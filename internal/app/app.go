@@ -13,6 +13,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/config"
 	"github.com/vladar107/home-ai-assistant/internal/health"
 	"github.com/vladar107/home-ai-assistant/internal/module"
+	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 )
 
 type App struct {
@@ -20,6 +21,7 @@ type App struct {
 	logger  *slog.Logger
 	modules []module.Module
 	server  *http.Server
+	store   *sqlite.Store
 	ready   atomic.Bool
 }
 
@@ -54,9 +56,15 @@ func New(cfg config.Config, registry *module.Registry, logger *slog.Logger) (*Ap
 }
 
 func (a *App) Run(ctx context.Context) error {
-	started, err := a.startModules(ctx)
+	store, err := sqlite.Open(ctx, a.cfg.DatabasePath())
 	if err != nil {
 		return err
+	}
+	a.store = store
+
+	started, err := a.startModules(ctx)
+	if err != nil {
+		return errors.Join(err, a.closeStore())
 	}
 
 	listener, err := net.Listen("tcp", a.cfg.ListenAddress)
@@ -64,7 +72,11 @@ func (a *App) Run(ctx context.Context) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), a.cfg.ShutdownTimeout)
 		shutdownErr := a.shutdownModules(shutdownCtx, started)
 		cancel()
-		return errors.Join(fmt.Errorf("listen on %s: %w", a.cfg.ListenAddress, err), shutdownErr)
+		return errors.Join(
+			fmt.Errorf("listen on %s: %w", a.cfg.ListenAddress, err),
+			shutdownErr,
+			a.closeStore(),
+		)
 	}
 
 	a.ready.Store(true)
@@ -94,6 +106,9 @@ func (a *App) Run(ctx context.Context) error {
 	if err := a.shutdownModules(shutdownCtx, started); err != nil {
 		runErr = errors.Join(runErr, err)
 	}
+	if err := a.closeStore(); err != nil {
+		runErr = errors.Join(runErr, err)
+	}
 
 	a.logger.Info("application stopped")
 	return runErr
@@ -103,12 +118,22 @@ func (a *App) Ready(ctx context.Context) error {
 	if !a.ready.Load() {
 		return fmt.Errorf("application is not ready")
 	}
+	if err := a.store.Ready(ctx); err != nil {
+		return err
+	}
 	for _, registeredModule := range a.modules {
 		if err := registeredModule.Ready(ctx); err != nil {
 			return fmt.Errorf("module %q: %w", registeredModule.Descriptor().ID, err)
 		}
 	}
 	return nil
+}
+
+func (a *App) closeStore() error {
+	if a.store == nil {
+		return nil
+	}
+	return a.store.Close()
 }
 
 func (a *App) startModules(ctx context.Context) ([]module.Module, error) {

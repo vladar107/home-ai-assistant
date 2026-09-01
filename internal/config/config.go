@@ -4,25 +4,31 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
 const (
 	defaultListenAddress   = "127.0.0.1:8080"
 	defaultShutdownTimeout = 10 * time.Second
+	defaultDataDir         = "./data"
+	databaseFilename       = "home-agent.db"
 )
 
 type Config struct {
 	ListenAddress    string
 	ShutdownTimeout  time.Duration
 	AllowNonLoopback bool
+	DataDir          string
 }
 
 func Load() (Config, error) {
 	cfg := Config{
 		ListenAddress:   envOrDefault("HOME_AGENT_LISTEN_ADDRESS", defaultListenAddress),
 		ShutdownTimeout: defaultShutdownTimeout,
+		DataDir:         envOrDefault("HOME_AGENT_DATA_DIR", defaultDataDir),
 	}
 
 	if value := os.Getenv("HOME_AGENT_SHUTDOWN_TIMEOUT"); value != "" {
@@ -71,8 +77,15 @@ func (c Config) Validate() error {
 	if c.ShutdownTimeout <= 0 {
 		return fmt.Errorf("HOME_AGENT_SHUTDOWN_TIMEOUT: must be greater than zero")
 	}
+	if strings.TrimSpace(c.DataDir) == "" {
+		return fmt.Errorf("HOME_AGENT_DATA_DIR: must not be empty")
+	}
 
 	return nil
+}
+
+func (c Config) DatabasePath() string {
+	return filepath.Join(c.DataDir, databaseFilename)
 }
 
 func envOrDefault(name, fallback string) string {
