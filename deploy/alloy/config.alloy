@@ -1,0 +1,79 @@
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+otelcol.receiver.otlp "home_agent" {
+  http {
+    endpoint              = "0.0.0.0:4318"
+    max_request_body_size = "4MiB"
+  }
+
+  output {
+    metrics = [otelcol.processor.transform.resource_labels.input]
+    traces  = [otelcol.processor.batch.home_agent.input]
+  }
+}
+
+otelcol.processor.transform "resource_labels" {
+  error_mode = "ignore"
+
+  metric_statements {
+    context = "datapoint"
+    statements = [
+      `set(attributes["service_name"], resource.attributes["service.name"])`,
+      `set(attributes["deployment_environment_name"], resource.attributes["deployment.environment.name"])`,
+    ]
+  }
+
+  output {
+    metrics = [otelcol.processor.batch.home_agent.input]
+  }
+}
+
+otelcol.processor.batch "home_agent" {
+  timeout             = "1s"
+  send_batch_size     = 512
+  send_batch_max_size = 1024
+
+  output {
+    metrics = [otelcol.exporter.prometheus.home_agent.input]
+    traces  = [otelcol.exporter.otlp.tempo.input]
+  }
+}
+
+otelcol.exporter.prometheus "home_agent" {
+  add_metric_suffixes  = false
+  include_scope_labels = false
+  forward_to           = [prometheus.remote_write.local.receiver]
+}
+
+prometheus.remote_write "local" {
+  endpoint {
+    url = "http://prometheus:9090/api/v1/write"
+  }
+}
+
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = "tempo:4317"
+
+    tls {
+      insecure             = true
+      insecure_skip_verify = true
+    }
+  }
+
+  retry_on_failure {
+    enabled          = true
+    initial_interval = "5s"
+    max_interval     = "30s"
+    max_elapsed_time = "5m"
+  }
+
+  sending_queue {
+    enabled       = true
+    queue_size    = 2048
+    num_consumers = 2
+  }
+}

@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+host=${1:-${HOME_AGENT_DEPLOY_HOST:-home-nas}}
+
+if [[ ! $host =~ ^[A-Za-z0-9][A-Za-z0-9._@-]*$ ]]; then
+  echo "invalid SSH host or alias: $host" >&2
+  exit 2
+fi
+
+ssh -o BatchMode=yes "$host" 'set -eu
+printf "host: "
+hostname
+printf "kernel: "
+uname -srm
+printf "architecture: "
+uname -m
+printf "identity: "
+id
+printf "shell: %s\n" "${SHELL:-unknown}"
+printf "filesystem near login directory:\n"
+df -h .
+printf "docker client:\n"
+docker version --format "{{.Client.Version}}"
+printf "docker server:\n"
+docker version --format "{{.Server.Version}}"
+printf "docker compose:\n"
+docker compose version
+printf "docker root and resources:\n"
+docker info --format "root={{.DockerRootDir}} cpus={{.NCPU}} memory={{.MemTotal}} security={{json .SecurityOptions}}"
+'

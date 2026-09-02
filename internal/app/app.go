@@ -12,17 +12,22 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/config"
 	"github.com/vladar107/home-ai-assistant/internal/health"
+	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/module"
+	"github.com/vladar107/home-ai-assistant/internal/observability"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
+	"github.com/vladar107/home-ai-assistant/internal/telegram"
 )
 
 type App struct {
-	cfg     config.Config
-	logger  *slog.Logger
-	modules []module.Module
-	server  *http.Server
-	store   *sqlite.Store
-	ready   atomic.Bool
+	cfg       config.Config
+	logger    *slog.Logger
+	modules   []module.Module
+	server    *http.Server
+	store     *sqlite.Store
+	telegram  *telegram.Service
+	telemetry *observability.Telemetry
+	ready     atomic.Bool
 }
 
 func New(cfg config.Config, registry *module.Registry, logger *slog.Logger) (*App, error) {
@@ -42,35 +47,78 @@ func New(cfg config.Config, registry *module.Registry, logger *slog.Logger) (*Ap
 	}
 
 	application := &App{
-		cfg:     cfg,
-		logger:  logger,
-		modules: modules,
+		cfg:       cfg,
+		logger:    logger,
+		modules:   modules,
+		telemetry: observability.Noop(),
 	}
 	application.server = &http.Server{
 		Addr:              cfg.ListenAddress,
-		Handler:           health.Handler(application),
+		Handler:           health.Handler(application, application.telemetry),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 	return application, nil
 }
 
-func (a *App) Run(ctx context.Context) error {
-	store, err := sqlite.Open(ctx, a.cfg.DatabasePath())
+func (a *App) Run(ctx context.Context) (runErr error) {
+	telemetry, err := observability.New(ctx, a.cfg.Observability, a.logger)
+	if err != nil {
+		return fmt.Errorf("initialize observability: %w", err)
+	}
+	a.telemetry = telemetry
+	a.server.Handler = health.Handler(a, telemetry)
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), a.cfg.ShutdownTimeout)
+		defer cancel()
+		if err := telemetry.Shutdown(shutdownCtx); err != nil {
+			a.logger.Warn("telemetry.shutdown.failed")
+		}
+	}()
+
+	storeCtx, endStoreOpen := telemetry.StartLifecycle(ctx, "store_open")
+	store, err := sqlite.Open(storeCtx, a.cfg.DatabasePath())
+	endStoreOpen(err)
 	if err != nil {
 		return err
 	}
 	a.store = store
 
-	started, err := a.startModules(ctx)
+	initializeTelegramCtx, endInitializeTelegram := telemetry.StartLifecycle(ctx, "telegram_initialize")
+	err = a.initializeTelegram(initializeTelegramCtx)
+	endInitializeTelegram(err)
 	if err != nil {
 		return errors.Join(err, a.closeStore())
 	}
 
-	listener, err := net.Listen("tcp", a.cfg.ListenAddress)
+	startModulesCtx, endStartModules := telemetry.StartLifecycle(ctx, "modules_start")
+	started, err := a.startModules(startModulesCtx)
+	endStartModules(err)
+	if err != nil {
+		return errors.Join(err, a.closeStore())
+	}
+	startTelegramCtx, endStartTelegram := telemetry.StartLifecycle(ctx, "telegram_start")
+	err = a.startTelegram(startTelegramCtx)
+	endStartTelegram(err)
 	if err != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), a.cfg.ShutdownTimeout)
-		shutdownErr := a.shutdownModules(shutdownCtx, started)
+		shutdownErr := errors.Join(
+			a.shutdownTelegram(shutdownCtx),
+			a.shutdownModules(shutdownCtx, started),
+		)
+		cancel()
+		return errors.Join(err, shutdownErr, a.closeStore())
+	}
+
+	_, endListen := telemetry.StartLifecycle(ctx, "http_listen")
+	listener, err := net.Listen("tcp", a.cfg.ListenAddress)
+	endListen(err)
+	if err != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), a.cfg.ShutdownTimeout)
+		shutdownErr := errors.Join(
+			a.shutdownTelegram(shutdownCtx),
+			a.shutdownModules(shutdownCtx, started),
+		)
 		cancel()
 		return errors.Join(
 			fmt.Errorf("listen on %s: %w", a.cfg.ListenAddress, err),
@@ -80,6 +128,7 @@ func (a *App) Run(ctx context.Context) error {
 	}
 
 	a.ready.Store(true)
+	a.telemetry.SetRunning(ctx, true)
 	serverErrors := make(chan error, 1)
 	go func() {
 		serverErrors <- a.server.Serve(listener)
@@ -87,7 +136,6 @@ func (a *App) Run(ctx context.Context) error {
 
 	a.logger.Info("application started", "address", listener.Addr().String(), "modules", len(a.modules))
 
-	var runErr error
 	select {
 	case <-ctx.Done():
 	case err := <-serverErrors:
@@ -97,9 +145,13 @@ func (a *App) Run(ctx context.Context) error {
 	}
 
 	a.ready.Store(false)
+	a.telemetry.SetRunning(ctx, false)
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), a.cfg.ShutdownTimeout)
 	defer cancel()
 
+	if err := a.shutdownTelegram(shutdownCtx); err != nil {
+		runErr = errors.Join(runErr, err)
+	}
 	if err := a.server.Shutdown(shutdownCtx); err != nil {
 		runErr = errors.Join(runErr, fmt.Errorf("shutdown HTTP server: %w", err))
 	}
@@ -121,10 +173,89 @@ func (a *App) Ready(ctx context.Context) error {
 	if err := a.store.Ready(ctx); err != nil {
 		return err
 	}
+	if a.cfg.Telegram.Enabled {
+		if a.telegram == nil {
+			return fmt.Errorf("Telegram service is not initialized")
+		}
+		if err := a.telegram.Ready(ctx); err != nil {
+			return err
+		}
+	}
 	for _, registeredModule := range a.modules {
 		if err := registeredModule.Ready(ctx); err != nil {
 			return fmt.Errorf("module %q: %w", registeredModule.Descriptor().ID, err)
 		}
+	}
+	return nil
+}
+
+func (a *App) initializeTelegram(ctx context.Context) error {
+	if !a.cfg.Telegram.Enabled {
+		return nil
+	}
+
+	configured := make([]identity.ConfiguredPrincipal, 0, len(a.cfg.Telegram.Users))
+	for _, user := range a.cfg.Telegram.Users {
+		configured = append(configured, identity.ConfiguredPrincipal{
+			ID:             user.PrincipalID,
+			DisplayName:    user.DisplayName,
+			TelegramUserID: user.TelegramUserID,
+		})
+	}
+
+	token := a.cfg.Telegram.BotToken
+	if token == "" {
+		var err error
+		token, err = telegram.LoadTokenFile(a.cfg.Telegram.BotTokenFile)
+		if err != nil {
+			return fmt.Errorf("load Telegram bot token: %w", err)
+		}
+	}
+	client, err := telegram.NewClient(telegram.ClientConfig{
+		BaseURL:     a.cfg.Telegram.APIBaseURL,
+		Token:       token,
+		PollTimeout: a.cfg.Telegram.PollTimeout,
+		Telemetry:   a.telemetry,
+	})
+	if err != nil {
+		return fmt.Errorf("initialize Telegram client: %w", err)
+	}
+
+	identities, err := identity.NewService(a.store, configured)
+	if err != nil {
+		return fmt.Errorf("initialize Telegram identities: %w", err)
+	}
+	bootstrapCtx, endBootstrap := a.telemetry.StartStore(ctx, "identity_bootstrap")
+	err = identities.Bootstrap(bootstrapCtx)
+	endBootstrap(err)
+	if err != nil {
+		return fmt.Errorf("bootstrap Telegram identities: %w", err)
+	}
+
+	service, err := telegram.NewService(client, identities, a.store, a.logger, a.telemetry)
+	if err != nil {
+		return fmt.Errorf("initialize Telegram service: %w", err)
+	}
+	a.telegram = service
+	return nil
+}
+
+func (a *App) startTelegram(ctx context.Context) error {
+	if a.telegram == nil {
+		return nil
+	}
+	if err := a.telegram.Start(ctx); err != nil {
+		return fmt.Errorf("start Telegram service: %w", err)
+	}
+	return nil
+}
+
+func (a *App) shutdownTelegram(ctx context.Context) error {
+	if a.telegram == nil {
+		return nil
+	}
+	if err := a.telegram.Shutdown(ctx); err != nil {
+		return fmt.Errorf("shutdown Telegram service: %w", err)
 	}
 	return nil
 }

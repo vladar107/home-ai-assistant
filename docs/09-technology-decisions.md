@@ -8,6 +8,7 @@
 | Proposed | Preferred but needs implementation validation |
 | Experimental | Bounded spike required before adoption |
 | Deferred | Deliberately excluded until a trigger occurs |
+| Superseded | Historical direction replaced by a later explicit decision |
 | Rejected for now | Considered and not justified in the current scope |
 
 ## Decision register
@@ -27,8 +28,8 @@
 | D-011 | Start integrations read-only | Accepted | Reduces risk while identity, isolation, audit, and failures mature |
 | D-012 | Native/source search before RAG | Accepted | Existing services already provide search; no evidence for another index |
 | D-013 | Use an application-owned durable scheduler and outbox | Accepted | System cron alone cannot provide ownership, catch-up, dedupe, or delivery state |
-| D-014 | Start monitoring with Prometheus and Grafana | Accepted | Covers metrics and alerts within the 8 GB constraint |
-| D-015 | Defer Loki, Alloy, and Tempo | Accepted | Structured local logs and metrics are enough initially; preserve memory |
+| D-014 | Start monitoring with Prometheus and Grafana | Accepted | Prometheus provides a bounded local metrics store and Grafana provides query, dashboards, and alerts within the 8 GB constraint |
+| D-015 | Defer Loki, Alloy, and Tempo | Superseded by D-030 | The original metrics-only launch was replaced when application OpenTelemetry metrics and traces became an explicit requirement; Loki remains deferred separately |
 | D-016 | Park Home Assistant | Accepted | Apple TV alone does not justify deployment/maintenance |
 | D-017 | No public NAS endpoints | Accepted | Telegram polling and existing WireGuard cover initial access |
 | D-018 | GitHub App for selected repositories | Proposed | Granular installation scope and short-lived tokens for a long-running service |
@@ -42,6 +43,10 @@
 | D-026 | Target Go 1.27 and introduce dependencies at their latest stable release | Accepted | Starts from the current toolchain and avoids knowingly adopting stale packages; versions remain pinned and upgrades are reviewed |
 | D-027 | Make strict-local search the default privacy mode | Accepted | The cloud model emits only a structured `SearchIntent`; local search and deterministic presentation keep files, OCR, embeddings, snippets, and preferably filenames off the model boundary, while any Telegram or future model disclosure remains separately scoped and auditable |
 | D-028 | Use `modernc.org/sqlite` for the control-plane store | Accepted | Its stable pure-Go `database/sql` driver avoids CGO and simplifies macOS development plus Linux/NAS builds; version `v1.57.0` was current when introduced and is pinned |
+| D-029 | Call the Telegram Bot API directly with Go's standard-library `net/http` | Accepted | The initial slice needs only `getMe`, `getUpdates`, and `sendMessage`; direct calls keep the dependency surface tiny while allowing explicit token redaction and request timeouts |
+| D-030 | Instrument application metrics and traces with OpenTelemetry, receive them in Alloy, and store them in Prometheus and monolithic Tempo | Accepted | Metrics and traces are required from the first NAS deployment; a collector boundary keeps backend details out of the application while separate bounded stores remain viable on 8 GB. Grafana is the interface, not a bundled data store. Structured stdout logs retain trace/span correlation and Loki remains deferred |
+| D-031 | Publish immutable `linux/amd64` images from private GitHub CI to private GHCR, but deploy them manually from the operator Mac | Accepted | CI can validate and build without production authority. Selecting an exact digest and streaming it to the NAS over SSH preserves human control, rollback, and auditability without leaving a registry credential or deployment archive on the NAS |
+| D-032 | Keep canonical runtime secrets in macOS Keychain and only required protected runtime copies on the NAS | Accepted | The Mac remains the operator-controlled source of recovery. Always-running containers receive only their own read-only files from a `0700` NAS directory with `0600` files; secrets stay out of Git, CI, image layers, environment values, command arguments, and logs |
 
 ## Go
 
@@ -154,6 +159,28 @@ Future selected-item disclosure or content-assisted search requires a distinct,
 explicitly authorized, scoped, and audited capability; the model cannot switch
 privacy mode itself.
 
+## Deployment and secret custody
+
+The GitHub repository and GHCR package are private. GitHub Actions uses the
+short-lived repository `GITHUB_TOKEN` with minimal permissions to publish an
+immutable commit-SHA image and digest; it holds no Telegram, Grafana, NAS, or
+application runtime secret and has no deployment path to the home network.
+
+The operator Mac authenticates to GHCR through its native credential store,
+pulls the exact `linux/amd64` digest, and streams `docker image save` output over
+the `home-nas` SSH alias to `docker image load`. Compose starts with pulling
+disabled, verifies health/readiness/telemetry, and returns to the retained
+previous digest if the gate fails. The encrypted SSH private key stays on the
+Mac with its passphrase cached in Keychain; the NAS contains only the public
+key. No public endpoint is introduced.
+
+Keychain is canonical for runtime secrets, but an always-on service necessarily
+needs a decrypted runtime copy. Each NAS copy lives outside the versioned
+deployment directory, has the narrowest consumer-specific ownership, and is
+mounted read-only into only that container. Absolute paths and UID/GID are not
+standardized in this decision because they must be verified against the live
+NAS OS volume and container identities.
+
 ## MCP decision test
 
 Use an MCP server only when most answers are “yes”:
@@ -180,6 +207,7 @@ Otherwise implement a narrow in-process adapter.
 | Kubernetes | One NAS and a few containers | None expected for this project |
 | Local LLM | Hardware and use cases do not justify it | Privacy/offline requirement plus new hardware |
 | Public web frontend | Telegram covers initial interaction | Clear workflow Telegram cannot support |
+| Loki | Bounded stdout logs plus trace/span IDs are sufficient initially; host/container log collection adds storage and privileged access questions | Repeated incidents cannot be diagnosed within retained local logs, with a measured resource and least-privilege collection design |
 
 ## Decision process
 

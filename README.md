@@ -11,7 +11,7 @@ personal briefings, job applications, mentoring, and future workflows share one
 secure control plane without sharing unrestricted authority. Architecture and
 an isolated runtime experiment are complete. The initial Go scaffold provides
 configuration, module lifecycle/dependency validation, JSON logging, graceful
-shutdown, and local health endpoints. Feature implementation has not started.
+shutdown, local health endpoints, and an opt-in Telegram access slice.
 
 ## Current direction
 
@@ -26,8 +26,16 @@ shutdown, and local health endpoints. Feature implementation has not started.
 - Direct service APIs by default; MCP only where it provides concrete value
 - Read-only integrations first
 - Durable scheduled workflows for briefings and notifications
-- Grafana and Prometheus locally; heavier logging/tracing components only when
-  justified
+- OpenTelemetry metrics and traces exported through Grafana Alloy to
+  Prometheus and Tempo, with Grafana as the local query, dashboard, and alert
+  interface
+- Structured stdout logs with bounded container rotation; Loki deferred until
+  local log search justifies its resource and access cost
+- Private GitHub repository and CI-built immutable `linux/amd64` images in
+  private GHCR; production deployment remains an explicit operation from the
+  operator's Mac
+- macOS Keychain as the canonical runtime-secret store, with only the required
+  protected runtime copies on the NAS
 - No public NAS endpoints
 - Home Assistant, RAG, local inference, and multi-agent orchestration deferred
 
@@ -47,6 +55,7 @@ shutdown, and local health endpoints. Feature implementation has not started.
 | [Delivery roadmap](docs/10-delivery-roadmap.md) | Incremental implementation stages and acceptance criteria |
 | [Risks and open questions](docs/11-risks-and-open-questions.md) | Risk register, decision triggers, and unresolved product choices |
 | [Module and automation model](docs/12-module-and-automation-model.md) | Static modules, connectors, automation packs, edge workers, workflows, and migration |
+| [Operator runbook](docs/13-operator-runbook.md) | Telegram verification, SSH and NAS preparation, secrets, monitoring-first deployment, rollback, and recovery |
 | [Pi subscription from Go](docs/research/pi-openai-subscription-from-go.md) | Reproducible validation of Go → Pi RPC → ChatGPT subscription |
 
 The original input is preserved in
@@ -76,6 +85,60 @@ directory and defaults to `./data`; the service creates it with mode `0700` and
 keeps the database at `0600`. An existing data directory must already be mode
 `0700` and live below operator-controlled parent directories.
 
+### Telegram local setup
+
+Telegram is disabled unless `HOME_AGENT_TELEGRAM_ENABLED=true`. For local
+development, copy the ignored environment template and fill in the Telegram
+bot token and your numeric user ID as described in the
+[operator runbook](docs/13-operator-runbook.md):
+
+```sh
+cp .env.example .env
+chmod 600 .env
+```
+
+The application loads `.env` automatically when it starts from the repository
+root. In GoLand, open `cmd/home-agent/main.go`, run the `main` package, and keep
+the working directory set to the project root. The command-line equivalent is:
+
+```sh
+go run ./cmd/home-agent
+```
+
+The Telegram user ID is ordinary allowlist configuration, not a secret. For
+production, the configuration interface also accepts explicit token and users
+files so the token does not need to be placed in the container environment:
+
+```sh
+HOME_AGENT_TELEGRAM_ENABLED=true \
+HOME_AGENT_TELEGRAM_BOT_TOKEN_FILE=/protected/path/telegram-bot-token \
+HOME_AGENT_TELEGRAM_USERS_FILE=/protected/path/telegram-users.json \
+go run ./cmd/home-agent
+```
+
+The token file must have no group or other permission bits (`0600` is suitable).
+The users file must contain one or two positive numeric Telegram user IDs,
+distinct principal IDs, and non-empty display names. User IDs and allowlist
+configuration may be versioned; bot tokens must never be committed.
+
+The default Telegram API base URL is the official HTTPS endpoint. For local
+testing only, `HOME_AGENT_TELEGRAM_API_BASE_URL` may override it with an HTTP
+loopback URL. `HOME_AGENT_TELEGRAM_POLL_TIMEOUT` defaults to 25 seconds and
+accepts at most 50 seconds.
+
+The current behavior is deliberately narrow: private chats only, a numeric
+allowlist, deterministic `/status` and `/privacy` replies, and ignored other
+text. These commands do not invoke a model, and no model invocation is wired
+into this slice. The service stores a durable polling cursor per bot so restart
+does not replay already committed updates. See the official
+[Telegram Bot API reference](https://core.telegram.org/bots/api) for the
+underlying API. `Hearthkeeper` is the preferred display name for the main bot,
+with an available BotFather username such as `HearthkeeperHomeBot`. A separate
+send-only alert bot named `Hearthwatch` is recommended so Grafana alerts do not
+depend on the application bot. Telegram usernames are globally allocated, so
+the exact usernames must be checked with BotFather. Real Telegram and NAS
+verification is still pending.
+
 ## Architecture at a glance
 
 ```mermaid
@@ -94,9 +157,18 @@ flowchart LR
 
     SCHED[Durable Scheduler] --> APP
     APP --> SQLITE[(SQLite)]
-    APP --> METRICS[Prometheus]
-    METRICS --> GRAFANA[Grafana]
+    APP -->|OTLP metrics and traces| ALLOY[Grafana Alloy]
+    ALLOY --> PROM[Prometheus]
+    ALLOY --> TEMPO[Tempo]
+    GRAFANA[Grafana] --> PROM
+    GRAFANA --> TEMPO
+    GRAFANA -->|alert via Hearthwatch| TG
 ```
+
+Grafana does not bundle Prometheus, Tempo, or another telemetry store. Each is a
+separate service with its own persistence and retention policy. Grafana binds
+to NAS loopback for initial operation and is reached through an SSH tunnel;
+none of the observability services requires a public endpoint.
 
 ## Status
 

@@ -13,21 +13,48 @@ Observability should answer:
 
 ## Initial stack
 
-Start with:
+Deploy the observability stack before the application:
 
-- Prometheus for metrics
-- Grafana for dashboards and alerting
-- host/node metrics
-- application `/metrics` endpoint
-- structured JSON logs with local rotation
-- structured audit data in SQLite
+- OpenTelemetry Go SDK instrumentation for application metrics and traces;
+- Grafana Alloy as the private OTLP receiver and routing layer;
+- Prometheus as the metrics store;
+- Tempo in monolithic mode as the trace store;
+- Grafana as the local query, dashboard, and alert interface;
+- structured JSON logs on stdout with bounded container rotation;
+- structured security and action audit data in SQLite.
 
-Do not deploy Loki, Alloy, or Tempo initially. Add them only when local log
-search or cross-process trace correlation justifies their memory and operational
-cost.
+```mermaid
+flowchart LR
+    APP[Home Agent] -->|OTLP metrics and traces| ALLOY[Grafana Alloy]
+    ALLOY --> PROM
+    ALLOY --> TEMPO[Tempo monolithic]
+    GRAFANA[Grafana] --> PROM
+    GRAFANA --> TEMPO
+    GRAFANA -->|sendMessage| ALERT[Hearthwatch Telegram bot]
+```
 
-Grafana is the presentation and alert layer; it does not replace a metrics or log
-data source.
+Grafana does not contain Prometheus, Tempo, or Loki under the hood. It queries
+separate data sources and owns dashboards and alerts. Alloy is Grafana Labs'
+OpenTelemetry Collector distribution; it receives OTLP from the application
+and routes each signal to its backend. See the official
+[Grafana data-source documentation](https://grafana.com/docs/grafana/latest/datasources/),
+[Alloy introduction](https://grafana.com/docs/alloy/latest/introduction/), and
+[Tempo deployment modes](https://grafana.com/docs/tempo/latest/reference-tempo-architecture/deployment-modes/).
+
+Loki remains explicitly deferred. Initial logs stay local because collecting
+all container or host logs would add storage, permissions, and operational
+cost. The application includes trace and span IDs in structured logs, so an
+operator can correlate a local log entry with Tempo without a log backend. Add
+Loki only when repeated incidents demonstrate that bounded local log inspection
+is insufficient. The all-in-one
+[`docker-otel-lgtm` image](https://grafana.com/docs/opentelemetry/docker-lgtm/)
+is suitable for development and demonstrations, not this long-running NAS
+deployment; production uses separate pinned containers and persistent stores.
+
+Host and NAS metrics are also deferred from the first installation. Add a
+narrowly exposed exporter only after the live NAS OS interfaces, filesystem
+permissions, container visibility, and useful alert signals have been verified;
+the application must never receive the Docker socket for this purpose.
 
 ## Correlation model
 
@@ -45,9 +72,19 @@ approval_id
 outbox_message_id
 ```
 
-Propagate them through logs, metrics labels only where cardinality permits, and
-audit records. Never use raw email addresses, paths, subjects, or prompts as
-metric labels.
+Propagate them through traces, logs, metric attributes only where cardinality
+permits, and audit records. `trace_id` and `span_id` correlate logs to Tempo but
+must not become metric attributes. Never attach Telegram messages or usernames,
+raw Telegram IDs, bot tokens, API URLs containing tokens, email addresses,
+paths, subjects, prompts, filenames, or third-party response bodies to
+telemetry.
+
+OpenTelemetry resources use stable low-cardinality attributes such as
+`service.name=home-agent`, a deployment environment, and an explicit service
+version. Metric and span attributes use bounded enums such as command, outcome,
+safe error class, and integration name. Principal and request identifiers stay
+out of metrics; pseudonymous identifiers may appear in protected logs or audit
+only when required for diagnosis or accountability.
 
 ## Application metrics
 
@@ -57,6 +94,7 @@ metric labels.
 - Update processing lag
 - Updates accepted/rejected by reason
 - Outbound Telegram requests, latency, retries, and permanent failures
+- Durable polling cursor advancement failures
 
 ### Runtime
 
@@ -93,8 +131,9 @@ metric labels.
 
 ## Logs
 
-Use structured logs with levels and stable event names. Log operational events,
-not conversational content.
+Use structured logs on stdout with levels and stable event names. The container
+runtime applies both size and file-count rotation. Log operational events, not
+conversational content.
 
 Examples:
 
@@ -113,6 +152,9 @@ integration.circuit_open
 
 Errors should be normalized into safe classes. Raw third-party responses may
 contain personal content or tokens and should not be logged automatically.
+Telegram HTTP client instrumentation must be manual or sanitized because the
+Bot API token is part of the request URL. Do not install generic HTTP telemetry
+that records that URL.
 
 ## Audit
 
@@ -139,8 +181,8 @@ retention is an open decision based on storage and privacy preference.
 
 ## Tracing
 
-Instrument the application with OpenTelemetry-compatible spans even before a
-trace backend is installed. At minimum:
+Instrument the application with OpenTelemetry spans and export them through
+OTLP to Alloy. At minimum:
 
 ```text
 telegram.receive
@@ -152,8 +194,17 @@ scheduler.run
 telegram.send
 ```
 
-Initially export metrics and use correlation IDs in logs. Add Tempo only if the
-cross-process Pi/tool flow becomes difficult to diagnose without trace search.
+Span names remain stable and low-cardinality. Record safe state transitions and
+normalized outcomes, not request content. The low-volume deterministic shell
+initially exports every span so deployment can verify the full path. Introduce
+sampling only from measured trace volume, while keeping failures diagnosable
+without turning message content into telemetry.
+
+The exporter has bounded queues, timeouts, and shutdown flushing. Loss of Alloy,
+Prometheus, Tempo, or Grafana degrades observability but must not stop Telegram
+polling after the application has otherwise started successfully. Readiness
+reports the application dependencies needed to serve users, not dashboard
+availability.
 
 ## Dashboards
 
@@ -193,6 +244,14 @@ cross-process Pi/tool flow becomes difficult to diagnose without trace search.
 Infrastructure alerts go directly from Grafana to Telegram through a dedicated
 alert contact path. They must not depend on the model runtime.
 
+Use a separate Telegram bot for this contact point so an application-bot token
+or failure does not also disable infrastructure alerts. `Hearthwatch` is the
+preferred display name and a username such as `HearthwatchAlertsBot` is a
+candidate, subject to BotFather availability. The alert bot token is readable
+only by Grafana. `Hearthkeeper`, the main interaction bot, remains readable only
+by the home-agent service. Test alerts must contain operational state, never
+messages, prompts, usernames, or secret values.
+
 Initial alert candidates:
 
 - Home agent unavailable
@@ -223,14 +282,37 @@ deployment declares it required.
 
 Starting points:
 
-- Metrics: 15 days
-- Local operational logs: 7–14 days with size-based rotation
+- Metrics: 15 days with an explicit TSDB size ceiling
+- Traces: 7 days, plus a volume-capacity alert and measured storage budget
+- Local operational logs: 7–14 days with size and file-count rotation
 - Audit: 30–90 days, subject to privacy decision
 - No prompt/body capture
 - Scrape interval: 30–60 seconds
 
-Measure Prometheus disk and memory growth before increasing retention or scrape
-frequency.
+Measure Prometheus and Tempo disk/memory growth before increasing retention,
+sampling, or scrape frequency. Alert before their volumes threaten application
+state or NAS capacity. Tempo monolithic mode is intentionally a single-instance
+deployment for this low-volume host; horizontal scale is not a current goal.
+
+## Access and deployment checks
+
+Grafana binds only to NAS loopback initially. The operator connects with
+`ssh -L 3000:127.0.0.1:3000 home-nas` and uses
+`http://127.0.0.1:3000`; no observability port is forwarded from the router.
+Prometheus, Tempo, Alloy, and OTLP listeners remain private to the Compose
+network.
+
+Provision the Prometheus and Tempo data sources rather than clicking them into
+existence. Deployment is acceptable only when:
+
+- all four observability containers remain running and their readiness
+  endpoints respond;
+- Grafana can query Prometheus and Tempo;
+- a known application action creates both expected metrics and a trace;
+- logs for that action contain matching trace/span IDs but no content;
+- the Hearthwatch contact point delivers a safe test alert;
+- container restart preserves dashboards, metrics, and trace storage within
+  their documented retention expectations.
 
 ## Backup and recovery checks
 

@@ -22,13 +22,21 @@ type Config struct {
 	ShutdownTimeout  time.Duration
 	AllowNonLoopback bool
 	DataDir          string
+	Telegram         TelegramConfig
+	Observability    ObservabilityConfig
 }
 
 func Load() (Config, error) {
+	if err := loadDotEnv(".env"); err != nil {
+		return Config{}, err
+	}
+
 	cfg := Config{
 		ListenAddress:   envOrDefault("HOME_AGENT_LISTEN_ADDRESS", defaultListenAddress),
 		ShutdownTimeout: defaultShutdownTimeout,
 		DataDir:         envOrDefault("HOME_AGENT_DATA_DIR", defaultDataDir),
+		Telegram:        defaultTelegramConfig(),
+		Observability:   defaultObservabilityConfig(),
 	}
 
 	if value := os.Getenv("HOME_AGENT_SHUTDOWN_TIMEOUT"); value != "" {
@@ -45,6 +53,24 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("HOME_AGENT_ALLOW_NON_LOOPBACK: %w", err)
 		}
 		cfg.AllowNonLoopback = allow
+	}
+
+	if value := os.Getenv("HOME_AGENT_TELEGRAM_ENABLED"); value != "" {
+		enabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return Config{}, fmt.Errorf("HOME_AGENT_TELEGRAM_ENABLED: must be true or false")
+		}
+		cfg.Telegram.Enabled = enabled
+	}
+
+	if err := loadObservabilityConfig(&cfg.Observability); err != nil {
+		return Config{}, err
+	}
+
+	if cfg.Telegram.Enabled {
+		if err := loadTelegramConfig(&cfg.Telegram); err != nil {
+			return Config{}, err
+		}
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -79,6 +105,12 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.DataDir) == "" {
 		return fmt.Errorf("HOME_AGENT_DATA_DIR: must not be empty")
+	}
+	if err := c.Telegram.validate(); err != nil {
+		return err
+	}
+	if err := c.Observability.validate(); err != nil {
+		return err
 	}
 
 	return nil

@@ -7,6 +7,11 @@ time. Every stage must leave the system deployable, observable, and no less
 safe than before. Infrastructure is introduced when a vertical slice needs it,
 not as an abstract framework exercise.
 
+For the first NAS installation, "deployable and observable" means the
+monitoring stack is started and verified before the home-agent container. CI
+builds immutable images but never deploys; the operator selects and deploys an
+exact digest manually from the Mac.
+
 The existing `job-apply` and `mentoring` repositories remain operational until
 each migrated capability reaches behavioural parity and an explicit cutover.
 
@@ -39,6 +44,11 @@ Deliver a deterministic Telegram system shell without invoking a model or an
 external integration. This establishes identity, persistence, deployment, and
 operations before model-driven behaviour is reachable.
 
+Status: Telegram, SQLite, OpenTelemetry instrumentation, container packaging,
+CI workflows, and manual deployment tooling are locally implemented. Real
+Telegram testing, image publication, Hearthwatch configuration, NAS deployment,
+resource measurement, and backup/restore exercises remain in this stage.
+
 ### Deliverables
 
 - SQLite driver decision, schema, and migrations
@@ -47,8 +57,19 @@ operations before model-driven behaviour is reachable.
 - Telegram long polling and durable update-offset advancement
 - Numeric two-user allowlist; private chats only
 - Deterministic `/status` and `/privacy`
-- Basic Prometheus metrics and module health aggregation
-- Container build and local development commands
+- OpenTelemetry metrics and traces exported over OTLP to Grafana Alloy
+- Structured stdout logs correlated with trace/span IDs
+- Separate bounded Prometheus, monolithic Tempo, Alloy, and Grafana services;
+  Loki deferred
+- Provisioned data sources, initial dashboard, and direct Hearthwatch Telegram
+  alerts
+- Non-root container build and local development commands
+- Private GitHub CI publishing immutable `linux/amd64` images to private GHCR
+- Manual digest-selected deployment from the Mac over the `home-nas` SSH alias
+- Mac Keychain secret custody and consumer-specific protected runtime copies on
+  the NAS
+- Transaction-consistent backup, restore, health-gate, and image rollback
+  procedure
 
 ### Acceptance
 
@@ -58,6 +79,15 @@ operations before model-driven behaviour is reachable.
 - Invalid configuration fails before polling starts.
 - Health, readiness, logs, and metrics expose no token or message content.
 - SQLite state can be backed up and restored in a local exercise.
+- Grafana can query application metrics in Prometheus and traces in Tempo over
+  private networking, while only Grafana is reachable through an SSH tunnel.
+- Grafana delivers a safe alert through the separate Hearthwatch bot without
+  depending on the model or Hearthkeeper bot.
+- CI has no runtime secrets or deployment authority; the NAS has no private
+  registry credential.
+- A failed deployment returns to the retained previous image digest.
+- The application plus observability stack leaves measured safe headroom on the
+  small NAS or deployment stops with an upgrade decision.
 
 ## Stage 2 — Model conversation
 
@@ -195,9 +225,9 @@ core security and workflow model.
 - Immich search and bounded preview delivery
 - Local metadata/keyword search and optional local-semantic indexing
 - Deterministic result rendering with configurable filename/metadata disclosure
-- Prometheus and Grafana deployment on the NAS
-- Direct infrastructure alerts to Telegram
-- Operational dashboards and backup checks
+- Host, storage, array, and supported container health metrics added to the
+  existing Prometheus/Grafana installation
+- Home-operations dashboards and backup-age checks
 
 ### Acceptance
 

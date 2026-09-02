@@ -1,0 +1,198 @@
+name: home-ai-assistant
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  init: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  logging:
+    driver: local
+    options:
+      max-size: 10m
+      max-file: "5"
+
+services:
+  home-agent:
+    <<: *service-defaults
+    image: ${HOME_AGENT_IMAGE:?set HOME_AGENT_IMAGE to the locally loaded immutable deployment tag}
+    platform: linux/amd64
+    pull_policy: never
+    read_only: true
+    user: "${NAS_RUNTIME_UID:?set NAS_RUNTIME_UID}:${NAS_RUNTIME_GID:?set NAS_RUNTIME_GID}"
+    depends_on:
+      alloy:
+        condition: service_started
+    environment:
+      HOME_AGENT_ALLOW_NON_LOOPBACK: "true"
+      HOME_AGENT_DATA_DIR: /var/lib/home-agent
+      HOME_AGENT_LISTEN_ADDRESS: 0.0.0.0:8080
+      HOME_AGENT_OTEL_ENABLED: "true"
+      HOME_AGENT_TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram-bot-token
+      HOME_AGENT_TELEGRAM_ENABLED: "true"
+      HOME_AGENT_TELEGRAM_USER_ID: ${HOME_AGENT_TELEGRAM_USER_ID:?set HOME_AGENT_TELEGRAM_USER_ID}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_METRIC_EXPORT_INTERVAL: "30000"
+      OTEL_RESOURCE_ATTRIBUTES: deployment.environment.name=${DEPLOYMENT_ENVIRONMENT:-home},service.version=${HOME_AGENT_VERSION:-dev}
+      OTEL_SERVICE_NAME: home-agent
+    ports:
+      - 127.0.0.1:${HOME_AGENT_HEALTH_PORT:-18080}:8080
+    secrets:
+      - source: telegram-bot-token
+        target: telegram-bot-token
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    volumes:
+      - type: bind
+        source: ${HOME_AGENT_DATA_PATH:?set HOME_AGENT_DATA_PATH}
+        target: /var/lib/home-agent
+        bind:
+          create_host_path: false
+    mem_limit: 384m
+    cpus: 1.0
+    pids_limit: 128
+
+  alloy:
+    <<: *service-defaults
+    image: grafana/alloy:v1.19.2
+    platform: linux/amd64
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    read_only: true
+    user: "${NAS_RUNTIME_UID:?set NAS_RUNTIME_UID}:${NAS_RUNTIME_GID:?set NAS_RUNTIME_GID}"
+    depends_on:
+      prometheus:
+        condition: service_started
+      tempo:
+        condition: service_started
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    volumes:
+      - type: bind
+        source: ./alloy/config.alloy
+        target: /etc/alloy/config.alloy
+        read_only: true
+      - type: bind
+        source: ${ALLOY_DATA_PATH:?set ALLOY_DATA_PATH}
+        target: /var/lib/alloy/data
+        bind:
+          create_host_path: false
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
+
+  prometheus:
+    <<: *service-defaults
+    image: prom/prometheus:v3.13.2
+    platform: linux/amd64
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --storage.tsdb.retention.size=2GB
+      - --web.enable-remote-write-receiver
+      - --enable-feature=exemplar-storage
+    read_only: true
+    user: "${NAS_RUNTIME_UID:?set NAS_RUNTIME_UID}:${NAS_RUNTIME_GID:?set NAS_RUNTIME_GID}"
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    volumes:
+      - type: bind
+        source: ./prometheus/prometheus.yml
+        target: /etc/prometheus/prometheus.yml
+        read_only: true
+      - type: bind
+        source: ${PROMETHEUS_DATA_PATH:?set PROMETHEUS_DATA_PATH}
+        target: /prometheus
+        bind:
+          create_host_path: false
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 256
+
+  tempo:
+    <<: *service-defaults
+    image: grafana/tempo:3.0.0
+    platform: linux/amd64
+    command:
+      - -config.file=/etc/tempo/tempo.yaml
+    read_only: true
+    user: "${NAS_RUNTIME_UID:?set NAS_RUNTIME_UID}:${NAS_RUNTIME_GID:?set NAS_RUNTIME_GID}"
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    volumes:
+      - type: bind
+        source: ./tempo/tempo.yaml
+        target: /etc/tempo/tempo.yaml
+        read_only: true
+      - type: bind
+        source: ${TEMPO_DATA_PATH:?set TEMPO_DATA_PATH}
+        target: /var/tempo
+        bind:
+          create_host_path: false
+    mem_limit: 512m
+    cpus: 0.75
+    pids_limit: 256
+
+  grafana:
+    <<: *service-defaults
+    image: grafana/grafana:13.2.1
+    platform: linux/amd64
+    read_only: true
+    user: "${NAS_RUNTIME_UID:?set NAS_RUNTIME_UID}:${NAS_RUNTIME_GID:?set NAS_RUNTIME_GID}"
+    depends_on:
+      prometheus:
+        condition: service_started
+      tempo:
+        condition: service_started
+    environment:
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana-admin-password
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+      GF_SECURITY_PASSWORD_POLICY: "true"
+      GF_SECURITY_SECRET_KEY__FILE: /run/secrets/grafana-secret-key
+      GF_SERVER_ROOT_URL: http://127.0.0.1:${GRAFANA_PORT:-3000}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - 127.0.0.1:${GRAFANA_PORT:-3000}:3000
+    secrets:
+      - grafana-admin-password
+      - grafana-secret-key
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    volumes:
+      - type: bind
+        source: ${GRAFANA_DATA_PATH:?set GRAFANA_DATA_PATH}
+        target: /var/lib/grafana
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./grafana/provisioning
+        target: /etc/grafana/provisioning
+        read_only: true
+      - type: bind
+        source: ./grafana/dashboards
+        target: /var/lib/grafana-provisioned-dashboards
+        read_only: true
+    mem_limit: 512m
+    cpus: 0.75
+    pids_limit: 256
+
+secrets:
+  telegram-bot-token:
+    file: ${HOME_AGENT_SECRETS_PATH:?set HOME_AGENT_SECRETS_PATH}/telegram-bot-token
+  grafana-admin-password:
+    file: ${GRAFANA_SECRETS_PATH:?set GRAFANA_SECRETS_PATH}/admin-password
+  grafana-secret-key:
+    file: ${GRAFANA_SECRETS_PATH:?set GRAFANA_SECRETS_PATH}/secret-key
+
+networks:
+  default:
+    name: home-ai-assistant
+    driver: bridge

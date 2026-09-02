@@ -1,0 +1,16 @@
+.git
+.github
+.agents
+.codex
+.env
+.env.*
+HANDOFF.md
+data
+deploy
+docs
+secrets
+spikes
+*.db
+*.db-shm
+*.db-wal
+*.log

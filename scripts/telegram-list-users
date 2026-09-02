@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+account=home-ai-assistant
+bot=${1:-main}
+repo_root=$(git rev-parse --show-toplevel)
+
+case "$bot" in
+  main)
+    env_file=${HOME_AGENT_ENV_FILE:-$repo_root/.env}
+    if [[ ! -f $env_file ]]; then
+      echo "Local environment file not found: $env_file" >&2
+      exit 2
+    fi
+    set -a
+    # shellcheck disable=SC1090
+    source "$env_file"
+    set +a
+    token=${HOME_AGENT_TELEGRAM_BOT_TOKEN:-}
+    ;;
+  alerts)
+    service=grafana.telegram-alert-bot-token
+    token=$(security find-generic-password -a "$account" -s "$service" -w)
+    ;;
+  *)
+    echo "usage: $0 [main|alerts]" >&2
+    exit 2
+    ;;
+esac
+
+if [[ ! $token =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
+  echo "the configured value is not a valid Telegram bot token" >&2
+  exit 1
+fi
+
+response=$(
+  printf 'url = "https://api.telegram.org/bot%s/getUpdates"\nsilent\nshow-error\nfail\n' "$token" \
+    | curl --config -
+)
+unset token HOME_AGENT_TELEGRAM_BOT_TOKEN
+
+if [[ $(jq -r '.ok' <<<"$response") != true ]]; then
+  echo "Telegram rejected getUpdates" >&2
+  exit 1
+fi
+
+users=$(jq -r '
+  [.result[]
+  | .message?
+  | select(. != null and .chat.type == "private" and .chat.id == .from.id)
+  | {
+    id: .from.id,
+    username: (.from.username // "-"),
+    name: ([.from.first_name, .from.last_name] | map(select(. != null)) | join(" "))
+  }]
+  | unique_by(.id)[]
+  | "id=\(.id) username=\(.username) name=\(.name)"
+' <<<"$response")
+
+if [[ -z $users ]]; then
+  echo "No private-message senders found. Send the bot a fresh private message before retrying." >&2
+  exit 1
+fi
+
+printf '%s\n' "$users"

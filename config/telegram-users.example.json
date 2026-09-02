@@ -1,0 +1,14 @@
+{
+  "users": [
+    {
+      "telegram_user_id": 100000001,
+      "principal_id": "person-one",
+      "display_name": "Person One"
+    },
+    {
+      "telegram_user_id": 100000002,
+      "principal_id": "person-two",
+      "display_name": "Person Two"
+    }
+  ]
+}
