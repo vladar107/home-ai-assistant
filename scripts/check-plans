@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+index=docs/plans/README.md
+base_ref=${1:-HEAD}
+errors=0
+
+fail() {
+  printf 'plan check: %s\n' "$1" >&2
+  errors=$((errors + 1))
+}
+
+if [[ ! -f "$index" ]]; then
+  printf 'plan check: %s is missing\n' "$index" >&2
+  exit 1
+fi
+
+previous=0
+plan_count=0
+
+for plan in docs/plans/[0-9][0-9][0-9][0-9]-*.md; do
+  [[ -e "$plan" ]] || continue
+  plan_count=$((plan_count + 1))
+
+  filename=${plan##*/}
+  number=${filename%%-*}
+  number_value=$((10#$number))
+  expected=$((previous + 1))
+
+  if ((number_value != expected)); then
+    fail "$filename has number $number; expected $(printf '%04d' "$expected")"
+  fi
+  previous=$number_value
+
+  status=$(sed -n 's/^Status: `\([^`]*\)`$/\1/p' "$plan")
+  status_count=$(sed -n 's/^Status: `[^`]*`$/status/p' "$plan" | wc -l | tr -d ' ')
+  if [[ "$status_count" != "1" ]]; then
+    fail "$filename must contain exactly one formatted Status field"
+    continue
+  fi
+
+  case "$status" in
+    proposed | in-progress | done | superseded | abandoned) ;;
+    *) fail "$filename has unsupported status '$status'" ;;
+  esac
+
+  rows=$(grep -F "]($filename)" "$index" || true)
+  row_count=$(printf '%s\n' "$rows" | awk 'NF { count++ } END { print count + 0 }')
+  if [[ "$row_count" != "1" ]]; then
+    fail "$filename must have exactly one index row"
+  elif [[ "$rows" != *"| $status |"* ]]; then
+    fail "$filename status does not match its index row"
+  fi
+done
+
+if ((plan_count == 0)); then
+  fail "no numbered plans found"
+fi
+
+while IFS= read -r linked_plan; do
+  [[ -z "$linked_plan" || -f "docs/plans/$linked_plan" ]] || fail "index links to missing plan $linked_plan"
+done < <(sed -n 's/.*](\([0-9][0-9][0-9][0-9]-[^)]*\.md\)).*/\1/p' "$index")
+
+if git rev-parse --verify "$base_ref^{commit}" >/dev/null 2>&1; then
+  while IFS= read -r prior_plan; do
+    prior_status=$(git show "$base_ref:$prior_plan" | sed -n 's/^Status: `\([^`]*\)`$/\1/p')
+    case "$prior_status" in
+      done | superseded | abandoned)
+        if ! git diff --quiet "$base_ref" -- "$prior_plan"; then
+          fail "$prior_plan is terminal and cannot be modified or deleted"
+        fi
+
+        if git cat-file -e "$base_ref:$index" 2>/dev/null; then
+          prior_filename=${prior_plan##*/}
+          prior_row=$(git show "$base_ref:$index" | grep -F "]($prior_filename)" || true)
+          current_row=$(grep -F "]($prior_filename)" "$index" || true)
+          if [[ "$prior_row" != "$current_row" ]]; then
+            fail "$prior_filename has a terminal index row that cannot be modified or deleted"
+          fi
+        fi
+        ;;
+    esac
+  done < <(git ls-tree -r --name-only "$base_ref" -- docs/plans | grep -E '^docs/plans/[0-9]{4}-.+\.md$' || true)
+fi
+
+if ((errors > 0)); then
+  exit 1
+fi
+
+printf 'Validated %d implementation plans.\n' "$plan_count"

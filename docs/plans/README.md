@@ -1,0 +1,17 @@
+# Implementation Plans
+
+Plans are sequential implementation records. Create the next plan before a
+non-trivial change and commit its completed form with the corresponding change.
+
+A plan may evolve while its status is `proposed` or `in-progress`. Once its
+status becomes `done`, `superseded`, or `abandoned`, both the plan file and its
+existing index row are immutable. Later discoveries belong in a new numbered
+plan that links back to the earlier record.
+
+| Number | Plan | Status |
+| --- | --- | --- |
+| 0001 | [Telegram, observability, and NAS foundation](0001-telegram-observability-nas-foundation.md) | done |
+| 0002 | [Private repository and plan governance](0002-private-repository-and-plan-governance.md) | done |
+
+Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
+before every commit.
