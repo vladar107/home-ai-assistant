@@ -1,8 +1,10 @@
 package telegram
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -17,7 +19,7 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func newFixtureRuntime(t *testing.T) *pi.Runtime {
+func newFixtureRuntime(t *testing.T, profilesDir string) *pi.Runtime {
 	t.Helper()
 	binary, err := os.Executable()
 	if err != nil {
@@ -25,7 +27,7 @@ func newFixtureRuntime(t *testing.T) *pi.Runtime {
 	}
 	runtime, err := pi.New(t.Context(), pi.Config{
 		Binary: binary, Provider: "fixture-provider", Model: "fixture-model:low",
-		ExpectedVersion: pifixture.Version, SessionDir: filepath.Join(t.TempDir(), "sessions"),
+		ExpectedVersion: pifixture.Version, ProfilesDir: profilesDir,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +45,9 @@ func TestProviderFailuresProduceActionableReplies(t *testing.T) {
 		{"auth", conversation.ReconnectReply, agentruntime.FailureAuth},
 	} {
 		t.Run(tc.scenario, func(t *testing.T) {
-			h := newConversationHarness(t, newFixtureRuntime(t))
+			profiles := filepath.Join(t.TempDir(), "profiles")
+			h := newConversationHarnessWithOptions(t, newFixtureRuntime(t, profiles), harnessOptions{profilesDir: profiles})
+			h.provision("alice", "acct-alice")
 			h.start()
 			receive(t, h.ctx, h.registrations)
 			if err := h.client.SendTyping(h.ctx, 101); err != nil {
@@ -68,6 +72,22 @@ func TestProviderFailuresProduceActionableReplies(t *testing.T) {
 			h.waitState(2, "delivered")
 			if logs := h.logs.String(); strings.Contains(logs, "synthetic-private-text") {
 				t.Fatal("logs contain provider text")
+			}
+			// The real adapter must have run inside Alice's own Pi directory.
+			reports, err := filepath.Glob(filepath.Join(profiles, "alice", "sessions", "*.fixture.json"))
+			if err != nil || len(reports) == 0 {
+				t.Fatalf("no fixture report under Alice's profile: %v", err)
+			}
+			data, err := os.ReadFile(reports[len(reports)-1])
+			if err != nil {
+				t.Fatal(err)
+			}
+			var report pifixture.Report
+			if err := json.Unmarshal(data, &report); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Contains(report.Environment, "PI_CODING_AGENT_DIR="+filepath.Join(profiles, "alice")) {
+				t.Fatalf("turn ran outside the principal directory: %v", report.Environment)
 			}
 		})
 	}

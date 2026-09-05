@@ -110,9 +110,10 @@ func run() error {
 		emit(map[string]any{"type": "auto_retry_start", "attempt": 1, "maxAttempts": 3, "delayMs": 2000, "errorMessage": text})
 	}
 	const (
-		quotaText = "Codex error: The usage limit has been reached synthetic-private-text"
-		authText  = "Unauthorized: token expired synthetic-private-text"
-		otherText = "network error synthetic-private-text"
+		quotaText      = "Codex error: The usage limit has been reached synthetic-private-text"
+		authText       = "Unauthorized: token expired synthetic-private-text"
+		missingKeyText = "No API key found for fixture-provider synthetic-private-text"
+		otherText      = "network error synthetic-private-text"
 	)
 	switch prompt.Message {
 	case "fixture:hold", "fixture:stubborn":
@@ -143,10 +144,13 @@ func run() error {
 		ack()
 		delta("   ")
 		settle()
-	case "fixture:quota", "fixture:auth":
+	case "fixture:quota", "fixture:auth", "fixture:missing-key":
 		text := quotaText
-		if prompt.Message == "fixture:auth" {
+		switch prompt.Message {
+		case "fixture:auth":
 			text = authText
+		case "fixture:missing-key":
+			text = missingKeyText
 		}
 		ack()
 		failMessage(text)

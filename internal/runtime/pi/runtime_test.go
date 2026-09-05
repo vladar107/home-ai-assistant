@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -34,6 +36,8 @@ func (s *eventSink) Emit(_ context.Context, event agentruntime.Event) error {
 	return s.err
 }
 
+const testPrincipal = "test-principal"
+
 func config(t *testing.T) pi.Config {
 	t.Helper()
 	binary, err := os.Executable()
@@ -42,11 +46,19 @@ func config(t *testing.T) pi.Config {
 	}
 	return pi.Config{
 		Binary: binary, Provider: "fixture-provider", Model: "fixture-model:low",
-		ExpectedVersion: pifixture.Version, SessionDir: filepath.Join(t.TempDir(), "sessions"),
+		ExpectedVersion: pifixture.Version, ProfilesDir: filepath.Join(t.TempDir(), "profiles"),
 	}
 }
 
+// newRuntime provisions the default principal the way the connection ceremony will.
 func newRuntime(t *testing.T, cfg pi.Config) *pi.Runtime {
+	t.Helper()
+	r := newUnprovisionedRuntime(t, cfg)
+	prepareProfile(t, cfg, testPrincipal)
+	return r
+}
+
+func newUnprovisionedRuntime(t *testing.T, cfg pi.Config) *pi.Runtime {
 	t.Helper()
 	r, err := pi.New(context.Background(), cfg)
 	if err != nil {
@@ -55,8 +67,29 @@ func newRuntime(t *testing.T, cfg pi.Config) *pi.Runtime {
 	return r
 }
 
+func prepareProfile(t *testing.T, cfg pi.Config, principal string) string {
+	t.Helper()
+	directory := agentDir(cfg, principal)
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return directory
+}
+
+func agentDir(cfg pi.Config, principal string) string {
+	return filepath.Join(cfg.ProfilesDir, principal)
+}
+
+func sessionDir(cfg pi.Config, principal string) string {
+	return filepath.Join(agentDir(cfg, principal), "sessions")
+}
+
 func request(session, message string) agentruntime.RunRequest {
-	return agentruntime.RunRequest{PrincipalID: "test-principal", SessionID: session, Message: message}
+	return principalRequest(testPrincipal, session, message)
+}
+
+func principalRequest(principal, session, message string) agentruntime.RunRequest {
+	return agentruntime.RunRequest{PrincipalID: principal, SessionID: session, Message: message}
 }
 
 func TestProcessConfigurationAndSessionContinuity(t *testing.T) {
@@ -83,13 +116,13 @@ func TestProcessConfigurationAndSessionContinuity(t *testing.T) {
 	if len(sink.events) != 2 || streamed.String() != result.Response {
 		t.Fatalf("streamed events = %#v", sink.events)
 	}
-	report := readReport(t, cfg.SessionDir, "session-one")
+	report := readReport(t, cfg, testPrincipal, "session-one")
 	for _, flag := range []string{"--no-tools", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-approve"} {
 		if !slices.Contains(report.Args, flag) {
 			t.Errorf("missing lockdown flag %s", flag)
 		}
 	}
-	for flag, want := range map[string]string{"--mode": "rpc", "--provider": cfg.Provider, "--model": cfg.Model, "--session-id": "session-one", "--session-dir": cfg.SessionDir} {
+	for flag, want := range map[string]string{"--mode": "rpc", "--provider": cfg.Provider, "--model": cfg.Model, "--session-id": "session-one", "--session-dir": sessionDir(cfg, testPrincipal)} {
 		index := slices.Index(report.Args, flag)
 		if index < 0 || index+1 >= len(report.Args) || report.Args[index+1] != want {
 			t.Errorf("%s not forwarded as %q: %#v", flag, want, report.Args)
@@ -103,11 +136,16 @@ func TestProcessConfigurationAndSessionContinuity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantEnvironment := []string{"HOME=" + homeDir, "PATH=" + filepath.Dir(cfg.Binary), "PI_TELEMETRY=0"}
+	wantEnvironment := []string{
+		"HOME=" + homeDir,
+		"PATH=" + filepath.Dir(cfg.Binary),
+		"PI_TELEMETRY=0",
+		"PI_CODING_AGENT_DIR=" + agentDir(cfg, testPrincipal),
+	}
 	slices.Sort(wantEnvironment)
 	slices.Sort(report.Environment)
 	if !reflect.DeepEqual(report.Environment, wantEnvironment) {
-		t.Errorf("child environment was not restricted to the authentication home, executable path, and telemetry opt-out")
+		t.Errorf("child environment was not restricted to the authentication home, executable path, telemetry opt-out, and the principal agent directory: %v", report.Environment)
 	}
 	if len(report.Files) != 0 {
 		t.Errorf("child working directory contained files: %v", report.Files)
@@ -116,17 +154,116 @@ func TestProcessConfigurationAndSessionContinuity(t *testing.T) {
 		t.Errorf("unexpected RPC prompt: %#v", report)
 	}
 	assertProcessStopped(t, report)
-	info, err := os.Stat(cfg.SessionDir)
-	if err != nil || info.Mode().Perm() != 0o700 {
-		t.Fatalf("session directory permissions: info=%v err=%v", info, err)
+	for _, directory := range []string{cfg.ProfilesDir, agentDir(cfg, testPrincipal), sessionDir(cfg, testPrincipal)} {
+		info, err := os.Stat(directory)
+		if err != nil || info.Mode().Perm() != 0o700 {
+			t.Fatalf("%s permissions: info=%v err=%v", directory, info, err)
+		}
 	}
 	// A new adapter process must use the same persisted session history.
-	r = newRuntime(t, cfg)
+	r = newUnprovisionedRuntime(t, cfg)
 	for _, tc := range []struct{ session, want string }{{"session-one", "amber"}, {"session-two", "nothing remembered"}} {
 		result, err := r.Run(context.Background(), request(tc.session, "recall"), &eventSink{})
 		if err != nil || result.Response != tc.want {
 			t.Errorf("session %s: response=%q err=%v", tc.session, result.Response, err)
 		}
+	}
+}
+
+func TestConcurrentPrincipalsUseSeparateAgentDirectories(t *testing.T) {
+	cfg := config(t)
+	r := newUnprovisionedRuntime(t, cfg)
+	principals := []string{"alice", "bob"}
+	for _, principal := range principals {
+		prepareProfile(t, cfg, principal)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	finished := make(chan error, len(principals))
+	for _, principal := range principals {
+		go func() {
+			_, err := r.Run(ctx, principalRequest(principal, "shared-session", "fixture:hold"), &eventSink{})
+			finished <- err
+		}()
+	}
+	// Both reports exist only while both children are running, so reading them proves overlap.
+	reports := map[string]pifixture.Report{}
+	for _, principal := range principals {
+		reports[principal] = readReport(t, cfg, principal, "shared-session")
+	}
+	cancel()
+	for range principals {
+		select {
+		case err := <-finished:
+			if !errors.Is(err, context.Canceled) {
+				t.Errorf("error = %v, want %v", err, context.Canceled)
+			}
+		case <-time.After(8 * time.Second):
+			t.Fatal("concurrent turns did not stop")
+		}
+	}
+	for _, principal := range principals {
+		report := reports[principal]
+		if !slices.Contains(report.Environment, "PI_CODING_AGENT_DIR="+agentDir(cfg, principal)) {
+			t.Errorf("%s ran outside its own agent directory: %v", principal, report.Environment)
+		}
+		index := slices.Index(report.Args, "--session-dir")
+		if index < 0 || index+1 >= len(report.Args) || report.Args[index+1] != sessionDir(cfg, principal) {
+			t.Errorf("%s session directory not forwarded: %#v", principal, report.Args)
+		}
+		assertProcessStopped(t, report)
+	}
+	if reports[principals[0]].PID == reports[principals[1]].PID {
+		t.Error("both principals shared one process")
+	}
+}
+
+func TestUnconnectedPrincipalNeverStartsAProcess(t *testing.T) {
+	for _, tc := range []struct {
+		name, principal string
+		prepare         func(*testing.T, pi.Config)
+	}{
+		{name: "missing profile", principal: "unprovisioned"},
+		{name: "shared profile", principal: "loose", prepare: func(t *testing.T, cfg pi.Config) {
+			if err := os.Chmod(prepareProfile(t, cfg, "loose"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := config(t)
+			r := newUnprovisionedRuntime(t, cfg)
+			if tc.prepare != nil {
+				tc.prepare(t, cfg)
+			}
+			result, err := r.Run(context.Background(), principalRequest(tc.principal, "unconnected", "hello"), &eventSink{})
+			var providerErr *agentruntime.ProviderError
+			if !errors.As(err, &providerErr) || providerErr.Category != agentruntime.FailureAuth {
+				t.Fatalf("error = %v, want an authentication provider error", err)
+			}
+			if result.Response != "" {
+				t.Errorf("result = %#v", result)
+			}
+			assertNoTurnStarted(t, cfg)
+		})
+	}
+}
+
+func TestInvalidPrincipalIsRejectedBeforeStart(t *testing.T) {
+	cfg := config(t)
+	r := newUnprovisionedRuntime(t, cfg)
+	for _, principal := range []string{"../escape", "with/slash", "with space", ".hidden", ""} {
+		t.Run(principal, func(t *testing.T) {
+			_, err := r.Run(context.Background(), principalRequest(principal, "invalid", "hello"), &eventSink{})
+			if err == nil {
+				t.Fatal("invalid principal was accepted")
+			}
+			var providerErr *agentruntime.ProviderError
+			if errors.As(err, &providerErr) {
+				t.Fatalf("invalid principal reported a provider failure: %v", providerErr.Category)
+			}
+			assertNoTurnStarted(t, cfg)
+		})
 	}
 }
 
@@ -172,7 +309,7 @@ func TestProcessFailuresAreBoundedAndContentFree(t *testing.T) {
 			if errors.Is(err, context.DeadlineExceeded) {
 				t.Fatalf("runtime did not fail before the test deadline: %v", err)
 			}
-			assertProcessStopped(t, readReport(t, cfg.SessionDir, "failure"))
+			assertProcessStopped(t, readReport(t, cfg, testPrincipal, "failure"))
 		})
 	}
 }
@@ -185,6 +322,7 @@ func TestActionableProviderFailuresEndTheTurn(t *testing.T) {
 	}{
 		{"quota", agentruntime.FailureQuota, false},
 		{"auth", agentruntime.FailureAuth, false},
+		{"missing-key", agentruntime.FailureAuth, false},
 		{"retry-quota", agentruntime.FailureQuota, true},
 		{"retry-auth", agentruntime.FailureAuth, true},
 	} {
@@ -209,7 +347,7 @@ func TestActionableProviderFailuresEndTheTurn(t *testing.T) {
 			if result.Response != "" || strings.Contains(err.Error(), "synthetic-private-text") {
 				t.Fatalf("provider failure exposed content: result=%#v error=%v", result, err)
 			}
-			report := readReport(t, cfg.SessionDir, "provider-failure")
+			report := readReport(t, cfg, testPrincipal, "provider-failure")
 			if tc.retrying && !report.AbortReceived {
 				t.Error("adapter did not send abort_retry while Pi was retrying")
 			}
@@ -246,7 +384,7 @@ func TestUncategorizedProviderFailuresStayWithPi(t *testing.T) {
 			case strings.Contains(err.Error(), "synthetic-private-text"):
 				t.Fatalf("error exposed provider text: %v", err)
 			}
-			assertProcessStopped(t, readReport(t, cfg.SessionDir, "uncategorized"))
+			assertProcessStopped(t, readReport(t, cfg, testPrincipal, "uncategorized"))
 		})
 	}
 }
@@ -269,7 +407,7 @@ func TestCancellationAndTimeoutStopRealProcess(t *testing.T) {
 				_, err := r.Run(ctx, request("blocked", tc.message), &eventSink{})
 				finished <- err
 			}()
-			report := readReport(t, cfg.SessionDir, "blocked")
+			report := readReport(t, cfg, testPrincipal, "blocked")
 			if tc.name != "timeout" {
 				cancel()
 			}
@@ -294,7 +432,7 @@ func TestSinkFailureStopsProcess(t *testing.T) {
 	if !errors.Is(err, sinkErr) {
 		t.Fatalf("error = %v", err)
 	}
-	assertProcessStopped(t, readReport(t, cfg.SessionDir, "sink-failure"))
+	assertProcessStopped(t, readReport(t, cfg, testPrincipal, "sink-failure"))
 }
 
 func TestRejectingQueuedEventsReleasesReader(t *testing.T) {
@@ -307,7 +445,7 @@ func TestRejectingQueuedEventsReleasesReader(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "tool event") {
 		t.Fatalf("error = %v", err)
 	}
-	assertProcessStopped(t, readReport(t, cfg.SessionDir, "flood"))
+	assertProcessStopped(t, readReport(t, cfg, testPrincipal, "flood"))
 	deadline := time.Now().Add(time.Second)
 	for eventReaderCount() > before {
 		if time.Now().After(deadline) {
@@ -323,11 +461,11 @@ func eventReaderCount() int {
 	return strings.Count(string(stack[:n]), "internal/runtime/pi.scanEvents(")
 }
 
-func readReport(t *testing.T, directory, session string) pifixture.Report {
+func readReport(t *testing.T, cfg pi.Config, principal, session string) pifixture.Report {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		data, err := os.ReadFile(pifixture.ReportPath(directory, session))
+		data, err := os.ReadFile(pifixture.ReportPath(sessionDir(cfg, principal), session))
 		var report pifixture.Report
 		if err == nil && json.Unmarshal(data, &report) == nil {
 			return report
@@ -346,5 +484,23 @@ func assertProcessStopped(t *testing.T, report pifixture.Report) {
 	}
 	if _, err := os.Stat(report.Directory); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("isolated child directory was not removed: %v", err)
+	}
+}
+
+// assertNoTurnStarted fails when the adapter prepared a session directory or a child wrote a
+// report, either of which would mean a process ran under the profiles root.
+func assertNoTurnStarted(t *testing.T, cfg pi.Config) {
+	t.Helper()
+	err := filepath.WalkDir(cfg.ProfilesDir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.Name() == "sessions" || strings.HasSuffix(entry.Name(), ".fixture.json") {
+			return fmt.Errorf("turn was started: %s exists", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Error(err)
 	}
 }

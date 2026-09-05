@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/vladar107/home-ai-assistant/internal/connection"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
@@ -34,10 +35,17 @@ type botAPI interface {
 	SetMyCommands(context.Context, CommandScope, []BotCommand) error
 }
 
-type conversationController interface {
+type ConversationController interface {
 	Enqueue(context.Context, conversation.EnqueueInput) error
 	Cancel(context.Context, string) (bool, error)
 	NewSession(context.Context, string) (bool, error)
+}
+
+// ConnectionController is implemented by the model connection service; nil disables the connection commands.
+type ConnectionController interface {
+	Connect(context.Context, string, int64) (connection.Ceremony, error)
+	Status(context.Context, string) (connection.Status, error)
+	Disconnect(context.Context, string) (bool, error)
 }
 
 type identityResolver interface {
@@ -54,7 +62,8 @@ type Service struct {
 	client       botAPI
 	identities   identityResolver
 	cursors      cursorStore
-	conversation conversationController
+	conversation ConversationController
+	connections  ConnectionController
 	logger       *slog.Logger
 	telemetry    Telemetry
 
@@ -68,7 +77,8 @@ func NewService(
 	client botAPI,
 	identities identityResolver,
 	cursors cursorStore,
-	conversation conversationController,
+	conversation ConversationController,
+	connections ConnectionController,
 	logger *slog.Logger,
 	telemetry Telemetry,
 ) (*Service, error) {
@@ -90,6 +100,7 @@ func NewService(
 		identities:   identities,
 		cursors:      cursors,
 		conversation: conversation,
+		connections:  connections,
 		logger:       logger,
 		telemetry:    telemetryOrNoop(telemetry),
 	}, nil
@@ -111,7 +122,7 @@ func (s *Service) Start(ctx context.Context) error {
 		return fmt.Errorf("Telegram getMe returned an invalid bot identity")
 	}
 
-	commands := registeredCommands(s.conversation != nil)
+	commands := registeredCommands(s.conversation != nil, s.connections != nil)
 	// Private chats resolve the all-private-chats scope before the default one, so a stale list there would hide the default registration.
 	for _, scope := range []CommandScope{"", CommandScopeAllPrivateChats} {
 		if err := s.client.SetMyCommands(ctx, scope, commands); err != nil {
@@ -338,7 +349,7 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 
 	command, isCommand := ParseCommand(message.Text, bot.Username)
 	if isCommand {
-		reply, err := s.handleCommand(ctx, authorization.Principal.ID, command)
+		reply, err := s.handleCommand(ctx, authorization.Principal.ID, message.Chat.ID, command)
 		if err != nil {
 			return processingResult{}, "handle_command", err
 		}
@@ -375,7 +386,7 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 	}, "", nil
 }
 
-func (s *Service) handleCommand(ctx context.Context, principalID, command string) (string, error) {
+func (s *Service) handleCommand(ctx context.Context, principalID string, chatID int64, command string) (string, error) {
 	switch command {
 	case "status":
 		if s.conversation != nil {
@@ -411,6 +422,45 @@ func (s *Service) handleCommand(ctx context.Context, principalID, command string
 			return NewSessionReply, nil
 		}
 		return NoSessionReply, nil
+	case "connect":
+		if s.connections == nil {
+			return HelpReply, nil
+		}
+		ceremony, err := s.connections.Connect(ctx, principalID, chatID)
+		if err != nil {
+			s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "telegram.connection.start_failed", "principal_id", principalID, "error", err)
+			return connection.ConnectFailedReply, nil
+		}
+		return ConnectInstructions(ceremony), nil
+	case "connection":
+		if s.connections == nil {
+			return HelpReply, nil
+		}
+		status, err := s.connections.Status(ctx, principalID)
+		if err != nil {
+			return "", err
+		}
+		if !status.Connected {
+			return NoConnectionReply, nil
+		}
+		return ConnectionStatusReply(status), nil
+	case "disconnect":
+		if s.connections == nil {
+			return HelpReply, nil
+		}
+		if s.conversation != nil {
+			if _, err := s.conversation.Cancel(ctx, principalID); err != nil {
+				return "", err
+			}
+		}
+		removed, err := s.connections.Disconnect(ctx, principalID)
+		if err != nil {
+			return "", err
+		}
+		if removed {
+			return DisconnectedReply, nil
+		}
+		return NoConnectionReply, nil
 	default:
 		return HelpReply, nil
 	}

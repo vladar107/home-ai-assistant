@@ -30,7 +30,7 @@ type Config struct {
 	Provider        string
 	Model           string
 	ExpectedVersion string
-	SessionDir      string
+	ProfilesDir     string
 }
 
 type Runtime struct {
@@ -39,7 +39,7 @@ type Runtime struct {
 	environment []string
 	provider    string
 	model       string
-	sessionDir  string
+	profilesDir string
 }
 
 var _ agentruntime.AgentRuntime = (*Runtime)(nil)
@@ -49,11 +49,11 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 	if err != nil {
 		return nil, fmt.Errorf("find Pi executable: configured binary is unavailable")
 	}
-	sessionDir, err := filepath.Abs(cfg.SessionDir)
+	profilesDir, err := filepath.Abs(cfg.ProfilesDir)
 	if err != nil {
-		return nil, fmt.Errorf("resolve Pi session directory: %w", err)
+		return nil, fmt.Errorf("resolve Pi profiles directory: %w", err)
 	}
-	if err := preparePrivateDirectory(sessionDir); err != nil {
+	if err := preparePrivateDirectory(profilesDir, "profiles"); err != nil {
 		return nil, err
 	}
 	var argsPrefix []string
@@ -93,7 +93,7 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 		environment: environment,
 		provider:    cfg.Provider,
 		model:       cfg.Model,
-		sessionDir:  sessionDir,
+		profilesDir: profilesDir,
 	}, nil
 }
 
@@ -107,6 +107,10 @@ func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink
 	if sink == nil {
 		return agentruntime.RunResult{}, fmt.Errorf("Pi runtime event sink is required")
 	}
+	agentDir, sessionDir, err := r.principalDirectories(request.PrincipalID)
+	if err != nil {
+		return agentruntime.RunResult{}, err
+	}
 
 	workDir, err := os.MkdirTemp("", "home-agent-pi-")
 	if err != nil {
@@ -118,7 +122,7 @@ func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink
 		"--mode", "rpc",
 		"--provider", r.provider,
 		"--session-id", request.SessionID,
-		"--session-dir", r.sessionDir,
+		"--session-dir", sessionDir,
 		"--system-prompt", systemPrompt,
 		"--no-tools",
 		"--no-extensions",
@@ -134,7 +138,7 @@ func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink
 
 	cmd := exec.CommandContext(ctx, r.binary, args...)
 	cmd.Dir = workDir
-	cmd.Env = r.environment
+	cmd.Env = append(append([]string(nil), r.environment...), "PI_CODING_AGENT_DIR="+agentDir)
 	cmd.Stderr = io.Discard
 	cmd.WaitDelay = processStopGrace
 	cmd.Cancel = func() error {
@@ -227,6 +231,26 @@ func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink
 	}
 }
 
+// principalDirectories resolves the principal's own agent directory. Pi reads auth.json only from
+// there, so a directory that is missing or shared means the subscription is not connected for this
+// principal rather than that the runtime is broken.
+func (r *Runtime) principalDirectories(principalID string) (string, string, error) {
+	name, err := agentruntime.ProfileDirectoryName(principalID)
+	if err != nil {
+		return "", "", err
+	}
+	agentDir := filepath.Join(r.profilesDir, name)
+	info, err := os.Lstat(agentDir)
+	if err != nil || !isPrivateDirectory(info) {
+		return "", "", &agentruntime.ProviderError{Category: agentruntime.FailureAuth}
+	}
+	sessionDir := filepath.Join(agentDir, "sessions")
+	if err := preparePrivateDirectory(sessionDir, "session"); err != nil {
+		return "", "", err
+	}
+	return agentDir, sessionDir, nil
+}
+
 func restrictedEnvironment(binary string) ([]string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(homeDir) == "" || strings.ContainsAny(homeDir, "\r\n") {
@@ -273,6 +297,7 @@ var failureCategories = []struct {
 	{"refresh token", agentruntime.FailureAuth},
 	{"not logged in", agentruntime.FailureAuth},
 	{"no credentials", agentruntime.FailureAuth},
+	{"no api key", agentruntime.FailureAuth},
 }
 
 // providerFailure reports the actionable category of a failed turn; anything else is left to Pi's own retry.
@@ -383,22 +408,26 @@ func stopProcess(cmd *exec.Cmd, stdin io.Closer, waitResult <-chan error) {
 	}
 }
 
-func preparePrivateDirectory(path string) error {
+func preparePrivateDirectory(path, purpose string) error {
 	info, err := os.Lstat(path)
 	switch {
 	case err == nil:
 		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-			return fmt.Errorf("Pi session directory must be a real directory")
+			return fmt.Errorf("Pi %s directory must be a real directory", purpose)
 		}
 		if info.Mode().Perm() != 0o700 {
-			return fmt.Errorf("Pi session directory permissions are %04o, want 0700", info.Mode().Perm())
+			return fmt.Errorf("Pi %s directory permissions are %04o, want 0700", purpose, info.Mode().Perm())
 		}
 	case errors.Is(err, os.ErrNotExist):
 		if err := os.Mkdir(path, 0o700); err != nil {
-			return fmt.Errorf("create Pi session directory: %w", err)
+			return fmt.Errorf("create Pi %s directory: %w", purpose, err)
 		}
 	case err != nil:
-		return fmt.Errorf("inspect Pi session directory: %w", err)
+		return fmt.Errorf("inspect Pi %s directory: %w", purpose, err)
 	}
 	return nil
+}
+
+func isPrivateDirectory(info os.FileInfo) bool {
+	return info.Mode()&os.ModeSymlink == 0 && info.IsDir() && info.Mode().Perm() == 0o700
 }

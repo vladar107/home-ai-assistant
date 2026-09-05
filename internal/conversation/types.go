@@ -67,6 +67,15 @@ type Deliverer interface {
 	SendTyping(context.Context, int64) error
 }
 
+// ConnectionGate reports whether a principal's own model connection is usable before a turn starts.
+type ConnectionGate interface {
+	Ready(context.Context, string) (bool, error)
+}
+
+type AlwaysConnected struct{}
+
+func (AlwaysConnected) Ready(context.Context, string) (bool, error) { return true, nil }
+
 type ToolProvider interface {
 	ToolsFor(context.Context, string) ([]agentruntime.ToolDefinition, error)
 }

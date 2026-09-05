@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -18,10 +19,12 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/vladar107/home-ai-assistant/internal/connection"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
+	"github.com/vladar107/home-ai-assistant/internal/testutil/codexauth"
 )
 
 const integrationTimeout = 15 * time.Second
@@ -83,6 +86,11 @@ func (b *lockedBuffer) String() string {
 	return b.buffer.String()
 }
 
+type harnessOptions struct {
+	profilesDir string
+	codeTimeout time.Duration
+}
+
 type conversationHarness struct {
 	t             *testing.T
 	ctx           context.Context
@@ -91,6 +99,10 @@ type conversationHarness struct {
 	client        *Client
 	service       *Service
 	conversation  *conversation.Service
+	connections   *connection.Service
+	auth          *codexauth.Simulator
+	profilesDir   string
+	sent          []string
 	updates       chan []Update
 	messages      chan sentMessage
 	offsets       chan int64
@@ -120,6 +132,11 @@ func (i integrationTelemetry) StartConversationTurn(ctx context.Context) (contex
 }
 
 func newConversationHarness(t *testing.T, runtime agentruntime.AgentRuntime) *conversationHarness {
+	t.Helper()
+	return newConversationHarnessWithOptions(t, runtime, harnessOptions{})
+}
+
+func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentRuntime, options harnessOptions) *conversationHarness {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), integrationTimeout)
 	t.Cleanup(cancel)
@@ -157,11 +174,23 @@ func newConversationHarness(t *testing.T, runtime agentruntime.AgentRuntime) *co
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(h.logs, nil))
-	h.conversation, err = conversation.NewService(conversation.Config{TurnTimeout: 10 * time.Second}, h.store, runtime, h.client, conversation.NoTools{}, logger, integrationTelemetry{turns: h.turns})
+	h.profilesDir = options.profilesDir
+	if h.profilesDir == "" {
+		h.profilesDir = filepath.Join(t.TempDir(), "profiles")
+	}
+	h.auth = codexauth.New(t)
+	h.connections, err = connection.NewService(connection.Config{
+		ProfilesDir: h.profilesDir, AuthBaseURL: h.auth.URL(), HTTPClient: h.auth.Client(),
+		CodeTimeout: options.codeTimeout, Principals: []string{"alice", "bob"},
+	}, h.store, h.client, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.service, err = NewService(h.client, identities, h.store, h.conversation, logger, nil)
+	h.conversation, err = conversation.NewService(conversation.Config{TurnTimeout: 10 * time.Second}, h.store, runtime, h.client, conversation.NoTools{}, h.connections, logger, integrationTelemetry{turns: h.turns})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.service, err = NewService(h.client, identities, h.store, h.conversation, h.connections, logger, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,6 +237,7 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 			h.sendStatuses = h.sendStatuses[1:]
 		}
 		gate := h.sendGate
+		h.sent = append(h.sent, r.Form.Get("text"))
 		h.mu.Unlock()
 		select {
 		case h.messages <- sentMessage{chatID: chatID, text: r.Form.Get("text"), status: status}:
@@ -260,6 +290,9 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 
 func (h *conversationHarness) start() {
 	h.t.Helper()
+	if err := h.connections.Start(h.ctx); err != nil {
+		h.t.Fatal(err)
+	}
 	if err := h.conversation.Start(h.ctx); err != nil {
 		h.t.Fatal(err)
 	}
@@ -278,6 +311,32 @@ func (h *conversationHarness) stop() {
 	if err := h.conversation.Shutdown(ctx); err != nil {
 		h.t.Error(err)
 	}
+	if err := h.connections.Shutdown(ctx); err != nil {
+		h.t.Error(err)
+	}
+}
+
+// provision installs a credential file and account row directly, the way a completed ceremony does.
+func (h *conversationHarness) provision(principal, accountID string) {
+	h.t.Helper()
+	directory := filepath.Join(h.profilesDir, principal)
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		h.t.Fatal(err)
+	}
+	record := fmt.Sprintf(`{"openai-codex":{"type":"oauth","access":%q,"refresh":%q,"expires":%d,"accountId":%q}}`,
+		codexauth.AccessToken(accountID), codexauth.RefreshToken(accountID), time.Now().Add(time.Hour).UnixMilli(), accountID)
+	if err := os.WriteFile(filepath.Join(directory, "auth.json"), []byte(record), 0o600); err != nil {
+		h.t.Fatal(err)
+	}
+	if bound, err := h.store.BindModelConnection(h.ctx, principal, "openai-codex", accountID); err != nil || !bound {
+		h.t.Fatalf("bind %s: bound=%v err=%v", principal, bound, err)
+	}
+}
+
+func (h *conversationHarness) sentTexts() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]string(nil), h.sent...)
 }
 
 func textUpdate(id, userID int64, text string) Update {
@@ -354,6 +413,8 @@ func (h *conversationHarness) waitOffset(want int64) {
 func TestConversationSessionsAndUserIsolation(t *testing.T) {
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
+	h.provision("alice", "acct-alice")
+	h.provision("bob", "acct-bob")
 	h.start()
 	h.push(textUpdate(1, 101, "remember amber"))
 	alice := receive(t, h.ctx, runtime.calls)
@@ -401,6 +462,7 @@ func TestConversationSessionsAndUserIsolation(t *testing.T) {
 func TestCommandsRemainResponsiveAndCancelSuppressesLateAnswer(t *testing.T) {
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
+	h.provision("alice", "acct-alice")
 	h.start()
 	h.push(textUpdate(1, 101, "long request"))
 	call := receive(t, h.ctx, runtime.calls)
@@ -430,6 +492,7 @@ func TestCommandsRemainResponsiveAndCancelSuppressesLateAnswer(t *testing.T) {
 func TestUnauthorizedAndNonPrivateUpdatesAreIgnoredAndCursorSurvivesRestart(t *testing.T) {
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
+	h.provision("alice", "acct-alice")
 	h.start()
 	group := textUpdate(2, 101, "group request")
 	group.Message.Chat.Type = "group"
@@ -469,6 +532,7 @@ func TestConversationRestartRecovery(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			runtime := newControlledRuntime()
 			h := newConversationHarness(t, runtime)
+			h.provision("alice", "acct-alice")
 			input := conversation.EnqueueInput{BotUserID: 999, TelegramUpdateID: 1, PrincipalID: "alice", ChatID: 101, Message: "original request"}
 			_, err := h.store.EnqueueConversation(h.ctx, input, conversation.Session{ID: recoverySessionID, PrincipalID: "alice", RuntimeSessionID: recoveryRuntimeSessionID}, recoveryRequestID)
 			if err != nil {
@@ -524,6 +588,7 @@ func TestConversationDeliveryFailuresAndUnicodeChunks(t *testing.T) {
 		t.Run(strconv.Itoa(status), func(t *testing.T) {
 			runtime := newControlledRuntime()
 			h := newConversationHarness(t, runtime)
+			h.provision("alice", "acct-alice")
 			h.sendStatuses = []int{status}
 			h.start()
 			h.push(textUpdate(1, 101, "answer"))
@@ -566,6 +631,7 @@ func TestBusyWhileResponseIsBeingDelivered(t *testing.T) {
 	h := newConversationHarness(t, runtime)
 	gate := make(chan struct{})
 	h.sendGate = gate
+	h.provision("alice", "acct-alice")
 	h.start()
 	h.push(textUpdate(1, 101, "first"))
 	call := receive(t, h.ctx, runtime.calls)
@@ -591,7 +657,7 @@ func TestBusyWhileResponseIsBeingDelivered(t *testing.T) {
 func TestBotCommandsRegisteredOnceAtStartup(t *testing.T) {
 	h := newConversationHarness(t, newControlledRuntime())
 	h.start()
-	want := []string{"status", "privacy", "cancel", "new"}
+	want := []string{"status", "privacy", "cancel", "new", "connect", "connection", "disconnect"}
 	for _, wantScope := range [][]string{nil, {`{"type":"all_private_chats"}`}} {
 		registration := receive(t, h.ctx, h.registrations)
 		if !slices.Equal(registration.scope, wantScope) {

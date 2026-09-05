@@ -1,6 +1,6 @@
 # 0004 — Per-user model subscriptions
 
-Status: `proposed`
+Status: `done`
 
 ## Context
 
@@ -59,9 +59,9 @@ Never use the operator's or another household user's credentials as a fallback.
 - After provisioning, Pi owns `auth.json`: it refreshes and rewrites tokens
   under its lock. The application reads only presence, expiry, and account ID.
 - Store non-secret connection metadata in SQLite: principal, provider,
-  ChatGPT account ID, and connected and last-verified timestamps. A unique
-  constraint on provider and account ID rejects binding one ChatGPT account to
-  two principals.
+  ChatGPT account ID, and the connection timestamp. A unique constraint on
+  provider and account ID rejects binding one ChatGPT account to two
+  principals.
 - `/connection` reports whether a connection exists, the last characters of
   the account ID, and expiry. `/disconnect` removes the auth file and the row,
   cancels the principal's active work, and prevents queued requests from
@@ -178,6 +178,49 @@ plan 0003; routine tests stay deterministic and credential-free.
   and plan checks.
 - Coordinate manual verification with the operator's GoLand process; do not
   start a second Telegram poller or restart that process automatically.
+
+## Implementation results
+
+Recorded on 2026-09-05.
+
+- Each principal runs Pi with `PI_CODING_AGENT_DIR` set to its own directory
+  under `data/pi/`, created with mode 0700 by the connection ceremony, with
+  session files inside it. A principal without that directory, or without a
+  refreshable credential and an account row, never starts a Pi process and
+  receives the connect guidance instead.
+- `/connect` runs the openai-codex device-code flow from the application:
+  user-code request, polling with pending, slow-down, denial, and expiry
+  handling, token exchange, account ID from the token, an account-uniqueness
+  check, and an atomic 0600 write of Pi's `auth.json`. `/connection` and
+  `/disconnect` are available to every authorized user; disconnect cancels
+  that user's running turn and removes the credential and the row. Pending
+  ceremonies are memory-only and do not survive a restart.
+- Non-secret metadata lives in the new `model_connections` table with a unique
+  provider and account constraint; tokens never appear in Telegram, logs, or
+  SQLite.
+- Found and fixed while wiring: with conversation disabled, the application
+  passed a nil service pointer through the Telegram controller interface, so
+  the first ordinary message would have panicked.
+- Automated checks passed: formatting, `go mod tidy -diff`, `go test ./...`,
+  `go test -race -count=2` for the Telegram, Pi, connection, and store
+  packages, vet, build, `scripts/check-plans`, and whitespace. The suites run
+  the real ceremony against a loopback simulator of the provider endpoints and
+  the real Pi adapter against the Go fixture inside the principal directory.
+
+### Live verification
+
+Recorded on 2026-09-06 from the operator's GoLand run:
+
+- `/connect` completed the device-code ceremony against the real provider
+  endpoints for the operator's ChatGPT account, and conversation turns then
+  ran through that principal's own Pi directory; confirmed by the operator
+  alongside the live check of [0006](0006-quoted-replies.md).
+- Not exercised live: a second household account, token refresh and
+  revocation, a restart with a connected profile, and the quota and
+  reconnect replies. All have automated coverage against the loopback
+  provider simulator and the Go Pi fixture.
+
+The operator accepted the plan as done on 2026-09-06.
 
 ## Risks and open questions
 

@@ -22,12 +22,13 @@ const (
 )
 
 const (
-	BusyReply        = "I am still working on your previous message. You can wait for it or use /cancel."
-	InterruptedReply = "The previous response was interrupted by a restart, so I did not retry it. Please send it again if you still need it."
-	TimeoutReply     = "That response took too long. Please try again with a smaller request."
-	UnavailableReply = "I could not complete that response. /status and /privacy are still available."
-	QuotaReply       = "Your model subscription has reached its usage limit. Please try again later."
-	ReconnectReply   = "Your model subscription is not connected or has expired. Reconnect it and try again."
+	BusyReply         = "I am still working on your previous message. You can wait for it or use /cancel."
+	InterruptedReply  = "The previous response was interrupted by a restart, so I did not retry it. Please send it again if you still need it."
+	TimeoutReply      = "That response took too long. Please try again with a smaller request."
+	UnavailableReply  = "I could not complete that response. /status and /privacy are still available."
+	QuotaReply        = "Your model subscription has reached its usage limit. Please try again later."
+	ReconnectReply    = "Your model subscription is not connected or has expired. Reconnect it and try again."
+	NotConnectedReply = "Your model subscription is not connected. Use /connect to connect it."
 )
 
 type Service struct {
@@ -36,6 +37,7 @@ type Service struct {
 	runtime      agentruntime.AgentRuntime
 	deliverer    Deliverer
 	toolProvider ToolProvider
+	gate         ConnectionGate
 	logger       *slog.Logger
 	telemetry    Telemetry
 
@@ -53,6 +55,7 @@ func NewService(
 	runtime agentruntime.AgentRuntime,
 	deliverer Deliverer,
 	toolProvider ToolProvider,
+	gate ConnectionGate,
 	logger *slog.Logger,
 	telemetry Telemetry,
 ) (*Service, error) {
@@ -71,6 +74,9 @@ func NewService(
 	if toolProvider == nil {
 		return nil, fmt.Errorf("conversation tool provider is required")
 	}
+	if gate == nil {
+		return nil, fmt.Errorf("conversation connection gate is required")
+	}
 	if logger == nil {
 		return nil, fmt.Errorf("conversation logger is required")
 	}
@@ -84,6 +90,7 @@ func NewService(
 		runtime:      runtime,
 		deliverer:    deliverer,
 		toolProvider: toolProvider,
+		gate:         gate,
 		logger:       logger,
 		telemetry:    telemetry,
 		workers:      make(map[string]chan struct{}),
@@ -310,16 +317,29 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 	}
 
 	turnCtx, endTurn := s.telemetry.StartConversationTurn(turnCtx)
-	_ = s.deliverer.SendTyping(turnCtx, request.ChatID)
 
-	tools, runErr := s.toolProvider.ToolsFor(turnCtx, request.PrincipalID)
 	errorKind := ""
 	// The stored kind stays within the schema's allowed set; telemetry and logs carry the finer category.
 	reportedKind := ""
 	reply := ""
-	if runErr != nil {
-		errorKind = "tool_provider"
-		reply = UnavailableReply
+	connected, runErr := s.gate.Ready(turnCtx, request.PrincipalID)
+	var tools []agentruntime.ToolDefinition
+	if runErr == nil && connected {
+		_ = s.deliverer.SendTyping(turnCtx, request.ChatID)
+		tools, runErr = s.toolProvider.ToolsFor(turnCtx, request.PrincipalID)
+		if runErr != nil {
+			errorKind = "tool_provider"
+		}
+	} else if runErr == nil {
+		errorKind, reportedKind = "runtime", "not_connected"
+		reply = NotConnectedReply
+	} else {
+		errorKind = "runtime"
+	}
+	if errorKind != "" {
+		if reply == "" {
+			reply = UnavailableReply
+		}
 	} else {
 		result, err := s.runtime.Run(turnCtx, agentruntime.RunRequest{
 			PrincipalID: request.PrincipalID,

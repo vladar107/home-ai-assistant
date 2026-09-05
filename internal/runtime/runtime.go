@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"regexp"
 )
 
 type RunRequest struct {
@@ -35,6 +37,17 @@ type RunResult struct {
 type AgentRuntime interface {
 	Run(context.Context, RunRequest, EventSink) (RunResult, error)
 }
+
+// ProfileDirectoryName returns the per-principal directory name for runtime profiles.
+// Principal IDs are free-form configuration, so only a conservative subset may name a directory.
+func ProfileDirectoryName(principalID string) (string, error) {
+	if !profileDirectoryPattern.MatchString(principalID) {
+		return "", fmt.Errorf("principal ID cannot name a runtime profile directory")
+	}
+	return principalID, nil
+}
+
+var profileDirectoryPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
 type FailureCategory string
 

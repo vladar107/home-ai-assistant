@@ -1,6 +1,13 @@
 package telegram
 
-import "strings"
+import (
+	"fmt"
+	"math"
+	"strings"
+	"time"
+
+	"github.com/vladar107/home-ai-assistant/internal/connection"
+)
 
 const (
 	StatusReply              = "Home Agent is online. Telegram access is active. This command does not use a model."
@@ -11,7 +18,9 @@ const (
 	NothingToCancelReply     = "There is no response to cancel."
 	NewSessionReply          = "Started a fresh conversation."
 	NoSessionReply           = "There is no conversation to reset yet."
-	HelpReply                = "Available commands: /status, /privacy, /cancel, /new. You can otherwise talk to me normally."
+	HelpReply                = "Available commands: /status, /privacy, /cancel, /new, /connect, /connection, /disconnect. You can otherwise talk to me normally."
+	NoConnectionReply        = "No model subscription is connected. Use /connect to connect one."
+	DisconnectedReply        = "Your model subscription is disconnected."
 )
 
 type BotCommand struct {
@@ -19,7 +28,7 @@ type BotCommand struct {
 	Description string `json:"description"`
 }
 
-func registeredCommands(conversationEnabled bool) []BotCommand {
+func registeredCommands(conversationEnabled, connectionsEnabled bool) []BotCommand {
 	commands := []BotCommand{
 		{Command: "status", Description: "Show whether Home Agent is online"},
 		{Command: "privacy", Description: "Show the current privacy mode"},
@@ -31,7 +40,37 @@ func registeredCommands(conversationEnabled bool) []BotCommand {
 			BotCommand{Command: "new", Description: "Start a fresh conversation"},
 		)
 	}
+	if connectionsEnabled {
+		commands = append(
+			commands,
+			BotCommand{Command: "connect", Description: "Connect your model subscription"},
+			BotCommand{Command: "connection", Description: "Show your model connection"},
+			BotCommand{Command: "disconnect", Description: "Disconnect your model subscription"},
+		)
+	}
 	return commands
+}
+
+func ConnectInstructions(ceremony connection.Ceremony) string {
+	minutes := int(math.Ceil(time.Until(ceremony.ExpiresAt).Minutes()))
+	if minutes < 1 {
+		minutes = 1
+	}
+	return fmt.Sprintf(
+		"Open %s and enter the code %s. The code expires in %d minutes. I will confirm here once your subscription is connected.",
+		ceremony.VerificationURL, ceremony.UserCode, minutes,
+	)
+}
+
+func ConnectionStatusReply(status connection.Status) string {
+	suffix := status.AccountID
+	if len(suffix) > 4 {
+		suffix = suffix[len(suffix)-4:]
+	}
+	return fmt.Sprintf(
+		"Connected to a ChatGPT account ending in %s. The access token expires %s.",
+		suffix, status.ExpiresAt.UTC().Format(time.RFC3339),
+	)
 }
 
 func ParseCommand(text, botUsername string) (string, bool) {
