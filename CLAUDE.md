@@ -7,6 +7,7 @@
 - Prefer narrow, typed integrations and least-privilege access over general-purpose tool authority.
 - Make ordinary natural-language conversation the primary Telegram experience; keep commands as deterministic shortcuts and operational controls.
 - Make integrations user-scoped: each authorized user must be able to discover, configure, enable, and disable their own integrations independently.
+- Require each user to connect their own model subscription through a principal-bound authentication profile. Never share or fall back to another user's subscription; separate conversation sessions alone do not satisfy this boundary.
 
 ## Immutable Plans
 
@@ -26,6 +27,12 @@
 - Amend the relevant commit when correcting work that is already committed instead of adding a follow-up repair commit.
 - Match existing structure and dependencies, and avoid unrelated refactoring.
 - Run the configured formatting, module, test, vet, build, and plan checks after code changes.
+- Local development uses the operator's GoLand server. Coordinate restarts and do not start a competing Telegram poller with the same bot token.
+
+## Testing Strategy
+
+- Prefer integration tests and end-to-end tests that verify observable behavior across real application components. Use unit tests selectively for isolated logic that is difficult to cover meaningfully at those boundaries; avoid mock-heavy tests, implementation-mirroring assertions, and coverage targets for their own sake.
+- Use real temporary SQLite databases and isolate external services at their HTTP or process boundaries. Keep routine tests deterministic and credential-free; run live Telegram/model checks explicitly without competing with the operator's GoLand server.
 
 ## Security and Operations
 

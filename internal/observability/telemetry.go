@@ -41,6 +41,8 @@ type Telemetry struct {
 	telegramUpdates              metric.Int64Counter
 	telegramUpdateDuration       metric.Float64Histogram
 	telegramRetries              metric.Int64Counter
+	conversationTurns            metric.Int64Counter
+	conversationTurnDuration     metric.Float64Histogram
 	storeOperations              metric.Int64Counter
 	storeOperationDuration       metric.Float64Histogram
 }
@@ -191,6 +193,20 @@ func newTelemetry(tracer trace.Tracer, meter metric.Meter) (*Telemetry, error) {
 	); err != nil {
 		return nil, fmt.Errorf("create Telegram retry counter: %w", err)
 	}
+	if t.conversationTurns, err = meter.Int64Counter(
+		"home_agent.conversation.turns",
+		metric.WithDescription("Conversation turns completed."),
+		metric.WithUnit("{turn}"),
+	); err != nil {
+		return nil, fmt.Errorf("create conversation turn counter: %w", err)
+	}
+	if t.conversationTurnDuration, err = meter.Float64Histogram(
+		"home_agent.conversation.turn.duration",
+		metric.WithDescription("Conversation turn duration."),
+		metric.WithUnit("s"),
+	); err != nil {
+		return nil, fmt.Errorf("create conversation turn duration histogram: %w", err)
+	}
 	if t.storeOperations, err = meter.Int64Counter(
 		"home_agent.store.operations",
 		metric.WithDescription("Application store operations completed."),
@@ -318,6 +334,24 @@ func (t *Telemetry) StartTelegramUpdate(ctx context.Context) (context.Context, f
 
 func (t *Telemetry) RecordTelegramRetry(ctx context.Context, reason string) {
 	t.telegramRetries.Add(ctx, 1, metric.WithAttributes(attribute.String("home_agent.reason", reason)))
+}
+
+func (t *Telemetry) StartConversationTurn(ctx context.Context) (context.Context, func(string, string)) {
+	ctx, span := t.tracer.Start(ctx, "home_agent.conversation.turn")
+	started := time.Now()
+	return ctx, func(outcome, errorKind string) {
+		if errorKind == "" {
+			errorKind = "none"
+		}
+		span.SetAttributes(attribute.String("home_agent.error_kind", errorKind))
+		finishSpan(span, outcome, nil)
+		attributes := metric.WithAttributes(
+			attribute.String("home_agent.outcome", outcome),
+			attribute.String("home_agent.error_kind", errorKind),
+		)
+		t.conversationTurns.Add(ctx, 1, attributes)
+		t.conversationTurnDuration.Record(ctx, time.Since(started).Seconds(), attributes)
+	}
 }
 
 func (t *Telemetry) StartStore(ctx context.Context, operation string) (context.Context, func(error)) {

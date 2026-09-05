@@ -33,8 +33,8 @@ jobs:
       - name: Check module files
         run: go mod tidy -diff
 
-      - name: Test
-        run: go test ./...
+      - name: Test with race detection
+        run: go test -race ./...
 
       - name: Vet
         run: go vet ./...

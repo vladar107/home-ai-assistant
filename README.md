@@ -126,18 +126,55 @@ testing only, `HOME_AGENT_TELEGRAM_API_BASE_URL` may override it with an HTTP
 loopback URL. `HOME_AGENT_TELEGRAM_POLL_TIMEOUT` defaults to 25 seconds and
 accepts at most 50 seconds.
 
-The current behavior is deliberately narrow: private chats only, a numeric
-allowlist, deterministic `/status` and `/privacy` replies, and ignored other
-text. These commands do not invoke a model, and no model invocation is wired
-into this slice. The service stores a durable polling cursor per bot so restart
-does not replay already committed updates. See the official
+The default behavior is deliberately narrow: private chats only, a numeric
+allowlist, deterministic `/status` and `/privacy` replies, and ignored ordinary
+text. Optional local conversation routes ordinary text to a locked-down Pi
+runtime while `/status`, `/privacy`, `/cancel`, and `/new` remain deterministic.
+The service stores a durable polling cursor per bot and persists accepted
+conversation work before advancing it, so restart does not silently lose an
+accepted message or replay already committed updates. A turn interrupted by a
+restart is not submitted to Pi again: the bot reports the interruption and the
+next message starts a fresh session. See the official
 [Telegram Bot API reference](https://core.telegram.org/bots/api) for the
 underlying API. `Hearthkeeper` is the preferred display name for the main bot,
 with an available BotFather username such as `HearthkeeperHomeBot`. A separate
 send-only alert bot named `Hearthwatch` is recommended so Grafana alerts do not
 depend on the application bot. Telegram usernames are globally allocated, so
-the exact usernames must be checked with BotFather. Real Telegram and NAS
-verification is still pending.
+the exact usernames must be checked with BotFather. The deterministic commands and
+ordinary conversation have passed real local Telegram tests; NAS operation
+still requires its own verification.
+
+### Local model conversation
+
+Natural-language conversation is opt-in and intended for local GoLand testing
+in this slice. Install and authenticate Pi first, then add these values to the
+ignored `.env` file:
+
+```dotenv
+HOME_AGENT_CONVERSATION_ENABLED=true
+HOME_AGENT_PI_BINARY=pi
+HOME_AGENT_PI_NODE_BINARY=
+HOME_AGENT_PI_PROVIDER=openai-codex
+HOME_AGENT_PI_MODEL=gpt-5.6-luna:low
+HOME_AGENT_PI_VERSION=0.84.1
+HOME_AGENT_CONVERSATION_TURN_TIMEOUT=2m
+```
+
+If GoLand cannot resolve the Node runtime used by Pi, set both binary variables
+to their stable absolute paths. Pi session history is stored below
+`data/pi-sessions/`, which is protected by the same local data-directory
+boundary and ignored by Git. SQLite keeps session ownership and request state;
+message and response bodies are cleared after delivery. Use `/new` to rotate to
+a fresh session and `/cancel` to stop an in-progress response.
+
+The runtime passes no tools, extensions, skills, templates, themes, project
+context, or approval authority to Pi. Its environment contains only the home
+directory needed to find Pi authentication, the executable directory, and an
+explicit Pi telemetry opt-out, so the Telegram token is not inherited. This is
+process-level minimization, not an OS sandbox: the pinned Pi package runs as
+the local application user and remains a trusted dependency. The production
+container intentionally does not contain Pi yet; NAS packaging, authentication
+delivery, and resource measurement require a separate plan.
 
 ## Architecture at a glance
 
@@ -179,6 +216,9 @@ automation packs, durable workflows, and contribution registration are not.
 Decisions marked
 `experimental` or `proposed` must be validated before they become product
 dependencies. The Go -> Pi RPC -> ChatGPT subscription path passed two local
-end-to-end checks and is accepted for the prototype. Credential refresh,
-resource use on the NAS, Pi upgrade compatibility, and multi-user suitability
-remain production-readiness questions.
+end-to-end checks and is accepted for the prototype. An opt-in local
+conversation adapter and durable per-principal coordinator are implemented and
+have passed a local Telegram check, with the remaining live gaps tracked in
+plan 0005. Credential
+refresh, resource use on the NAS, Pi upgrade compatibility, and multi-user
+suitability remain production-readiness questions.

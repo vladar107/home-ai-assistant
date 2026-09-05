@@ -143,6 +143,9 @@ func dataSourceName(absolutePath string) string {
 	query.Set("_foreign_keys", "1")
 	query.Set("_journal_mode", "WAL")
 	query.Set("_synchronous", "NORMAL")
+	// Every transaction here writes; deferred ones that read first fail with
+	// SQLITE_BUSY on a stale WAL snapshot instead of waiting for the busy timeout.
+	query.Set("_txlock", "immediate")
 
 	dsn := url.URL{
 		Scheme:   "file",

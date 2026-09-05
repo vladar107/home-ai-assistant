@@ -26,6 +26,8 @@ For the main interaction bot:
    ```text
    status - Check whether the home agent is online
    privacy - Show the current privacy boundary
+   cancel - Stop the current model response
+   new - Start a fresh conversation
    ```
 
 For infrastructure alerts, repeat only the creation and group-disable steps
@@ -105,7 +107,7 @@ Perform this smoke test:
 
 1. Send `/status` and verify the deterministic online reply.
 2. Send `/privacy` and verify the strict-local policy.
-3. Send ordinary text and verify there is no reply; no model is connected.
+3. With conversation disabled, send ordinary text and verify there is no reply.
 4. From another account, send `/status` and verify there is no reply.
 5. If group addition was not disabled, add the bot temporarily and verify a
    group command receives no reply, then remove it.
@@ -114,6 +116,76 @@ Perform this smoke test:
 
 Do not run the local bot while the NAS bot is polling. The same token cannot be
 used reliably by two long-polling processes at once.
+
+### Automated conversation checks
+
+Run the integration suites from the repository root:
+
+```sh
+go test ./...
+go test -race ./...
+```
+
+The suites use real temporary SQLite databases, a loopback Telegram API
+simulator, and a Go subprocess that implements the Pi RPC test protocol. They
+require no bot token, model subscription, Node, or Pi installation. They do not
+load the repository `.env` or use the running GoLand server's data. CI runs the
+same suites with race detection.
+
+These checks exercise application behavior across HTTP, persistence, and
+process boundaries. They cannot establish real subscription access, model
+quality, or Telegram service compatibility; complete the live check below
+before recording the conversation plan as done.
+
+### Test local model conversation
+
+Keep the NAS bot stopped. Confirm the pinned local Pi installation and its
+subscription authentication without printing credentials:
+
+```sh
+pi --version
+pi auth check --provider openai-codex --json
+command -v pi
+```
+
+Pi must report version `0.84.1`. Add the following to the ignored `.env` file;
+use the absolute path from `command -v pi` if GoLand does not inherit the shell
+PATH:
+
+```dotenv
+HOME_AGENT_CONVERSATION_ENABLED=true
+HOME_AGENT_PI_BINARY=pi
+HOME_AGENT_PI_NODE_BINARY=
+HOME_AGENT_PI_PROVIDER=openai-codex
+HOME_AGENT_PI_MODEL=gpt-5.6-luna:low
+HOME_AGENT_PI_VERSION=0.84.1
+HOME_AGENT_CONVERSATION_TURN_TIMEOUT=2m
+```
+
+For a GUI-launched GoLand instance using `fnm`, point
+`HOME_AGENT_PI_BINARY` at the stable versioned `bin/pi` path and
+`HOME_AGENT_PI_NODE_BINARY` at the matching `bin/node` path. This avoids
+depending on a shell-specific `fnm_multishells` PATH entry.
+
+Start `cmd/home-agent/main.go` from GoLand with the repository root as its
+working directory, then verify:
+
+1. An ordinary sentence receives a model response.
+2. A follow-up referring to that response retains the conversation context.
+3. `/status` and `/privacy` respond without waiting for or invoking the model.
+4. Send a slow request followed by `/cancel`; cancellation is acknowledged and no later model reply arrives.
+5. `/new` starts a fresh session whose next message does not retain the previous context.
+6. A second ordinary message while a turn is active receives a busy response.
+7. An unauthorized Telegram user remains ignored.
+8. If the process is stopped during a turn, restart it and verify the bot reports
+   the interruption without replaying the prompt; the next message starts a
+   fresh session.
+
+Conversation history is stored by Pi below `data/pi-sessions/`. SQLite stores
+principal ownership and durable request state, but clears message and response
+bodies after delivery. Neither location is committed. This local feature is
+not enabled in the production Compose configuration because the current image
+does not package Pi or its authentication profile.
 
 ## 4. Configure passwordless SSH safely
 

@@ -7,27 +7,31 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"path/filepath"
 	"sync/atomic"
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/config"
+	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/health"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/module"
 	"github.com/vladar107/home-ai-assistant/internal/observability"
+	piruntime "github.com/vladar107/home-ai-assistant/internal/runtime/pi"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/telegram"
 )
 
 type App struct {
-	cfg       config.Config
-	logger    *slog.Logger
-	modules   []module.Module
-	server    *http.Server
-	store     *sqlite.Store
-	telegram  *telegram.Service
-	telemetry *observability.Telemetry
-	ready     atomic.Bool
+	cfg          config.Config
+	logger       *slog.Logger
+	modules      []module.Module
+	server       *http.Server
+	store        *sqlite.Store
+	conversation *conversation.Service
+	telegram     *telegram.Service
+	telemetry    *observability.Telemetry
+	ready        atomic.Bool
 }
 
 func New(cfg config.Config, registry *module.Registry, logger *slog.Logger) (*App, error) {
@@ -97,6 +101,15 @@ func (a *App) Run(ctx context.Context) (runErr error) {
 	if err != nil {
 		return errors.Join(err, a.closeStore())
 	}
+	startConversationCtx, endStartConversation := telemetry.StartLifecycle(ctx, "conversation_start")
+	err = a.startConversation(startConversationCtx)
+	endStartConversation(err)
+	if err != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), a.cfg.ShutdownTimeout)
+		shutdownErr := a.shutdownModules(shutdownCtx, started)
+		cancel()
+		return errors.Join(err, shutdownErr, a.closeStore())
+	}
 	startTelegramCtx, endStartTelegram := telemetry.StartLifecycle(ctx, "telegram_start")
 	err = a.startTelegram(startTelegramCtx)
 	endStartTelegram(err)
@@ -104,6 +117,7 @@ func (a *App) Run(ctx context.Context) (runErr error) {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), a.cfg.ShutdownTimeout)
 		shutdownErr := errors.Join(
 			a.shutdownTelegram(shutdownCtx),
+			a.shutdownConversation(shutdownCtx),
 			a.shutdownModules(shutdownCtx, started),
 		)
 		cancel()
@@ -117,6 +131,7 @@ func (a *App) Run(ctx context.Context) (runErr error) {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), a.cfg.ShutdownTimeout)
 		shutdownErr := errors.Join(
 			a.shutdownTelegram(shutdownCtx),
+			a.shutdownConversation(shutdownCtx),
 			a.shutdownModules(shutdownCtx, started),
 		)
 		cancel()
@@ -150,6 +165,9 @@ func (a *App) Run(ctx context.Context) (runErr error) {
 	defer cancel()
 
 	if err := a.shutdownTelegram(shutdownCtx); err != nil {
+		runErr = errors.Join(runErr, err)
+	}
+	if err := a.shutdownConversation(shutdownCtx); err != nil {
 		runErr = errors.Join(runErr, err)
 	}
 	if err := a.server.Shutdown(shutdownCtx); err != nil {
@@ -221,6 +239,33 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		return fmt.Errorf("initialize Telegram client: %w", err)
 	}
 
+	if a.cfg.Conversation.Enabled {
+		runtime, err := piruntime.New(ctx, piruntime.Config{
+			Binary:          a.cfg.Conversation.PiBinary,
+			NodeBinary:      a.cfg.Conversation.PiNodeBinary,
+			Provider:        a.cfg.Conversation.PiProvider,
+			Model:           a.cfg.Conversation.PiModel,
+			ExpectedVersion: a.cfg.Conversation.PiVersion,
+			SessionDir:      filepath.Join(a.cfg.DataDir, "pi-sessions"),
+		})
+		if err != nil {
+			return fmt.Errorf("initialize Pi runtime: %w", err)
+		}
+		conversationService, err := conversation.NewService(
+			conversation.Config{TurnTimeout: a.cfg.Conversation.TurnTimeout},
+			a.store,
+			runtime,
+			client,
+			conversation.NoTools{},
+			a.logger,
+			a.telemetry,
+		)
+		if err != nil {
+			return fmt.Errorf("initialize conversation service: %w", err)
+		}
+		a.conversation = conversationService
+	}
+
 	identities, err := identity.NewService(a.store, configured)
 	if err != nil {
 		return fmt.Errorf("initialize Telegram identities: %w", err)
@@ -232,11 +277,31 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		return fmt.Errorf("bootstrap Telegram identities: %w", err)
 	}
 
-	service, err := telegram.NewService(client, identities, a.store, a.logger, a.telemetry)
+	service, err := telegram.NewService(client, identities, a.store, a.conversation, a.logger, a.telemetry)
 	if err != nil {
 		return fmt.Errorf("initialize Telegram service: %w", err)
 	}
 	a.telegram = service
+	return nil
+}
+
+func (a *App) startConversation(ctx context.Context) error {
+	if a.conversation == nil {
+		return nil
+	}
+	if err := a.conversation.Start(ctx); err != nil {
+		return fmt.Errorf("start conversation service: %w", err)
+	}
+	return nil
+}
+
+func (a *App) shutdownConversation(ctx context.Context) error {
+	if a.conversation == nil {
+		return nil
+	}
+	if err := a.conversation.Shutdown(ctx); err != nil {
+		return fmt.Errorf("shutdown conversation service: %w", err)
+	}
 	return nil
 }
 

@@ -23,6 +23,7 @@ type Config struct {
 	AllowNonLoopback bool
 	DataDir          string
 	Telegram         TelegramConfig
+	Conversation     ConversationConfig
 	Observability    ObservabilityConfig
 }
 
@@ -36,6 +37,7 @@ func Load() (Config, error) {
 		ShutdownTimeout: defaultShutdownTimeout,
 		DataDir:         envOrDefault("HOME_AGENT_DATA_DIR", defaultDataDir),
 		Telegram:        defaultTelegramConfig(),
+		Conversation:    defaultConversationConfig(),
 		Observability:   defaultObservabilityConfig(),
 	}
 
@@ -71,6 +73,9 @@ func Load() (Config, error) {
 		if err := loadTelegramConfig(&cfg.Telegram); err != nil {
 			return Config{}, err
 		}
+	}
+	if err := loadConversationConfig(&cfg.Conversation); err != nil {
+		return Config{}, err
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -108,6 +113,12 @@ func (c Config) Validate() error {
 	}
 	if err := c.Telegram.validate(); err != nil {
 		return err
+	}
+	if err := c.Conversation.validate(); err != nil {
+		return err
+	}
+	if c.Conversation.Enabled && !c.Telegram.Enabled {
+		return fmt.Errorf("HOME_AGENT_CONVERSATION_ENABLED: requires HOME_AGENT_TELEGRAM_ENABLED=true")
 	}
 	if err := c.Observability.validate(); err != nil {
 		return err

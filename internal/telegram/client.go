@@ -89,17 +89,21 @@ func (e *apiError) Error() string {
 	return fmt.Sprintf("Telegram %s returned HTTP status %d", e.method, e.httpStatus)
 }
 
+func (e *apiError) Permanent() bool {
+	if e.httpStatus == http.StatusTooManyRequests || e.httpStatus >= 500 ||
+		e.errorCode == http.StatusTooManyRequests || e.errorCode >= 500 {
+		return false
+	}
+	return e.errorCode >= 400 && e.errorCode < 500 ||
+		e.httpStatus >= 400 && e.httpStatus < 500
+}
+
 func isPermanentAPIError(err error) bool {
 	var apiErr *apiError
 	if !errors.As(err, &apiErr) {
 		return false
 	}
-	if apiErr.httpStatus == http.StatusTooManyRequests || apiErr.httpStatus >= 500 ||
-		apiErr.errorCode == http.StatusTooManyRequests || apiErr.errorCode >= 500 {
-		return false
-	}
-	return apiErr.errorCode >= 400 && apiErr.errorCode < 500 ||
-		apiErr.httpStatus >= 400 && apiErr.httpStatus < 500
+	return apiErr.Permanent()
 }
 
 func NewClient(cfg ClientConfig) (*Client, error) {
@@ -171,6 +175,15 @@ func (c *Client) SendMessage(ctx context.Context, chatID int64, text string) err
 		"text":    {text},
 	}
 	_, err := execute[struct{}](c, ctx, "sendMessage", params)
+	return err
+}
+
+func (c *Client) SendTyping(ctx context.Context, chatID int64) error {
+	params := url.Values{
+		"action":  {"typing"},
+		"chat_id": {strconv.FormatInt(chatID, 10)},
+	}
+	_, err := execute[struct{}](c, ctx, "sendChatAction", params)
 	return err
 }
 

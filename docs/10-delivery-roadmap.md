@@ -94,6 +94,11 @@ resource measurement, and backup/restore exercises remain in this stage.
 Connect the application to Pi only after identity and session ownership are
 deterministic. Reuse the verified spike as the compatibility reference.
 
+Status: local opt-in implementation complete (plan 0003). Remaining live checks
+and actionable provider failures are tracked in plan 0005. Production Pi
+packaging, credential delivery, and NAS validation are deferred to a dedicated
+follow-up plan.
+
 ### Deliverables
 
 - Locked-down Pi JSONL RPC adapter
@@ -106,7 +111,7 @@ deterministic. Reuse the verified spike as the compatibility reference.
 ### Acceptance
 
 - Each principal receives an independent session.
-- Pi receives no tools, project context, extensions, or filesystem authority.
+- The model receives no tools, project context, extensions, or approval authority; Pi runs from a temporary empty working directory with a minimized environment.
 - Cancellation terminates the active turn and cleans up the subprocess.
 - Runtime failure does not affect `/status` or corrupt control-plane state.
 - After adapter parity, the standalone spike is removed and its verification

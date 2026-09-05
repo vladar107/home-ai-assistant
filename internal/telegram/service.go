@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	oteltrace "go.opentelemetry.io/otel/trace"
@@ -31,6 +32,12 @@ type botAPI interface {
 	SendMessage(context.Context, int64, string) error
 }
 
+type conversationController interface {
+	Enqueue(context.Context, conversation.EnqueueInput) error
+	Cancel(context.Context, string) (bool, error)
+	NewSession(context.Context, string) (bool, error)
+}
+
 type identityResolver interface {
 	Observe(context.Context, identity.TelegramUser) error
 	Authorize(context.Context, int64) (identity.Authorization, error)
@@ -42,11 +49,12 @@ type cursorStore interface {
 }
 
 type Service struct {
-	client     botAPI
-	identities identityResolver
-	cursors    cursorStore
-	logger     *slog.Logger
-	telemetry  Telemetry
+	client       botAPI
+	identities   identityResolver
+	cursors      cursorStore
+	conversation conversationController
+	logger       *slog.Logger
+	telemetry    Telemetry
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -54,7 +62,14 @@ type Service struct {
 	ready  atomic.Bool
 }
 
-func NewService(client botAPI, identities identityResolver, cursors cursorStore, logger *slog.Logger, telemetry Telemetry) (*Service, error) {
+func NewService(
+	client botAPI,
+	identities identityResolver,
+	cursors cursorStore,
+	conversation conversationController,
+	logger *slog.Logger,
+	telemetry Telemetry,
+) (*Service, error) {
 	if client == nil {
 		return nil, fmt.Errorf("Telegram client is required")
 	}
@@ -69,11 +84,12 @@ func NewService(client botAPI, identities identityResolver, cursors cursorStore,
 	}
 
 	return &Service{
-		client:     client,
-		identities: identities,
-		cursors:    cursors,
-		logger:     logger,
-		telemetry:  telemetryOrNoop(telemetry),
+		client:       client,
+		identities:   identities,
+		cursors:      cursors,
+		conversation: conversation,
+		logger:       logger,
+		telemetry:    telemetryOrNoop(telemetry),
 	}, nil
 }
 
@@ -225,7 +241,7 @@ func (s *Service) processBatch(ctx context.Context, bot Bot, updates []Update, l
 		}
 
 		updateCtx, endUpdate := s.telemetry.StartTelegramUpdate(ctx)
-		result, failureReason, failureErr := s.processUpdate(updateCtx, bot.Username, update)
+		result, failureReason, failureErr := s.processUpdate(updateCtx, bot, update)
 		if failureReason != "" {
 			endUpdate("failed", failureReason, "", failureErr)
 			return nextOffset, failureReason, failureErr
@@ -265,7 +281,7 @@ type processingResult struct {
 	err         error
 }
 
-func (s *Service) processUpdate(ctx context.Context, botUsername string, update Update) (processingResult, string, error) {
+func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (processingResult, string, error) {
 	if update.Message == nil {
 		return ignoredResult("non_message"), "", nil
 	}
@@ -310,8 +326,19 @@ func (s *Service) processUpdate(ctx context.Context, botUsername string, update 
 		return processingResult{}, "observe_identity", err
 	}
 
-	reply, handled := CommandReply(message.Text, botUsername)
-	if !handled {
+	command, isCommand := ParseCommand(message.Text, bot.Username)
+	if isCommand {
+		reply, err := s.handleCommand(ctx, authorization.Principal.ID, command)
+		if err != nil {
+			return processingResult{}, "handle_command", err
+		}
+		return s.sendCommandReply(ctx, message.Chat.ID, authorization.Principal.ID, command, reply)
+	}
+	if strings.HasPrefix(strings.TrimSpace(message.Text), "/") {
+		return ignoredResult("command_for_other_bot"), "", nil
+	}
+
+	if strings.TrimSpace(message.Text) == "" || s.conversation == nil {
 		return processingResult{
 			event:       "telegram.update.ignored",
 			reason:      "unhandled_text",
@@ -319,13 +346,80 @@ func (s *Service) processUpdate(ctx context.Context, botUsername string, update 
 		}, "", nil
 	}
 
-	if err := s.client.SendMessage(ctx, message.Chat.ID, reply); err != nil {
+	err = s.conversation.Enqueue(ctx, conversation.EnqueueInput{
+		BotUserID:        bot.ID,
+		TelegramUpdateID: update.UpdateID,
+		PrincipalID:      authorization.Principal.ID,
+		ChatID:           message.Chat.ID,
+		Message:          message.Text,
+	})
+	if errors.Is(err, conversation.ErrBusy) {
+		return s.sendCommandReply(ctx, message.Chat.ID, authorization.Principal.ID, "busy", conversation.BusyReply)
+	}
+	if err != nil {
+		return processingResult{}, "enqueue_conversation", err
+	}
+	return processingResult{
+		event:       "telegram.conversation.queued",
+		principalID: authorization.Principal.ID,
+	}, "", nil
+}
+
+func (s *Service) handleCommand(ctx context.Context, principalID, command string) (string, error) {
+	switch command {
+	case "status":
+		if s.conversation != nil {
+			return ConversationStatusReply, nil
+		}
+		return StatusReply, nil
+	case "privacy":
+		if s.conversation != nil {
+			return ConversationPrivacyReply, nil
+		}
+		return PrivacyReply, nil
+	case "cancel":
+		if s.conversation == nil {
+			return NothingToCancelReply, nil
+		}
+		cancelled, err := s.conversation.Cancel(ctx, principalID)
+		if err != nil {
+			return "", err
+		}
+		if cancelled {
+			return CancelledReply, nil
+		}
+		return NothingToCancelReply, nil
+	case "new":
+		if s.conversation == nil {
+			return NoSessionReply, nil
+		}
+		reset, err := s.conversation.NewSession(ctx, principalID)
+		if err != nil {
+			return "", err
+		}
+		if reset {
+			return NewSessionReply, nil
+		}
+		return NoSessionReply, nil
+	default:
+		return HelpReply, nil
+	}
+}
+
+func (s *Service) sendCommandReply(
+	ctx context.Context,
+	chatID int64,
+	principalID string,
+	command string,
+	reply string,
+) (processingResult, string, error) {
+	if err := s.client.SendMessage(ctx, chatID, reply); err != nil {
 		if isPermanentAPIError(err) {
 			return processingResult{
 				event:       "telegram.command.undeliverable",
 				reason:      "send_rejected",
-				principalID: authorization.Principal.ID,
-				command:     commandName(reply),
+				principalID: principalID,
+				command:     command,
 				err:         err,
 			}, "", nil
 		}
@@ -333,8 +427,8 @@ func (s *Service) processUpdate(ctx context.Context, botUsername string, update 
 	}
 	return processingResult{
 		event:       "telegram.command.handled",
-		principalID: authorization.Principal.ID,
-		command:     commandName(reply),
+		principalID: principalID,
+		command:     command,
 	}, "", nil
 }
 
@@ -351,17 +445,6 @@ func validObservedNames(username, displayName string) bool {
 
 func ignoredResult(reason string) processingResult {
 	return processingResult{event: "telegram.update.ignored", reason: reason}
-}
-
-func commandName(reply string) string {
-	switch reply {
-	case StatusReply:
-		return "status"
-	case PrivacyReply:
-		return "privacy"
-	default:
-		return "unknown"
-	}
 }
 
 func (s *Service) logResult(ctx context.Context, result processingResult) {

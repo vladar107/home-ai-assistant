@@ -12,6 +12,8 @@ plan that links back to the earlier record.
 | --- | --- | --- |
 | 0001 | [Telegram, observability, and NAS foundation](0001-telegram-observability-nas-foundation.md) | done |
 | 0002 | [Private repository and plan governance](0002-private-repository-and-plan-governance.md) | done |
+| 0003 | [Local model conversation](0003-local-model-conversation.md) | done |
+| 0004 | [Per-user model subscriptions](0004-per-user-model-subscriptions.md) | proposed |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.
