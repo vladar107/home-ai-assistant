@@ -14,6 +14,23 @@ The product requirement is settled: each household user must connect and use
 their own model subscription. This plan records that requirement and proposes
 its implementation; the current application does not yet enforce it.
 
+Verified against the pinned Pi 0.84.1 package on 2026-09-05:
+
+- `PI_CODING_AGENT_DIR` selects the agent directory that holds `auth.json`,
+  `settings.json`, model caches, trust state, and the debug log. No CLI flag
+  sets it in any mode, and `--session-dir` redirects only session files.
+- `auth.json` is a provider-keyed file written with mode 0600 under a lock
+  file. For `openai-codex` it stores an OAuth record with access token,
+  refresh token, expiry, and the ChatGPT account ID decoded from the token;
+  no email or plan name. Pi refreshes tokens automatically and writes them
+  back under the lock.
+- Pi has no login command outside its interactive terminal UI. The
+  `openai-codex` login is a PKCE flow with a browser callback on localhost
+  port 1455, or a device-code flow against the OpenAI device endpoint with a
+  fifteen-minute timeout.
+- `pi auth check --provider openai-codex --json` reports credential status for
+  the agent directory named in the environment.
+
 ## Goal
 
 Resolve every model request to the authenticated principal's own subscription,
@@ -23,88 +40,152 @@ Never use the operator's or another household user's credentials as a fallback.
 ## Decisions
 
 - Bind a model connection to an immutable principal ID before invoking Pi.
-- Use a distinct protected Pi authentication profile and session directory per
-  principal. Select profiles through core-owned configuration, never model
-  output, Telegram text, or a user-supplied filesystem path.
-- Pass an explicit principal-specific Pi configuration directory; do not rely
-  on ambient authentication under the application's shared home directory.
-- Let every user connect, inspect, and disconnect their own model connection.
-  Missing, expired, or revoked credentials produce an actionable response for
-  that user without invoking a different subscription.
-- Bind the connection ceremony to its initiating principal, with bounded expiry
-  and replay protection. Tokens remain outside Telegram, application logs,
-  SQLite preferences, and source control.
-- Keep credentials and refresh state within that principal's protected runtime
-  profile. Follow the existing local-secret and NAS Keychain custody rules;
-  document how mutable refreshed credentials are persisted and recovered.
+- Give each principal a private agent directory below the application data
+  directory, for example `data/pi/<principal>/`, created with mode 0700 and
+  passed to Pi as `PI_CODING_AGENT_DIR`, with that principal's session
+  directory inside it. The name derives from the principal ID in core
+  configuration, never from model output, Telegram text, or a user-supplied
+  path.
+- Do not rely on ambient authentication under the application's home
+  directory. A principal without a provisioned `auth.json` receives connection
+  guidance and no model invocation.
+- Implement the device-code ceremony in the application: `/connect` requests
+  a device code for `openai-codex`, replies with the verification address and
+  user code, polls until approval or the fifteen-minute expiry, then writes the
+  OAuth record into that principal's `auth.json` with mode 0600. Pending
+  ceremonies live in memory keyed by principal, a new `/connect` replaces the
+  previous one, and completion writes only to the initiating principal's
+  directory. Tokens never appear in Telegram, logs, SQLite, or source control.
+- After provisioning, Pi owns `auth.json`: it refreshes and rewrites tokens
+  under its lock. The application reads only presence, expiry, and account ID.
+- Store non-secret connection metadata in SQLite: principal, provider,
+  ChatGPT account ID, and connected and last-verified timestamps. A unique
+  constraint on provider and account ID rejects binding one ChatGPT account to
+  two principals.
+- `/connection` reports whether a connection exists, the last characters of
+  the account ID, and expiry. `/disconnect` removes the auth file and the row,
+  cancels the principal's active work, and prevents queued requests from
+  reusing the credentials. Other users remain operational.
+- Recheck connection ownership and enablement when queued work starts.
+  Authentication failures during a turn produce the reconnect reply defined in
+  [0005](0005-bot-commands-and-provider-failures.md).
 - Treat different session IDs, separate processes, and filesystem permissions
   as separate controls. Profiles under one OS account do not constitute an OS
   sandbox against a compromised Pi process.
-- Recheck connection ownership and enablement when queued work starts. A
-  disconnect cancels that principal's active work and prevents queued requests
-  from reusing disconnected credentials; other users remain operational.
 - Any future scheduled model invocation uses its owning principal's connection.
 - Preserve deterministic operational commands when a user's model connection
   is unavailable.
-- Do not automatically copy the existing operator profile to household users.
-  Explicitly associate or reconnect it only for its verified owner.
+- Do not copy the existing operator profile to household users. The operator
+  connects through the same `/connect` ceremony as everyone else.
+- Per-user auth files are secrets at rest. Exclude `data/pi/` from any copy
+  that leaves the host, and document recovery as reconnecting rather than
+  restoring tokens.
 
 ## Approach
 
-1. Define the principal-to-connection mapping, protected profile layout, and
-   missing-connection behavior in configuration and persistence. Complexity:
-   complex. This is the prerequisite for runtime routing and connection flows.
-2. After the mapping is agreed, implement two parallel work areas: runtime
-   profile selection and per-user connection lifecycle. Complexity: complex.
-   Give the runtime work ownership of `internal/runtime/pi/` and the connection
-   work ownership of connection persistence and Telegram controls; coordinate
-   shared contracts before either changes the conversation coordinator.
+1. Define the connection table and migration, the principal directory layout,
+   and the missing-connection reply. Complexity: complex. Prerequisite for the
+   rest.
+2. After step 1, two parallel work areas. Complexity: complex.
+   - Runtime: per-principal agent directory in the Pi adapter environment, a
+     readiness check before each turn, and the authentication failure
+     classification shared with plan 0005. Owns `internal/runtime/pi/`.
+   - Connection lifecycle: device-code client, `/connect`, `/connection`,
+     `/disconnect`, ceremony state with expiry, and integration tests against
+     a loopback simulator of the device endpoint. Owns connection persistence
+     and Telegram controls. Coordinate shared contracts before either changes
+     the conversation coordinator.
 3. Integrate dispatch, disconnect cancellation, and readiness reporting in the
-   conversation coordinator and application wiring. Complexity: complex.
-   Depends on both preceding work areas.
-4. Update architecture, security, integrations, roadmap, and operator guidance
-   to describe the implemented boundary. Complexity: simple. Preserve completed
-   plans and historical experiment results.
-5. Review and validate with two independently authenticated accounts, including
+   conversation coordinator and application wiring, with the lifecycle tests
+   below. Complexity: complex.
+4. Review and validate with two independently authenticated accounts, including
    refresh, revocation, restart, and concurrent requests. Record evidence before
    reporting multi-user subscription isolation complete.
 
 ## Files affected
 
-- `internal/config/`, `internal/store/sqlite/`, and a migration if needed
+- `internal/config/`, `internal/store/sqlite/`, and a migration
 - `internal/runtime/pi/` and `internal/conversation/`
-- `internal/telegram/` and `internal/app/`
-- `.env.example` and deployment configuration as required by profile delivery
-- `README.md`, `docs/03-system-architecture.md`, `docs/04-integrations.md`,
-  `docs/05-security-and-privacy.md`, `docs/10-delivery-roadmap.md`,
-  `docs/11-risks-and-open-questions.md`, and `docs/13-operator-runbook.md`
+- a new connection package, `internal/telegram/`, and `internal/app/`
+- `.env.example`, `.gitignore`, and deployment configuration as required by
+  the per-principal data layout, plus the matching `README.md` configuration
+  notes
+
+## Testing
+
+Integration suites over real components with loopback simulators, following
+plan 0003; routine tests stay deterministic and credential-free.
+
+### Connection ceremony
+
+- Add a loopback simulator for the device endpoints: user-code request,
+  polling that returns pending, approved, denied, or expired, and token
+  exchange with a token whose account claim the test controls.
+- Through the real Telegram simulator, identity service, connection package,
+  and SQLite store, assert that `/connect` replies with the user code and
+  verification address; approval writes `auth.json` with mode 0600 inside a
+  0700 principal directory containing the OAuth record and stores the account
+  ID row; denial and expiry reply accordingly and write nothing; a second
+  `/connect` replaces the pending ceremony; a second principal approving the
+  same account ID is rejected with nothing written; `/connection` reports
+  presence, account suffix, and expiry; `/disconnect` removes the file and
+  the row.
+- Capture logger output and the simulator's sent messages and assert that the
+  access and refresh tokens never appear there or in SQLite.
+- Owns the connection package tests and `internal/telegram/*_test.go`.
+
+### Runtime isolation
+
+- Using the Pi fixture's environment report, assert that a turn runs with
+  `PI_CODING_AGENT_DIR` set to the principal's directory with the session
+  directory inside it, and that two principals run concurrently with distinct
+  directories.
+- Assert that a principal without `auth.json` receives the connection reply
+  and no process starts, while another connected principal's turn proceeds.
+- Owns `internal/runtime/pi/*_test.go` and `internal/telegram/*_test.go`.
+
+### Lifecycle
+
+- Disconnect during a running turn cancels it: the fixture process is gone,
+  the request ends cancelled, and a queued request is not started with the
+  removed credentials.
+- Restart: connection rows and principal directories survive, a pending
+  ceremony does not and a fresh `/connect` is required, and queued work
+  resumes under its owning principal only.
+- An authentication failure during a turn, using the fixture scenario from
+  plan 0005, yields the reconnect reply and leaves the connection row for the
+  user to inspect.
+- Owns `internal/telegram/*_test.go`.
 
 ## Validation
 
-- User A and User B invoke their distinct authenticated profiles and cannot
-  read, select, reset, disconnect, or refresh the other user's connection.
+- User A and User B invoke their distinct agent directories and cannot read,
+  select, reset, disconnect, or refresh the other user's connection.
 - An authorized user without a connection receives connection guidance, with
   no model invocation and no fallback to the application's home profile.
+- A second principal cannot connect a ChatGPT account ID that is already bound.
 - Expiry, revocation, refresh failure, or disconnect for one user does not
   prevent the other user's requests or deterministic commands.
 - Restart preserves principal ownership, including queued requests and refreshed
   credential state; reconnect cannot resume a session under a different account.
 - Verify profile selection and model-account identity without printing secrets
   or conversation content.
-- Run configured formatting, module, test, vet, build, and plan checks. Add no
-  new test files unless explicitly requested.
+- All suites in the testing section pass under `go test ./...` and
+  `go test -race ./...`, with the configured formatting, module, vet, build,
+  and plan checks.
 - Coordinate manual verification with the operator's GoLand process; do not
   start a second Telegram poller or restart that process automatically.
 
 ## Risks and open questions
 
-- Verify the pinned Pi version's profile override, independent refresh, and
-  supported account-identity metadata before finalizing storage interfaces.
-- Decide the concrete supported connection ceremony and local-to-NAS credential
-  provisioning procedure. Do not infer NAS readiness from a local login.
-- Decide how to detect and reject accidentally binding one authenticated model
-  account to two household principals using non-secret account metadata.
+- The device-code flow depends on the OAuth client identity and endpoints
+  embedded in Pi; a Pi or provider change breaks connection. Re-verify on
+  every Pi upgrade.
+- Pi refreshes tokens on its own schedule, so a revoked refresh token surfaces
+  only at the next turn; `/connection` may report stale state until then.
+- NAS custody of per-user auth files must be designed with the NAS packaging
+  plan; do not infer NAS readiness from a local connection.
 - Model availability must be checked for each connected subscription. A model
   listed in a client catalog does not establish access for a particular account.
-- Photo input and model/effort selection are separate work from subscription
+- Photo input and model or effort selection are separate work from subscription
   ownership and are not implemented by this plan.
