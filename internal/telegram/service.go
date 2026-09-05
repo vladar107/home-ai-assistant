@@ -1,6 +1,7 @@
 package telegram
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -30,6 +31,7 @@ type botAPI interface {
 	GetMe(context.Context) (Bot, error)
 	GetUpdates(context.Context, int64) ([]Update, error)
 	SendMessage(context.Context, int64, string) error
+	SetMyCommands(context.Context, CommandScope, []BotCommand) error
 }
 
 type conversationController interface {
@@ -107,6 +109,14 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 	if bot.ID <= 0 || bot.Username == "" || bot.Username != strings.TrimSpace(bot.Username) {
 		return fmt.Errorf("Telegram getMe returned an invalid bot identity")
+	}
+
+	commands := registeredCommands(s.conversation != nil)
+	// Private chats resolve the all-private-chats scope before the default one, so a stale list there would hide the default registration.
+	for _, scope := range []CommandScope{"", CommandScopeAllPrivateChats} {
+		if err := s.client.SetMyCommands(ctx, scope, commands); err != nil {
+			s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "telegram.commands.register_failed", "scope", cmp.Or(string(scope), "default"), "error", err)
+		}
 	}
 
 	loadCursorCtx, endLoadCursor := s.telemetry.StartStore(ctx, "telegram_cursor_load")

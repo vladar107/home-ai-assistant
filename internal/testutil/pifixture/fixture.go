@@ -22,6 +22,8 @@ type Report struct {
 	PID         int      `json:"pid"`
 	PromptID    string   `json:"prompt_id"`
 	Message     string   `json:"message"`
+	// AbortReceived is rewritten by the retry scenarios once they stop waiting for abort_retry.
+	AbortReceived bool `json:"abort_received"`
 }
 
 func ReportPath(sessionDir, sessionID string) string {
@@ -58,7 +60,9 @@ func run() error {
 		Type    string `json:"type"`
 		Message string `json:"message"`
 	}
-	if err := json.NewDecoder(os.Stdin).Decode(&prompt); err != nil {
+	// One decoder keeps commands sent after the prompt readable from its buffer.
+	commands := json.NewDecoder(os.Stdin)
+	if err := commands.Decode(&prompt); err != nil {
 		return err
 	}
 	if prompt.Type != "prompt" {
@@ -79,11 +83,14 @@ func run() error {
 	for _, entry := range entries {
 		report.Files = append(report.Files, entry.Name())
 	}
-	data, err := json.Marshal(report)
-	if err != nil {
-		return err
+	writeReport := func() error {
+		data, err := json.Marshal(report)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(ReportPath(args["--session-dir"], args["--session-id"]), data, 0o600)
 	}
-	if err := os.WriteFile(ReportPath(args["--session-dir"], args["--session-id"]), data, 0o600); err != nil {
+	if err := writeReport(); err != nil {
 		return err
 	}
 	output := bufio.NewWriter(os.Stdout)
@@ -96,6 +103,17 @@ func run() error {
 	}
 	ack := func() { emit(map[string]any{"type": "response", "command": "prompt", "success": true}) }
 	settle := func() { emit(map[string]string{"type": "agent_settled"}) }
+	failMessage := func(text string) {
+		emit(map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "stopReason": "error", "errorMessage": text}})
+	}
+	retryStart := func(text string) {
+		emit(map[string]any{"type": "auto_retry_start", "attempt": 1, "maxAttempts": 3, "delayMs": 2000, "errorMessage": text})
+	}
+	const (
+		quotaText = "Codex error: The usage limit has been reached synthetic-private-text"
+		authText  = "Unauthorized: token expired synthetic-private-text"
+		otherText = "network error synthetic-private-text"
+	)
 	switch prompt.Message {
 	case "fixture:hold", "fixture:stubborn":
 		for {
@@ -124,6 +142,35 @@ func run() error {
 	case "fixture:empty":
 		ack()
 		delta("   ")
+		settle()
+	case "fixture:quota", "fixture:auth":
+		text := quotaText
+		if prompt.Message == "fixture:auth" {
+			text = authText
+		}
+		ack()
+		failMessage(text)
+		emit(map[string]string{"type": "agent_end"})
+		settle()
+	case "fixture:unrelated-error":
+		ack()
+		failMessage(otherText)
+		settle()
+	case "fixture:retry-quota", "fixture:retry-auth":
+		text := quotaText
+		if prompt.Message == "fixture:retry-auth" {
+			text = authText
+		}
+		ack()
+		retryStart(text)
+		report.AbortReceived = awaitAbort(commands, 5*time.Second)
+		return writeReport()
+	case "fixture:retry-transient":
+		ack()
+		retryStart(otherText)
+		emit(map[string]any{"type": "auto_retry_end", "success": true, "attempt": 1})
+		delta("reco")
+		delta("vered")
 		settle()
 	case "fixture:flood-after-tool":
 		// One write keeps queued events available after the adapter rejects the first.
@@ -161,4 +208,29 @@ func run() error {
 	}
 	_, err = io.Copy(io.Discard, os.Stdin)
 	return err
+}
+
+func awaitAbort(commands *json.Decoder, timeout time.Duration) bool {
+	received := make(chan bool, 1)
+	go func() {
+		for {
+			var command struct {
+				Type string `json:"type"`
+			}
+			if err := commands.Decode(&command); err != nil {
+				received <- false
+				return
+			}
+			if command.Type == "abort_retry" {
+				received <- true
+				return
+			}
+		}
+	}()
+	select {
+	case value := <-received:
+		return value
+	case <-time.After(timeout):
+		return false
+	}
 }

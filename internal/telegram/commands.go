@@ -14,6 +14,26 @@ const (
 	HelpReply                = "Available commands: /status, /privacy, /cancel, /new. You can otherwise talk to me normally."
 )
 
+type BotCommand struct {
+	Command     string `json:"command"`
+	Description string `json:"description"`
+}
+
+func registeredCommands(conversationEnabled bool) []BotCommand {
+	commands := []BotCommand{
+		{Command: "status", Description: "Show whether Home Agent is online"},
+		{Command: "privacy", Description: "Show the current privacy mode"},
+	}
+	if conversationEnabled {
+		commands = append(
+			commands,
+			BotCommand{Command: "cancel", Description: "Stop the current response"},
+			BotCommand{Command: "new", Description: "Start a fresh conversation"},
+		)
+	}
+	return commands
+}
+
 func ParseCommand(text, botUsername string) (string, bool) {
 	fields := strings.Fields(text)
 	if len(fields) == 0 || !strings.HasPrefix(fields[0], "/") {

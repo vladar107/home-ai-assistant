@@ -14,7 +14,7 @@ plan that links back to the earlier record.
 | 0002 | [Private repository and plan governance](0002-private-repository-and-plan-governance.md) | done |
 | 0003 | [Local model conversation](0003-local-model-conversation.md) | done |
 | 0004 | [Per-user model subscriptions](0004-per-user-model-subscriptions.md) | proposed |
-| 0005 | [Bot-registered commands and actionable provider failures](0005-bot-commands-and-provider-failures.md) | proposed |
+| 0005 | [Bot-registered commands and actionable provider failures](0005-bot-commands-and-provider-failures.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

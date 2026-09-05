@@ -183,7 +183,31 @@ func (c *Client) SendTyping(ctx context.Context, chatID int64) error {
 		"action":  {"typing"},
 		"chat_id": {strconv.FormatInt(chatID, 10)},
 	}
-	_, err := execute[struct{}](c, ctx, "sendChatAction", params)
+	_, err := execute[bool](c, ctx, "sendChatAction", params)
+	return err
+}
+
+// CommandScope names a Bot API BotCommandScope type; the empty scope is the default scope.
+type CommandScope string
+
+const CommandScopeAllPrivateChats CommandScope = "all_private_chats"
+
+func (c *Client) SetMyCommands(ctx context.Context, scope CommandScope, commands []BotCommand) error {
+	encoded, err := json.Marshal(commands)
+	if err != nil {
+		return fmt.Errorf("Telegram setMyCommands command list could not be encoded")
+	}
+	params := url.Values{"commands": {string(encoded)}}
+	if scope != "" {
+		encodedScope, err := json.Marshal(struct {
+			Type string `json:"type"`
+		}{string(scope)})
+		if err != nil {
+			return fmt.Errorf("Telegram setMyCommands scope could not be encoded")
+		}
+		params.Set("scope", string(encodedScope))
+	}
+	_, err = execute[bool](c, ctx, "setMyCommands", params)
 	return err
 }
 

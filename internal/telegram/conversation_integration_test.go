@@ -1,15 +1,16 @@
 package telegram
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -60,36 +61,69 @@ type sentMessage struct {
 	status int
 }
 
-type conversationHarness struct {
-	t            *testing.T
-	ctx          context.Context
-	store        *sqlite.Store
-	db           *sql.DB
-	client       *Client
-	service      *Service
-	conversation *conversation.Service
-	updates      chan []Update
-	messages     chan sentMessage
-	offsets      chan int64
-	mu           sync.Mutex
-	sendStatuses []int
-	sendGate     <-chan struct{}
+type commandRegistration struct {
+	commands []BotCommand
+	scope    []string
 }
 
-type integrationTelemetry struct{}
+type lockedBuffer struct {
+	mu     sync.Mutex
+	buffer bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buffer.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buffer.String()
+}
+
+type conversationHarness struct {
+	t             *testing.T
+	ctx           context.Context
+	store         *sqlite.Store
+	db            *sql.DB
+	client        *Client
+	service       *Service
+	conversation  *conversation.Service
+	updates       chan []Update
+	messages      chan sentMessage
+	offsets       chan int64
+	registrations chan commandRegistration
+	turns         chan turnOutcome
+	logs          *lockedBuffer
+	mu            sync.Mutex
+	sendStatuses  []int
+	sendGate      <-chan struct{}
+	commandStatus int
+}
+
+type turnOutcome struct{ outcome, errorKind string }
+
+type integrationTelemetry struct{ turns chan turnOutcome }
 
 func (integrationTelemetry) ContextLogger(_ context.Context, logger *slog.Logger) *slog.Logger {
 	return logger
 }
-func (integrationTelemetry) StartConversationTurn(ctx context.Context) (context.Context, func(string, string)) {
-	return ctx, func(string, string) {}
+func (i integrationTelemetry) StartConversationTurn(ctx context.Context) (context.Context, func(string, string)) {
+	return ctx, func(outcome, errorKind string) {
+		select {
+		case i.turns <- turnOutcome{outcome: outcome, errorKind: errorKind}:
+		default:
+		}
+	}
 }
 
 func newConversationHarness(t *testing.T, runtime agentruntime.AgentRuntime) *conversationHarness {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), integrationTimeout)
 	t.Cleanup(cancel)
-	h := &conversationHarness{t: t, ctx: ctx, updates: make(chan []Update, 20), messages: make(chan sentMessage, 100), offsets: make(chan int64, 100)}
+	h := &conversationHarness{t: t, ctx: ctx, updates: make(chan []Update, 20), messages: make(chan sentMessage, 100), offsets: make(chan int64, 100), registrations: make(chan commandRegistration, 10), turns: make(chan turnOutcome, 20), logs: &lockedBuffer{}}
 	server := httptest.NewServer(http.HandlerFunc(h.serveHTTP))
 	t.Cleanup(server.Close)
 	path := filepath.Join(t.TempDir(), "state", "assistant.sqlite")
@@ -122,8 +156,8 @@ func newConversationHarness(t *testing.T, runtime agentruntime.AgentRuntime) *co
 	if err != nil {
 		t.Fatal(err)
 	}
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	h.conversation, err = conversation.NewService(conversation.Config{TurnTimeout: 10 * time.Second}, h.store, runtime, h.client, conversation.NoTools{}, logger, integrationTelemetry{})
+	logger := slog.New(slog.NewTextHandler(h.logs, nil))
+	h.conversation, err = conversation.NewService(conversation.Config{TurnTimeout: 10 * time.Second}, h.store, runtime, h.client, conversation.NoTools{}, logger, integrationTelemetry{turns: h.turns})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,6 +227,27 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	case "sendChatAction":
+		result = true
+	case "setMyCommands":
+		registration := commandRegistration{scope: r.Form["scope"]}
+		if err := json.Unmarshal([]byte(r.Form.Get("commands")), &registration.commands); err != nil {
+			h.t.Error(err)
+			return
+		}
+		h.mu.Lock()
+		status := h.commandStatus
+		h.mu.Unlock()
+		select {
+		case h.registrations <- registration:
+		case <-r.Context().Done():
+			return
+		}
+		if status != 0 {
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_code": status})
+			return
+		}
+		result = true
 	default:
 		h.t.Errorf("unexpected Telegram method: %s", r.URL.Path)
 		w.WriteHeader(404)
@@ -530,5 +585,51 @@ func TestBusyWhileResponseIsBeingDelivered(t *testing.T) {
 	case call := <-runtime.calls:
 		t.Fatalf("message during delivery was enqueued: %s", fmt.Sprint(call.request))
 	default:
+	}
+}
+
+func TestBotCommandsRegisteredOnceAtStartup(t *testing.T) {
+	h := newConversationHarness(t, newControlledRuntime())
+	h.start()
+	want := []string{"status", "privacy", "cancel", "new"}
+	for _, wantScope := range [][]string{nil, {`{"type":"all_private_chats"}`}} {
+		registration := receive(t, h.ctx, h.registrations)
+		if !slices.Equal(registration.scope, wantScope) {
+			t.Fatalf("registration scope = %v, want %v", registration.scope, wantScope)
+		}
+		if len(registration.commands) != len(want) {
+			t.Fatalf("registered %+v, want %v", registration.commands, want)
+		}
+		for index, command := range registration.commands {
+			if command.Command != want[index] || command.Description == "" {
+				t.Fatalf("command %d = %+v, want %q with a description", index, command, want[index])
+			}
+		}
+	}
+	h.push(textUpdate(1, 101, "/status"), textUpdate(2, 101, "/privacy"))
+	h.wantMessage(101, ConversationStatusReply)
+	h.wantMessage(101, ConversationPrivacyReply)
+	h.waitOffset(3)
+	select {
+	case extra := <-h.registrations:
+		t.Fatalf("registered again while polling: %+v", extra)
+	default:
+	}
+}
+
+func TestBotCommandRegistrationFailureKeepsPolling(t *testing.T) {
+	h := newConversationHarness(t, newControlledRuntime())
+	h.commandStatus = http.StatusInternalServerError
+	h.start()
+	receive(t, h.ctx, h.registrations)
+	receive(t, h.ctx, h.registrations)
+	h.push(textUpdate(1, 101, "/status"))
+	h.wantMessage(101, ConversationStatusReply)
+	logs := h.logs.String()
+	if !strings.Contains(logs, "telegram.commands.register_failed") {
+		t.Fatalf("registration failure was not logged: %s", logs)
+	}
+	if strings.Contains(logs, "test-token") {
+		t.Fatal("logs contain the Telegram token")
 	}
 }

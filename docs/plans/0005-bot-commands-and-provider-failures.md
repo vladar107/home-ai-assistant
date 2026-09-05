@@ -1,6 +1,6 @@
 # 0005 — Bot-registered commands and actionable provider failures
 
-Status: `proposed`
+Status: `done`
 
 ## Context
 
@@ -23,8 +23,10 @@ authenticated, and record the live checks carried over from plan 0003.
   truth and register it with `setMyCommands` once per start, after `getMe`.
   Registration failure is logged and does not stop polling; commands keep
   working without a menu.
-- Register the default scope so the BotFather list is superseded. Reserve
-  per-chat scopes for user-scoped integration commands in a later plan.
+- Register the same list in the default scope and in the all-private-chats
+  scope: private chats resolve the latter first, so a list left there earlier
+  would otherwise hide the registration. Reserve per-chat scopes for
+  user-scoped integration commands in a later plan.
 - Classify provider failures in the Pi adapter from the RPC `message_end`
   event whose assistant message has `stopReason` `error`, and from
   `auto_retry_start`, which carries the same error text before Pi waits.
@@ -107,6 +109,47 @@ cannot be reached through those boundaries.
   an unauthorized user with conversation enabled, a restart during a running
   turn, a quota failure reply, and `gpt-5.6-luna:low`. Record the results here
   before marking the plan done.
+
+## Implementation results
+
+Recorded on 2026-09-05.
+
+- `status` and `privacy` are registered at every start, plus `cancel` and
+  `new` when conversation is enabled, in the default and all-private-chats
+  scopes. A failed registration is logged and polling continues.
+- Live check on 2026-09-05: after the first build the menu still showed an
+  older two-command list because a list registered earlier in the
+  all-private-chats scope took precedence over the default scope. The app now
+  registers both scopes.
+- The Pi adapter ends a turn immediately on quota or authentication failures
+  seen in `message_end` or `auto_retry_start`, sends `abort_retry`, and the
+  coordinator replies with the quota or reconnect text. Other failures stay
+  with Pi's retry and fall back to the generic reply. The stored error kind
+  remains `runtime`; telemetry and logs carry `provider_quota` or
+  `provider_auth`, and no provider text is persisted or logged.
+- Found and fixed while testing: the typing indicator call decoded the Bot
+  API's `True` result into an empty struct and failed on every turn.
+- Automated checks passed: formatting, `go mod tidy -diff`, `go test ./...`,
+  `go test -race -count=2` for the Telegram and Pi packages, vet, build,
+  `scripts/check-plans`, and whitespace.
+
+### Live verification
+
+Recorded on 2026-09-05 from the operator's GoLand run after the second build:
+
+- The command menu shows all four commands once the all-private-chats scope
+  is registered; confirmed by the operator.
+- Four turns with `gpt-5.6-luna:low` completed and were delivered between
+  18:01 and 18:13 CEST, and `/status` and `/privacy` replied while a model
+  turn was running.
+- One in-flight request was cancelled by the operator at 18:13 CEST.
+- Not exercised live: the busy reply, an unauthorized user, a restart during
+  a running turn, and the quota reply. All have automated coverage. The quota
+  and reconnect replies move to the live validation of
+  [0004](0004-per-user-model-subscriptions.md), where subscription state
+  becomes per user.
+
+The operator accepted the plan as done on 2026-09-05.
 
 ## Risks and open questions
 

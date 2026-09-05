@@ -189,6 +189,12 @@ func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink
 				stopProcess(cmd, stdin, waitResult)
 				return agentruntime.RunResult{}, fmt.Errorf("read Pi output: event stream ended early")
 			}
+			if category, actionable := providerFailure(event); actionable {
+				// Pi may be waiting between its own retries; abort_retry ends the turn now.
+				_ = json.NewEncoder(stdin).Encode(map[string]string{"type": "abort_retry"})
+				stopProcess(cmd, stdin, waitResult)
+				return agentruntime.RunResult{}, &agentruntime.ProviderError{Category: category}
+			}
 			settled, err := consumeEvent(ctx, event, &response, &promptAcknowledged, sink)
 			if err != nil {
 				stopProcess(cmd, stdin, waitResult)
@@ -237,12 +243,59 @@ type rpcEvent struct {
 	Type                  string                 `json:"type"`
 	Command               string                 `json:"command"`
 	Success               bool                   `json:"success"`
+	ErrorMessage          string                 `json:"errorMessage"`
+	Message               *rpcMessage            `json:"message"`
 	AssistantMessageEvent *assistantMessageEvent `json:"assistantMessageEvent"`
+}
+
+type rpcMessage struct {
+	Role         string `json:"role"`
+	StopReason   string `json:"stopReason"`
+	ErrorMessage string `json:"errorMessage"`
 }
 
 type assistantMessageEvent struct {
 	Type  string `json:"type"`
 	Delta string `json:"delta"`
+}
+
+var failureCategories = []struct {
+	substring string
+	category  agentruntime.FailureCategory
+}{
+	{"usage limit", agentruntime.FailureQuota},
+	{"quota", agentruntime.FailureQuota},
+	{"billing", agentruntime.FailureQuota},
+	{"unauthorized", agentruntime.FailureAuth},
+	{"authentication", agentruntime.FailureAuth},
+	{"invalid_grant", agentruntime.FailureAuth},
+	{"token expired", agentruntime.FailureAuth},
+	{"refresh token", agentruntime.FailureAuth},
+	{"not logged in", agentruntime.FailureAuth},
+	{"no credentials", agentruntime.FailureAuth},
+}
+
+// providerFailure reports the actionable category of a failed turn; anything else is left to Pi's own retry.
+func providerFailure(event rpcEvent) (agentruntime.FailureCategory, bool) {
+	var text string
+	switch event.Type {
+	case "message_end":
+		if event.Message == nil || event.Message.StopReason != "error" {
+			return "", false
+		}
+		text = event.Message.ErrorMessage
+	case "auto_retry_start":
+		text = event.ErrorMessage
+	default:
+		return "", false
+	}
+	lowered := strings.ToLower(text)
+	for _, candidate := range failureCategories {
+		if strings.Contains(lowered, candidate.substring) {
+			return candidate.category, true
+		}
+	}
+	return "", false
 }
 
 func scanEvents(reader io.Reader, events chan<- rpcEvent, scanErrors chan<- error, done <-chan struct{}) {

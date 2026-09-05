@@ -177,6 +177,80 @@ func TestProcessFailuresAreBoundedAndContentFree(t *testing.T) {
 	}
 }
 
+func TestActionableProviderFailuresEndTheTurn(t *testing.T) {
+	for _, tc := range []struct {
+		scenario string
+		category agentruntime.FailureCategory
+		retrying bool
+	}{
+		{"quota", agentruntime.FailureQuota, false},
+		{"auth", agentruntime.FailureAuth, false},
+		{"retry-quota", agentruntime.FailureQuota, true},
+		{"retry-auth", agentruntime.FailureAuth, true},
+	} {
+		t.Run(tc.scenario, func(t *testing.T) {
+			cfg := config(t)
+			r := newRuntime(t, cfg)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			started := time.Now()
+			result, err := r.Run(ctx, request("provider-failure", "fixture:"+tc.scenario), &eventSink{})
+			elapsed := time.Since(started)
+			var providerErr *agentruntime.ProviderError
+			if !errors.As(err, &providerErr) {
+				t.Fatalf("error = %v, want a provider error", err)
+			}
+			if providerErr.Category != tc.category {
+				t.Errorf("category = %q, want %q", providerErr.Category, tc.category)
+			}
+			if elapsed > 3*time.Second {
+				t.Errorf("turn ended after %s instead of failing fast", elapsed)
+			}
+			if result.Response != "" || strings.Contains(err.Error(), "synthetic-private-text") {
+				t.Fatalf("provider failure exposed content: result=%#v error=%v", result, err)
+			}
+			report := readReport(t, cfg.SessionDir, "provider-failure")
+			if tc.retrying && !report.AbortReceived {
+				t.Error("adapter did not send abort_retry while Pi was retrying")
+			}
+			assertProcessStopped(t, report)
+		})
+	}
+}
+
+func TestUncategorizedProviderFailuresStayWithPi(t *testing.T) {
+	for _, tc := range []struct{ scenario, response, message string }{
+		{"unrelated-error", "", "empty response"},
+		{"retry-transient", "recovered", ""},
+	} {
+		t.Run(tc.scenario, func(t *testing.T) {
+			cfg := config(t)
+			r := newRuntime(t, cfg)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			result, err := r.Run(ctx, request("uncategorized", "fixture:"+tc.scenario), &eventSink{})
+			var providerErr *agentruntime.ProviderError
+			if errors.As(err, &providerErr) {
+				t.Fatalf("uncategorized text was classified as %q", providerErr.Category)
+			}
+			if result.Response != tc.response {
+				t.Errorf("response = %q, want %q", result.Response, tc.response)
+			}
+			switch {
+			case tc.message == "":
+				if err != nil {
+					t.Fatalf("error = %v", err)
+				}
+			case err == nil || !strings.Contains(err.Error(), tc.message):
+				t.Fatalf("error = %v, want containing %q", err, tc.message)
+			case strings.Contains(err.Error(), "synthetic-private-text"):
+				t.Fatalf("error exposed provider text: %v", err)
+			}
+			assertProcessStopped(t, readReport(t, cfg.SessionDir, "uncategorized"))
+		})
+	}
+}
+
 func TestCancellationAndTimeoutStopRealProcess(t *testing.T) {
 	for _, tc := range []struct{ name, message string }{{"cancel", "fixture:hold"}, {"timeout", "fixture:hold"}, {"uncooperative child", "fixture:stubborn"}} {
 		t.Run(tc.name, func(t *testing.T) {

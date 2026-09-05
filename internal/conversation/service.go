@@ -26,6 +26,8 @@ const (
 	InterruptedReply = "The previous response was interrupted by a restart, so I did not retry it. Please send it again if you still need it."
 	TimeoutReply     = "That response took too long. Please try again with a smaller request."
 	UnavailableReply = "I could not complete that response. /status and /privacy are still available."
+	QuotaReply       = "Your model subscription has reached its usage limit. Please try again later."
+	ReconnectReply   = "Your model subscription is not connected or has expired. Reconnect it and try again."
 )
 
 type Service struct {
@@ -312,6 +314,8 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 
 	tools, runErr := s.toolProvider.ToolsFor(turnCtx, request.PrincipalID)
 	errorKind := ""
+	// The stored kind stays within the schema's allowed set; telemetry and logs carry the finer category.
+	reportedKind := ""
 	reply := ""
 	if runErr != nil {
 		errorKind = "tool_provider"
@@ -334,9 +338,21 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		case runErr != nil || strings.TrimSpace(result.Response) == "":
 			errorKind = "runtime"
 			reply = UnavailableReply
+			var providerErr *agentruntime.ProviderError
+			if errors.As(runErr, &providerErr) {
+				switch providerErr.Category {
+				case agentruntime.FailureQuota:
+					reportedKind, reply = string(agentruntime.FailureQuota), QuotaReply
+				case agentruntime.FailureAuth:
+					reportedKind, reply = string(agentruntime.FailureAuth), ReconnectReply
+				}
+			}
 		default:
 			reply = result.Response
 		}
+	}
+	if reportedKind == "" {
+		reportedKind = errorKind
 	}
 
 	outcome := "success"
@@ -363,13 +379,13 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		endTurn("cancelled", "cancelled")
 		return
 	}
-	endTurn(outcome, errorKind)
+	endTurn(outcome, reportedKind)
 	s.telemetry.ContextLogger(ctx, s.logger).Info(
 		"conversation.turn.completed",
 		"principal_id", request.PrincipalID,
 		"session_id", request.SessionID,
 		"outcome", outcome,
-		"error_kind", errorKind,
+		"error_kind", reportedKind,
 	)
 }
 

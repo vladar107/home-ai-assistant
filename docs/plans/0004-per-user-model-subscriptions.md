@@ -170,6 +170,9 @@ plan 0003; routine tests stay deterministic and credential-free.
   credential state; reconnect cannot resume a session under a different account.
 - Verify profile selection and model-account identity without printing secrets
   or conversation content.
+- Verify live the quota and reconnect replies introduced in
+  [0005](0005-bot-commands-and-provider-failures.md), which were not
+  exercised live there.
 - All suites in the testing section pass under `go test ./...` and
   `go test -race ./...`, with the configured formatting, module, vet, build,
   and plan checks.
