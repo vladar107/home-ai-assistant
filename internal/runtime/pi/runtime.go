@@ -107,16 +107,10 @@ func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink
 	if sink == nil {
 		return agentruntime.RunResult{}, fmt.Errorf("Pi runtime event sink is required")
 	}
-	agentDir, sessionDir, err := r.principalDirectories(request.PrincipalID)
+	agentDir, sessionDir, workDir, err := r.principalDirectories(request.PrincipalID)
 	if err != nil {
 		return agentruntime.RunResult{}, err
 	}
-
-	workDir, err := os.MkdirTemp("", "home-agent-pi-")
-	if err != nil {
-		return agentruntime.RunResult{}, fmt.Errorf("create isolated Pi working directory: %w", err)
-	}
-	defer os.RemoveAll(workDir)
 
 	args := append(append([]string(nil), r.argsPrefix...),
 		"--mode", "rpc",
@@ -234,21 +228,28 @@ func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink
 // principalDirectories resolves the principal's own agent directory. Pi reads auth.json only from
 // there, so a directory that is missing or shared means the subscription is not connected for this
 // principal rather than that the runtime is broken.
-func (r *Runtime) principalDirectories(principalID string) (string, string, error) {
+//
+// The working directory must stay the same across turns: Pi resumes a session by id only among
+// the sessions recorded for the current working directory, and creates a new session otherwise.
+func (r *Runtime) principalDirectories(principalID string) (string, string, string, error) {
 	name, err := agentruntime.ProfileDirectoryName(principalID)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	agentDir := filepath.Join(r.profilesDir, name)
 	info, err := os.Lstat(agentDir)
 	if err != nil || !isPrivateDirectory(info) {
-		return "", "", &agentruntime.ProviderError{Category: agentruntime.FailureAuth}
+		return "", "", "", &agentruntime.ProviderError{Category: agentruntime.FailureAuth}
 	}
 	sessionDir := filepath.Join(agentDir, "sessions")
 	if err := preparePrivateDirectory(sessionDir, "session"); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
-	return agentDir, sessionDir, nil
+	workDir := filepath.Join(agentDir, "workspace")
+	if err := preparePrivateDirectory(workDir, "workspace"); err != nil {
+		return "", "", "", err
+	}
+	return agentDir, sessionDir, workDir, nil
 }
 
 func restrictedEnvironment(binary string) ([]string, error) {

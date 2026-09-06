@@ -482,8 +482,9 @@ func assertProcessStopped(t *testing.T, report pifixture.Report) {
 	if err := syscall.Kill(report.PID, 0); !errors.Is(err, syscall.ESRCH) {
 		t.Errorf("child process %d still exists: %v", report.PID, err)
 	}
-	if _, err := os.Stat(report.Directory); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("isolated child directory was not removed: %v", err)
+	info, err := os.Lstat(report.Directory)
+	if err != nil || !info.IsDir() || info.Mode().Perm() != 0o700 || filepath.Base(report.Directory) != "workspace" {
+		t.Errorf("child ran outside the principal's private workspace directory: %s (%v)", report.Directory, err)
 	}
 }
 
