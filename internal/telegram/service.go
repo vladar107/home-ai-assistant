@@ -31,7 +31,7 @@ const (
 type botAPI interface {
 	GetMe(context.Context) (Bot, error)
 	GetUpdates(context.Context, int64) ([]Update, error)
-	SendMessage(context.Context, int64, string) error
+	SendReply(context.Context, int64, int64, string) error
 	SetMyCommands(context.Context, CommandScope, []BotCommand) error
 }
 
@@ -320,6 +320,9 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 	if message.Chat.ID <= 0 || message.Chat.ID != message.From.ID {
 		return ignoredResult("malformed_chat"), "", nil
 	}
+	if message.MessageID <= 0 {
+		return ignoredResult("malformed_message"), "", nil
+	}
 
 	displayName := strings.TrimSpace(strings.Join([]string{message.From.FirstName, message.From.LastName}, " "))
 	if !validObservedNames(message.From.Username, displayName) {
@@ -353,7 +356,7 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 		if err != nil {
 			return processingResult{}, "handle_command", err
 		}
-		return s.sendCommandReply(ctx, message.Chat.ID, authorization.Principal.ID, command, reply)
+		return s.sendCommandReply(ctx, message, authorization.Principal.ID, command, reply)
 	}
 	if strings.HasPrefix(strings.TrimSpace(message.Text), "/") {
 		return ignoredResult("command_for_other_bot"), "", nil
@@ -368,14 +371,15 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 	}
 
 	err = s.conversation.Enqueue(ctx, conversation.EnqueueInput{
-		BotUserID:        bot.ID,
-		TelegramUpdateID: update.UpdateID,
-		PrincipalID:      authorization.Principal.ID,
-		ChatID:           message.Chat.ID,
-		Message:          message.Text,
+		BotUserID:         bot.ID,
+		TelegramUpdateID:  update.UpdateID,
+		TelegramMessageID: message.MessageID,
+		PrincipalID:       authorization.Principal.ID,
+		ChatID:            message.Chat.ID,
+		Message:           message.Text,
 	})
 	if errors.Is(err, conversation.ErrBusy) {
-		return s.sendCommandReply(ctx, message.Chat.ID, authorization.Principal.ID, "busy", conversation.BusyReply)
+		return s.sendCommandReply(ctx, message, authorization.Principal.ID, "busy", conversation.BusyReply)
 	}
 	if err != nil {
 		return processingResult{}, "enqueue_conversation", err
@@ -468,12 +472,12 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, chatID 
 
 func (s *Service) sendCommandReply(
 	ctx context.Context,
-	chatID int64,
+	message *Message,
 	principalID string,
 	command string,
 	reply string,
 ) (processingResult, string, error) {
-	if err := s.client.SendMessage(ctx, chatID, reply); err != nil {
+	if err := s.client.SendReply(ctx, message.Chat.ID, message.MessageID, reply); err != nil {
 		if isPermanentAPIError(err) {
 			return processingResult{
 				event:       "telegram.command.undeliverable",

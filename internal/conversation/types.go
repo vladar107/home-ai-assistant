@@ -23,23 +23,25 @@ type Session struct {
 }
 
 type EnqueueInput struct {
-	BotUserID        int64
-	TelegramUpdateID int64
-	PrincipalID      string
-	ChatID           int64
-	Message          string
+	BotUserID         int64
+	TelegramUpdateID  int64
+	TelegramMessageID int64
+	PrincipalID       string
+	ChatID            int64
+	Message           string
 }
 
 type Request struct {
-	ID               string
-	PrincipalID      string
-	ChatID           int64
-	SessionID        string
-	RuntimeSessionID string
-	Message          string
-	State            string
-	ResponseText     string
-	ErrorKind        string
+	ID                string
+	PrincipalID       string
+	ChatID            int64
+	TelegramMessageID int64
+	SessionID         string
+	RuntimeSessionID  string
+	Message           string
+	State             string
+	ResponseText      string
+	ErrorKind         string
 }
 
 type EnqueueResult struct {
@@ -63,7 +65,8 @@ type Repository interface {
 }
 
 type Deliverer interface {
-	SendMessage(context.Context, int64, string) error
+	// SendReply quotes the request message with the given ID; a zero ID sends without a quote.
+	SendReply(context.Context, int64, int64, string) error
 	SendTyping(context.Context, int64) error
 }
 

@@ -49,9 +49,10 @@ type Update struct {
 }
 
 type Message struct {
-	From *User  `json:"from"`
-	Chat Chat   `json:"chat"`
-	Text string `json:"text"`
+	MessageID int64  `json:"message_id"`
+	From      *User  `json:"from"`
+	Chat      Chat   `json:"chat"`
+	Text      string `json:"text"`
 }
 
 type Chat struct {
@@ -170,9 +171,18 @@ func (c *Client) GetUpdates(ctx context.Context, offset int64) ([]Update, error)
 }
 
 func (c *Client) SendMessage(ctx context.Context, chatID int64, text string) error {
+	return c.SendReply(ctx, chatID, 0, text)
+}
+
+// SendReply quotes the request message with the reply. Telegram still delivers the text
+// when that message was deleted, and a zero message ID sends without a quote.
+func (c *Client) SendReply(ctx context.Context, chatID, replyToMessageID int64, text string) error {
 	params := url.Values{
 		"chat_id": {strconv.FormatInt(chatID, 10)},
 		"text":    {text},
+	}
+	if replyToMessageID > 0 {
+		params.Set("reply_parameters", fmt.Sprintf(`{"message_id":%d,"allow_sending_without_reply":true}`, replyToMessageID))
 	}
 	_, err := execute[struct{}](c, ctx, "sendMessage", params)
 	return err

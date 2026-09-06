@@ -1,6 +1,6 @@
 # 0006 — Quoted replies
 
-Status: `proposed`
+Status: `done`
 
 ## Context
 
@@ -63,6 +63,43 @@ the controllable runtime, following plan 0003.
   configured formatting, module, vet, build, and plan checks.
 - Live: send a slow question, then `/status`, and confirm both replies quote
   their own request in Telegram.
+
+## Implementation results
+
+Recorded on 2026-09-06.
+
+- Every reply from the Telegram service and the conversation coordinator
+  carries `reply_parameters` naming the request's message ID with
+  `allow_sending_without_reply` set, so a deleted request never blocks
+  delivery. Command replies, the busy reply, the not-connected, quota,
+  reconnect, timeout, and interrupted replies, and model replies all quote;
+  only the first chunk of a long reply does.
+- The request's Telegram message ID is persisted in the new
+  `telegram_message_id` column (migration 005, nullable with a positive
+  check) and survives the clearing of the message text, so a reply delivered
+  after a restart still quotes its request. Rows created before the
+  migration have no ID and deliver without a quote; verified by upgrading a
+  version-004 database that held a ready request.
+- An update whose message has no positive `message_id` is ignored with the
+  `malformed_message` reason next to the existing malformed-sender and
+  malformed-chat cases, so no reply is ever sent without a request to quote.
+- Connection ceremony outcomes are notifications delivered later by the
+  connection service and stay unquoted; the client keeps its plain send for
+  them next to the new reply variant.
+- The loopback simulator records the reply parameters of every send and
+  fails any quote that would not survive a deleted request. Every reply
+  assertion in the Telegram suites names the update it answers, and
+  notification assertions require the absence of a quote.
+- Automated checks passed: formatting, `go mod tidy -diff`, `go test ./...`,
+  `go test -race ./...`, vet, build, `scripts/check-plans`, and whitespace.
+
+### Live verification
+
+Recorded on 2026-09-06 from the operator's GoLand run after restarting on
+this build: a slow question followed by `/status` produced two replies, each
+quoting its own request in Telegram; confirmed by the operator.
+
+The operator accepted the plan as done on 2026-09-06.
 
 ## Risks and open questions
 

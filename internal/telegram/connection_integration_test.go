@@ -22,7 +22,7 @@ func (h *conversationHarness) requestConnect(updateID, userID int64) string {
 	h.push(textUpdate(updateID, userID, "/connect"))
 	message := h.nextMessage()
 	match := userCodePattern.FindStringSubmatch(message.text)
-	if message.chatID != userID || match == nil || !strings.Contains(message.text, h.auth.URL()+"/codex/device") {
+	if message.chatID != userID || message.replyTo != requestMessageID(updateID) || match == nil || !strings.Contains(message.text, h.auth.URL()+"/codex/device") {
 		h.t.Fatalf("connect reply = %+v", message)
 	}
 	if match[1] != h.auth.LatestUserCode() {
@@ -125,7 +125,7 @@ func TestConnectCeremonyBindsSubscription(t *testing.T) {
 	}
 
 	h.push(textUpdate(2, 101, "/connection"))
-	if message := h.nextMessage(); !strings.Contains(message.text, "ending in 1234") {
+	if message := h.nextMessage(); message.replyTo != requestMessageID(2) || !strings.Contains(message.text, "ending in 1234") {
 		t.Fatalf("connection status = %+v", message)
 	}
 	h.push(textUpdate(3, 101, "hello"))
@@ -134,7 +134,7 @@ func TestConnectCeremonyBindsSubscription(t *testing.T) {
 		t.Fatalf("unexpected principal %+v", call.request)
 	}
 	call.answer <- agentruntimeResult("hi")
-	h.wantMessage(101, "hi")
+	h.wantReply(101, 3, "hi")
 	h.waitState(3, "delivered")
 	h.assertNoSecretLeaked("acct-alice-1234")
 }
@@ -150,7 +150,7 @@ func TestConnectOutcomes(t *testing.T) {
 			t.Fatal("denied ceremony wrote a credential")
 		}
 		h.push(textUpdate(2, 101, "/connection"))
-		h.wantMessage(101, NoConnectionReply)
+		h.wantReply(101, 2, NoConnectionReply)
 	})
 	t.Run("expired", func(t *testing.T) {
 		h := newConversationHarnessWithOptions(t, newControlledRuntime(), harnessOptions{codeTimeout: 2 * time.Second})
@@ -174,7 +174,7 @@ func TestConnectOutcomes(t *testing.T) {
 			t.Fatalf("credential = %v exists=%v", record, exists)
 		}
 		h.push(textUpdate(3, 101, "/connection"))
-		if message := h.nextMessage(); !strings.Contains(message.text, "ending in -new") {
+		if message := h.nextMessage(); message.replyTo != requestMessageID(3) || !strings.Contains(message.text, "ending in -new") {
 			t.Fatalf("after replacement got %+v", message)
 		}
 	})
@@ -211,7 +211,7 @@ func TestAccountBoundToAnotherPrincipalIsRejected(t *testing.T) {
 		t.Fatalf("bob has a connection row: found=%v err=%v", found, err)
 	}
 	h.push(textUpdate(2, 202, "hello"))
-	h.wantMessage(202, conversation.NotConnectedReply)
+	h.wantReply(202, 2, conversation.NotConnectedReply)
 	h.waitState(2, "delivered")
 	select {
 	case call := <-runtime.calls:
@@ -226,7 +226,7 @@ func TestUnconnectedPrincipalGetsGuidance(t *testing.T) {
 	h.provision("alice", "acct-alice")
 	h.start()
 	h.push(textUpdate(1, 202, "hello"))
-	h.wantMessage(202, conversation.NotConnectedReply)
+	h.wantReply(202, 1, conversation.NotConnectedReply)
 	h.waitState(1, "delivered")
 	if turn := receive(t, h.ctx, h.turns); turn.outcome != "error" || turn.errorKind != "not_connected" {
 		t.Fatalf("telemetry turn = %+v", turn)
@@ -237,7 +237,7 @@ func TestUnconnectedPrincipalGetsGuidance(t *testing.T) {
 		t.Fatalf("unexpected principal %+v", call.request)
 	}
 	call.answer <- agentruntimeResult("hi")
-	h.wantMessage(101, "hi")
+	h.wantReply(101, 2, "hi")
 	h.waitState(2, "delivered")
 	select {
 	case call := <-runtime.calls:
@@ -254,7 +254,7 @@ func TestDisconnectCancelsRunningTurnAndBlocksQueuedWork(t *testing.T) {
 	h.push(textUpdate(1, 101, "long request"))
 	call := receive(t, h.ctx, runtime.calls)
 	h.push(textUpdate(2, 101, "/disconnect"))
-	h.wantMessage(101, DisconnectedReply)
+	h.wantReply(101, 2, DisconnectedReply)
 	receive(t, h.ctx, call.ctx.Done())
 	h.waitState(1, "cancelled")
 	if _, exists := h.credentialFile("alice"); exists {
@@ -264,10 +264,10 @@ func TestDisconnectCancelsRunningTurnAndBlocksQueuedWork(t *testing.T) {
 		t.Fatalf("connection row survived disconnect: found=%v err=%v", found, err)
 	}
 	h.push(textUpdate(3, 101, "hello again"))
-	h.wantMessage(101, conversation.NotConnectedReply)
+	h.wantReply(101, 3, conversation.NotConnectedReply)
 	h.waitState(3, "delivered")
 	h.push(textUpdate(4, 101, "/disconnect"))
-	h.wantMessage(101, NoConnectionReply)
+	h.wantReply(101, 4, NoConnectionReply)
 	select {
 	case call := <-runtime.calls:
 		t.Fatalf("disconnected principal reached the runtime: %+v", call.request)
@@ -286,14 +286,14 @@ func TestConnectionSurvivesRestartButPendingCeremonyDoesNot(t *testing.T) {
 	h.start()
 	h.auth.Approve(code, "acct-alice")
 	h.push(textUpdate(2, 101, "/connection"))
-	h.wantMessage(101, NoConnectionReply)
+	h.wantReply(101, 2, NoConnectionReply)
 	h.push(textUpdate(3, 202, "hello"))
 	call := receive(t, h.ctx, runtime.calls)
 	if call.request.PrincipalID != "bob" {
 		t.Fatalf("unexpected principal %+v", call.request)
 	}
 	call.answer <- agentruntimeResult("hi bob")
-	h.wantMessage(202, "hi bob")
+	h.wantReply(202, 3, "hi bob")
 	h.waitState(3, "delivered")
 	fresh := h.requestConnect(4, 101)
 	h.auth.Approve(fresh, "acct-alice")

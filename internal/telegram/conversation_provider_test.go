@@ -54,7 +54,7 @@ func TestProviderFailuresProduceActionableReplies(t *testing.T) {
 				t.Fatalf("typing indicator failed against a True result: %v", err)
 			}
 			h.push(textUpdate(1, 101, "fixture:"+tc.scenario))
-			h.wantMessage(101, tc.reply)
+			h.wantReply(101, 1, tc.reply)
 			h.waitState(1, "delivered")
 			turn := receive(t, h.ctx, h.turns)
 			if turn.outcome != "error" || turn.errorKind != string(tc.category) {
@@ -68,7 +68,7 @@ func TestProviderFailuresProduceActionableReplies(t *testing.T) {
 				t.Fatalf("stored error_kind = %q, want runtime", stored)
 			}
 			h.push(textUpdate(2, 101, "hello"))
-			h.wantMessage(101, "reply: hello")
+			h.wantReply(101, 2, "reply: hello")
 			h.waitState(2, "delivered")
 			if logs := h.logs.String(); strings.Contains(logs, "synthetic-private-text") {
 				t.Fatal("logs contain provider text")

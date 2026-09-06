@@ -72,22 +72,24 @@ func (s *Store) EnqueueConversation(
 	}
 
 	request := conversation.Request{
-		ID:               requestID,
-		PrincipalID:      input.PrincipalID,
-		ChatID:           input.ChatID,
-		SessionID:        session.ID,
-		RuntimeSessionID: session.RuntimeSessionID,
-		Message:          input.Message,
-		State:            conversation.RequestStateQueued,
+		ID:                requestID,
+		PrincipalID:       input.PrincipalID,
+		ChatID:            input.ChatID,
+		TelegramMessageID: input.TelegramMessageID,
+		SessionID:         session.ID,
+		RuntimeSessionID:  session.RuntimeSessionID,
+		Message:           input.Message,
+		State:             conversation.RequestStateQueued,
 	}
 	if _, err := tx.ExecContext(
 		ctx,
 		`INSERT INTO conversation_requests (
-		    id, bot_user_id, telegram_update_id, principal_id, chat_id, session_id, message
-		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		    id, bot_user_id, telegram_update_id, telegram_message_id, principal_id, chat_id, session_id, message
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		request.ID,
 		input.BotUserID,
 		input.TelegramUpdateID,
+		request.TelegramMessageID,
 		request.PrincipalID,
 		request.ChatID,
 		request.SessionID,
@@ -173,8 +175,8 @@ func (s *Store) NextConversationRequest(ctx context.Context, principalID string)
 	}
 	request, err := scanConversationRequest(s.db.QueryRowContext(
 		ctx,
-		`SELECT request.id, request.principal_id, request.chat_id, request.session_id,
-		        session.runtime_session_id, request.message, request.state,
+		`SELECT request.id, request.principal_id, request.chat_id, COALESCE(request.telegram_message_id, 0),
+		        request.session_id, session.runtime_session_id, request.message, request.state,
 		        COALESCE(request.response_text, ''), COALESCE(request.error_kind, '')
 		 FROM conversation_requests AS request
 		 JOIN conversation_sessions AS session
@@ -344,8 +346,8 @@ type queryRower interface {
 func loadConversationByUpdate(ctx context.Context, db queryRower, botUserID, updateID int64) (conversation.Request, bool, error) {
 	request, err := scanConversationRequest(db.QueryRowContext(
 		ctx,
-		`SELECT request.id, request.principal_id, request.chat_id, request.session_id,
-		        session.runtime_session_id, request.message, request.state,
+		`SELECT request.id, request.principal_id, request.chat_id, COALESCE(request.telegram_message_id, 0),
+		        request.session_id, session.runtime_session_id, request.message, request.state,
 		        COALESCE(request.response_text, ''), COALESCE(request.error_kind, '')
 		 FROM conversation_requests AS request
 		 JOIN conversation_sessions AS session
@@ -386,6 +388,7 @@ func scanConversationRequest(row *sql.Row) (conversation.Request, error) {
 		&request.ID,
 		&request.PrincipalID,
 		&request.ChatID,
+		&request.TelegramMessageID,
 		&request.SessionID,
 		&request.RuntimeSessionID,
 		&request.Message,

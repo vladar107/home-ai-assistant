@@ -59,9 +59,10 @@ func (r *controlledRuntime) Run(ctx context.Context, request agentruntime.RunReq
 }
 
 type sentMessage struct {
-	chatID int64
-	text   string
-	status int
+	chatID  int64
+	replyTo int64
+	text    string
+	status  int
 }
 
 type commandRegistration struct {
@@ -230,6 +231,17 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 			h.t.Error(err)
 			return
 		}
+		var replyTo int64
+		if raw := r.Form.Get("reply_parameters"); raw != "" {
+			var parameters struct {
+				MessageID                int64 `json:"message_id"`
+				AllowSendingWithoutReply bool  `json:"allow_sending_without_reply"`
+			}
+			if err := json.Unmarshal([]byte(raw), &parameters); err != nil || parameters.MessageID <= 0 || !parameters.AllowSendingWithoutReply {
+				h.t.Errorf("reply_parameters %q must quote a message and allow sending without it: %v", raw, err)
+			}
+			replyTo = parameters.MessageID
+		}
 		h.mu.Lock()
 		status := http.StatusOK
 		if len(h.sendStatuses) > 0 {
@@ -240,7 +252,7 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 		h.sent = append(h.sent, r.Form.Get("text"))
 		h.mu.Unlock()
 		select {
-		case h.messages <- sentMessage{chatID: chatID, text: r.Form.Get("text"), status: status}:
+		case h.messages <- sentMessage{chatID: chatID, replyTo: replyTo, text: r.Form.Get("text"), status: status}:
 		case <-r.Context().Done():
 			return
 		}
@@ -339,8 +351,11 @@ func (h *conversationHarness) sentTexts() []string {
 	return append([]string(nil), h.sent...)
 }
 
+// requestMessageID differs from the update ID so a reply quoting the wrong identifier is caught.
+func requestMessageID(updateID int64) int64 { return 1000 + updateID }
+
 func textUpdate(id, userID int64, text string) Update {
-	return Update{UpdateID: id, Message: &Message{From: &User{ID: userID, FirstName: "Test"}, Chat: Chat{ID: userID, Type: ChatTypePrivate}, Text: text}}
+	return Update{UpdateID: id, Message: &Message{MessageID: requestMessageID(id), From: &User{ID: userID, FirstName: "Test"}, Chat: Chat{ID: userID, Type: ChatTypePrivate}, Text: text}}
 }
 
 func (h *conversationHarness) push(updates ...Update) {
@@ -366,11 +381,21 @@ func receive[T any](t *testing.T, ctx context.Context, channel <-chan T) T {
 
 func (h *conversationHarness) nextMessage() sentMessage { return receive(h.t, h.ctx, h.messages) }
 
+// wantMessage expects an unquoted send, as connection notifications are.
 func (h *conversationHarness) wantMessage(chatID int64, text string) {
 	h.t.Helper()
 	message := h.nextMessage()
-	if message.chatID != chatID || message.text != text {
-		h.t.Fatalf("message = %+v, want chat %d text %q", message, chatID, text)
+	if message.chatID != chatID || message.replyTo != 0 || message.text != text {
+		h.t.Fatalf("message = %+v, want chat %d text %q without a quote", message, chatID, text)
+	}
+}
+
+// wantReply expects a send that answers the update by quoting its message.
+func (h *conversationHarness) wantReply(chatID, updateID int64, text string) {
+	h.t.Helper()
+	message := h.nextMessage()
+	if message.chatID != chatID || message.replyTo != requestMessageID(updateID) || message.text != text {
+		h.t.Fatalf("message = %+v, want chat %d text %q quoting message %d", message, chatID, text, requestMessageID(updateID))
 	}
 }
 
@@ -427,10 +452,10 @@ func TestConversationSessionsAndUserIsolation(t *testing.T) {
 		t.Fatalf("principal sessions not isolated: %+v / %+v", alice.request, bob.request)
 	}
 	bob.answer <- agentruntime.RunResult{Response: "blue saved"}
-	h.wantMessage(202, "blue saved")
+	h.wantReply(202, 2, "blue saved")
 	h.waitState(2, "delivered")
 	alice.answer <- agentruntime.RunResult{Response: "amber saved"}
-	h.wantMessage(101, "amber saved")
+	h.wantReply(101, 1, "amber saved")
 	h.waitState(1, "delivered")
 	h.push(textUpdate(3, 101, "recall"))
 	recall := receive(t, h.ctx, runtime.calls)
@@ -438,10 +463,10 @@ func TestConversationSessionsAndUserIsolation(t *testing.T) {
 		t.Fatal("conversation did not reuse Alice's session")
 	}
 	recall.answer <- agentruntime.RunResult{Response: "amber"}
-	h.wantMessage(101, "amber")
+	h.wantReply(101, 3, "amber")
 	h.waitState(3, "delivered")
 	h.push(textUpdate(4, 101, "/new"))
-	h.wantMessage(101, NewSessionReply)
+	h.wantReply(101, 4, NewSessionReply)
 	h.push(textUpdate(5, 101, "recall"), textUpdate(6, 202, "recall"))
 	for range 2 {
 		call := receive(t, h.ctx, runtime.calls)
@@ -467,10 +492,10 @@ func TestCommandsRemainResponsiveAndCancelSuppressesLateAnswer(t *testing.T) {
 	h.push(textUpdate(1, 101, "long request"))
 	call := receive(t, h.ctx, runtime.calls)
 	h.push(textUpdate(2, 101, "second request"), textUpdate(3, 101, "/status"), textUpdate(4, 101, "/privacy"), textUpdate(5, 101, "/cancel"))
-	h.wantMessage(101, conversation.BusyReply)
-	h.wantMessage(101, ConversationStatusReply)
-	h.wantMessage(101, ConversationPrivacyReply)
-	h.wantMessage(101, CancelledReply)
+	h.wantReply(101, 2, conversation.BusyReply)
+	h.wantReply(101, 3, ConversationStatusReply)
+	h.wantReply(101, 4, ConversationPrivacyReply)
+	h.wantReply(101, 5, CancelledReply)
 	receive(t, h.ctx, call.ctx.Done())
 	h.waitState(1, "cancelled")
 	h.push(textUpdate(6, 101, "next request"))
@@ -479,7 +504,7 @@ func TestCommandsRemainResponsiveAndCancelSuppressesLateAnswer(t *testing.T) {
 		t.Fatalf("busy request reached runtime: %+v", next.request)
 	}
 	next.answer <- agentruntime.RunResult{Response: "next answer"}
-	h.wantMessage(101, "next answer")
+	h.wantReply(101, 6, "next answer")
 	h.waitState(6, "delivered")
 	h.stop()
 	select {
@@ -497,21 +522,26 @@ func TestUnauthorizedAndNonPrivateUpdatesAreIgnoredAndCursorSurvivesRestart(t *t
 	group := textUpdate(2, 101, "group request")
 	group.Message.Chat.Type = "group"
 	group.Message.Chat.ID = -500
-	h.push(textUpdate(1, 303, "unauthorized"), group, Update{UpdateID: 3}, textUpdate(4, 101, ""), textUpdate(5, 101, "accepted"), textUpdate(5, 101, "accepted"))
+	unquotable := textUpdate(5, 101, "no message id")
+	unquotable.Message.MessageID = 0
+	h.push(textUpdate(1, 303, "unauthorized"), group, Update{UpdateID: 3}, textUpdate(4, 101, ""), unquotable, textUpdate(6, 101, "accepted"), textUpdate(6, 101, "accepted"))
 	call := receive(t, h.ctx, runtime.calls)
 	if call.request.Message != "accepted" {
 		t.Fatalf("ignored input reached runtime: %+v", call.request)
 	}
 	call.answer <- agentruntime.RunResult{Response: "one answer"}
-	h.wantMessage(101, "one answer")
-	h.waitState(5, "delivered")
-	h.waitOffset(6)
+	h.wantReply(101, 6, "one answer")
+	h.waitState(6, "delivered")
+	h.waitOffset(7)
+	if logs := h.logs.String(); !strings.Contains(logs, "reason=malformed_message") {
+		t.Fatalf("message without an ID was not ignored as malformed: %s", logs)
+	}
 	h.stop()
 	h.start()
-	h.waitOffset(6)
-	h.push(textUpdate(5, 101, "accepted"), textUpdate(6, 101, "/status"))
-	h.wantMessage(101, ConversationStatusReply)
 	h.waitOffset(7)
+	h.push(textUpdate(6, 101, "accepted"), textUpdate(7, 101, "/status"))
+	h.wantReply(101, 7, ConversationStatusReply)
+	h.waitOffset(8)
 	h.stop()
 	select {
 	case call := <-runtime.calls:
@@ -533,7 +563,7 @@ func TestConversationRestartRecovery(t *testing.T) {
 			runtime := newControlledRuntime()
 			h := newConversationHarness(t, runtime)
 			h.provision("alice", "acct-alice")
-			input := conversation.EnqueueInput{BotUserID: 999, TelegramUpdateID: 1, PrincipalID: "alice", ChatID: 101, Message: "original request"}
+			input := conversation.EnqueueInput{BotUserID: 999, TelegramUpdateID: 1, TelegramMessageID: requestMessageID(1), PrincipalID: "alice", ChatID: 101, Message: "original request"}
 			_, err := h.store.EnqueueConversation(h.ctx, input, conversation.Session{ID: recoverySessionID, PrincipalID: "alice", RuntimeSessionID: recoveryRuntimeSessionID}, recoveryRequestID)
 			if err != nil {
 				t.Fatal(err)
@@ -566,7 +596,7 @@ func TestConversationRestartRecovery(t *testing.T) {
 			if state == "running" {
 				want = conversation.InterruptedReply
 			}
-			h.wantMessage(101, want)
+			h.wantReply(101, 1, want)
 			h.waitState(1, "delivered")
 			h.push(textUpdate(2, 101, "follow up"))
 			call := receive(t, h.ctx, runtime.calls)
@@ -577,7 +607,7 @@ func TestConversationRestartRecovery(t *testing.T) {
 				t.Fatalf("unexpected recovery session %q for %s", call.request.SessionID, state)
 			}
 			call.answer <- agentruntime.RunResult{Response: "follow up answer"}
-			h.wantMessage(101, "follow up answer")
+			h.wantReply(101, 2, "follow up answer")
 			h.waitState(2, "delivered")
 		})
 	}
@@ -594,13 +624,13 @@ func TestConversationDeliveryFailuresAndUnicodeChunks(t *testing.T) {
 			h.push(textUpdate(1, 101, "answer"))
 			call := receive(t, h.ctx, runtime.calls)
 			call.answer <- agentruntime.RunResult{Response: "model answer"}
-			if first := h.nextMessage(); first.status != status || first.text != "model answer" {
+			if first := h.nextMessage(); first.status != status || first.replyTo != requestMessageID(1) || first.text != "model answer" {
 				t.Fatalf("first attempt = %+v", first)
 			}
 			if status == http.StatusForbidden {
 				h.waitState(1, "cancelled")
 			} else {
-				h.wantMessage(101, "model answer")
+				h.wantReply(101, 1, "model answer")
 				h.waitState(1, "delivered")
 			}
 			h.push(textUpdate(2, 101, "next"))
@@ -611,10 +641,17 @@ func TestConversationDeliveryFailuresAndUnicodeChunks(t *testing.T) {
 			answer := strings.Repeat("😀", 8001)
 			call.answer <- agentruntime.RunResult{Response: answer}
 			var joined strings.Builder
-			for range 3 {
+			for index := range 3 {
 				chunk := h.nextMessage()
 				if chunk.chatID != 101 || !utf8.ValidString(chunk.text) || utf8.RuneCountInString(chunk.text) > 4000 {
 					t.Fatalf("invalid Telegram chunk: chat=%d runes=%d", chunk.chatID, utf8.RuneCountInString(chunk.text))
+				}
+				wantQuote := int64(0)
+				if index == 0 {
+					wantQuote = requestMessageID(2)
+				}
+				if chunk.replyTo != wantQuote {
+					t.Fatalf("chunk %d quotes message %d, want %d", index, chunk.replyTo, wantQuote)
 				}
 				joined.WriteString(chunk.text)
 			}
@@ -636,12 +673,12 @@ func TestBusyWhileResponseIsBeingDelivered(t *testing.T) {
 	h.push(textUpdate(1, 101, "first"))
 	call := receive(t, h.ctx, runtime.calls)
 	call.answer <- agentruntime.RunResult{Response: "first answer"}
-	h.wantMessage(101, "first answer")
+	h.wantReply(101, 1, "first answer")
 	h.waitState(1, "delivering")
 	h.push(textUpdate(2, 101, "second"))
 	message := h.nextMessage()
-	if message.text != conversation.BusyReply {
-		t.Fatalf("during delivery got %q, want busy reply", message.text)
+	if message.text != conversation.BusyReply || message.replyTo != requestMessageID(2) {
+		t.Fatalf("during delivery got %+v, want busy reply quoting the second request", message)
 	}
 	close(gate)
 	h.waitState(1, "delivered")
@@ -673,8 +710,8 @@ func TestBotCommandsRegisteredOnceAtStartup(t *testing.T) {
 		}
 	}
 	h.push(textUpdate(1, 101, "/status"), textUpdate(2, 101, "/privacy"))
-	h.wantMessage(101, ConversationStatusReply)
-	h.wantMessage(101, ConversationPrivacyReply)
+	h.wantReply(101, 1, ConversationStatusReply)
+	h.wantReply(101, 2, ConversationPrivacyReply)
 	h.waitOffset(3)
 	select {
 	case extra := <-h.registrations:
@@ -690,7 +727,7 @@ func TestBotCommandRegistrationFailureKeepsPolling(t *testing.T) {
 	receive(t, h.ctx, h.registrations)
 	receive(t, h.ctx, h.registrations)
 	h.push(textUpdate(1, 101, "/status"))
-	h.wantMessage(101, ConversationStatusReply)
+	h.wantReply(101, 1, ConversationStatusReply)
 	logs := h.logs.String()
 	if !strings.Contains(logs, "telegram.commands.register_failed") {
 		t.Fatalf("registration failure was not logged: %s", logs)

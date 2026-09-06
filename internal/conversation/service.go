@@ -154,7 +154,7 @@ func (s *Service) Shutdown(ctx context.Context) error {
 }
 
 func (s *Service) Enqueue(ctx context.Context, input EnqueueInput) error {
-	if input.BotUserID <= 0 || input.TelegramUpdateID < 0 || input.PrincipalID == "" || input.ChatID <= 0 {
+	if input.BotUserID <= 0 || input.TelegramUpdateID < 0 || input.TelegramMessageID <= 0 || input.PrincipalID == "" || input.ChatID <= 0 {
 		return fmt.Errorf("conversation request identity is invalid")
 	}
 	if !utf8.ValidString(input.Message) || strings.TrimSpace(input.Message) == "" || utf8.RuneCountInString(input.Message) > maximumMessageRunes {
@@ -428,14 +428,16 @@ func (s *Service) deliver(ctx context.Context, request Request) error {
 	if !claimed {
 		return nil
 	}
+	replyTo := request.TelegramMessageID
 	for _, chunk := range splitReply(request.ResponseText) {
-		if err := s.deliverer.SendMessage(deliveryCtx, request.ChatID, chunk); err != nil {
+		if err := s.deliverer.SendReply(deliveryCtx, request.ChatID, replyTo, chunk); err != nil {
 			if isPermanentDeliveryError(err) {
 				return s.repository.CancelConversationDelivery(ctx, request.ID)
 			}
 			_ = s.repository.ReleaseConversationDelivery(ctx, request.ID)
 			return err
 		}
+		replyTo = 0
 	}
 	if err := s.repository.MarkConversationDelivered(deliveryCtx, request.ID); err != nil {
 		_ = s.repository.ReleaseConversationDelivery(ctx, request.ID)
