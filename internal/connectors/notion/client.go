@@ -106,6 +106,21 @@ type Block struct {
 	Content     json.RawMessage
 }
 
+// Database is a database container as Notion returns it. Since API version 2025-09-03 a database
+// holds the data sources that actually carry rows, so its ID cannot be queried directly.
+type Database struct {
+	ID          string          `json:"id"`
+	Title       []RichText      `json:"title"`
+	IsInline    bool            `json:"is_inline"`
+	DataSources []DataSourceRef `json:"data_sources"`
+	Parent      Parent          `json:"parent"`
+}
+
+type DataSourceRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 func (b *Block) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -191,6 +206,14 @@ func (c *Client) Page(ctx context.Context, token, pageID string) (Object, error)
 	var page Object
 	err := c.do(ctx, token, http.MethodGet, "/v1/pages/"+url.PathEscape(pageID), nil, &page)
 	return page, err
+}
+
+// Database retrieves a database container so its data sources can be queried. A child_database
+// block's ID is a database ID, which no query endpoint accepts.
+func (c *Client) Database(ctx context.Context, token, databaseID string) (Database, error) {
+	var database Database
+	err := c.do(ctx, token, http.MethodGet, "/v1/databases/"+url.PathEscape(databaseID), nil, &database)
+	return database, err
 }
 
 func (c *Client) BlockChildren(ctx context.Context, token, blockID, cursor string) (List[Block], error) {

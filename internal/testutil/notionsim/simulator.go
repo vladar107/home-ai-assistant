@@ -44,6 +44,20 @@ type DataSource struct {
 	Properties map[string]any
 }
 
+// Database is a container of data sources, as Notion has modelled databases since API version
+// 2025-09-03. Its ID is what a child_database block in page content carries.
+type Database struct {
+	ID          string
+	Title       string
+	IsInline    bool
+	DataSources []DataSourceRef
+}
+
+type DataSourceRef struct {
+	ID   string
+	Name string
+}
+
 // Request is one recorded call with the bearer token that made it and the decoded JSON body.
 type Request struct {
 	Method  string
@@ -66,6 +80,8 @@ type Simulator struct {
 	pageShares  map[string][]string
 	dataSources []*DataSource
 	dsShares    map[string][]string
+	databases   []*Database
+	dbShares    map[string][]string
 	requests    []Request
 	failures    []failure
 	created     int
@@ -73,7 +89,7 @@ type Simulator struct {
 
 func New(t *testing.T) *Simulator {
 	t.Helper()
-	s := &Simulator{tokens: map[string]Token{}, pageShares: map[string][]string{}, dsShares: map[string][]string{}}
+	s := &Simulator{tokens: map[string]Token{}, pageShares: map[string][]string{}, dsShares: map[string][]string{}, dbShares: map[string][]string{}}
 	s.server = httptest.NewServer(http.HandlerFunc(s.serve))
 	t.Cleanup(s.server.Close)
 	return s
@@ -109,6 +125,16 @@ func (s *Simulator) ShareDataSource(token string, dataSource DataSource) {
 
 // FailNext makes the next request answer with the status (and Retry-After when given) before
 // normal handling resumes.
+// ShareDatabase makes a database container reachable by the token. Its data sources must be
+// shared separately, the way Notion shares the rows rather than the container.
+func (s *Simulator) ShareDatabase(token string, database Database) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	copied := database
+	s.databases = append(s.databases, &copied)
+	s.dbShares[database.ID] = append(s.dbShares[database.ID], token)
+}
+
 func (s *Simulator) FailNext(status int, retryAfter string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -193,6 +219,13 @@ func (s *Simulator) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.appendBlocks(w, page, body)
+	case r.Method == http.MethodGet && len(segments) == 3 && segments[1] == "databases":
+		database := s.sharedDatabase(token, segments[2])
+		if database == nil {
+			writeError(w, http.StatusNotFound, "object_not_found", "Could not find database. synthetic-notion-error-text")
+			return
+		}
+		writeJSON(w, databaseObject(database))
 	case r.Method == http.MethodPost && len(segments) == 4 && segments[1] == "data_sources" && segments[3] == "query":
 		dataSource := s.sharedDataSource(token, segments[2])
 		if dataSource == nil {
@@ -222,6 +255,17 @@ func (s *Simulator) sharedDataSource(token, id string) *DataSource {
 	for _, dataSource := range s.dataSources {
 		if dataSource.ID == id && contains(s.dsShares[id], token) {
 			return dataSource
+		}
+	}
+	return nil
+}
+
+func (s *Simulator) sharedDatabase(token, id string) *Database {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, database := range s.databases {
+		if database.ID == id && contains(s.dbShares[id], token) {
+			return database
 		}
 	}
 	return nil
@@ -595,6 +639,21 @@ func dataSourceObject(dataSource *DataSource) map[string]any {
 	}
 }
 
+func databaseObject(database *Database) map[string]any {
+	sources := make([]any, 0, len(database.DataSources))
+	for _, source := range database.DataSources {
+		sources = append(sources, map[string]any{"id": source.ID, "name": source.Name})
+	}
+	return map[string]any{
+		"object":       "database",
+		"id":           database.ID,
+		"title":        []any{richText(database.Title)},
+		"is_inline":    database.IsInline,
+		"data_sources": sources,
+		"url":          "https://notion.so/" + database.ID,
+	}
+}
+
 func richText(text string) map[string]any {
 	return map[string]any{"type": "text", "text": map[string]any{"content": text, "link": nil}, "plain_text": text, "href": nil,
 		"annotations": map[string]any{"bold": false, "italic": false, "strikethrough": false, "underline": false, "code": false, "color": "default"}}
@@ -636,6 +695,12 @@ func Heading(level int, text string) map[string]any {
 
 func Bullet(text string) map[string]any {
 	return map[string]any{"type": "bulleted_list_item", "bulleted_list_item": map[string]any{"rich_text": []any{richText(text)}, "color": "default"}}
+}
+
+// ChildDatabase is an inline table inside a page. Its block ID is the database ID, which is what
+// the connector must surface for the table's rows to be reachable.
+func ChildDatabase(databaseID, title string) map[string]any {
+	return map[string]any{"type": "child_database", "id": databaseID, "child_database": map[string]any{"title": title}}
 }
 
 func ToDo(text string, checked bool) map[string]any {

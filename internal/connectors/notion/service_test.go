@@ -234,3 +234,102 @@ func TestConnectRejectsUnknownTokensWithoutStoringThem(t *testing.T) {
 		t.Fatalf("execution after disconnect = %+v", result)
 	}
 }
+
+func TestTableNestedInAPageIsReachableThroughItsDatabaseID(t *testing.T) {
+	f := newFixture(t)
+	f.sim.ShareDataSource(token, notionsim.DataSource{
+		ID: "ds-movies", Title: "Movie nights", URL: "https://notion.so/ds-movies",
+		Properties: map[string]any{"Name": notionsim.SchemaProperty("title"), "Week": notionsim.SchemaProperty("rich_text")},
+	})
+	f.sim.ShareDatabase(token, notionsim.Database{
+		ID: "db-movies", Title: "Movie nights", IsInline: true,
+		DataSources: []notionsim.DataSourceRef{{ID: "ds-movies", Name: "Movie nights"}},
+	})
+	f.sim.SharePage(token, notionsim.Page{
+		ID: "page-movies", Title: "Кино вечера", URL: "https://notion.so/page-movies", LastEdited: "2026-09-01T00:00:00.000Z",
+		Blocks: []map[string]any{notionsim.Paragraph("Расписание"), notionsim.ChildDatabase("db-movies", "Movie nights")},
+	})
+	f.sim.SharePage(token, notionsim.Page{
+		ID: "row-dune", Title: "Dune", URL: "https://notion.so/row-dune", LastEdited: "2026-09-01T00:00:00.000Z",
+		DataSourceID: "ds-movies",
+		Properties:   map[string]any{"Name": notionsim.TitleProperty("Dune"), "Week": notionsim.RichTextProperty("next")},
+	})
+	f.contribute()
+
+	page := f.execute("notion_get_page", `{"page_id":"page-movies"}`)
+	if page.IsError || !strings.Contains(page.Text, "[database] Movie nights (database id: db-movies)") {
+		t.Fatalf("page content hides the nested database: %s", page.Text)
+	}
+
+	rows := f.execute("notion_query_data_source", `{"data_source_id":"db-movies"}`)
+	if rows.IsError || !strings.Contains(rows.Text, "Dune") || !strings.Contains(rows.Text, "Week: next") {
+		t.Fatalf("rows through the database ID = %+v", rows)
+	}
+	if rejected := f.requests("/v1/data_sources/db-movies/query"); len(rejected) != 1 {
+		t.Fatalf("the database ID must be tried as a data source first: %d attempt(s)", len(rejected))
+	}
+	if lookups := f.requests("/v1/databases/db-movies"); len(lookups) != 1 {
+		t.Fatalf("database lookups = %d, want exactly one resolution hop", len(lookups))
+	}
+	if queries := f.requests("/v1/data_sources/ds-movies/query"); len(queries) != 1 {
+		t.Fatalf("data source queries = %d", len(queries))
+	}
+}
+
+func TestDataSourceIDIsQueriedWithoutADatabaseLookup(t *testing.T) {
+	f := newFixture(t)
+	f.sim.ShareDataSource(token, notionsim.DataSource{
+		ID: "ds-movies", Title: "Movie nights", URL: "https://notion.so/ds-movies",
+		Properties: map[string]any{"Name": notionsim.SchemaProperty("title")},
+	})
+	f.sim.SharePage(token, notionsim.Page{
+		ID: "row-dune", Title: "Dune", URL: "https://notion.so/row-dune", LastEdited: "2026-09-01T00:00:00.000Z",
+		DataSourceID: "ds-movies", Properties: map[string]any{"Name": notionsim.TitleProperty("Dune")},
+	})
+	f.contribute()
+
+	rows := f.execute("notion_query_data_source", `{"data_source_id":"ds-movies"}`)
+	if rows.IsError || !strings.Contains(rows.Text, "Dune") {
+		t.Fatalf("direct query = %+v", rows)
+	}
+	if queries := f.requests("/v1/data_sources/ds-movies/query"); len(queries) != 1 {
+		t.Fatalf("data source queries = %d, want one", len(queries))
+	}
+	for _, request := range f.sim.Requests() {
+		if strings.HasPrefix(request.Path, "/v1/databases/") {
+			t.Fatalf("a data source ID must not trigger a database lookup: %s", request.Path)
+		}
+	}
+
+	missing := f.execute("notion_query_data_source", `{"data_source_id":"ds-unknown"}`)
+	if !missing.IsError || strings.Contains(missing.Text, "synthetic-notion-error-text") {
+		t.Fatalf("unknown ID = %+v", missing)
+	}
+}
+
+func TestDatabaseWithSeveralDataSourcesAsksWhichOne(t *testing.T) {
+	f := newFixture(t)
+	for _, id := range []string{"ds-2026", "ds-2025"} {
+		f.sim.ShareDataSource(token, notionsim.DataSource{ID: id, Title: id, URL: "https://notion.so/" + id, Properties: map[string]any{"Name": notionsim.SchemaProperty("title")}})
+	}
+	f.sim.ShareDatabase(token, notionsim.Database{
+		ID: "db-seasons", Title: "Seasons",
+		DataSources: []notionsim.DataSourceRef{{ID: "ds-2026", Name: "2026"}, {ID: "ds-2025", Name: "2025"}},
+	})
+	f.contribute()
+
+	result := f.execute("notion_query_data_source", `{"data_source_id":"db-seasons"}`)
+	if result.IsError {
+		t.Fatalf("ambiguous database = %+v", result)
+	}
+	for _, want := range []string{"holds 2 data sources", "id: ds-2026", "id: ds-2025", "2026", "2025"} {
+		if !strings.Contains(result.Text, want) {
+			t.Fatalf("choice rendering lacks %q: %s", want, result.Text)
+		}
+	}
+	for _, request := range f.sim.Requests() {
+		if strings.HasPrefix(request.Path, "/v1/data_sources/ds-") {
+			t.Fatalf("an ambiguous database must not query a data source: %s", request.Path)
+		}
+	}
+}

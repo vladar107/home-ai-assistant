@@ -230,7 +230,12 @@ tools offered to the model through the core broker:
   by title, with IDs, URLs, and key properties
 - `notion_get_page`: one page's properties and flattened text content
 - `notion_query_data_source`: entries of one data source with Notion filter
-  and sorts objects passed through for Notion to validate
+  and sorts objects passed through for Notion to validate. A table nested in
+  a page appears in that page's content as a `[database]` line carrying its
+  database ID, and the tool accepts that ID: a rejected query is resolved
+  with `GET /v1/databases/{id}` and repeated against the database's single
+  data source, or answered with the data source names and IDs to choose from
+  when the database holds several.
 
 [Plan 0011](plans/0011-confirmed-notion-writes.md) adds confirmed writes,
 offered only while the user's writes switch in `/settings` is on:

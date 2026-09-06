@@ -25,6 +25,7 @@ plan that links back to the earlier record.
 | 0013 | [Runtime metrics and Grafana dashboards](0013-runtime-metrics-and-dashboards.md) | done |
 | 0014 | [Generic Go runtime dashboard and duration histogram buckets](0014-go-runtime-dashboard.md) | done |
 | 0015 | [Resumable Pi sessions across turns](0015-resumable-pi-sessions.md) | done |
+| 0016 | [Reach data sources nested inside Notion pages](0016-notion-nested-databases.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

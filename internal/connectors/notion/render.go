@@ -101,6 +101,28 @@ func renderPage(page Object, content string, truncated bool) string {
 	return strings.TrimRight(builder.String(), "\n")
 }
 
+// renderDataSources lists the data sources of a database so the model can name one, for the
+// database that holds more than a single data source.
+func renderDataSources(database Database) string {
+	var builder strings.Builder
+	fmt.Fprintf(&builder, "Database %s holds %d data sources; query one of them by ID:", databaseTitle(database), len(database.DataSources))
+	for _, source := range database.DataSources {
+		name := strings.TrimSpace(source.Name)
+		if name == "" {
+			name = "(untitled)"
+		}
+		fmt.Fprintf(&builder, "\n- %s\n  id: %s", name, source.ID)
+	}
+	return builder.String()
+}
+
+func databaseTitle(database Database) string {
+	if title := strings.TrimSpace(plainText(database.Title)); title != "" {
+		return title
+	}
+	return "(untitled)"
+}
+
 func renderParent(parent Parent) string {
 	switch parent.Type {
 	case "data_source_id":
@@ -380,9 +402,9 @@ func renderBlock(block Block, index int) string {
 	case "divider":
 		return "---"
 	case "child_page":
-		return "[page] " + content.Title
+		return "[page] " + content.Title + " (page id: " + block.ID + ")"
 	case "child_database":
-		return "[database] " + content.Title
+		return "[database] " + content.Title + " (database id: " + block.ID + ")"
 	case "table_row":
 		cells := make([]string, 0, len(content.Cells))
 		for _, cell := range content.Cells {
