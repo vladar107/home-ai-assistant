@@ -19,6 +19,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/connection"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
@@ -62,11 +63,12 @@ func (r *controlledRuntime) Run(ctx context.Context, request agentruntime.RunReq
 }
 
 type sentMessage struct {
-	chatID   int64
-	replyTo  int64
-	text     string
-	keyboard InlineKeyboard
-	status   int
+	chatID    int64
+	replyTo   int64
+	text      string
+	keyboard  InlineKeyboard
+	status    int
+	messageID int64
 }
 
 type editedMessage struct {
@@ -115,6 +117,8 @@ type harnessOptions struct {
 	notion              *notionsim.Simulator
 	notionChatConnect   bool
 	notionIntakeTimeout time.Duration
+	approvalLifetime    time.Duration
+	approvalSweep       time.Duration
 }
 
 type conversationHarness struct {
@@ -127,6 +131,7 @@ type conversationHarness struct {
 	conversation   *conversation.Service
 	connections    *connection.Service
 	notion         *notion.Service
+	approvals      *approval.Service
 	auth           *codexauth.Simulator
 	profilesDir    string
 	credentialsDir string
@@ -141,6 +146,7 @@ type conversationHarness struct {
 	turns          chan turnOutcome
 	logs           *lockedBuffer
 	mu             sync.Mutex
+	sentCount      int64
 	sendStatuses   []int
 	sendGate       <-chan struct{}
 	commandStatus  int
@@ -233,26 +239,33 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 			t.Fatal(err)
 		}
 	}
+	h.approvals, err = approval.NewService(approval.Config{Lifetime: options.approvalLifetime, SweepInterval: options.approvalSweep}, h.store, h.client, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var notionController NotionController
 	if options.notion != nil {
 		h.credentialsDir = filepath.Join(t.TempDir(), "integrations")
 		h.notion, err = notion.NewService(notion.Config{
 			CredentialsDir: h.credentialsDir, APIBaseURL: options.notion.URL(), ChatConnect: options.notionChatConnect,
 			HTTPClient: options.notion.Client(), IntakeLifetime: options.notionIntakeTimeout,
-		}, h.store, logger)
+		}, h.store, h.approvals, logger)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if err := broker.Register(h.notion); err != nil {
 			t.Fatal(err)
 		}
+		if err := h.approvals.RegisterExecutor(h.notion); err != nil {
+			t.Fatal(err)
+		}
 		notionController = h.notion
 	}
-	h.conversation, err = conversation.NewService(conversation.Config{TurnTimeout: 10 * time.Second}, h.store, runtime, h.client, broker, h.connections, logger, integrationTelemetry{turns: h.turns})
+	h.conversation, err = conversation.NewService(conversation.Config{TurnTimeout: 10 * time.Second, FollowUp: h.approvals}, h.store, runtime, h.client, broker, h.connections, logger, integrationTelemetry{turns: h.turns})
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.service, err = NewService(h.client, identities, h.store, h.conversation, h.connections, notionController, logger, nil)
+	h.service, err = NewService(h.client, identities, h.store, h.conversation, h.connections, notionController, h.approvals, logger, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,12 +324,15 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 		}
 		gate := h.sendGate
 		h.sent = append(h.sent, r.Form.Get("text"))
+		h.sentCount++
+		messageID := sentMessageID(h.sentCount)
 		h.mu.Unlock()
 		select {
-		case h.messages <- sentMessage{chatID: chatID, replyTo: replyTo, text: r.Form.Get("text"), keyboard: h.parseKeyboard(r.Form.Get("reply_markup")), status: status}:
+		case h.messages <- sentMessage{chatID: chatID, replyTo: replyTo, text: r.Form.Get("text"), keyboard: h.parseKeyboard(r.Form.Get("reply_markup")), status: status, messageID: messageID}:
 		case <-r.Context().Done():
 			return
 		}
+		result = Message{MessageID: messageID, Chat: Chat{ID: chatID, Type: ChatTypePrivate}}
 		if gate != nil {
 			select {
 			case <-gate:
@@ -448,6 +464,9 @@ func (h *conversationHarness) start() {
 	if err := h.connections.Start(h.ctx); err != nil {
 		h.t.Fatal(err)
 	}
+	if err := h.approvals.Start(h.ctx); err != nil {
+		h.t.Fatal(err)
+	}
 	if err := h.conversation.Start(h.ctx); err != nil {
 		h.t.Fatal(err)
 	}
@@ -469,6 +488,9 @@ func (h *conversationHarness) stop() {
 		h.t.Error(err)
 	}
 	if err := h.conversation.Shutdown(ctx); err != nil {
+		h.t.Error(err)
+	}
+	if err := h.approvals.Shutdown(ctx); err != nil {
 		h.t.Error(err)
 	}
 	if err := h.connections.Shutdown(ctx); err != nil {
@@ -513,6 +535,9 @@ func textUpdate(id, userID int64, text string) Update {
 
 // settingsMessageID stands for the bot's settings message that a button press refers to.
 func settingsMessageID(updateID int64) int64 { return 5000 + updateID }
+
+// sentMessageID is the ID the Telegram simulator assigns to the n-th message the bot sends.
+func sentMessageID(n int64) int64 { return 9000 + n }
 
 func callbackID(updateID int64) string { return fmt.Sprintf("cb-%d", updateID) }
 

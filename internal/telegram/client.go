@@ -212,6 +212,11 @@ func (c *Client) SendKeyboard(ctx context.Context, chatID, replyToMessageID int6
 }
 
 func (c *Client) send(ctx context.Context, chatID, replyToMessageID int64, text string, keyboard InlineKeyboard) error {
+	_, err := c.sendMessage(ctx, chatID, replyToMessageID, text, keyboard)
+	return err
+}
+
+func (c *Client) sendMessage(ctx context.Context, chatID, replyToMessageID int64, text string, keyboard InlineKeyboard) (Message, error) {
 	params := url.Values{
 		"chat_id": {strconv.FormatInt(chatID, 10)},
 		"text":    {text},
@@ -220,10 +225,30 @@ func (c *Client) send(ctx context.Context, chatID, replyToMessageID int64, text 
 		params.Set("reply_parameters", fmt.Sprintf(`{"message_id":%d,"allow_sending_without_reply":true}`, replyToMessageID))
 	}
 	if err := setKeyboard(params, keyboard); err != nil {
-		return err
+		return Message{}, err
 	}
-	_, err := execute[struct{}](c, ctx, "sendMessage", params)
-	return err
+	return execute[Message](c, ctx, "sendMessage", params)
+}
+
+// SendProposal posts a confirmation request with Confirm and Reject buttons and returns the
+// message ID so the outcome can replace the buttons later.
+func (c *Client) SendProposal(ctx context.Context, chatID int64, text, confirmData, rejectData string) (int64, error) {
+	message, err := c.sendMessage(ctx, chatID, 0, text, InlineKeyboard{{
+		{Text: "Confirm", CallbackData: confirmData},
+		{Text: "Reject", CallbackData: rejectData},
+	}})
+	if err != nil {
+		return 0, err
+	}
+	if message.MessageID <= 0 {
+		return 0, fmt.Errorf("Telegram sendMessage returned no message ID")
+	}
+	return message.MessageID, nil
+}
+
+// EditText replaces a bot message's text and removes its buttons.
+func (c *Client) EditText(ctx context.Context, chatID, messageID int64, text string) error {
+	return c.EditKeyboard(ctx, chatID, messageID, text, nil)
 }
 
 // EditKeyboard replaces the text and buttons of a bot message in place. An edit that changes

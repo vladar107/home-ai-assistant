@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/config"
 	"github.com/vladar107/home-ai-assistant/internal/connection"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
@@ -35,6 +36,7 @@ type App struct {
 	connections  *connection.Service
 	conversation *conversation.Service
 	tools        *tools.Broker
+	approvals    *approval.Service
 	notion       *notion.Service
 	telegram     *telegram.Service
 	telemetry    *observability.Telemetry
@@ -284,8 +286,12 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("initialize tool broker: %w", err)
 		}
+		approvals, err := approval.NewService(approval.Config{}, a.store, client, a.logger)
+		if err != nil {
+			return fmt.Errorf("initialize approvals: %w", err)
+		}
 		conversationService, err := conversation.NewService(
-			conversation.Config{TurnTimeout: a.cfg.Conversation.TurnTimeout},
+			conversation.Config{TurnTimeout: a.cfg.Conversation.TurnTimeout, FollowUp: approvals},
 			a.store,
 			runtime,
 			client,
@@ -300,12 +306,13 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		a.connections = connections
 		a.conversation = conversationService
 		a.tools = broker
+		a.approvals = approvals
 		if a.cfg.Notion.Enabled {
 			notionService, err := notion.NewService(notion.Config{
 				CredentialsDir: filepath.Join(a.cfg.DataDir, "integrations"),
 				APIBaseURL:     a.cfg.Notion.APIBaseURL,
 				ChatConnect:    a.cfg.Notion.ChatConnect,
-			}, a.store, a.logger)
+			}, a.store, approvals, a.logger)
 			if err != nil {
 				return fmt.Errorf("initialize Notion connector: %w", err)
 			}
@@ -313,6 +320,9 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 				return err
 			}
 			if err := broker.Register(notionService); err != nil {
+				return err
+			}
+			if err := approvals.RegisterExecutor(notionService); err != nil {
 				return err
 			}
 			a.notion = notionService
@@ -334,14 +344,16 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	var conversationController telegram.ConversationController
 	var connectionController telegram.ConnectionController
 	var notionController telegram.NotionController
+	var approvalController telegram.ApprovalController
 	if a.conversation != nil {
 		conversationController = a.conversation
 		connectionController = a.connections
+		approvalController = a.approvals
 	}
 	if a.notion != nil {
 		notionController = a.notion
 	}
-	service, err := telegram.NewService(client, identities, a.store, conversationController, connectionController, notionController, a.logger, a.telemetry)
+	service, err := telegram.NewService(client, identities, a.store, conversationController, connectionController, notionController, approvalController, a.logger, a.telemetry)
 	if err != nil {
 		return fmt.Errorf("initialize Telegram service: %w", err)
 	}
@@ -356,8 +368,11 @@ func (a *App) startConversation(ctx context.Context) error {
 	if err := a.connections.Start(ctx); err != nil {
 		return fmt.Errorf("start model connections: %w", err)
 	}
+	if err := a.approvals.Start(ctx); err != nil {
+		return errors.Join(fmt.Errorf("start approvals: %w", err), a.connections.Shutdown(ctx))
+	}
 	if err := a.conversation.Start(ctx); err != nil {
-		return errors.Join(fmt.Errorf("start conversation service: %w", err), a.connections.Shutdown(ctx))
+		return errors.Join(fmt.Errorf("start conversation service: %w", err), a.approvals.Shutdown(ctx), a.connections.Shutdown(ctx))
 	}
 	return nil
 }
@@ -369,6 +384,9 @@ func (a *App) shutdownConversation(ctx context.Context) error {
 	var errs []error
 	if err := a.conversation.Shutdown(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("shutdown conversation service: %w", err))
+	}
+	if err := a.approvals.Shutdown(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("shutdown approvals: %w", err))
 	}
 	if err := a.connections.Shutdown(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("shutdown model connections: %w", err))

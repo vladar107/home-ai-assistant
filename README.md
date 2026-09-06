@@ -215,9 +215,18 @@ records the workspace, bot name, and token kind in SQLite. With
 button; the user's next message is consumed as the token, deleted from the chat
 before verification, and never sent to the model. Any message that looks like
 a Notion token is deleted and answered with guidance instead of reaching the
-model. The model receives read tools only: search shared pages and data
-sources, read a page, and query a data source. Notion content read this way is
-sent to that user's own model subscription, which `/privacy` states.
+model. The model receives read tools: search shared pages and data sources,
+read a page, and query a data source. Notion content read this way is sent to
+that user's own model subscription, which `/privacy` states.
+
+Writes are off until the user turns them on from `/settings`. With writes on,
+the model may propose to create a page, set page properties, or append
+paragraphs, but nothing reaches Notion during the turn: the core records the
+exact proposal, sends it after the reply with Confirm and Reject buttons, and
+executes a confirmed proposal exactly once with that user's token before
+replacing the buttons with the outcome. A proposal expires after ten minutes,
+is replaced by a newer one, does not survive a restart, and can only be
+confirmed by the user it belongs to.
 
 ## Architecture at a glance
 

@@ -87,3 +87,28 @@ func (s *Store) DeleteIntegrationConnection(ctx context.Context, principalID, na
 	}
 	return deleted > 0, nil
 }
+
+func (s *Store) SetIntegrationWrites(ctx context.Context, principalID, name string, enabled bool) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("set integration writes: SQLite store is not open")
+	}
+	value := 0
+	if enabled {
+		value = 1
+	}
+	result, err := s.db.ExecContext(
+		ctx,
+		`UPDATE integration_connections SET writes_enabled = ? WHERE principal_id = ? AND integration = ?`,
+		value,
+		principalID,
+		name,
+	)
+	if err != nil {
+		return false, fmt.Errorf("set integration writes: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("read integration writes update count: %w", err)
+	}
+	return changed == 1, nil
+}

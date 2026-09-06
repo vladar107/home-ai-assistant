@@ -303,3 +303,23 @@ func wait(ctx context.Context, duration time.Duration) bool {
 		return false
 	}
 }
+
+// CreatePage creates one page from a Notion create-page body. A failure after the request was
+// sent is ambiguous, so callers never retry it.
+func (c *Client) CreatePage(ctx context.Context, token string, body map[string]any) (Object, error) {
+	var page Object
+	err := c.do(ctx, token, http.MethodPost, "/v1/pages", body, &page)
+	return page, err
+}
+
+func (c *Client) UpdatePage(ctx context.Context, token, pageID string, properties map[string]json.RawMessage) (Object, error) {
+	var page Object
+	err := c.do(ctx, token, http.MethodPatch, "/v1/pages/"+url.PathEscape(pageID), map[string]any{"properties": properties}, &page)
+	return page, err
+}
+
+func (c *Client) AppendBlockChildren(ctx context.Context, token, blockID string, children []map[string]any) (List[Block], error) {
+	var result List[Block]
+	err := c.do(ctx, token, http.MethodPatch, "/v1/blocks/"+url.PathEscape(blockID)+"/children", map[string]any{"children": children}, &result)
+	return result, err
+}

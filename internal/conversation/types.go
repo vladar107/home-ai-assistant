@@ -90,6 +90,13 @@ type Telemetry interface {
 	StartConversationTurn(context.Context) (context.Context, func(string, string))
 }
 
+// FollowUp runs after a turn's reply has been delivered, for work that must follow the reply
+// such as a pending confirmation request; failures are logged, never retried with the reply.
+type FollowUp interface {
+	AfterDelivery(ctx context.Context, principalID string, chatID int64) error
+}
+
 type Config struct {
 	TurnTimeout time.Duration
+	FollowUp    FollowUp
 }

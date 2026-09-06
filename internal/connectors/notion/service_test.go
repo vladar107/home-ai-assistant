@@ -69,7 +69,7 @@ func newFixture(t *testing.T) *fixture {
 	sim := notionsim.New(t)
 	sim.AddToken(token, notionsim.Token{Kind: "internal", BotName: "Connector", WorkspaceID: "ws", WorkspaceName: "Workspace"})
 	logs := &lockedBuffer{}
-	service, err := notion.NewService(notion.Config{CredentialsDir: credentialsDir, APIBaseURL: sim.URL(), HTTPClient: sim.Client()}, store, slog.New(slog.NewTextHandler(logs, nil)))
+	service, err := notion.NewService(notion.Config{CredentialsDir: credentialsDir, APIBaseURL: sim.URL(), HTTPClient: sim.Client()}, store, nil, slog.New(slog.NewTextHandler(logs, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}

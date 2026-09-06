@@ -68,6 +68,7 @@ type Simulator struct {
 	dsShares    map[string][]string
 	requests    []Request
 	failures    []failure
+	created     int
 }
 
 func New(t *testing.T) *Simulator {
@@ -176,6 +177,22 @@ func (s *Simulator) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.blockChildren(w, page, r.URL.Query())
+	case r.Method == http.MethodPost && r.URL.Path == "/v1/pages":
+		s.createPage(w, token, body)
+	case r.Method == http.MethodPatch && len(segments) == 3 && segments[1] == "pages":
+		page := s.sharedPage(token, segments[2])
+		if page == nil {
+			writeError(w, http.StatusNotFound, "object_not_found", "Could not find page. synthetic-notion-error-text")
+			return
+		}
+		s.updatePage(w, page, body)
+	case r.Method == http.MethodPatch && len(segments) == 4 && segments[1] == "blocks" && segments[3] == "children":
+		page := s.sharedPage(token, segments[2])
+		if page == nil {
+			writeError(w, http.StatusNotFound, "object_not_found", "Could not find block. synthetic-notion-error-text")
+			return
+		}
+		s.appendBlocks(w, page, body)
 	case r.Method == http.MethodPost && len(segments) == 4 && segments[1] == "data_sources" && segments[3] == "query":
 		dataSource := s.sharedDataSource(token, segments[2])
 		if dataSource == nil {
@@ -282,6 +299,164 @@ func (s *Simulator) query(w http.ResponseWriter, token string, dataSource *DataS
 		results = append(results, pageObject(page))
 	}
 	writeList(w, results, body)
+}
+
+// Pages returns a snapshot of every page the simulator holds, in creation order.
+func (s *Simulator) Pages() []Page {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pages := make([]Page, 0, len(s.pages))
+	for _, page := range s.pages {
+		pages = append(pages, *page)
+	}
+	return pages
+}
+
+func (s *Simulator) createPage(w http.ResponseWriter, token string, body map[string]any) {
+	parent, _ := body["parent"].(map[string]any)
+	properties, _ := body["properties"].(map[string]any)
+	if parent == nil || properties == nil {
+		writeError(w, http.StatusBadRequest, "validation_error", "body.parent and body.properties are required. synthetic-notion-error-text")
+		return
+	}
+	page := &Page{Properties: map[string]any{}, LastEdited: "2026-09-06T12:00:00.000Z"}
+	if dataSourceID, _ := parent["data_source_id"].(string); dataSourceID != "" {
+		if s.sharedDataSource(token, dataSourceID) == nil {
+			writeError(w, http.StatusNotFound, "object_not_found", "Could not find data source. synthetic-notion-error-text")
+			return
+		}
+		page.DataSourceID = dataSourceID
+	} else if pageID, _ := parent["page_id"].(string); pageID != "" {
+		if s.sharedPage(token, pageID) == nil {
+			writeError(w, http.StatusNotFound, "object_not_found", "Could not find page. synthetic-notion-error-text")
+			return
+		}
+	} else {
+		writeError(w, http.StatusBadRequest, "validation_error", "body.parent must name a page or data source. synthetic-notion-error-text")
+		return
+	}
+	for name, value := range properties {
+		property, ok := value.(map[string]any)
+		if !ok {
+			writeError(w, http.StatusBadRequest, "validation_error", "body.properties."+name+" must be an object. synthetic-notion-error-text")
+			return
+		}
+		if parts, isTitle := property["title"].([]any); isTitle {
+			page.Title = inputTextPlain(parts)
+			continue
+		}
+		page.Properties[name] = normalizeInput(name, property)
+	}
+	if children, _ := body["children"].([]any); len(children) > 0 {
+		for _, child := range children {
+			if block, ok := child.(map[string]any); ok {
+				page.Blocks = append(page.Blocks, block)
+			}
+		}
+	}
+	s.mu.Lock()
+	s.created++
+	page.ID = fmt.Sprintf("page-created-%d", s.created)
+	page.URL = "https://notion.so/" + page.ID
+	s.pages = append(s.pages, page)
+	s.pageShares[page.ID] = append(s.pageShares[page.ID], token)
+	s.mu.Unlock()
+	writeJSON(w, pageObject(page))
+}
+
+func (s *Simulator) updatePage(w http.ResponseWriter, page *Page, body map[string]any) {
+	properties, _ := body["properties"].(map[string]any)
+	if properties == nil {
+		writeError(w, http.StatusBadRequest, "validation_error", "body.properties is required. synthetic-notion-error-text")
+		return
+	}
+	s.mu.Lock()
+	for name, value := range properties {
+		property, ok := value.(map[string]any)
+		if !ok {
+			s.mu.Unlock()
+			writeError(w, http.StatusBadRequest, "validation_error", "body.properties."+name+" must be an object. synthetic-notion-error-text")
+			return
+		}
+		if parts, isTitle := property["title"].([]any); isTitle {
+			page.Title = inputTextPlain(parts)
+			continue
+		}
+		if page.Properties == nil {
+			page.Properties = map[string]any{}
+		}
+		page.Properties[name] = normalizeInput(name, property)
+	}
+	page.LastEdited = "2026-09-06T12:30:00.000Z"
+	s.mu.Unlock()
+	writeJSON(w, pageObject(page))
+}
+
+func (s *Simulator) appendBlocks(w http.ResponseWriter, page *Page, body map[string]any) {
+	children, _ := body["children"].([]any)
+	if len(children) == 0 || len(children) > 100 {
+		writeError(w, http.StatusBadRequest, "validation_error", "body.children must hold 1 to 100 blocks. synthetic-notion-error-text")
+		return
+	}
+	var results []any
+	s.mu.Lock()
+	for _, child := range children {
+		block, ok := child.(map[string]any)
+		if !ok {
+			s.mu.Unlock()
+			writeError(w, http.StatusBadRequest, "validation_error", "body.children items must be blocks. synthetic-notion-error-text")
+			return
+		}
+		page.Blocks = append(page.Blocks, block)
+		object := map[string]any{"object": "block", "id": fmt.Sprintf("%s-block-%d", page.ID, len(page.Blocks)-1), "has_children": false}
+		for key, value := range block {
+			object[key] = value
+		}
+		results = append(results, object)
+	}
+	s.mu.Unlock()
+	writeList(w, results, nil)
+}
+
+// normalizeInput turns a property value input (which may omit "type") into the response shape.
+func normalizeInput(name string, property map[string]any) map[string]any {
+	normalized := map[string]any{"id": "prop-" + name}
+	for key, value := range property {
+		if key == "type" || key == "id" {
+			continue
+		}
+		normalized["type"] = key
+		if parts, ok := value.([]any); ok && (key == "rich_text" || key == "title") {
+			normalized[key] = inputRichText(parts)
+			continue
+		}
+		normalized[key] = value
+	}
+	return normalized
+}
+
+func inputRichText(parts []any) []any {
+	converted := make([]any, 0, len(parts))
+	for _, part := range parts {
+		item, _ := part.(map[string]any)
+		text, _ := item["text"].(map[string]any)
+		content, _ := text["content"].(string)
+		if content == "" {
+			content, _ = item["plain_text"].(string)
+		}
+		converted = append(converted, richText(content))
+	}
+	return converted
+}
+
+func inputTextPlain(parts []any) string {
+	var builder strings.Builder
+	for _, part := range inputRichText(parts) {
+		item, _ := part.(map[string]any)
+		text, _ := item["plain_text"].(string)
+		builder.WriteString(text)
+	}
+	return builder.String()
 }
 
 func (s *Simulator) blockChildren(w http.ResponseWriter, page *Page, query url.Values) {

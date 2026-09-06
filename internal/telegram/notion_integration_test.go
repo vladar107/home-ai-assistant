@@ -122,7 +122,7 @@ func TestNotionOperatorTokenIsAdoptedAndDisconnected(t *testing.T) {
 	h.start()
 
 	settings := h.requestSettings(1, 101)
-	if !strings.Contains(settings.text, NotionConnectedLine(aliceStatus)) || !slices.Equal(buttonData(settings.keyboard), []string{"model:disconnect", "notion:disconnect"}) {
+	if !strings.Contains(settings.text, NotionConnectedLine(aliceStatus)) || !slices.Equal(buttonData(settings.keyboard), []string{"model:disconnect", "notion:writes-on", "notion:disconnect"}) {
 		t.Fatalf("settings after adoption = %+v", settings)
 	}
 	record, found, err := h.store.LoadIntegrationConnection(h.ctx, "alice", "notion")

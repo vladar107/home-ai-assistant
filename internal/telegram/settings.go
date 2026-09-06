@@ -145,6 +145,11 @@ const (
 	notionSectionPrefix    = "notion"
 	notionConnectAction    = "connect"
 	notionDisconnectAction = "disconnect"
+	notionWritesOnAction   = "writes-on"
+	notionWritesOffAction  = "writes-off"
+
+	NotionWritesOnReply  = "Notion writes are on. The model may propose to create or update pages; nothing is written until you confirm the exact proposal."
+	NotionWritesOffReply = "Notion writes are off. The model can only read your Notion content."
 
 	NotionNotConnectedLine    = "Notion: not connected."
 	NotionOperatorLine        = "Notion: not connected. Ask the operator to install your token with scripts/notion-set-token."
@@ -207,7 +212,11 @@ func (n notionSection) render(ctx context.Context, principalID string) (settings
 	case status.Problem == notion.ProblemUnavailable:
 		return settingsView{lines: []string{NotionUnavailableLine}, buttons: disconnect}, nil
 	case status.Connected:
-		return settingsView{lines: []string{NotionConnectedLine(status)}, buttons: disconnect}, nil
+		writes := InlineButton{Text: "Turn Notion writes on", CallbackData: notionSectionPrefix + ":" + notionWritesOnAction}
+		if status.WritesEnabled {
+			writes = InlineButton{Text: "Turn Notion writes off", CallbackData: notionSectionPrefix + ":" + notionWritesOffAction}
+		}
+		return settingsView{lines: []string{NotionConnectedLine(status)}, buttons: append([]InlineButton{writes}, disconnect...)}, nil
 	case n.notion.ChatConnectEnabled():
 		return settingsView{
 			lines:   []string{NotionNotConnectedLine},
@@ -232,6 +241,20 @@ func (n notionSection) act(ctx context.Context, principalID string, _ int64, act
 			return "", err
 		}
 		return "", nil
+	case notionWritesOnAction, notionWritesOffAction:
+		enabled := action == notionWritesOnAction
+		status, err := n.notion.SetWrites(ctx, principalID, enabled)
+		if err != nil {
+			return "", err
+		}
+		if !status.Connected {
+			return "", nil
+		}
+		n.telemetry.ContextLogger(ctx, n.logger).InfoContext(ctx, "notion.writes.changed", "principal_id", principalID, "enabled", enabled)
+		if enabled {
+			return NotionWritesOnReply, nil
+		}
+		return NotionWritesOffReply, nil
 	default:
 		return "", errUnknownSettingsAction
 	}

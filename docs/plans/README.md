@@ -20,7 +20,7 @@ plan that links back to the earlier record.
 | 0008 | [NAS deployment of monitoring and the application](0008-nas-deployment.md) | done |
 | 0009 | [Model tool calls through a core broker and Pi bridge](0009-model-tool-calls-through-pi.md) | done |
 | 0010 | [Per-user Notion workspace connection](0010-notion-workspace-connection.md) | done |
-| 0011 | [Confirmed Notion writes through core approvals](0011-confirmed-notion-writes.md) | proposed |
+| 0011 | [Confirmed Notion writes through core approvals](0011-confirmed-notion-writes.md) | done |
 | 0012 | [Pull the application image from GHCR by digest](0012-ghcr-image-deployment.md) | done |
 | 0013 | [Runtime metrics and Grafana dashboards](0013-runtime-metrics-and-dashboards.md) | done |
 | 0014 | [Generic Go runtime dashboard and duration histogram buckets](0014-go-runtime-dashboard.md) | done |

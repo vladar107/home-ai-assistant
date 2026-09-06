@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/connection"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
@@ -58,9 +59,17 @@ type NotionController interface {
 	Status(context.Context, string) (notion.Status, error)
 	Connect(context.Context, string, string) (notion.Status, error)
 	Disconnect(context.Context, string) (bool, error)
+	SetWrites(context.Context, string, bool) (notion.Status, error)
 	BeginIntake(string)
 	ConsumeIntake(string) bool
 	ChatConnectEnabled() bool
+}
+
+// ApprovalController resolves Confirm and Reject presses on proposal messages; nil ignores them.
+type ApprovalController interface {
+	// Press returns the text the proposal message should show, or false when the press is not
+	// the pressing principal's own proposal.
+	Press(ctx context.Context, principalID, action, approvalID string) (string, bool, error)
 }
 
 type identityResolver interface {
@@ -80,6 +89,7 @@ type Service struct {
 	conversation ConversationController
 	connections  ConnectionController
 	notion       NotionController
+	approvals    ApprovalController
 	sections     []settingsSection
 	interceptors []messageInterceptor
 	logger       *slog.Logger
@@ -98,6 +108,7 @@ func NewService(
 	conversation ConversationController,
 	connections ConnectionController,
 	notion NotionController,
+	approvals ApprovalController,
 	logger *slog.Logger,
 	telemetry Telemetry,
 ) (*Service, error) {
@@ -121,6 +132,7 @@ func NewService(
 		conversation: conversation,
 		connections:  connections,
 		notion:       notion,
+		approvals:    approvals,
 		logger:       logger,
 		telemetry:    telemetryOrNoop(telemetry),
 	}
@@ -499,6 +511,10 @@ func (s *Service) processCallback(ctx context.Context, callback *CallbackQuery) 
 		return processingResult{}, "answer_callback", err
 	}
 
+	if action, approvalID, isApproval := approval.ParseCallback(callback.Data); isApproval {
+		return s.processApprovalPress(ctx, callback, principalID, action, approvalID)
+	}
+
 	result := processingResult{event: "telegram.callback.handled", principalID: principalID, command: "settings"}
 	followUp := ""
 	section, action, known := settingsSectionFor(s.sections, callback.Data)
@@ -528,6 +544,36 @@ func (s *Service) processCallback(ctx context.Context, callback *CallbackQuery) 
 	}
 	if err == nil && followUp != "" {
 		err = s.client.SendReply(ctx, chatID, 0, followUp)
+	}
+	if err != nil {
+		if isPermanentAPIError(err) {
+			result.event, result.reason, result.err = "telegram.callback.undeliverable", "send_rejected", err
+			return result, "", nil
+		}
+		return processingResult{}, "send_message", err
+	}
+	return result, "", nil
+}
+
+// processApprovalPress resolves a Confirm or Reject press and replaces the proposal message with
+// its outcome; a press on another principal's proposal or without an approval service is ignored.
+func (s *Service) processApprovalPress(ctx context.Context, callback *CallbackQuery, principalID, action, approvalID string) (processingResult, string, error) {
+	result := processingResult{event: "telegram.callback.handled", principalID: principalID, command: "approval." + action}
+	if s.approvals == nil {
+		result.event, result.reason = "telegram.update.ignored", "unknown_action"
+		return result, "", nil
+	}
+	text, owned, err := s.approvals.Press(ctx, principalID, action, approvalID)
+	if err != nil {
+		return processingResult{}, "approval_press", err
+	}
+	if !owned {
+		result.event, result.reason = "telegram.update.ignored", "foreign_approval"
+		return result, "", nil
+	}
+	err = s.client.EditKeyboard(ctx, callback.Message.Chat.ID, callback.Message.MessageID, text, nil)
+	if err != nil && isPermanentAPIError(err) {
+		err = s.client.SendReply(ctx, callback.Message.Chat.ID, 0, text)
 	}
 	if err != nil {
 		if isPermanentAPIError(err) {

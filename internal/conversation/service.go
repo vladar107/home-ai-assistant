@@ -443,6 +443,11 @@ func (s *Service) deliver(ctx context.Context, request Request) error {
 		_ = s.repository.ReleaseConversationDelivery(ctx, request.ID)
 		return err
 	}
+	if s.config.FollowUp != nil {
+		if err := s.config.FollowUp.AfterDelivery(deliveryCtx, request.PrincipalID, request.ChatID); err != nil && ctx.Err() == nil {
+			s.logWorkerError(ctx, request.PrincipalID, "follow_up")
+		}
+	}
 	return nil
 }
 

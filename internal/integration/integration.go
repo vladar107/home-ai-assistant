@@ -31,4 +31,7 @@ type Repository interface {
 	SaveIntegrationConnection(context.Context, Connection) error
 	LoadIntegrationConnection(ctx context.Context, principalID, integration string) (Connection, bool, error)
 	DeleteIntegrationConnection(ctx context.Context, principalID, integration string) (bool, error)
+	// SetIntegrationWrites switches the write grant of an existing connection and reports
+	// whether a connection existed.
+	SetIntegrationWrites(ctx context.Context, principalID, integration string, enabled bool) (bool, error)
 }

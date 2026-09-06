@@ -217,8 +217,12 @@ pasted token followed by Enter and Ctrl-D as well. The file is written to
    the tools and the answers match the shared content.
 3. With `HOME_AGENT_NOTION_CHAT_CONNECT=true`, press Connect Notion, paste a
    token, and confirm the message disappears and the connection is reported.
-4. Disconnect from `/settings` and confirm the file and the row are gone.
-5. Confirm the token appears in neither the logs nor the database.
+4. Turn Notion writes on in `/settings`, ask the model to add a task to a
+   shared data source, confirm the proposal, and verify the page in Notion;
+   reject a second proposal and verify nothing changed; turn writes off and
+   confirm the model no longer offers to write.
+5. Disconnect from `/settings` and confirm the file and the row are gone.
+6. Confirm the token appears in neither the logs nor the database.
 
 ## 4. Configure passwordless SSH safely
 

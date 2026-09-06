@@ -232,6 +232,20 @@ tools offered to the model through the core broker:
 - `notion_query_data_source`: entries of one data source with Notion filter
   and sorts objects passed through for Notion to validate
 
+[Plan 0011](plans/0011-confirmed-notion-writes.md) adds confirmed writes,
+offered only while the user's writes switch in `/settings` is on:
+
+- `notion_create_page`: a page under a shared page or in a data source, with
+  a title, property values, and body paragraphs
+- `notion_update_page`: property values on a shared page
+- `notion_append_blocks`: paragraphs appended to a shared page
+
+A write tool only records a proposal through the core approval service; the
+bot shows the exact proposal after the reply, and the same user confirms or
+rejects it. A confirmed proposal is executed once with that user's token;
+creates and appends are never retried after an ambiguous failure, updates are
+retried once on a transient error.
+
 Every request carries a ten-second deadline, one retry on `429` or `529`
 honouring `Retry-After` up to five seconds, a page size capped at 25, and
 normalized error classes (unauthorized, restricted, not shared, rate limited,
@@ -262,8 +276,8 @@ The pasted message is deleted before verification and never reaches the model.
 Notion content read through the tools reaches the user's own model
 subscription; this is inherent to the feature and stated in the connect
 instructions and `/privacy`. Pages are untrusted content: the broker labels
-results as data, and only read tools exist until
-[plan 0011](plans/0011-confirmed-notion-writes.md) adds confirmed writes.
+results as data, and every write needs the user's confirmation of the exact
+proposal.
 
 Do not attempt to mirror the whole workspace. The connector does not infer
 domain status transitions, mentee identity, or publication rules; those belong

@@ -61,6 +61,7 @@ type Service struct {
 	client         *Client
 	credentials    *integration.Credentials
 	repository     integration.Repository
+	proposer       Proposer
 	chatConnect    bool
 	intakeLifetime time.Duration
 	logger         *slog.Logger
@@ -73,7 +74,8 @@ type Service struct {
 
 var _ module.Module = (*Service)(nil)
 
-func NewService(cfg Config, repository integration.Repository, logger *slog.Logger) (*Service, error) {
+// NewService builds the connector; a nil proposer leaves the write tools out entirely.
+func NewService(cfg Config, repository integration.Repository, proposer Proposer, logger *slog.Logger) (*Service, error) {
 	if repository == nil {
 		return nil, fmt.Errorf("Notion repository is required")
 	}
@@ -96,6 +98,7 @@ func NewService(cfg Config, repository integration.Repository, logger *slog.Logg
 		client:         client,
 		credentials:    credentials,
 		repository:     repository,
+		proposer:       proposer,
 		chatConnect:    cfg.ChatConnect,
 		intakeLifetime: lifetime,
 		logger:         logger,
@@ -242,6 +245,19 @@ func (s *Service) Disconnect(ctx context.Context, principalID string) (bool, err
 		s.logger.InfoContext(ctx, "notion.connection.disconnected", "principal_id", principalID)
 	}
 	return removed || deleted, nil
+}
+
+// SetWrites switches the principal's write grant; it reports a disconnected status when there is
+// no connection to switch.
+func (s *Service) SetWrites(ctx context.Context, principalID string, enabled bool) (Status, error) {
+	changed, err := s.repository.SetIntegrationWrites(ctx, principalID, Integration, enabled)
+	if err != nil {
+		return Status{}, err
+	}
+	if !changed {
+		return Status{}, nil
+	}
+	return s.Status(ctx, principalID)
 }
 
 // BeginIntake marks the principal's next chat message as a token, replacing any pending intake.

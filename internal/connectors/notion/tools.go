@@ -58,7 +58,8 @@ var readDefinitions = []tools.Definition{
 	},
 }
 
-// Contribute offers the read tools to a principal whose connection is present and adopted.
+// Contribute offers the read tools to a principal whose connection is present and adopted, and
+// the write tools while that principal's writes switch is on.
 func (s *Service) Contribute(ctx context.Context, principalID string) (tools.Contribution, error) {
 	status, err := s.Status(ctx, principalID)
 	if err != nil {
@@ -67,7 +68,12 @@ func (s *Service) Contribute(ctx context.Context, principalID string) (tools.Con
 	if !status.Connected {
 		return tools.Contribution{}, nil
 	}
-	return tools.Contribution{Guidance: readGuidance, Definitions: readDefinitions}, nil
+	contribution := tools.Contribution{Guidance: readGuidance, Definitions: append([]tools.Definition(nil), readDefinitions...)}
+	if status.WritesEnabled && s.proposer != nil {
+		contribution.Guidance += "\n" + writeGuidance
+		contribution.Definitions = append(contribution.Definitions, writeDefinitions...)
+	}
+	return contribution, nil
 }
 
 // Execute runs one read tool with the principal's own token, read fresh from the credential file
@@ -80,7 +86,12 @@ func (s *Service) Execute(ctx context.Context, principalID string, call tools.Ca
 	if !connected {
 		return tools.Result{Text: NotConnectedText, IsError: true}, nil
 	}
-	text, err := s.run(ctx, token, call)
+	var text string
+	if isWriteTool(call.Name) {
+		text, err = s.propose(ctx, principalID, token, call)
+	} else {
+		text, err = s.run(ctx, token, call)
+	}
 	if err != nil {
 		var notionErr *Error
 		if errors.As(err, &notionErr) {
