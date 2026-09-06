@@ -426,9 +426,16 @@ Verify:
    sources.
 2. **Dashboards → Home Agent → Home Agent Overview** shows the running metric
    and Telegram activity after a `/status` command.
-3. **Explore → Tempo** can find recent traces for `service.name=home-agent`.
-4. NAS container logs contain JSON events with matching trace and span IDs but
+3. **Dashboards → Home Agent → Home Agent Runtime** shows goroutines, container
+   memory against the 1 GiB limit, and the SQLite connection pool.
+4. **Explore → Tempo** can find recent traces for `service.name=home-agent`.
+5. NAS container logs contain JSON events with matching trace and span IDs but
    no Telegram text, username, numeric ID, or token.
+
+Both dashboards are provisioned from files. Grafana rereads
+`deploy/grafana/dashboards` every 30 seconds, so a dashboard change appears
+within half a minute of a monitoring deploy without a Grafana restart. The
+dashboards are read-only in the interface; edit the JSON and deploy again.
 
 Grafana does not include Prometheus, Tempo, Loki, or Alloy under the hood; the
 Compose file operates each as a separate, resource-bounded service. Loki and a

@@ -208,6 +208,11 @@ availability.
 
 ## Dashboards
 
+Both dashboards are provisioned from `deploy/grafana/dashboards`; Grafana
+rereads the directory every 30 seconds and keeps the dashboards read-only in
+the interface, so a change is made in the JSON and deployed, never saved from
+the browser.
+
 ### Home Agent overview
 
 - Availability
@@ -216,6 +221,16 @@ availability.
 - Runtime restarts
 - Integration health
 - Pending jobs and outbox depth
+
+### Home Agent runtime
+
+- Process and container CPU against the one-core Compose limit
+- Container memory against the 1 GiB limit, and process resident set size
+- Go memory by class, the collection goal, allocation rate, and GC cycles
+- Goroutines, operating system threads, and open file descriptors
+- SQLite connection pool usage, maximum, and connection waits
+- Container PIDs against the limit
+- Uptime and the deployed commit
 
 ### Integrations
 

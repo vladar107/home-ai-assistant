@@ -30,6 +30,7 @@ type Telemetry struct {
 	tracerProvider *sdktrace.TracerProvider
 	meterProvider  *sdkmetric.MeterProvider
 	tracer         trace.Tracer
+	meter          metric.Meter
 
 	applicationLifecycle         metric.Int64Counter
 	applicationLifecycleDuration metric.Float64Histogram
@@ -121,7 +122,7 @@ func Noop() *Telemetry {
 }
 
 func newTelemetry(tracer trace.Tracer, meter metric.Meter) (*Telemetry, error) {
-	t := &Telemetry{tracer: tracer}
+	t := &Telemetry{tracer: tracer, meter: meter}
 	var err error
 	if t.applicationLifecycle, err = meter.Int64Counter(
 		"home_agent.application.lifecycle",
@@ -220,6 +221,9 @@ func newTelemetry(tracer trace.Tracer, meter metric.Meter) (*Telemetry, error) {
 		metric.WithUnit("s"),
 	); err != nil {
 		return nil, fmt.Errorf("create store operation duration histogram: %w", err)
+	}
+	if err := registerRuntimeMetrics(meter); err != nil {
+		return nil, err
 	}
 
 	return t, nil

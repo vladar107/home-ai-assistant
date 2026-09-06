@@ -2,8 +2,29 @@
   "annotations": {"list": []},
   "editable": false,
   "graphTooltip": 1,
-  "links": [],
+  "links": [
+    {
+      "asDropdown": true,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": ["home-agent"],
+      "targetBlank": false,
+      "title": "Home Agent dashboards",
+      "tooltip": "",
+      "type": "dashboards",
+      "url": ""
+    }
+  ],
   "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+      "id": 8,
+      "panels": [],
+      "title": "Service",
+      "type": "row"
+    },
     {
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "fieldConfig": {
@@ -18,7 +39,7 @@
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0},
+      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 1},
       "id": 1,
       "options": {
         "colorMode": "background",
@@ -40,8 +61,152 @@
     },
     {
       "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
-      "gridPos": {"h": 8, "w": 9, "x": 6, "y": 0},
+      "description": "Git commit of the deployed image, read from the service_version datapoint label that Alloy copies from the resource.",
+      "fieldConfig": {"defaults": {"noValue": "unknown"}, "overrides": []},
+      "gridPos": {"h": 4, "w": 4, "x": 4, "y": 1},
+      "id": 9,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "/^service_version$/", "values": false},
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "home_agent_application_running{service_name=\"home-agent\"}",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{service_version}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Version",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Seconds since the application process started. It returns to zero on every container restart.",
+      "fieldConfig": {"defaults": {"noValue": "0", "unit": "dtdurations"}, "overrides": []},
+      "gridPos": {"h": 4, "w": 4, "x": 8, "y": 1},
+      "id": 10,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "reduceOptions": {"calcs": ["lastNotNull"], "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "process_uptime{service_name=\"home-agent\"}",
+          "legendFormat": "uptime",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Uptime",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Conversation turns completed over the preceding 24 hours, independent of the dashboard time range.",
+      "fieldConfig": {"defaults": {"noValue": "0", "unit": "short"}, "overrides": []},
+      "gridPos": {"h": 4, "w": 4, "x": 12, "y": 1},
+      "id": 11,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "area",
+        "reduceOptions": {"calcs": ["lastNotNull"], "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(increase(home_agent_conversation_turns{service_name=\"home-agent\"}[24h]))",
+          "legendFormat": "turns",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Turns last 24h",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Conversation turns over the preceding 24 hours that did not end successfully.",
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 1}
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 4, "w": 4, "x": 16, "y": 1},
+      "id": 12,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {"calcs": ["lastNotNull"], "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(increase(home_agent_conversation_turns{service_name=\"home-agent\", home_agent_outcome=\"error\"}[24h]))",
+          "legendFormat": "errors",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Turn errors last 24h",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Telegram updates processed over the preceding 24 hours, independent of the dashboard time range.",
+      "fieldConfig": {"defaults": {"noValue": "0", "unit": "short"}, "overrides": []},
+      "gridPos": {"h": 4, "w": 4, "x": 20, "y": 1},
+      "id": 13,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "area",
+        "reduceOptions": {"calcs": ["lastNotNull"], "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(increase(home_agent_telegram_updates{service_name=\"home-agent\"}[24h]))",
+          "legendFormat": "updates",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Telegram updates last 24h",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5},
+      "id": 14,
+      "panels": [],
+      "title": "Telegram",
+      "type": "row"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Updates per second by outcome. Handled updates produced a reply, ignored updates were deliberately dropped, undeliverable updates could not be answered, and failed updates aborted the poll cycle.",
+      "fieldConfig": {"defaults": {"noValue": "0", "unit": "ops"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
       "id": 2,
       "options": {
         "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true},
@@ -50,19 +215,41 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by (home_agent_outcome) (rate(home_agent_telegram_updates{service_name=\"home-agent\"}[5m]))",
+          "expr": "sum by (home_agent_outcome) (rate(home_agent_telegram_updates{service_name=\"home-agent\"}[$__rate_interval]))",
           "legendFormat": "{{home_agent_outcome}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Telegram updates",
+      "title": "Telegram updates by outcome",
       "type": "timeseries"
     },
     {
       "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
-      "gridPos": {"h": 8, "w": 9, "x": 15, "y": 0},
+      "description": "Updates per second that were not handled, grouped by the recorded reason. An empty panel means every update produced a reply.",
+      "fieldConfig": {"defaults": {"noValue": "0", "unit": "ops"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+      "id": 15,
+      "options": {
+        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (home_agent_reason) (rate(home_agent_telegram_updates{service_name=\"home-agent\", home_agent_outcome!=\"handled\"}[$__rate_interval]))",
+          "legendFormat": "{{home_agent_reason}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Telegram updates not handled by reason",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"noValue": "0", "unit": "reqps"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 14},
       "id": 3,
       "options": {
         "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true},
@@ -71,19 +258,20 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by (home_agent_outcome, home_agent_operation) (rate(home_agent_telegram_api_requests{service_name=\"home-agent\"}[5m]))",
+          "expr": "sum by (home_agent_operation, home_agent_outcome) (rate(home_agent_telegram_api_requests{service_name=\"home-agent\"}[$__rate_interval]))",
           "legendFormat": "{{home_agent_operation}} {{home_agent_outcome}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Telegram API",
+      "title": "Telegram API requests",
       "type": "timeseries"
     },
     {
       "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "description": "The getUpdates operation sits at the long-poll timeout by design; watch sendMessage and setMyCommands instead.",
+      "fieldConfig": {"defaults": {"noValue": "0", "unit": "s"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 14},
       "id": 4,
       "options": {
         "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true},
@@ -92,7 +280,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (le, home_agent_operation) (rate(home_agent_telegram_api_request_duration_bucket{service_name=\"home-agent\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, home_agent_operation) (rate(home_agent_telegram_api_request_duration_bucket{service_name=\"home-agent\"}[$__rate_interval])))",
           "legendFormat": "p95 {{home_agent_operation}}",
           "range": true,
           "refId": "A"
@@ -103,8 +291,31 @@
     },
     {
       "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "description": "End to end time to process one update, from receiving it to committing the cursor.",
+      "fieldConfig": {"defaults": {"noValue": "0", "unit": "s"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 22},
+      "id": 16,
+      "options": {
+        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(home_agent_telegram_update_duration_bucket{service_name=\"home-agent\"}[$__rate_interval])))",
+          "legendFormat": "p95",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Telegram update processing p95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Poll cycles retried after a Telegram or store failure. The counter appears only after the first retry, so an empty panel means polling has never failed.",
+      "fieldConfig": {"defaults": {"noValue": "0", "unit": "ops"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 22},
       "id": 5,
       "options": {
         "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true},
@@ -113,7 +324,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by (home_agent_reason) (rate(home_agent_telegram_poll_retries{service_name=\"home-agent\"}[5m]))",
+          "expr": "sum by (home_agent_reason) (rate(home_agent_telegram_poll_retries{service_name=\"home-agent\"}[$__rate_interval]))",
           "legendFormat": "{{home_agent_reason}}",
           "range": true,
           "refId": "A"
@@ -123,9 +334,18 @@
       "type": "timeseries"
     },
     {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 30},
+      "id": 17,
+      "panels": [],
+      "title": "Conversation",
+      "type": "row"
+    },
+    {
       "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "description": "Turns per second by outcome and, for failures, the error kind that ended them.",
+      "fieldConfig": {"defaults": {"noValue": "0", "unit": "ops"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 31},
       "id": 6,
       "options": {
         "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true},
@@ -134,7 +354,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by (home_agent_outcome, home_agent_error_kind) (rate(home_agent_conversation_turns{service_name=\"home-agent\"}[5m]))",
+          "expr": "sum by (home_agent_outcome, home_agent_error_kind) (rate(home_agent_conversation_turns{service_name=\"home-agent\"}[$__rate_interval]))",
           "legendFormat": "{{home_agent_outcome}} {{home_agent_error_kind}}",
           "range": true,
           "refId": "A"
@@ -145,8 +365,8 @@
     },
     {
       "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "fieldConfig": {"defaults": {"noValue": "0", "unit": "s"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 31},
       "id": 7,
       "options": {
         "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true},
@@ -155,13 +375,85 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (le, home_agent_outcome) (rate(home_agent_conversation_turn_duration_bucket{service_name=\"home-agent\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, home_agent_outcome) (rate(home_agent_conversation_turn_duration_bucket{service_name=\"home-agent\"}[$__rate_interval])))",
           "legendFormat": "p95 {{home_agent_outcome}}",
           "range": true,
           "refId": "A"
         }
       ],
       "title": "Conversation p95 latency",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 39},
+      "id": 18,
+      "panels": [],
+      "title": "Store and health",
+      "type": "row"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"noValue": "0", "unit": "ops"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 40},
+      "id": 19,
+      "options": {
+        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (home_agent_operation, home_agent_outcome) (rate(home_agent_store_operations{service_name=\"home-agent\"}[$__rate_interval]))",
+          "legendFormat": "{{home_agent_operation}} {{home_agent_outcome}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Store operations",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"noValue": "0", "unit": "s"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 40},
+      "id": 20,
+      "options": {
+        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le, home_agent_operation) (rate(home_agent_store_operation_duration_bucket{service_name=\"home-agent\"}[$__rate_interval])))",
+          "legendFormat": "p95 {{home_agent_operation}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Store p95 latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Health endpoint traffic. A steady rate is the container health check; a missing rate means the check is not running.",
+      "fieldConfig": {"defaults": {"noValue": "0", "unit": "reqps"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 40},
+      "id": 21,
+      "options": {
+        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (home_agent_endpoint, home_agent_result) (rate(home_agent_http_server_requests{service_name=\"home-agent\"}[$__rate_interval]))",
+          "legendFormat": "{{home_agent_endpoint}} {{home_agent_result}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Health requests",
       "type": "timeseries"
     }
   ],

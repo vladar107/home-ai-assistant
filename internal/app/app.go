@@ -89,6 +89,9 @@ func (a *App) Run(ctx context.Context) (runErr error) {
 		return err
 	}
 	a.store = store
+	if err := telemetry.RegisterConnectionPool("sqlite", store.Stats); err != nil {
+		return errors.Join(fmt.Errorf("register store metrics: %w", err), a.closeStore())
+	}
 
 	initializeTelegramCtx, endInitializeTelegram := telemetry.StartLifecycle(ctx, "telegram_initialize")
 	err = a.initializeTelegram(initializeTelegramCtx)

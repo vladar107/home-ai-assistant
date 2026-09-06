@@ -66,6 +66,13 @@ func (s *Store) Ready(ctx context.Context) error {
 	return nil
 }
 
+func (s *Store) Stats() sql.DBStats {
+	if s == nil || s.db == nil {
+		return sql.DBStats{}
+	}
+	return s.db.Stats()
+}
+
 func (s *Store) Close() error {
 	if s == nil || s.db == nil {
 		return nil
