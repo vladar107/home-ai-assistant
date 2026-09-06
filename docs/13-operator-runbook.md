@@ -428,11 +428,13 @@ Verify:
    and Telegram activity after a `/status` command.
 3. **Dashboards → Home Agent → Home Agent Runtime** shows goroutines, container
    memory against the 1 GiB limit, and the SQLite connection pool.
-4. **Explore → Tempo** can find recent traces for `service.name=home-agent`.
-5. NAS container logs contain JSON events with matching trace and span IDs but
+4. **Dashboards → Home Agent → Go Runtime** with the `service` dropdown set to
+   `home-agent` shows GC pauses and goroutines.
+5. **Explore → Tempo** can find recent traces for `service.name=home-agent`.
+6. NAS container logs contain JSON events with matching trace and span IDs but
    no Telegram text, username, numeric ID, or token.
 
-Both dashboards are provisioned from files. Grafana rereads
+The dashboards are provisioned from files. Grafana rereads
 `deploy/grafana/dashboards` every 30 seconds, so a dashboard change appears
 within half a minute of a monitoring deploy without a Grafana restart. The
 dashboards are read-only in the interface; edit the JSON and deploy again.

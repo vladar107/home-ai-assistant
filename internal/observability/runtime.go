@@ -8,8 +8,10 @@ import (
 	"math"
 	"os"
 	"runtime/metrics"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -25,6 +27,18 @@ const (
 	cgroupRoot            = "/sys/fs/cgroup/"
 	microsecondsPerSecond = 1e6
 )
+
+// Field offsets inside a /proc/self/net/dev interface row, counted after the
+// interface name: eight receive columns followed by eight transmit columns.
+const (
+	networkReceiveBytesField  = 0
+	networkTransmitBytesField = 8
+)
+
+var gcPauseBoundaries = []float64{
+	0.00001, 0.000025, 0.00005, 0.0001, 0.00025, 0.0005, 0.001,
+	0.0025, 0.005, 0.01, 0.025, 0.05, 0.1,
+}
 
 const (
 	sampleGoroutines = iota
@@ -42,6 +56,7 @@ const (
 	sampleCPUScavenge
 	sampleCPUIdle
 	sampleGOGC
+	sampleGCPauses
 	sampleCount
 )
 
@@ -61,6 +76,7 @@ var sampleNames = [sampleCount]string{
 	sampleCPUScavenge:      "/cpu/classes/scavenge/total:cpu-seconds",
 	sampleCPUIdle:          "/cpu/classes/idle:cpu-seconds",
 	sampleGOGC:             "/gc/gogc:percent",
+	sampleGCPauses:         "/sched/pauses/total/gc:seconds",
 }
 
 type runtimeInstruments struct {
@@ -74,12 +90,20 @@ type runtimeInstruments struct {
 	goGCCycles    goconv.MemoryGCCyclesObservable
 	goCPUTime     goconv.CPUTimeObservable
 	goGOGC        goconv.ConfigGogc
+	goGCPause     goconv.MemoryGCPauseDuration
+
+	gcPauseMu     sync.Mutex
+	gcPauseCounts []uint64
 
 	processCPUTime     processconv.CPUTime
 	processMemory      processconv.MemoryUsageObservable
 	processThreads     processconv.ThreadCountObservable
 	processDescriptors processconv.UnixFileDescriptorCountObservable
 	processUptime      processconv.UptimeObservable
+	processDiskIO      processconv.DiskIOObservable
+	processNetworkIO   processconv.NetworkIOObservable
+	processPagingFault processconv.PagingFaultsObservable
+	processSwitches    processconv.ContextSwitchesObservable
 	processStarted     time.Time
 
 	containerCPUTime    containerconv.CPUTimeObservable
@@ -111,6 +135,8 @@ func registerRuntimeMetrics(meter metric.Meter) error {
 	errs = append(errs, err)
 	goGOGC, err := goconv.NewConfigGogc(meter)
 	errs = append(errs, err)
+	goGCPause, err := goconv.NewMemoryGCPauseDuration(meter, metric.WithExplicitBucketBoundaries(gcPauseBoundaries...))
+	errs = append(errs, err)
 	processCPUTime, err := processconv.NewCPUTime(meter)
 	errs = append(errs, err)
 	processMemory, err := processconv.NewMemoryUsageObservable(meter)
@@ -120,6 +146,14 @@ func registerRuntimeMetrics(meter metric.Meter) error {
 	processDescriptors, err := processconv.NewUnixFileDescriptorCountObservable(meter)
 	errs = append(errs, err)
 	processUptime, err := processconv.NewUptimeObservable(meter)
+	errs = append(errs, err)
+	processDiskIO, err := processconv.NewDiskIOObservable(meter)
+	errs = append(errs, err)
+	processNetworkIO, err := processconv.NewNetworkIOObservable(meter)
+	errs = append(errs, err)
+	processPagingFault, err := processconv.NewPagingFaultsObservable(meter)
+	errs = append(errs, err)
+	processSwitches, err := processconv.NewContextSwitchesObservable(meter)
 	errs = append(errs, err)
 	containerCPUTime, err := containerconv.NewCPUTimeObservable(meter)
 	errs = append(errs, err)
@@ -158,11 +192,16 @@ func registerRuntimeMetrics(meter metric.Meter) error {
 		goGCCycles:          goGCCycles,
 		goCPUTime:           goCPUTime,
 		goGOGC:              goGOGC,
+		goGCPause:           goGCPause,
 		processCPUTime:      processCPUTime,
 		processMemory:       processMemory,
 		processThreads:      processThreads,
 		processDescriptors:  processDescriptors,
 		processUptime:       processUptime,
+		processDiskIO:       processDiskIO,
+		processNetworkIO:    processNetworkIO,
+		processPagingFault:  processPagingFault,
+		processSwitches:     processSwitches,
 		processStarted:      time.Now(),
 		containerCPUTime:    containerCPUTime,
 		containerMemory:     containerMemory,
@@ -186,6 +225,10 @@ func registerRuntimeMetrics(meter metric.Meter) error {
 		processThreads.Inst(),
 		processDescriptors.Inst(),
 		processUptime.Inst(),
+		processDiskIO.Inst(),
+		processNetworkIO.Inst(),
+		processPagingFault.Inst(),
+		processSwitches.Inst(),
 		containerCPUTime.Inst(),
 		containerMemory.Inst(),
 		containerMemoryMax,
@@ -198,14 +241,14 @@ func registerRuntimeMetrics(meter metric.Meter) error {
 	return nil
 }
 
-func (i *runtimeInstruments) observe(_ context.Context, observer metric.Observer) error {
-	i.observeGoRuntime(observer)
+func (i *runtimeInstruments) observe(ctx context.Context, observer metric.Observer) error {
+	i.observeGoRuntime(ctx, observer)
 	i.observeProcess(observer)
 	i.observeContainer(observer)
 	return nil
 }
 
-func (i *runtimeInstruments) observeGoRuntime(observer metric.Observer) {
+func (i *runtimeInstruments) observeGoRuntime(ctx context.Context, observer metric.Observer) {
 	samples := make([]metrics.Sample, sampleCount)
 	for index := range samples {
 		samples[index].Name = sampleNames[index]
@@ -248,6 +291,43 @@ func (i *runtimeInstruments) observeGoRuntime(observer metric.Observer) {
 	for _, class := range cpuClasses {
 		observeFloat64(observer, i.goCPUTime.Inst(), samples[class.sample], i.goCPUTime.AttrCPUState(class.state))
 	}
+
+	i.recordGCPauses(ctx, samples[sampleGCPauses])
+}
+
+// recordGCPauses replays the pauses observed since the previous collection.
+// runtime/metrics only exposes cumulative per-bucket counts rather than the
+// individual pauses, so every pause is recorded at the bound of the bucket it
+// fell into, which is the closest value the runtime still knows about it.
+func (i *runtimeInstruments) recordGCPauses(ctx context.Context, sample metrics.Sample) {
+	if sample.Value.Kind() != metrics.KindFloat64Histogram {
+		return
+	}
+	histogram := sample.Value.Float64Histogram()
+
+	i.gcPauseMu.Lock()
+	defer i.gcPauseMu.Unlock()
+	previous := i.gcPauseCounts
+	i.gcPauseCounts = slices.Clone(histogram.Counts)
+	if len(previous) != len(histogram.Counts) {
+		return
+	}
+
+	for index, count := range histogram.Counts {
+		if count <= previous[index] {
+			continue
+		}
+		bound := histogram.Buckets[index+1]
+		if math.IsInf(bound, 1) {
+			bound = histogram.Buckets[index]
+		}
+		if math.IsInf(bound, -1) {
+			continue
+		}
+		for range count - previous[index] {
+			i.goGCPause.Record(ctx, bound)
+		}
+	}
 }
 
 func (i *runtimeInstruments) observeProcess(observer metric.Observer) {
@@ -257,6 +337,14 @@ func (i *runtimeInstruments) observeProcess(observer metric.Observer) {
 			metric.WithAttributes(i.processCPUTime.AttrCPUMode(processconv.CPUModeUser)))
 		observer.ObserveFloat64(i.processCPUTime.Inst(), timevalSeconds(usage.Stime),
 			metric.WithAttributes(i.processCPUTime.AttrCPUMode(processconv.CPUModeSystem)))
+		observer.ObserveInt64(i.processPagingFault.Inst(), int64(usage.Majflt),
+			metric.WithAttributes(i.processPagingFault.AttrSystemPagingFaultType(processconv.SystemPagingFaultTypeMajor)))
+		observer.ObserveInt64(i.processPagingFault.Inst(), int64(usage.Minflt),
+			metric.WithAttributes(i.processPagingFault.AttrSystemPagingFaultType(processconv.SystemPagingFaultTypeMinor)))
+		observer.ObserveInt64(i.processSwitches.Inst(), int64(usage.Nvcsw),
+			metric.WithAttributes(i.processSwitches.AttrContextSwitchType(processconv.ContextSwitchTypeVoluntary)))
+		observer.ObserveInt64(i.processSwitches.Inst(), int64(usage.Nivcsw),
+			metric.WithAttributes(i.processSwitches.AttrContextSwitchType(processconv.ContextSwitchTypeInvoluntary)))
 	}
 	observer.ObserveFloat64(i.processUptime.Inst(), time.Since(i.processStarted).Seconds())
 
@@ -271,6 +359,25 @@ func (i *runtimeInstruments) observeProcess(observer metric.Observer) {
 	}
 	if entries, err := os.ReadDir("/proc/self/fd"); err == nil {
 		observer.ObserveInt64(i.processDescriptors.Inst(), int64(len(entries)))
+	}
+	diskDirections := [...]struct {
+		key       string
+		direction processconv.DiskIODirectionAttr
+	}{
+		{"read_bytes", processconv.DiskIODirectionRead},
+		{"write_bytes", processconv.DiskIODirectionWrite},
+	}
+	for _, disk := range diskDirections {
+		if transferred, read := readProcValue("/proc/self/io", disk.key); read {
+			observer.ObserveInt64(i.processDiskIO.Inst(), transferred,
+				metric.WithAttributes(i.processDiskIO.AttrDiskIODirection(disk.direction)))
+		}
+	}
+	if receive, transmit, read := readNetworkIO(); read {
+		observer.ObserveInt64(i.processNetworkIO.Inst(), receive,
+			metric.WithAttributes(i.processNetworkIO.AttrNetworkIODirection(processconv.NetworkIODirectionReceive)))
+		observer.ObserveInt64(i.processNetworkIO.Inst(), transmit,
+			metric.WithAttributes(i.processNetworkIO.AttrNetworkIODirection(processconv.NetworkIODirectionTransmit)))
 	}
 }
 
@@ -402,6 +509,37 @@ func readProcValue(path, key string) (int64, bool) {
 		return value, true
 	}
 	return 0, false
+}
+
+// readNetworkIO sums the byte counters of every non-loopback interface in
+// /proc/self/net/dev, which reports the container network namespace. The two
+// header rows carry no interface name and are skipped by the missing colon.
+func readNetworkIO() (receive, transmit int64, read bool) {
+	content, err := os.ReadFile("/proc/self/net/dev")
+	if err != nil {
+		return 0, 0, false
+	}
+	for line := range strings.Lines(string(content)) {
+		name, counters, found := strings.Cut(line, ":")
+		if !found || strings.TrimSpace(name) == "lo" {
+			continue
+		}
+		fields := strings.Fields(counters)
+		if len(fields) <= networkTransmitBytesField {
+			continue
+		}
+		received, err := strconv.ParseInt(fields[networkReceiveBytesField], 10, 64)
+		if err != nil {
+			continue
+		}
+		transmitted, err := strconv.ParseInt(fields[networkTransmitBytesField], 10, 64)
+		if err != nil {
+			continue
+		}
+		receive += received
+		transmit += transmitted
+	}
+	return receive, transmit, true
 }
 
 func readProcFields(path string) ([]string, bool) {

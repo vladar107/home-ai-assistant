@@ -25,6 +25,15 @@ import (
 
 const instrumentationName = "github.com/vladar107/home-ai-assistant"
 
+// Every duration histogram records seconds, while the SDK default boundaries
+// are sized for milliseconds and collapse whole sub-second distributions into
+// the first bucket.
+var (
+	requestDurationBoundaries   = []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60}
+	turnDurationBoundaries      = []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 30, 60, 120, 180, 300}
+	lifecycleDurationBoundaries = []float64{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5, 10, 30, 60}
+)
+
 type Telemetry struct {
 	enabled        bool
 	tracerProvider *sdktrace.TracerProvider
@@ -135,6 +144,7 @@ func newTelemetry(tracer trace.Tracer, meter metric.Meter) (*Telemetry, error) {
 		"home_agent.application.lifecycle.duration",
 		metric.WithDescription("Application lifecycle phase duration."),
 		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(lifecycleDurationBoundaries...),
 	); err != nil {
 		return nil, fmt.Errorf("create application lifecycle duration histogram: %w", err)
 	}
@@ -156,6 +166,7 @@ func newTelemetry(tracer trace.Tracer, meter metric.Meter) (*Telemetry, error) {
 		"home_agent.http.server.request.duration",
 		metric.WithDescription("Health HTTP request duration."),
 		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(requestDurationBoundaries...),
 	); err != nil {
 		return nil, fmt.Errorf("create HTTP request duration histogram: %w", err)
 	}
@@ -170,6 +181,7 @@ func newTelemetry(tracer trace.Tracer, meter metric.Meter) (*Telemetry, error) {
 		"home_agent.telegram.api.request.duration",
 		metric.WithDescription("Telegram Bot API request duration."),
 		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(requestDurationBoundaries...),
 	); err != nil {
 		return nil, fmt.Errorf("create Telegram API request duration histogram: %w", err)
 	}
@@ -184,6 +196,7 @@ func newTelemetry(tracer trace.Tracer, meter metric.Meter) (*Telemetry, error) {
 		"home_agent.telegram.update.duration",
 		metric.WithDescription("Telegram update processing duration."),
 		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(turnDurationBoundaries...),
 	); err != nil {
 		return nil, fmt.Errorf("create Telegram update duration histogram: %w", err)
 	}
@@ -205,6 +218,7 @@ func newTelemetry(tracer trace.Tracer, meter metric.Meter) (*Telemetry, error) {
 		"home_agent.conversation.turn.duration",
 		metric.WithDescription("Conversation turn duration."),
 		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(turnDurationBoundaries...),
 	); err != nil {
 		return nil, fmt.Errorf("create conversation turn duration histogram: %w", err)
 	}
@@ -219,6 +233,7 @@ func newTelemetry(tracer trace.Tracer, meter metric.Meter) (*Telemetry, error) {
 		"home_agent.store.operation.duration",
 		metric.WithDescription("Application store operation duration."),
 		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(requestDurationBoundaries...),
 	); err != nil {
 		return nil, fmt.Errorf("create store operation duration histogram: %w", err)
 	}

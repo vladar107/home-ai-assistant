@@ -23,6 +23,7 @@ plan that links back to the earlier record.
 | 0011 | [Confirmed Notion writes through core approvals](0011-confirmed-notion-writes.md) | proposed |
 | 0012 | [Pull the application image from GHCR by digest](0012-ghcr-image-deployment.md) | done |
 | 0013 | [Runtime metrics and Grafana dashboards](0013-runtime-metrics-and-dashboards.md) | done |
+| 0014 | [Generic Go runtime dashboard and duration histogram buckets](0014-go-runtime-dashboard.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

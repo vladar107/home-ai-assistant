@@ -208,7 +208,7 @@ availability.
 
 ## Dashboards
 
-Both dashboards are provisioned from `deploy/grafana/dashboards`; Grafana
+The dashboards are provisioned from `deploy/grafana/dashboards`; Grafana
 rereads the directory every 30 seconds and keeps the dashboards read-only in
 the interface, so a change is made in the JSON and deployed, never saved from
 the browser.
@@ -226,11 +226,20 @@ the browser.
 
 - Process and container CPU against the one-core Compose limit
 - Container memory against the 1 GiB limit, and process resident set size
-- Go memory by class, the collection goal, allocation rate, and GC cycles
-- Goroutines, operating system threads, and open file descriptors
-- SQLite connection pool usage, maximum, and connection waits
 - Container PIDs against the limit
-- Uptime and the deployed commit
+- SQLite connection pool usage, maximum, and connection waits
+- Uptime, goroutines, and the deployed commit
+- A link to Go runtime for this service
+
+### Go runtime
+
+- Go memory by class, the collection goal, and GOMEMLIMIT
+- Heap allocation rate in bytes and in objects
+- Garbage collection cycles, pause duration, and the collector's share of CPU
+- Goroutines, operating system threads, and open file descriptors
+- Process CPU and the Go runtime CPU classes
+- Disk and network I/O, page faults, and context switches
+- Any service that reports Go runtime metrics, selected by service name
 
 ### Integrations
 
