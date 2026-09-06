@@ -191,6 +191,34 @@ process-level minimization, not an OS sandbox: the pinned Pi package runs as
 the local application user and remains a trusted dependency. The published
 application image packages Pi; the independent monitoring project does not.
 
+### Notion connection
+
+Each user connects their own Notion workspace; nothing is shared between
+users. Set `HOME_AGENT_NOTION_ENABLED=true` (conversation must be enabled).
+The recommended credential is an internal connection created in Notion's
+developer portal with read, update, and insert content capabilities and
+shared only with the pages and data sources the assistant should see; a
+personal access token is accepted for a user who cannot create a connection,
+but it grants everything that person can access and expires. The operator
+installs a token with:
+
+```sh
+printf '%s' "$NOTION_TOKEN" | scripts/notion-set-token <principal>            # local run
+printf '%s' "$NOTION_TOKEN" | scripts/notion-set-token <principal> home-nas   # NAS deployment
+```
+
+The token lives only in `data/integrations/<principal>/notion.json` (mode
+`0600` inside `0700` directories) and is adopted the next time that user opens
+`/settings` or sends a message: the application verifies it against Notion and
+records the workspace, bot name, and token kind in SQLite. With
+`HOME_AGENT_NOTION_CHAT_CONNECT=true`, `/settings` also offers a Connect Notion
+button; the user's next message is consumed as the token, deleted from the chat
+before verification, and never sent to the model. Any message that looks like
+a Notion token is deleted and answered with guidance instead of reaching the
+model. The model receives read tools only: search shared pages and data
+sources, read a page, and query a data source. Notion content read this way is
+sent to that user's own model subscription, which `/privacy` states.
+
 ## Architecture at a glance
 
 ```mermaid

@@ -13,6 +13,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/config"
 	"github.com/vladar107/home-ai-assistant/internal/connection"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/health"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
@@ -27,12 +28,14 @@ import (
 type App struct {
 	cfg          config.Config
 	logger       *slog.Logger
+	registry     *module.Registry
 	modules      []module.Module
 	server       *http.Server
 	store        *sqlite.Store
 	connections  *connection.Service
 	conversation *conversation.Service
 	tools        *tools.Broker
+	notion       *notion.Service
 	telegram     *telegram.Service
 	telemetry    *observability.Telemetry
 	ready        atomic.Bool
@@ -57,6 +60,7 @@ func New(cfg config.Config, registry *module.Registry, logger *slog.Logger) (*Ap
 	application := &App{
 		cfg:       cfg,
 		logger:    logger,
+		registry:  registry,
 		modules:   modules,
 		telemetry: observability.Noop(),
 	}
@@ -98,6 +102,11 @@ func (a *App) Run(ctx context.Context) (runErr error) {
 	initializeTelegramCtx, endInitializeTelegram := telemetry.StartLifecycle(ctx, "telegram_initialize")
 	err = a.initializeTelegram(initializeTelegramCtx)
 	endInitializeTelegram(err)
+	if err != nil {
+		return errors.Join(err, a.closeStore())
+	}
+	// Connectors register during initialization, so the module order is settled only now.
+	a.modules, err = a.registry.Ordered()
 	if err != nil {
 		return errors.Join(err, a.closeStore())
 	}
@@ -291,6 +300,23 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		a.connections = connections
 		a.conversation = conversationService
 		a.tools = broker
+		if a.cfg.Notion.Enabled {
+			notionService, err := notion.NewService(notion.Config{
+				CredentialsDir: filepath.Join(a.cfg.DataDir, "integrations"),
+				APIBaseURL:     a.cfg.Notion.APIBaseURL,
+				ChatConnect:    a.cfg.Notion.ChatConnect,
+			}, a.store, a.logger)
+			if err != nil {
+				return fmt.Errorf("initialize Notion connector: %w", err)
+			}
+			if err := a.registry.Register(notionService); err != nil {
+				return err
+			}
+			if err := broker.Register(notionService); err != nil {
+				return err
+			}
+			a.notion = notionService
+		}
 	}
 
 	identities, err := identity.NewService(a.store, configured)
@@ -307,11 +333,15 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	// Interface values are built here so a disabled conversation never becomes a typed nil controller.
 	var conversationController telegram.ConversationController
 	var connectionController telegram.ConnectionController
+	var notionController telegram.NotionController
 	if a.conversation != nil {
 		conversationController = a.conversation
 		connectionController = a.connections
 	}
-	service, err := telegram.NewService(client, identities, a.store, conversationController, connectionController, a.logger, a.telemetry)
+	if a.notion != nil {
+		notionController = a.notion
+	}
+	service, err := telegram.NewService(client, identities, a.store, conversationController, connectionController, notionController, a.logger, a.telemetry)
 	if err != nil {
 		return fmt.Errorf("initialize Telegram service: %w", err)
 	}

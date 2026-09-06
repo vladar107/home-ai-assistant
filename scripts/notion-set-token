@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+usage() {
+  echo "usage: printf '%s' \"\$TOKEN\" | $0 <principal> [ssh-alias [env-file]]" >&2
+  echo "  Installs a Notion token for the principal locally (below HOME_AGENT_DATA_DIR or ./data)" >&2
+  echo "  or on the NAS through the SSH alias, using HOME_AGENT_DATA_PATH from the env file." >&2
+  exit 2
+}
+
+principal=${1:-}
+host=${2:-}
+env_file=${3:-deploy/.env.nas}
+[[ $principal =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || usage
+if [[ -n $host && ! $host =~ ^[A-Za-z0-9][A-Za-z0-9._@-]*$ ]]; then
+  echo "invalid SSH host or alias: $host" >&2
+  exit 2
+fi
+if [[ -t 0 ]]; then
+  echo "Paste the Notion token, then press Enter and Ctrl-D." >&2
+fi
+IFS= read -r token || true
+token=${token//$'\r'/}
+if [[ ! $token =~ ^(ntn_|secret_)[A-Za-z0-9]+$ ]]; then
+  echo "the value is not a Notion token" >&2
+  exit 1
+fi
+record=$(printf '{"token":"%s"}' "$token")
+unset token
+
+remote_install() {
+  local directory=$1
+  local remote_command
+  remote_command="set -eu; umask 077; mkdir -p '$directory'; chmod 700 '$directory'; target='$directory/notion.json'; test ! -L \"\$target\"; if test -e \"\$target\"; then test -f \"\$target\"; fi; temporary=\$(mktemp '$directory/.notion.json.XXXXXX'); trap 'rm -f \"\$temporary\"' EXIT HUP INT TERM; cat >\"\$temporary\"; test -s \"\$temporary\"; chmod 600 \"\$temporary\"; mv -f \"\$temporary\" \"\$target\"; trap - EXIT HUP INT TERM"
+  printf '%s\n' "$record" | ssh -o BatchMode=yes "$host" "$remote_command"
+}
+
+if [[ -z $host ]]; then
+  repo_root=$(git rev-parse --show-toplevel)
+  data_dir=${HOME_AGENT_DATA_DIR:-$repo_root/data}
+  directory=$data_dir/integrations/$principal
+  umask 077
+  mkdir -p "$directory"
+  chmod 700 "$data_dir/integrations" "$directory"
+  temporary=$(mktemp "$directory/.notion.json.XXXXXX")
+  trap 'rm -f "$temporary"' EXIT HUP INT TERM
+  printf '%s\n' "$record" >"$temporary"
+  chmod 600 "$temporary"
+  mv -f "$temporary" "$directory/notion.json"
+  trap - EXIT HUP INT TERM
+  echo "Installed the Notion token for $principal at $directory/notion.json; the bot adopts it on the next /settings or message." >&2
+  exit 0
+fi
+
+if [[ $env_file != /* ]]; then
+  env_file=$(git rev-parse --show-toplevel)/$env_file
+fi
+[[ -f $env_file ]] || { echo "NAS environment file not found: $env_file" >&2; exit 2; }
+mode=$(stat -f '%Lp' "$env_file")
+(( (8#$mode & 077) == 0 )) || { echo "NAS environment file must not be accessible by group or others: $env_file" >&2; exit 2; }
+# shellcheck disable=SC1090
+source "$env_file"
+data_path=${HOME_AGENT_DATA_PATH:-}
+if [[ ! $data_path =~ ^/[A-Za-z0-9._/-]+$ || $data_path == / || $data_path == *'/../'* || $data_path == */.. ]]; then
+  echo "HOME_AGENT_DATA_PATH must be a safe absolute NAS path without parent traversal" >&2
+  exit 2
+fi
+for numeric in "${NAS_RUNTIME_UID:-}" "${NAS_RUNTIME_GID:-}"; do
+  [[ $numeric =~ ^[0-9]+$ ]] || { echo "NAS_RUNTIME_UID and NAS_RUNTIME_GID must be numeric" >&2; exit 2; }
+done
+ssh -o BatchMode=yes "$host" sh -s -- "$NAS_RUNTIME_UID" "$NAS_RUNTIME_GID" "$data_path" <<'REMOTE'
+set -eu
+test "$(id -u)" = "$1"
+test "$(id -g)" = "$2"
+test -d "$3"
+test ! -L "$3"
+test "$(stat -c %u "$3")" = "$(id -u)"
+REMOTE
+remote_install "$data_path/integrations/$principal"
+echo "Installed the Notion token for $principal on $host; the bot adopts it on the next /settings or message." >&2

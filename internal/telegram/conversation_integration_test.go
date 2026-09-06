@@ -20,11 +20,13 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/connection"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/codexauth"
+	"github.com/vladar107/home-ai-assistant/internal/testutil/notionsim"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -79,6 +81,11 @@ type callbackAnswer struct {
 	text string
 }
 
+type deletedMessage struct {
+	chatID    int64
+	messageID int64
+}
+
 type commandRegistration struct {
 	commands []BotCommand
 	scope    []string
@@ -102,37 +109,44 @@ func (b *lockedBuffer) String() string {
 }
 
 type harnessOptions struct {
-	profilesDir string
-	codeTimeout time.Duration
-	providers   []tools.Provider
+	profilesDir         string
+	codeTimeout         time.Duration
+	providers           []tools.Provider
+	notion              *notionsim.Simulator
+	notionChatConnect   bool
+	notionIntakeTimeout time.Duration
 }
 
 type conversationHarness struct {
-	t             *testing.T
-	ctx           context.Context
-	store         *sqlite.Store
-	db            *sql.DB
-	client        *Client
-	service       *Service
-	conversation  *conversation.Service
-	connections   *connection.Service
-	auth          *codexauth.Simulator
-	profilesDir   string
-	sent          []string
-	updates       chan []Update
-	messages      chan sentMessage
-	edits         chan editedMessage
-	answers       chan callbackAnswer
-	offsets       chan int64
-	registrations chan commandRegistration
-	turns         chan turnOutcome
-	logs          *lockedBuffer
-	mu            sync.Mutex
-	sendStatuses  []int
-	sendGate      <-chan struct{}
-	commandStatus int
-	editStatus    int
-	editReason    string
+	t              *testing.T
+	ctx            context.Context
+	store          *sqlite.Store
+	db             *sql.DB
+	client         *Client
+	service        *Service
+	conversation   *conversation.Service
+	connections    *connection.Service
+	notion         *notion.Service
+	auth           *codexauth.Simulator
+	profilesDir    string
+	credentialsDir string
+	sent           []string
+	updates        chan []Update
+	messages       chan sentMessage
+	edits          chan editedMessage
+	deletes        chan deletedMessage
+	answers        chan callbackAnswer
+	offsets        chan int64
+	registrations  chan commandRegistration
+	turns          chan turnOutcome
+	logs           *lockedBuffer
+	mu             sync.Mutex
+	sendStatuses   []int
+	sendGate       <-chan struct{}
+	commandStatus  int
+	editStatus     int
+	editReason     string
+	deleteStatus   int
 }
 
 type turnOutcome struct{ outcome, errorKind string }
@@ -162,7 +176,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	t.Cleanup(cancel)
 	h := &conversationHarness{
 		t: t, ctx: ctx, updates: make(chan []Update, 20), messages: make(chan sentMessage, 100), edits: make(chan editedMessage, 100),
-		answers: make(chan callbackAnswer, 100), offsets: make(chan int64, 100), registrations: make(chan commandRegistration, 10),
+		answers: make(chan callbackAnswer, 100), deletes: make(chan deletedMessage, 100), offsets: make(chan int64, 100), registrations: make(chan commandRegistration, 10),
 		turns: make(chan turnOutcome, 20), logs: &lockedBuffer{},
 	}
 	server := httptest.NewServer(http.HandlerFunc(h.serveHTTP))
@@ -219,11 +233,26 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 			t.Fatal(err)
 		}
 	}
+	var notionController NotionController
+	if options.notion != nil {
+		h.credentialsDir = filepath.Join(t.TempDir(), "integrations")
+		h.notion, err = notion.NewService(notion.Config{
+			CredentialsDir: h.credentialsDir, APIBaseURL: options.notion.URL(), ChatConnect: options.notionChatConnect,
+			HTTPClient: options.notion.Client(), IntakeLifetime: options.notionIntakeTimeout,
+		}, h.store, logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := broker.Register(h.notion); err != nil {
+			t.Fatal(err)
+		}
+		notionController = h.notion
+	}
 	h.conversation, err = conversation.NewService(conversation.Config{TurnTimeout: 10 * time.Second}, h.store, runtime, h.client, broker, h.connections, logger, integrationTelemetry{turns: h.turns})
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.service, err = NewService(h.client, identities, h.store, h.conversation, h.connections, logger, nil)
+	h.service, err = NewService(h.client, identities, h.store, h.conversation, h.connections, notionController, logger, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,6 +330,31 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	case "sendChatAction":
+		result = true
+	case "deleteMessage":
+		chatID, err := strconv.ParseInt(r.Form.Get("chat_id"), 10, 64)
+		if err != nil {
+			h.t.Error(err)
+			return
+		}
+		messageID, err := strconv.ParseInt(r.Form.Get("message_id"), 10, 64)
+		if err != nil {
+			h.t.Error(err)
+			return
+		}
+		h.mu.Lock()
+		status := h.deleteStatus
+		h.mu.Unlock()
+		select {
+		case h.deletes <- deletedMessage{chatID: chatID, messageID: messageID}:
+		case <-r.Context().Done():
+			return
+		}
+		if status != 0 {
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_code": status, "description": "Bad Request: message can't be deleted"})
+			return
+		}
 		result = true
 	case "answerCallbackQuery":
 		if r.Form.Get("callback_query_id") == "" {
@@ -397,6 +451,11 @@ func (h *conversationHarness) start() {
 	if err := h.conversation.Start(h.ctx); err != nil {
 		h.t.Fatal(err)
 	}
+	if h.notion != nil {
+		if err := h.notion.Start(h.ctx); err != nil {
+			h.t.Fatal(err)
+		}
+	}
 	if err := h.service.Start(h.ctx); err != nil {
 		h.t.Fatal(err)
 	}
@@ -414,6 +473,11 @@ func (h *conversationHarness) stop() {
 	}
 	if err := h.connections.Shutdown(ctx); err != nil {
 		h.t.Error(err)
+	}
+	if h.notion != nil {
+		if err := h.notion.Shutdown(ctx); err != nil {
+			h.t.Error(err)
+		}
 	}
 }
 

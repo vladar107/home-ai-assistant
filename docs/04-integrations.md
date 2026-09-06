@@ -221,29 +221,53 @@ confirmation and idempotency because retries can create duplicate events.
 
 ## Notion
 
-### Initial capabilities
+### Current capabilities
 
-- Search explicitly shared pages and data sources
-- Retrieve page properties and blocks on demand
-- List tasks due or overdue from configured data sources
-- Include selected results in a briefing
+Implemented by [plan 0010](plans/0010-notion-workspace-connection.md) as read
+tools offered to the model through the core broker:
+
+- `notion_search`: pages and data sources shared with the user's connection,
+  by title, with IDs, URLs, and key properties
+- `notion_get_page`: one page's properties and flattened text content
+- `notion_query_data_source`: entries of one data source with Notion filter
+  and sorts objects passed through for Notion to validate
+
+Every request carries a ten-second deadline, one retry on `429` or `529`
+honouring `Retry-After` up to five seconds, a page size capped at 25, and
+normalized error classes (unauthorized, restricted, not shared, rate limited,
+invalid, unavailable). Page content is capped so a rendered page stays below
+the broker's result limit. Responses are never logged.
 
 ### Authentication
 
-Use a private internal Notion integration for the owner’s workspace. A newly
-created connection has no page access until pages are explicitly shared, which
-provides the primary content boundary. The integration token belongs to one
-principal.
+Each principal connects their own token; the token belongs to one principal
+and is never shared or used as a fallback. The recommended credential is an
+internal connection with read, update, and insert content capabilities, shared
+only with the pages and data sources the assistant should see, which provides
+the primary content boundary. A personal access token is accepted for a user
+who cannot create a connection; it acts as its creator with everything that
+person can access and expires within a year. The token is stored only in
+`data/integrations/<principal>/notion.json`; SQLite keeps the workspace,
+bot name, token kind, and writes flag. `GET /v1/users/me` verifies a token
+before it is stored or adopted.
 
-Do not attempt to mirror the whole workspace. Configure one or more approved
-roots, such as a Tasks data source and an Agent Inbox page.
+Notion offers no device-code flow and its OAuth flow needs a public redirect
+endpoint, so the token is copied from Notion's developer portal and installed
+either by the operator with `scripts/notion-set-token` or, when chat connect
+is enabled, pasted by the user after pressing Connect Notion in `/settings`.
+The pasted message is deleted before verification and never reaches the model.
 
-Later writes may create an Inbox item or update a task after confirmation.
+### Data handling
 
-The connector must support separately configured roots and typed schemas for
-general tasks, job applications, and mentoring. It does not infer domain status
-transitions, mentee identity, or publication rules; those belong to their
-automation packs.
+Notion content read through the tools reaches the user's own model
+subscription; this is inherent to the feature and stated in the connect
+instructions and `/privacy`. Pages are untrusted content: the broker labels
+results as data, and only read tools exist until
+[plan 0011](plans/0011-confirmed-notion-writes.md) adds confirmed writes.
+
+Do not attempt to mirror the whole workspace. The connector does not infer
+domain status transitions, mentee identity, or publication rules; those belong
+to their automation packs.
 
 References:
 

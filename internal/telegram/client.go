@@ -245,6 +245,17 @@ func (c *Client) EditKeyboard(ctx context.Context, chatID, messageID int64, text
 	return err
 }
 
+// DeleteMessage removes a message from the chat. Telegram lets a bot delete any message in a
+// private chat for 48 hours after it was sent.
+func (c *Client) DeleteMessage(ctx context.Context, chatID, messageID int64) error {
+	params := url.Values{
+		"chat_id":    {strconv.FormatInt(chatID, 10)},
+		"message_id": {strconv.FormatInt(messageID, 10)},
+	}
+	_, err := execute[bool](c, ctx, "deleteMessage", params)
+	return err
+}
+
 // AnswerCallback closes the loading state of a button press, with an optional short toast.
 func (c *Client) AnswerCallback(ctx context.Context, callbackID, text string) error {
 	params := url.Values{"callback_query_id": {callbackID}}

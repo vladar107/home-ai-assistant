@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/connection"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
@@ -34,6 +35,7 @@ type botAPI interface {
 	SendReply(context.Context, int64, int64, string) error
 	SendKeyboard(context.Context, int64, int64, string, InlineKeyboard) error
 	EditKeyboard(context.Context, int64, int64, string, InlineKeyboard) error
+	DeleteMessage(context.Context, int64, int64) error
 	AnswerCallback(context.Context, string, string) error
 	SetMyCommands(context.Context, CommandScope, []BotCommand) error
 }
@@ -49,6 +51,16 @@ type ConnectionController interface {
 	Connect(context.Context, string, int64) (connection.Ceremony, error)
 	Status(context.Context, string) (connection.Status, error)
 	Disconnect(context.Context, string) (bool, error)
+}
+
+// NotionController is implemented by the Notion connector; nil disables the Notion settings section.
+type NotionController interface {
+	Status(context.Context, string) (notion.Status, error)
+	Connect(context.Context, string, string) (notion.Status, error)
+	Disconnect(context.Context, string) (bool, error)
+	BeginIntake(string)
+	ConsumeIntake(string) bool
+	ChatConnectEnabled() bool
 }
 
 type identityResolver interface {
@@ -67,7 +79,9 @@ type Service struct {
 	cursors      cursorStore
 	conversation ConversationController
 	connections  ConnectionController
+	notion       NotionController
 	sections     []settingsSection
+	interceptors []messageInterceptor
 	logger       *slog.Logger
 	telemetry    Telemetry
 
@@ -83,6 +97,7 @@ func NewService(
 	cursors cursorStore,
 	conversation ConversationController,
 	connections ConnectionController,
+	notion NotionController,
 	logger *slog.Logger,
 	telemetry Telemetry,
 ) (*Service, error) {
@@ -105,6 +120,7 @@ func NewService(
 		cursors:      cursors,
 		conversation: conversation,
 		connections:  connections,
+		notion:       notion,
 		logger:       logger,
 		telemetry:    telemetryOrNoop(telemetry),
 	}
@@ -112,6 +128,11 @@ func NewService(
 		service.sections = append(service.sections, modelSection{
 			connections: connections, conversation: conversation, logger: logger, telemetry: service.telemetry,
 		})
+	}
+	if notion != nil {
+		section := notionSection{notion: notion, logger: logger, telemetry: service.telemetry}
+		service.sections = append(service.sections, section)
+		service.interceptors = append(service.interceptors, section)
 	}
 	return service, nil
 }
@@ -351,6 +372,15 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 			principalID: authorization.Principal.ID,
 		}, "", nil
 	}
+	for _, interceptor := range s.interceptors {
+		result, err := interceptor.intercept(ctx, authorization.Principal.ID, message.Text)
+		if err != nil {
+			return processingResult{}, "intercept_message", err
+		}
+		if result.handled {
+			return s.finishInterception(ctx, message, authorization.Principal.ID, result)
+		}
+	}
 
 	err = s.conversation.Enqueue(ctx, conversation.EnqueueInput{
 		BotUserID:         bot.ID,
@@ -370,6 +400,28 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 		event:       "telegram.conversation.queued",
 		principalID: authorization.Principal.ID,
 	}, "", nil
+}
+
+// finishInterception removes the consumed message when the interceptor asked for it and sends the
+// reply without a quote. A failed deletion is reported to the user rather than retried, because the
+// message has already been consumed.
+func (s *Service) finishInterception(ctx context.Context, message *Message, principalID string, result interception) (processingResult, string, error) {
+	reply := result.reply
+	if result.remove {
+		if err := s.client.DeleteMessage(ctx, message.Chat.ID, message.MessageID); err != nil {
+			s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "telegram.message.delete_failed", "principal_id", principalID, "reason", result.reason, "error", err)
+			reply += " " + DeleteFailedLine
+		}
+	}
+	outcome := processingResult{event: "telegram.message.intercepted", reason: result.reason, principalID: principalID}
+	if err := s.client.SendReply(ctx, message.Chat.ID, 0, reply); err != nil {
+		if isPermanentAPIError(err) {
+			outcome.event, outcome.err = "telegram.command.undeliverable", err
+			return outcome, "", nil
+		}
+		return processingResult{}, "send_message", err
+	}
+	return outcome, "", nil
 }
 
 // validatePrivateMessage returns the ignore reason for input that is not a well-formed message
@@ -495,6 +547,9 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		}
 		return StatusReply, nil, nil
 	case "privacy":
+		if s.conversation != nil && s.notion != nil {
+			return ConversationPrivacyReply + " " + NotionPrivacyLine, nil, nil
+		}
 		if s.conversation != nil {
 			return ConversationPrivacyReply, nil, nil
 		}

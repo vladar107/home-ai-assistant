@@ -24,6 +24,7 @@ type Config struct {
 	DataDir          string
 	Telegram         TelegramConfig
 	Conversation     ConversationConfig
+	Notion           NotionConfig
 	Observability    ObservabilityConfig
 }
 
@@ -38,6 +39,7 @@ func Load() (Config, error) {
 		DataDir:         envOrDefault("HOME_AGENT_DATA_DIR", defaultDataDir),
 		Telegram:        defaultTelegramConfig(),
 		Conversation:    defaultConversationConfig(),
+		Notion:          defaultNotionConfig(),
 		Observability:   defaultObservabilityConfig(),
 	}
 
@@ -75,6 +77,9 @@ func Load() (Config, error) {
 		}
 	}
 	if err := loadConversationConfig(&cfg.Conversation); err != nil {
+		return Config{}, err
+	}
+	if err := loadNotionConfig(&cfg.Notion); err != nil {
 		return Config{}, err
 	}
 
@@ -119,6 +124,12 @@ func (c Config) Validate() error {
 	}
 	if c.Conversation.Enabled && !c.Telegram.Enabled {
 		return fmt.Errorf("HOME_AGENT_CONVERSATION_ENABLED: requires HOME_AGENT_TELEGRAM_ENABLED=true")
+	}
+	if err := c.Notion.validate(); err != nil {
+		return err
+	}
+	if c.Notion.Enabled && !c.Conversation.Enabled {
+		return fmt.Errorf("HOME_AGENT_NOTION_ENABLED: requires HOME_AGENT_CONVERSATION_ENABLED=true")
 	}
 	if err := c.Observability.validate(); err != nil {
 		return err

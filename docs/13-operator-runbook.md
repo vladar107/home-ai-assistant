@@ -196,6 +196,30 @@ bodies after delivery. Neither location is committed. The NAS-built production
 image packages the pinned Pi runtime; each user must still connect that user's
 own subscription through `/settings` after deployment.
 
+### Connect Notion
+
+Notion is opt-in with `HOME_AGENT_NOTION_ENABLED=true`. Create an internal
+connection in Notion's developer portal with read, update, and insert content
+capabilities, share the wanted pages and data sources with it, and install its
+token for the principal without printing it:
+
+```sh
+security find-generic-password -a home-ai-assistant -s notion.token -w | scripts/notion-set-token primary
+```
+
+Any command that writes the token to standard input works; the script accepts a
+pasted token followed by Enter and Ctrl-D as well. The file is written to
+`data/integrations/<principal>/notion.json` with mode `0600`. Then verify:
+
+1. `/settings` shows the workspace, bot name, and token kind, and Notion's
+   `users/me` was called once.
+2. Ask for a search, a page, and a data source query; confirm the model used
+   the tools and the answers match the shared content.
+3. With `HOME_AGENT_NOTION_CHAT_CONNECT=true`, press Connect Notion, paste a
+   token, and confirm the message disappears and the connection is reported.
+4. Disconnect from `/settings` and confirm the file and the row are gone.
+5. Confirm the token appears in neither the logs nor the database.
+
 ## 4. Configure passwordless SSH safely
 
 The NAS needs the public key. It must never receive the private key. First
@@ -400,6 +424,14 @@ Use `/status`, `/privacy`, and `/settings` from each configured Telegram user.
 Connect each user's own model subscription through `/settings`; profiles are
 principal-bound and are not shared. Then perform the ordinary-message,
 `/cancel`, and `/new` smoke checks.
+
+To connect a user's Notion workspace on the NAS, install the token through
+the SSH alias; the script writes it below `HOME_AGENT_DATA_PATH/integrations`
+as the runtime user and the bot adopts it on that user's next `/settings`:
+
+```sh
+security find-generic-password -a home-ai-assistant -s notion.token -w | scripts/notion-set-token <principal> home-nas deploy/.env.nas
+```
 
 ## 8. Open and verify Grafana
 
