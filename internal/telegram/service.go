@@ -32,6 +32,9 @@ type botAPI interface {
 	GetMe(context.Context) (Bot, error)
 	GetUpdates(context.Context, int64) ([]Update, error)
 	SendReply(context.Context, int64, int64, string) error
+	SendKeyboard(context.Context, int64, int64, string, InlineKeyboard) error
+	EditKeyboard(context.Context, int64, int64, string, InlineKeyboard) error
+	AnswerCallback(context.Context, string, string) error
 	SetMyCommands(context.Context, CommandScope, []BotCommand) error
 }
 
@@ -41,7 +44,7 @@ type ConversationController interface {
 	NewSession(context.Context, string) (bool, error)
 }
 
-// ConnectionController is implemented by the model connection service; nil disables the connection commands.
+// ConnectionController is implemented by the model connection service; nil disables the model settings section.
 type ConnectionController interface {
 	Connect(context.Context, string, int64) (connection.Ceremony, error)
 	Status(context.Context, string) (connection.Status, error)
@@ -64,6 +67,7 @@ type Service struct {
 	cursors      cursorStore
 	conversation ConversationController
 	connections  ConnectionController
+	sections     []settingsSection
 	logger       *slog.Logger
 	telemetry    Telemetry
 
@@ -95,7 +99,7 @@ func NewService(
 		return nil, fmt.Errorf("Telegram logger is required")
 	}
 
-	return &Service{
+	service := &Service{
 		client:       client,
 		identities:   identities,
 		cursors:      cursors,
@@ -103,7 +107,13 @@ func NewService(
 		connections:  connections,
 		logger:       logger,
 		telemetry:    telemetryOrNoop(telemetry),
-	}, nil
+	}
+	if connections != nil {
+		service.sections = append(service.sections, modelSection{
+			connections: connections, conversation: conversation, logger: logger, telemetry: service.telemetry,
+		})
+	}
+	return service, nil
 }
 
 func (s *Service) Start(ctx context.Context) error {
@@ -122,7 +132,7 @@ func (s *Service) Start(ctx context.Context) error {
 		return fmt.Errorf("Telegram getMe returned an invalid bot identity")
 	}
 
-	commands := registeredCommands(s.conversation != nil, s.connections != nil)
+	commands := registeredCommands(s.conversation != nil, len(s.sections) > 0)
 	// Private chats resolve the all-private-chats scope before the default one, so a stale list there would hide the default registration.
 	for _, scope := range []CommandScope{"", CommandScopeAllPrivateChats} {
 		if err := s.client.SetMyCommands(ctx, scope, commands); err != nil {
@@ -284,7 +294,7 @@ func (s *Service) processBatch(ctx context.Context, bot Bot, updates []Update, l
 		switch result.event {
 		case "telegram.update.ignored":
 			outcome = "ignored"
-		case "telegram.command.undeliverable":
+		case "telegram.command.undeliverable", "telegram.callback.undeliverable":
 			outcome = "undeliverable"
 		}
 		endUpdate(outcome, result.reason, result.command, result.err)
@@ -303,60 +313,32 @@ type processingResult struct {
 }
 
 func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (processingResult, string, error) {
+	if update.CallbackQuery != nil {
+		return s.processCallback(ctx, update.CallbackQuery)
+	}
 	if update.Message == nil {
 		return ignoredResult("non_message"), "", nil
 	}
 
 	message := update.Message
-	if !validSender(message.From) {
-		return ignoredResult("malformed_sender"), "", nil
+	if reason := validatePrivateMessage(message.From, message.Chat, message.MessageID); reason != "" {
+		return ignoredResult(reason), "", nil
 	}
-	if message.Chat.ID == 0 || message.Chat.Type == "" {
-		return ignoredResult("malformed_chat"), "", nil
-	}
-	if message.Chat.Type != ChatTypePrivate {
-		return ignoredResult("non_private_chat"), "", nil
-	}
-	if message.Chat.ID <= 0 || message.Chat.ID != message.From.ID {
-		return ignoredResult("malformed_chat"), "", nil
-	}
-	if message.MessageID <= 0 {
-		return ignoredResult("malformed_message"), "", nil
-	}
-
-	displayName := strings.TrimSpace(strings.Join([]string{message.From.FirstName, message.From.LastName}, " "))
-	if !validObservedNames(message.From.Username, displayName) {
-		return ignoredResult("malformed_sender"), "", nil
-	}
-
-	authorizeCtx, endAuthorize := s.telemetry.StartStore(ctx, "identity_authorize")
-	authorization, err := s.identities.Authorize(authorizeCtx, message.From.ID)
-	endAuthorize(err)
+	authorization, reason, failure, err := s.resolvePrincipal(ctx, message.From)
 	if err != nil {
-		return processingResult{}, "authorize_identity", err
+		return processingResult{}, failure, err
 	}
-	if !authorization.Authorized() {
-		return ignoredResult(string(authorization.Status)), "", nil
-	}
-
-	observeCtx, endObserve := s.telemetry.StartStore(ctx, "identity_observe")
-	err = s.identities.Observe(observeCtx, identity.TelegramUser{
-		ID:          message.From.ID,
-		Username:    message.From.Username,
-		DisplayName: displayName,
-	})
-	endObserve(err)
-	if err != nil {
-		return processingResult{}, "observe_identity", err
+	if reason != "" {
+		return ignoredResult(reason), "", nil
 	}
 
 	command, isCommand := ParseCommand(message.Text, bot.Username)
 	if isCommand {
-		reply, err := s.handleCommand(ctx, authorization.Principal.ID, message.Chat.ID, command)
+		reply, keyboard, err := s.handleCommand(ctx, authorization.Principal.ID, command)
 		if err != nil {
 			return processingResult{}, "handle_command", err
 		}
-		return s.sendCommandReply(ctx, message, authorization.Principal.ID, command, reply)
+		return s.sendCommandReply(ctx, message, authorization.Principal.ID, command, reply, keyboard)
 	}
 	if strings.HasPrefix(strings.TrimSpace(message.Text), "/") {
 		return ignoredResult("command_for_other_bot"), "", nil
@@ -379,7 +361,7 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 		Message:           message.Text,
 	})
 	if errors.Is(err, conversation.ErrBusy) {
-		return s.sendCommandReply(ctx, message, authorization.Principal.ID, "busy", conversation.BusyReply)
+		return s.sendCommandReply(ctx, message, authorization.Principal.ID, "busy", conversation.BusyReply, nil)
 	}
 	if err != nil {
 		return processingResult{}, "enqueue_conversation", err
@@ -390,83 +372,168 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 	}, "", nil
 }
 
-func (s *Service) handleCommand(ctx context.Context, principalID string, chatID int64, command string) (string, error) {
+// validatePrivateMessage returns the ignore reason for input that is not a well-formed message
+// from a user in their own private chat, or an empty string.
+func validatePrivateMessage(from *User, chat Chat, messageID int64) string {
+	if !validSender(from) {
+		return "malformed_sender"
+	}
+	if chat.ID == 0 || chat.Type == "" {
+		return "malformed_chat"
+	}
+	if chat.Type != ChatTypePrivate {
+		return "non_private_chat"
+	}
+	if chat.ID <= 0 || chat.ID != from.ID {
+		return "malformed_chat"
+	}
+	if messageID <= 0 {
+		return "malformed_message"
+	}
+	displayName := strings.TrimSpace(strings.Join([]string{from.FirstName, from.LastName}, " "))
+	if !validObservedNames(from.Username, displayName) {
+		return "malformed_sender"
+	}
+	return ""
+}
+
+// resolvePrincipal authorizes the sender and records the observed identity. It returns an ignore
+// reason for an unauthorized sender, or a failure reason with the error for a store problem.
+func (s *Service) resolvePrincipal(ctx context.Context, from *User) (identity.Authorization, string, string, error) {
+	authorizeCtx, endAuthorize := s.telemetry.StartStore(ctx, "identity_authorize")
+	authorization, err := s.identities.Authorize(authorizeCtx, from.ID)
+	endAuthorize(err)
+	if err != nil {
+		return identity.Authorization{}, "", "authorize_identity", err
+	}
+	if !authorization.Authorized() {
+		return identity.Authorization{}, string(authorization.Status), "", nil
+	}
+
+	observeCtx, endObserve := s.telemetry.StartStore(ctx, "identity_observe")
+	err = s.identities.Observe(observeCtx, identity.TelegramUser{
+		ID:          from.ID,
+		Username:    from.Username,
+		DisplayName: strings.TrimSpace(strings.Join([]string{from.FirstName, from.LastName}, " ")),
+	})
+	endObserve(err)
+	if err != nil {
+		return identity.Authorization{}, "", "observe_identity", err
+	}
+	return authorization, "", "", nil
+}
+
+// processCallback handles a button press on a settings message: the press is answered first, the
+// section acts, and the message is refreshed from current state so stale buttons stay harmless.
+func (s *Service) processCallback(ctx context.Context, callback *CallbackQuery) (processingResult, string, error) {
+	if callback.ID == "" || callback.Message == nil {
+		return ignoredResult("malformed_callback"), "", nil
+	}
+	message := callback.Message
+	if reason := validatePrivateMessage(callback.From, message.Chat, message.MessageID); reason != "" {
+		return ignoredResult(reason), "", nil
+	}
+	authorization, reason, failure, err := s.resolvePrincipal(ctx, callback.From)
+	if err != nil {
+		return processingResult{}, failure, err
+	}
+	if reason != "" {
+		return ignoredResult(reason), "", nil
+	}
+	principalID := authorization.Principal.ID
+	chatID := message.Chat.ID
+
+	if err := s.client.AnswerCallback(ctx, callback.ID, ""); err != nil && !isPermanentAPIError(err) {
+		return processingResult{}, "answer_callback", err
+	}
+
+	result := processingResult{event: "telegram.callback.handled", principalID: principalID, command: "settings"}
+	followUp := ""
+	section, action, known := settingsSectionFor(s.sections, callback.Data)
+	if known {
+		followUp, err = section.act(ctx, principalID, chatID, action)
+		if errors.Is(err, errUnknownSettingsAction) {
+			known, err = false, nil
+		}
+		if err != nil {
+			return processingResult{}, "settings_action", err
+		}
+	}
+	if known {
+		result.command = section.prefix() + "." + action
+	} else {
+		result.reason = "unknown_action"
+	}
+
+	text, keyboard, err := renderSettings(ctx, principalID, s.sections)
+	if err != nil {
+		return processingResult{}, "render_settings", err
+	}
+	err = s.client.EditKeyboard(ctx, chatID, message.MessageID, text, keyboard)
+	if err != nil && isPermanentAPIError(err) {
+		// Telegram no longer allows editing an old message; a fresh settings message replaces it.
+		err = s.client.SendKeyboard(ctx, chatID, 0, text, keyboard)
+	}
+	if err == nil && followUp != "" {
+		err = s.client.SendReply(ctx, chatID, 0, followUp)
+	}
+	if err != nil {
+		if isPermanentAPIError(err) {
+			result.event, result.reason, result.err = "telegram.callback.undeliverable", "send_rejected", err
+			return result, "", nil
+		}
+		return processingResult{}, "send_message", err
+	}
+	return result, "", nil
+}
+
+func (s *Service) handleCommand(ctx context.Context, principalID string, command string) (string, InlineKeyboard, error) {
 	switch command {
 	case "status":
 		if s.conversation != nil {
-			return ConversationStatusReply, nil
+			return ConversationStatusReply, nil, nil
 		}
-		return StatusReply, nil
+		return StatusReply, nil, nil
 	case "privacy":
 		if s.conversation != nil {
-			return ConversationPrivacyReply, nil
+			return ConversationPrivacyReply, nil, nil
 		}
-		return PrivacyReply, nil
+		return PrivacyReply, nil, nil
 	case "cancel":
 		if s.conversation == nil {
-			return NothingToCancelReply, nil
+			return NothingToCancelReply, nil, nil
 		}
 		cancelled, err := s.conversation.Cancel(ctx, principalID)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		if cancelled {
-			return CancelledReply, nil
+			return CancelledReply, nil, nil
 		}
-		return NothingToCancelReply, nil
+		return NothingToCancelReply, nil, nil
 	case "new":
 		if s.conversation == nil {
-			return NoSessionReply, nil
+			return NoSessionReply, nil, nil
 		}
 		reset, err := s.conversation.NewSession(ctx, principalID)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		if reset {
-			return NewSessionReply, nil
+			return NewSessionReply, nil, nil
 		}
-		return NoSessionReply, nil
-	case "connect":
-		if s.connections == nil {
-			return HelpReply, nil
+		return NoSessionReply, nil, nil
+	case "settings":
+		if len(s.sections) == 0 {
+			return HelpReply, nil, nil
 		}
-		ceremony, err := s.connections.Connect(ctx, principalID, chatID)
+		text, keyboard, err := renderSettings(ctx, principalID, s.sections)
 		if err != nil {
-			s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "telegram.connection.start_failed", "principal_id", principalID, "error", err)
-			return connection.ConnectFailedReply, nil
+			return "", nil, err
 		}
-		return ConnectInstructions(ceremony), nil
-	case "connection":
-		if s.connections == nil {
-			return HelpReply, nil
-		}
-		status, err := s.connections.Status(ctx, principalID)
-		if err != nil {
-			return "", err
-		}
-		if !status.Connected {
-			return NoConnectionReply, nil
-		}
-		return ConnectionStatusReply(status), nil
-	case "disconnect":
-		if s.connections == nil {
-			return HelpReply, nil
-		}
-		if s.conversation != nil {
-			if _, err := s.conversation.Cancel(ctx, principalID); err != nil {
-				return "", err
-			}
-		}
-		removed, err := s.connections.Disconnect(ctx, principalID)
-		if err != nil {
-			return "", err
-		}
-		if removed {
-			return DisconnectedReply, nil
-		}
-		return NoConnectionReply, nil
+		return text, keyboard, nil
 	default:
-		return HelpReply, nil
+		return HelpReply, nil, nil
 	}
 }
 
@@ -476,8 +543,15 @@ func (s *Service) sendCommandReply(
 	principalID string,
 	command string,
 	reply string,
+	keyboard InlineKeyboard,
 ) (processingResult, string, error) {
-	if err := s.client.SendReply(ctx, message.Chat.ID, message.MessageID, reply); err != nil {
+	var err error
+	if len(keyboard) > 0 {
+		err = s.client.SendKeyboard(ctx, message.Chat.ID, message.MessageID, reply, keyboard)
+	} else {
+		err = s.client.SendReply(ctx, message.Chat.ID, message.MessageID, reply)
+	}
+	if err != nil {
 		if isPermanentAPIError(err) {
 			return processingResult{
 				event:       "telegram.command.undeliverable",

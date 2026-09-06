@@ -18,9 +18,7 @@ const (
 	NothingToCancelReply     = "There is no response to cancel."
 	NewSessionReply          = "Started a fresh conversation."
 	NoSessionReply           = "There is no conversation to reset yet."
-	HelpReply                = "Available commands: /status, /privacy, /cancel, /new, /connect, /connection, /disconnect. You can otherwise talk to me normally."
-	NoConnectionReply        = "No model subscription is connected. Use /connect to connect one."
-	DisconnectedReply        = "Your model subscription is disconnected."
+	HelpReply                = "Available commands: /status, /privacy, /cancel, /new, /settings. You can otherwise talk to me normally."
 )
 
 type BotCommand struct {
@@ -28,7 +26,7 @@ type BotCommand struct {
 	Description string `json:"description"`
 }
 
-func registeredCommands(conversationEnabled, connectionsEnabled bool) []BotCommand {
+func registeredCommands(conversationEnabled, settingsEnabled bool) []BotCommand {
 	commands := []BotCommand{
 		{Command: "status", Description: "Show whether Home Agent is online"},
 		{Command: "privacy", Description: "Show the current privacy mode"},
@@ -40,13 +38,8 @@ func registeredCommands(conversationEnabled, connectionsEnabled bool) []BotComma
 			BotCommand{Command: "new", Description: "Start a fresh conversation"},
 		)
 	}
-	if connectionsEnabled {
-		commands = append(
-			commands,
-			BotCommand{Command: "connect", Description: "Connect your model subscription"},
-			BotCommand{Command: "connection", Description: "Show your model connection"},
-			BotCommand{Command: "disconnect", Description: "Disconnect your model subscription"},
-		)
+	if settingsEnabled {
+		commands = append(commands, BotCommand{Command: "settings", Description: "Show and change your settings"})
 	}
 	return commands
 }
@@ -62,13 +55,13 @@ func ConnectInstructions(ceremony connection.Ceremony) string {
 	)
 }
 
-func ConnectionStatusReply(status connection.Status) string {
+func ModelConnectedLine(status connection.Status) string {
 	suffix := status.AccountID
 	if len(suffix) > 4 {
 		suffix = suffix[len(suffix)-4:]
 	}
 	return fmt.Sprintf(
-		"Connected to a ChatGPT account ending in %s. The access token expires %s.",
+		"Model subscription: ChatGPT account ending in %s, access token expires %s.",
 		suffix, status.ExpiresAt.UTC().Format(time.RFC3339),
 	)
 }

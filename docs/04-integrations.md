@@ -53,7 +53,9 @@ and webhooks simultaneously.
 - Photos and files subject to Telegram size limits
 - Inline confirmation/cancellation buttons
 - Progress messages for long operations
-- Deterministic `/status`, `/cancel`, `/confirm`, and `/privacy` commands
+- Deterministic `/status`, `/privacy`, `/cancel`, `/new`, and `/settings`
+  commands; settings and confirmations use inline buttons rather than
+  further commands
 
 Reference: [Telegram Bot API](https://core.telegram.org/bots/api).
 

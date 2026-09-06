@@ -7,9 +7,9 @@ import (
 
 const (
 	ConnectedReply           = "Your model subscription is connected."
-	ConnectDeniedReply       = "The connection was denied. Use /connect to try again."
-	ConnectExpiredReply      = "The connection code expired. Use /connect to get a new one."
-	ConnectFailedReply       = "The connection could not be completed. Use /connect to try again."
+	ConnectDeniedReply       = "The connection was denied. Use /settings to try again."
+	ConnectExpiredReply      = "The connection code expired. Use /settings to get a new one."
+	ConnectFailedReply       = "The connection could not be completed. Use /settings to try again."
 	AccountAlreadyBoundReply = "That ChatGPT account is already connected to another user of this bot."
 )
 

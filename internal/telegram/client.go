@@ -44,9 +44,27 @@ type Bot struct {
 }
 
 type Update struct {
-	UpdateID int64    `json:"update_id"`
-	Message  *Message `json:"message"`
+	UpdateID      int64          `json:"update_id"`
+	Message       *Message       `json:"message"`
+	CallbackQuery *CallbackQuery `json:"callback_query"`
 }
+
+// CallbackQuery is a button press. Message is the bot message that carried the button; Telegram
+// may send only its chat and ID when the message is no longer accessible.
+type CallbackQuery struct {
+	ID      string   `json:"id"`
+	From    *User    `json:"from"`
+	Message *Message `json:"message"`
+	Data    string   `json:"data"`
+}
+
+type InlineButton struct {
+	Text         string `json:"text"`
+	CallbackData string `json:"callback_data"`
+}
+
+// InlineKeyboard is the rows of buttons shown under a message.
+type InlineKeyboard [][]InlineButton
 
 type Message struct {
 	MessageID int64  `json:"message_id"`
@@ -72,15 +90,18 @@ type User struct {
 }
 
 type apiResponse[T any] struct {
-	OK        bool `json:"ok"`
-	Result    T    `json:"result"`
-	ErrorCode int  `json:"error_code"`
+	OK          bool   `json:"ok"`
+	Result      T      `json:"result"`
+	ErrorCode   int    `json:"error_code"`
+	Description string `json:"description"`
 }
 
+// apiError keeps the description out of Error() so provider text never reaches a log.
 type apiError struct {
-	method     string
-	httpStatus int
-	errorCode  int
+	method      string
+	httpStatus  int
+	errorCode   int
+	description string
 }
 
 func (e *apiError) Error() string {
@@ -88,6 +109,11 @@ func (e *apiError) Error() string {
 		return fmt.Sprintf("Telegram %s returned HTTP status %d (API error code %d)", e.method, e.httpStatus, e.errorCode)
 	}
 	return fmt.Sprintf("Telegram %s returned HTTP status %d", e.method, e.httpStatus)
+}
+
+// NotModified reports Telegram's rejection of an edit that would change nothing.
+func (e *apiError) NotModified() bool {
+	return e.errorCode == http.StatusBadRequest && strings.Contains(strings.ToLower(e.description), "message is not modified")
 }
 
 func (e *apiError) Permanent() bool {
@@ -163,7 +189,7 @@ func (c *Client) GetMe(ctx context.Context) (Bot, error) {
 
 func (c *Client) GetUpdates(ctx context.Context, offset int64) ([]Update, error) {
 	params := url.Values{
-		"allowed_updates": {`["message"]`},
+		"allowed_updates": {`["message","callback_query"]`},
 		"offset":          {strconv.FormatInt(offset, 10)},
 		"timeout":         {strconv.FormatInt(c.pollSeconds, 10)},
 	}
@@ -177,6 +203,15 @@ func (c *Client) SendMessage(ctx context.Context, chatID int64, text string) err
 // SendReply quotes the request message with the reply. Telegram still delivers the text
 // when that message was deleted, and a zero message ID sends without a quote.
 func (c *Client) SendReply(ctx context.Context, chatID, replyToMessageID int64, text string) error {
+	return c.send(ctx, chatID, replyToMessageID, text, nil)
+}
+
+// SendKeyboard sends a message with inline buttons, quoting the request like SendReply.
+func (c *Client) SendKeyboard(ctx context.Context, chatID, replyToMessageID int64, text string, keyboard InlineKeyboard) error {
+	return c.send(ctx, chatID, replyToMessageID, text, keyboard)
+}
+
+func (c *Client) send(ctx context.Context, chatID, replyToMessageID int64, text string, keyboard InlineKeyboard) error {
 	params := url.Values{
 		"chat_id": {strconv.FormatInt(chatID, 10)},
 		"text":    {text},
@@ -184,8 +219,54 @@ func (c *Client) SendReply(ctx context.Context, chatID, replyToMessageID int64, 
 	if replyToMessageID > 0 {
 		params.Set("reply_parameters", fmt.Sprintf(`{"message_id":%d,"allow_sending_without_reply":true}`, replyToMessageID))
 	}
+	if err := setKeyboard(params, keyboard); err != nil {
+		return err
+	}
 	_, err := execute[struct{}](c, ctx, "sendMessage", params)
 	return err
+}
+
+// EditKeyboard replaces the text and buttons of a bot message in place. An edit that changes
+// nothing is a success; an edit Telegram no longer allows is a permanent API error.
+func (c *Client) EditKeyboard(ctx context.Context, chatID, messageID int64, text string, keyboard InlineKeyboard) error {
+	params := url.Values{
+		"chat_id":    {strconv.FormatInt(chatID, 10)},
+		"message_id": {strconv.FormatInt(messageID, 10)},
+		"text":       {text},
+	}
+	if err := setKeyboard(params, keyboard); err != nil {
+		return err
+	}
+	_, err := execute[json.RawMessage](c, ctx, "editMessageText", params)
+	var apiErr *apiError
+	if errors.As(err, &apiErr) && apiErr.NotModified() {
+		return nil
+	}
+	return err
+}
+
+// AnswerCallback closes the loading state of a button press, with an optional short toast.
+func (c *Client) AnswerCallback(ctx context.Context, callbackID, text string) error {
+	params := url.Values{"callback_query_id": {callbackID}}
+	if text != "" {
+		params.Set("text", text)
+	}
+	_, err := execute[bool](c, ctx, "answerCallbackQuery", params)
+	return err
+}
+
+func setKeyboard(params url.Values, keyboard InlineKeyboard) error {
+	if len(keyboard) == 0 {
+		return nil
+	}
+	encoded, err := json.Marshal(struct {
+		InlineKeyboard InlineKeyboard `json:"inline_keyboard"`
+	}{keyboard})
+	if err != nil {
+		return fmt.Errorf("Telegram inline keyboard could not be encoded")
+	}
+	params.Set("reply_markup", string(encoded))
+	return nil
 }
 
 func (c *Client) SendTyping(ctx context.Context, chatID int64) error {
@@ -273,11 +354,8 @@ func execute[T any](c *Client, ctx context.Context, method string, params url.Va
 	if err := json.Unmarshal(body, &envelope); err != nil {
 		return zero, fmt.Errorf("Telegram %s returned invalid JSON (HTTP status %d)", method, response.StatusCode)
 	}
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return zero, &apiError{method: method, httpStatus: response.StatusCode, errorCode: envelope.ErrorCode}
-	}
-	if !envelope.OK {
-		return zero, &apiError{method: method, httpStatus: response.StatusCode, errorCode: envelope.ErrorCode}
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices || !envelope.OK {
+		return zero, &apiError{method: method, httpStatus: response.StatusCode, errorCode: envelope.ErrorCode, description: envelope.Description}
 	}
 
 	return envelope.Result, nil

@@ -59,10 +59,23 @@ func (r *controlledRuntime) Run(ctx context.Context, request agentruntime.RunReq
 }
 
 type sentMessage struct {
-	chatID  int64
-	replyTo int64
-	text    string
-	status  int
+	chatID   int64
+	replyTo  int64
+	text     string
+	keyboard InlineKeyboard
+	status   int
+}
+
+type editedMessage struct {
+	chatID    int64
+	messageID int64
+	text      string
+	keyboard  InlineKeyboard
+}
+
+type callbackAnswer struct {
+	id   string
+	text string
 }
 
 type commandRegistration struct {
@@ -106,6 +119,8 @@ type conversationHarness struct {
 	sent          []string
 	updates       chan []Update
 	messages      chan sentMessage
+	edits         chan editedMessage
+	answers       chan callbackAnswer
 	offsets       chan int64
 	registrations chan commandRegistration
 	turns         chan turnOutcome
@@ -114,6 +129,8 @@ type conversationHarness struct {
 	sendStatuses  []int
 	sendGate      <-chan struct{}
 	commandStatus int
+	editStatus    int
+	editReason    string
 }
 
 type turnOutcome struct{ outcome, errorKind string }
@@ -141,7 +158,11 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), integrationTimeout)
 	t.Cleanup(cancel)
-	h := &conversationHarness{t: t, ctx: ctx, updates: make(chan []Update, 20), messages: make(chan sentMessage, 100), offsets: make(chan int64, 100), registrations: make(chan commandRegistration, 10), turns: make(chan turnOutcome, 20), logs: &lockedBuffer{}}
+	h := &conversationHarness{
+		t: t, ctx: ctx, updates: make(chan []Update, 20), messages: make(chan sentMessage, 100), edits: make(chan editedMessage, 100),
+		answers: make(chan callbackAnswer, 100), offsets: make(chan int64, 100), registrations: make(chan commandRegistration, 10),
+		turns: make(chan turnOutcome, 20), logs: &lockedBuffer{},
+	}
 	server := httptest.NewServer(http.HandlerFunc(h.serveHTTP))
 	t.Cleanup(server.Close)
 	path := filepath.Join(t.TempDir(), "state", "assistant.sqlite")
@@ -252,7 +273,7 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 		h.sent = append(h.sent, r.Form.Get("text"))
 		h.mu.Unlock()
 		select {
-		case h.messages <- sentMessage{chatID: chatID, replyTo: replyTo, text: r.Form.Get("text"), status: status}:
+		case h.messages <- sentMessage{chatID: chatID, replyTo: replyTo, text: r.Form.Get("text"), keyboard: h.parseKeyboard(r.Form.Get("reply_markup")), status: status}:
 		case <-r.Context().Done():
 			return
 		}
@@ -269,6 +290,42 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	case "sendChatAction":
+		result = true
+	case "answerCallbackQuery":
+		if r.Form.Get("callback_query_id") == "" {
+			h.t.Error("answerCallbackQuery without a callback ID")
+		}
+		select {
+		case h.answers <- callbackAnswer{id: r.Form.Get("callback_query_id"), text: r.Form.Get("text")}:
+		case <-r.Context().Done():
+			return
+		}
+		result = true
+	case "editMessageText":
+		chatID, err := strconv.ParseInt(r.Form.Get("chat_id"), 10, 64)
+		if err != nil {
+			h.t.Error(err)
+			return
+		}
+		messageID, err := strconv.ParseInt(r.Form.Get("message_id"), 10, 64)
+		if err != nil {
+			h.t.Error(err)
+			return
+		}
+		h.mu.Lock()
+		status, reason := h.editStatus, h.editReason
+		h.sent = append(h.sent, r.Form.Get("text"))
+		h.mu.Unlock()
+		select {
+		case h.edits <- editedMessage{chatID: chatID, messageID: messageID, text: r.Form.Get("text"), keyboard: h.parseKeyboard(r.Form.Get("reply_markup"))}:
+		case <-r.Context().Done():
+			return
+		}
+		if status != 0 {
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_code": status, "description": reason})
+			return
+		}
 		result = true
 	case "setMyCommands":
 		registration := commandRegistration{scope: r.Form["scope"]}
@@ -298,6 +355,27 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 	if err := json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": result}); err != nil && r.Context().Err() == nil {
 		h.t.Error(err)
 	}
+}
+
+func (h *conversationHarness) parseKeyboard(raw string) InlineKeyboard {
+	h.t.Helper()
+	if raw == "" {
+		return nil
+	}
+	var markup struct {
+		InlineKeyboard InlineKeyboard `json:"inline_keyboard"`
+	}
+	if err := json.Unmarshal([]byte(raw), &markup); err != nil || len(markup.InlineKeyboard) == 0 {
+		h.t.Errorf("reply_markup %q must be an inline keyboard: %v", raw, err)
+	}
+	for _, row := range markup.InlineKeyboard {
+		for _, button := range row {
+			if button.Text == "" || button.CallbackData == "" || len(button.CallbackData) > 64 {
+				h.t.Errorf("invalid inline button %+v", button)
+			}
+		}
+	}
+	return markup.InlineKeyboard
 }
 
 func (h *conversationHarness) start() {
@@ -358,6 +436,18 @@ func textUpdate(id, userID int64, text string) Update {
 	return Update{UpdateID: id, Message: &Message{MessageID: requestMessageID(id), From: &User{ID: userID, FirstName: "Test"}, Chat: Chat{ID: userID, Type: ChatTypePrivate}, Text: text}}
 }
 
+// settingsMessageID stands for the bot's settings message that a button press refers to.
+func settingsMessageID(updateID int64) int64 { return 5000 + updateID }
+
+func callbackID(updateID int64) string { return fmt.Sprintf("cb-%d", updateID) }
+
+func callbackUpdate(id, userID, messageID int64, data string) Update {
+	return Update{UpdateID: id, CallbackQuery: &CallbackQuery{
+		ID: callbackID(id), From: &User{ID: userID, FirstName: "Test"},
+		Message: &Message{MessageID: messageID, Chat: Chat{ID: userID, Type: ChatTypePrivate}}, Data: data,
+	}}
+}
+
 func (h *conversationHarness) push(updates ...Update) {
 	h.t.Helper()
 	select {
@@ -380,6 +470,15 @@ func receive[T any](t *testing.T, ctx context.Context, channel <-chan T) T {
 }
 
 func (h *conversationHarness) nextMessage() sentMessage { return receive(h.t, h.ctx, h.messages) }
+
+func (h *conversationHarness) nextEdit() editedMessage { return receive(h.t, h.ctx, h.edits) }
+
+func (h *conversationHarness) wantAnswer(updateID int64) {
+	h.t.Helper()
+	if answer := receive(h.t, h.ctx, h.answers); answer.id != callbackID(updateID) {
+		h.t.Fatalf("answered callback %+v, want %s", answer, callbackID(updateID))
+	}
+}
 
 // wantMessage expects an unquoted send, as connection notifications are.
 func (h *conversationHarness) wantMessage(chatID int64, text string) {
@@ -694,7 +793,7 @@ func TestBusyWhileResponseIsBeingDelivered(t *testing.T) {
 func TestBotCommandsRegisteredOnceAtStartup(t *testing.T) {
 	h := newConversationHarness(t, newControlledRuntime())
 	h.start()
-	want := []string{"status", "privacy", "cancel", "new", "connect", "connection", "disconnect"}
+	want := []string{"status", "privacy", "cancel", "new", "settings"}
 	for _, wantScope := range [][]string{nil, {`{"type":"all_private_chats"}`}} {
 		registration := receive(t, h.ctx, h.registrations)
 		if !slices.Equal(registration.scope, wantScope) {

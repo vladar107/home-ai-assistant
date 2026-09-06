@@ -28,7 +28,7 @@ const (
 	UnavailableReply  = "I could not complete that response. /status and /privacy are still available."
 	QuotaReply        = "Your model subscription has reached its usage limit. Please try again later."
 	ReconnectReply    = "Your model subscription is not connected or has expired. Reconnect it and try again."
-	NotConnectedReply = "Your model subscription is not connected. Use /connect to connect it."
+	NotConnectedReply = "Your model subscription is not connected. Use /settings to connect it."
 )
 
 type Service struct {

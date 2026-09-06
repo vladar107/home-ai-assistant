@@ -16,6 +16,7 @@ plan that links back to the earlier record.
 | 0004 | [Per-user model subscriptions](0004-per-user-model-subscriptions.md) | done |
 | 0005 | [Bot-registered commands and actionable provider failures](0005-bot-commands-and-provider-failures.md) | done |
 | 0006 | [Quoted replies](0006-quoted-replies.md) | done |
+| 0007 | [Settings command with inline controls](0007-settings-command.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

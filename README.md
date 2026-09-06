@@ -130,6 +130,9 @@ The default behavior is deliberately narrow: private chats only, a numeric
 allowlist, deterministic `/status` and `/privacy` replies, and ignored ordinary
 text. Optional local conversation routes ordinary text to a locked-down Pi
 runtime while `/status`, `/privacy`, `/cancel`, and `/new` remain deterministic.
+`/settings` renders every per-user setting in one message with inline
+buttons, starting with the model subscription connection; the poller accepts
+button presses only from the authorized user in their own private chat.
 The service stores a durable polling cursor per bot and persists accepted
 conversation work before advancing it, so restart does not silently lose an
 accepted message or replay already committed updates. A turn interrupted by a
