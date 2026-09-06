@@ -323,7 +323,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 	reportedKind := ""
 	reply := ""
 	connected, runErr := s.gate.Ready(turnCtx, request.PrincipalID)
-	var tools []agentruntime.ToolDefinition
+	var tools agentruntime.ToolSet
 	if runErr == nil && connected {
 		_ = s.deliverer.SendTyping(turnCtx, request.ChatID)
 		tools, runErr = s.toolProvider.ToolsFor(turnCtx, request.PrincipalID)

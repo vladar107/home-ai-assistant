@@ -25,6 +25,7 @@ import (
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/codexauth"
+	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
 const integrationTimeout = 15 * time.Second
@@ -103,6 +104,7 @@ func (b *lockedBuffer) String() string {
 type harnessOptions struct {
 	profilesDir string
 	codeTimeout time.Duration
+	providers   []tools.Provider
 }
 
 type conversationHarness struct {
@@ -208,7 +210,16 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.conversation, err = conversation.NewService(conversation.Config{TurnTimeout: 10 * time.Second}, h.store, runtime, h.client, conversation.NoTools{}, h.connections, logger, integrationTelemetry{turns: h.turns})
+	broker, err := tools.NewBroker(logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, provider := range options.providers {
+		if err := broker.Register(provider); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.conversation, err = conversation.NewService(conversation.Config{TurnTimeout: 10 * time.Second}, h.store, runtime, h.client, broker, h.connections, logger, integrationTelemetry{turns: h.turns})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -542,7 +553,7 @@ func TestConversationSessionsAndUserIsolation(t *testing.T) {
 	h.start()
 	h.push(textUpdate(1, 101, "remember amber"))
 	alice := receive(t, h.ctx, runtime.calls)
-	if alice.request.PrincipalID != "alice" || alice.request.Message != "remember amber" || len(alice.request.Tools) != 0 {
+	if alice.request.PrincipalID != "alice" || alice.request.Message != "remember amber" || !alice.request.Tools.Empty() {
 		t.Fatalf("unexpected runtime request: %+v", alice.request)
 	}
 	h.push(textUpdate(2, 202, "remember blue"))

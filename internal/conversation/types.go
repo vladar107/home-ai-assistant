@@ -79,8 +79,10 @@ type AlwaysConnected struct{}
 
 func (AlwaysConnected) Ready(context.Context, string) (bool, error) { return true, nil }
 
+// ToolProvider returns the tools a principal may use in one turn, with the executor bound to that
+// principal; an empty set runs the turn without tools.
 type ToolProvider interface {
-	ToolsFor(context.Context, string) ([]agentruntime.ToolDefinition, error)
+	ToolsFor(context.Context, string) (agentruntime.ToolSet, error)
 }
 
 type Telemetry interface {

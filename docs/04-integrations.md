@@ -84,6 +84,17 @@ The generic runtime process must not inherit coding-agent authority:
 - mount only required runtime state;
 - use one isolated profile/process where credential separation requires it.
 
+RPC mode has no host-side tool protocol; tools exist only when an extension
+inside the Pi process registers them. The application therefore bridges
+broker-granted tools with its own embedded extension, loaded explicitly with
+`--extension` while `--no-extensions` and `--no-builtin-tools` stay in force.
+The extension registers exactly the definitions written for the turn and
+forwards each call to a loopback listener with a per-turn bearer token; the
+core broker validates the grant and bounds the call before any connector runs.
+Pi persists tool arguments and results in the principal's session file
+alongside the conversation history. See
+[plan 0009](plans/0009-model-tool-calls-through-pi.md).
+
 ### Authentication and lifecycle caveat
 
 Local login and reuse by two new headless Go-driven processes are verified for

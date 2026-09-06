@@ -18,7 +18,7 @@ plan that links back to the earlier record.
 | 0006 | [Quoted replies](0006-quoted-replies.md) | done |
 | 0007 | [Settings command with inline controls](0007-settings-command.md) | done |
 | 0008 | [NAS deployment of monitoring and the application](0008-nas-deployment.md) | done |
-| 0009 | [Model tool calls through a core broker and Pi bridge](0009-model-tool-calls-through-pi.md) | proposed |
+| 0009 | [Model tool calls through a core broker and Pi bridge](0009-model-tool-calls-through-pi.md) | done |
 | 0010 | [Per-user Notion workspace connection](0010-notion-workspace-connection.md) | proposed |
 | 0011 | [Confirmed Notion writes through core approvals](0011-confirmed-notion-writes.md) | proposed |
 | 0012 | [Pull the application image from GHCR by digest](0012-ghcr-image-deployment.md) | done |

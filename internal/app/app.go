@@ -21,6 +21,7 @@ import (
 	piruntime "github.com/vladar107/home-ai-assistant/internal/runtime/pi"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/telegram"
+	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
 type App struct {
@@ -31,6 +32,7 @@ type App struct {
 	store        *sqlite.Store
 	connections  *connection.Service
 	conversation *conversation.Service
+	tools        *tools.Broker
 	telegram     *telegram.Service
 	telemetry    *observability.Telemetry
 	ready        atomic.Bool
@@ -269,12 +271,16 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("initialize Pi runtime: %w", err)
 		}
+		broker, err := tools.NewBroker(a.logger)
+		if err != nil {
+			return fmt.Errorf("initialize tool broker: %w", err)
+		}
 		conversationService, err := conversation.NewService(
 			conversation.Config{TurnTimeout: a.cfg.Conversation.TurnTimeout},
 			a.store,
 			runtime,
 			client,
-			conversation.NoTools{},
+			broker,
 			connections,
 			a.logger,
 			a.telemetry,
@@ -284,6 +290,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		}
 		a.connections = connections
 		a.conversation = conversationService
+		a.tools = broker
 	}
 
 	identities, err := identity.NewService(a.store, configured)

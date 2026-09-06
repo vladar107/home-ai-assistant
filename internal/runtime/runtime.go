@@ -11,14 +11,43 @@ type RunRequest struct {
 	PrincipalID string
 	SessionID   string
 	Message     string
-	Tools       []ToolDefinition
+	Tools       ToolSet
 	Metadata    map[string]string
+}
+
+// ToolSet is what one turn may call: the definitions offered to the model, prompt guidance for
+// them, and the executor that runs every call under the turn's principal. An empty set runs the
+// turn without tools.
+type ToolSet struct {
+	Definitions []ToolDefinition
+	Guidance    string
+	Executor    ToolExecutor
+}
+
+func (t ToolSet) Empty() bool {
+	return len(t.Definitions) == 0
 }
 
 type ToolDefinition struct {
 	Name        string
 	Description string
 	InputSchema json.RawMessage
+}
+
+// ToolExecutor runs the calls a model makes during one turn. The result is what the model may
+// read; an error means the call could not be attempted at all.
+type ToolExecutor interface {
+	Execute(context.Context, ToolCall) (ToolResult, error)
+}
+
+type ToolCall struct {
+	Name      string
+	Arguments json.RawMessage
+}
+
+type ToolResult struct {
+	Text    string
+	IsError bool
 }
 
 type Event struct {

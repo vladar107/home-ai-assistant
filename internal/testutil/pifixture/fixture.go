@@ -2,9 +2,11 @@ package pifixture
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -22,8 +24,23 @@ type Report struct {
 	PID         int      `json:"pid"`
 	PromptID    string   `json:"prompt_id"`
 	Message     string   `json:"message"`
+	// BridgeFiles lists the directory of the --extension argument and Tools holds the tools.json
+	// beside it, both captured while the turn is running because the adapter removes them after.
+	BridgeFiles []string        `json:"bridge_files"`
+	Tools       json.RawMessage `json:"tools"`
 	// AbortReceived is rewritten by the retry scenarios once they stop waiting for abort_retry.
 	AbortReceived bool `json:"abort_received"`
+}
+
+// BridgeCall is what the tool scenario posts to the application, mirroring the real extension.
+type BridgeCall struct {
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments"`
+}
+
+type BridgeResult struct {
+	Text    string `json:"text"`
+	IsError bool   `json:"isError"`
 }
 
 func ReportPath(sessionDir, sessionID string) string {
@@ -50,7 +67,7 @@ func run() error {
 	args := map[string]string{}
 	for i := 1; i < len(os.Args); i++ {
 		key := os.Args[i]
-		if i+1 < len(os.Args) && !strings.HasPrefix(os.Args[i+1], "--") {
+		if i+1 < len(os.Args) && !strings.HasPrefix(os.Args[i+1], "-") {
 			i++
 			args[key] = os.Args[i]
 		}
@@ -82,6 +99,19 @@ func run() error {
 	report := Report{Args: os.Args[1:], Environment: os.Environ(), Directory: directory, PID: os.Getpid(), PromptID: prompt.ID, Message: prompt.Message}
 	for _, entry := range entries {
 		report.Files = append(report.Files, entry.Name())
+	}
+	if extension := args["--extension"]; extension != "" {
+		bridgeEntries, err := os.ReadDir(filepath.Dir(extension))
+		if err != nil {
+			return err
+		}
+		for _, entry := range bridgeEntries {
+			report.BridgeFiles = append(report.BridgeFiles, entry.Name())
+		}
+		report.Tools, err = os.ReadFile(filepath.Join(filepath.Dir(extension), "tools.json"))
+		if err != nil {
+			return err
+		}
 	}
 	writeReport := func() error {
 		data, err := json.Marshal(report)
@@ -115,6 +145,28 @@ func run() error {
 		missingKeyText = "No API key found for fixture-provider synthetic-private-text"
 		otherText      = "network error synthetic-private-text"
 	)
+	if strings.HasPrefix(prompt.Message, "fixture:call ") {
+		// Pi runs a tool call between two assistant messages; the events mirror its RPC stream.
+		name, arguments, _ := strings.Cut(strings.TrimPrefix(prompt.Message, "fixture:call "), " ")
+		ack()
+		emit(map[string]any{"type": "message_start", "message": map[string]string{"role": "assistant"}})
+		delta("Checking.")
+		emit(map[string]any{"type": "message_update", "assistantMessageEvent": map[string]string{"type": "toolcall_start"}})
+		emit(map[string]any{"type": "tool_execution_start", "toolCallId": "call-1", "toolName": name})
+		text, isError, err := callBridge(name, arguments)
+		if err != nil {
+			return err
+		}
+		emit(map[string]any{"type": "tool_execution_end", "toolCallId": "call-1", "toolName": name, "isError": isError})
+		emit(map[string]any{"type": "message_start", "message": map[string]string{"role": "assistant"}})
+		if isError {
+			text = "error: " + text
+		}
+		delta(text)
+		settle()
+		_, err = io.Copy(io.Discard, os.Stdin)
+		return err
+	}
 	switch prompt.Message {
 	case "fixture:hold", "fixture:stubborn":
 		for {
@@ -212,6 +264,37 @@ func run() error {
 	}
 	_, err = io.Copy(io.Discard, os.Stdin)
 	return err
+}
+
+// callBridge posts the call the way the real extension does and returns the text the model would
+// read; a rejected request is reported as an error result naming the HTTP status.
+func callBridge(name, arguments string) (string, bool, error) {
+	if arguments == "" {
+		arguments = "{}"
+	}
+	body, err := json.Marshal(BridgeCall{Name: name, Arguments: json.RawMessage(arguments)})
+	if err != nil {
+		return "", false, err
+	}
+	request, err := http.NewRequest(http.MethodPost, os.Getenv("HOME_AGENT_TOOL_BRIDGE_URL"), bytes.NewReader(body))
+	if err != nil {
+		return "", false, err
+	}
+	request.Header.Set("Authorization", "Bearer "+os.Getenv("HOME_AGENT_TOOL_BRIDGE_TOKEN"))
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return "", false, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Sprintf("rejected: %d", response.StatusCode), true, nil
+	}
+	var result BridgeResult
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		return "", false, err
+	}
+	return result.Text, result.IsError, nil
 }
 
 func awaitAbort(commands *json.Decoder, timeout time.Duration) bool {

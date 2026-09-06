@@ -174,10 +174,19 @@ boundary and ignored by Git. SQLite keeps session ownership and request state;
 message and response bodies are cleared after delivery. Use `/new` to rotate to
 a fresh session and `/cancel` to stop an in-progress response.
 
-The runtime passes no tools, extensions, skills, templates, themes, project
-context, or approval authority to Pi. Its environment contains only the home
-directory needed to find Pi authentication, the executable directory, and an
-explicit Pi telemetry opt-out, so the Telegram token is not inherited. This is
+The runtime passes no built-in tools, discovered extensions, skills,
+templates, themes, project context, or approval authority to Pi. A turn whose
+user has connected an integration carries only that user's granted tools: the
+application writes its own small bridge extension and the turn's tool
+definitions into a private per-turn directory, Pi loads that one extension
+explicitly, and every call comes back over a loopback listener with a per-turn
+bearer token to the core tool broker, which rechecks the grant, bounds each
+call to 15 seconds, 16 KiB, and 8 calls per turn, marks results as untrusted
+data, and logs only the principal, tool name, outcome, duration, and size. A
+turn without tools keeps the full lockdown. Pi's environment contains only the
+home directory needed to find Pi authentication, the executable directory, an
+explicit Pi telemetry opt-out, and the per-turn bridge address, so the
+Telegram token is not inherited. This is
 process-level minimization, not an OS sandbox: the pinned Pi package runs as
 the local application user and remains a trusted dependency. The published
 application image packages Pi; the independent monitoring project does not.
