@@ -17,7 +17,7 @@ plan that links back to the earlier record.
 | 0005 | [Bot-registered commands and actionable provider failures](0005-bot-commands-and-provider-failures.md) | done |
 | 0006 | [Quoted replies](0006-quoted-replies.md) | done |
 | 0007 | [Settings command with inline controls](0007-settings-command.md) | done |
-| 0008 | [NAS deployment of monitoring and the application](0008-nas-deployment.md) | proposed |
+| 0008 | [NAS deployment of monitoring and the application](0008-nas-deployment.md) | in-progress |
 | 0009 | [Model tool calls through a core broker and Pi bridge](0009-model-tool-calls-through-pi.md) | proposed |
 | 0010 | [Per-user Notion workspace connection](0010-notion-workspace-connection.md) | proposed |
 | 0011 | [Confirmed Notion writes through core approvals](0011-confirmed-notion-writes.md) | proposed |

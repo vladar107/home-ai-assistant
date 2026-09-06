@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() { echo "usage: $0 [ssh-host] [env-file]" >&2; exit 2; }
+host=${1:-${HOME_AGENT_DEPLOY_HOST:-home-nas}}
+env_file=${2:-deploy/.env.nas}
+[[ $host =~ ^[A-Za-z0-9._@-]+$ ]] || usage
+repo_root=$(git rev-parse --show-toplevel)
+[[ $env_file = /* ]] || env_file=$repo_root/$env_file
+[[ -f $env_file ]] || { echo "NAS environment file not found: $env_file" >&2; exit 2; }
+mode=$(stat -f '%Lp' "$env_file")
+(( (8#$mode & 077) == 0 )) || { echo "NAS environment file must not be accessible by group or others: $env_file" >&2; exit 2; }
+if grep -Eq '^(HOME_AGENT_TELEGRAM_BOT_TOKEN|GRAFANA_ADMIN_PASSWORD|GRAFANA_SECRET_KEY)=' "$env_file"; then
+  echo "runtime secret values must be stored in macOS Keychain, not $env_file" >&2
+  exit 2
+fi
+# shellcheck disable=SC1090
+source "$env_file"
+for n in NAS_RUNTIME_UID NAS_RUNTIME_GID; do
+  [[ ${!n:-} =~ ^[0-9]+$ ]] || { echo "$n must be numeric" >&2; exit 2; }
+done
+validate_path() {
+  local name=$1 value=$2
+  [[ $value =~ ^/[A-Za-z0-9._/-]+$ && $value != / && $value != *'/../'* && $value != */.. ]] || {
+    echo "$name must be a safe absolute NAS path without parent traversal" >&2; exit 2;
+  }
+  [[ $value != /volume1/@docker && $value != /volume1/@docker/* ]] || {
+    echo "$name must not use Docker's internal data directory: $value" >&2; exit 2;
+  }
+}
+validate_path HOME_AGENT_NAS_ROOT "${HOME_AGENT_NAS_ROOT:-}"
+for n in HOME_AGENT_CONFIG_PATH HOME_AGENT_DATA_PATH HOME_AGENT_SECRETS_PATH HOME_AGENT_TELEGRAM_USERS_FILE_PATH; do
+  validate_path "$n" "${!n:-}"
+  [[ ${!n} = "$HOME_AGENT_NAS_ROOT"/* ]] || { echo "$n must be below HOME_AGENT_NAS_ROOT" >&2; exit 2; }
+done
+users_source=${HOME_AGENT_TELEGRAM_USERS_SOURCE:-deploy/telegram-users.json}
+if [[ $users_source = /* ]]; then
+  [[ $users_source =~ ^/[A-Za-z0-9._/-]+$ && $users_source != *'/../'* && $users_source != */.. ]] || { echo "unsafe Telegram users path" >&2; exit 2; }
+else
+  [[ $users_source =~ ^[A-Za-z0-9._/-]+$ && $users_source != ../* && $users_source != *'/../'* ]] || { echo "unsafe Telegram users path" >&2; exit 2; }
+  users_source=$repo_root/$users_source
+fi
+[[ -f $users_source ]] || { echo "Telegram users file not found: $users_source" >&2; exit 2; }
+
+for path in Dockerfile go.mod go.sum cmd internal deploy/compose.app.yaml; do
+  [[ -z $(git -C "$repo_root" status --porcelain --untracked-files=all -- "$path") ]] || {
+    echo "deployment input has uncommitted changes: $path" >&2; exit 2;
+  }
+done
+
+revision=$(git -C "$repo_root" rev-parse HEAD)
+image=home-ai-assistant:deploy-${revision:0:16}
+release=$HOME_AGENT_NAS_ROOT/releases/$(date -u +%Y%m%dT%H%M%SZ)-${revision:0:16}
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/home-agent-deploy.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT
+ssh -o BatchMode=yes "$host" "test ! -L '$HOME_AGENT_NAS_ROOT'; umask 077; mkdir -p '$release/deploy' '$HOME_AGENT_CONFIG_PATH'"
+git -C "$repo_root" archive --format=tar HEAD Dockerfile go.mod go.sum cmd internal deploy/compose.app.yaml \
+  | ssh -o BatchMode=yes "$host" "tar -xf - -C '$release'"
+scp -O -q "$users_source" "$host:$HOME_AGENT_CONFIG_PATH/.telegram-users.json.deploy"
+ssh -o BatchMode=yes "$host" "chmod 600 '$HOME_AGENT_CONFIG_PATH/.telegram-users.json.deploy' && mv -f '$HOME_AGENT_CONFIG_PATH/.telegram-users.json.deploy' '$HOME_AGENT_CONFIG_PATH/telegram-users.json'"
+
+awk '
+  /^[[:space:]]*#/ || /^[[:space:]]*$/ { print; next }
+  /^[A-Za-z_][A-Za-z0-9_]*=/ {
+    key=$0; sub(/=.*/, "", key)
+    if (key == "HOME_AGENT_IMAGE" || key == "HOME_AGENT_VERSION" || key == "HOME_AGENT_TELEGRAM_USER_ID" || key == "HOME_AGENT_TELEGRAM_USERS_SOURCE") next
+  }
+  { print }
+' "$env_file" > "$tmp/runtime.env"
+printf 'HOME_AGENT_IMAGE=%s\nHOME_AGENT_VERSION=%s\nHOME_AGENT_TELEGRAM_USERS_FILE=/etc/home-agent/telegram-users.json\n' "$image" "$revision" >> "$tmp/runtime.env"
+chmod 600 "$tmp/runtime.env"
+scp -O -q "$tmp/runtime.env" "$host:$release/deploy/runtime.env"
+
+"$repo_root/scripts/nas-sync-secrets" app "$host" "$env_file"
+remote_command=$(cat <<REMOTE
+set -Eeuo pipefail
+test ! -L '$HOME_AGENT_NAS_ROOT' && test ! -L '$HOME_AGENT_NAS_ROOT/releases'
+test ! -L '$HOME_AGENT_CONFIG_PATH' && test ! -L '$HOME_AGENT_DATA_PATH' && test ! -L '$HOME_AGENT_SECRETS_PATH'
+sudo mkdir -p '$HOME_AGENT_NAS_ROOT' '$HOME_AGENT_NAS_ROOT/releases' '$HOME_AGENT_CONFIG_PATH' '$HOME_AGENT_DATA_PATH' '$HOME_AGENT_SECRETS_PATH'
+sudo chown '$NAS_RUNTIME_UID:$NAS_RUNTIME_GID' '$HOME_AGENT_NAS_ROOT' '$HOME_AGENT_NAS_ROOT/releases' '$HOME_AGENT_CONFIG_PATH' '$HOME_AGENT_DATA_PATH' '$HOME_AGENT_SECRETS_PATH'
+sudo chmod 700 '$HOME_AGENT_NAS_ROOT' '$HOME_AGENT_NAS_ROOT/releases' '$HOME_AGENT_CONFIG_PATH' '$HOME_AGENT_DATA_PATH' '$HOME_AGENT_SECRETS_PATH'
+test -f '$HOME_AGENT_CONFIG_PATH/telegram-users.json' && test ! -L '$HOME_AGENT_CONFIG_PATH/telegram-users.json' && chmod 600 '$HOME_AGENT_CONFIG_PATH/telegram-users.json'
+cd '$release/deploy'
+sudo docker network inspect home-observability >/dev/null
+sudo docker compose -p home-ai-assistant --env-file runtime.env -f compose.app.yaml build home-agent
+sudo docker compose -p home-ai-assistant --env-file runtime.env -f compose.app.yaml up -d home-agent
+sudo docker compose -p home-ai-assistant --env-file runtime.env -f compose.app.yaml ps
+printf '%s\\n' '$release' > '$HOME_AGENT_NAS_ROOT/current.release'
+ln -sfn '$release' '$HOME_AGENT_NAS_ROOT/current'
+REMOTE
+)
+ssh -tt "$host" "$remote_command"
+
+echo "Deployed app release $release on $host." >&2

@@ -1,4 +1,4 @@
-name: home-ai-assistant
+name: home-observability
 
 x-service-defaults: &service-defaults
   restart: unless-stopped
@@ -14,46 +14,6 @@ x-service-defaults: &service-defaults
       max-file: "5"
 
 services:
-  home-agent:
-    <<: *service-defaults
-    image: ${HOME_AGENT_IMAGE:?set HOME_AGENT_IMAGE to the locally loaded immutable deployment tag}
-    platform: linux/amd64
-    pull_policy: never
-    read_only: true
-    user: "${NAS_RUNTIME_UID:?set NAS_RUNTIME_UID}:${NAS_RUNTIME_GID:?set NAS_RUNTIME_GID}"
-    depends_on:
-      alloy:
-        condition: service_started
-    environment:
-      HOME_AGENT_ALLOW_NON_LOOPBACK: "true"
-      HOME_AGENT_DATA_DIR: /var/lib/home-agent
-      HOME_AGENT_LISTEN_ADDRESS: 0.0.0.0:8080
-      HOME_AGENT_OTEL_ENABLED: "true"
-      HOME_AGENT_TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram-bot-token
-      HOME_AGENT_TELEGRAM_ENABLED: "true"
-      HOME_AGENT_TELEGRAM_USER_ID: ${HOME_AGENT_TELEGRAM_USER_ID:?set HOME_AGENT_TELEGRAM_USER_ID}
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
-      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
-      OTEL_METRIC_EXPORT_INTERVAL: "30000"
-      OTEL_RESOURCE_ATTRIBUTES: deployment.environment.name=${DEPLOYMENT_ENVIRONMENT:-home},service.version=${HOME_AGENT_VERSION:-dev}
-      OTEL_SERVICE_NAME: home-agent
-    ports:
-      - 127.0.0.1:${HOME_AGENT_HEALTH_PORT:-18080}:8080
-    secrets:
-      - source: telegram-bot-token
-        target: telegram-bot-token
-    tmpfs:
-      - /tmp:size=16m,mode=1777
-    volumes:
-      - type: bind
-        source: ${HOME_AGENT_DATA_PATH:?set HOME_AGENT_DATA_PATH}
-        target: /var/lib/home-agent
-        bind:
-          create_host_path: false
-    mem_limit: 384m
-    cpus: 1.0
-    pids_limit: 128
-
   alloy:
     <<: *service-defaults
     image: grafana/alloy:v1.19.2
@@ -64,12 +24,10 @@ services:
       - --storage.path=/var/lib/alloy/data
       - /etc/alloy/config.alloy
     read_only: true
-    user: "${NAS_RUNTIME_UID:?set NAS_RUNTIME_UID}:${NAS_RUNTIME_GID:?set NAS_RUNTIME_GID}"
-    depends_on:
-      prometheus:
-        condition: service_started
-      tempo:
-        condition: service_started
+    # The pinned image creates the alloy user as UID/GID 473. Keep the process
+    # non-root and make the host bind mount match it; cap_drop removes DAC
+    # override, so a mode-700 directory owned by the NAS account is not usable.
+    user: "473:473"
     tmpfs:
       - /tmp:size=32m,mode=1777
     volumes:
@@ -82,6 +40,8 @@ services:
         target: /var/lib/alloy/data
         bind:
           create_host_path: false
+    networks:
+      - home-observability
     mem_limit: 256m
     cpus: 0.5
     pids_limit: 128
@@ -111,6 +71,8 @@ services:
         target: /prometheus
         bind:
           create_host_path: false
+    networks:
+      - home-observability
     mem_limit: 768m
     cpus: 1.0
     pids_limit: 256
@@ -135,6 +97,8 @@ services:
         target: /var/tempo
         bind:
           create_host_path: false
+    networks:
+      - home-observability
     mem_limit: 512m
     cpus: 0.75
     pids_limit: 256
@@ -157,10 +121,10 @@ services:
       GF_SECURITY_DISABLE_GRAVATAR: "true"
       GF_SECURITY_PASSWORD_POLICY: "true"
       GF_SECURITY_SECRET_KEY__FILE: /run/secrets/grafana-secret-key
-      GF_SERVER_ROOT_URL: http://127.0.0.1:${GRAFANA_PORT:-3000}
+      GF_SERVER_ROOT_URL: http://${GRAFANA_BIND_ADDRESS:-127.0.0.1}:${GRAFANA_PORT:-3000}
       GF_USERS_ALLOW_SIGN_UP: "false"
     ports:
-      - 127.0.0.1:${GRAFANA_PORT:-3000}:3000
+      - ${GRAFANA_BIND_ADDRESS:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000
     secrets:
       - grafana-admin-password
       - grafana-secret-key
@@ -180,19 +144,19 @@ services:
         source: ./grafana/dashboards
         target: /var/lib/grafana-provisioned-dashboards
         read_only: true
+    networks:
+      - home-observability
     mem_limit: 512m
     cpus: 0.75
     pids_limit: 256
 
 secrets:
-  telegram-bot-token:
-    file: ${HOME_AGENT_SECRETS_PATH:?set HOME_AGENT_SECRETS_PATH}/telegram-bot-token
   grafana-admin-password:
     file: ${GRAFANA_SECRETS_PATH:?set GRAFANA_SECRETS_PATH}/admin-password
   grafana-secret-key:
     file: ${GRAFANA_SECRETS_PATH:?set GRAFANA_SECRETS_PATH}/secret-key
 
 networks:
-  default:
-    name: home-ai-assistant
-    driver: bridge
+  home-observability:
+    external: true
+    name: home-observability

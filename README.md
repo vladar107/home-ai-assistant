@@ -31,9 +31,10 @@ shutdown, local health endpoints, and an opt-in Telegram access slice.
   interface
 - Structured stdout logs with bounded container rotation; Loki deferred until
   local log search justifies its resource and access cost
-- Private GitHub repository and CI-built immutable `linux/amd64` images in
-  private GHCR; production deployment remains an explicit operation from the
-  operator's Mac
+- Private GitHub repository with optional CI image artifacts; production
+  deployment remains an explicit, operator-triggered NAS build from source
+- Independent monitoring and application Compose projects on the NAS, joined
+  through a private observability network
 - macOS Keychain as the canonical runtime-secret store, with only the required
   protected runtime copies on the NAS
 - No public NAS endpoints
@@ -119,7 +120,9 @@ go run ./cmd/home-agent
 The token file must have no group or other permission bits (`0600` is suitable).
 The users file must contain one or two positive numeric Telegram user IDs,
 distinct principal IDs, and non-empty display names. User IDs and allowlist
-configuration may be versioned; bot tokens must never be committed.
+configuration may be versioned; bot tokens must never be committed. The NAS
+deployment uses the users file from its first run so each authorized household
+user has an independent principal and Pi profile.
 
 The default Telegram API base URL is the official HTTPS endpoint. For local
 testing only, `HOME_AGENT_TELEGRAM_API_BASE_URL` may override it with an HTTP
@@ -175,9 +178,8 @@ context, or approval authority to Pi. Its environment contains only the home
 directory needed to find Pi authentication, the executable directory, and an
 explicit Pi telemetry opt-out, so the Telegram token is not inherited. This is
 process-level minimization, not an OS sandbox: the pinned Pi package runs as
-the local application user and remains a trusted dependency. The production
-container intentionally does not contain Pi yet; NAS packaging, authentication
-delivery, and resource measurement require a separate plan.
+the local application user and remains a trusted dependency. The NAS-built
+application image packages Pi; the independent monitoring project does not.
 
 ## Architecture at a glance
 
@@ -207,8 +209,8 @@ flowchart LR
 
 Grafana does not bundle Prometheus, Tempo, or another telemetry store. Each is a
 separate service with its own persistence and retention policy. Grafana binds
-to NAS loopback for initial operation and is reached through an SSH tunnel;
-none of the observability services requires a public endpoint.
+to the configured NAS LAN address; none of the observability services requires
+a public endpoint.
 
 ## Status
 

@@ -9,8 +9,8 @@ not as an abstract framework exercise.
 
 For the first NAS installation, "deployable and observable" means the
 monitoring stack is started and verified before the home-agent container. CI
-builds immutable images but never deploys; the operator selects and deploys an
-exact digest manually from the Mac.
+validates source; the operator copies the checked-out source from the Mac and
+the NAS builds the application image locally.
 
 The existing `job-apply` and `mentoring` repositories remain operational until
 each migrated capability reaches behavioural parity and an explicit cutover.
@@ -64,8 +64,8 @@ resource measurement, and backup/restore exercises remain in this stage.
 - Provisioned data sources, initial dashboard, and direct Hearthwatch Telegram
   alerts
 - Non-root container build and local development commands
-- Private GitHub CI publishing immutable `linux/amd64` images to private GHCR
-- Manual digest-selected deployment from the Mac over the `home-nas` SSH alias
+- Manual source deployment from the Mac over the `home-nas` SSH alias, with the
+  application image built on the NAS
 - Mac Keychain secret custody and consumer-specific protected runtime copies on
   the NAS
 - Transaction-consistent backup, restore, health-gate, and image rollback
@@ -80,12 +80,13 @@ resource measurement, and backup/restore exercises remain in this stage.
 - Health, readiness, logs, and metrics expose no token or message content.
 - SQLite state can be backed up and restored in a local exercise.
 - Grafana can query application metrics in Prometheus and traces in Tempo over
-  private networking, while only Grafana is reachable through an SSH tunnel.
+  private networking, while only Grafana is reachable on the trusted LAN.
 - Grafana delivers a safe alert through the separate Hearthwatch bot without
   depending on the model or Hearthkeeper bot.
 - CI has no runtime secrets or deployment authority; the NAS has no private
   registry credential.
-- A failed deployment returns to the retained previous image digest.
+- A failed deployment returns to the retained previous NAS-built image and
+  release.
 - The application plus observability stack leaves measured safe headroom on the
   small NAS or deployment stops with an upgrade decision.
 
@@ -94,10 +95,10 @@ resource measurement, and backup/restore exercises remain in this stage.
 Connect the application to Pi only after identity and session ownership are
 deterministic. Reuse the verified spike as the compatibility reference.
 
-Status: local opt-in implementation complete (plan 0003). Remaining live checks
-and actionable provider failures are tracked in plan 0005. Production Pi
-packaging, credential delivery, and NAS validation are deferred to a dedicated
-follow-up plan.
+Status: local opt-in implementation complete (plan 0003). The NAS image now
+packages the pinned Pi runtime and receives its Telegram secret from the
+operator's Keychain sync; remaining live subscription checks and actionable
+provider failures are tracked in plan 0005.
 
 ### Deliverables
 

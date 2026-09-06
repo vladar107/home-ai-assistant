@@ -21,14 +21,9 @@ For the main interaction bot:
    `HearthkeeperHomeBot` or `MyHearthkeeperBot`.
 4. Use `/setjoingroups` and disable group addition. The application rejects
    non-private chats as a second boundary.
-5. Use `/setcommands` and enter:
 
-   ```text
-   status - Check whether the home agent is online
-   privacy - Show the current privacy boundary
-   cancel - Stop the current model response
-   new - Start a fresh conversation
-   ```
+The application registers the command menu at startup, including `/status`,
+`/privacy`, `/cancel`, `/new`, and `/settings` when those features are enabled.
 
 For infrastructure alerts, repeat only the creation and group-disable steps
 with a distinct bot; it needs no command menu. The preferred display name is
@@ -45,19 +40,20 @@ chmod 600 .env
 ${EDITOR:-vi} .env
 ```
 
-Set `HOME_AGENT_TELEGRAM_BOT_TOKEN` to the Hearthkeeper token. Leave
-`HOME_AGENT_TELEGRAM_USER_ID` empty until the next section discovers it.
+Set `HOME_AGENT_TELEGRAM_BOT_TOKEN` to the Hearthkeeper token. Leave the
+production users file for the next section; local development may continue to
+use `HOME_AGENT_TELEGRAM_USER_ID` when only one test account is needed.
 
 If a token is ever pasted elsewhere or committed, revoke it with BotFather and
 replace the configured token before continuing.
 
-## 2. Discover your numeric Telegram user ID
+## 2. Discover and configure the authorized Telegram users
 
 Open a private chat with Hearthkeeper, press **Start**, and send one message.
 Stop any existing bot process first because Telegram permits only one active
 `getUpdates` poller per bot.
 
-Run:
+Run this once for each authorized household user:
 
 ```sh
 scripts/telegram-list-users main
@@ -65,9 +61,22 @@ scripts/telegram-list-users main
 
 The script reads the token from `.env`, sends it to `curl` through standard
 input, and prints only sender ID, username, and display name. It does not print
-message text or the token. Put the positive numeric ID in `.env` as
-`HOME_AGENT_TELEGRAM_USER_ID`. This ID is allowlist configuration, not a
-secret, and is never stored in Keychain.
+message text or the token. Record each positive numeric ID in a local copy of
+`deploy/telegram-users.example.json`, replacing the placeholder principal IDs
+and display names. The users file is allowlist configuration, not a secret,
+and is never stored in Keychain. Keep one entry for each authorized user; the
+application accepts one or two entries and rejects duplicate IDs or principals.
+
+Create the ignored production copy:
+
+```sh
+cp deploy/telegram-users.example.json deploy/telegram-users.json
+chmod 600 deploy/telegram-users.json
+${EDITOR:-vi} deploy/telegram-users.json
+```
+
+The deployment command copies this file to the NAS application configuration
+directory. Do not put the bot token in the JSON file.
 
 For Hearthwatch, store its separate token in Keychain, send `/start` to the
 alert bot, and run:
@@ -183,9 +192,9 @@ working directory, then verify:
 
 Conversation history is stored by Pi below `data/pi-sessions/`. SQLite stores
 principal ownership and durable request state, but clears message and response
-bodies after delivery. Neither location is committed. This local feature is
-not enabled in the production Compose configuration because the current image
-does not package Pi or its authentication profile.
+bodies after delivery. Neither location is committed. The NAS-built production
+image packages the pinned Pi runtime; each user must still connect that user's
+own subscription through `/settings` after deployment.
 
 ## 4. Configure passwordless SSH safely
 
@@ -249,29 +258,40 @@ scripts/nas-preflight home-nas
 
 Do not continue until it confirms Linux `x86_64`, working Docker Engine,
 working Docker Compose, sufficient free space, and Docker access for the
-dedicated deployment account. Docker access is effectively root-equivalent;
-do not share this account or mount the Docker socket into a container.
+dedicated deployment account. `nas-preflight` opens an interactive SSH
+terminal and asks for the NAS account password once. The deployment scripts do
+the same for their Compose command; no sudo timestamp needs to persist between
+SSH sessions, and no Docker group is required. Docker access is effectively
+root-equivalent; do not share this account or mount the Docker socket into a
+container.
 
-Select a user-writable absolute data root on the real NAS volume. The example
-below is intentionally a placeholder; do not copy it until the actual NAS OS
-volume layout and backup coverage are known:
+Use the existing `docker` shared folder. It is the parent for the two projects;
+Immich remains a separate sibling. Connect to the NAS and create only the
+directories that the deployment account owns:
 
 ```sh
+ssh home-nas
 umask 077
-install -d -m 700 /VALIDATED_VOLUME/home-ai-assistant
-install -d -m 700 /VALIDATED_VOLUME/home-ai-assistant/releases
-install -d -m 700 /VALIDATED_VOLUME/home-ai-assistant/home-agent/data
-install -d -m 700 /VALIDATED_VOLUME/home-ai-assistant/home-agent/secrets
-install -d -m 700 /VALIDATED_VOLUME/home-ai-assistant/alloy
-install -d -m 700 /VALIDATED_VOLUME/home-ai-assistant/prometheus
-install -d -m 700 /VALIDATED_VOLUME/home-ai-assistant/tempo
-install -d -m 700 /VALIDATED_VOLUME/home-ai-assistant/grafana
-install -d -m 700 /VALIDATED_VOLUME/home-ai-assistant/grafana-secrets
+install -d -m 700 /volume1/docker/monitoring/releases
+install -d -m 700 /volume1/docker/monitoring/alloy
+install -d -m 700 /volume1/docker/monitoring/prometheus
+install -d -m 700 /volume1/docker/monitoring/tempo
+install -d -m 700 /volume1/docker/monitoring/grafana
+install -d -m 700 /volume1/docker/monitoring/grafana-secrets
+install -d -m 700 /volume1/docker/home-ai-assistant/releases
+install -d -m 700 /volume1/docker/home-ai-assistant/config
+install -d -m 700 /volume1/docker/home-ai-assistant/data
+install -d -m 700 /volume1/docker/home-ai-assistant/secrets
+exit
 ```
 
-Run those commands while connected as the deployment account, so all
-directories have that account's UID and GID. Do not solve permission errors
-with `chmod 777`.
+Run those commands as `vladar107`, not with `sudo`, so all directories have the
+deployment account's UID and GID. Do not use a literal `'$NAS_ROOT'` or solve
+permission errors with `chmod 777`. Confirm the resulting layout with:
+
+```sh
+ssh home-nas 'find /volume1/docker -maxdepth 2 -type d -print'
+```
 
 On the Mac, create the ignored deployment environment:
 
@@ -282,15 +302,20 @@ ${EDITOR:-vi} deploy/.env.nas
 ```
 
 Set `NAS_RUNTIME_UID` and `NAS_RUNTIME_GID` to the numeric values printed by
-`nas-preflight`. Replace every placeholder path with the directories just
-created. The Compose services intentionally run as this verified unprivileged
-identity so their mode-`0600` secret files and mode-`0700` data directories do
-not need broader permissions.
+`nas-preflight`. Replace the path placeholders with the directories just
+created: monitoring uses `/volume1/docker/monitoring`; the application uses
+`/volume1/docker/home-ai-assistant`. Prometheus, Tempo, and Grafana run as this
+verified unprivileged identity. The monitoring deploy script owns the Alloy
+data directory as UID/GID 473, matching the pinned Alloy image, because all
+Linux capabilities are dropped. Their mode-`0600` secret files and
+mode-`0700` data directories do not need broader permissions.
+Set `GRAFANA_BIND_ADDRESS` to the NAS LAN address (`10.0.0.10` here). This
+publishes only Grafana on the internal network; the Home Agent health endpoint
+remains bound to NAS loopback.
 
-Set `HOME_AGENT_TELEGRAM_USER_ID` in `deploy/.env.nas`. Store the bot token and
-remaining Grafana secrets in Keychain. Use a unique generated admin password
-and at least 32 random characters for the Grafana secret key; paste each only
-at its Keychain prompt:
+Store the bot token and Grafana secrets in Keychain. Use a unique generated
+admin password and at least 32 random characters for the Grafana secret key;
+paste each only at its Keychain prompt:
 
 ```sh
 scripts/keychain-set-secret home-agent.telegram-bot-token
@@ -298,94 +323,69 @@ scripts/keychain-set-secret grafana.admin-password
 scripts/keychain-set-secret grafana.secret-key
 ```
 
-Synchronize only the always-needed runtime copies:
+The stage-specific deployment commands below read these Keychain entries and
+install only the secret needed by that stage. No runtime secret is written to
+`deploy/.env.nas`.
+
+## 6. Deploy monitoring first
+
+Monitoring is independent and can run without the application image or a
+Telegram token. Ensure Docker Hub is reachable from the NAS, then deploy it
+from the checked-out repository:
 
 ```sh
-scripts/nas-sync-secrets home-nas deploy/.env.nas
+scripts/deploy-monitoring-nas home-nas deploy/.env.nas
 ```
 
-The script refuses broad local environment-file permissions, verifies both NAS
-secret directories are mode `0700` and owned by the SSH account, and installs
-each non-empty secret atomically with mode `0600`.
-
-## 6. Create the private repository and image pipeline
-
-Keep the GitHub repository private. The included workflows have separate
-responsibilities:
-
-- `CI` formats, validates module files, tests, vets, and builds;
-- `Production image` builds only `linux/amd64`, publishes a commit-SHA tag to
-  private GHCR, and records build provenance;
-- neither workflow has NAS or runtime secrets, network access to the NAS, or a
-  deployment step.
-
-Publish only after reviewing and committing the complete change. If no private
-remote exists yet, create one with the GitHub CLI when ready:
+The command copies the pinned monitoring configuration to a new release under
+`/volume1/docker/monitoring`, syncs the Grafana secrets from Keychain, and opens
+one interactive NAS terminal for `sudo docker compose pull` and `up -d`. It does
+not build or start `home-agent`.
+Verify the stage before deploying the application:
 
 ```sh
-gh repo create vladar107/home-ai-assistant --private --source=. --remote=origin
-git push -u origin main
+ssh -tt home-nas 'cd /volume1/docker/monitoring/current/deploy && sudo docker compose --env-file runtime.env -f compose.monitoring.yaml ps'
+ssh -tt home-nas 'sudo docker network inspect home-observability >/dev/null'
 ```
 
-Confirm the repository and GHCR package are private. On the Mac, authenticate
-Docker to GHCR using a token with package read access. With Docker Desktop or
-the `osxkeychain` credential helper configured, this stores the credential in
-Keychain instead of plaintext Docker configuration:
+Open `http://10.0.0.10:3000` from a device on the trusted LAN and verify the
+provisioned Prometheus and Tempo data sources. The Home Agent dashboard may be
+empty until the application is deployed; that does not mean the monitoring
+stage failed. Keep the NAS firewall limited to the trusted LAN.
+
+## 7. Build and deploy the application on the NAS
+
+Stop the GoLand poller for the production bot token first. Keep
+`deploy/telegram-users.json` beside the repository (it is ignored by Git), and
+ensure it contains both authorized users. Then run:
 
 ```sh
-gh auth token | docker login ghcr.io -u vladar107 --password-stdin
+scripts/deploy-app-nas home-nas deploy/.env.nas
 ```
 
-Check `~/.docker/config.json` for a credential helper such as `desktop` or
-`osxkeychain`; stop if it contains a plaintext `auth` entry for GHCR. The NAS
-does not log in to GHCR.
+The command copies the complete checked-out source and Docker build context to a
+new release under `/volume1/docker/home-ai-assistant`, copies the users file to
+the protected application config directory, syncs only the Hearthkeeper token
+from Keychain, and opens one interactive NAS terminal for the local
+`linux/amd64` build and `sudo docker compose up -d`. It does not log in to GHCR
+or stream an image from the Mac.
 
-After the image workflow succeeds, select the exact manifest digest for the
-`sha-<full-commit>` tag. A deployable reference has this shape:
-
-```text
-ghcr.io/vladar107/home-ai-assistant@sha256:64-lowercase-hex-characters
-```
-
-## 7. Deploy manually from the Mac
-
-Ensure Docker Desktop is running, the repository is checked out at the exact
-image revision, and the deployment inputs are committed. Then run:
+Check the application and its independent monitoring project:
 
 ```sh
-scripts/deploy-nas \
-  ghcr.io/vladar107/home-ai-assistant@sha256:REPLACE_WITH_REAL_DIGEST \
-  home-nas \
-  deploy/.env.nas
+ssh -tt home-nas 'cd /volume1/docker/home-ai-assistant/current/deploy && sudo docker compose --env-file runtime.env -f compose.app.yaml ps'
+ssh home-nas 'curl --fail http://127.0.0.1:18080/healthz && curl --fail http://127.0.0.1:18080/readyz'
 ```
 
-The script performs these gates:
-
-1. validates an exact GHCR digest and a clean set of deployment inputs;
-2. pulls `linux/amd64` on the Mac and verifies the image's revision label;
-3. tags it locally and streams `docker image save` directly through SSH to
-   `docker image load`, without an archive or NAS registry credential;
-4. copies only version-controlled deployment configuration into a versioned
-   NAS release directory;
-5. refreshes runtime secret files from Keychain;
-6. pulls and starts Alloy, Prometheus, Tempo, and Grafana first;
-7. checks their private readiness endpoints, then starts home-agent;
-8. requires application readiness plus an application metric and trace;
-9. updates the `current` release symlink only after all gates pass.
-
-If a gate fails and a previous release exists, Compose is reconciled back to
-that release. The failed release and both images remain available for
-diagnosis; cleanup is a separate explicit operation.
+Use `/status`, `/privacy`, and `/settings` from each configured Telegram user.
+Connect each user's own model subscription through `/settings`; profiles are
+principal-bound and are not shared. Then perform the ordinary-message,
+`/cancel`, and `/new` smoke checks.
 
 ## 8. Open and verify Grafana
 
-Grafana listens only on NAS loopback. Keep this terminal open:
-
-```sh
-ssh -N -L 3000:127.0.0.1:3000 home-nas
-```
-
-Open `http://127.0.0.1:3000` and log in as `admin`. To paste the admin password
+Grafana listens on the configured NAS LAN address. Open
+`http://10.0.0.10:3000` and log in as `admin`. To paste the admin password
 without printing it:
 
 ```sh
@@ -440,27 +440,19 @@ maintenance behaviour.
 Inspect current state without exposing secrets:
 
 ```sh
-ssh home-nas 'cd /VALIDATED_VOLUME/home-ai-assistant/current/deploy && docker compose --env-file runtime.env ps'
-ssh home-nas 'cd /VALIDATED_VOLUME/home-ai-assistant/current/deploy && docker compose --env-file runtime.env logs --tail=200 home-agent'
+ssh -tt home-nas 'cd /volume1/docker/monitoring/current/deploy && sudo docker compose --env-file runtime.env -f compose.monitoring.yaml ps'
+ssh -tt home-nas 'cd /volume1/docker/home-ai-assistant/current/deploy && sudo docker compose --env-file runtime.env -f compose.app.yaml ps'
+ssh -tt home-nas 'cd /volume1/docker/home-ai-assistant/current/deploy && sudo docker compose --env-file runtime.env -f compose.app.yaml logs --tail=200 home-agent'
 ```
 
-Use the exact validated NAS root in place of the placeholder. Container logs
-rotate at 10 MB with five files per service. Loki is intentionally absent.
+Container logs rotate at 10 MB with five files per service. Loki is intentionally
+absent.
 
-To roll back manually, identify a retained release, inspect its `source-image`
-and `runtime.env`, and pair it with the data snapshot taken before that release
-changed the database. An older binary must not be started against a database
-that has newer migrations. Update the `current` symlink only after readiness
-and telemetry are verified. Never delete the last known-good image, release,
-or pre-upgrade snapshot during the same operation as a deployment.
-
-`scripts/deploy-nas` stops the previous Home Agent immediately before starting
-the new image and copies its clean data directory to
-an attempt-specific `pre-upgrade-data-*` directory inside the new release. If
-readiness or telemetry validation fails, the script stops the new container,
-restores that attempt's snapshot, and starts the previous Compose release
-before returning an error. Retained snapshots must be associated with their
-deployment attempt before a later manual restore.
+To roll back manually, identify a retained release and inspect its
+`deploy/runtime.env`. Start it with the matching Compose file and then update
+the `current` symlink. An older binary must not be started against a database
+that has newer migrations. Keep at least one known-good release and its data
+backup until the replacement has been verified.
 
 ## 11. Backup and restore
 
@@ -469,15 +461,15 @@ transaction-consistent manual backup, stop only `home-agent`, take a NAS
 snapshot or copy of its entire private data directory, and start it again:
 
 ```sh
-ssh home-nas 'cd /VALIDATED_VOLUME/home-ai-assistant/current/deploy && docker compose --env-file runtime.env stop home-agent'
+ssh -tt home-nas 'cd /volume1/docker/home-ai-assistant/current/deploy && sudo docker compose --env-file runtime.env -f compose.app.yaml stop home-agent'
 # Take the configured NAS snapshot or protected copy here.
-ssh home-nas 'cd /VALIDATED_VOLUME/home-ai-assistant/current/deploy && docker compose --env-file runtime.env up -d home-agent'
+ssh -tt home-nas 'cd /volume1/docker/home-ai-assistant/current/deploy && sudo docker compose --env-file runtime.env -f compose.app.yaml up -d home-agent'
 ```
 
 Back up the Grafana data directory if alert configuration must survive a loss.
 Prometheus metrics, Tempo traces, and Alloy queue state have lower recovery
 priority and may be recreated. The source repository, Keychain secrets,
-selected image digest, ignored NAS environment file, and documented NAS paths
+selected NAS image tag, ignored NAS environment file, and documented NAS paths
 are all required for full recovery.
 
 A backup is not accepted until it has been restored into an isolated directory
@@ -493,7 +485,7 @@ polling cursor have been verified without sending duplicate Telegram replies.
   procedure; replacing the file alone can make stored alert credentials
   unreadable.
 - Revoke the SSH public key on the NAS if the Mac or private key is lost.
-- Treat unexpected host-key changes, a plaintext GHCR credential, broad NAS
+- Treat unexpected host-key changes, plaintext registry credentials, broad NAS
   secret permissions, or token-bearing logs as an incident and stop deployment.
 - Never paste diagnostic output that might contain message bodies or secrets
   into an issue without reviewing and redacting it locally.

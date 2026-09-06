@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() { echo "usage: $0 [ssh-host] [env-file]" >&2; exit 2; }
+host=${1:-${HOME_AGENT_DEPLOY_HOST:-home-nas}}
+env_file=${2:-deploy/.env.nas}
+[[ $host =~ ^[A-Za-z0-9._@-]+$ ]] || usage
+repo_root=$(git rev-parse --show-toplevel)
+[[ $env_file = /* ]] || env_file=$repo_root/$env_file
+[[ -f $env_file ]] || { echo "NAS environment file not found: $env_file" >&2; exit 2; }
+mode=$(stat -f '%Lp' "$env_file")
+(( (8#$mode & 077) == 0 )) || { echo "NAS environment file must not be accessible by group or others: $env_file" >&2; exit 2; }
+if grep -Eq '^(HOME_AGENT_TELEGRAM_BOT_TOKEN|GRAFANA_ADMIN_PASSWORD|GRAFANA_SECRET_KEY)=' "$env_file"; then
+  echo "runtime secret values must be stored in macOS Keychain, not $env_file" >&2
+  exit 2
+fi
+# shellcheck disable=SC1090
+source "$env_file"
+for n in NAS_RUNTIME_UID NAS_RUNTIME_GID; do
+  [[ ${!n:-} =~ ^[0-9]+$ ]] || { echo "$n must be numeric" >&2; exit 2; }
+done
+validate_path() {
+  local name=$1 value=$2
+  [[ $value =~ ^/[A-Za-z0-9._/-]+$ && $value != / && $value != *'/../'* && $value != */.. ]] || {
+    echo "$name must be a safe absolute NAS path without parent traversal" >&2; exit 2;
+  }
+  [[ $value != /volume1/@docker && $value != /volume1/@docker/* ]] || {
+    echo "$name must not use Docker's internal data directory: $value" >&2; exit 2;
+  }
+}
+validate_path MONITORING_ROOT "${MONITORING_ROOT:-}"
+for n in ALLOY_DATA_PATH PROMETHEUS_DATA_PATH TEMPO_DATA_PATH GRAFANA_DATA_PATH GRAFANA_SECRETS_PATH; do
+  validate_path "$n" "${!n:-}"
+  [[ ${!n} = "$MONITORING_ROOT"/* ]] || { echo "$n must be below MONITORING_ROOT" >&2; exit 2; }
+done
+
+# grafana/alloy:v1.19.2 creates its supported non-root account as UID/GID 473.
+# Keep this image-specific identity next to the bind-mount ownership repair.
+alloy_uid=473
+alloy_gid=473
+
+for path in deploy/compose.monitoring.yaml deploy/alloy deploy/prometheus deploy/tempo deploy/grafana; do
+  [[ -z $(git -C "$repo_root" status --porcelain --untracked-files=all -- "$path") ]] || {
+    echo "deployment input has uncommitted changes: $path" >&2; exit 2;
+  }
+done
+
+revision=$(git -C "$repo_root" rev-parse HEAD)
+release=$MONITORING_ROOT/releases/$(date -u +%Y%m%dT%H%M%SZ)-${revision:0:16}
+ssh -o BatchMode=yes "$host" "test ! -L '$MONITORING_ROOT'; umask 077; mkdir -p '$release/deploy'"
+git -C "$repo_root" archive --format=tar HEAD deploy/compose.monitoring.yaml deploy/alloy deploy/prometheus deploy/tempo deploy/grafana \
+  | ssh -o BatchMode=yes "$host" "tar -xf - -C '$release'"
+scp -O -q "$env_file" "$host:$release/deploy/runtime.env"
+ssh -o BatchMode=yes "$host" "chmod 600 '$release/deploy/runtime.env'"
+
+"$repo_root/scripts/nas-sync-secrets" monitoring "$host" "$env_file"
+remote_command=$(cat <<REMOTE
+set -Eeuo pipefail
+test ! -L '$MONITORING_ROOT' && test ! -L '$MONITORING_ROOT/releases'
+test ! -L '$ALLOY_DATA_PATH' && test ! -L '$PROMETHEUS_DATA_PATH' && test ! -L '$TEMPO_DATA_PATH'
+test ! -L '$GRAFANA_DATA_PATH' && test ! -L '$GRAFANA_SECRETS_PATH'
+sudo mkdir -p '$MONITORING_ROOT' '$MONITORING_ROOT/releases' '$ALLOY_DATA_PATH' '$PROMETHEUS_DATA_PATH' '$TEMPO_DATA_PATH' '$GRAFANA_DATA_PATH' '$GRAFANA_SECRETS_PATH'
+sudo chown '$NAS_RUNTIME_UID:$NAS_RUNTIME_GID' '$MONITORING_ROOT' '$MONITORING_ROOT/releases' '$PROMETHEUS_DATA_PATH' '$TEMPO_DATA_PATH' '$GRAFANA_DATA_PATH' '$GRAFANA_SECRETS_PATH'
+sudo chown -R '$alloy_uid:$alloy_gid' '$ALLOY_DATA_PATH'
+sudo chmod 700 '$MONITORING_ROOT' '$MONITORING_ROOT/releases' '$ALLOY_DATA_PATH' '$PROMETHEUS_DATA_PATH' '$TEMPO_DATA_PATH' '$GRAFANA_DATA_PATH' '$GRAFANA_SECRETS_PATH'
+sudo docker network inspect home-observability >/dev/null 2>&1 || sudo docker network create --driver bridge home-observability >/dev/null
+cd '$release/deploy'
+sudo docker compose -p home-monitoring --env-file runtime.env -f compose.monitoring.yaml pull alloy prometheus tempo grafana
+sudo docker compose -p home-monitoring --env-file runtime.env -f compose.monitoring.yaml up -d alloy prometheus tempo grafana
+sudo docker compose -p home-monitoring --env-file runtime.env -f compose.monitoring.yaml ps
+printf '%s\\n' '$release' > '$MONITORING_ROOT/current.release'
+ln -sfn '$release' '$MONITORING_ROOT/current'
+REMOTE
+)
+ssh -tt "$host" "$remote_command"
+
+echo "Deployed monitoring release $release on $host." >&2

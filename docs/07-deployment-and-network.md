@@ -40,15 +40,13 @@ segments cannot reach it, and remote administration uses a VPN.
 flowchart LR
     GH[Private GitHub repository]
     CI[GitHub Actions]
-    GHCR[Private GHCR]
     MAC[Operator Mac]
     INTERNET[Internet]
     ROUTER[Router\n<router-address>]
     SWITCH[Switch]
 
-    GH --> CI -->|immutable linux/amd64 image| GHCR
-    GHCR -->|pull exact digest| MAC
-    MAC -->|image stream and explicit deploy over SSH| NAS
+    GH --> CI
+    MAC -->|source and configuration over SSH| NAS
     INTERNET --> ROUTER
     ROUTER -->|trunk| SWITCH
 
@@ -58,8 +56,9 @@ flowchart LR
     end
 
     subgraph NASWORKLOADS[NAS workloads]
-        AGENT[home-agent]
-        PI[Pi runtime]
+        MON[Independent monitoring Compose project]
+        AGENT[Home Agent Compose project]
+        PI[Pi runtime inside Home Agent]
         IMMICH[Immich]
         PROM[Prometheus]
         TEMPO[Tempo monolithic]
@@ -76,7 +75,7 @@ flowchart LR
 
     AGENT -->|outbound 443| INTERNET
     PI -->|outbound model traffic| INTERNET
-    AGENT -->|OTLP, private container network| ALLOY
+    AGENT -->|OTLP, home-observability network| ALLOY
     ALLOY --> PROM
     ALLOY --> TEMPO
     GRAFANA --> PROM
@@ -98,46 +97,46 @@ Telegram uses outbound long polling. Existing VPN access already
 solves remote administration. CloudFront, Cloudflare Tunnel, and additional DDNS
 are not required for the initial agent.
 
-The first deployment binds Grafana to NAS loopback rather than the LAN. An
-operator reaches it from the Mac with an SSH local-forward such as
-`ssh -L 3000:127.0.0.1:3000 home-nas`, then opens
-`http://127.0.0.1:3000`. Prometheus, Tempo, Alloy, application health, and OTLP
+The first deployment binds Grafana to the configured NAS LAN address (for this
+NAS, `10.0.0.10:3000`). Prometheus, Tempo, Alloy, application health, and OTLP
 listeners stay on the private container network or NAS loopback. No service is
-published to the internet.
+published to the internet; restrict the Grafana port to the trusted LAN in the
+NAS firewall.
 
 ## Build and deployment flow
 
-The source lives in a private GitHub repository. GitHub Actions validates the
-repository, builds only the required `linux/amd64` production image initially,
-and publishes it to private GitHub Container Registry (GHCR) under an immutable
-commit-SHA tag and digest. CI uses the repository's short-lived `GITHUB_TOKEN`
-with only `contents: read` and `packages: write`; it receives no NAS, Telegram,
-Grafana, or application runtime credentials. See GitHub's official guidance for
-[publishing Docker images](https://docs.github.com/en/actions/tutorials/publish-packages/publish-docker-images)
-and [package permissions](https://docs.github.com/en/packages/learn-github-packages/about-permissions-for-github-packages).
+The source lives in a private GitHub repository. CI validates the source and
+may publish an image artifact, but production deployment is an explicit
+operator-triggered build on the NAS. The Mac copies versioned source and
+configuration files over SSH; no application image is streamed or pulled from a
+registry.
 
-Production deployment is never a CI side effect. The operator selects an exact
-digest and deploys from the Mac:
+The monitoring project is deployed first:
 
-1. Authenticate the local Docker client to private GHCR using a credential held
-   by the Mac's native credential store.
-2. Pull the selected digest explicitly for `linux/amd64`.
-3. Stream `docker image save` stdout through `ssh home-nas` to
-   `docker image load` on the NAS.
-4. Synchronize only version-controlled, non-secret Compose and provisioning
-   files.
-5. Materialize the required runtime secrets from Keychain into protected NAS
-   files without printing them or placing them in command arguments.
-6. Start Compose with registry pulling disabled.
-7. Require container health, application readiness, and telemetry checks to
-   pass; otherwise restore the previously recorded image digest.
+1. Copy the monitoring Compose file, Alloy configuration, Prometheus
+   configuration, Grafana provisioning, and non-secret environment file into a
+   versioned directory under `/volume1/docker/monitoring`.
+2. Pull the pinned public Alloy, Prometheus, Tempo, and Grafana images on the
+   NAS.
+3. Ensure the private external `home-observability` network exists and start
+   the monitoring project on it.
+4. Verify readiness, Grafana data sources, dashboards, and the SSH tunnel.
 
-This leaves no deployment archive and no private-registry credential on the
-NAS. It requires enough temporary Docker storage on the Mac and NAS for the new
-and previous images. Retain at least the last known-good image until the new
-deployment passes its verification gate. Docker documents both
-[`docker image save`](https://docs.docker.com/reference/cli/docker/image/save/)
-and [`docker image load`](https://docs.docker.com/reference/cli/docker/image/load/).
+The application is deployed separately:
+
+1. Copy the checked-out Go and Docker build context, application Compose file,
+   multi-user users file, and non-secret environment file into a versioned
+   directory under `/volume1/docker/home-ai-assistant`.
+2. Build the `linux/amd64` image on the NAS.
+3. Materialize only the Telegram token from Keychain into the protected
+   application secret directory.
+4. Start the application project on the existing `home-observability` network.
+5. Check the application health endpoints and Telegram smoke flows, then point
+   the application `current` symlink at the release.
+
+Monitoring and application releases, persistent data, and rollback operations
+remain independent. A monitoring restart must not stop the application, and an
+application rollback must not rewrite monitoring state.
 
 ## SSH operator access
 
@@ -167,7 +166,7 @@ Initial services:
 | `alloy` | Private OTLP input and backend output only | Normally none | 128–256 MB |
 | `prometheus` | Private only | Metrics TSDB | 512 MB–1 GB |
 | `tempo` | Private only, monolithic mode | Trace blocks and WAL | 256–512 MB |
-| `grafana` | NAS loopback only | Internal database, dashboards, alert state | 256–512 MB |
+| `grafana` | Configured NAS LAN address | Internal database, dashboards, alert state | 256–512 MB |
 | later host exporters | Prometheus only | None | under 128 MB total |
 
 These are conservative planning envelopes, not measured requirements or a
@@ -211,20 +210,21 @@ growth. The hardware supports larger capacity.
 Proposed logical volumes:
 
 ```text
-home-agent/data/          SQLite and application state
-home-agent/config/        Non-secret configuration
-home-agent/secrets/       Protected runtime copies, separate from deployment files
-home-agent/pi/user-a/     Isolated Pi profile for user A, if Pi is adopted
-home-agent/pi/user-b/     Separate profile only if independently authorized
-prometheus/               Metrics data
-tempo/                    Trace blocks and WAL
-grafana/                  Dashboards and alert configuration
+monitoring/releases/       Versioned monitoring Compose and configuration
+monitoring/prometheus/     Metrics data
+monitoring/tempo/          Trace blocks and WAL
+monitoring/grafana/        Dashboards and alert configuration
+monitoring/alloy/          Alloy queue/state
+home-ai-assistant/releases/  Versioned application source and Compose
+home-ai-assistant/data/      SQLite and per-user Pi state
+home-ai-assistant/config/    Multi-user and other non-secret configuration
+home-ai-assistant/secrets/   Protected Telegram and runtime secret copies
 ```
 
-These are logical names, not assumed NAS OS paths. The operator must select
-absolute NAS locations only after checking the live volume layout, filesystem,
-backup policy, and the UID/GID used by each container. Compose bind mounts must
-use those validated absolute paths.
+These logical volumes live under the existing `/volume1/docker` shared folder,
+alongside but separate from `immich-app`. The operator must still verify the
+live filesystem, backup policy, and the UID/GID used by each container before
+binding them into Compose.
 
 NAS content roots are mounted read-only and separately from application state.
 Pi does not receive NAS content mounts in the generic runtime configuration.

@@ -45,7 +45,7 @@
 | D-028 | Use `modernc.org/sqlite` for the control-plane store | Accepted | Its stable pure-Go `database/sql` driver avoids CGO and simplifies macOS development plus Linux/NAS builds; version `v1.57.0` was current when introduced and is pinned |
 | D-029 | Call the Telegram Bot API directly with Go's standard-library `net/http` | Accepted | The initial slice needs only `getMe`, `getUpdates`, and `sendMessage`; direct calls keep the dependency surface tiny while allowing explicit token redaction and request timeouts |
 | D-030 | Instrument application metrics and traces with OpenTelemetry, receive them in Alloy, and store them in Prometheus and monolithic Tempo | Accepted | Metrics and traces are required from the first NAS deployment; a collector boundary keeps backend details out of the application while separate bounded stores remain viable on 8 GB. Grafana is the interface, not a bundled data store. Structured stdout logs retain trace/span correlation and Loki remains deferred |
-| D-031 | Publish immutable `linux/amd64` images from private GitHub CI to private GHCR, but deploy them manually from the operator Mac | Accepted | CI can validate and build without production authority. Selecting an exact digest and streaming it to the NAS over SSH preserves human control, rollback, and auditability without leaving a registry credential or deployment archive on the NAS |
+| D-031 | Keep production deployment operator-triggered, build the application on the NAS from checked-out source, and run monitoring as a separate Compose project | Accepted | The NAS is the production host, so its build context, local image, persistent state, and rollback record stay together. Independent monitoring can serve Home Agent and future applications without application secrets or coupling. CI may publish an optional image artifact but has no deployment authority |
 | D-032 | Keep canonical runtime secrets in macOS Keychain and only required protected runtime copies on the NAS | Accepted | The Mac remains the operator-controlled source of recovery. Always-running containers receive only their own read-only files from a `0700` NAS directory with `0600` files; secrets stay out of Git, CI, image layers, environment values, command arguments, and logs |
 
 ## Go
@@ -161,18 +161,17 @@ privacy mode itself.
 
 ## Deployment and secret custody
 
-The GitHub repository and GHCR package are private. GitHub Actions uses the
-short-lived repository `GITHUB_TOKEN` with minimal permissions to publish an
-immutable commit-SHA image and digest; it holds no Telegram, Grafana, NAS, or
+The GitHub repository remains private. GitHub Actions validates source and may
+publish an optional image artifact; it holds no Telegram, Grafana, NAS, or
 application runtime secret and has no deployment path to the home network.
 
-The operator Mac authenticates to GHCR through its native credential store,
-pulls the exact `linux/amd64` digest, and streams `docker image save` output over
-the `home-nas` SSH alias to `docker image load`. Compose starts with pulling
-disabled, verifies health/readiness/telemetry, and returns to the retained
-previous digest if the gate fails. The encrypted SSH private key stays on the
-Mac with its passphrase cached in Keychain; the NAS contains only the public
-key. No public endpoint is introduced.
+The operator Mac copies the checked-out source and versioned Compose
+configuration over the `home-nas` SSH alias. The NAS builds the `linux/amd64`
+application image locally. Monitoring and application Compose projects have
+separate release roots, persistent data, and rollback records. They share only
+the private `home-observability` Docker network. The encrypted SSH private key
+stays on the Mac with its passphrase cached in Keychain; the NAS contains only
+the public key. No public endpoint is introduced.
 
 Keychain is canonical for runtime secrets, but an always-on service necessarily
 needs a decrypted runtime copy. Each NAS copy lives outside the versioned

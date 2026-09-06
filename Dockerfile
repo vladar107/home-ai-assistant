@@ -18,14 +18,19 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     -o /out/home-agent \
     ./cmd/home-agent
 
-FROM alpine:3.24.1
+FROM --platform=$TARGETPLATFORM node:24.19.0-alpine3.24
 
-RUN addgroup -S -g 10001 homeagent \
+RUN apk add --no-cache ca-certificates wget \
+    && addgroup -S -g 10001 homeagent \
     && adduser -S -D -H -u 10001 -G homeagent homeagent \
     && mkdir -p /var/lib/home-agent \
+    && mkdir -p /etc/home-agent \
     && chown 10001:10001 /var/lib/home-agent
 
-COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+RUN npm install --global --omit=dev @earendil-works/pi-coding-agent@0.84.1 \
+    && test "$(pi --version)" = "0.84.1" \
+    && npm cache clean --force
+
 COPY --from=build /out/home-agent /usr/local/bin/home-agent
 
 USER 10001:10001

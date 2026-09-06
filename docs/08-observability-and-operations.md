@@ -25,7 +25,7 @@ Deploy the observability stack before the application:
 
 ```mermaid
 flowchart LR
-    APP[Home Agent] -->|OTLP metrics and traces| ALLOY[Grafana Alloy]
+    APP[Home Agent or future app] -->|OTLP metrics and traces| ALLOY[Grafana Alloy]
     ALLOY --> PROM
     ALLOY --> TEMPO[Tempo monolithic]
     GRAFANA[Grafana] --> PROM
@@ -79,12 +79,12 @@ raw Telegram IDs, bot tokens, API URLs containing tokens, email addresses,
 paths, subjects, prompts, filenames, or third-party response bodies to
 telemetry.
 
-OpenTelemetry resources use stable low-cardinality attributes such as
-`service.name=home-agent`, a deployment environment, and an explicit service
-version. Metric and span attributes use bounded enums such as command, outcome,
-safe error class, and integration name. Principal and request identifiers stay
-out of metrics; pseudonymous identifiers may appear in protected logs or audit
-only when required for diagnosis or accountability.
+OpenTelemetry resources use stable low-cardinality attributes such as a
+service-specific `service.name`, a deployment environment, and an explicit
+service version. Metric and span attributes use bounded enums such as command,
+outcome, safe error class, and integration name. Principal and request
+identifiers stay out of metrics; pseudonymous identifiers may appear in
+protected logs or audit only when required for diagnosis or accountability.
 
 ## Application metrics
 
@@ -296,19 +296,20 @@ deployment for this low-volume host; horizontal scale is not a current goal.
 
 ## Access and deployment checks
 
-Grafana binds only to NAS loopback initially. The operator connects with
-`ssh -L 3000:127.0.0.1:3000 home-nas` and uses
-`http://127.0.0.1:3000`; no observability port is forwarded from the router.
+Grafana binds to the configured NAS LAN address (currently
+`http://10.0.0.10:3000`); no observability port is forwarded from the router.
 Prometheus, Tempo, Alloy, and OTLP listeners remain private to the Compose
 network.
 
 Provision the Prometheus and Tempo data sources rather than clicking them into
-existence. Deployment is acceptable only when:
+existence. The monitoring project must be usable while no application is
+running. Deployment is acceptable only when:
 
 - all four observability containers remain running and their readiness
   endpoints respond;
 - Grafana can query Prometheus and Tempo;
-- a known application action creates both expected metrics and a trace;
+- a known application action, when an application is deployed, creates both
+  expected metrics and a trace;
 - logs for that action contain matching trace/span IDs but no content;
 - the Hearthwatch contact point delivers a safe test alert;
 - container restart preserves dashboards, metrics, and trace storage within

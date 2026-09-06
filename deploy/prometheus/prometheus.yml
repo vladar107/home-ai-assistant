@@ -2,6 +2,10 @@ global:
   scrape_interval: 30s
   evaluation_interval: 30s
 
+# Application metrics arrive through Alloy's OTLP receiver. This scrape list is
+# limited to the monitoring services so additional applications can join the
+# home-observability network without changing this project.
+
 scrape_configs:
   - job_name: prometheus
     static_configs:
