@@ -31,8 +31,9 @@ shutdown, local health endpoints, and an opt-in Telegram access slice.
   interface
 - Structured stdout logs with bounded container rotation; Loki deferred until
   local log search justifies its resource and access cost
-- Private GitHub repository with optional CI image artifacts; production
-  deployment remains an explicit, operator-triggered NAS build from source
+- Private GitHub repository whose CI publishes the production image to GHCR;
+  deployment remains an explicit, operator-triggered pull of that image on the
+  NAS, recorded by registry digest
 - Independent monitoring and application Compose projects on the NAS, joined
   through a private observability network
 - macOS Keychain as the canonical runtime-secret store, with only the required
@@ -178,7 +179,7 @@ context, or approval authority to Pi. Its environment contains only the home
 directory needed to find Pi authentication, the executable directory, and an
 explicit Pi telemetry opt-out, so the Telegram token is not inherited. This is
 process-level minimization, not an OS sandbox: the pinned Pi package runs as
-the local application user and remains a trusted dependency. The NAS-built
+the local application user and remains a trusted dependency. The published
 application image packages Pi; the independent monitoring project does not.
 
 ## Architecture at a glance

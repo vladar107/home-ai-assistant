@@ -106,10 +106,11 @@ NAS firewall.
 ## Build and deployment flow
 
 The source lives in a private GitHub repository. CI validates the source and
-may publish an image artifact, but production deployment is an explicit
-operator-triggered build on the NAS. The Mac copies versioned source and
-configuration files over SSH; no application image is streamed or pulled from a
-registry.
+publishes the `linux/amd64` application image to the private GitHub Container
+Registry package for every commit on `main`. Production deployment stays an
+explicit operator-triggered step from the Mac: it copies versioned
+configuration over SSH and makes the NAS pull the already-published image. The
+NAS never builds the application, and no image is streamed from the Mac.
 
 The monitoring project is deployed first:
 
@@ -124,10 +125,12 @@ The monitoring project is deployed first:
 
 The application is deployed separately:
 
-1. Copy the checked-out Go and Docker build context, application Compose file,
-   multi-user users file, and non-secret environment file into a versioned
-   directory under `/volume1/docker/home-ai-assistant`.
-2. Build the `linux/amd64` image on the NAS.
+1. Copy the application Compose file, multi-user users file, and non-secret
+   environment file into a versioned directory under
+   `/volume1/docker/home-ai-assistant`. The deployed commit must already be
+   contained in `origin/main`, because only pushed commits have a CI image.
+2. Pull the image tagged with the deployed commit on the NAS and record the
+   returned registry digest as the release's image reference.
 3. Materialize only the Telegram token from Keychain into the protected
    application secret directory.
 4. Start the application project on the existing `home-observability` network.

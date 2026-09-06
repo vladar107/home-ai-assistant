@@ -33,6 +33,9 @@ for n in HOME_AGENT_CONFIG_PATH HOME_AGENT_DATA_PATH HOME_AGENT_SECRETS_PATH HOM
   validate_path "$n" "${!n:-}"
   [[ ${!n} = "$HOME_AGENT_NAS_ROOT"/* ]] || { echo "$n must be below HOME_AGENT_NAS_ROOT" >&2; exit 2; }
 done
+[[ ${HOME_AGENT_IMAGE_REPOSITORY:-} =~ ^ghcr\.io/[a-z0-9][a-z0-9-]*/[a-z0-9._-]+$ ]] || {
+  echo "HOME_AGENT_IMAGE_REPOSITORY must be a GHCR repository such as ghcr.io/owner/name" >&2; exit 2;
+}
 users_source=${HOME_AGENT_TELEGRAM_USERS_SOURCE:-deploy/telegram-users.json}
 if [[ $users_source = /* ]]; then
   [[ $users_source =~ ^/[A-Za-z0-9._/-]+$ && $users_source != *'/../'* && $users_source != */.. ]] || { echo "unsafe Telegram users path" >&2; exit 2; }
@@ -42,19 +45,22 @@ else
 fi
 [[ -f $users_source ]] || { echo "Telegram users file not found: $users_source" >&2; exit 2; }
 
-for path in Dockerfile go.mod go.sum cmd internal deploy/compose.app.yaml; do
-  [[ -z $(git -C "$repo_root" status --porcelain --untracked-files=all -- "$path") ]] || {
-    echo "deployment input has uncommitted changes: $path" >&2; exit 2;
-  }
-done
+[[ -z $(git -C "$repo_root" status --porcelain --untracked-files=all -- deploy/compose.app.yaml) ]] || {
+  echo "deployment input has uncommitted changes: deploy/compose.app.yaml" >&2; exit 2;
+}
+git -C "$repo_root" fetch --quiet origin main
+git -C "$repo_root" merge-base --is-ancestor HEAD origin/main || {
+  echo "HEAD is not contained in origin/main; push it first because the CI image workflow only publishes pushed commits" >&2
+  exit 2
+}
 
 revision=$(git -C "$repo_root" rev-parse HEAD)
-image=home-ai-assistant:deploy-${revision:0:16}
+tag_ref=$HOME_AGENT_IMAGE_REPOSITORY:sha-$revision
 release=$HOME_AGENT_NAS_ROOT/releases/$(date -u +%Y%m%dT%H%M%SZ)-${revision:0:16}
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/home-agent-deploy.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 ssh -o BatchMode=yes "$host" "test ! -L '$HOME_AGENT_NAS_ROOT'; umask 077; mkdir -p '$release/deploy' '$HOME_AGENT_CONFIG_PATH'"
-git -C "$repo_root" archive --format=tar HEAD Dockerfile go.mod go.sum cmd internal deploy/compose.app.yaml \
+git -C "$repo_root" archive --format=tar HEAD deploy/compose.app.yaml \
   | ssh -o BatchMode=yes "$host" "tar -xf - -C '$release'"
 scp -O -q "$users_source" "$host:$HOME_AGENT_CONFIG_PATH/.telegram-users.json.deploy"
 ssh -o BatchMode=yes "$host" "chmod 600 '$HOME_AGENT_CONFIG_PATH/.telegram-users.json.deploy' && mv -f '$HOME_AGENT_CONFIG_PATH/.telegram-users.json.deploy' '$HOME_AGENT_CONFIG_PATH/telegram-users.json'"
@@ -67,7 +73,7 @@ awk '
   }
   { print }
 ' "$env_file" > "$tmp/runtime.env"
-printf 'HOME_AGENT_IMAGE=%s\nHOME_AGENT_VERSION=%s\nHOME_AGENT_TELEGRAM_USERS_FILE=/etc/home-agent/telegram-users.json\n' "$image" "$revision" >> "$tmp/runtime.env"
+printf 'HOME_AGENT_IMAGE=%s\nHOME_AGENT_VERSION=%s\nHOME_AGENT_TELEGRAM_USERS_FILE=/etc/home-agent/telegram-users.json\n' "$tag_ref" "$revision" >> "$tmp/runtime.env"
 chmod 600 "$tmp/runtime.env"
 scp -O -q "$tmp/runtime.env" "$host:$release/deploy/runtime.env"
 
@@ -82,13 +88,23 @@ sudo chmod 700 '$HOME_AGENT_NAS_ROOT' '$HOME_AGENT_NAS_ROOT/releases' '$HOME_AGE
 test -f '$HOME_AGENT_CONFIG_PATH/telegram-users.json' && test ! -L '$HOME_AGENT_CONFIG_PATH/telegram-users.json' && chmod 600 '$HOME_AGENT_CONFIG_PATH/telegram-users.json'
 cd '$release/deploy'
 sudo docker network inspect home-observability >/dev/null
-sudo docker compose -p home-ai-assistant --env-file runtime.env -f compose.app.yaml build home-agent
+if ! sudo docker pull '$tag_ref'; then
+  echo 'could not pull $tag_ref' >&2
+  echo 'if the image is not published yet, check: gh run list --workflow=image.yml --commit $revision' >&2
+  echo 'if the registry login expired, run on the NAS: sudo docker login ghcr.io' >&2
+  exit 1
+fi
+digest=\$(sudo docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' '$tag_ref' | grep -m1 '^$HOME_AGENT_IMAGE_REPOSITORY@sha256:' || true)
+[ -n "\$digest" ] || { echo 'no $HOME_AGENT_IMAGE_REPOSITORY digest recorded for $tag_ref' >&2; exit 1; }
+sed -i "s|^HOME_AGENT_IMAGE=.*|HOME_AGENT_IMAGE=\$digest|" runtime.env
+grep -qxF "HOME_AGENT_IMAGE=\$digest" runtime.env || { echo 'failed to write the image digest into runtime.env' >&2; exit 1; }
 sudo docker compose -p home-ai-assistant --env-file runtime.env -f compose.app.yaml up -d home-agent
 sudo docker compose -p home-ai-assistant --env-file runtime.env -f compose.app.yaml ps
+echo "deployed image \$digest"
 printf '%s\\n' '$release' > '$HOME_AGENT_NAS_ROOT/current.release'
 ln -sfn '$release' '$HOME_AGENT_NAS_ROOT/current'
 REMOTE
 )
 ssh -tt "$host" "$remote_command"
 
-echo "Deployed app release $release on $host." >&2
+echo "Deployed app release $release on $host; the pulled image digest is recorded in $release/deploy/runtime.env." >&2

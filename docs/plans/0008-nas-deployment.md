@@ -1,6 +1,6 @@
 # 0008 — NAS deployment of monitoring and the application
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
@@ -173,9 +173,10 @@ state.
 
 Repository implementation is complete and locally validated: both Compose
 files render, the deployment scripts pass shell syntax checks, and Go tests,
-race tests, vet, build, and plan validation pass. The NAS image build and live
-monitoring/application smoke tests remain pending because they must run on
-`home-nas` with the operator's Keychain secrets and Telegram accounts.
+race tests, vet, build, and plan validation pass. The NAS image build and
+both deployment stages ran on `home-nas` on 2026-09-06 with the operator's
+Keychain secrets; monitoring and the application are running. The build-on-NAS
+image decision was superseded by [0012](0012-ghcr-image-deployment.md).
 
 ## Risks and open questions
 

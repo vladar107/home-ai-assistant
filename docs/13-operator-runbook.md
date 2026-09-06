@@ -340,7 +340,7 @@ scripts/deploy-monitoring-nas home-nas deploy/.env.nas
 The command copies the pinned monitoring configuration to a new release under
 `/volume1/docker/monitoring`, syncs the Grafana secrets from Keychain, and opens
 one interactive NAS terminal for `sudo docker compose pull` and `up -d`. It does
-not build or start `home-agent`.
+not deploy or start `home-agent`.
 Verify the stage before deploying the application:
 
 ```sh
@@ -353,7 +353,22 @@ provisioned Prometheus and Tempo data sources. The Home Agent dashboard may be
 empty until the application is deployed; that does not mean the monitoring
 stage failed. Keep the NAS firewall limited to the trusted LAN.
 
-## 7. Build and deploy the application on the NAS
+## 7. Deploy the application on the NAS
+
+The NAS runs the image that CI publishes; nothing is built or streamed from the
+Mac. Once per NAS, log the Docker daemon into the private package registry with
+a GitHub token that has the `read:packages` scope:
+
+```sh
+ssh -tt home-nas 'sudo docker login ghcr.io'
+```
+
+Before every deployment, push `main` and wait for the "Production image"
+workflow to publish `ghcr.io/vladar107/home-ai-assistant:sha-<commit>`:
+
+```sh
+gh run list --workflow=image.yml --commit "$(git rev-parse HEAD)"
+```
 
 Stop the GoLand poller for the production bot token first. Keep
 `deploy/telegram-users.json` beside the repository (it is ignored by Git), and
@@ -363,17 +378,21 @@ ensure it contains both authorized users. Then run:
 scripts/deploy-app-nas home-nas deploy/.env.nas
 ```
 
-The command copies the complete checked-out source and Docker build context to a
-new release under `/volume1/docker/home-ai-assistant`, copies the users file to
-the protected application config directory, syncs only the Hearthkeeper token
-from Keychain, and opens one interactive NAS terminal for the local
-`linux/amd64` build and `sudo docker compose up -d`. It does not log in to GHCR
-or stream an image from the Mac.
+The command refuses to run unless `HEAD` is contained in `origin/main`. It
+copies only the application Compose file and the derived `runtime.env` to a new
+release under `/volume1/docker/home-ai-assistant`, copies the users file to the
+protected application config directory, syncs only the Hearthkeeper token from
+Keychain, and opens one interactive NAS terminal that pulls
+`$HOME_AGENT_IMAGE_REPOSITORY:sha-<commit>`, rewrites `HOME_AGENT_IMAGE` in the
+release's `runtime.env` to the pulled `sha256` digest, and runs
+`sudo docker compose up -d`.
 
-Check the application and its independent monitoring project:
+Check the application, the recorded image digest, and its independent monitoring
+project:
 
 ```sh
 ssh -tt home-nas 'cd /volume1/docker/home-ai-assistant/current/deploy && sudo docker compose --env-file runtime.env -f compose.app.yaml ps'
+ssh home-nas 'grep ^HOME_AGENT_IMAGE= /volume1/docker/home-ai-assistant/current/deploy/runtime.env'
 ssh home-nas 'curl --fail http://127.0.0.1:18080/healthz && curl --fail http://127.0.0.1:18080/readyz'
 ```
 
@@ -469,7 +488,7 @@ ssh -tt home-nas 'cd /volume1/docker/home-ai-assistant/current/deploy && sudo do
 Back up the Grafana data directory if alert configuration must survive a loss.
 Prometheus metrics, Tempo traces, and Alloy queue state have lower recovery
 priority and may be recreated. The source repository, Keychain secrets,
-selected NAS image tag, ignored NAS environment file, and documented NAS paths
+recorded image digest, ignored NAS environment file, and documented NAS paths
 are all required for full recovery.
 
 A backup is not accepted until it has been restored into an isolated directory
