@@ -50,7 +50,11 @@ and webhooks simultaneously.
 ### Interaction primitives
 
 - Text and Markdown-safe responses
-- Photos and files subject to Telegram size limits
+- Received photos and files subject to Telegram size limits: a photo is passed
+  to the model with the message that carried it, and any other file is read
+  only when the model asks for it by id
+- Voice, audio, and video are answered with an explicit refusal, because no
+  model reachable through the runtime accepts them
 - Inline confirmation/cancellation buttons
 - Progress messages for long operations
 - Deterministic `/status`, `/privacy`, `/cancel`, `/new`, and `/settings`

@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +22,10 @@ const (
 	responseBodyLimit = 4 << 20
 	httpTimeoutGrace  = 10 * time.Second
 )
+
+// filePathPattern accepts the relative path getFile returns and nothing that could escape the
+// bot's own file route.
+var filePathPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$`)
 
 type ClientConfig struct {
 	BaseURL     string
@@ -67,10 +72,44 @@ type InlineButton struct {
 type InlineKeyboard [][]InlineButton
 
 type Message struct {
-	MessageID int64  `json:"message_id"`
-	From      *User  `json:"from"`
-	Chat      Chat   `json:"chat"`
-	Text      string `json:"text"`
+	MessageID int64       `json:"message_id"`
+	From      *User       `json:"from"`
+	Chat      Chat        `json:"chat"`
+	Text      string      `json:"text"`
+	Caption   string      `json:"caption"`
+	Photo     []PhotoSize `json:"photo"`
+	Document  *MediaFile  `json:"document"`
+	// The kinds below cannot reach the model through the runtime; they are read only so the
+	// message can be answered instead of ignored.
+	Voice     *MediaFile `json:"voice"`
+	Audio     *MediaFile `json:"audio"`
+	Video     *MediaFile `json:"video"`
+	VideoNote *MediaFile `json:"video_note"`
+	Sticker   *MediaFile `json:"sticker"`
+	Animation *MediaFile `json:"animation"`
+}
+
+// PhotoSize is one rendition of a photo; Telegram lists them from smallest to largest.
+type PhotoSize struct {
+	FileID   string `json:"file_id"`
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
+	FileSize int64  `json:"file_size"`
+}
+
+// MediaFile is any non-photo attachment. Telegram omits the name and type for some kinds.
+type MediaFile struct {
+	FileID   string `json:"file_id"`
+	FileName string `json:"file_name"`
+	MimeType string `json:"mime_type"`
+	FileSize int64  `json:"file_size"`
+}
+
+// FileReference is what getFile returns: where the bot may download the file for the next hour.
+type FileReference struct {
+	FileID   string `json:"file_id"`
+	FilePath string `json:"file_path"`
+	FileSize int64  `json:"file_size"`
 }
 
 type Chat struct {
@@ -209,6 +248,74 @@ func (c *Client) GetUpdates(ctx context.Context, offset int64) ([]Update, error)
 	}
 	return execute[[]Update](c, ctx, "getUpdates", params)
 }
+
+// GetFile resolves an attachment to a downloadable path. Telegram refuses files above 20 MB.
+func (c *Client) GetFile(ctx context.Context, fileID string) (FileReference, error) {
+	if strings.TrimSpace(fileID) == "" {
+		return FileReference{}, fmt.Errorf("Telegram getFile requires a file identifier")
+	}
+	reference, err := execute[FileReference](c, ctx, "getFile", url.Values{"file_id": {fileID}})
+	if err != nil {
+		return FileReference{}, err
+	}
+	if !filePathPattern.MatchString(reference.FilePath) {
+		return FileReference{}, fmt.Errorf("Telegram getFile returned an unusable file path")
+	}
+	return reference, nil
+}
+
+// DownloadFile reads an attachment from the bot's file route, refusing anything over the limit.
+// The response is raw bytes rather than the JSON envelope every API method returns.
+func (c *Client) DownloadFile(ctx context.Context, filePath string, limit int64) (result []byte, resultErr error) {
+	if !filePathPattern.MatchString(filePath) {
+		return nil, fmt.Errorf("Telegram file path is unusable")
+	}
+	if limit <= 0 {
+		return nil, fmt.Errorf("Telegram file size limit must be positive")
+	}
+	ctx, endTelemetry := c.telemetry.StartTelegramAPI(ctx, "downloadFile")
+	defer func() {
+		endTelemetry(resultErr)
+	}()
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.fileURL(filePath), nil)
+	if err != nil {
+		return nil, fmt.Errorf("Telegram file request could not be created")
+	}
+	response, err := c.httpClient.Do(request)
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf("Telegram file request canceled: %w", ctxErr)
+		}
+		return nil, fmt.Errorf("Telegram file request failed")
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		return nil, &apiError{method: "downloadFile", httpStatus: response.StatusCode}
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
+	if err != nil {
+		return nil, fmt.Errorf("Telegram file could not be read")
+	}
+	if int64(len(body)) > limit {
+		return nil, &oversizedFileError{limit: limit}
+	}
+	if len(body) == 0 {
+		return nil, fmt.Errorf("Telegram file is empty")
+	}
+	return body, nil
+}
+
+// oversizedFileError reports a file the application refuses to hold, which is permanent for that
+// message however often it is retried.
+type oversizedFileError struct{ limit int64 }
+
+func (e *oversizedFileError) Error() string {
+	return fmt.Sprintf("Telegram file exceeds the %d byte limit", e.limit)
+}
+
+func (e *oversizedFileError) Permanent() bool { return true }
 
 func (c *Client) SendMessage(ctx context.Context, chatID int64, text string) error {
 	return c.SendReply(ctx, chatID, 0, text)
@@ -434,6 +541,25 @@ func execute[T any](c *Client, ctx context.Context, method string, params url.Va
 	}
 
 	return envelope.Result, nil
+}
+
+// fileURL builds the download route, which carries the token in the path like every API method
+// but serves file bytes rather than a JSON envelope.
+func (c *Client) fileURL(filePath string) string {
+	endpoint := *c.baseURL
+	basePath := strings.TrimRight(endpoint.Path, "/")
+	escapedBasePath := strings.TrimRight(endpoint.EscapedPath(), "/")
+	endpoint.Path = basePath + "/file/bot" + c.token + "/" + filePath
+	endpoint.RawPath = escapedBasePath + "/file/bot" + url.PathEscape(c.token) + "/" + escapeFilePath(filePath)
+	return endpoint.String()
+}
+
+func escapeFilePath(filePath string) string {
+	segments := strings.Split(filePath, "/")
+	for index, segment := range segments {
+		segments[index] = url.PathEscape(segment)
+	}
+	return strings.Join(segments, "/")
 }
 
 func (c *Client) endpointURL(method string) string {

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/attachment"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 )
 
@@ -29,6 +30,7 @@ type EnqueueInput struct {
 	PrincipalID       string
 	ChatID            int64
 	Message           string
+	Attachments       []attachment.Incoming
 }
 
 type Request struct {
@@ -51,7 +53,9 @@ type EnqueueResult struct {
 }
 
 type Repository interface {
-	EnqueueConversation(context.Context, EnqueueInput, Session, string) (EnqueueResult, error)
+	// EnqueueConversation records the request and its attachments in one transaction, filling in
+	// each attachment's session from the session the request joined.
+	EnqueueConversation(context.Context, EnqueueInput, Session, string, []attachment.Record) (EnqueueResult, error)
 	RecoverConversations(context.Context) ([]string, error)
 	NextConversationRequest(context.Context, string) (Request, bool, error)
 	ClaimConversationRequest(context.Context, string) (bool, error)
@@ -61,7 +65,8 @@ type Repository interface {
 	CancelConversationDelivery(context.Context, string) error
 	MarkConversationDelivered(context.Context, string) error
 	CancelPendingConversation(context.Context, string) (bool, error)
-	ResetConversation(context.Context, string) (bool, error)
+	// ResetConversation closes the principal's active session and returns its ID.
+	ResetConversation(context.Context, string) (string, bool, error)
 }
 
 type Deliverer interface {
@@ -102,8 +107,22 @@ type Notice interface {
 	PendingNotice(principalID string) string
 }
 
+// Attachments keeps the photos and files a principal sent, for as long as the session lives; nil
+// leaves a deployment without attachment support.
+type Attachments interface {
+	// Stage writes the bytes of one request's files and returns the rows describing them.
+	Stage(principalID, requestID string, files []attachment.Incoming) ([]attachment.Record, error)
+	// Discard removes bytes that were staged for a request the store did not record.
+	Discard(records []attachment.Record)
+	// Turn returns the images one request carried and the text describing all of its files.
+	Turn(ctx context.Context, principalID, requestID string) (attachment.Turn, error)
+	CloseSession(ctx context.Context, principalID, sessionID string) error
+	Purge(ctx context.Context) error
+}
+
 type Config struct {
 	TurnTimeout time.Duration
 	FollowUp    FollowUp
 	Notice      Notice
+	Attachments Attachments
 }

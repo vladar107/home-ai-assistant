@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/attachment"
 	"github.com/vladar107/home-ai-assistant/internal/config"
 	"github.com/vladar107/home-ai-assistant/internal/connection"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
@@ -34,6 +35,7 @@ type App struct {
 	server       *http.Server
 	store        *sqlite.Store
 	connections  *connection.Service
+	attachments  *attachment.Service
 	conversation *conversation.Service
 	tools        *tools.Broker
 	approvals    *approval.Service
@@ -286,12 +288,26 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("initialize tool broker: %w", err)
 		}
+		attachments, err := attachment.NewService(attachment.Config{
+			Directory: filepath.Join(a.cfg.DataDir, "attachments"),
+		}, a.store, a.logger)
+		if err != nil {
+			return fmt.Errorf("initialize attachments: %w", err)
+		}
+		if err := broker.Register(attachments); err != nil {
+			return err
+		}
 		approvals, err := approval.NewService(approval.Config{}, a.store, client, a.logger)
 		if err != nil {
 			return fmt.Errorf("initialize approvals: %w", err)
 		}
 		conversationService, err := conversation.NewService(
-			conversation.Config{TurnTimeout: a.cfg.Conversation.TurnTimeout, FollowUp: approvals, Notice: approvals},
+			conversation.Config{
+				TurnTimeout: a.cfg.Conversation.TurnTimeout,
+				FollowUp:    approvals,
+				Notice:      approvals,
+				Attachments: attachments,
+			},
 			a.store,
 			runtime,
 			client,
@@ -303,6 +319,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("initialize conversation service: %w", err)
 		}
+		a.attachments = attachments
 		a.connections = connections
 		a.conversation = conversationService
 		a.tools = broker
@@ -342,18 +359,20 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 
 	// Interface values are built here so a disabled conversation never becomes a typed nil controller.
 	var conversationController telegram.ConversationController
+	var attachmentStore telegram.AttachmentStore
 	var connectionController telegram.ConnectionController
 	var notionController telegram.NotionController
 	var approvalController telegram.ApprovalController
 	if a.conversation != nil {
 		conversationController = a.conversation
+		attachmentStore = a.attachments
 		connectionController = a.connections
 		approvalController = a.approvals
 	}
 	if a.notion != nil {
 		notionController = a.notion
 	}
-	service, err := telegram.NewService(client, identities, a.store, conversationController, connectionController, notionController, approvalController, a.logger, a.telemetry)
+	service, err := telegram.NewService(client, identities, a.store, conversationController, attachmentStore, connectionController, notionController, approvalController, a.logger, a.telemetry)
 	if err != nil {
 		return fmt.Errorf("initialize Telegram service: %w", err)
 	}

@@ -3,6 +3,7 @@ package pi
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -103,7 +104,8 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 }
 
 func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink agentruntime.EventSink) (agentruntime.RunResult, error) {
-	if request.PrincipalID == "" || request.SessionID == "" || strings.TrimSpace(request.Message) == "" {
+	if request.PrincipalID == "" || request.SessionID == "" ||
+		(strings.TrimSpace(request.Message) == "" && len(request.Images) == 0) {
 		return agentruntime.RunResult{}, fmt.Errorf("Pi runtime request is incomplete")
 	}
 	if !request.Tools.Empty() && request.Tools.Executor == nil {
@@ -192,6 +194,9 @@ func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink
 		"type":    "prompt",
 		"message": request.Message,
 	}
+	if images := promptImages(request.Images); len(images) > 0 {
+		prompt["images"] = images
+	}
 	if err := json.NewEncoder(stdin).Encode(prompt); err != nil {
 		stopProcess(cmd, stdin, waitResult)
 		return agentruntime.RunResult{}, fmt.Errorf("send Pi prompt: request could not be written")
@@ -241,6 +246,30 @@ func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink
 			return agentruntime.RunResult{}, ctx.Err()
 		}
 	}
+}
+
+// promptImages renders the turn's pictures as Pi's ImageContent blocks, the only non-text input
+// its RPC prompt accepts.
+func promptImages(images []agentruntime.Image) []map[string]string {
+	if len(images) == 0 {
+		return nil
+	}
+	encoded := make([]map[string]string, 0, len(images))
+	for _, image := range images {
+		if len(image.Data) == 0 {
+			continue
+		}
+		mimeType := image.MimeType
+		if mimeType == "" {
+			mimeType = "image/jpeg"
+		}
+		encoded = append(encoded, map[string]string{
+			"type":     "image",
+			"data":     base64.StdEncoding.EncodeToString(image.Data),
+			"mimeType": mimeType,
+		})
+	}
+	return encoded
 }
 
 // systemPrompt keeps the tool-less prompt unchanged and adds the broker's guidance when a turn

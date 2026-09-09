@@ -24,12 +24,20 @@ type Report struct {
 	PID         int      `json:"pid"`
 	PromptID    string   `json:"prompt_id"`
 	Message     string   `json:"message"`
+	Images      []Image  `json:"images"`
 	// BridgeFiles lists the directory of the --extension argument and Tools holds the tools.json
 	// beside it, both captured while the turn is running because the adapter removes them after.
 	BridgeFiles []string        `json:"bridge_files"`
 	Tools       json.RawMessage `json:"tools"`
 	// AbortReceived is rewritten by the retry scenarios once they stop waiting for abort_retry.
 	AbortReceived bool `json:"abort_received"`
+}
+
+// Image is one picture the prompt carried, kept as Pi receives it.
+type Image struct {
+	Type     string `json:"type"`
+	Data     string `json:"data"`
+	MimeType string `json:"mimeType"`
 }
 
 // BridgeCall is what the tool scenario posts to the application, mirroring the real extension.
@@ -73,9 +81,10 @@ func run() error {
 		}
 	}
 	var prompt struct {
-		ID      string `json:"id"`
-		Type    string `json:"type"`
-		Message string `json:"message"`
+		ID      string  `json:"id"`
+		Type    string  `json:"type"`
+		Message string  `json:"message"`
+		Images  []Image `json:"images"`
 	}
 	// One decoder keeps commands sent after the prompt readable from its buffer.
 	commands := json.NewDecoder(os.Stdin)
@@ -96,7 +105,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	report := Report{Args: os.Args[1:], Environment: os.Environ(), Directory: directory, PID: os.Getpid(), PromptID: prompt.ID, Message: prompt.Message}
+	report := Report{Args: os.Args[1:], Environment: os.Environ(), Directory: directory, PID: os.Getpid(), PromptID: prompt.ID, Message: prompt.Message, Images: prompt.Images}
 	for _, entry := range entries {
 		report.Files = append(report.Files, entry.Name())
 	}

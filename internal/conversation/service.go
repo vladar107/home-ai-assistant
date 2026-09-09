@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/vladar107/home-ai-assistant/internal/attachment"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 )
 
@@ -109,6 +110,17 @@ func (s *Service) Start(ctx context.Context) error {
 	s.cancel = cancel
 	s.mu.Unlock()
 
+	if s.config.Attachments != nil {
+		if err := s.config.Attachments.Purge(ctx); err != nil {
+			cancel()
+			s.mu.Lock()
+			s.ctx = nil
+			s.cancel = nil
+			s.mu.Unlock()
+			return fmt.Errorf("purge conversation attachments: %w", err)
+		}
+	}
+
 	principals, err := s.repository.RecoverConversations(ctx)
 	if err != nil {
 		cancel()
@@ -157,8 +169,15 @@ func (s *Service) Enqueue(ctx context.Context, input EnqueueInput) error {
 	if input.BotUserID <= 0 || input.TelegramUpdateID < 0 || input.TelegramMessageID <= 0 || input.PrincipalID == "" || input.ChatID <= 0 {
 		return fmt.Errorf("conversation request identity is invalid")
 	}
-	if !utf8.ValidString(input.Message) || strings.TrimSpace(input.Message) == "" || utf8.RuneCountInString(input.Message) > maximumMessageRunes {
-		return fmt.Errorf("conversation message must be valid non-empty UTF-8 within 4096 characters")
+	if !utf8.ValidString(input.Message) || utf8.RuneCountInString(input.Message) > maximumMessageRunes {
+		return fmt.Errorf("conversation message must be valid UTF-8 within 4096 characters")
+	}
+	// A photo or a file carries the request on its own, so only a message with neither is empty.
+	if strings.TrimSpace(input.Message) == "" && len(input.Attachments) == 0 {
+		return fmt.Errorf("conversation request must carry a message or an attachment")
+	}
+	if len(input.Attachments) > 0 && s.config.Attachments == nil {
+		return fmt.Errorf("conversation attachments are not supported")
 	}
 	if !s.running() {
 		return fmt.Errorf("conversation service is not running")
@@ -177,11 +196,23 @@ func (s *Service) Enqueue(ctx context.Context, input EnqueueInput) error {
 		return err
 	}
 
+	var staged []attachment.Record
+	if len(input.Attachments) > 0 {
+		staged, err = s.config.Attachments.Stage(input.PrincipalID, requestID, input.Attachments)
+		if err != nil {
+			return fmt.Errorf("store conversation attachments: %w", err)
+		}
+	}
+
 	result, err := s.repository.EnqueueConversation(ctx, input, Session{
 		ID:               sessionID,
 		PrincipalID:      input.PrincipalID,
 		RuntimeSessionID: runtimeSessionID,
-	}, requestID)
+	}, requestID, staged)
+	// Only a created request owns the staged bytes; a busy or redelivered update leaves them behind.
+	if !result.Created {
+		s.config.Attachments.Discard(staged)
+	}
 	if err != nil {
 		return fmt.Errorf("persist conversation request: %w", err)
 	}
@@ -209,9 +240,14 @@ func (s *Service) Cancel(ctx context.Context, principalID string) (bool, error) 
 }
 
 func (s *Service) NewSession(ctx context.Context, principalID string) (bool, error) {
-	reset, err := s.repository.ResetConversation(ctx, principalID)
+	sessionID, reset, err := s.repository.ResetConversation(ctx, principalID)
 	if err != nil {
 		return false, err
+	}
+	if reset && s.config.Attachments != nil {
+		if err := s.config.Attachments.CloseSession(ctx, principalID, sessionID); err != nil {
+			return false, err
+		}
 	}
 	s.mu.Lock()
 	cancel := s.inflight[principalID]
@@ -324,11 +360,18 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 	reply := ""
 	connected, runErr := s.gate.Ready(turnCtx, request.PrincipalID)
 	var tools agentruntime.ToolSet
+	var attachments attachment.Turn
 	if runErr == nil && connected {
 		_ = s.deliverer.SendTyping(turnCtx, request.ChatID)
 		tools, runErr = s.toolProvider.ToolsFor(turnCtx, request.PrincipalID)
 		if runErr != nil {
 			errorKind = "tool_provider"
+		}
+		if runErr == nil && s.config.Attachments != nil {
+			attachments, runErr = s.config.Attachments.Turn(turnCtx, request.PrincipalID, request.ID)
+			if runErr != nil {
+				errorKind, reportedKind = "runtime", "attachments"
+			}
 		}
 	} else if runErr == nil {
 		errorKind, reportedKind = "runtime", "not_connected"
@@ -344,7 +387,8 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		result, err := s.runtime.Run(turnCtx, agentruntime.RunRequest{
 			PrincipalID: request.PrincipalID,
 			SessionID:   request.RuntimeSessionID,
-			Message:     s.turnMessage(request),
+			Message:     s.turnMessage(request, attachments.Summary),
+			Images:      attachments.Images,
 			Tools:       tools,
 		}, discardSink{})
 		runErr = err
@@ -410,16 +454,22 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 }
 
 // turnMessage prefixes what became of the principal's last confirmation request, which was
-// resolved between turns and which the model would otherwise have to guess at.
-func (s *Service) turnMessage(request Request) string {
-	if s.config.Notice == nil {
-		return request.Message
+// resolved between turns and which the model would otherwise have to guess at, and appends what
+// the message carried so the model can see its files without reading them.
+func (s *Service) turnMessage(request Request, attachments string) string {
+	message := request.Message
+	if s.config.Notice != nil {
+		if notice := s.config.Notice.PendingNotice(request.PrincipalID); notice != "" {
+			message = "[system] " + notice + "\n\n" + message
+		}
 	}
-	notice := s.config.Notice.PendingNotice(request.PrincipalID)
-	if notice == "" {
-		return request.Message
+	if attachments == "" {
+		return message
 	}
-	return "[system] " + notice + "\n\n" + request.Message
+	if strings.TrimSpace(message) == "" {
+		return attachments
+	}
+	return strings.TrimRight(message, "\n") + "\n\n" + attachments
 }
 
 func (s *Service) deliver(ctx context.Context, request Request) error {

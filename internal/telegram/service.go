@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/attachment"
 	"github.com/vladar107/home-ai-assistant/internal/connection"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
@@ -34,6 +35,8 @@ type botAPI interface {
 	GetMe(context.Context) (Bot, error)
 	GetUpdates(context.Context, int64) ([]Update, error)
 	SendReply(context.Context, int64, int64, string) error
+	GetFile(context.Context, string) (FileReference, error)
+	DownloadFile(context.Context, string, int64) ([]byte, error)
 	SendKeyboard(context.Context, int64, int64, string, InlineKeyboard) error
 	EditKeyboard(context.Context, int64, int64, string, InlineKeyboard) error
 	DeleteMessage(context.Context, int64, int64) error
@@ -45,6 +48,12 @@ type ConversationController interface {
 	Enqueue(context.Context, conversation.EnqueueInput) error
 	Cancel(context.Context, string) (bool, error)
 	NewSession(context.Context, string) (bool, error)
+}
+
+// AttachmentStore reports what the principal's conversation may still hold; nil refuses photos
+// and files instead of downloading them.
+type AttachmentStore interface {
+	Room(context.Context, string) (attachment.Room, error)
 }
 
 // ConnectionController is implemented by the model connection service; nil disables the model settings section.
@@ -87,6 +96,7 @@ type Service struct {
 	identities   identityResolver
 	cursors      cursorStore
 	conversation ConversationController
+	attachments  AttachmentStore
 	connections  ConnectionController
 	notion       NotionController
 	approvals    ApprovalController
@@ -106,6 +116,7 @@ func NewService(
 	identities identityResolver,
 	cursors cursorStore,
 	conversation ConversationController,
+	attachments AttachmentStore,
 	connections ConnectionController,
 	notion NotionController,
 	approvals ApprovalController,
@@ -130,6 +141,7 @@ func NewService(
 		identities:   identities,
 		cursors:      cursors,
 		conversation: conversation,
+		attachments:  attachments,
 		connections:  connections,
 		notion:       notion,
 		approvals:    approvals,
@@ -377,20 +389,38 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 		return ignoredResult("command_for_other_bot"), "", nil
 	}
 
-	if strings.TrimSpace(message.Text) == "" || s.conversation == nil {
+	carried, unsupported := classifyMedia(message)
+	text := cmp.Or(message.Text, message.Caption)
+	if s.conversation == nil || (unsupported == "" && len(carried) == 0 && strings.TrimSpace(text) == "") {
 		return processingResult{
 			event:       "telegram.update.ignored",
 			reason:      "unhandled_text",
 			principalID: authorization.Principal.ID,
 		}, "", nil
 	}
-	for _, interceptor := range s.interceptors {
-		result, err := interceptor.intercept(ctx, authorization.Principal.ID, message.Text)
+	if unsupported != "" {
+		return s.sendMediaReply(ctx, message, authorization.Principal.ID, unsupported, unsupportedMediaReply(unsupported))
+	}
+
+	var attachments []attachment.Incoming
+	if len(carried) > 0 {
+		files, refusal, err := s.fetchMedia(ctx, authorization.Principal.ID, carried)
 		if err != nil {
-			return processingResult{}, "intercept_message", err
+			return processingResult{}, "fetch_media", err
 		}
-		if result.handled {
-			return s.finishInterception(ctx, message, authorization.Principal.ID, result)
+		if refusal != "" {
+			return s.sendMediaReply(ctx, message, authorization.Principal.ID, "refused", refusal)
+		}
+		attachments = files
+	} else {
+		for _, interceptor := range s.interceptors {
+			result, err := interceptor.intercept(ctx, authorization.Principal.ID, text)
+			if err != nil {
+				return processingResult{}, "intercept_message", err
+			}
+			if result.handled {
+				return s.finishInterception(ctx, message, authorization.Principal.ID, result)
+			}
 		}
 	}
 
@@ -400,7 +430,8 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 		TelegramMessageID: message.MessageID,
 		PrincipalID:       authorization.Principal.ID,
 		ChatID:            message.Chat.ID,
-		Message:           message.Text,
+		Message:           text,
+		Attachments:       attachments,
 	})
 	if errors.Is(err, conversation.ErrBusy) {
 		return s.sendCommandReply(ctx, message, authorization.Principal.ID, "busy", conversation.BusyReply, nil)
@@ -412,6 +443,20 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 		event:       "telegram.conversation.queued",
 		principalID: authorization.Principal.ID,
 	}, "", nil
+}
+
+// sendMediaReply answers a message carrying something that cannot become a turn, quoting it so
+// the user sees which message was refused.
+func (s *Service) sendMediaReply(ctx context.Context, message *Message, principalID, reason, reply string) (processingResult, string, error) {
+	result := processingResult{event: "telegram.media.refused", reason: reason, principalID: principalID}
+	if err := s.client.SendReply(ctx, message.Chat.ID, message.MessageID, reply); err != nil {
+		if isPermanentAPIError(err) {
+			result.event, result.err = "telegram.command.undeliverable", err
+			return result, "", nil
+		}
+		return processingResult{}, "send_message", err
+	}
+	return result, "", nil
 }
 
 // finishInterception removes the consumed message when the interceptor asked for it and sends the
@@ -593,13 +638,17 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		}
 		return StatusReply, nil, nil
 	case "privacy":
-		if s.conversation != nil && s.notion != nil {
-			return ConversationPrivacyReply + " " + NotionPrivacyLine, nil, nil
+		if s.conversation == nil {
+			return PrivacyReply, nil, nil
 		}
-		if s.conversation != nil {
-			return ConversationPrivacyReply, nil, nil
+		reply := ConversationPrivacyReply
+		if s.attachments != nil {
+			reply += " " + AttachmentPrivacyLine
 		}
-		return PrivacyReply, nil, nil
+		if s.notion != nil {
+			reply += " " + NotionPrivacyLine
+		}
+		return reply, nil, nil
 	case "cancel":
 		if s.conversation == nil {
 			return NothingToCancelReply, nil, nil

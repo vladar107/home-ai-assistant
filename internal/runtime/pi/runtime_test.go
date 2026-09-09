@@ -1,7 +1,9 @@
 package pi_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -167,6 +169,35 @@ func TestProcessConfigurationAndSessionContinuity(t *testing.T) {
 		if err != nil || result.Response != tc.want {
 			t.Errorf("session %s: response=%q err=%v", tc.session, result.Response, err)
 		}
+	}
+}
+
+func TestPromptCarriesImages(t *testing.T) {
+	cfg := config(t)
+	r := newRuntime(t, cfg)
+	picture := []byte("\x89PNG synthetic picture bytes")
+	run := request("session-image", "what is on this label?")
+	run.Images = []agentruntime.Image{{Name: "photo.png", MimeType: "image/png", Data: picture}}
+
+	result, err := r.Run(context.Background(), run, &eventSink{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Response != "reply: what is on this label?" {
+		t.Fatalf("response = %q", result.Response)
+	}
+	report := readReport(t, cfg, testPrincipal, "session-image")
+	if len(report.Images) != 1 {
+		t.Fatalf("prompt images = %#v, want one", report.Images)
+	}
+	image := report.Images[0]
+	decoded, err := base64.StdEncoding.DecodeString(image.Data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if image.Type != "image" || image.MimeType != "image/png" || !bytes.Equal(decoded, picture) {
+		t.Fatalf("prompt image = {type:%q mime:%q bytes:%d}, want the picture as an image/png block",
+			image.Type, image.MimeType, len(decoded))
 	}
 }
 

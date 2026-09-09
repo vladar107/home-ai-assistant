@@ -11,8 +11,16 @@ type RunRequest struct {
 	PrincipalID string
 	SessionID   string
 	Message     string
+	Images      []Image
 	Tools       ToolSet
 	Metadata    map[string]string
+}
+
+// Image is a picture the turn's message carried. It is the only non-text input a runtime accepts.
+type Image struct {
+	Name     string
+	MimeType string
+	Data     []byte
 }
 
 // ToolSet is what one turn may call: the definitions offered to the model, prompt guidance for

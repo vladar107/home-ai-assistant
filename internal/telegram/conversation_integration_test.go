@@ -20,6 +20,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/attachment"
 	"github.com/vladar107/home-ai-assistant/internal/connection"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
@@ -122,6 +123,13 @@ type harnessOptions struct {
 	approvalSweep       time.Duration
 }
 
+// testFile is one attachment the Telegram simulator will hand out through getFile.
+type testFile struct {
+	path   string
+	data   []byte
+	status int
+}
+
 type conversationHarness struct {
 	t              *testing.T
 	ctx            context.Context
@@ -130,6 +138,9 @@ type conversationHarness struct {
 	client         *Client
 	service        *Service
 	conversation   *conversation.Service
+	attachments    *attachment.Service
+	attachmentsDir string
+	files          map[string]testFile
 	connections    *connection.Service
 	notion         *notion.Service
 	approvals      *approval.Service
@@ -185,7 +196,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	h := &conversationHarness{
 		t: t, ctx: ctx, updates: make(chan []Update, 20), messages: make(chan sentMessage, 100), edits: make(chan editedMessage, 100),
 		answers: make(chan callbackAnswer, 100), deletes: make(chan deletedMessage, 100), offsets: make(chan int64, 100), registrations: make(chan commandRegistration, 10),
-		turns: make(chan turnOutcome, 20), logs: &lockedBuffer{},
+		turns: make(chan turnOutcome, 20), logs: &lockedBuffer{}, files: make(map[string]testFile),
 	}
 	server := httptest.NewServer(http.HandlerFunc(h.serveHTTP))
 	t.Cleanup(server.Close)
@@ -241,6 +252,14 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 			t.Fatal(err)
 		}
 	}
+	h.attachmentsDir = filepath.Join(t.TempDir(), "attachments")
+	h.attachments, err = attachment.NewService(attachment.Config{Directory: h.attachmentsDir}, h.store, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := broker.Register(h.attachments); err != nil {
+		t.Fatal(err)
+	}
 	h.approvals, err = approval.NewService(approval.Config{Lifetime: options.approvalLifetime, SweepInterval: options.approvalSweep}, h.store, h.client, logger)
 	if err != nil {
 		t.Fatal(err)
@@ -263,11 +282,14 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		}
 		notionController = h.notion
 	}
-	h.conversation, err = conversation.NewService(conversation.Config{TurnTimeout: 10 * time.Second, FollowUp: h.approvals, Notice: h.approvals}, h.store, runtime, h.client, broker, h.connections, logger, integrationTelemetry{turns: h.turns})
+	h.conversation, err = conversation.NewService(
+		conversation.Config{TurnTimeout: 10 * time.Second, FollowUp: h.approvals, Notice: h.approvals, Attachments: h.attachments},
+		h.store, runtime, h.client, broker, h.connections, logger, integrationTelemetry{turns: h.turns},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.service, err = NewService(h.client, identities, h.store, h.conversation, h.connections, notionController, h.approvals, logger, nil)
+	h.service, err = NewService(h.client, identities, h.store, h.conversation, h.attachments, h.connections, notionController, h.approvals, logger, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,6 +298,10 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 }
 
 func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) {
+	if route, isFile := strings.CutPrefix(r.URL.Path, "/file/"); isFile {
+		h.serveFileDownload(w, route)
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		h.t.Error(err)
 		return
@@ -347,6 +373,14 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_code": status, "description": reason})
 			return
 		}
+	case "getFile":
+		file, known := h.file(r.Form.Get("file_id"))
+		if !known {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_code": 400, "description": "Bad Request: file is too big"})
+			return
+		}
+		result = FileReference{FileID: r.Form.Get("file_id"), FilePath: file.path, FileSize: int64(len(file.data))}
 	case "sendChatAction":
 		result = true
 	case "deleteMessage":
@@ -438,6 +472,42 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 	if err := json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": result}); err != nil && r.Context().Err() == nil {
 		h.t.Error(err)
 	}
+}
+
+// serveFileDownload answers the bot file route, which returns bytes rather than a JSON envelope.
+func (h *conversationHarness) serveFileDownload(w http.ResponseWriter, route string) {
+	_, filePath, _ := strings.Cut(route, "/")
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, file := range h.files {
+		if file.path != filePath {
+			continue
+		}
+		if file.status != 0 {
+			w.WriteHeader(file.status)
+			return
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		if _, err := w.Write(file.data); err != nil {
+			h.t.Error(err)
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNotFound)
+}
+
+func (h *conversationHarness) file(fileID string) (testFile, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	file, known := h.files[fileID]
+	return file, known
+}
+
+// addFile registers what the simulator will serve for one file identifier.
+func (h *conversationHarness) addFile(fileID, filePath string, data []byte) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.files[fileID] = testFile{path: filePath, data: data}
 }
 
 func (h *conversationHarness) parseKeyboard(raw string) InlineKeyboard {
@@ -533,6 +603,29 @@ func requestMessageID(updateID int64) int64 { return 1000 + updateID }
 
 func textUpdate(id, userID int64, text string) Update {
 	return Update{UpdateID: id, Message: &Message{MessageID: requestMessageID(id), From: &User{ID: userID, FirstName: "Test"}, Chat: Chat{ID: userID, Type: ChatTypePrivate}, Text: text}}
+}
+
+func photoUpdate(id, userID int64, caption, fileID string, size int64) Update {
+	update := textUpdate(id, userID, "")
+	update.Message.Caption = caption
+	update.Message.Photo = []PhotoSize{
+		{FileID: fileID + "-small", Width: 90, Height: 60, FileSize: size / 4},
+		{FileID: fileID, Width: 1280, Height: 853, FileSize: size},
+	}
+	return update
+}
+
+func documentUpdate(id, userID int64, caption string, document MediaFile) Update {
+	update := textUpdate(id, userID, "")
+	update.Message.Caption = caption
+	update.Message.Document = &document
+	return update
+}
+
+func voiceUpdate(id, userID int64) Update {
+	update := textUpdate(id, userID, "")
+	update.Message.Voice = &MediaFile{FileID: "voice-1", MimeType: "audio/ogg", FileSize: 4096}
+	return update
 }
 
 // settingsMessageID stands for the bot's settings message that a button press refers to.
@@ -695,7 +788,7 @@ func TestCommandsRemainResponsiveAndCancelSuppressesLateAnswer(t *testing.T) {
 	h.push(textUpdate(2, 101, "second request"), textUpdate(3, 101, "/status"), textUpdate(4, 101, "/privacy"), textUpdate(5, 101, "/cancel"))
 	h.wantReply(101, 2, conversation.BusyReply)
 	h.wantReply(101, 3, ConversationStatusReply)
-	h.wantReply(101, 4, ConversationPrivacyReply)
+	h.wantReply(101, 4, ConversationPrivacyReply+" "+AttachmentPrivacyLine)
 	h.wantReply(101, 5, CancelledReply)
 	receive(t, h.ctx, call.ctx.Done())
 	h.waitState(1, "cancelled")
@@ -765,7 +858,7 @@ func TestConversationRestartRecovery(t *testing.T) {
 			h := newConversationHarness(t, runtime)
 			h.provision("alice", "acct-alice")
 			input := conversation.EnqueueInput{BotUserID: 999, TelegramUpdateID: 1, TelegramMessageID: requestMessageID(1), PrincipalID: "alice", ChatID: 101, Message: "original request"}
-			_, err := h.store.EnqueueConversation(h.ctx, input, conversation.Session{ID: recoverySessionID, PrincipalID: "alice", RuntimeSessionID: recoveryRuntimeSessionID}, recoveryRequestID)
+			_, err := h.store.EnqueueConversation(h.ctx, input, conversation.Session{ID: recoverySessionID, PrincipalID: "alice", RuntimeSessionID: recoveryRuntimeSessionID}, recoveryRequestID, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -953,7 +1046,7 @@ func TestBotCommandsRegisteredOnceAtStartup(t *testing.T) {
 	}
 	h.push(textUpdate(1, 101, "/status"), textUpdate(2, 101, "/privacy"))
 	h.wantReply(101, 1, ConversationStatusReply)
-	h.wantReply(101, 2, ConversationPrivacyReply)
+	h.wantReply(101, 2, ConversationPrivacyReply+" "+AttachmentPrivacyLine)
 	h.waitOffset(3)
 	select {
 	case extra := <-h.registrations:

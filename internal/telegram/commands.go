@@ -19,6 +19,15 @@ const (
 	NewSessionReply          = "Started a fresh conversation."
 	NoSessionReply           = "There is no conversation to reset yet."
 	HelpReply                = "Available commands: /status, /privacy, /cancel, /new, /settings. You can otherwise talk to me normally."
+
+	AttachmentPrivacyLine = "Photos and files you send stay on the home system for the current conversation and are removed when you start a new one with /new."
+
+	UnsupportedAudioReply      = "I cannot listen to voice messages or audio yet. Send text, a photo, or a file and I will work with that."
+	UnsupportedVideoReply      = "I cannot watch video yet. Send text, a photo, or a file and I will work with that."
+	UnsupportedStickerReply    = "I cannot read stickers. Send text, a photo, or a file and I will work with that."
+	UnsupportedAttachmentReply = "I cannot accept photos or files in this conversation."
+	AttachmentUnavailableReply = "I could not download that from Telegram. Please send it again."
+	ConversationFullReply      = "This conversation is already holding as many files as I can keep. Use /new to start a fresh one."
 )
 
 type BotCommand struct {

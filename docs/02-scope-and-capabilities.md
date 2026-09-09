@@ -40,7 +40,7 @@ Automation execution has a separate four-level scale:
 
 | Domain | Initial capabilities | Later capabilities | Ownership | Initial mode |
 | --- | --- | --- | --- | --- |
-| Telegram | Receive text/files, send text/photos/files/buttons | Voice or richer UI | Per user | Operational |
+| Telegram | Receive text, photos, and files; send text/buttons | Send photos/files, voice messages, richer UI | Per user | Operational |
 | Immich | Search by text/person/date/album, inspect metadata, return previews/originals | Create albums, upload, change metadata | Shared service with grants | Read |
 | NAS files | List safe roots, search metadata, download selected files | Upload, move, rename | Shared service with path grants | Read |
 | NAS health | Capacity, temperatures, disk/array/backup status | Acknowledge maintenance tasks | Shared | Read |

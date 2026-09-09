@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/vladar107/home-ai-assistant/internal/attachment"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 )
 
@@ -16,6 +17,7 @@ func (s *Store) EnqueueConversation(
 	input conversation.EnqueueInput,
 	candidate conversation.Session,
 	requestID string,
+	attachments []attachment.Record,
 ) (conversation.EnqueueResult, error) {
 	if s == nil || s.db == nil {
 		return conversation.EnqueueResult{}, fmt.Errorf("enqueue conversation: SQLite store is not open")
@@ -96,6 +98,11 @@ func (s *Store) EnqueueConversation(
 		request.Message,
 	); err != nil {
 		return conversation.EnqueueResult{}, fmt.Errorf("create conversation request: %w", err)
+	}
+	// The request and its attachments become visible together, so a turn can never start on a
+	// message whose files are not yet stored.
+	if err := insertAttachments(ctx, tx, request.SessionID, attachments); err != nil {
+		return conversation.EnqueueResult{}, err
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -297,15 +304,20 @@ func (s *Store) CancelPendingConversation(ctx context.Context, principalID strin
 	)
 }
 
-func (s *Store) ResetConversation(ctx context.Context, principalID string) (bool, error) {
+func (s *Store) ResetConversation(ctx context.Context, principalID string) (string, bool, error) {
 	if s == nil || s.db == nil {
-		return false, fmt.Errorf("reset conversation: SQLite store is not open")
+		return "", false, fmt.Errorf("reset conversation: SQLite store is not open")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return false, fmt.Errorf("begin conversation reset: %w", err)
+		return "", false, fmt.Errorf("begin conversation reset: %w", err)
 	}
 	defer tx.Rollback()
+
+	session, _, err := loadActiveConversationSession(ctx, tx, principalID)
+	if err != nil {
+		return "", false, err
+	}
 
 	if _, err := tx.ExecContext(
 		ctx,
@@ -315,7 +327,7 @@ func (s *Store) ResetConversation(ctx context.Context, principalID string) (bool
 		 WHERE principal_id = ? AND state IN ('queued', 'running', 'ready', 'delivering')`,
 		principalID,
 	); err != nil {
-		return false, fmt.Errorf("cancel requests during conversation reset: %w", err)
+		return "", false, fmt.Errorf("cancel requests during conversation reset: %w", err)
 	}
 	result, err := tx.ExecContext(
 		ctx,
@@ -327,16 +339,16 @@ func (s *Store) ResetConversation(ctx context.Context, principalID string) (bool
 		principalID,
 	)
 	if err != nil {
-		return false, fmt.Errorf("close active conversation: %w", err)
+		return "", false, fmt.Errorf("close active conversation: %w", err)
 	}
 	changed, err := result.RowsAffected()
 	if err != nil {
-		return false, fmt.Errorf("read closed conversation count: %w", err)
+		return "", false, fmt.Errorf("read closed conversation count: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return false, fmt.Errorf("commit conversation reset: %w", err)
+		return "", false, fmt.Errorf("commit conversation reset: %w", err)
 	}
-	return changed == 1, nil
+	return session.ID, changed == 1, nil
 }
 
 type queryRower interface {
