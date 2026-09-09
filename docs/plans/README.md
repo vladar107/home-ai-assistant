@@ -28,7 +28,7 @@ plan that links back to the earlier record.
 | 0016 | [Reach data sources nested inside Notion pages](0016-notion-nested-databases.md) | done |
 | 0017 | [Schema-checked Notion writes and readable confirmations](0017-schema-checked-notion-writes.md) | done |
 | 0018 | [Tag-pinned deployment without release directories](0018-tag-pinned-deployment.md) | in-progress |
-| 0019 | [Read nested block content through a block-children tool](0019-nested-block-children.md) | in-progress |
+| 0019 | [Read nested block content through a block-children tool](0019-nested-block-children.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

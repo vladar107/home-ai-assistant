@@ -1,6 +1,6 @@
 # 0019 — Read nested block content through a block-children tool
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
@@ -84,7 +84,10 @@ simple table's rows become readable without a table-specific code path.
   the rows, an unknown block ID fails as an ordinary tool error, and a page ID
   passed to the tool returns the page's own blocks.
 - Live: asking which film is next on the "Кино вечера" page answers from the
-  table instead of asking for a screenshot.
+  table instead of asking for a screenshot. Verified on 2026-09-09. That
+  particular page was afterwards converted to a database, because a simple
+  table's rows cannot be written through the API; the tool remains the only way
+  to read the content of any simple table, toggle, or column.
 - `scripts/check-plans` passes.
 
 ## Risks and open questions
