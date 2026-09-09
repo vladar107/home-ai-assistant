@@ -399,7 +399,7 @@ func flattenBlocks(blocks []Block, limit int) (string, bool) {
 	for index, block := range blocks {
 		line := renderBlock(block, index)
 		if block.HasChildren {
-			line += " (has nested content)"
+			line += " (has nested content; block id: " + block.ID + ")"
 		}
 		if builder.Len()+len(line)+1 > limit {
 			return strings.TrimRight(builder.String(), "\n"), true
@@ -407,6 +407,19 @@ func flattenBlocks(blocks []Block, limit int) (string, bool) {
 		builder.WriteString(line + "\n")
 	}
 	return strings.TrimRight(builder.String(), "\n"), false
+}
+
+// renderBlockChildren presents one level of content nested inside a block, reached through the
+// block ID printed beside a nested-content note in a page render.
+func renderBlockChildren(blockID, content string, truncated bool) string {
+	if content == "" {
+		return "Block " + blockID + " holds no nested content."
+	}
+	text := "Nested content of block " + blockID + ":\n" + content
+	if truncated {
+		text += "\n[content truncated]"
+	}
+	return text
 }
 
 func renderBlock(block Block, index int) string {

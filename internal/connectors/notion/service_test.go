@@ -156,7 +156,7 @@ func TestPageSizeCapAndCursor(t *testing.T) {
 	for index := 1; index <= 27; index++ {
 		f.sim.SharePage(token, notionsim.Page{ID: fmt.Sprintf("page-%02d", index), Title: fmt.Sprintf("Item %02d", index), URL: "https://notion.so/p", LastEdited: "2026-09-01T00:00:00.000Z"})
 	}
-	if contribution := f.contribute(); len(contribution.Definitions) != 3 {
+	if contribution := f.contribute(); len(contribution.Definitions) != 4 {
 		t.Fatalf("contribution = %+v", contribution)
 	}
 	first := f.execute("notion_search", `{"limit":50}`)
@@ -317,6 +317,34 @@ func TestTableNestedInAPageIsReachableThroughItsDatabaseID(t *testing.T) {
 	}
 	if queries := f.requests("/v1/data_sources/ds-movies/query"); len(queries) != 1 {
 		t.Fatalf("data source queries = %d", len(queries))
+	}
+}
+
+func TestSimpleTableRowsAreReadThroughTheirBlockID(t *testing.T) {
+	f := newFixture(t)
+	f.sim.SharePage(token, notionsim.Page{
+		ID: "page-films", Title: "Кино вечера", URL: "https://notion.so/page-films", LastEdited: "2026-09-01T00:00:00.000Z",
+		Blocks: []map[string]any{
+			notionsim.Paragraph("Очередь"),
+			notionsim.Table(notionsim.TableRow("Фильм", "Неделя"), notionsim.TableRow("Dune", "next")),
+		},
+	})
+	f.contribute()
+
+	page := f.execute("notion_get_page", `{"page_id":"page-films"}`)
+	if page.IsError || !strings.Contains(page.Text, "[table] (has nested content; block id: page-films-block-1)") {
+		t.Fatalf("page content hides the table's block ID: %s", page.Text)
+	}
+
+	rows := f.execute("notion_get_block_children", `{"block_id":"page-films-block-1"}`)
+	if rows.IsError || !strings.Contains(rows.Text, "| Фильм | Неделя |") || !strings.Contains(rows.Text, "| Dune | next |") {
+		t.Fatalf("table rows = %+v", rows)
+	}
+	if missing := f.execute("notion_get_block_children", `{"block_id":"page-films-block-9"}`); !missing.IsError {
+		t.Fatalf("an unknown block ID must fail: %+v", missing)
+	}
+	if own := f.execute("notion_get_block_children", `{"block_id":"page-films"}`); own.IsError || !strings.Contains(own.Text, "Очередь") {
+		t.Fatalf("a page ID must resolve to its own blocks: %+v", own)
 	}
 }
 

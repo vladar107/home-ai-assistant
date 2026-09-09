@@ -298,7 +298,7 @@ func TestNotionToolsAreScopedToTheConnectedPrincipal(t *testing.T) {
 	for _, definition := range alice.request.Tools.Definitions {
 		names = append(names, definition.Name)
 	}
-	if !slices.Equal(names, []string{"notion_search", "notion_get_page", "notion_query_data_source"}) || !strings.Contains(alice.request.Tools.Guidance, "notion_search") {
+	if !slices.Equal(names, []string{"notion_search", "notion_get_page", "notion_query_data_source", "notion_get_block_children"}) || !strings.Contains(alice.request.Tools.Guidance, "notion_search") {
 		t.Fatalf("Alice's tools = %v guidance=%q", names, alice.request.Tools.Guidance)
 	}
 	execute := func(name, arguments string) agentruntime.ToolResult {
@@ -355,7 +355,7 @@ func TestNotionToolsAreScopedToTheConnectedPrincipal(t *testing.T) {
 	before := len(sim.Requests())
 	h.push(textUpdate(3, 202, "search my pages"))
 	bob = receive(t, h.ctx, runtime.calls)
-	if len(bob.request.Tools.Definitions) != 3 {
+	if len(bob.request.Tools.Definitions) != 4 {
 		t.Fatalf("Bob's tools after connecting = %+v", bob.request.Tools)
 	}
 	result, err := bob.request.Tools.Executor.Execute(bob.ctx, agentruntime.ToolCall{Name: "notion_search", Arguments: json.RawMessage(`{"query":"bob"}`)})
@@ -374,7 +374,7 @@ func TestNotionToolsAreScopedToTheConnectedPrincipal(t *testing.T) {
 	// Disconnecting during a turn makes the next execution fail closed without a request.
 	h.push(textUpdate(4, 101, "again"))
 	alice = receive(t, h.ctx, runtime.calls)
-	if len(alice.request.Tools.Definitions) != 3 {
+	if len(alice.request.Tools.Definitions) != 4 {
 		t.Fatalf("Alice's tools = %+v", alice.request.Tools)
 	}
 	h.requestSettings(5, 101)

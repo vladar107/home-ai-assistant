@@ -209,12 +209,12 @@ func (s *Simulator) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, pageObject(page))
 	case r.Method == http.MethodGet && len(segments) == 4 && segments[1] == "blocks" && segments[3] == "children":
-		page := s.sharedPage(token, segments[2])
-		if page == nil {
+		blocks, ok := s.blocksAt(token, segments[2])
+		if !ok {
 			writeError(w, http.StatusNotFound, "object_not_found", "Could not find block. synthetic-notion-error-text")
 			return
 		}
-		s.blockChildren(w, page, r.URL.Query())
+		s.blockChildren(w, blocks, segments[2], r.URL.Query())
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/pages":
 		s.createPage(w, token, body)
 	case r.Method == http.MethodPatch && len(segments) == 3 && segments[1] == "pages":
@@ -522,11 +522,40 @@ func inputTextPlain(parts []any) string {
 	return builder.String()
 }
 
-func (s *Simulator) blockChildren(w http.ResponseWriter, page *Page, query url.Values) {
-	results := make([]any, 0, len(page.Blocks))
-	for index, block := range page.Blocks {
-		object := map[string]any{"object": "block", "id": fmt.Sprintf("%s-block-%d", page.ID, index), "has_children": false}
+// blocksAt resolves the children of a page or of a nested block. A block ID is built as
+// "<parent id>-block-<index>", so the same walk reaches any depth. A block that exists without
+// children resolves to an empty list, as Notion answers for a childless block.
+func (s *Simulator) blocksAt(token, id string) ([]map[string]any, bool) {
+	if page := s.sharedPage(token, id); page != nil {
+		return page.Blocks, true
+	}
+	cut := strings.LastIndex(id, "-block-")
+	if cut < 0 {
+		return nil, false
+	}
+	index, err := strconv.Atoi(id[cut+len("-block-"):])
+	if err != nil {
+		return nil, false
+	}
+	siblings, ok := s.blocksAt(token, id[:cut])
+	if !ok || index < 0 || index >= len(siblings) {
+		return nil, false
+	}
+	children, _ := siblings[index]["children"].([]map[string]any)
+	return children, true
+}
+
+// blockChildren writes one level of blocks. A block's own children are held under the "children"
+// key, which Notion never returns; it is reported as has_children and served on request instead.
+func (s *Simulator) blockChildren(w http.ResponseWriter, blocks []map[string]any, parentID string, query url.Values) {
+	results := make([]any, 0, len(blocks))
+	for index, block := range blocks {
+		children, _ := block["children"].([]map[string]any)
+		object := map[string]any{"object": "block", "id": fmt.Sprintf("%s-block-%d", parentID, index), "has_children": len(children) > 0}
 		for key, value := range block {
+			if key == "children" {
+				continue
+			}
 			object[key] = value
 		}
 		results = append(results, object)
@@ -732,6 +761,27 @@ func Bullet(text string) map[string]any {
 // the connector must surface for the table's rows to be reachable.
 func ChildDatabase(databaseID, title string) map[string]any {
 	return map[string]any{"type": "child_database", "id": databaseID, "child_database": map[string]any{"title": title}}
+}
+
+// Table is a simple table drawn inside a page. Its rows are nested children rather than siblings,
+// which is why they are only reachable one level deeper than the page's own content.
+func Table(rows ...map[string]any) map[string]any {
+	width := 0
+	if len(rows) > 0 {
+		if row, ok := rows[0]["table_row"].(map[string]any); ok {
+			cells, _ := row["cells"].([]any)
+			width = len(cells)
+		}
+	}
+	return map[string]any{"type": "table", "table": map[string]any{"table_width": width, "has_column_header": true, "has_row_header": false}, "children": rows}
+}
+
+func TableRow(cells ...string) map[string]any {
+	values := make([]any, 0, len(cells))
+	for _, cell := range cells {
+		values = append(values, []any{richText(cell)})
+	}
+	return map[string]any{"type": "table_row", "table_row": map[string]any{"cells": values}}
 }
 
 func ToDo(text string, checked bool) map[string]any {
