@@ -32,6 +32,7 @@ plan that links back to the earlier record.
 | 0020 | [Photos and files in Telegram conversations](0020-telegram-attachments.md) | done |
 | 0021 | [NAS files through mounted per-user roots](0021-nas-file-access.md) | done |
 | 0022 | [Monitoring stack in its own repository with a single deployment directory](0022-monitoring-repository-split.md) | done |
+| 0023 | [Send a NAS file to the user in Telegram](0023-outbound-telegram-files.md) | in-progress |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

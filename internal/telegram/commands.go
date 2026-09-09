@@ -21,6 +21,8 @@ const (
 	HelpReply                = "Available commands: /status, /privacy, /cancel, /new, /settings. You can otherwise talk to me normally."
 
 	AttachmentPrivacyLine = "Photos and files you send stay on the home system for the current conversation and are removed when you start a new one with /new."
+	// Asking for a file uploads the whole file to Telegram, which reading one as text does not.
+	SentFilePrivacyLine = "A NAS file you ask for is uploaded to Telegram to reach you; nothing is sent to this chat unless you ask for it."
 
 	UnsupportedAudioReply      = "I cannot listen to voice messages or audio yet. Send text, a photo, or a file and I will work with that."
 	UnsupportedVideoReply      = "I cannot watch video yet. Send text, a photo, or a file and I will work with that."

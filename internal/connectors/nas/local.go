@@ -142,6 +142,30 @@ func (s *localSession) Read(_ context.Context, location Location, offset int64, 
 	return chunk[:read], info.Size(), nil
 }
 
+// Open hands the caller an open file rather than its bytes, so a file on its way to Telegram is
+// never held in memory here. Every refusal Read makes is made here for the same reasons.
+func (s *localSession) Open(_ context.Context, location Location) (io.ReadCloser, int64, error) {
+	path, err := s.resolve(location, false)
+	if err != nil {
+		return nil, 0, err
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, 0, classify(err)
+	}
+	if info.IsDir() {
+		return nil, 0, &Error{Class: ErrorDirectory}
+	}
+	if !info.Mode().IsRegular() {
+		return nil, 0, &Error{Class: ErrorNotFound}
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, 0, classify(err)
+	}
+	return file, info.Size(), nil
+}
+
 func (s *localSession) MakeDirectory(_ context.Context, location Location) error {
 	path, err := s.resolve(location, true)
 	if err != nil {

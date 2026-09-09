@@ -1,11 +1,13 @@
 package telegram
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/url"
@@ -21,6 +23,11 @@ const (
 	DefaultBaseURL    = "https://api.telegram.org"
 	responseBodyLimit = 4 << 20
 	httpTimeoutGrace  = 10 * time.Second
+	documentNameLimit = 128
+	// uploadTimeout is the ceiling for one upload. It is deliberately not the shared client's
+	// timeout, which is sized for long polling: an upload is bounded by its caller's deadline,
+	// and this only stops one that has no deadline at all from running forever.
+	uploadTimeout = 2 * time.Minute
 )
 
 // filePathPattern accepts the relative path getFile returns and nothing that could escape the
@@ -36,11 +43,12 @@ type ClientConfig struct {
 }
 
 type Client struct {
-	baseURL     *url.URL
-	token       string
-	pollSeconds int64
-	httpClient  *http.Client
-	telemetry   Telemetry
+	baseURL      *url.URL
+	token        string
+	pollSeconds  int64
+	httpClient   *http.Client
+	uploadClient *http.Client
+	telemetry    Telemetry
 }
 
 type Bot struct {
@@ -227,12 +235,16 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		httpClient = &clientCopy
 	}
 
+	uploadClient := *httpClient
+	uploadClient.Timeout = uploadTimeout
+
 	return &Client{
-		baseURL:     parsedBaseURL,
-		token:       cfg.Token,
-		pollSeconds: int64(cfg.PollTimeout / time.Second),
-		httpClient:  httpClient,
-		telemetry:   telemetryOrNoop(cfg.Telemetry),
+		baseURL:      parsedBaseURL,
+		token:        cfg.Token,
+		pollSeconds:  int64(cfg.PollTimeout / time.Second),
+		httpClient:   httpClient,
+		uploadClient: &uploadClient,
+		telemetry:    telemetryOrNoop(cfg.Telemetry),
 	}, nil
 }
 
@@ -460,6 +472,81 @@ func (c *Client) SendTyping(ctx context.Context, chatID int64) error {
 	return err
 }
 
+// SendDocument uploads a file to the chat as a Telegram document. The caller bounds the size; the
+// body is streamed into the multipart request between its prologue and closing boundary so a file
+// never has to be held in memory, which is also why the length is set rather than left to chunked
+// encoding.
+func (c *Client) SendDocument(ctx context.Context, chatID int64, name string, body io.Reader, size int64) (resultErr error) {
+	if chatID == 0 {
+		return fmt.Errorf("Telegram sendDocument requires a chat")
+	}
+	if body == nil {
+		return fmt.Errorf("Telegram sendDocument requires a file to upload")
+	}
+	if size <= 0 {
+		return fmt.Errorf("Telegram sendDocument requires a positive file size")
+	}
+	ctx, endTelemetry := c.telemetry.StartTelegramAPI(ctx, "sendDocument")
+	defer func() {
+		endTelemetry(resultErr)
+	}()
+
+	var form bytes.Buffer
+	writer := multipart.NewWriter(&form)
+	if err := writer.WriteField("chat_id", strconv.FormatInt(chatID, 10)); err != nil {
+		return fmt.Errorf("Telegram sendDocument request could not be created")
+	}
+	if _, err := writer.CreateFormFile("document", documentName(name)); err != nil {
+		return fmt.Errorf("Telegram sendDocument request could not be created")
+	}
+	prologueEnd := form.Len()
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("Telegram sendDocument request could not be created")
+	}
+	encoded := form.Bytes()
+
+	request, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		c.endpointURL("sendDocument"),
+		io.MultiReader(bytes.NewReader(encoded[:prologueEnd]), io.LimitReader(body, size), bytes.NewReader(encoded[prologueEnd:])),
+	)
+	if err != nil {
+		return fmt.Errorf("Telegram sendDocument request could not be created")
+	}
+	request.ContentLength = int64(len(encoded)) + size
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+
+	response, err := c.uploadClient.Do(request)
+	if err != nil {
+		return requestFailure(ctx, "sendDocument", err)
+	}
+	defer response.Body.Close()
+
+	_, err = decodeResponse[Message]("sendDocument", response)
+	return err
+}
+
+// documentName makes a name the user chose usable in a part header. multipart escapes quotes and
+// backslashes, but a control character would still break the header apart.
+func documentName(name string) string {
+	sanitized := strings.Map(func(r rune) rune {
+		if r == '"' || r == '\\' || unicode.IsControl(r) {
+			return '_'
+		}
+		return r
+	}, name)
+	if runes := []rune(sanitized); len(runes) > documentNameLimit {
+		sanitized = string(runes[:documentNameLimit])
+	}
+	sanitized = strings.TrimSpace(sanitized)
+	if sanitized == "" {
+		return "file"
+	}
+	return sanitized
+}
+
 // CommandScope names a Bot API BotCommandScope type; the empty scope is the default scope.
 type CommandScope string
 
@@ -509,21 +596,30 @@ func execute[T any](c *Client, ctx context.Context, method string, params url.Va
 
 	response, err := c.httpClient.Do(request)
 	if err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return zero, fmt.Errorf("Telegram %s request canceled: %w", method, ctxErr)
-		}
-		var networkError net.Error
-		if errors.As(err, &networkError) && networkError.Timeout() {
-			return zero, fmt.Errorf("Telegram %s request timed out", method)
-		}
-		cause := err
-		if requestError, ok := err.(*url.Error); ok && requestError.Err != nil {
-			cause = requestError.Err
-		}
-		return zero, fmt.Errorf("Telegram %s request failed: %w", method, cause)
+		return zero, requestFailure(ctx, method, err)
 	}
 	defer response.Body.Close()
 
+	return decodeResponse[T](method, response)
+}
+
+func requestFailure(ctx context.Context, method string, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return fmt.Errorf("Telegram %s request canceled: %w", method, ctxErr)
+	}
+	var networkError net.Error
+	if errors.As(err, &networkError) && networkError.Timeout() {
+		return fmt.Errorf("Telegram %s request timed out", method)
+	}
+	cause := err
+	if requestError, ok := err.(*url.Error); ok && requestError.Err != nil {
+		cause = requestError.Err
+	}
+	return fmt.Errorf("Telegram %s request failed: %w", method, cause)
+}
+
+func decodeResponse[T any](method string, response *http.Response) (T, error) {
+	var zero T
 	body, err := io.ReadAll(io.LimitReader(response.Body, responseBodyLimit+1))
 	if err != nil {
 		return zero, fmt.Errorf("Telegram %s response could not be read (HTTP status %d)", method, response.StatusCode)

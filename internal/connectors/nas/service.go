@@ -42,6 +42,7 @@ type Service struct {
 	repository   integration.Repository
 	proposer     Proposer
 	attachments  Attachments
+	sender       Sender
 	defaultWrite map[string]string
 	logger       *slog.Logger
 
@@ -51,8 +52,8 @@ type Service struct {
 var _ module.Module = (*Service)(nil)
 
 // NewService builds the connector. A nil proposer or nil attachments leaves the save tool out
-// entirely, as does a principal with no writable root.
-func NewService(cfg Config, repository integration.Repository, proposer Proposer, attachments Attachments, logger *slog.Logger) (*Service, error) {
+// entirely, as does a principal with no writable root; a nil sender leaves out the send tool.
+func NewService(cfg Config, repository integration.Repository, proposer Proposer, attachments Attachments, sender Sender, logger *slog.Logger) (*Service, error) {
 	if repository == nil {
 		return nil, fmt.Errorf("NAS repository is required")
 	}
@@ -74,6 +75,7 @@ func NewService(cfg Config, repository integration.Repository, proposer Proposer
 		repository:   repository,
 		proposer:     proposer,
 		attachments:  attachments,
+		sender:       sender,
 		defaultWrite: defaults,
 		logger:       logger,
 	}, nil

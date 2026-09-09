@@ -151,6 +151,50 @@ func (s *Store) ResolveActivePrincipal(ctx context.Context, telegramUserID int64
 	}, nil
 }
 
+// ResolveActiveChat returns the private chat of a principal who is still allowlisted and enabled.
+// Telegram makes a private chat ID equal to the user ID, so the allowlist is the whole mapping.
+// The allowlist does not make principal_id unique, so a principal holding two active identities
+// is refused rather than resolved to whichever row came first: sending a file to a stale account
+// is worse than not sending it.
+func (s *Store) ResolveActiveChat(ctx context.Context, principalID string) (int64, bool, error) {
+	if s == nil || s.db == nil {
+		return 0, false, fmt.Errorf("resolve active chat: SQLite store is not open")
+	}
+
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT allowlist.telegram_user_id
+		 FROM telegram_allowlist AS allowlist
+		 JOIN principals AS principal ON principal.id = allowlist.principal_id
+		 WHERE allowlist.principal_id = ?
+		     AND allowlist.revoked_at IS NULL
+		     AND principal.status = 'active'
+		 ORDER BY allowlist.telegram_user_id
+		 LIMIT 2`,
+		principalID,
+	)
+	if err != nil {
+		return 0, false, fmt.Errorf("query chat for principal: %w", err)
+	}
+	defer rows.Close()
+
+	var chats []int64
+	for rows.Next() {
+		var telegramUserID int64
+		if err := rows.Scan(&telegramUserID); err != nil {
+			return 0, false, fmt.Errorf("query chat for principal: %w", err)
+		}
+		chats = append(chats, telegramUserID)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, false, fmt.Errorf("query chat for principal: %w", err)
+	}
+	if len(chats) != 1 {
+		return 0, false, nil
+	}
+	return chats[0], true, nil
+}
+
 func (s *Store) LoadTelegramCursor(ctx context.Context, botUserID int64) (TelegramCursor, bool, error) {
 	if s == nil || s.db == nil {
 		return TelegramCursor{}, false, fmt.Errorf("load Telegram cursor: SQLite store is not open")

@@ -2,6 +2,7 @@ package nas
 
 import (
 	"context"
+	"io"
 	"sort"
 	"strings"
 	"time"
@@ -44,6 +45,9 @@ type Session interface {
 	List(context.Context, Location) ([]Entry, error)
 	// Read returns a chunk starting at offset together with the file's whole size.
 	Read(ctx context.Context, location Location, offset int64, limit int) ([]byte, int64, error)
+	// Open streams a whole file together with its size, for delivery somewhere the model never
+	// sees. The caller closes it. Like Read it follows no symlink and opens only a regular file.
+	Open(context.Context, Location) (io.ReadCloser, int64, error)
 	// MakeDirectory creates one directory whose parent already exists.
 	MakeDirectory(context.Context, Location) error
 	// Create writes a new file and fails with ErrorExists when the name is taken.

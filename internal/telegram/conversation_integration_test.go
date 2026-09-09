@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -25,6 +26,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/delivery"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
@@ -75,6 +77,12 @@ type sentMessage struct {
 	keyboard  InlineKeyboard
 	status    int
 	messageID int64
+}
+
+type sentDocument struct {
+	chatID int64
+	name   string
+	data   []byte
 }
 
 type editedMessage struct {
@@ -156,6 +164,7 @@ type conversationHarness struct {
 	sent           []string
 	updates        chan []Update
 	messages       chan sentMessage
+	documents      chan sentDocument
 	edits          chan editedMessage
 	deletes        chan deletedMessage
 	answers        chan callbackAnswer
@@ -200,7 +209,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	ctx, cancel := context.WithTimeout(context.Background(), integrationTimeout)
 	t.Cleanup(cancel)
 	h := &conversationHarness{
-		t: t, ctx: ctx, updates: make(chan []Update, 20), messages: make(chan sentMessage, 100), edits: make(chan editedMessage, 100),
+		t: t, ctx: ctx, updates: make(chan []Update, 20), messages: make(chan sentMessage, 100), documents: make(chan sentDocument, 20), edits: make(chan editedMessage, 100),
 		answers: make(chan callbackAnswer, 100), deletes: make(chan deletedMessage, 100), offsets: make(chan int64, 100), registrations: make(chan commandRegistration, 10),
 		turns: make(chan turnOutcome, 20), logs: &lockedBuffer{}, files: make(map[string]testFile),
 	}
@@ -290,7 +299,11 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	}
 	var nasController NASController
 	if len(options.nasRoots) > 0 {
-		h.nas, err = nas.NewService(nas.Config{Roots: options.nasRoots}, h.store, h.approvals, h.attachments, logger)
+		files, err := delivery.NewService(h.store, h.client, logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.nas, err = nas.NewService(nas.Config{Roots: options.nasRoots}, h.store, h.approvals, h.attachments, files, logger)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -320,6 +333,10 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	if route, isFile := strings.CutPrefix(r.URL.Path, "/file/"); isFile {
 		h.serveFileDownload(w, route)
+		return
+	}
+	if filepath.Base(r.URL.Path) == "sendDocument" {
+		h.serveDocumentUpload(w, r)
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -489,6 +506,40 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 		w.WriteHeader(404)
 		return
 	}
+	if err := json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": result}); err != nil && r.Context().Err() == nil {
+		h.t.Error(err)
+	}
+}
+
+// serveDocumentUpload answers an upload, whose multipart body ParseForm does not read.
+func (h *conversationHarness) serveDocumentUpload(w http.ResponseWriter, r *http.Request) {
+	chatID, err := strconv.ParseInt(r.FormValue("chat_id"), 10, 64)
+	if err != nil {
+		h.t.Error(err)
+		return
+	}
+	file, header, err := r.FormFile("document")
+	if err != nil {
+		h.t.Error(err)
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(file)
+	if err != nil {
+		h.t.Error(err)
+		return
+	}
+	h.mu.Lock()
+	h.sentCount++
+	messageID := sentMessageID(h.sentCount)
+	h.mu.Unlock()
+	select {
+	case h.documents <- sentDocument{chatID: chatID, name: header.Filename, data: data}:
+	case <-r.Context().Done():
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	result := Message{MessageID: messageID, Chat: Chat{ID: chatID, Type: ChatTypePrivate}}
 	if err := json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": result}); err != nil && r.Context().Err() == nil {
 		h.t.Error(err)
 	}
@@ -685,6 +736,11 @@ func receive[T any](t *testing.T, ctx context.Context, channel <-chan T) T {
 }
 
 func (h *conversationHarness) nextMessage() sentMessage { return receive(h.t, h.ctx, h.messages) }
+
+func (h *conversationHarness) nextDocument() sentDocument { return receive(h.t, h.ctx, h.documents) }
+
+// documentCount is the number of uploads the simulator has taken and no test has collected yet.
+func (h *conversationHarness) documentCount() int { return len(h.documents) }
 
 func (h *conversationHarness) nextEdit() editedMessage { return receive(h.t, h.ctx, h.edits) }
 

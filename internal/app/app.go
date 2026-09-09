@@ -18,6 +18,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/delivery"
 	"github.com/vladar107/home-ai-assistant/internal/health"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/module"
@@ -347,9 +348,15 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			a.notion = notionService
 		}
 		if a.cfg.NAS.Enabled {
+			// Files reach the user through their own private chat, which is the Telegram identity
+			// the allowlist already binds to the principal running the turn.
+			files, err := delivery.NewService(a.store, client, a.logger)
+			if err != nil {
+				return fmt.Errorf("initialize file delivery: %w", err)
+			}
 			nasService, err := nas.NewService(nas.Config{
 				Roots: nasRoots(a.cfg.NAS.Roots),
-			}, a.store, approvals, attachments, a.logger)
+			}, a.store, approvals, attachments, files, a.logger)
 			if err != nil {
 				return fmt.Errorf("initialize NAS connector: %w", err)
 			}

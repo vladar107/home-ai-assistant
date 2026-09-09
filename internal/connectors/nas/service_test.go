@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +18,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
+	"github.com/vladar107/home-ai-assistant/internal/delivery"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
@@ -79,15 +82,55 @@ func (f *sentFiles) add(principalID, id, name string, content []byte) {
 	f.data[id] = content
 }
 
+// outbox is the delivery service as the connector sees it. It closes the file the way delivery
+// does, so a test would notice the connector handing over something it had already closed.
+type outbox struct {
+	mu        sync.Mutex
+	documents []sentDocument
+	err       error
+}
+
+type sentDocument struct {
+	principalID string
+	name        string
+	data        []byte
+}
+
+func (o *outbox) SendFile(_ context.Context, principalID string, file delivery.File) error {
+	defer file.Body.Close()
+	if o.err != nil {
+		return o.err
+	}
+	data, err := io.ReadAll(file.Body)
+	if err != nil {
+		return err
+	}
+	if int64(len(data)) != file.Size {
+		return fmt.Errorf("file %q reported %d bytes and carried %d", file.Name, file.Size, len(data))
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.documents = append(o.documents, sentDocument{principalID: principalID, name: file.Name, data: data})
+	return nil
+}
+
+func (o *outbox) sent() []sentDocument {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return append([]sentDocument(nil), o.documents...)
+}
+
 type fixture struct {
 	t         *testing.T
 	ctx       context.Context
 	service   *nas.Service
+	store     *sqlite.Store
 	home      string
 	inbox     string
 	second    string
 	proposals *recorder
 	files     *sentFiles
+	outbox    *outbox
 	logs      *lockedBuffer
 }
 
@@ -112,6 +155,7 @@ func newFixture(t *testing.T) *fixture {
 	logs := &lockedBuffer{}
 	proposals := &recorder{}
 	files := &sentFiles{records: map[string]attachment.Record{}, data: map[string][]byte{}}
+	chat := &outbox{}
 	service, err := nas.NewService(nas.Config{Roots: []nas.PrincipalRoots{
 		{
 			PrincipalID: "alice",
@@ -125,11 +169,11 @@ func newFixture(t *testing.T) *fixture {
 			PrincipalID: "bob",
 			Roots:       []nas.RootPath{{Name: "home", Path: second}},
 		},
-	}}, state, proposals, files, slog.New(slog.NewTextHandler(logs, nil)))
+	}}, state, proposals, files, chat, slog.New(slog.NewTextHandler(logs, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &fixture{t: t, ctx: ctx, service: service, home: home, inbox: inbox, second: second, proposals: proposals, files: files, logs: logs}
+	return &fixture{t: t, ctx: ctx, service: service, store: state, home: home, inbox: inbox, second: second, proposals: proposals, files: files, outbox: chat, logs: logs}
 }
 
 func (f *fixture) write(directory, path, content string) {
@@ -248,8 +292,8 @@ func TestBobSeesOnlyHisOwnRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Bob has no writable root, so saving is never offered to him.
-	if got := names(contribution); len(got) != 3 {
+	// Bob has no writable root, so saving is never offered to him; browsing, reading and sending are.
+	if got := names(contribution); len(got) != 4 {
 		t.Fatalf("bob's tools = %+v", got)
 	}
 	result, err := f.service.Execute(f.ctx, "bob", tools.Call{Name: "nas_list_files", Arguments: json.RawMessage(`{"path":"inbox"}`)})
@@ -376,7 +420,7 @@ func TestSavingIsOffUntilTheUserSwitchesItOn(t *testing.T) {
 
 	f.enableSaving()
 	after := f.contribute()
-	if got := names(after); len(got) != 4 {
+	if got := names(after); len(got) != 5 {
 		t.Fatalf("contribution after enabling = %+v", got)
 	}
 	if !strings.Contains(after.Guidance, "the file goes to inbox") || !strings.Contains(after.Guidance, "Only these folders can be saved to: inbox") {
@@ -508,5 +552,127 @@ func TestSaveRefusesAnAttachmentFromAnotherConversation(t *testing.T) {
 	result := f.execute("nas_save_attachment", `{"attachment_id":"att-bob"}`)
 	if !result.IsError || !strings.Contains(result.Text, "No file with that id") {
 		t.Fatalf("save of another principal's attachment = %+v", result)
+	}
+}
+
+// Sending is what the user asked for when they want the file itself, and it must not depend on
+// reading: the bytes go from the mounted directory to the chat without passing through the model.
+func TestSendingAFileDeliversItsBytesUnread(t *testing.T) {
+	f := newFixture(t)
+	f.write(f.home, "Documents/Payslip.pdf", "%PDF-1.7 payslip")
+	f.contribute()
+
+	result := f.execute("nas_send_file", `{"path":"home/Documents/Payslip.pdf"}`)
+	if result.IsError || !strings.Contains(result.Text, "Sent home/Documents/Payslip.pdf") {
+		t.Fatalf("send = %+v", result)
+	}
+	sent := f.outbox.sent()
+	if len(sent) != 1 {
+		t.Fatalf("documents sent = %+v", sent)
+	}
+	if sent[0].principalID != "alice" || sent[0].name != "Payslip.pdf" || string(sent[0].data) != "%PDF-1.7 payslip" {
+		t.Fatalf("document = %+v", sent[0])
+	}
+	// The content reaches Telegram, never the model.
+	if strings.Contains(result.Text, "%PDF") {
+		t.Fatalf("the file's content reached the model: %+v", result)
+	}
+}
+
+// A file is addressed exactly as it is for reading, so every refusal that protects reading
+// protects sending too.
+func TestSendingStaysInsideTheGrant(t *testing.T) {
+	f := newFixture(t)
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.pdf"), []byte("outside the root"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "secret.pdf"), filepath.Join(f.home, "secret.pdf")); err != nil {
+		t.Fatal(err)
+	}
+	f.write(f.home, "Documents/notes.md", "milk")
+	f.contribute()
+
+	for _, path := range []string{"second/Photos/private.md", "home/../../etc/passwd", "home/secret.pdf", "home/Documents", "home"} {
+		result := f.execute("nas_send_file", fmt.Sprintf(`{"path":%q}`, path))
+		if !result.IsError {
+			t.Fatalf("sending %q was allowed: %+v", path, result)
+		}
+	}
+	if sent := f.outbox.sent(); len(sent) != 0 {
+		t.Fatalf("a refused send still delivered something: %+v", sent)
+	}
+}
+
+// Nothing empty and nothing over the limit leaves the NAS, and each refusal says why so the model
+// can tell the user rather than retrying.
+func TestSendingRefusesEmptyAndOversizeFiles(t *testing.T) {
+	f := newFixture(t)
+	f.write(f.home, "Documents/empty.pdf", "")
+	if err := os.WriteFile(filepath.Join(f.home, "huge.bin"), make([]byte, (20<<20)+1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.contribute()
+
+	empty := f.execute("nas_send_file", `{"path":"home/Documents/empty.pdf"}`)
+	if !empty.IsError || !strings.Contains(empty.Text, "is empty") {
+		t.Fatalf("empty file = %+v", empty)
+	}
+	oversize := f.execute("nas_send_file", `{"path":"home/huge.bin"}`)
+	if !oversize.IsError || !strings.Contains(oversize.Text, "only files up to 20.0 MB can be sent") {
+		t.Fatalf("oversize file = %+v", oversize)
+	}
+	if sent := f.outbox.sent(); len(sent) != 0 {
+		t.Fatalf("a refused send still delivered something: %+v", sent)
+	}
+}
+
+// A file that cannot be delivered must not leave the model believing the user has it.
+func TestAnUndeliverableFileIsReportedAsNotArrived(t *testing.T) {
+	f := newFixture(t)
+	f.write(f.home, "Documents/report.pdf", "report")
+	f.outbox.err = errors.New("Telegram sendDocument returned HTTP status 500")
+	f.contribute()
+
+	result := f.execute("nas_send_file", `{"path":"home/Documents/report.pdf"}`)
+	if !result.IsError || !strings.Contains(result.Text, "did not arrive") {
+		t.Fatalf("undeliverable file = %+v", result)
+	}
+}
+
+// The tool is only as available as the deployment that can deliver it, and the guidance carries
+// the household's rule: a file is opened only when its content was asked for.
+func TestSendingIsAbsentWithoutADelivererAndReadingStaysGated(t *testing.T) {
+	f := newFixture(t)
+	contribution := f.contribute()
+	if !slices.Contains(names(contribution), "nas_send_file") {
+		t.Fatalf("tools = %+v", names(contribution))
+	}
+	if !strings.Contains(contribution.Guidance, "Sending never needs a read") ||
+		!strings.Contains(contribution.Guidance, "files stay closed unless they ask for the content") {
+		t.Fatalf("guidance = %q", contribution.Guidance)
+	}
+
+	f.write(f.home, "Documents/notes.md", "milk")
+	withoutDelivery, err := nas.NewService(nas.Config{Roots: []nas.PrincipalRoots{
+		{PrincipalID: "alice", Roots: []nas.RootPath{{Name: "home", Path: f.home}}},
+	}}, f.store, f.proposals, f.files, nil, slog.New(slog.NewTextHandler(f.logs, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	offered, err := withoutDelivery.Contribute(f.ctx, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(names(offered), "nas_send_file") {
+		t.Fatalf("a deployment that cannot deliver still offered the tool: %+v", names(offered))
+	}
+	// The file exists, so only the missing sender can refuse this.
+	result, err := withoutDelivery.Execute(f.ctx, "alice", tools.Call{Name: "nas_send_file", Arguments: json.RawMessage(`{"path":"home/Documents/notes.md"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError || !strings.Contains(result.Text, "cannot send files") {
+		t.Fatalf("an ungranted send succeeded: %+v", result)
 	}
 }

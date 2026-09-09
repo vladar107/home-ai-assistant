@@ -658,6 +658,9 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		if s.attachments != nil {
 			reply += " " + AttachmentPrivacyLine
 		}
+		if s.nas != nil {
+			reply += " " + SentFilePrivacyLine
+		}
 		if s.notion != nil {
 			reply += " " + NotionPrivacyLine
 		}
