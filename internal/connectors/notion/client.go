@@ -72,9 +72,14 @@ func (b Bot) TokenKind() string {
 	return integration.TokenKindInternal
 }
 
+// RichText is a rich text run. Notion returns the flattened run in PlainText, while a write input
+// carries the text the model wrote in Text.Content.
 type RichText struct {
 	PlainText string `json:"plain_text"`
 	Href      string `json:"href"`
+	Text      struct {
+		Content string `json:"content"`
+	} `json:"text"`
 }
 
 // Object is a page or a data source as Notion returns it. A page's properties are values; a
@@ -214,6 +219,15 @@ func (c *Client) Database(ctx context.Context, token, databaseID string) (Databa
 	var database Database
 	err := c.do(ctx, token, http.MethodGet, "/v1/databases/"+url.PathEscape(databaseID), nil, &database)
 	return database, err
+}
+
+// DataSource retrieves one data source. Its properties are the schema of the rows it holds, so
+// they carry the writable structure and the options every select, status, and multi-select
+// property accepts.
+func (c *Client) DataSource(ctx context.Context, token, dataSourceID string) (Object, error) {
+	var dataSource Object
+	err := c.do(ctx, token, http.MethodGet, "/v1/data_sources/"+url.PathEscape(dataSourceID), nil, &dataSource)
+	return dataSource, err
 }
 
 func (c *Client) BlockChildren(ctx context.Context, token, blockID, cursor string) (List[Block], error) {

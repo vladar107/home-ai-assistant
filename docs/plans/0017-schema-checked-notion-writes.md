@@ -1,6 +1,6 @@
 # 0017 — Schema-checked Notion writes and readable confirmations
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 

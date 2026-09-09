@@ -132,6 +132,7 @@ type Service struct {
 
 	mu        sync.Mutex
 	executors map[string]Executor
+	notices   map[string]string
 	cancel    context.CancelFunc
 	done      chan struct{}
 }
@@ -162,6 +163,7 @@ func NewService(cfg Config, repository Repository, deliverer Deliverer, logger *
 		sweepInterval: sweepInterval,
 		now:           time.Now,
 		executors:     make(map[string]Executor),
+		notices:       make(map[string]string),
 	}, nil
 }
 
@@ -416,18 +418,63 @@ func (s *Service) execute(ctx context.Context, record Record) string {
 		s.logger.ErrorContext(ctx, "approval.finish_failed", "principal_id", record.PrincipalID, "approval_id", record.ID, "status", status)
 	}
 	record.Status, record.Reason, record.Outcome = status, reason, outcome
+	s.rememberNotice(record)
 	s.logger.InfoContext(ctx, "approval.resolved", "principal_id", record.PrincipalID, "approval_id", record.ID, "status", status, "reason", reason)
 	return finalText(record)
 }
 
 // report edits the proposal message of a record resolved without a press, when it has one.
 func (s *Service) report(ctx context.Context, record Record) {
+	s.rememberNotice(record)
 	s.logger.InfoContext(ctx, "approval.resolved", "principal_id", record.PrincipalID, "approval_id", record.ID, "status", record.Status, "reason", record.Reason)
 	if record.ChatID == 0 || record.MessageID == 0 {
 		return
 	}
 	if err := s.deliverer.EditText(ctx, record.ChatID, record.MessageID, finalText(record)); err != nil {
 		s.logger.WarnContext(ctx, "approval.report.failed", "principal_id", record.PrincipalID, "approval_id", record.ID, "error", err)
+	}
+}
+
+// rememberNotice keeps what became of a resolved proposal until the principal's next turn, so the
+// model answers from the outcome it never saw instead of assuming its proposal is still waiting.
+// Only the latest resolution is kept, and a proposal the model itself replaced needs no notice.
+func (s *Service) rememberNotice(record Record) {
+	if record.Reason == ReasonReplaced {
+		return
+	}
+	notice := noticeText(record)
+	if notice == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.notices[record.PrincipalID] = notice
+}
+
+// PendingNotice takes the principal's unreported proposal resolution, if there is one.
+func (s *Service) PendingNotice(principalID string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	notice := s.notices[principalID]
+	delete(s.notices, principalID)
+	return notice
+}
+
+func noticeText(record Record) string {
+	switch record.Status {
+	case StatusExecuted:
+		return strings.TrimSpace("The user confirmed your " + record.Tool + " proposal and it was executed. " + record.Outcome)
+	case StatusRejected:
+		return "The user rejected your " + record.Tool + " proposal; nothing was written."
+	case StatusExpired:
+		return "Your " + record.Tool + " proposal expired without an answer; nothing was written."
+	case StatusFailed:
+		if record.Outcome != "" {
+			return "Your " + record.Tool + " proposal was confirmed but failed: " + record.Outcome
+		}
+		return "Your " + record.Tool + " proposal was confirmed but failed; check the target before proposing it again."
+	default:
+		return ""
 	}
 }
 
@@ -449,7 +496,7 @@ func callbackData(action, id string) string {
 }
 
 func proposalText(record Record) string {
-	return record.Summary + "\n\nConfirm to execute exactly this, or reject. The proposal expires in " + fmtMinutes(record.ExpiresAt.Sub(record.CreatedAt)) + "."
+	return record.Summary + "\n\nExpires in " + fmtMinutes(record.ExpiresAt.Sub(record.CreatedAt)) + "."
 }
 
 func finalText(record Record) string {

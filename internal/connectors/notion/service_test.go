@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/integration"
@@ -39,12 +40,24 @@ func (b *lockedBuffer) String() string {
 	return b.buffer.String()
 }
 
+// recorder is the approval service as the connector sees it. It keeps every proposal, so a test
+// can prove that a refused write records nothing.
+type recorder struct {
+	proposals []approval.Proposal
+}
+
+func (r *recorder) Propose(_ context.Context, principalID string, proposal approval.Proposal) (approval.Record, error) {
+	r.proposals = append(r.proposals, proposal)
+	return approval.Record{ID: fmt.Sprintf("approval-%d", len(r.proposals)), PrincipalID: principalID, Tool: proposal.Tool, Arguments: proposal.Arguments, Summary: proposal.Summary}, nil
+}
+
 type fixture struct {
-	t       *testing.T
-	ctx     context.Context
-	sim     *notionsim.Simulator
-	service *notion.Service
-	logs    *lockedBuffer
+	t         *testing.T
+	ctx       context.Context
+	sim       *notionsim.Simulator
+	service   *notion.Service
+	proposals *recorder
+	logs      *lockedBuffer
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -69,11 +82,12 @@ func newFixture(t *testing.T) *fixture {
 	sim := notionsim.New(t)
 	sim.AddToken(token, notionsim.Token{Kind: "internal", BotName: "Connector", WorkspaceID: "ws", WorkspaceName: "Workspace"})
 	logs := &lockedBuffer{}
-	service, err := notion.NewService(notion.Config{CredentialsDir: credentialsDir, APIBaseURL: sim.URL(), HTTPClient: sim.Client()}, store, nil, slog.New(slog.NewTextHandler(logs, nil)))
+	proposals := &recorder{}
+	service, err := notion.NewService(notion.Config{CredentialsDir: credentialsDir, APIBaseURL: sim.URL(), HTTPClient: sim.Client()}, store, proposals, slog.New(slog.NewTextHandler(logs, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &fixture{t: t, ctx: ctx, sim: sim, service: service, logs: logs}
+	return &fixture{t: t, ctx: ctx, sim: sim, service: service, proposals: proposals, logs: logs}
 }
 
 func (f *fixture) execute(name, arguments string) tools.Result {
@@ -96,6 +110,36 @@ func (f *fixture) requests(path string) []notionsim.Request {
 		}
 	}
 	return matching
+}
+
+// refuse runs a write the schema must reject and proves that nothing was proposed for it.
+func (f *fixture) refuse(name, arguments, want string) {
+	f.t.Helper()
+	before := len(f.proposals.proposals)
+	result := f.execute(name, arguments)
+	if !result.IsError || !strings.Contains(result.Text, want) {
+		f.t.Fatalf("%s = %+v, want a failure naming %q", name, result, want)
+	}
+	if recorded := len(f.proposals.proposals) - before; recorded != 0 {
+		f.t.Fatalf("a refused write recorded %d proposal(s)", recorded)
+	}
+}
+
+func (f *fixture) proposal() approval.Proposal {
+	f.t.Helper()
+	if len(f.proposals.proposals) == 0 {
+		f.t.Fatal("no proposal was recorded")
+	}
+	return f.proposals.proposals[len(f.proposals.proposals)-1]
+}
+
+// enableWrites adopts the connection and switches the principal's write grant on.
+func (f *fixture) enableWrites() {
+	f.t.Helper()
+	f.contribute()
+	if status, err := f.service.SetWrites(f.ctx, "alice", true); err != nil || !status.WritesEnabled {
+		f.t.Fatalf("enable writes = %+v %v", status, err)
+	}
 }
 
 func (f *fixture) contribute() tools.Contribution {
@@ -331,5 +375,225 @@ func TestDatabaseWithSeveralDataSourcesAsksWhichOne(t *testing.T) {
 		if strings.HasPrefix(request.Path, "/v1/data_sources/ds-") {
 			t.Fatalf("an ambiguous database must not query a data source: %s", request.Path)
 		}
+	}
+}
+
+func TestDataSourceOptionsAreVisibleInSearchAndOnItsRows(t *testing.T) {
+	f := newFixture(t)
+	f.sim.ShareDataSource(token, notionsim.DataSource{
+		ID: "ds-mentoring", Title: "Mentoring", URL: "https://notion.so/ds-mentoring",
+		Properties: map[string]any{
+			"Name":   notionsim.SchemaProperty("title"),
+			"Week":   notionsim.SchemaProperty("rich_text"),
+			"Status": notionsim.SchemaPropertyWithOptions("status", "Not started", "In progress", "Done"),
+			"Tags":   notionsim.SchemaPropertyWithOptions("multi_select", "home", "work"),
+		},
+	})
+	f.sim.SharePage(token, notionsim.Page{
+		ID: "row-session", Title: "Session", URL: "https://notion.so/row-session", LastEdited: "2026-09-01T00:00:00.000Z",
+		DataSourceID: "ds-mentoring",
+		Properties:   map[string]any{"Status": notionsim.StatusProperty("In progress")},
+	})
+	f.contribute()
+
+	found := f.execute("notion_search", `{"object_type":"data_source"}`)
+	for _, want := range []string{"Status (status: Not started | In progress | Done)", "Tags (multi_select: home | work)", "Week (rich_text)"} {
+		if found.IsError || !strings.Contains(found.Text, want) {
+			t.Fatalf("search result lacks %q: %s", want, found.Text)
+		}
+	}
+
+	row := f.execute("notion_get_page", `{"page_id":"row-session"}`)
+	for _, want := range []string{"Page: Session", "Status: In progress", "Structure: ", "Status (status: Not started | In progress | Done)"} {
+		if row.IsError || !strings.Contains(row.Text, want) {
+			t.Fatalf("row rendering lacks %q: %s", want, row.Text)
+		}
+	}
+	if retrievals := f.requests("/v1/data_sources/ds-mentoring"); len(retrievals) != 1 {
+		t.Fatalf("data source retrievals = %d, want one", len(retrievals))
+	}
+}
+
+func TestRowRendersWhenItsDataSourceCannotBeRead(t *testing.T) {
+	f := newFixture(t)
+	f.sim.SharePage(token, notionsim.Page{
+		ID: "row-private", Title: "Session", URL: "https://notion.so/row-private", LastEdited: "2026-09-01T00:00:00.000Z",
+		DataSourceID: "ds-unshared",
+		Properties:   map[string]any{"Week": notionsim.RichTextProperty("next")},
+	})
+	f.contribute()
+
+	row := f.execute("notion_get_page", `{"page_id":"row-private","include_content":false}`)
+	if row.IsError || !strings.Contains(row.Text, "Page: Session") || !strings.Contains(row.Text, "Week: next") {
+		t.Fatalf("row with an unreadable data source = %+v", row)
+	}
+	if strings.Contains(row.Text, "Structure:") {
+		t.Fatalf("an unreadable data source must not render a structure: %s", row.Text)
+	}
+	if retrievals := f.requests("/v1/data_sources/ds-unshared"); len(retrievals) != 1 {
+		t.Fatalf("data source retrievals = %d, want one attempt", len(retrievals))
+	}
+}
+
+// shareMentoringTable shares a data source whose properties carry the options a proposed write is
+// checked against, together with one row of it.
+func shareMentoringTable(f *fixture) {
+	f.sim.ShareDataSource(token, notionsim.DataSource{
+		ID: "ds-mentoring", Title: "Mentoring", URL: "https://notion.so/ds-mentoring",
+		Properties: map[string]any{
+			"Week":    notionsim.SchemaProperty("rich_text"),
+			"Status":  notionsim.SchemaPropertyWithOptions("status", "Not started", "In progress", "Done"),
+			"Tags":    notionsim.SchemaPropertyWithOptions("multi_select", "home", "work"),
+			"Updated": notionsim.SchemaProperty("last_edited_time"),
+		},
+	})
+	f.sim.SharePage(token, notionsim.Page{
+		ID: "row-session", Title: "Session", URL: "https://notion.so/row-session", LastEdited: "2026-09-01T00:00:00.000Z",
+		DataSourceID: "ds-mentoring",
+		Properties:   map[string]any{"Status": notionsim.StatusProperty("In progress")},
+	})
+}
+
+func TestProposedRowValuesAreCheckedAgainstTheSchemaBeforeAnythingIsRecorded(t *testing.T) {
+	f := newFixture(t)
+	shareMentoringTable(f)
+	f.contribute()
+
+	f.refuse("notion_update_page", `{"page_id":"row-session","properties":{"Status":{"status":{"name":"Completed"}}}}`,
+		`property "Status" has no option "Completed"; its options are Not started | In progress | Done`)
+	f.refuse("notion_update_page", `{"page_id":"row-session","properties":{"Tags":{"multi_select":[{"name":"home"},{"name":"garden"}]}}}`,
+		`property "Tags" has no option "garden"; its options are home | work`)
+	f.refuse("notion_update_page", `{"page_id":"row-session","properties":{"State":{"status":{"name":"Done"}}}}`,
+		`this table has no property "State"; its settable properties are Name, Status, Tags, Week`)
+	f.refuse("notion_update_page", `{"page_id":"row-session","properties":{"Updated":{"last_edited_time":"2026-09-07T00:00:00.000Z"}}}`,
+		`property "Updated" is last_edited_time, which Notion computes itself and never accepts on a write`)
+	f.refuse("notion_update_page", `{"page_id":"row-session","properties":{"Status":{"select":{"name":"Done"}}}}`,
+		`property "Status" is status; send it as {"Status":{"status":{"name":"..."}}}`)
+
+	// Clearing a property names no option, so it passes the check.
+	if cleared := f.execute("notion_update_page", `{"page_id":"row-session","properties":{"Status":{"status":null}}}`); cleared.IsError {
+		t.Fatalf("clearing a property = %+v", cleared)
+	}
+	for _, request := range f.sim.Requests() {
+		if request.Method != "GET" {
+			t.Fatalf("a checked proposal reached Notion with %s %s", request.Method, request.Path)
+		}
+	}
+}
+
+func TestProposedRowChangeShowsCurrentValuesAndExecutesOnConfirmation(t *testing.T) {
+	f := newFixture(t)
+	shareMentoringTable(f)
+	f.enableWrites()
+
+	if result := f.execute("notion_update_page", `{"page_id":"row-session","properties":{"Status":{"status":{"name":"Done"}},"Tags":{"multi_select":[{"name":"home"}]},"Week":{"rich_text":[{"text":{"content":"next"}}]}}}`); result.IsError {
+		t.Fatalf("valid update = %+v", result)
+	}
+	proposal := f.proposal()
+	want := "Notion · update page\n**[Session](https://notion.so/row-session)**\nStatus: In progress → Done\nTags: (empty) → home\nWeek: (empty) → next"
+	if proposal.Summary != want {
+		t.Fatalf("proposal summary = %q, want %q", proposal.Summary, want)
+	}
+	if reads := f.requests("/v1/pages/row-session"); len(reads) != 1 {
+		t.Fatalf("page reads for one proposal = %d, want one", len(reads))
+	}
+
+	outcome, err := f.service.ExecuteApproved(f.ctx, approval.Record{PrincipalID: "alice", Tool: proposal.Tool, Arguments: proposal.Arguments})
+	if err != nil || outcome.Text != "Updated." {
+		t.Fatalf("confirmed update = %+v %v", outcome, err)
+	}
+	var written notionsim.Request
+	for _, request := range f.sim.Requests() {
+		if request.Method == "PATCH" {
+			written = request
+		}
+	}
+	properties, _ := written.Body["properties"].(map[string]any)
+	status, _ := properties["Status"].(map[string]any)
+	option, _ := status["status"].(map[string]any)
+	if written.Path != "/v1/pages/row-session" || option["name"] != "Done" {
+		t.Fatalf("update request = %+v", written)
+	}
+
+	if result := f.execute("notion_update_page", `{"page_id":"row-session","properties":{"Status":{"status":{"name":"Done"}}}}`); result.IsError {
+		t.Fatalf("repeated update = %+v", result)
+	}
+	if summary := f.proposal().Summary; !strings.HasSuffix(summary, "\nStatus: Done (no change)") {
+		t.Fatalf("proposal of an unchanged value = %q", summary)
+	}
+}
+
+func TestProposedPageCreationNamesItsDataSourceAndChecksItsOptions(t *testing.T) {
+	f := newFixture(t)
+	shareMentoringTable(f)
+	f.contribute()
+
+	f.refuse("notion_create_page", `{"parent_type":"data_source","parent_id":"ds-mentoring","title":"October review","properties":{"Status":{"status":{"name":"Started"}}}}`,
+		`property "Status" has no option "Started"; its options are Not started | In progress | Done`)
+
+	if result := f.execute("notion_create_page", `{"parent_type":"data_source","parent_id":"ds-mentoring","title":"October review","properties":{"Status":{"status":{"name":"Not started"}}},"paragraphs":["Agenda"]}`); result.IsError {
+		t.Fatalf("valid create = %+v", result)
+	}
+	want := "Notion · create page\n**October review** in **Mentoring**\nStatus: Not started\nBody (1 paragraph(s)):\n1. Agenda"
+	if summary := f.proposal().Summary; summary != want {
+		t.Fatalf("create summary = %q, want %q", summary, want)
+	}
+}
+
+func TestProposalsCarryOnWhenTheDataSourceCannotBeRead(t *testing.T) {
+	f := newFixture(t)
+	f.sim.SharePage(token, notionsim.Page{
+		ID: "row-private", Title: "Session", URL: "https://notion.so/row-private", LastEdited: "2026-09-01T00:00:00.000Z",
+		DataSourceID: "ds-unshared",
+	})
+	f.contribute()
+
+	if result := f.execute("notion_update_page", `{"page_id":"row-private","properties":{"Anything":{"multi_select":[{"name":"invented"}]}}}`); result.IsError {
+		t.Fatalf("update of a row without a readable schema = %+v", result)
+	}
+	want := "Notion · update page\n**[Session](https://notion.so/row-private)**\nAnything: (empty) → invented"
+	if summary := f.proposal().Summary; summary != want {
+		t.Fatalf("proposal summary = %q, want %q", summary, want)
+	}
+	if retrievals := f.requests("/v1/data_sources/ds-unshared"); len(retrievals) != 1 {
+		t.Fatalf("data source retrievals = %d, want one attempt", len(retrievals))
+	}
+
+	if result := f.execute("notion_append_blocks", `{"page_id":"row-private","paragraphs":["First","Second"]}`); result.IsError {
+		t.Fatalf("append = %+v", result)
+	}
+	want = "Notion · append 2 paragraph(s)\n**[Session](https://notion.so/row-private)**\nBody (2 paragraph(s)):\n1. First\n2. Second"
+	if summary := f.proposal().Summary; summary != want {
+		t.Fatalf("append summary = %q, want %q", summary, want)
+	}
+}
+
+func TestARejectedWriteNamesTheOptionThatNoLongerMatches(t *testing.T) {
+	f := newFixture(t)
+	shareMentoringTable(f)
+	f.enableWrites()
+	if result := f.execute("notion_update_page", `{"page_id":"row-session","properties":{"Status":{"status":{"name":"Done"}}}}`); result.IsError {
+		t.Fatalf("valid update = %+v", result)
+	}
+	record := approval.Record{PrincipalID: "alice", Tool: f.proposal().Tool, Arguments: f.proposal().Arguments}
+
+	// The option is removed in Notion between the proposal and its confirmation.
+	f.sim.SetDataSourceProperties("ds-mentoring", map[string]any{"Status": notionsim.SchemaPropertyWithOptions("status", "Not started", "In progress")})
+	f.sim.FailNext(400, "")
+	var actionErr *approval.ActionError
+	_, err := f.service.ExecuteApproved(f.ctx, record)
+	if !errors.As(err, &actionErr) || !strings.Contains(actionErr.Text, `property "Status" has no option "Done"; its options are Not started | In progress`) {
+		t.Fatalf("rejected write = %v", err)
+	}
+
+	// A rejection the schema does not explain keeps the general sentence.
+	f.sim.SetDataSourceProperties("ds-mentoring", map[string]any{"Status": notionsim.SchemaPropertyWithOptions("status", "Not started", "In progress", "Done")})
+	f.sim.FailNext(400, "")
+	_, err = f.service.ExecuteApproved(f.ctx, record)
+	if !errors.As(err, &actionErr) || actionErr.Text != "Notion rejected the request; nothing was written." {
+		t.Fatalf("unexplained rejection = %v", err)
+	}
+	if logs := f.logs.String(); strings.Contains(logs, "synthetic-notion-error-text") || strings.Contains(logs, "Done") {
+		t.Fatalf("logs carry provider text or content: %s", logs)
 	}
 }

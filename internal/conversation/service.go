@@ -344,7 +344,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		result, err := s.runtime.Run(turnCtx, agentruntime.RunRequest{
 			PrincipalID: request.PrincipalID,
 			SessionID:   request.RuntimeSessionID,
-			Message:     request.Message,
+			Message:     s.turnMessage(request),
 			Tools:       tools,
 		}, discardSink{})
 		runErr = err
@@ -407,6 +407,19 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		"outcome", outcome,
 		"error_kind", reportedKind,
 	)
+}
+
+// turnMessage prefixes what became of the principal's last confirmation request, which was
+// resolved between turns and which the model would otherwise have to guess at.
+func (s *Service) turnMessage(request Request) string {
+	if s.config.Notice == nil {
+		return request.Message
+	}
+	notice := s.config.Notice.PendingNotice(request.PrincipalID)
+	if notice == "" {
+		return request.Message
+	}
+	return "[system] " + notice + "\n\n" + request.Message
 }
 
 func (s *Service) deliver(ctx context.Context, request Request) error {

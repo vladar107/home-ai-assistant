@@ -291,7 +291,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			return fmt.Errorf("initialize approvals: %w", err)
 		}
 		conversationService, err := conversation.NewService(
-			conversation.Config{TurnTimeout: a.cfg.Conversation.TurnTimeout, FollowUp: approvals},
+			conversation.Config{TurnTimeout: a.cfg.Conversation.TurnTimeout, FollowUp: approvals, Notice: approvals},
 			a.store,
 			runtime,
 			client,

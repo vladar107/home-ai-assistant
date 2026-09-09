@@ -116,6 +116,12 @@ func (e *apiError) NotModified() bool {
 	return e.errorCode == http.StatusBadRequest && strings.Contains(strings.ToLower(e.description), "message is not modified")
 }
 
+// UnparsableEntities reports Telegram's rejection of the formatting entities of a message, which
+// makes the same text deliverable only without a parse mode.
+func (e *apiError) UnparsableEntities() bool {
+	return e.errorCode == http.StatusBadRequest && strings.Contains(strings.ToLower(e.description), "can't parse entities")
+}
+
 func (e *apiError) Permanent() bool {
 	if e.httpStatus == http.StatusTooManyRequests || e.httpStatus >= 500 ||
 		e.errorCode == http.StatusTooManyRequests || e.errorCode >= 500 {
@@ -123,6 +129,14 @@ func (e *apiError) Permanent() bool {
 	}
 	return e.errorCode >= 400 && e.errorCode < 500 ||
 		e.httpStatus >= 400 && e.httpStatus < 500
+}
+
+func hasUnparsableEntities(err error) bool {
+	var apiErr *apiError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	return apiErr.UnparsableEntities()
 }
 
 func isPermanentAPIError(err error) bool {
@@ -217,17 +231,20 @@ func (c *Client) send(ctx context.Context, chatID, replyToMessageID int64, text 
 }
 
 func (c *Client) sendMessage(ctx context.Context, chatID, replyToMessageID int64, text string, keyboard InlineKeyboard) (Message, error) {
-	params := url.Values{
-		"chat_id": {strconv.FormatInt(chatID, 10)},
-		"text":    {text},
-	}
+	params := url.Values{"chat_id": {strconv.FormatInt(chatID, 10)}}
 	if replyToMessageID > 0 {
 		params.Set("reply_parameters", fmt.Sprintf(`{"message_id":%d,"allow_sending_without_reply":true}`, replyToMessageID))
 	}
 	if err := setKeyboard(params, keyboard); err != nil {
 		return Message{}, err
 	}
-	return execute[Message](c, ctx, "sendMessage", params)
+	setFormattedText(params, text)
+	message, err := execute[Message](c, ctx, "sendMessage", params)
+	if hasUnparsableEntities(err) {
+		setPlainText(params, text)
+		return execute[Message](c, ctx, "sendMessage", params)
+	}
+	return message, err
 }
 
 // SendProposal posts a confirmation request with Confirm and Reject buttons and returns the
@@ -257,15 +274,24 @@ func (c *Client) EditKeyboard(ctx context.Context, chatID, messageID int64, text
 	params := url.Values{
 		"chat_id":    {strconv.FormatInt(chatID, 10)},
 		"message_id": {strconv.FormatInt(messageID, 10)},
-		"text":       {text},
 	}
 	if err := setKeyboard(params, keyboard); err != nil {
 		return err
 	}
-	_, err := execute[json.RawMessage](c, ctx, "editMessageText", params)
+	err := c.editMessageText(ctx, params, text)
 	var apiErr *apiError
 	if errors.As(err, &apiErr) && apiErr.NotModified() {
 		return nil
+	}
+	return err
+}
+
+func (c *Client) editMessageText(ctx context.Context, params url.Values, text string) error {
+	setFormattedText(params, text)
+	_, err := execute[json.RawMessage](c, ctx, "editMessageText", params)
+	if hasUnparsableEntities(err) {
+		setPlainText(params, text)
+		_, err = execute[json.RawMessage](c, ctx, "editMessageText", params)
 	}
 	return err
 }
@@ -289,6 +315,19 @@ func (c *Client) AnswerCallback(ctx context.Context, callbackID, text string) er
 	}
 	_, err := execute[bool](c, ctx, "answerCallbackQuery", params)
 	return err
+}
+
+// setFormattedText renders the message as Telegram HTML, and setPlainText restores the text the
+// caller wrote. A message Telegram refuses to parse is resent plain, so a formatting fault can
+// never swallow an answer the user is waiting for.
+func setFormattedText(params url.Values, text string) {
+	params.Set("text", renderMarkup(text))
+	params.Set("parse_mode", "HTML")
+}
+
+func setPlainText(params url.Values, text string) {
+	params.Set("text", text)
+	params.Del("parse_mode")
 }
 
 func setKeyboard(params url.Values, keyboard InlineKeyboard) error {

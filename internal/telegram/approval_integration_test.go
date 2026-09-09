@@ -16,7 +16,10 @@ func writableNotionSimulator(t *testing.T) *notionsim.Simulator {
 	sim := notionsim.New(t)
 	sim.AddToken(aliceNotionToken, aliceWorkspace)
 	sim.AddToken(bobNotionToken, bobWorkspace)
-	sim.ShareDataSource(aliceNotionToken, notionsim.DataSource{ID: "ds-tasks", Title: "Tasks", URL: "https://notion.so/ds-tasks", Properties: map[string]any{"Status": notionsim.SchemaProperty("status")}})
+	sim.ShareDataSource(aliceNotionToken, notionsim.DataSource{
+		ID: "ds-tasks", Title: "Tasks", URL: "https://notion.so/ds-tasks",
+		Properties: map[string]any{"Status": notionsim.SchemaPropertyWithOptions("status", "Open", "Done")},
+	})
 	sim.SharePage(aliceNotionToken, notionsim.Page{
 		ID: "page-groceries", Title: "Groceries", URL: "https://notion.so/page-groceries", LastEdited: "2026-09-05T10:00:00.000Z", DataSourceID: "ds-tasks",
 		Properties: map[string]any{"Status": notionsim.StatusProperty("Open")},
@@ -46,7 +49,7 @@ func (h *conversationHarness) proposeTurn(runtime *controlledRuntime, updateID i
 	h.wantReply(101, updateID, "proposed")
 	h.waitState(updateID, "delivered")
 	proposal := h.nextMessage()
-	if proposal.chatID != 101 || proposal.replyTo != 0 || !strings.Contains(proposal.text, "Confirm to execute exactly this") {
+	if proposal.chatID != 101 || proposal.replyTo != 0 || !strings.Contains(proposal.text, "Expires in") {
 		h.t.Fatalf("proposal message = %+v", proposal)
 	}
 	return proposal
@@ -135,7 +138,7 @@ func TestNotionWritesAreProposedConfirmedAndExecutedOnce(t *testing.T) {
 	h.wantReply(101, 4, "I proposed adding Buy milk")
 	h.waitState(4, "delivered")
 	proposal := h.nextMessage()
-	for _, want := range []string{`create page "Buy milk" in data source ds-tasks`, "Status: Open", "1. Two litres", "Confirm to execute exactly this"} {
+	for _, want := range []string{"Notion · create page", "<b>Buy milk</b> in <b>Tasks</b>", "Status: Open", "1. Two litres", "Expires in 10 minutes."} {
 		if !strings.Contains(proposal.text, want) {
 			t.Fatalf("proposal text lacks %q: %s", want, proposal.text)
 		}
@@ -200,8 +203,9 @@ func TestNotionWritesAreProposedConfirmedAndExecutedOnce(t *testing.T) {
 
 	// Reject leaves Notion untouched.
 	rejected := h.proposeTurn(runtime, 8, "notion_update_page", `{"page_id":"page-groceries","properties":{"Status":{"status":{"name":"Done"}}}}`)
-	if !strings.Contains(rejected.text, `update page "Groceries" (page-groceries)`) || !strings.Contains(rejected.text, "Status: Done") {
-		t.Fatalf("update proposal = %+v", rejected)
+	wantUpdate := "Notion · update page\n<b><a href=\"https://notion.so/page-groceries\">Groceries</a></b>\nStatus: Open → Done\n\nExpires in"
+	if !strings.HasPrefix(rejected.text, wantUpdate) {
+		t.Fatalf("update proposal = %q, want it to start with %q", rejected.text, wantUpdate)
 	}
 	_, rejectData := approvalButtons(t, rejected.keyboard)
 	h.push(callbackUpdate(9, 101, rejected.messageID, rejectData))
@@ -234,6 +238,25 @@ func TestNotionWritesAreProposedConfirmedAndExecutedOnce(t *testing.T) {
 	if countRequests(sim, "PATCH", "/v1/blocks/page-groceries/children") != 1 {
 		t.Fatalf("append requests = %d, want 1", countRequests(sim, "PATCH", "/v1/blocks/page-groceries/children"))
 	}
+
+	// The next turn starts from what became of the proposal, so the model never guesses at it.
+	h.push(textUpdate(14, 101, "did it go through?"))
+	informed := receive(t, h.ctx, runtime.calls)
+	if !strings.HasPrefix(informed.request.Message, "[system] The user confirmed your notion_append_blocks proposal and it was executed. Appended 1 paragraph(s) to page page-groceries.\n\n") ||
+		!strings.HasSuffix(informed.request.Message, "did it go through?") {
+		t.Fatalf("turn after a confirmed proposal = %q", informed.request.Message)
+	}
+	informed.answer <- agentruntime.RunResult{Response: "it was written"}
+	h.wantReply(101, 14, "it was written")
+
+	// The outcome is reported once, so a later turn carries no stale notice.
+	h.push(textUpdate(15, 101, "anything else?"))
+	repeated := receive(t, h.ctx, runtime.calls)
+	if repeated.request.Message != "anything else?" {
+		t.Fatalf("second turn after a confirmed proposal = %q", repeated.request.Message)
+	}
+	repeated.answer <- agentruntime.RunResult{Response: "no"}
+	h.wantReply(101, 15, "no")
 
 	// Writes off again removes the write tools.
 	h.requestSettings(20, 101)
@@ -319,7 +342,7 @@ func TestNotionProposalsExpireFailSafelyAndDoNotSurviveRestart(t *testing.T) {
 	sim.FailNext(503, "")
 	h.push(callbackUpdate(12, 101, update.messageID, updateConfirm))
 	h.wantAnswer(12)
-	if edit := h.nextEdit(); !strings.Contains(edit.text, "Done. Updated page: https://notion.so/page-groceries") {
+	if edit := h.nextEdit(); !strings.Contains(edit.text, "Done. Updated.") {
 		t.Fatalf("retried update rendered %+v", edit)
 	}
 	if countRequests(sim, "PATCH", "/v1/pages/page-groceries") != 2 {

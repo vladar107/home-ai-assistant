@@ -14,6 +14,9 @@ const (
 	// broker's result limit together with its properties.
 	maximumContentBytes = 12 << 10
 	maximumPropertyText = 400
+	// maximumOptionsText bounds the options listed for one property so a table with hundreds of
+	// them cannot fill the tool result by itself.
+	maximumOptionsText = 200
 )
 
 func errorAs(err error, target **Error) bool {
@@ -23,6 +26,10 @@ func errorAs(err error, target **Error) bool {
 func plainText(parts []RichText) string {
 	var builder strings.Builder
 	for _, part := range parts {
+		if part.PlainText == "" {
+			builder.WriteString(part.Text.Content)
+			continue
+		}
 		builder.WriteString(part.PlainText)
 	}
 	return builder.String()
@@ -68,8 +75,9 @@ func renderSummary(object Object) string {
 	return builder.String()
 }
 
-// renderPage renders one page with its properties and, when present, its flattened content.
-func renderPage(page Object, content string, truncated bool) string {
+// renderPage renders one page with its properties, the schema of the data source it belongs to
+// when that could be read, and, when present, its flattened content.
+func renderPage(page Object, schema, content string, truncated bool) string {
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "Page: %s\nid: %s", objectTitle(page), page.ID)
 	if page.URL != "" {
@@ -91,6 +99,9 @@ func renderPage(page Object, content string, truncated bool) string {
 		for _, line := range lines {
 			builder.WriteString("- " + line + "\n")
 		}
+	}
+	if schema != "" {
+		builder.WriteString("Structure: " + schema + "\n")
 	}
 	if content != "" {
 		builder.WriteString("Content:\n" + content + "\n")
@@ -323,7 +334,8 @@ func compactJSON(value json.RawMessage) string {
 	return buffer.String()
 }
 
-// renderSchema lists a data source's property names and types so the model can build filters.
+// renderSchema lists a data source's property names and types so the model can build filters, and
+// the options of the properties that only accept a fixed set of values.
 func renderSchema(properties map[string]json.RawMessage) string {
 	names := make([]string, 0, len(properties))
 	for name := range properties {
@@ -335,11 +347,49 @@ func renderSchema(properties map[string]json.RawMessage) string {
 		var property struct {
 			Type string `json:"type"`
 		}
-		if json.Unmarshal(properties[name], &property) == nil && property.Type != "" {
-			parts = append(parts, name+" ("+property.Type+")")
+		if json.Unmarshal(properties[name], &property) != nil || property.Type == "" {
+			continue
 		}
+		part := name + " (" + property.Type
+		if options := schemaOptions(property.Type, properties[name]); options != "" {
+			part += ": " + options
+		}
+		parts = append(parts, part+")")
 	}
 	return strings.Join(parts, ", ")
+}
+
+// schemaOptions lists the option names a select, status, or multi-select property accepts,
+// separated by a pipe because an option name may hold a comma.
+func schemaOptions(propertyType string, raw json.RawMessage) string {
+	return truncateText(strings.Join(schemaOptionNames(propertyType, raw), " | "), maximumOptionsText)
+}
+
+// schemaOptionNames returns the options of a select, status, or multi-select property, and nothing
+// for a property type that holds no options.
+func schemaOptionNames(propertyType string, raw json.RawMessage) []string {
+	switch propertyType {
+	case "select", "status", "multi_select":
+	default:
+		return nil
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil {
+		return nil
+	}
+	var definition struct {
+		Options []struct {
+			Name string `json:"name"`
+		} `json:"options"`
+	}
+	if json.Unmarshal(fields[propertyType], &definition) != nil {
+		return nil
+	}
+	names := make([]string, 0, len(definition.Options))
+	for _, option := range definition.Options {
+		names = append(names, option.Name)
+	}
+	return names
 }
 
 // flattenBlocks renders top-level blocks as plain text lines up to the byte cap and reports

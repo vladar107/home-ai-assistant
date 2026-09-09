@@ -66,6 +66,7 @@ type sentMessage struct {
 	chatID    int64
 	replyTo   int64
 	text      string
+	parseMode string
 	keyboard  InlineKeyboard
 	status    int
 	messageID int64
@@ -148,6 +149,7 @@ type conversationHarness struct {
 	mu             sync.Mutex
 	sentCount      int64
 	sendStatuses   []int
+	sendReason     string
 	sendGate       <-chan struct{}
 	commandStatus  int
 	editStatus     int
@@ -261,7 +263,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		}
 		notionController = h.notion
 	}
-	h.conversation, err = conversation.NewService(conversation.Config{TurnTimeout: 10 * time.Second, FollowUp: h.approvals}, h.store, runtime, h.client, broker, h.connections, logger, integrationTelemetry{turns: h.turns})
+	h.conversation, err = conversation.NewService(conversation.Config{TurnTimeout: 10 * time.Second, FollowUp: h.approvals, Notice: h.approvals}, h.store, runtime, h.client, broker, h.connections, logger, integrationTelemetry{turns: h.turns})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,13 +324,13 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 			status = h.sendStatuses[0]
 			h.sendStatuses = h.sendStatuses[1:]
 		}
-		gate := h.sendGate
+		gate, reason := h.sendGate, h.sendReason
 		h.sent = append(h.sent, r.Form.Get("text"))
 		h.sentCount++
 		messageID := sentMessageID(h.sentCount)
 		h.mu.Unlock()
 		select {
-		case h.messages <- sentMessage{chatID: chatID, replyTo: replyTo, text: r.Form.Get("text"), keyboard: h.parseKeyboard(r.Form.Get("reply_markup")), status: status, messageID: messageID}:
+		case h.messages <- sentMessage{chatID: chatID, replyTo: replyTo, text: r.Form.Get("text"), parseMode: r.Form.Get("parse_mode"), keyboard: h.parseKeyboard(r.Form.Get("reply_markup")), status: status, messageID: messageID}:
 		case <-r.Context().Done():
 			return
 		}
@@ -342,7 +344,7 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 		}
 		if status != http.StatusOK {
 			w.WriteHeader(status)
-			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_code": status})
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_code": status, "description": reason})
 			return
 		}
 	case "sendChatAction":
@@ -860,6 +862,47 @@ func TestConversationDeliveryFailuresAndUnicodeChunks(t *testing.T) {
 			h.waitState(2, "delivered")
 		})
 	}
+}
+
+func TestOutgoingMessagesUseHTMLAndFallBackToPlainText(t *testing.T) {
+	const answer = "**Done** on [the page](https://notion.so/p?a=1&b=2): `data_source_id` a & b <now>"
+	const formatted = `<b>Done</b> on <a href="https://notion.so/p?a=1&amp;b=2">the page</a>: <code>data_source_id</code> a &amp; b &lt;now&gt;`
+	t.Run("rendered", func(t *testing.T) {
+		runtime := newControlledRuntime()
+		h := newConversationHarness(t, runtime)
+		h.provision("alice", "acct-alice")
+		h.start()
+		h.push(textUpdate(1, 101, "answer"))
+		call := receive(t, h.ctx, runtime.calls)
+		call.answer <- agentruntime.RunResult{Response: answer}
+		message := h.nextMessage()
+		if message.parseMode != "HTML" || message.text != formatted {
+			t.Fatalf("message = %+v, want %q with parse mode HTML", message, formatted)
+		}
+		h.waitState(1, "delivered")
+	})
+	t.Run("refused entities", func(t *testing.T) {
+		runtime := newControlledRuntime()
+		h := newConversationHarness(t, runtime)
+		h.provision("alice", "acct-alice")
+		h.sendStatuses = []int{http.StatusBadRequest}
+		h.sendReason = "Bad Request: can't parse entities: Unsupported start tag"
+		h.start()
+		h.push(textUpdate(1, 101, "answer"))
+		call := receive(t, h.ctx, runtime.calls)
+		call.answer <- agentruntime.RunResult{Response: answer}
+		if refused := h.nextMessage(); refused.parseMode != "HTML" || refused.text != formatted {
+			t.Fatalf("first attempt = %+v, want the rendered message", refused)
+		}
+		retry := h.nextMessage()
+		if retry.parseMode != "" || retry.text != answer || retry.replyTo != requestMessageID(1) {
+			t.Fatalf("retry = %+v, want the plain text quoting the request", retry)
+		}
+		h.waitState(1, "delivered")
+		if sent := h.sentTexts(); len(sent) != 2 {
+			t.Fatalf("sent %q, want exactly one plain-text retry", sent)
+		}
+	})
 }
 
 func TestBusyWhileResponseIsBeingDelivered(t *testing.T) {

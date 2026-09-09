@@ -96,7 +96,14 @@ type FollowUp interface {
 	AfterDelivery(ctx context.Context, principalID string, chatID int64) error
 }
 
+// Notice reports what happened to the principal outside a turn, such as the resolution of a
+// confirmation the model asked for, so the next turn starts from the outcome instead of a guess.
+type Notice interface {
+	PendingNotice(principalID string) string
+}
+
 type Config struct {
 	TurnTimeout time.Duration
 	FollowUp    FollowUp
+	Notice      Notice
 }

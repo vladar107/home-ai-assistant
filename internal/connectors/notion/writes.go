@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -28,7 +29,10 @@ const (
 const writeGuidance = "Notion writes are on, and every write needs the user's confirmation: notion_create_page, notion_update_page, and notion_append_blocks only propose a change. " +
 	"After your reply the user sees the exact proposal with Confirm and Reject buttons, so describe what you proposed and never claim it was written. " +
 	"Only one proposal can wait at a time, so propose a single change per turn; a second proposal replaces the first. " +
-	"Property values are Notion API property value objects keyed by property name, for example {\"Status\": {\"status\": {\"name\": \"Done\"}}}."
+	"Property values are Notion API property value objects keyed by property name, for example {\"Status\": {\"status\": {\"name\": \"Done\"}}}. " +
+	"Read the target's structure before proposing property values: notion_get_page shows a row's Structure line, and a data source lists every property with the options it accepts. " +
+	"Spell an option exactly as the table spells it, because Notion cannot add one. " +
+	"Every proposal is checked against that structure before the user sees it, so a wrong property or option comes back to you as a tool failure naming the valid alternatives; correct it and propose again in the same turn."
 
 var writeDefinitions = []tools.Definition{
 	{
@@ -96,7 +100,7 @@ type appendArguments struct {
 }
 
 // propose validates a write call and records it for confirmation; nothing reaches Notion here
-// except a read of the target page so the user sees its title.
+// except the reads that name the target and check the write against its schema.
 func (s *Service) propose(ctx context.Context, principalID, token string, call tools.Call) (string, error) {
 	if s.proposer == nil {
 		return "", fmt.Errorf("Notion writes are not available")
@@ -105,7 +109,7 @@ func (s *Service) propose(ctx context.Context, principalID, token string, call t
 	if err != nil {
 		return "", err
 	}
-	summary, err := s.renderProposal(ctx, token, call.Name, arguments)
+	summary, err := s.prepareProposal(ctx, token, call.Name, arguments)
 	if err != nil {
 		return "", err
 	}
@@ -204,9 +208,167 @@ func validateParagraphs(paragraphs []string, required bool) error {
 	return nil
 }
 
-// renderProposal produces the text the user confirms: exactly what will be sent, with property
-// values shown as text where possible and as compact JSON otherwise.
-func (s *Service) renderProposal(ctx context.Context, token, tool string, arguments json.RawMessage) (string, error) {
+// checkRowProperties validates proposed row values against the schema of the data source that
+// holds them. A page outside a data source carries no data source ID and has no schema to check.
+func (s *Service) checkRowProperties(ctx context.Context, token, dataSourceID string, properties map[string]json.RawMessage) error {
+	if dataSourceID == "" || len(properties) == 0 {
+		return nil
+	}
+	dataSource, found := s.dataSourceSchema(ctx, token, dataSourceID)
+	if !found {
+		return nil
+	}
+	return validateAgainstSchema(dataSource.Properties, properties)
+}
+
+// dataSourceSchema retrieves the row schema of a data source. Being able to write matters more
+// than the check, so a schema that cannot be read is reported as absent and the write carries on
+// unvalidated, exactly as it did before the check existed.
+func (s *Service) dataSourceSchema(ctx context.Context, token, dataSourceID string) (Object, bool) {
+	dataSource, err := s.client.DataSource(ctx, token, dataSourceID)
+	if err != nil {
+		var notionErr *Error
+		if errorAs(err, &notionErr) {
+			s.logger.InfoContext(ctx, "notion.proposal.schema_unavailable", "error_class", notionErr.Class)
+		}
+		return Object{}, false
+	}
+	return dataSource, true
+}
+
+// computedTypes are the property types Notion derives itself and rejects on every write.
+var computedTypes = map[string]bool{
+	"formula": true, "rollup": true, "created_time": true, "created_by": true,
+	"last_edited_time": true, "last_edited_by": true, "unique_id": true,
+	"button": true, "verification": true,
+}
+
+// validateAgainstSchema checks proposed property values against a data source's row schema and
+// names the valid alternatives, so the model corrects a wrong property or option during the same
+// turn instead of the write failing after the user has confirmed it. An option a select does not
+// already hold is refused as well, even though Notion would create it, so a typo cannot add
+// options to the user's own table.
+func validateAgainstSchema(schema, properties map[string]json.RawMessage) error {
+	for _, name := range sortedKeys(properties) {
+		definition, known := schema[name]
+		if !known {
+			return fmt.Errorf("this table has no property %q; its settable properties are %s", name, settableNames(schema))
+		}
+		var property struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(definition, &property) != nil || property.Type == "" {
+			continue
+		}
+		if computedTypes[property.Type] {
+			return fmt.Errorf("property %q is %s, which Notion computes itself and never accepts on a write", name, property.Type)
+		}
+		var value map[string]json.RawMessage
+		_ = json.Unmarshal(properties[name], &value)
+		chosen, matching := value[property.Type]
+		if !matching {
+			return fmt.Errorf("property %q is %s; send it as {%q:{%q:%s}}", name, property.Type, name, property.Type, valueShape(property.Type))
+		}
+		if err := validateOptions(name, property.Type, definition, chosen); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateOptions refuses an option the property does not already hold. A value explicitly set to
+// null clears the property and names no option.
+func validateOptions(name, propertyType string, definition, value json.RawMessage) error {
+	allowed := schemaOptionNames(propertyType, definition)
+	for _, chosen := range chosenOptionNames(propertyType, value) {
+		if !slices.Contains(allowed, chosen) {
+			options := schemaOptions(propertyType, definition)
+			if options == "" {
+				options = "(none)"
+			}
+			return fmt.Errorf("property %q has no option %q; its options are %s", name, chosen, options)
+		}
+	}
+	return nil
+}
+
+// chosenOptionNames lists the option names a select, status, or multi-select value names. An
+// option chosen by ID alone is left to Notion.
+func chosenOptionNames(propertyType string, value json.RawMessage) []string {
+	if string(value) == "null" {
+		return nil
+	}
+	var options []struct {
+		Name string `json:"name"`
+	}
+	switch propertyType {
+	case "select", "status":
+		var option struct {
+			Name string `json:"name"`
+		}
+		if json.Unmarshal(value, &option) != nil {
+			return nil
+		}
+		options = append(options, option)
+	case "multi_select":
+		if json.Unmarshal(value, &options) != nil {
+			return nil
+		}
+	default:
+		return nil
+	}
+	names := make([]string, 0, len(options))
+	for _, option := range options {
+		if option.Name != "" {
+			names = append(names, option.Name)
+		}
+	}
+	return names
+}
+
+// settableNames lists the properties of a schema a write may set, in name order.
+func settableNames(schema map[string]json.RawMessage) string {
+	names := make([]string, 0, len(schema))
+	for _, name := range sortedKeys(schema) {
+		var property struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(schema[name], &property) == nil && computedTypes[property.Type] {
+			continue
+		}
+		names = append(names, name)
+	}
+	return strings.Join(names, ", ")
+}
+
+// valueShape is the value a property type expects, so a mismatch tells the model the shape to send
+// rather than only the type.
+func valueShape(propertyType string) string {
+	switch propertyType {
+	case "select", "status":
+		return `{"name":"..."}`
+	case "multi_select":
+		return `[{"name":"..."}]`
+	case "title", "rich_text":
+		return `[{"text":{"content":"..."}}]`
+	case "date":
+		return `{"start":"YYYY-MM-DD"}`
+	case "checkbox":
+		return "true"
+	case "number":
+		return "0"
+	case "url", "email", "phone_number":
+		return `"..."`
+	default:
+		return "..."
+	}
+}
+
+// prepareProposal checks the write against the target's real schema and renders the text the user
+// confirms: the page it changes and, for every property, the value it replaces. Both need the
+// target itself, so it is read once for the two of them, and a page that is not shared fails
+// before anything is proposed.
+func (s *Service) prepareProposal(ctx context.Context, token, tool string, arguments json.RawMessage) (string, error) {
 	var builder strings.Builder
 	switch tool {
 	case toolCreatePage:
@@ -215,49 +377,60 @@ func (s *Service) renderProposal(ctx context.Context, token, tool string, argume
 		parent := "page " + create.ParentID
 		if create.ParentType == "data_source" {
 			parent = "data source " + create.ParentID
+			if dataSource, found := s.dataSourceSchema(ctx, token, create.ParentID); found {
+				if err := validateAgainstSchema(dataSource.Properties, create.Properties); err != nil {
+					return "", err
+				}
+				if name := strings.TrimSpace(plainText(dataSource.Title)); name != "" {
+					parent = boldName(name)
+				}
+			}
 		}
-		fmt.Fprintf(&builder, "Notion proposal: create page %q in %s.", create.Title, parent)
-		writeProperties(&builder, create.Properties)
+		fmt.Fprintf(&builder, "Notion · create page\n%s in %s", boldName(create.Title), parent)
+		writeLines(&builder, renderInputProperties(create.Properties))
 		writeParagraphs(&builder, create.Paragraphs)
 	case toolUpdatePage:
 		var update updateArguments
 		_ = json.Unmarshal(arguments, &update)
-		title, err := s.pageTitle(ctx, token, update.PageID)
+		page, err := s.client.Page(ctx, token, update.PageID)
 		if err != nil {
 			return "", err
 		}
-		fmt.Fprintf(&builder, "Notion proposal: update page %s.", title)
-		writeProperties(&builder, update.Properties)
+		if err := s.checkRowProperties(ctx, token, page.Parent.DataSourceID, update.Properties); err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&builder, "Notion · update page\n%s", pageLink(page))
+		writeLines(&builder, renderPropertyChanges(page.Properties, update.Properties))
 	case toolAppendBlocks:
 		var appendTo appendArguments
 		_ = json.Unmarshal(arguments, &appendTo)
-		title, err := s.pageTitle(ctx, token, appendTo.PageID)
+		page, err := s.client.Page(ctx, token, appendTo.PageID)
 		if err != nil {
 			return "", err
 		}
-		fmt.Fprintf(&builder, "Notion proposal: append %d paragraph(s) to page %s.", len(appendTo.Paragraphs), title)
+		fmt.Fprintf(&builder, "Notion · append %d paragraph(s)\n%s", len(appendTo.Paragraphs), pageLink(page))
 		writeParagraphs(&builder, appendTo.Paragraphs)
 	}
 	return builder.String(), nil
 }
 
-// pageTitle reads the target page so the proposal names it and a page that is not shared fails
-// before anything is proposed.
-func (s *Service) pageTitle(ctx context.Context, token, pageID string) (string, error) {
-	page, err := s.client.Page(ctx, token, pageID)
-	if err != nil {
-		return "", err
+// pageLink renders the page as a bold link the user can open, and as a bold title alone when the
+// page has no URL or its title carries the markers a link is written with.
+func pageLink(page Object) string {
+	title := objectTitle(page)
+	if page.URL == "" || strings.ContainsAny(title, "[]()*`") || strings.ContainsAny(page.URL, "()[]") {
+		return boldName(title)
 	}
-	return fmt.Sprintf("%q (%s)", objectTitle(page), page.ID), nil
+	return "**[" + title + "](" + page.URL + ")**"
 }
 
-func writeProperties(builder *strings.Builder, properties map[string]json.RawMessage) {
-	if len(properties) == 0 {
-		return
-	}
-	builder.WriteString("\nProperties:")
-	for _, line := range renderInputProperties(properties) {
-		builder.WriteString("\n- " + line)
+func boldName(name string) string {
+	return "**" + name + "**"
+}
+
+func writeLines(builder *strings.Builder, lines []string) {
+	for _, line := range lines {
+		builder.WriteString("\n" + line)
 	}
 }
 
@@ -271,33 +444,78 @@ func writeParagraphs(builder *strings.Builder, paragraphs []string) {
 	}
 }
 
-// renderInputProperties renders property value inputs, which may omit the "type" field, by the
-// single value key they carry.
+// renderInputProperties renders the proposed property values of a page that does not exist yet,
+// which therefore has nothing they replace.
 func renderInputProperties(properties map[string]json.RawMessage) []string {
 	names := sortedKeys(properties)
 	lines := make([]string, 0, len(names))
 	for _, name := range names {
-		var value map[string]json.RawMessage
-		_ = json.Unmarshal(properties[name], &value)
-		propertyType := ""
-		if raw, present := value["type"]; present {
-			_ = json.Unmarshal(raw, &propertyType)
-		}
-		if propertyType == "" {
-			for key := range value {
-				if key != "id" && key != "type" {
-					propertyType = key
-					break
-				}
-			}
-		}
-		rendered := renderPropertyValue(propertyType, properties[name])
-		if rendered == "" {
-			rendered = compactJSON(properties[name])
-		}
-		lines = append(lines, name+": "+truncateText(rendered, maximumPropertyText))
+		lines = append(lines, name+": "+renderInputProperty(properties[name]))
 	}
 	return lines
+}
+
+// renderPropertyChanges renders each proposed value beside the value it replaces, so the user
+// confirms a change rather than a value.
+func renderPropertyChanges(current, proposed map[string]json.RawMessage) []string {
+	names := sortedKeys(proposed)
+	lines := make([]string, 0, len(names))
+	for _, name := range names {
+		value := renderInputProperty(proposed[name])
+		switch before := currentPropertyValue(current[name]); {
+		case before == value:
+			lines = append(lines, name+": "+value+" (no change)")
+		case before == "":
+			lines = append(lines, name+": (empty) → "+value)
+		default:
+			lines = append(lines, name+": "+before+" → "+value)
+		}
+	}
+	return lines
+}
+
+// renderInputProperty renders a property value input, which may omit the "type" field, by the
+// single value key it carries.
+func renderInputProperty(raw json.RawMessage) string {
+	var value map[string]json.RawMessage
+	_ = json.Unmarshal(raw, &value)
+	rendered := renderPropertyValue(inputPropertyType(value), raw)
+	if rendered == "" {
+		rendered = compactJSON(raw)
+	}
+	return truncateText(rendered, maximumPropertyText)
+}
+
+// currentPropertyValue renders the value a page already holds for one property, which carries its
+// own type, and nothing for a property the page does not hold.
+func currentPropertyValue(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var property struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(raw, &property) != nil {
+		return ""
+	}
+	return truncateText(renderPropertyValue(property.Type, raw), maximumPropertyText)
+}
+
+// inputPropertyType is the type a property value input names: its "type" field when the model sent
+// one, and otherwise the value key it carries.
+func inputPropertyType(value map[string]json.RawMessage) string {
+	if raw, present := value["type"]; present {
+		var propertyType string
+		if json.Unmarshal(raw, &propertyType) == nil && propertyType != "" {
+			return propertyType
+		}
+	}
+	for key := range value {
+		if key != "id" && key != "type" {
+			return key
+		}
+	}
+	return ""
 }
 
 func sortedKeys(values map[string]json.RawMessage) []string {
@@ -331,6 +549,11 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		var notionErr *Error
 		if errors.As(err, &notionErr) {
 			s.logger.InfoContext(ctx, "notion.action.failed", "principal_id", record.PrincipalID, "tool", record.Tool, "error_class", notionErr.Class)
+			if notionErr.Class == ErrorInvalid {
+				if cause := s.invalidCause(ctx, token, record); cause != "" {
+					return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "Notion rejected the write: " + cause + ". Nothing was written."}
+				}
+			}
 			return approval.Outcome{}, actionError(record.Tool, notionErr.Class)
 		}
 		return approval.Outcome{}, err
@@ -371,15 +594,15 @@ func (s *Service) write(ctx context.Context, token string, record approval.Recor
 		if err := json.Unmarshal(record.Arguments, &arguments); err != nil {
 			return approval.Outcome{}, fmt.Errorf("decode stored arguments: %w", err)
 		}
-		page, err := s.client.UpdatePage(ctx, token, arguments.PageID, arguments.Properties)
+		_, err := s.client.UpdatePage(ctx, token, arguments.PageID, arguments.Properties)
 		var notionErr *Error
 		if errors.As(err, &notionErr) && notionErr.Class == ErrorUnavailable {
-			page, err = s.client.UpdatePage(ctx, token, arguments.PageID, arguments.Properties)
+			_, err = s.client.UpdatePage(ctx, token, arguments.PageID, arguments.Properties)
 		}
 		if err != nil {
 			return approval.Outcome{}, err
 		}
-		return approval.Outcome{Text: "Updated page: " + pageReference(page)}, nil
+		return approval.Outcome{Text: "Updated."}, nil
 	case toolAppendBlocks:
 		var arguments appendArguments
 		if err := json.Unmarshal(record.Arguments, &arguments); err != nil {
@@ -417,6 +640,36 @@ func pageReference(page Object) string {
 		return page.URL
 	}
 	return page.ID
+}
+
+// invalidCause re-checks a confirmed write Notion rejected as invalid against the target's schema,
+// so the user learns which property or option no longer matches. Notion's own message stays out of
+// the chat, so the cause comes from the schema alone and is empty when the schema still accepts
+// the write.
+func (s *Service) invalidCause(ctx context.Context, token string, record approval.Record) string {
+	var err error
+	switch record.Tool {
+	case toolCreatePage:
+		var arguments createArguments
+		if json.Unmarshal(record.Arguments, &arguments) != nil || arguments.ParentType != "data_source" {
+			return ""
+		}
+		err = s.checkRowProperties(ctx, token, arguments.ParentID, arguments.Properties)
+	case toolUpdatePage:
+		var arguments updateArguments
+		if json.Unmarshal(record.Arguments, &arguments) != nil {
+			return ""
+		}
+		page, pageErr := s.client.Page(ctx, token, arguments.PageID)
+		if pageErr != nil {
+			return ""
+		}
+		err = s.checkRowProperties(ctx, token, page.Parent.DataSourceID, arguments.Properties)
+	}
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // actionError maps a Notion failure of a confirmed action to what the user is told. A failure of

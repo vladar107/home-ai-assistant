@@ -148,7 +148,7 @@ func (s *Service) run(ctx context.Context, token string, call tools.Call) (strin
 				return "", err
 			}
 		}
-		return renderPage(page, content, truncated), nil
+		return renderPage(page, s.parentSchema(ctx, token, page.Parent), content, truncated), nil
 	case toolQueryDataSource:
 		var arguments struct {
 			DataSourceID string          `json:"data_source_id"`
@@ -197,6 +197,24 @@ func (s *Service) queryThroughDatabase(ctx context.Context, token, id string, re
 		return "", err
 	}
 	return renderList("Data source entries", result), nil
+}
+
+// parentSchema renders the schema of the data source a page belongs to, so the model sees the
+// structure and the allowed options of the row before proposing a change to it. Reading the page
+// matters more than the extra detail, so a parent that cannot be read is left out.
+func (s *Service) parentSchema(ctx context.Context, token string, parent Parent) string {
+	if parent.Type != "data_source_id" || parent.DataSourceID == "" {
+		return ""
+	}
+	dataSource, err := s.client.DataSource(ctx, token, parent.DataSourceID)
+	if err != nil {
+		var notionErr *Error
+		if errorAs(err, &notionErr) {
+			s.logger.InfoContext(ctx, "notion.page.structure_unavailable", "error_class", notionErr.Class)
+		}
+		return ""
+	}
+	return renderSchema(dataSource.Properties)
 }
 
 // content flattens the page's top-level blocks up to the byte cap, following Notion's cursor

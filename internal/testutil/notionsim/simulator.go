@@ -135,6 +135,18 @@ func (s *Simulator) ShareDatabase(token string, database Database) {
 	s.dbShares[database.ID] = append(s.dbShares[database.ID], token)
 }
 
+// SetDataSourceProperties replaces the schema of a shared data source, the way an option removed
+// in Notion changes the schema between a proposal and its confirmation.
+func (s *Simulator) SetDataSourceProperties(id string, properties map[string]any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, dataSource := range s.dataSources {
+		if dataSource.ID == id {
+			dataSource.Properties = properties
+		}
+	}
+}
+
 func (s *Simulator) FailNext(status int, retryAfter string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -226,6 +238,13 @@ func (s *Simulator) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, databaseObject(database))
+	case r.Method == http.MethodGet && len(segments) == 3 && segments[1] == "data_sources":
+		dataSource := s.sharedDataSource(token, segments[2])
+		if dataSource == nil {
+			writeError(w, http.StatusNotFound, "object_not_found", "Could not find data source. synthetic-notion-error-text")
+			return
+		}
+		writeJSON(w, dataSourceObject(dataSource))
 	case r.Method == http.MethodPost && len(segments) == 4 && segments[1] == "data_sources" && segments[3] == "query":
 		dataSource := s.sharedDataSource(token, segments[2])
 		if dataSource == nil {
@@ -682,6 +701,18 @@ func CheckboxProperty(checked bool) map[string]any {
 
 func SchemaProperty(kind string) map[string]any {
 	return map[string]any{"id": "prop-" + kind, "name": kind, "type": kind, kind: map[string]any{}}
+}
+
+// SchemaPropertyWithOptions builds the schema of a select, status, or multi-select property with
+// the options it accepts.
+func SchemaPropertyWithOptions(kind string, options ...string) map[string]any {
+	values := make([]any, 0, len(options))
+	for _, option := range options {
+		values = append(values, map[string]any{"id": "opt-" + option, "name": option, "color": "default"})
+	}
+	property := SchemaProperty(kind)
+	property[kind] = map[string]any{"options": values}
+	return property
 }
 
 func Paragraph(text string) map[string]any {
