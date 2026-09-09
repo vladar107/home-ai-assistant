@@ -144,16 +144,47 @@ duplicate files where possible.
 
 ### Initial capabilities
 
-- List directories within configured roots
-- Search filename and filesystem metadata
-- Download a selected file
+- List the folders granted to a user, and the folders inside them
+- Search file and folder names
+- Read the text content of a selected file, only when the user asked for it
+- Add a file the user sent in the conversation, after an explicit confirmation,
+  to the user's own inbox or to a folder they name
 - Report storage, disk, array, temperature, and backup health where available
 
 ### Access approach
 
-Prefer read-only bind mounts for selected roots rather than administrative NAS
-credentials. Normalize and resolve every path, reject traversal and symlink
-escapes, and enforce root-level grants after resolution.
+File access is through directories mounted into the container, decided in
+[plan 0021](plans/0021-nas-file-access.md). The application already runs on the
+NAS as the household's own user, so there is no NAS account and no NAS password
+anywhere in this system.
+
+Per-user SMB with dedicated accounts was built first and abandoned. SMB is
+share-scoped and NAS OS defines the personal-folder share as `path = %H`, which
+resolves to the home of whoever authenticates. A dedicated agent account
+therefore reaches only its own home, and no share exposes a person's home to
+anyone else. Reaching the household's own files over SMB would have required
+storing each person's real NAS password, which is a worse trade than losing
+NAS-enforced scoping.
+
+Each principal is granted a named set of mounted directories in the roots file.
+A path the model writes always starts with one of those names, is resolved
+inside that directory, and is checked again after the filesystem has followed
+every symlink, so a link planted inside a root cannot reach outside it.
+Symlinks are omitted from listings rather than followed.
+
+Because one process serves the whole household, the per-user boundary is this
+grant rather than the NAS's own permissions. That is the cost of the approach
+and the reason roots are mounted narrowly and named explicitly per principal.
+
+The connector cannot modify or remove anything already on the NAS. It offers no
+rename, move, delete, or overwrite tool; a new file is created exclusively so a
+name in use is refused rather than replaced; and every mount is read-only except
+the inbox directories a confirmed save writes to, so the kernel refuses a write
+anywhere else even if this application is wrong.
+
+Reading a file's content is separate from browsing it. Listings and name
+searches are always available to a principal with roots, while reading content
+is reserved for a file the user has asked about.
 
 System-health data may come from NAS-supported metrics, standard Linux
 exporters, or a narrow vendor API. Do not mount the Docker socket into the agent.

@@ -36,6 +36,31 @@ done
 [[ ${HOME_AGENT_IMAGE_REPOSITORY:-} =~ ^ghcr\.io/[a-z0-9][a-z0-9-]*/[a-z0-9._-]+$ ]] || {
   echo "HOME_AGENT_IMAGE_REPOSITORY must be a GHCR repository such as ghcr.io/owner/name" >&2; exit 2;
 }
+compose_files=(-f compose.app.yaml)
+compose_inputs=(deploy/compose.app.yaml)
+nas_enabled=${HOME_AGENT_NAS_ENABLED:-false}
+if [[ $nas_enabled == true ]]; then
+  compose_files+=(-f compose.app.nas.yaml)
+  compose_inputs+=(deploy/compose.app.nas.yaml)
+  validate_path HOME_AGENT_NAS_ROOTS_FILE_PATH "${HOME_AGENT_NAS_ROOTS_FILE_PATH:-}"
+  [[ ${HOME_AGENT_NAS_ROOTS_FILE_PATH} = "$HOME_AGENT_NAS_ROOT"/* ]] || {
+    echo "HOME_AGENT_NAS_ROOTS_FILE_PATH must be below HOME_AGENT_NAS_ROOT" >&2; exit 2;
+  }
+  # The mounted household directories live outside the deployment root and may sit below NAS OS
+  # paths such as /volume1/@home, so they are validated on their own terms.
+  for n in HOME_AGENT_NAS_PRIMARY_HOME_PATH HOME_AGENT_NAS_PRIMARY_INBOX_PATH \
+    HOME_AGENT_NAS_SECOND_HOME_PATH HOME_AGENT_NAS_SECOND_INBOX_PATH \
+    HOME_AGENT_NAS_SHARED_PATH HOME_AGENT_NAS_SHARED_INBOX_PATH; do
+    value=${!n:-}
+    [[ $value =~ ^/[A-Za-z0-9._/@-]+$ && $value != / && $value != *'/../'* && $value != */.. ]] || {
+      echo "$n must be a safe absolute NAS path without parent traversal" >&2; exit 2;
+    }
+    [[ $value != "$HOME_AGENT_NAS_ROOT" && $value != "$HOME_AGENT_NAS_ROOT"/* ]] || {
+      echo "$n must not mount the deployment's own directory: $value" >&2; exit 2;
+    }
+  done
+fi
+
 users_source=${HOME_AGENT_TELEGRAM_USERS_SOURCE:-deploy/telegram-users.json}
 if [[ $users_source = /* ]]; then
   [[ $users_source =~ ^/[A-Za-z0-9._/-]+$ && $users_source != *'/../'* && $users_source != */.. ]] || { echo "unsafe Telegram users path" >&2; exit 2; }
@@ -45,7 +70,18 @@ else
 fi
 [[ -f $users_source ]] || { echo "Telegram users file not found: $users_source" >&2; exit 2; }
 
-for path in deploy/compose.app.yaml scripts/image-tag; do
+if [[ $nas_enabled == true ]]; then
+  roots_source=${HOME_AGENT_NAS_ROOTS_SOURCE:-deploy/nas-roots.json}
+  if [[ $roots_source = /* ]]; then
+    [[ $roots_source =~ ^/[A-Za-z0-9._/-]+$ && $roots_source != *'/../'* && $roots_source != */.. ]] || { echo "unsafe NAS roots path" >&2; exit 2; }
+  else
+    [[ $roots_source =~ ^[A-Za-z0-9._/-]+$ && $roots_source != ../* && $roots_source != *'/../'* ]] || { echo "unsafe NAS roots path" >&2; exit 2; }
+    roots_source=$repo_root/$roots_source
+  fi
+  [[ -f $roots_source ]] || { echo "NAS roots file not found: $roots_source" >&2; exit 2; }
+fi
+
+for path in "${compose_inputs[@]}" scripts/image-tag; do
   [[ -z $(git -C "$repo_root" status --porcelain --untracked-files=all -- "$path") ]] || {
     echo "deployment input has uncommitted changes: $path" >&2; exit 2;
   }
@@ -63,16 +99,20 @@ deploy_dir=$HOME_AGENT_NAS_ROOT/deploy
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/home-agent-deploy.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 ssh -o BatchMode=yes "$host" "test ! -L '$HOME_AGENT_NAS_ROOT' && test ! -L '$deploy_dir' && { umask 077; mkdir -p '$deploy_dir' '$HOME_AGENT_CONFIG_PATH'; }"
-git -C "$repo_root" archive --format=tar HEAD deploy/compose.app.yaml \
+git -C "$repo_root" archive --format=tar HEAD "${compose_inputs[@]}" \
   | ssh -o BatchMode=yes "$host" "tar -xf - -C '$HOME_AGENT_NAS_ROOT'"
 scp -O -q "$users_source" "$host:$HOME_AGENT_CONFIG_PATH/.telegram-users.json.deploy"
 ssh -o BatchMode=yes "$host" "chmod 600 '$HOME_AGENT_CONFIG_PATH/.telegram-users.json.deploy' && mv -f '$HOME_AGENT_CONFIG_PATH/.telegram-users.json.deploy' '$HOME_AGENT_CONFIG_PATH/telegram-users.json'"
+if [[ $nas_enabled == true ]]; then
+  scp -O -q "$roots_source" "$host:$HOME_AGENT_NAS_ROOTS_FILE_PATH.deploy"
+  ssh -o BatchMode=yes "$host" "chmod 600 '$HOME_AGENT_NAS_ROOTS_FILE_PATH.deploy' && mv -f '$HOME_AGENT_NAS_ROOTS_FILE_PATH.deploy' '$HOME_AGENT_NAS_ROOTS_FILE_PATH'"
+fi
 
 awk '
   /^[[:space:]]*#/ || /^[[:space:]]*$/ { print; next }
   /^[A-Za-z_][A-Za-z0-9_]*=/ {
     key=$0; sub(/=.*/, "", key)
-    if (key == "HOME_AGENT_IMAGE" || key == "HOME_AGENT_IMAGE_TAG" || key == "HOME_AGENT_VERSION" || key == "HOME_AGENT_TELEGRAM_USER_ID" || key == "HOME_AGENT_TELEGRAM_USERS_SOURCE") next
+    if (key == "HOME_AGENT_IMAGE" || key == "HOME_AGENT_IMAGE_TAG" || key == "HOME_AGENT_VERSION" || key == "HOME_AGENT_TELEGRAM_USER_ID" || key == "HOME_AGENT_TELEGRAM_USERS_SOURCE" || key == "HOME_AGENT_NAS_ROOTS_SOURCE") next
   }
   { print }
 ' "$env_file" > "$tmp/runtime.env"
@@ -100,8 +140,8 @@ if ! sudo docker pull '$tag_ref'; then
 fi
 digest=\$(sudo docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' '$tag_ref' | grep -m1 '^$HOME_AGENT_IMAGE_REPOSITORY@sha256:' || true)
 [ -n "\$digest" ] || { echo 'no $HOME_AGENT_IMAGE_REPOSITORY digest recorded for $tag_ref' >&2; exit 1; }
-sudo docker compose -p home-ai-assistant --env-file runtime.env -f compose.app.yaml up -d home-agent
-sudo docker compose -p home-ai-assistant --env-file runtime.env -f compose.app.yaml ps
+sudo docker compose -p home-ai-assistant --env-file runtime.env ${compose_files[*]} up -d home-agent
+sudo docker compose -p home-ai-assistant --env-file runtime.env ${compose_files[*]} ps
 printf '%s %s %s %s\\n' "\$(date -u +%Y-%m-%dT%H:%M:%SZ)" '$release_tag' "\$digest" '$revision' >> '$HOME_AGENT_NAS_ROOT/deployments.log'
 chmod 600 '$HOME_AGENT_NAS_ROOT/deployments.log'
 echo "deployed \$digest"

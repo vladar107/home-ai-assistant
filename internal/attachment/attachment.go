@@ -296,6 +296,37 @@ func (s *Service) Purge(ctx context.Context) error {
 	return nil
 }
 
+// Describe returns the record of one of the principal's attachments without reading its bytes,
+// so a connector can name a file in a proposal without paying for its content.
+func (s *Service) Describe(ctx context.Context, principalID, attachmentID string) (Record, bool, error) {
+	if !idPattern.MatchString(attachmentID) {
+		return Record{}, false, nil
+	}
+	record, found, err := s.repository.LoadAttachment(ctx, principalID, attachmentID)
+	if err != nil || !found {
+		return Record{}, false, err
+	}
+	return record, true, nil
+}
+
+// Content returns the stored bytes of one of the principal's attachments with its record, so a
+// connector can file a file the user sent without reaching into this package's directory layout.
+// A missing attachment, or one belonging to another principal, reports false rather than an error.
+func (s *Service) Content(ctx context.Context, principalID, attachmentID string) (Record, []byte, bool, error) {
+	if !idPattern.MatchString(attachmentID) {
+		return Record{}, nil, false, nil
+	}
+	record, found, err := s.repository.LoadAttachment(ctx, principalID, attachmentID)
+	if err != nil || !found {
+		return Record{}, nil, false, err
+	}
+	data, err := s.read(record)
+	if err != nil {
+		return Record{}, nil, false, nil
+	}
+	return record, data, true, nil
+}
+
 func (s *Service) read(record Record) ([]byte, error) {
 	path, err := s.path(record)
 	if err != nil {

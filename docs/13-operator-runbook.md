@@ -447,6 +447,54 @@ as the runtime user and the bot adopts it on that user's next `/settings`:
 security find-generic-password -a home-ai-assistant -s notion.token -w | scripts/notion-set-token <principal> home-nas deploy/.env.nas
 ```
 
+### NAS file access
+
+File access needs no NAS account and no password: the container already runs as
+the household's own user (`NAS_RUNTIME_UID`), so the directories are mounted
+into it directly. `deploy/compose.app.nas.yaml` carries those mounts and is
+applied only while `HOME_AGENT_NAS_ENABLED` is true.
+
+Every mount is read-only except the two inbox paths and the shared drop, which
+are the only places a confirmed save can write. That is enforced by the mount,
+not by the application, so a write anywhere else fails in the kernel.
+
+1. Create the folders that do not exist yet. Each person's inbox is inside their
+   own home folder, and the shared drop is a folder in the shared share:
+
+```sh
+ssh home-nas 'mkdir -p /volume1/@home/<user>/Inbox /volume1/shared/from-assistant'
+```
+
+2. Set the mount paths in the NAS `runtime.env` from `deploy/nas.env.example`:
+   the two home paths, the two inbox paths, the shared path, and the shared
+   inbox path.
+
+3. Copy `deploy/nas-roots.example.json` to `deploy/nas-roots.json` and replace
+   the principal IDs with the real ones. Each principal lists the roots they may
+   reach under the names the model will use, marks the writable ones, and names
+   the `default_write` root that saves land in when the user names no folder. A
+   principal left out of this file has no NAS access at all. The deployment
+   script copies it to `HOME_AGENT_NAS_ROOTS_FILE_PATH`.
+
+4. Set `HOME_AGENT_NAS_ENABLED=true` and deploy.
+
+Because one process serves the whole household, the separation between the two
+people's folders is this file rather than the NAS's own permissions. Review it
+the way you would review an access rule: a wrong `principal_id` on a root grants
+one person's folders to the other.
+
+Saving stays off for each user until they turn it on in `/settings`, and every
+save is confirmed with Confirm and Reject before anything is written.
+
+Verify, from each user's chat:
+
+- `/settings` names the folders that user can reach.
+- Asking what is in a folder lists it; asking for a folder that belongs to the
+  other person reports that no such folder exists.
+- Asking to file a photo shows a confirmation naming the exact destination, and
+  the file appears in that user's inbox only after Confirm.
+- Asking to save into a read-only folder is refused rather than confirmed.
+
 ## 8. Open and verify Grafana
 
 Grafana listens on the configured NAS LAN address. Open

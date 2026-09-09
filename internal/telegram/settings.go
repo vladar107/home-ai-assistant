@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/vladar107/home-ai-assistant/internal/connection"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
 )
 
@@ -282,4 +283,83 @@ func (n notionSection) intercept(ctx context.Context, principalID string, text s
 		return interception{handled: true, remove: true, reply: NotionTokenGuardReply, reason: "notion_token_guard"}, nil
 	}
 	return interception{}, nil
+}
+
+const (
+	nasSectionPrefix   = "nas"
+	nasWritesOnAction  = "writes-on"
+	nasWritesOffAction = "writes-off"
+
+	NASWritesOnReply  = "Saving to the NAS is on. The model may propose to file a photo or document you sent in the conversation; nothing is written until you confirm the exact proposal, and a save can only add a new file."
+	NASWritesOffReply = "Saving to the NAS is off. The model can browse and read your NAS folders, but not add anything."
+
+	NASNoAccessLine          = "NAS: no folders are configured for you."
+	NASSavingUnavailableLine = "Saving is not configured for you, so NAS files can only be read."
+)
+
+// NASConnectedLine names the folders this user can reach and whether saving is on, because those
+// two facts are the whole of what the connector can do for them.
+func NASConnectedLine(status nas.Status) string {
+	names := make([]string, 0, len(status.Roots))
+	for _, root := range status.Roots {
+		names = append(names, root.Name)
+	}
+	if !status.CanSave {
+		return fmt.Sprintf("NAS: %s (read-only).", strings.Join(names, ", "))
+	}
+	writes := "off"
+	if status.WritesEnabled {
+		writes = "on"
+	}
+	return fmt.Sprintf("NAS: %s. Saving %s, to %s.", strings.Join(names, ", "), writes, status.DefaultFolder)
+}
+
+// nasSection renders the NAS folders. There is nothing to connect or disconnect: access is the
+// set of directories mounted for this user, which only the operator can change.
+type nasSection struct {
+	nas       NASController
+	logger    *slog.Logger
+	telemetry Telemetry
+}
+
+func (n nasSection) prefix() string { return nasSectionPrefix }
+
+func (n nasSection) render(ctx context.Context, principalID string) (settingsView, error) {
+	status, err := n.nas.Status(ctx, principalID)
+	if err != nil {
+		return settingsView{}, err
+	}
+	switch {
+	case !status.Connected:
+		return settingsView{lines: []string{NASNoAccessLine}}, nil
+	case !status.CanSave:
+		return settingsView{lines: []string{NASConnectedLine(status), NASSavingUnavailableLine}}, nil
+	default:
+		writes := InlineButton{Text: "Turn NAS saving on", CallbackData: nasSectionPrefix + ":" + nasWritesOnAction}
+		if status.WritesEnabled {
+			writes = InlineButton{Text: "Turn NAS saving off", CallbackData: nasSectionPrefix + ":" + nasWritesOffAction}
+		}
+		return settingsView{lines: []string{NASConnectedLine(status)}, buttons: []InlineButton{writes}}, nil
+	}
+}
+
+func (n nasSection) act(ctx context.Context, principalID string, _ int64, action string) (string, error) {
+	switch action {
+	case nasWritesOnAction, nasWritesOffAction:
+		enabled := action == nasWritesOnAction
+		status, err := n.nas.SetWrites(ctx, principalID, enabled)
+		if err != nil {
+			return "", err
+		}
+		if !status.Connected || !status.CanSave {
+			return "", nil
+		}
+		n.telemetry.ContextLogger(ctx, n.logger).InfoContext(ctx, "nas.writes.changed", "principal_id", principalID, "enabled", enabled)
+		if enabled {
+			return NASWritesOnReply, nil
+		}
+		return NASWritesOffReply, nil
+	default:
+		return "", errUnknownSettingsAction
+	}
 }

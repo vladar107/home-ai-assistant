@@ -22,6 +22,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
 	"github.com/vladar107/home-ai-assistant/internal/connection"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
@@ -124,6 +125,7 @@ type harnessOptions struct {
 	notionIntakeTimeout time.Duration
 	approvalLifetime    time.Duration
 	approvalSweep       time.Duration
+	nasRoots            []nas.PrincipalRoots
 }
 
 // testFile is one attachment the Telegram simulator will hand out through getFile.
@@ -146,6 +148,7 @@ type conversationHarness struct {
 	files          map[string]testFile
 	connections    *connection.Service
 	notion         *notion.Service
+	nas            *nas.Service
 	approvals      *approval.Service
 	auth           *codexauth.Simulator
 	profilesDir    string
@@ -267,9 +270,9 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	if err != nil {
 		t.Fatal(err)
 	}
+	h.credentialsDir = filepath.Join(t.TempDir(), "integrations")
 	var notionController NotionController
 	if options.notion != nil {
-		h.credentialsDir = filepath.Join(t.TempDir(), "integrations")
 		h.notion, err = notion.NewService(notion.Config{
 			CredentialsDir: h.credentialsDir, APIBaseURL: options.notion.URL(), ChatConnect: options.notionChatConnect,
 			HTTPClient: options.notion.Client(), IntakeLifetime: options.notionIntakeTimeout,
@@ -285,6 +288,20 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		}
 		notionController = h.notion
 	}
+	var nasController NASController
+	if len(options.nasRoots) > 0 {
+		h.nas, err = nas.NewService(nas.Config{Roots: options.nasRoots}, h.store, h.approvals, h.attachments, logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := broker.Register(h.nas); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.approvals.RegisterExecutor(h.nas); err != nil {
+			t.Fatal(err)
+		}
+		nasController = h.nas
+	}
 	h.conversation, err = conversation.NewService(
 		conversation.Config{TurnTimeout: 10 * time.Second, FollowUp: h.approvals, Notice: h.approvals, Attachments: h.attachments},
 		h.store, runtime, h.client, broker, h.connections, logger, integrationTelemetry{turns: h.turns},
@@ -292,7 +309,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.service, err = NewService(h.client, identities, h.store, h.conversation, h.attachments, h.connections, notionController, h.approvals, logger, nil)
+	h.service, err = NewService(h.client, identities, h.store, h.conversation, h.attachments, h.connections, notionController, nasController, h.approvals, logger, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

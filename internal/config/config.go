@@ -25,6 +25,7 @@ type Config struct {
 	Telegram         TelegramConfig
 	Conversation     ConversationConfig
 	Notion           NotionConfig
+	NAS              NASConfig
 	Observability    ObservabilityConfig
 }
 
@@ -40,6 +41,7 @@ func Load() (Config, error) {
 		Telegram:        defaultTelegramConfig(),
 		Conversation:    defaultConversationConfig(),
 		Notion:          defaultNotionConfig(),
+		NAS:             defaultNASConfig(),
 		Observability:   defaultObservabilityConfig(),
 	}
 
@@ -80,6 +82,9 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if err := loadNotionConfig(&cfg.Notion); err != nil {
+		return Config{}, err
+	}
+	if err := loadNASConfig(&cfg.NAS); err != nil {
 		return Config{}, err
 	}
 
@@ -130,6 +135,12 @@ func (c Config) Validate() error {
 	}
 	if c.Notion.Enabled && !c.Conversation.Enabled {
 		return fmt.Errorf("HOME_AGENT_NOTION_ENABLED: requires HOME_AGENT_CONVERSATION_ENABLED=true")
+	}
+	if err := c.NAS.validate(); err != nil {
+		return err
+	}
+	if c.NAS.Enabled && !c.Conversation.Enabled {
+		return fmt.Errorf("HOME_AGENT_NAS_ENABLED: requires HOME_AGENT_CONVERSATION_ENABLED=true")
 	}
 	if err := c.Observability.validate(); err != nil {
 		return err

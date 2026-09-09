@@ -5,6 +5,7 @@
 /HANDOFF.md
 /deploy/runtime.env
 /deploy/telegram-users.json
+/deploy/nas-roots.json
 /credentials/
 /secrets/
 /auth/

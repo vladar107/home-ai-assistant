@@ -17,6 +17,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
 	"github.com/vladar107/home-ai-assistant/internal/connection"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
@@ -74,6 +75,12 @@ type NotionController interface {
 	ChatConnectEnabled() bool
 }
 
+// NASController is implemented by the NAS connector; nil disables the NAS settings section.
+type NASController interface {
+	Status(context.Context, string) (nas.Status, error)
+	SetWrites(context.Context, string, bool) (nas.Status, error)
+}
+
 // ApprovalController resolves Confirm and Reject presses on proposal messages; nil ignores them.
 type ApprovalController interface {
 	// Press returns the text the proposal message should show, or false when the press is not
@@ -99,6 +106,7 @@ type Service struct {
 	attachments  AttachmentStore
 	connections  ConnectionController
 	notion       NotionController
+	nas          NASController
 	approvals    ApprovalController
 	sections     []settingsSection
 	interceptors []messageInterceptor
@@ -119,6 +127,7 @@ func NewService(
 	attachments AttachmentStore,
 	connections ConnectionController,
 	notion NotionController,
+	nasFiles NASController,
 	approvals ApprovalController,
 	logger *slog.Logger,
 	telemetry Telemetry,
@@ -144,6 +153,7 @@ func NewService(
 		attachments:  attachments,
 		connections:  connections,
 		notion:       notion,
+		nas:          nasFiles,
 		approvals:    approvals,
 		logger:       logger,
 		telemetry:    telemetryOrNoop(telemetry),
@@ -157,6 +167,9 @@ func NewService(
 		section := notionSection{notion: notion, logger: logger, telemetry: service.telemetry}
 		service.sections = append(service.sections, section)
 		service.interceptors = append(service.interceptors, section)
+	}
+	if nasFiles != nil {
+		service.sections = append(service.sections, nasSection{nas: nasFiles, logger: logger, telemetry: service.telemetry})
 	}
 	return service, nil
 }

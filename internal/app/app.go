@@ -15,6 +15,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
 	"github.com/vladar107/home-ai-assistant/internal/config"
 	"github.com/vladar107/home-ai-assistant/internal/connection"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/health"
@@ -40,6 +41,7 @@ type App struct {
 	tools        *tools.Broker
 	approvals    *approval.Service
 	notion       *notion.Service
+	nas          *nas.Service
 	telegram     *telegram.Service
 	telemetry    *observability.Telemetry
 	ready        atomic.Bool
@@ -344,6 +346,24 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			}
 			a.notion = notionService
 		}
+		if a.cfg.NAS.Enabled {
+			nasService, err := nas.NewService(nas.Config{
+				Roots: nasRoots(a.cfg.NAS.Roots),
+			}, a.store, approvals, attachments, a.logger)
+			if err != nil {
+				return fmt.Errorf("initialize NAS connector: %w", err)
+			}
+			if err := a.registry.Register(nasService); err != nil {
+				return err
+			}
+			if err := broker.Register(nasService); err != nil {
+				return err
+			}
+			if err := approvals.RegisterExecutor(nasService); err != nil {
+				return err
+			}
+			a.nas = nasService
+		}
 	}
 
 	identities, err := identity.NewService(a.store, configured)
@@ -362,6 +382,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	var attachmentStore telegram.AttachmentStore
 	var connectionController telegram.ConnectionController
 	var notionController telegram.NotionController
+	var nasController telegram.NASController
 	var approvalController telegram.ApprovalController
 	if a.conversation != nil {
 		conversationController = a.conversation
@@ -372,7 +393,10 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	if a.notion != nil {
 		notionController = a.notion
 	}
-	service, err := telegram.NewService(client, identities, a.store, conversationController, attachmentStore, connectionController, notionController, approvalController, a.logger, a.telemetry)
+	if a.nas != nil {
+		nasController = a.nas
+	}
+	service, err := telegram.NewService(client, identities, a.store, conversationController, attachmentStore, connectionController, notionController, nasController, approvalController, a.logger, a.telemetry)
 	if err != nil {
 		return fmt.Errorf("initialize Telegram service: %w", err)
 	}
@@ -469,4 +493,22 @@ func (a *App) shutdownModules(ctx context.Context, started []module.Module) erro
 		}
 	}
 	return shutdownErr
+}
+
+// nasRoots translates the configured NAS view into the connector's own shape, so the connector
+// never depends on the configuration package.
+func nasRoots(configured config.NASRoots) []nas.PrincipalRoots {
+	roots := make([]nas.PrincipalRoots, 0, len(configured))
+	for _, principal := range configured {
+		paths := make([]nas.RootPath, 0, len(principal.Roots))
+		for _, root := range principal.Roots {
+			paths = append(paths, nas.RootPath{Name: root.Name, Path: root.Path, Writable: root.Writable})
+		}
+		roots = append(roots, nas.PrincipalRoots{
+			PrincipalID:  principal.PrincipalID,
+			Roots:        paths,
+			DefaultWrite: principal.DefaultWrite,
+		})
+	}
+	return roots
 }

@@ -1,0 +1,51 @@
+# NAS file access. Applied on top of compose.app.yaml only when HOME_AGENT_NAS_ENABLED is true,
+# so a deployment without the feature mounts none of the household's directories.
+#
+# The application already runs as the household's own NAS user, so these mounts need no account
+# and no password. Every mount is read-only except the ones a confirmed save writes to, which is
+# the outermost guarantee that nothing already on the NAS can be changed or removed: a write to a
+# read-only mount fails in the kernel, whatever the application believes.
+services:
+  home-agent:
+    environment:
+      HOME_AGENT_NAS_ROOTS_FILE: /etc/home-agent/nas-roots.json
+    volumes:
+      - type: bind
+        source: ${HOME_AGENT_NAS_ROOTS_FILE_PATH:?set HOME_AGENT_NAS_ROOTS_FILE_PATH}
+        target: /etc/home-agent/nas-roots.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${HOME_AGENT_NAS_PRIMARY_HOME_PATH:?set HOME_AGENT_NAS_PRIMARY_HOME_PATH}
+        target: /nas/primary-home
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${HOME_AGENT_NAS_PRIMARY_INBOX_PATH:?set HOME_AGENT_NAS_PRIMARY_INBOX_PATH}
+        target: /nas/primary-inbox
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${HOME_AGENT_NAS_SECOND_HOME_PATH:?set HOME_AGENT_NAS_SECOND_HOME_PATH}
+        target: /nas/second-home
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${HOME_AGENT_NAS_SECOND_INBOX_PATH:?set HOME_AGENT_NAS_SECOND_INBOX_PATH}
+        target: /nas/second-inbox
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${HOME_AGENT_NAS_SHARED_PATH:?set HOME_AGENT_NAS_SHARED_PATH}
+        target: /nas/shared
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${HOME_AGENT_NAS_SHARED_INBOX_PATH:?set HOME_AGENT_NAS_SHARED_INBOX_PATH}
+        target: /nas/shared-inbox
+        bind:
+          create_host_path: false

@@ -30,6 +30,8 @@ plan that links back to the earlier record.
 | 0018 | [Tag-pinned deployment without release directories](0018-tag-pinned-deployment.md) | done |
 | 0019 | [Read nested block content through a block-children tool](0019-nested-block-children.md) | done |
 | 0020 | [Photos and files in Telegram conversations](0020-telegram-attachments.md) | done |
+| 0021 | [NAS files through mounted per-user roots](0021-nas-file-access.md) | done |
+| 0022 | [Monitoring stack in its own repository with a single deployment directory](0022-monitoring-repository-split.md) | in-progress |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

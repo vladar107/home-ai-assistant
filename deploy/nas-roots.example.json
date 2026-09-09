@@ -1,0 +1,24 @@
+{
+  "principals": [
+    {
+      "principal_id": "person-one",
+      "roots": [
+        { "name": "home", "path": "/nas/primary-home" },
+        { "name": "inbox", "path": "/nas/primary-inbox", "writable": true },
+        { "name": "shared", "path": "/nas/shared" },
+        { "name": "shared-inbox", "path": "/nas/shared-inbox", "writable": true }
+      ],
+      "default_write": "inbox"
+    },
+    {
+      "principal_id": "person-two",
+      "roots": [
+        { "name": "home", "path": "/nas/second-home" },
+        { "name": "inbox", "path": "/nas/second-inbox", "writable": true },
+        { "name": "shared", "path": "/nas/shared" },
+        { "name": "shared-inbox", "path": "/nas/shared-inbox", "writable": true }
+      ],
+      "default_write": "inbox"
+    }
+  ]
+}
