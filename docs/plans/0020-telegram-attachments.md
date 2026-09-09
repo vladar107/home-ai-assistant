@@ -1,6 +1,6 @@
 # 0020 — Photos and files in Telegram conversations
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
@@ -108,14 +108,17 @@ system cannot handle is answered with a plain sentence instead of silence.
 
 - `internal/telegram/client.go`, `service.go`, `commands.go`, and a new
   `media.go`
-- new `internal/attachment/` (store, tools, tests)
-- `internal/store/sqlite/migrations/008_attachments.sql`,
+- new `internal/attachment/` (store and tools)
+- new `internal/store/sqlite/attachments.go`,
+  `internal/store/sqlite/migrations/008_attachments.sql`,
   `internal/store/sqlite/conversation.go`
 - `internal/conversation/service.go`, `types.go`
 - `internal/runtime/runtime.go`, `internal/runtime/pi/runtime.go`
 - `internal/app/app.go`
 - `internal/testutil/pifixture/fixture.go`
-- `internal/telegram/conversation_integration_test.go`,
+- new `internal/telegram/attachment_integration_test.go`,
+  `internal/telegram/conversation_integration_test.go`,
+  `internal/telegram/notion_integration_test.go`,
   `internal/runtime/pi/runtime_test.go`
 - `docs/02-scope-and-capabilities.md`, `docs/04-integrations.md`,
   `docs/plans/README.md`
@@ -128,8 +131,8 @@ system cannot handle is answered with a plain sentence instead of silence.
   with a caption reaches the runtime as an image; a photo without a caption
   still starts a turn; a document is listed in the turn message and its content
   arrives only through `read_attachment`; an oversized file is refused with the
-  limit; a voice message gets the unsupported reply; `/new` removes the stored
-  files from disk.
+  limit; a voice message gets the unsupported reply; a message refused as busy
+  leaves no bytes behind; `/new` removes the stored files from disk.
 - Live check in the operator's own chat: a photo question, a text file the model
   reads on request, and a voice message that is refused.
 

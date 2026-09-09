@@ -29,7 +29,7 @@ plan that links back to the earlier record.
 | 0017 | [Schema-checked Notion writes and readable confirmations](0017-schema-checked-notion-writes.md) | done |
 | 0018 | [Tag-pinned deployment without release directories](0018-tag-pinned-deployment.md) | done |
 | 0019 | [Read nested block content through a block-children tool](0019-nested-block-children.md) | done |
-| 0020 | [Photos and files in Telegram conversations](0020-telegram-attachments.md) | in-progress |
+| 0020 | [Photos and files in Telegram conversations](0020-telegram-attachments.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.
