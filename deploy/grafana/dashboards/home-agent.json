@@ -61,7 +61,7 @@
     },
     {
       "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "description": "Git commit of the deployed image, read from the service_version datapoint label that Alloy copies from the resource.",
+      "description": "Release tag of the deployed image, read from the service_version datapoint label that Alloy copies from the resource.",
       "fieldConfig": {"defaults": {"noValue": "unknown"}, "overrides": []},
       "gridPos": {"h": 4, "w": 4, "x": 4, "y": 1},
       "id": 9,

@@ -16,7 +16,7 @@ x-service-defaults: &service-defaults
 services:
   home-agent:
     <<: *service-defaults
-    image: ${HOME_AGENT_IMAGE:?set HOME_AGENT_IMAGE to the GHCR image reference}
+    image: ${HOME_AGENT_IMAGE_REPOSITORY:?set HOME_AGENT_IMAGE_REPOSITORY to the GHCR repository}:${HOME_AGENT_IMAGE_TAG:?set HOME_AGENT_IMAGE_TAG to the deployed image tag}
     platform: linux/amd64
     read_only: true
     user: "${NAS_RUNTIME_UID:?set NAS_RUNTIME_UID}:${NAS_RUNTIME_GID:?set NAS_RUNTIME_GID}"
@@ -41,7 +41,7 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
       OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
       OTEL_METRIC_EXPORT_INTERVAL: "30000"
-      OTEL_RESOURCE_ATTRIBUTES: deployment.environment.name=${DEPLOYMENT_ENVIRONMENT:-home},service.version=${HOME_AGENT_VERSION:-dev}
+      OTEL_RESOURCE_ATTRIBUTES: deployment.environment.name=${DEPLOYMENT_ENVIRONMENT:-home},service.version=${HOME_AGENT_IMAGE_TAG}
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-home-agent}
     ports:
       - 127.0.0.1:${HOME_AGENT_HEALTH_PORT:-18080}:8080

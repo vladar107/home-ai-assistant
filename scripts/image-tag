@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Prints the published image tag for a revision: <commit date UTC>-<short commit>.
+# CI, the deployment script, and manual rollbacks all derive the tag here so the
+# Mac can name any commit's image without querying the registry.
+usage() { echo "usage: $0 [revision]" >&2; exit 2; }
+(( $# <= 1 )) || usage
+revision=${1:-HEAD}
+repo_root=$(git rev-parse --show-toplevel)
+commit=$(git -C "$repo_root" rev-parse --verify --quiet "$revision^{commit}") || {
+  echo "unknown revision: $revision" >&2; exit 2;
+}
+day=$(TZ=UTC0 git -C "$repo_root" show -s --format=%cd --date=format-local:%Y.%m.%d "$commit")
+printf '%s-%s\n' "$day" "${commit:0:7}"

@@ -26,6 +26,10 @@ jobs:
       - name: Check immutable plans
         run: scripts/check-plans HEAD^
 
+      - name: Compute release tag
+        id: release
+        run: printf 'tag=%s\n' "$(scripts/image-tag HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
@@ -55,7 +59,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           flavor: latest=false
-          tags: type=sha,format=long,prefix=sha-
+          tags: |
+            type=raw,value=${{ steps.release.outputs.tag }}
+            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and publish linux/amd64 image
         id: build

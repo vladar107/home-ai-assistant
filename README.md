@@ -32,8 +32,8 @@ shutdown, local health endpoints, and an opt-in Telegram access slice.
 - Structured stdout logs with bounded container rotation; Loki deferred until
   local log search justifies its resource and access cost
 - Private GitHub repository whose CI publishes the production image to GHCR;
-  deployment remains an explicit, operator-triggered pull of that image on the
-  NAS, recorded by registry digest
+  deployment remains an explicit, operator-triggered pull of a tagged image on
+  the NAS, recorded by registry digest
 - Independent monitoring and application Compose projects on the NAS, joined
   through a private observability network
 - macOS Keychain as the canonical runtime-secret store, with only the required

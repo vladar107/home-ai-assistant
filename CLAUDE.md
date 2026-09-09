@@ -39,7 +39,7 @@
 - Never commit tokens, passwords, private keys, runtime `.env` files, or NAS secret copies.
 - Keep local development secrets in the ignored `.env` file and production source secrets in macOS Keychain.
 - Treat Telegram numeric user IDs and other allowlist identifiers as configuration, not secrets.
-- Keep deployments manual and digest-selected from the operator's Mac; CI must not receive NAS access or deployment authority.
+- Keep deployments manual and tag-pinned from the operator's Mac, recording the resolved image digest; CI must not receive NAS access or deployment authority.
 - Keep NAS and observability endpoints private and reach administrative interfaces through the configured SSH alias and tunnels.
 - Use the existing NAS `/volume1/docker` shared folder as the deployment parent; keep `monitoring` and `home-ai-assistant` as separate sibling projects beside Immich.
 - Run NAS Docker commands through `ssh -tt home-nas` with `sudo`; the NAS account has no Docker socket access and `sudo` always prompts for a password, so `sudo -n` and non-interactive sessions fail.

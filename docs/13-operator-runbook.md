@@ -306,7 +306,7 @@ install -d -m 700 /volume1/docker/monitoring/prometheus
 install -d -m 700 /volume1/docker/monitoring/tempo
 install -d -m 700 /volume1/docker/monitoring/grafana
 install -d -m 700 /volume1/docker/monitoring/grafana-secrets
-install -d -m 700 /volume1/docker/home-ai-assistant/releases
+install -d -m 700 /volume1/docker/home-ai-assistant/deploy
 install -d -m 700 /volume1/docker/home-ai-assistant/config
 install -d -m 700 /volume1/docker/home-ai-assistant/data
 install -d -m 700 /volume1/docker/home-ai-assistant/secrets
@@ -392,9 +392,11 @@ ssh -tt home-nas 'sudo docker login ghcr.io'
 ```
 
 Before every deployment, push `main` and wait for the "Production image"
-workflow to publish `ghcr.io/vladar107/home-ai-assistant:sha-<commit>`:
+workflow to publish `latest` and the commit's release tag, which
+`scripts/image-tag` names:
 
 ```sh
+scripts/image-tag
 gh run list --workflow=image.yml --commit "$(git rev-parse HEAD)"
 ```
 
@@ -406,21 +408,29 @@ ensure it contains both authorized users. Then run:
 scripts/deploy-app-nas home-nas deploy/.env.nas
 ```
 
-The command refuses to run unless `HEAD` is contained in `origin/main`. It
-copies only the application Compose file and the derived `runtime.env` to a new
-release under `/volume1/docker/home-ai-assistant`, copies the users file to the
+The command refuses to run unless `HEAD` is contained in `origin/main` and
+`deploy/compose.app.yaml` and `scripts/image-tag` are committed. It replaces the
+application Compose file and the derived `runtime.env` in
+`/volume1/docker/home-ai-assistant/deploy`, copies the users file to the
 protected application config directory, syncs only the Hearthkeeper token from
-Keychain, and opens one interactive NAS terminal that pulls
-`$HOME_AGENT_IMAGE_REPOSITORY:sha-<commit>`, rewrites `HOME_AGENT_IMAGE` in the
-release's `runtime.env` to the pulled `sha256` digest, and runs
-`sudo docker compose up -d`.
+Keychain, and opens one interactive NAS terminal that pulls the commit's release
+tag, verifies the returned `sha256` digest, runs `sudo docker compose up -d`,
+and appends the timestamp, tag, digest, and commit to `deployments.log`.
 
-Check the application, the recorded image digest, and its independent monitoring
-project:
+There is one deployment directory; earlier deployments are not retained. After
+the first successful deployment with this layout, remove the superseded release
+tree once:
 
 ```sh
-ssh -tt home-nas 'cd /volume1/docker/home-ai-assistant/current/deploy && sudo docker compose --env-file runtime.env -f compose.app.yaml ps'
-ssh home-nas 'grep ^HOME_AGENT_IMAGE= /volume1/docker/home-ai-assistant/current/deploy/runtime.env'
+ssh home-nas 'rm -rf /volume1/docker/home-ai-assistant/releases /volume1/docker/home-ai-assistant/current /volume1/docker/home-ai-assistant/current.release'
+```
+
+Check the application, the deployed tag and digest, and its independent
+monitoring project:
+
+```sh
+ssh -tt home-nas 'cd /volume1/docker/home-ai-assistant/deploy && sudo docker compose --env-file runtime.env -f compose.app.yaml ps'
+ssh home-nas 'tail -1 /volume1/docker/home-ai-assistant/deployments.log'
 ssh home-nas 'curl --fail http://127.0.0.1:18080/healthz && curl --fail http://127.0.0.1:18080/readyz'
 ```
 
@@ -505,18 +515,45 @@ Inspect current state without exposing secrets:
 
 ```sh
 ssh -tt home-nas 'cd /volume1/docker/monitoring/current/deploy && sudo docker compose --env-file runtime.env -f compose.monitoring.yaml ps'
-ssh -tt home-nas 'cd /volume1/docker/home-ai-assistant/current/deploy && sudo docker compose --env-file runtime.env -f compose.app.yaml ps'
-ssh -tt home-nas 'cd /volume1/docker/home-ai-assistant/current/deploy && sudo docker compose --env-file runtime.env -f compose.app.yaml logs --tail=200 home-agent'
+ssh -tt home-nas 'cd /volume1/docker/home-ai-assistant/deploy && sudo docker compose --env-file runtime.env -f compose.app.yaml ps'
+ssh -tt home-nas 'cd /volume1/docker/home-ai-assistant/deploy && sudo docker compose --env-file runtime.env -f compose.app.yaml logs --tail=200 home-agent'
 ```
 
 Container logs rotate at 10 MB with five files per service. Loki is intentionally
 absent.
 
-To roll back manually, identify a retained release and inspect its
-`deploy/runtime.env`. Start it with the matching Compose file and then update
-the `current` symlink. An older binary must not be started against a database
-that has newer migrations. Keep at least one known-good release and its data
-backup until the replacement has been verified.
+To roll back, pick an earlier release tag and replace `HOME_AGENT_IMAGE_TAG` in
+the deployment directory's `runtime.env`. `deployments.log` lists every tag
+deployed on this NAS with its digest and commit, and `scripts/image-tag` names
+the tag for any commit on `main`:
+
+```sh
+ssh home-nas 'cat /volume1/docker/home-ai-assistant/deployments.log'
+scripts/image-tag 0f73fc6
+```
+
+Only commits built after this tagging scheme have a release tag, so the first
+release-tagged rollback target exists after the second deployment. Until then,
+and whenever an older image is wanted, the historical `sha-<full commit>` tags
+are still in the registry and are equally valid values for
+`HOME_AGENT_IMAGE_TAG`.
+
+Then pin that tag and restart the service:
+
+```sh
+ssh -tt home-nas
+cd /volume1/docker/home-ai-assistant/deploy
+sed -i 's|^HOME_AGENT_IMAGE_TAG=.*|HOME_AGENT_IMAGE_TAG=2026.09.06-0f73fc6|' runtime.env
+sudo docker compose --env-file runtime.env -f compose.app.yaml pull home-agent
+sudo docker compose --env-file runtime.env -f compose.app.yaml up -d home-agent
+exit
+```
+
+The same tag sets the reported `service.version`, so Grafana follows the
+rollback, and the next `scripts/deploy-app-nas` run replaces the pinned tag with
+the deployed commit's tag. An older binary must not be started against a
+database that has newer migrations. Keep a data backup until the replacement has
+been verified.
 
 ## 11. Backup and restore
 
@@ -525,9 +562,9 @@ transaction-consistent manual backup, stop only `home-agent`, take a NAS
 snapshot or copy of its entire private data directory, and start it again:
 
 ```sh
-ssh -tt home-nas 'cd /volume1/docker/home-ai-assistant/current/deploy && sudo docker compose --env-file runtime.env -f compose.app.yaml stop home-agent'
+ssh -tt home-nas 'cd /volume1/docker/home-ai-assistant/deploy && sudo docker compose --env-file runtime.env -f compose.app.yaml stop home-agent'
 # Take the configured NAS snapshot or protected copy here.
-ssh -tt home-nas 'cd /volume1/docker/home-ai-assistant/current/deploy && sudo docker compose --env-file runtime.env -f compose.app.yaml up -d home-agent'
+ssh -tt home-nas 'cd /volume1/docker/home-ai-assistant/deploy && sudo docker compose --env-file runtime.env -f compose.app.yaml up -d home-agent'
 ```
 
 Back up the Grafana data directory if alert configuration must survive a loss.

@@ -107,10 +107,12 @@ NAS firewall.
 
 The source lives in a private GitHub repository. CI validates the source and
 publishes the `linux/amd64` application image to the private GitHub Container
-Registry package for every commit on `main`. Production deployment stays an
-explicit operator-triggered step from the Mac: it copies versioned
-configuration over SSH and makes the NAS pull the already-published image. The
-NAS never builds the application, and no image is streamed from the Mac.
+Registry package for every commit on `main`, tagged `latest` and with an
+immutable release tag combining the commit's UTC date and short hash.
+Production deployment stays an explicit operator-triggered step from the Mac: it
+copies the current configuration over SSH and makes the NAS pull the
+already-published tag. The NAS never builds the application, never follows
+`latest` on its own, and no image is streamed from the Mac.
 
 The monitoring project is deployed first:
 
@@ -125,21 +127,24 @@ The monitoring project is deployed first:
 
 The application is deployed separately:
 
-1. Copy the application Compose file, multi-user users file, and non-secret
-   environment file into a versioned directory under
+1. Replace the application Compose file, multi-user users file, and non-secret
+   environment file in the single deployment directory under
    `/volume1/docker/home-ai-assistant`. The deployed commit must already be
    contained in `origin/main`, because only pushed commits have a CI image.
-2. Pull the image tagged with the deployed commit on the NAS and record the
-   returned registry digest as the release's image reference.
+2. Pull the deployed commit's release tag on the NAS, verify the returned
+   registry digest, and append the tag, digest, and commit to the deployment
+   log.
 3. Materialize only the Telegram token from Keychain into the protected
    application secret directory.
 4. Start the application project on the existing `home-observability` network.
-5. Check the application health endpoints and Telegram smoke flows, then point
-   the application `current` symlink at the release.
+5. Check the application health endpoints and Telegram smoke flows.
 
-Monitoring and application releases, persistent data, and rollback operations
-remain independent. A monitoring restart must not stop the application, and an
-application rollback must not rewrite monitoring state.
+Earlier application deployments are not retained on the NAS; a rollback replaces
+the pinned tag in the deployment directory and restarts the service, using the
+deployment log to name the target. Monitoring and application deployments,
+persistent data, and rollback operations remain independent. A monitoring
+restart must not stop the application, and an application rollback must not
+rewrite monitoring state.
 
 ## SSH operator access
 
@@ -218,7 +223,7 @@ monitoring/prometheus/     Metrics data
 monitoring/tempo/          Trace blocks and WAL
 monitoring/grafana/        Dashboards and alert configuration
 monitoring/alloy/          Alloy queue/state
-home-ai-assistant/releases/  Versioned application source and Compose
+home-ai-assistant/deploy/    Application Compose file and runtime environment
 home-ai-assistant/data/      SQLite and per-user Pi state
 home-ai-assistant/config/    Multi-user and other non-secret configuration
 home-ai-assistant/secrets/   Protected Telegram and runtime secret copies

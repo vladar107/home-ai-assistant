@@ -26,6 +26,8 @@ plan that links back to the earlier record.
 | 0014 | [Generic Go runtime dashboard and duration histogram buckets](0014-go-runtime-dashboard.md) | done |
 | 0015 | [Resumable Pi sessions across turns](0015-resumable-pi-sessions.md) | done |
 | 0016 | [Reach data sources nested inside Notion pages](0016-notion-nested-databases.md) | done |
+| 0017 | [Schema-checked Notion writes and readable confirmations](0017-schema-checked-notion-writes.md) | in-progress |
+| 0018 | [Tag-pinned deployment without release directories](0018-tag-pinned-deployment.md) | in-progress |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.
