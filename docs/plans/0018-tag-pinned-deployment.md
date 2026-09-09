@@ -1,6 +1,6 @@
 # 0018 — Tag-pinned deployment without release directories
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
@@ -133,6 +133,14 @@ Deployment stays a manual, operator-triggered step from the Mac.
   `pull` and `up -d`, confirm the reported version changes, then return to the
   current tag.
 - `scripts/check-plans` passes.
+
+Outcome: three deployments on 2026-09-09 succeeded from the single deployment
+directory, each running the pulled release tag, confirmed by the behavior every
+image carried reaching Telegram. The live rollback drill was skipped by the
+operator's decision and has not been run on this NAS, so the rollback path
+documented in `docs/13-operator-runbook.md` is correct by construction but
+unproven here. The one-time removal of the superseded `releases/` tree remains
+an operator step.
 
 ## Risks and open questions
 
