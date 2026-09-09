@@ -46,6 +46,7 @@
 | D-029 | Call the Telegram Bot API directly with Go's standard-library `net/http` | Accepted | The initial slice needs only `getMe`, `getUpdates`, and `sendMessage`; direct calls keep the dependency surface tiny while allowing explicit token redaction and request timeouts |
 | D-030 | Instrument application metrics and traces with OpenTelemetry, receive them in Alloy, and store them in Prometheus and monolithic Tempo | Accepted | Metrics and traces are required from the first NAS deployment; a collector boundary keeps backend details out of the application while separate bounded stores remain viable on 8 GB. Grafana is the interface, not a bundled data store. Structured stdout logs retain trace/span correlation and Loki remains deferred |
 | D-031 | Keep production deployment operator-triggered, build the application on the NAS from checked-out source, and run monitoring as a separate Compose project | Accepted | The NAS is the production host, so its build context, local image, persistent state, and rollback record stay together. Independent monitoring can serve Home Agent and future applications without application secrets or coupling. CI may publish an optional image artifact but has no deployment authority |
+| D-033 | Keep the monitoring stack in its own `home-monitoring` repository with one Compose file and an in-place deployment directory | Accepted | The stack serves more than Home Agent, is deployed first and independently, and changes on its own cadence; a separate repository removes the shared environment file and stage-switched secret scripts, and one `deploy/` directory replaced on every deploy mirrors the application's tag-pinned layout |
 | D-032 | Keep canonical runtime secrets in macOS Keychain and only required protected runtime copies on the NAS | Accepted | The Mac remains the operator-controlled source of recovery. Always-running containers receive only their own read-only files from a `0700` NAS directory with `0600` files; secrets stay out of Git, CI, image layers, environment values, command arguments, and logs |
 
 ## Go
@@ -167,8 +168,9 @@ application runtime secret and has no deployment path to the home network.
 
 The operator Mac copies the checked-out source and versioned Compose
 configuration over the `home-nas` SSH alias. The NAS builds the `linux/amd64`
-application image locally. Monitoring and application Compose projects have
-separate release roots, persistent data, and rollback records. They share only
+application image locally. The monitoring and application Compose projects come
+from separate repositories and have separate deployment directories, persistent
+data, and rollback records. They share only
 the private `home-observability` Docker network. The encrypted SSH private key
 stays on the Mac with its passphrase cached in Keychain; the NAS contains only
 the public key. No public endpoint is introduced.

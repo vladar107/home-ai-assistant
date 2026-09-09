@@ -1,6 +1,6 @@
 # 0022 — Monitoring stack in its own repository with a single deployment directory
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
@@ -199,8 +199,13 @@ re-entered both secrets under `home-monitoring` and deleted the
 retained. No contact point or other encrypted Grafana secret existed under the
 old key, so nothing became unreadable. The Hearthwatch Keychain items
 (`grafana.telegram-alert-bot-token`, `grafana.telegram-alert-chat-id`) exist
-under neither account and must be stored before runbook §9. Stage 5 waits for
-0021 as decided above.
+under neither account and must be stored before runbook §9.
+
+Outcome of stage 5 (2026-09-09): once 0021 was committed as `8184277`, the
+monitoring files and `scripts/deploy-monitoring-nas` were removed, the shared
+scripts and environment example became application-only, and the docs point to
+`home-monitoring`. The application deploy path was not exercised live by this
+stage; its pre-SSH checks were.
 
 ## Risks and open questions
 

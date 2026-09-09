@@ -10,7 +10,7 @@ repo_root=$(git rev-parse --show-toplevel)
 [[ -f $env_file ]] || { echo "NAS environment file not found: $env_file" >&2; exit 2; }
 mode=$(stat -f '%Lp' "$env_file")
 (( (8#$mode & 077) == 0 )) || { echo "NAS environment file must not be accessible by group or others: $env_file" >&2; exit 2; }
-if grep -Eq '^(HOME_AGENT_TELEGRAM_BOT_TOKEN|GRAFANA_ADMIN_PASSWORD|GRAFANA_SECRET_KEY)=' "$env_file"; then
+if grep -Eq '^HOME_AGENT_TELEGRAM_BOT_TOKEN=' "$env_file"; then
   echo "runtime secret values must be stored in macOS Keychain, not $env_file" >&2
   exit 2
 fi
@@ -121,7 +121,7 @@ chmod 600 "$tmp/runtime.env"
 scp -O -q "$tmp/runtime.env" "$host:$deploy_dir/.runtime.env.deploy"
 ssh -o BatchMode=yes "$host" "chmod 600 '$deploy_dir/.runtime.env.deploy' && mv -f '$deploy_dir/.runtime.env.deploy' '$deploy_dir/runtime.env'"
 
-"$repo_root/scripts/nas-sync-secrets" app "$host" "$env_file"
+"$repo_root/scripts/nas-sync-secrets" "$host" "$env_file"
 remote_command=$(cat <<REMOTE
 set -Eeuo pipefail
 test ! -L '$HOME_AGENT_NAS_ROOT' && test ! -L '$deploy_dir'

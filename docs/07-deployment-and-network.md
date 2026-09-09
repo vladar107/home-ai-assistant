@@ -114,16 +114,14 @@ copies the current configuration over SSH and makes the NAS pull the
 already-published tag. The NAS never builds the application, never follows
 `latest` on its own, and no image is streamed from the Mac.
 
-The monitoring project is deployed first:
-
-1. Copy the monitoring Compose file, Alloy configuration, Prometheus
-   configuration, Grafana provisioning, and non-secret environment file into a
-   versioned directory under `/volume1/docker/monitoring`.
-2. Pull the pinned public Alloy, Prometheus, Tempo, and Grafana images on the
-   NAS.
-3. Ensure the private external `home-observability` network exists and start
-   the monitoring project on it.
-4. Verify readiness, Grafana data sources, dashboards, and the SSH tunnel.
+The monitoring project is deployed first, from the separate `home-monitoring`
+repository. Its deploy script replaces the single deployment directory under
+`/volume1/docker/monitoring` with the committed Compose file, service
+configuration, and dashboards, pulls the pinned public Alloy, Prometheus,
+Tempo, and Grafana images, ensures the private external `home-observability`
+network exists, and recreates the four services on it. Readiness, the Grafana
+data sources, and the dashboards are verified before the application is
+deployed.
 
 The application is deployed separately:
 
@@ -141,7 +139,8 @@ The application is deployed separately:
 
 Earlier application deployments are not retained on the NAS; a rollback replaces
 the pinned tag in the deployment directory and restarts the service, using the
-deployment log to name the target. Monitoring and application deployments,
+deployment log to name the target. A monitoring rollback redeploys an earlier
+commit of `home-monitoring`. Monitoring and application deployments,
 persistent data, and rollback operations remain independent. A monitoring
 restart must not stop the application, and an application rollback must not
 rewrite monitoring state.
@@ -218,7 +217,7 @@ growth. The hardware supports larger capacity.
 Proposed logical volumes:
 
 ```text
-monitoring/releases/       Versioned monitoring Compose and configuration
+monitoring/deploy/         Monitoring Compose file, environment, and configuration
 monitoring/prometheus/     Metrics data
 monitoring/tempo/          Trace blocks and WAL
 monitoring/grafana/        Dashboards and alert configuration

@@ -35,7 +35,8 @@ shutdown, local health endpoints, and an opt-in Telegram access slice.
   deployment remains an explicit, operator-triggered pull of a tagged image on
   the NAS, recorded by registry digest
 - Independent monitoring and application Compose projects on the NAS, joined
-  through a private observability network
+  through a private observability network; the monitoring project is deployed
+  from the separate `home-monitoring` repository
 - macOS Keychain as the canonical runtime-secret store, with only the required
   protected runtime copies on the NAS
 - No public NAS endpoints
@@ -257,7 +258,9 @@ flowchart LR
 Grafana does not bundle Prometheus, Tempo, or another telemetry store. Each is a
 separate service with its own persistence and retention policy. Grafana binds
 to the configured NAS LAN address; none of the observability services requires
-a public endpoint.
+a public endpoint. The monitoring Compose file, service configuration, and
+dashboards live in the separate `home-monitoring` repository; this repository
+only exports telemetry to it.
 
 ## Status
 

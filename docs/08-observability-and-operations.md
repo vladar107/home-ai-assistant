@@ -208,10 +208,10 @@ availability.
 
 ## Dashboards
 
-The dashboards are provisioned from `deploy/grafana/dashboards`; Grafana
-rereads the directory every 30 seconds and keeps the dashboards read-only in
-the interface, so a change is made in the JSON and deployed, never saved from
-the browser.
+The dashboards live in the `home-monitoring` repository under
+`grafana/dashboards` and are provisioned from files; Grafana keeps them
+read-only in the interface, so a change is made in the JSON and deployed from
+that repository, never saved from the browser.
 
 ### Home Agent overview
 

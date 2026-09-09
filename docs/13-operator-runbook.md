@@ -300,12 +300,6 @@ directories that the deployment account owns:
 ```sh
 ssh home-nas
 umask 077
-install -d -m 700 /volume1/docker/monitoring/releases
-install -d -m 700 /volume1/docker/monitoring/alloy
-install -d -m 700 /volume1/docker/monitoring/prometheus
-install -d -m 700 /volume1/docker/monitoring/tempo
-install -d -m 700 /volume1/docker/monitoring/grafana
-install -d -m 700 /volume1/docker/monitoring/grafana-secrets
 install -d -m 700 /volume1/docker/home-ai-assistant/deploy
 install -d -m 700 /volume1/docker/home-ai-assistant/config
 install -d -m 700 /volume1/docker/home-ai-assistant/data
@@ -331,48 +325,39 @@ ${EDITOR:-vi} deploy/.env.nas
 
 Set `NAS_RUNTIME_UID` and `NAS_RUNTIME_GID` to the numeric values printed by
 `nas-preflight`. Replace the path placeholders with the directories just
-created: monitoring uses `/volume1/docker/monitoring`; the application uses
-`/volume1/docker/home-ai-assistant`. Prometheus, Tempo, and Grafana run as this
-verified unprivileged identity. The monitoring deploy script owns the Alloy
-data directory as UID/GID 473, matching the pinned Alloy image, because all
-Linux capabilities are dropped. Their mode-`0600` secret files and
-mode-`0700` data directories do not need broader permissions.
-Set `GRAFANA_BIND_ADDRESS` to the NAS LAN address (`10.0.0.10` here). This
-publishes only Grafana on the internal network; the Home Agent health endpoint
-remains bound to NAS loopback.
+created under `/volume1/docker/home-ai-assistant`. The application runs as this
+verified unprivileged identity; its mode-`0600` secret files and mode-`0700`
+data directories do not need broader permissions. The Home Agent health
+endpoint stays bound to NAS loopback; only Grafana, deployed from
+`home-monitoring`, is published on the internal network. The monitoring
+directories under `/volume1/docker/monitoring` are created the same way,
+following that repository's README.
 
-Store the bot token and Grafana secrets in Keychain. Use a unique generated
-admin password and at least 32 random characters for the Grafana secret key;
-paste each only at its Keychain prompt:
+Store the bot token in Keychain; paste it only at the Keychain prompt:
 
 ```sh
 scripts/keychain-set-secret home-agent.telegram-bot-token
-scripts/keychain-set-secret grafana.admin-password
-scripts/keychain-set-secret grafana.secret-key
 ```
 
-The stage-specific deployment commands below read these Keychain entries and
-install only the secret needed by that stage. No runtime secret is written to
-`deploy/.env.nas`.
+The Grafana secrets belong to the `home-monitoring` repository and its own
+Keychain account. The deployment command below reads this Keychain entry and
+installs only the token. No runtime secret is written to `deploy/.env.nas`.
 
 ## 6. Deploy monitoring first
 
 Monitoring is independent and can run without the application image or a
-Telegram token. Ensure Docker Hub is reachable from the NAS, then deploy it
-from the checked-out repository:
+Telegram token. Deploy it from the `home-monitoring` repository, following its
+README:
 
 ```sh
-scripts/deploy-monitoring-nas home-nas deploy/.env.nas
+cd ~/src/home-monitoring
+scripts/deploy home-nas
 ```
 
-The command copies the pinned monitoring configuration to a new release under
-`/volume1/docker/monitoring`, syncs the Grafana secrets from Keychain, and opens
-one interactive NAS terminal for `sudo docker compose pull` and `up -d`. It does
-not deploy or start `home-agent`.
 Verify the stage before deploying the application:
 
 ```sh
-ssh -tt home-nas 'cd /volume1/docker/monitoring/current/deploy && sudo docker compose --env-file runtime.env -f compose.monitoring.yaml ps'
+ssh -tt home-nas 'cd /volume1/docker/monitoring/deploy && sudo docker compose ps'
 ssh -tt home-nas 'sudo docker network inspect home-observability >/dev/null'
 ```
 
@@ -503,7 +488,7 @@ without printing it:
 
 ```sh
 security find-generic-password \
-  -a home-ai-assistant \
+  -a home-monitoring \
   -s grafana.admin-password \
   -w | pbcopy
 ```
@@ -528,10 +513,9 @@ Verify:
 6. NAS container logs contain JSON events with matching trace and span IDs but
    no Telegram text, username, numeric ID, or token.
 
-The dashboards are provisioned from files. Grafana rereads
-`deploy/grafana/dashboards` every 30 seconds, so a dashboard change appears
-within half a minute of a monitoring deploy without a Grafana restart. The
-dashboards are read-only in the interface; edit the JSON and deploy again.
+The dashboards are provisioned from files in the `home-monitoring` repository
+(`grafana/dashboards`) and are read-only in the interface; edit the JSON there
+and deploy that repository again.
 
 Grafana does not include Prometheus, Tempo, Loki, or Alloy under the hood; the
 Compose file operates each as a separate, resource-bounded service. Loki and a
@@ -562,7 +546,7 @@ maintenance behaviour.
 Inspect current state without exposing secrets:
 
 ```sh
-ssh -tt home-nas 'cd /volume1/docker/monitoring/current/deploy && sudo docker compose --env-file runtime.env -f compose.monitoring.yaml ps'
+ssh -tt home-nas 'cd /volume1/docker/monitoring/deploy && sudo docker compose ps'
 ssh -tt home-nas 'cd /volume1/docker/home-ai-assistant/deploy && sudo docker compose --env-file runtime.env -f compose.app.yaml ps'
 ssh -tt home-nas 'cd /volume1/docker/home-ai-assistant/deploy && sudo docker compose --env-file runtime.env -f compose.app.yaml logs --tail=200 home-agent'
 ```
@@ -615,7 +599,8 @@ ssh -tt home-nas 'cd /volume1/docker/home-ai-assistant/deploy && sudo docker com
 ssh -tt home-nas 'cd /volume1/docker/home-ai-assistant/deploy && sudo docker compose --env-file runtime.env -f compose.app.yaml up -d home-agent'
 ```
 
-Back up the Grafana data directory if alert configuration must survive a loss.
+Back up the Grafana data directory if alert configuration must survive a loss;
+the monitoring configuration itself is recoverable from `home-monitoring`.
 Prometheus metrics, Tempo traces, and Alloy queue state have lower recovery
 priority and may be recreated. The source repository, Keychain secrets,
 recorded image digest, ignored NAS environment file, and documented NAS paths

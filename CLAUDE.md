@@ -41,6 +41,6 @@
 - Treat Telegram numeric user IDs and other allowlist identifiers as configuration, not secrets.
 - Keep deployments manual and tag-pinned from the operator's Mac, recording the resolved image digest; CI must not receive NAS access or deployment authority.
 - Keep NAS and observability endpoints private and reach administrative interfaces through the configured SSH alias and tunnels.
-- Use the existing NAS `/volume1/docker` shared folder as the deployment parent; keep `monitoring` and `home-ai-assistant` as separate sibling projects beside Immich.
+- Use the existing NAS `/volume1/docker` shared folder as the deployment parent; keep `monitoring` and `home-ai-assistant` as separate sibling projects beside other apps. The monitoring project is deployed from the separate `home-monitoring` repository (`~/src/home-monitoring`); this repository deploys only the application.
 - Run NAS Docker commands through `ssh -tt home-nas` with `sudo`; the NAS account has no Docker socket access and `sudo` always prompts for a password, so `sudo -n` and non-interactive sessions fail.
-- Prometheus is not published on the LAN. Verify metrics from the Mac through Grafana's data source proxy at `http://nas.local:3000/api/datasources/proxy/uid/prometheus/api/v1/...`, authenticating as `admin` with the Keychain item `grafana.admin-password`.
+- Prometheus is not published on the LAN. Verify metrics from the Mac through Grafana's data source proxy at `http://nas.local:3000/api/datasources/proxy/uid/prometheus/api/v1/...`, authenticating as `admin` with the Keychain item `grafana.admin-password` under account `home-monitoring`.
