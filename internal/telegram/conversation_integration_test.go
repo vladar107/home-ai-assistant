@@ -32,7 +32,10 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
-const integrationTimeout = 15 * time.Second
+// integrationTimeout bounds a whole test, not one exchange, and the longest tests here run more
+// than a dozen sequential round-trips. It is only an upper bound, so a generous value costs a
+// passing run nothing and keeps a loaded CI runner from failing at whatever step crosses it.
+const integrationTimeout = 60 * time.Second
 
 const (
 	recoverySessionID        = "11111111-1111-4111-8111-111111111111"
