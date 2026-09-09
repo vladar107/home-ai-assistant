@@ -248,6 +248,7 @@ func TestNotionWritesAreProposedConfirmedAndExecutedOnce(t *testing.T) {
 	}
 	informed.answer <- agentruntime.RunResult{Response: "it was written"}
 	h.wantReply(101, 14, "it was written")
+	h.waitState(14, "delivered")
 
 	// The outcome is reported once, so a later turn carries no stale notice.
 	h.push(textUpdate(15, 101, "anything else?"))
@@ -257,6 +258,7 @@ func TestNotionWritesAreProposedConfirmedAndExecutedOnce(t *testing.T) {
 	}
 	repeated.answer <- agentruntime.RunResult{Response: "no"}
 	h.wantReply(101, 15, "no")
+	h.waitState(15, "delivered")
 
 	// Writes off again removes the write tools.
 	h.requestSettings(20, 101)
