@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	// The container image has no zone database, and scheduled jobs run in the user's own zone.
+	_ "time/tzdata"
 
 	"github.com/vladar107/home-ai-assistant/internal/app"
 	"github.com/vladar107/home-ai-assistant/internal/config"

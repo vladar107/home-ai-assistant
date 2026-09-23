@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
@@ -88,6 +89,8 @@ func (AlwaysConnected) Ready(context.Context, string) (bool, error) { return tru
 // principal; an empty set runs the turn without tools.
 type ToolProvider interface {
 	ToolsFor(context.Context, string) (agentruntime.ToolSet, error)
+	// ReadOnlyToolsFor is the same set limited to read tools, for a turn nobody is watching.
+	ReadOnlyToolsFor(context.Context, string) (agentruntime.ToolSet, error)
 }
 
 type Telemetry interface {
@@ -105,6 +108,19 @@ type FollowUp interface {
 // confirmation the model asked for, so the next turn starts from the outcome instead of a guess.
 type Notice interface {
 	PendingNotice(principalID string) string
+}
+
+// Notices joins several sources of notices into one, in order.
+type Notices []Notice
+
+func (n Notices) PendingNotice(principalID string) string {
+	var pending []string
+	for _, notice := range n {
+		if text := notice.PendingNotice(principalID); text != "" {
+			pending = append(pending, text)
+		}
+	}
+	return strings.Join(pending, "\n\n")
 }
 
 // Attachments keeps the photos and files a principal sent, for as long as the session lives; nil

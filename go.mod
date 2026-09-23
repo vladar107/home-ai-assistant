@@ -3,6 +3,7 @@ module github.com/vladar107/home-ai-assistant
 go 1.27.0
 
 require (
+	github.com/robfig/cron/v3 v3.0.1
 	go.opentelemetry.io/otel v1.46.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.46.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.46.0

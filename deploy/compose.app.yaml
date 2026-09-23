@@ -39,6 +39,7 @@ services:
       HOME_AGENT_TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram-bot-token
       HOME_AGENT_TELEGRAM_ENABLED: "true"
       HOME_AGENT_TELEGRAM_USERS_FILE: /etc/home-agent/telegram-users.json
+      HOME_AGENT_TIMEZONE: ${HOME_AGENT_TIMEZONE:-Europe/Amsterdam}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
       OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
       OTEL_METRIC_EXPORT_INTERVAL: "30000"

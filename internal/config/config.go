@@ -14,6 +14,7 @@ const (
 	defaultListenAddress   = "127.0.0.1:8080"
 	defaultShutdownTimeout = 10 * time.Second
 	defaultDataDir         = "./data"
+	defaultTimezone        = "Europe/Amsterdam"
 	databaseFilename       = "home-agent.db"
 )
 
@@ -22,11 +23,13 @@ type Config struct {
 	ShutdownTimeout  time.Duration
 	AllowNonLoopback bool
 	DataDir          string
-	Telegram         TelegramConfig
-	Conversation     ConversationConfig
-	Notion           NotionConfig
-	NAS              NASConfig
-	Observability    ObservabilityConfig
+	// Timezone is the IANA zone scheduled jobs use unless a job names its own.
+	Timezone      string
+	Telegram      TelegramConfig
+	Conversation  ConversationConfig
+	Notion        NotionConfig
+	NAS           NASConfig
+	Observability ObservabilityConfig
 }
 
 func Load() (Config, error) {
@@ -38,6 +41,7 @@ func Load() (Config, error) {
 		ListenAddress:   envOrDefault("HOME_AGENT_LISTEN_ADDRESS", defaultListenAddress),
 		ShutdownTimeout: defaultShutdownTimeout,
 		DataDir:         envOrDefault("HOME_AGENT_DATA_DIR", defaultDataDir),
+		Timezone:        envOrDefault("HOME_AGENT_TIMEZONE", defaultTimezone),
 		Telegram:        defaultTelegramConfig(),
 		Conversation:    defaultConversationConfig(),
 		Notion:          defaultNotionConfig(),
@@ -120,6 +124,12 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.DataDir) == "" {
 		return fmt.Errorf("HOME_AGENT_DATA_DIR: must not be empty")
+	}
+	if c.Timezone == "" || c.Timezone == "Local" {
+		return fmt.Errorf("HOME_AGENT_TIMEZONE: must be an IANA time zone such as Europe/Amsterdam")
+	}
+	if _, err := time.LoadLocation(c.Timezone); err != nil {
+		return fmt.Errorf("HOME_AGENT_TIMEZONE: unknown time zone %q", c.Timezone)
 	}
 	if err := c.Telegram.validate(); err != nil {
 		return err

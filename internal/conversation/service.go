@@ -47,7 +47,10 @@ type Service struct {
 	cancel   context.CancelFunc
 	workers  map[string]chan struct{}
 	inflight map[string]context.CancelFunc
-	wg       sync.WaitGroup
+	// turns holds one slot per principal: two model processes on one principal's profile would
+	// race on refreshing its credentials, so chat turns and scheduled runs take turns.
+	turns map[string]chan struct{}
+	wg    sync.WaitGroup
 }
 
 func NewService(
@@ -96,6 +99,7 @@ func NewService(
 		telemetry:    telemetry,
 		workers:      make(map[string]chan struct{}),
 		inflight:     make(map[string]context.CancelFunc),
+		turns:        make(map[string]chan struct{}),
 	}, nil
 }
 
@@ -328,6 +332,12 @@ func (s *Service) runWorker(ctx context.Context, principalID string, wake <-chan
 }
 
 func (s *Service) runTurn(ctx context.Context, request Request) {
+	release, acquired := s.awaitTurn(ctx, request)
+	if !acquired {
+		return
+	}
+	defer release()
+
 	turnCtx, cancel := context.WithTimeout(ctx, s.config.TurnTimeout)
 	s.mu.Lock()
 	s.inflight[request.PrincipalID] = cancel
@@ -401,16 +411,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 			return
 		case runErr != nil || strings.TrimSpace(result.Response) == "":
 			errorKind = "runtime"
-			reply = UnavailableReply
-			var providerErr *agentruntime.ProviderError
-			if errors.As(runErr, &providerErr) {
-				switch providerErr.Category {
-				case agentruntime.FailureQuota:
-					reportedKind, reply = string(agentruntime.FailureQuota), QuotaReply
-				case agentruntime.FailureAuth:
-					reportedKind, reply = string(agentruntime.FailureAuth), ReconnectReply
-				}
-			}
+			reply, reportedKind = failureReply(runErr)
 		default:
 			reply = result.Response
 		}
@@ -492,7 +493,7 @@ func (s *Service) deliver(ctx context.Context, request Request) error {
 		return nil
 	}
 	replyTo := request.TelegramMessageID
-	for _, chunk := range splitReply(request.ResponseText) {
+	for _, chunk := range SplitReply(request.ResponseText) {
 		if err := s.deliverer.SendReply(deliveryCtx, request.ChatID, replyTo, chunk); err != nil {
 			if isPermanentDeliveryError(err) {
 				return s.repository.CancelConversationDelivery(ctx, request.ID)
@@ -521,6 +522,70 @@ func isPermanentDeliveryError(err error) bool {
 	return errors.As(err, &permanent) && permanent.Permanent()
 }
 
+// failureReply maps a failed run to the reply the user sees and the category telemetry reports.
+func failureReply(err error) (string, string) {
+	var providerErr *agentruntime.ProviderError
+	if errors.As(err, &providerErr) {
+		switch providerErr.Category {
+		case agentruntime.FailureQuota:
+			return QuotaReply, string(agentruntime.FailureQuota)
+		case agentruntime.FailureAuth:
+			return ReconnectReply, string(agentruntime.FailureAuth)
+		}
+	}
+	return UnavailableReply, "runtime"
+}
+
+// awaitTurn waits for the principal's turn slot. While another turn holds it the user sees the
+// typing indicator, and /cancel or /new can still stop the wait.
+func (s *Service) awaitTurn(ctx context.Context, request Request) (func(), bool) {
+	slot := s.turnSlot(request.PrincipalID)
+	select {
+	case slot <- struct{}{}:
+		return func() { <-slot }, true
+	default:
+	}
+
+	waitCtx, stopWaiting := context.WithCancel(ctx)
+	s.mu.Lock()
+	s.inflight[request.PrincipalID] = stopWaiting
+	s.mu.Unlock()
+	defer func() {
+		stopWaiting()
+		s.mu.Lock()
+		delete(s.inflight, request.PrincipalID)
+		s.mu.Unlock()
+	}()
+	_ = s.deliverer.SendTyping(waitCtx, request.ChatID)
+	select {
+	case slot <- struct{}{}:
+		return func() { <-slot }, true
+	case <-waitCtx.Done():
+		return nil, false
+	}
+}
+
+func (s *Service) acquireTurn(ctx context.Context, principalID string) (func(), error) {
+	slot := s.turnSlot(principalID)
+	select {
+	case slot <- struct{}{}:
+		return func() { <-slot }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (s *Service) turnSlot(principalID string) chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	slot, exists := s.turns[principalID]
+	if !exists {
+		slot = make(chan struct{}, 1)
+		s.turns[principalID] = slot
+	}
+	return slot
+}
+
 func (s *Service) logWorkerError(ctx context.Context, principalID, errorKind string) {
 	s.telemetry.ContextLogger(ctx, s.logger).Warn(
 		"conversation.worker.retry",
@@ -546,7 +611,8 @@ func newID() (string, error) {
 	return encoded[:8] + "-" + encoded[8:12] + "-" + encoded[12:16] + "-" + encoded[16:20] + "-" + encoded[20:], nil
 }
 
-func splitReply(reply string) []string {
+// SplitReply cuts a reply into Telegram-sized chunks, preferring line breaks.
+func SplitReply(reply string) []string {
 	runes := []rune(strings.TrimSpace(reply))
 	if len(runes) == 0 {
 		return []string{UnavailableReply}

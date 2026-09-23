@@ -82,7 +82,7 @@ func (s *Service) Contribute(ctx context.Context, principalID string) (tools.Con
 	}
 	contribution := tools.Contribution{Guidance: readGuidance, Definitions: append([]tools.Definition(nil), readDefinitions...)}
 	if status.WritesEnabled && s.proposer != nil {
-		contribution.Guidance += "\n" + writeGuidance
+		contribution.WriteGuidance = writeGuidance
 		contribution.Definitions = append(contribution.Definitions, writeDefinitions...)
 	}
 	return contribution, nil

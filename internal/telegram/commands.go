@@ -37,7 +37,7 @@ type BotCommand struct {
 	Description string `json:"description"`
 }
 
-func registeredCommands(conversationEnabled, settingsEnabled bool) []BotCommand {
+func registeredCommands(conversationEnabled, settingsEnabled, jobsEnabled bool) []BotCommand {
 	commands := []BotCommand{
 		{Command: "status", Description: "Show whether Home Agent is online"},
 		{Command: "privacy", Description: "Show the current privacy mode"},
@@ -48,6 +48,9 @@ func registeredCommands(conversationEnabled, settingsEnabled bool) []BotCommand 
 			BotCommand{Command: "cancel", Description: "Stop the current response"},
 			BotCommand{Command: "new", Description: "Start a fresh conversation"},
 		)
+	}
+	if jobsEnabled {
+		commands = append(commands, BotCommand{Command: "jobs", Description: "Show and manage your scheduled jobs"})
 	}
 	if settingsEnabled {
 		commands = append(commands, BotCommand{Command: "settings", Description: "Show and change your settings"})

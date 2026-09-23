@@ -73,7 +73,7 @@ func (s *Service) Contribute(ctx context.Context, principalID string) (tools.Con
 		contribution.Definitions = append(contribution.Definitions, sendDefinitions...)
 	}
 	if status.WritesEnabled && status.CanSave {
-		contribution.Guidance += "\n" + writeGuidance(status)
+		contribution.WriteGuidance = writeGuidance(status)
 		contribution.Definitions = append(contribution.Definitions, writeDefinitions...)
 	}
 	return contribution, nil

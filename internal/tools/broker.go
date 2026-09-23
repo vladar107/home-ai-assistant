@@ -54,10 +54,12 @@ type Definition struct {
 	Timeout     time.Duration
 }
 
-// Contribution is what a provider grants one principal at one moment.
+// Contribution is what a provider grants one principal at one moment. WriteGuidance describes the
+// write tools alone, so a read-only turn can leave it out with them.
 type Contribution struct {
-	Guidance    string
-	Definitions []Definition
+	Guidance      string
+	WriteGuidance string
+	Definitions   []Definition
 }
 
 type Call struct {
@@ -103,6 +105,16 @@ func (b *Broker) Register(provider Provider) error {
 // ToolsFor returns the tools the principal is granted right now and an executor bound to that
 // principal for one turn. A principal without contributions receives an empty set.
 func (b *Broker) ToolsFor(ctx context.Context, principalID string) (agentruntime.ToolSet, error) {
+	return b.toolsFor(ctx, principalID, false)
+}
+
+// ReadOnlyToolsFor is ToolsFor limited to read tools, for a turn nobody is watching: a write tool
+// is neither offered nor callable, and guidance is kept only from providers that still offer one.
+func (b *Broker) ReadOnlyToolsFor(ctx context.Context, principalID string) (agentruntime.ToolSet, error) {
+	return b.toolsFor(ctx, principalID, true)
+}
+
+func (b *Broker) toolsFor(ctx context.Context, principalID string, readOnly bool) (agentruntime.ToolSet, error) {
 	if principalID == "" {
 		return agentruntime.ToolSet{}, fmt.Errorf("tool broker requires a principal")
 	}
@@ -114,10 +126,15 @@ func (b *Broker) ToolsFor(ctx context.Context, principalID string) (agentruntime
 		if err != nil {
 			return agentruntime.ToolSet{}, fmt.Errorf("collect tool contribution: %w", err)
 		}
+		offered := 0
 		for _, definition := range contribution.Definitions {
 			if err := validateDefinition(definition); err != nil {
 				return agentruntime.ToolSet{}, err
 			}
+			if readOnly && definition.Risk != RiskRead {
+				continue
+			}
+			offered++
 			if _, exists := executor.bindings[definition.Name]; exists {
 				return agentruntime.ToolSet{}, fmt.Errorf("tool %q is contributed twice", definition.Name)
 			}
@@ -128,7 +145,10 @@ func (b *Broker) ToolsFor(ctx context.Context, principalID string) (agentruntime
 				InputSchema: definition.InputSchema,
 			})
 		}
-		if text := strings.TrimSpace(contribution.Guidance); text != "" && len(contribution.Definitions) > 0 {
+		if text := strings.TrimSpace(contribution.Guidance); text != "" && offered > 0 {
+			guidance = append(guidance, text)
+		}
+		if text := strings.TrimSpace(contribution.WriteGuidance); text != "" && offered > 0 && !readOnly {
 			guidance = append(guidance, text)
 		}
 	}

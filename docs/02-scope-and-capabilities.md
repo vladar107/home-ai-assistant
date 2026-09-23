@@ -49,7 +49,7 @@ Automation execution has a separate four-level scale:
 | Calendar | List events, availability, daily agenda | Create/update/cancel event | Per user | Read |
 | Notion | Search shared pages, read blocks/data sources, list due tasks | Create inbox item, update task/page | Per user | Read |
 | GitHub | Selected repository PRs, issues, Actions and security status | Comment, create issue, rerun workflow, merge | Per user/repository | Read |
-| Scheduler | Morning briefings, interval checks, reminders | User-created recurring workflows | Per user | Controlled write to local state |
+| Scheduler | Recurring questions to the user's own model, proposed in conversation, confirmed, and run with read-only tools; `/jobs` to pause, resume, run, or delete | Morning briefings and other deterministic job types, reminders, interval checks | Per user | Controlled write to local state |
 | Monitoring | Query health and receive alerts | Acknowledge or silence alerts | Shared/admin | Read |
 | Apple TV | None while integration is parked | Playback/device control | Shared | Deferred |
 

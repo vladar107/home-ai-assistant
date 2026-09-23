@@ -24,6 +24,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/module"
 	"github.com/vladar107/home-ai-assistant/internal/observability"
 	piruntime "github.com/vladar107/home-ai-assistant/internal/runtime/pi"
+	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/telegram"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
@@ -41,6 +42,7 @@ type App struct {
 	conversation *conversation.Service
 	tools        *tools.Broker
 	approvals    *approval.Service
+	scheduler    *schedule.Service
 	notion       *notion.Service
 	nas          *nas.Service
 	telegram     *telegram.Service
@@ -304,11 +306,16 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("initialize approvals: %w", err)
 		}
+		// Scheduled runs reach only the owner's own chat, resolved from the allowlist at delivery.
+		scheduler, err := schedule.NewService(schedule.Config{Zone: a.cfg.Timezone}, a.store, a.store, client, approvals, a.logger)
+		if err != nil {
+			return fmt.Errorf("initialize scheduler: %w", err)
+		}
 		conversationService, err := conversation.NewService(
 			conversation.Config{
 				TurnTimeout: a.cfg.Conversation.TurnTimeout,
 				FollowUp:    approvals,
-				Notice:      approvals,
+				Notice:      conversation.Notices{approvals, scheduler},
 				Attachments: attachments,
 			},
 			a.store,
@@ -322,6 +329,16 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("initialize conversation service: %w", err)
 		}
+		if err := scheduler.Register(schedule.ModelTurn(conversationService)); err != nil {
+			return err
+		}
+		if err := broker.Register(scheduler); err != nil {
+			return err
+		}
+		if err := approvals.RegisterExecutor(scheduler); err != nil {
+			return err
+		}
+		a.scheduler = scheduler
 		a.attachments = attachments
 		a.connections = connections
 		a.conversation = conversationService
@@ -391,11 +408,13 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	var notionController telegram.NotionController
 	var nasController telegram.NASController
 	var approvalController telegram.ApprovalController
+	var scheduleController telegram.ScheduleController
 	if a.conversation != nil {
 		conversationController = a.conversation
 		attachmentStore = a.attachments
 		connectionController = a.connections
 		approvalController = a.approvals
+		scheduleController = a.scheduler
 	}
 	if a.notion != nil {
 		notionController = a.notion
@@ -403,7 +422,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	if a.nas != nil {
 		nasController = a.nas
 	}
-	service, err := telegram.NewService(client, identities, a.store, conversationController, attachmentStore, connectionController, notionController, nasController, approvalController, a.logger, a.telemetry)
+	service, err := telegram.NewService(client, identities, a.store, conversationController, attachmentStore, connectionController, notionController, nasController, approvalController, scheduleController, a.logger, a.telemetry)
 	if err != nil {
 		return fmt.Errorf("initialize Telegram service: %w", err)
 	}
@@ -424,6 +443,9 @@ func (a *App) startConversation(ctx context.Context) error {
 	if err := a.conversation.Start(ctx); err != nil {
 		return errors.Join(fmt.Errorf("start conversation service: %w", err), a.approvals.Shutdown(ctx), a.connections.Shutdown(ctx))
 	}
+	if err := a.scheduler.Start(ctx); err != nil {
+		return errors.Join(fmt.Errorf("start scheduler: %w", err), a.conversation.Shutdown(ctx), a.approvals.Shutdown(ctx), a.connections.Shutdown(ctx))
+	}
 	return nil
 }
 
@@ -432,6 +454,9 @@ func (a *App) shutdownConversation(ctx context.Context) error {
 		return nil
 	}
 	var errs []error
+	if err := a.scheduler.Shutdown(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("shutdown scheduler: %w", err))
+	}
 	if err := a.conversation.Shutdown(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("shutdown conversation service: %w", err))
 	}

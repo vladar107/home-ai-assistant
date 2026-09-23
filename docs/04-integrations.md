@@ -59,6 +59,9 @@ and webhooks simultaneously.
 - Voice, audio, and video are answered with an explicit refusal, because no
   model reachable through the runtime accepts them
 - Inline confirmation/cancellation buttons
+- Scheduled reports: a job's reply is sent unquoted to its owner's own chat
+  under the job's name; `/jobs` lists the owner's jobs with pause, resume,
+  run-now, and delete buttons
 - Progress messages for long operations
 - Deterministic `/status`, `/privacy`, `/cancel`, `/new`, and `/settings`
   commands; settings and confirmations use inline buttons rather than

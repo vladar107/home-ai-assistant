@@ -29,6 +29,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/delivery"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
+	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/codexauth"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/notionsim"
@@ -134,6 +135,8 @@ type harnessOptions struct {
 	approvalLifetime    time.Duration
 	approvalSweep       time.Duration
 	nasRoots            []nas.PrincipalRoots
+	// schedules adds the scheduler, its tools, and /jobs, on the given clock.
+	schedules *testClock
 }
 
 // testFile is one attachment the Telegram simulator will hand out through getFile.
@@ -158,6 +161,7 @@ type conversationHarness struct {
 	notion         *notion.Service
 	nas            *nas.Service
 	approvals      *approval.Service
+	scheduler      *schedule.Service
 	auth           *codexauth.Simulator
 	profilesDir    string
 	credentialsDir string
@@ -315,14 +319,36 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		}
 		nasController = h.nas
 	}
+	notices := conversation.Notices{h.approvals}
+	var scheduleController ScheduleController
+	if options.schedules != nil {
+		h.scheduler, err = schedule.NewService(schedule.Config{Zone: "Europe/Amsterdam", TickInterval: 10 * time.Millisecond, Now: options.schedules.Now},
+			h.store, h.store, h.client, h.approvals, logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := broker.Register(h.scheduler); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.approvals.RegisterExecutor(h.scheduler); err != nil {
+			t.Fatal(err)
+		}
+		notices = append(notices, h.scheduler)
+		scheduleController = h.scheduler
+	}
 	h.conversation, err = conversation.NewService(
-		conversation.Config{TurnTimeout: 10 * time.Second, FollowUp: h.approvals, Notice: h.approvals, Attachments: h.attachments},
+		conversation.Config{TurnTimeout: 10 * time.Second, FollowUp: h.approvals, Notice: notices, Attachments: h.attachments},
 		h.store, runtime, h.client, broker, h.connections, logger, integrationTelemetry{turns: h.turns},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.service, err = NewService(h.client, identities, h.store, h.conversation, h.attachments, h.connections, notionController, nasController, h.approvals, logger, nil)
+	if h.scheduler != nil {
+		if err := h.scheduler.Register(schedule.ModelTurn(h.conversation)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.service, err = NewService(h.client, identities, h.store, h.conversation, h.attachments, h.connections, notionController, nasController, h.approvals, scheduleController, logger, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -613,6 +639,11 @@ func (h *conversationHarness) start() {
 	if err := h.conversation.Start(h.ctx); err != nil {
 		h.t.Fatal(err)
 	}
+	if h.scheduler != nil {
+		if err := h.scheduler.Start(h.ctx); err != nil {
+			h.t.Fatal(err)
+		}
+	}
 	if h.notion != nil {
 		if err := h.notion.Start(h.ctx); err != nil {
 			h.t.Fatal(err)
@@ -629,6 +660,11 @@ func (h *conversationHarness) stop() {
 	defer cancel()
 	if err := h.service.Shutdown(ctx); err != nil {
 		h.t.Error(err)
+	}
+	if h.scheduler != nil {
+		if err := h.scheduler.Shutdown(ctx); err != nil {
+			h.t.Error(err)
+		}
 	}
 	if err := h.conversation.Shutdown(ctx); err != nil {
 		h.t.Error(err)

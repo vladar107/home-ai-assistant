@@ -108,6 +108,7 @@ type Service struct {
 	notion       NotionController
 	nas          NASController
 	approvals    ApprovalController
+	schedules    ScheduleController
 	sections     []settingsSection
 	interceptors []messageInterceptor
 	logger       *slog.Logger
@@ -129,6 +130,7 @@ func NewService(
 	notion NotionController,
 	nasFiles NASController,
 	approvals ApprovalController,
+	schedules ScheduleController,
 	logger *slog.Logger,
 	telemetry Telemetry,
 ) (*Service, error) {
@@ -155,6 +157,7 @@ func NewService(
 		notion:       notion,
 		nas:          nasFiles,
 		approvals:    approvals,
+		schedules:    schedules,
 		logger:       logger,
 		telemetry:    telemetryOrNoop(telemetry),
 	}
@@ -190,7 +193,7 @@ func (s *Service) Start(ctx context.Context) error {
 		return fmt.Errorf("Telegram getMe returned an invalid bot identity")
 	}
 
-	commands := registeredCommands(s.conversation != nil, len(s.sections) > 0)
+	commands := registeredCommands(s.conversation != nil, len(s.sections) > 0, s.schedules != nil)
 	// Private chats resolve the all-private-chats scope before the default one, so a stale list there would hide the default registration.
 	for _, scope := range []CommandScope{"", CommandScopeAllPrivateChats} {
 		if err := s.client.SetMyCommands(ctx, scope, commands); err != nil {
@@ -572,6 +575,9 @@ func (s *Service) processCallback(ctx context.Context, callback *CallbackQuery) 
 	if action, approvalID, isApproval := approval.ParseCallback(callback.Data); isApproval {
 		return s.processApprovalPress(ctx, callback, principalID, action, approvalID)
 	}
+	if action, jobID, isJob := parseJobCallback(callback.Data); isJob && s.schedules != nil {
+		return s.processJobPress(ctx, callback, principalID, action, jobID)
+	}
 
 	result := processingResult{event: "telegram.callback.handled", principalID: principalID, command: "settings"}
 	followUp := ""
@@ -643,6 +649,40 @@ func (s *Service) processApprovalPress(ctx context.Context, callback *CallbackQu
 	return result, "", nil
 }
 
+// processJobPress acts on one of the principal's jobs and refreshes the /jobs message from current
+// state, so a button on an outdated list cannot act on anything but the principal's own job.
+func (s *Service) processJobPress(ctx context.Context, callback *CallbackQuery, principalID, action, jobID string) (processingResult, string, error) {
+	result := processingResult{event: "telegram.callback.handled", principalID: principalID, command: "jobs." + action}
+	chatID, messageID := callback.Message.Chat.ID, callback.Message.MessageID
+	followUp, err := actOnJob(ctx, principalID, action, jobID, s.schedules)
+	if errors.Is(err, errUnknownJobAction) {
+		result.command, result.reason, err = "jobs", "unknown_action", nil
+	}
+	if err != nil {
+		return processingResult{}, "jobs_action", err
+	}
+
+	text, keyboard, err := renderJobs(ctx, principalID, s.schedules)
+	if err != nil {
+		return processingResult{}, "render_jobs", err
+	}
+	err = s.client.EditKeyboard(ctx, chatID, messageID, text, keyboard)
+	if err != nil && isPermanentAPIError(err) {
+		err = s.client.SendKeyboard(ctx, chatID, 0, text, keyboard)
+	}
+	if err == nil && followUp != "" {
+		err = s.client.SendReply(ctx, chatID, 0, followUp)
+	}
+	if err != nil {
+		if isPermanentAPIError(err) {
+			result.event, result.reason, result.err = "telegram.callback.undeliverable", "send_rejected", err
+			return result, "", nil
+		}
+		return processingResult{}, "send_message", err
+	}
+	return result, "", nil
+}
+
 func (s *Service) handleCommand(ctx context.Context, principalID string, command string) (string, InlineKeyboard, error) {
 	switch command {
 	case "status":
@@ -663,6 +703,9 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		}
 		if s.notion != nil {
 			reply += " " + NotionPrivacyLine
+		}
+		if s.schedules != nil {
+			reply += " " + SchedulePrivacyLine
 		}
 		return reply, nil, nil
 	case "cancel":
@@ -689,6 +732,11 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 			return NewSessionReply, nil, nil
 		}
 		return NoSessionReply, nil, nil
+	case "jobs":
+		if s.schedules == nil {
+			return HelpReply, nil, nil
+		}
+		return renderJobs(ctx, principalID, s.schedules)
 	case "settings":
 		if len(s.sections) == 0 {
 			return HelpReply, nil, nil

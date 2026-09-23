@@ -423,8 +423,8 @@ func TestSavingIsOffUntilTheUserSwitchesItOn(t *testing.T) {
 	if got := names(after); len(got) != 5 {
 		t.Fatalf("contribution after enabling = %+v", got)
 	}
-	if !strings.Contains(after.Guidance, "the file goes to inbox") || !strings.Contains(after.Guidance, "Only these folders can be saved to: inbox") {
-		t.Fatalf("guidance does not describe the destinations: %s", after.Guidance)
+	if !strings.Contains(after.WriteGuidance, "the file goes to inbox") || !strings.Contains(after.WriteGuidance, "Only these folders can be saved to: inbox") {
+		t.Fatalf("guidance does not describe the destinations: %s", after.WriteGuidance)
 	}
 }
 

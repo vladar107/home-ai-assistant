@@ -169,7 +169,13 @@ HOME_AGENT_PI_PROVIDER=openai-codex
 HOME_AGENT_PI_MODEL=gpt-5.6-luna:low
 HOME_AGENT_PI_VERSION=0.84.1
 HOME_AGENT_CONVERSATION_TURN_TIMEOUT=2m
+HOME_AGENT_TIMEZONE=Europe/Amsterdam
 ```
+
+`HOME_AGENT_TIMEZONE` is the zone scheduled jobs use unless a job names its own;
+it defaults to `Europe/Amsterdam`. Scheduled jobs live in the database of the
+instance where they were confirmed, so a job created against the local server
+does not exist on the NAS.
 
 For a GUI-launched GoLand instance using `fnm`, point
 `HOME_AGENT_PI_BINARY` at the stable versioned `bin/pi` path and

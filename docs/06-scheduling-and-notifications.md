@@ -24,6 +24,29 @@ typed occurrence event at a time; an automation pack’s explicit state machine
 decides and checkpoints what that occurrence does. User commands, connector
 changes, and edge-worker completions can trigger the same workflow mechanism.
 
+## Current implementation
+
+[Plan 0024](plans/0024-scheduled-model-turns.md) built the core with one job
+type, `model.turn`: a prompt the user confirmed, run on a standard five-field
+cron schedule in the job's IANA zone against the owner's own subscription, in a
+fresh session, with read tools only. It differs from the sketch below in these
+ways:
+
+- `scheduled_jobs` and `schedule_runs` carry no lease columns. The application
+  is one process, so a run left `running` by a previous process is reported to
+  its owner as interrupted at startup and never run again.
+- The run is the outbox: it moves `queued → running → ready → delivered`, and
+  its reply is cleared once delivered. A separate notification outbox waits for
+  a second producer.
+- Catch-up is a property of the job type. `model.turn` runs the latest missed
+  occurrence once if it is under six hours old and otherwise skips it.
+- An occurrence at a local time that does not exist when clocks go forward is
+  skipped that day; one in the repeated hour when clocks go back runs once.
+- `/jobs` is a single command with Pause/Resume, Run now, and Delete buttons per
+  job, instead of separate `/pause`, `/resume`, and `/run` commands.
+- A principal runs one model turn at a time: a chat message sent during a
+  scheduled run waits for it, and the reverse.
+
 ## Scheduled job model
 
 ```text
@@ -42,7 +65,8 @@ updated_at
 ```
 
 Job configuration references safe, typed workflow parameters. It does not store
-an arbitrary prompt to execute with unrestricted tools.
+an arbitrary prompt to execute with unrestricted tools: the one job type that
+stores a prompt, `model.turn`, runs it with read-only tools only.
 
 Job types are namespaced to their contributing module, for example
 `briefing.morning`, `jobapply.reconcile`, or `mentoring.prepare`.
