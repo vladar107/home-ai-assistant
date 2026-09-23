@@ -1,6 +1,6 @@
 # 0023 — Send a NAS file to the user in Telegram
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
@@ -111,26 +111,27 @@ rather than a claim that it was sent.
 5. `internal/connectors/nas`: `Session.Open` on the store and `localSession`
    (read-only, refusing a directory, a non-regular file, and a symlink escape
    exactly as `Read` does); a `Sender` interface and `sendFile` in a new
-   `send.go`; the definition and guidance in `tools.go`; the size refusal and
-   its sentence in `errors.go`/`render.go`. Complexity: complex.
+   `send.go`, which also holds the size refusal and its sentence; the definition
+   and guidance in `tools.go`. Complexity: complex.
 6. `readGuidance` and the `nas_read_file` description in `tools.go`: state the
    reading boundary as a rule rather than a preference, and name sending among
    the things that never justify a read. Complexity: simple.
 7. `internal/app/app.go`: build the delivery service from the store and the
    Telegram client, and pass it to `nas.NewService`. Complexity: simple.
 8. Documentation: the capability rows in `docs/02-scope-and-capabilities.md` and
-   `docs/04-integrations.md`, the `/privacy` line in `internal/telegram/commands.go`,
-   and this plan with its index row. Complexity: simple.
+   `docs/04-integrations.md`, the `/privacy` line in `internal/telegram/commands.go`
+   and `service.go`, and this plan with its index row. Complexity: simple.
 
 ## Files affected
 
-- `internal/telegram/client.go`, `internal/telegram/commands.go`
+- `internal/telegram/client.go`, `internal/telegram/commands.go`,
+  `internal/telegram/service.go`
 - new `internal/delivery/delivery.go`, `internal/delivery/delivery_test.go`
 - `internal/store/sqlite/telegram.go`, new
   `internal/store/sqlite/telegram_test.go`
 - `internal/tools/broker.go`, new `internal/tools/broker_test.go`
 - `internal/connectors/nas/`: `service.go`, `store.go`, `local.go`, `tools.go`,
-  new `send.go`, `errors.go`, `render.go`, `service_test.go`
+  new `send.go`, `service_test.go`
 - `internal/app/app.go`
 - `internal/telegram/conversation_integration_test.go` (fake `sendDocument`),
   `internal/telegram/nas_integration_test.go`
