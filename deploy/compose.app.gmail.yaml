@@ -1,0 +1,16 @@
+# Gmail access. Applied on top of compose.app.yaml only when HOME_AGENT_GMAIL_ENABLED is true, so a
+# deployment without the feature needs no OAuth client secret on the NAS.
+services:
+  home-agent:
+    environment:
+      HOME_AGENT_GMAIL_ENABLED: "true"
+      HOME_AGENT_GMAIL_CLIENT_ID: ${HOME_AGENT_GMAIL_CLIENT_ID:?set HOME_AGENT_GMAIL_CLIENT_ID}
+      HOME_AGENT_GMAIL_CLIENT_SECRET_FILE: /run/secrets/gmail-client-secret
+      HOME_AGENT_GMAIL_REDIRECT_URL: ${HOME_AGENT_GMAIL_REDIRECT_URL:-http://localhost:8080/callback}
+    secrets:
+      - source: gmail-client-secret
+        target: gmail-client-secret
+
+secrets:
+  gmail-client-secret:
+    file: ${HOME_AGENT_SECRETS_PATH:?set HOME_AGENT_SECRETS_PATH}/gmail-client-secret

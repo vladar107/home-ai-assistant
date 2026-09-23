@@ -23,6 +23,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
 	"github.com/vladar107/home-ai-assistant/internal/connection"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/gmail"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
@@ -32,6 +33,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/codexauth"
+	"github.com/vladar107/home-ai-assistant/internal/testutil/gmailsim"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/notionsim"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
@@ -137,6 +139,7 @@ type harnessOptions struct {
 	nasRoots            []nas.PrincipalRoots
 	// schedules adds the scheduler, its tools, and /jobs, on the given clock.
 	schedules *testClock
+	gmail     *gmailsim.Simulator
 }
 
 // testFile is one attachment the Telegram simulator will hand out through getFile.
@@ -160,6 +163,7 @@ type conversationHarness struct {
 	connections    *connection.Service
 	notion         *notion.Service
 	nas            *nas.Service
+	gmail          *gmail.Service
 	approvals      *approval.Service
 	scheduler      *schedule.Service
 	auth           *codexauth.Simulator
@@ -319,6 +323,21 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		}
 		nasController = h.nas
 	}
+	var gmailController GmailController
+	if sim := options.gmail; sim != nil {
+		h.gmail, err = gmail.NewService(gmail.Config{
+			CredentialsDir: h.credentialsDir, ClientID: gmailsim.ClientID, ClientSecret: gmailsim.ClientSecret,
+			RedirectURL: gmailsim.RedirectURL, AuthURL: sim.AuthURL(), TokenURL: sim.TokenURL(), RevokeURL: sim.RevokeURL(),
+			APIBaseURL: sim.URL(), HTTPClient: sim.Client(),
+		}, h.store, h.store, logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := broker.Register(h.gmail); err != nil {
+			t.Fatal(err)
+		}
+		gmailController = h.gmail
+	}
 	notices := conversation.Notices{h.approvals}
 	var scheduleController ScheduleController
 	if options.schedules != nil {
@@ -348,7 +367,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 			t.Fatal(err)
 		}
 	}
-	h.service, err = NewService(h.client, identities, h.store, h.conversation, h.attachments, h.connections, notionController, nasController, h.approvals, scheduleController, logger, nil)
+	h.service, err = NewService(h.client, identities, h.store, h.conversation, h.attachments, h.connections, notionController, nasController, gmailController, h.approvals, scheduleController, logger, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

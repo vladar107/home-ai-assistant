@@ -34,6 +34,7 @@ plan that links back to the earlier record.
 | 0022 | [Monitoring stack in its own repository with a single deployment directory](0022-monitoring-repository-split.md) | done |
 | 0023 | [Send a NAS file to the user in Telegram](0023-outbound-telegram-files.md) | done |
 | 0024 | [Durable scheduler and scheduled model turns](0024-scheduled-model-turns.md) | in-progress |
+| 0025 | [Per-user read-only Gmail connection](0025-gmail-read-connection.md) | in-progress |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

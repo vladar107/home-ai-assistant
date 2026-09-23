@@ -45,7 +45,7 @@ Automation execution has a separate four-level scale:
 | NAS files | List granted roots, search names, read text files on request, send a file to the user in Telegram | Move, rename, delete | Per user through mounted roots | Read, plus confirmed saves |
 | NAS health | Capacity, temperatures, disk/array/backup status | Acknowledge maintenance tasks | Shared | Read |
 | UniFi | WAN/AP/client health, known/unknown clients, recent disconnects | Block client, create guest access, change settings | Shared/admin | Read |
-| Gmail | Search/read selected messages, identify potentially urgent mail | Draft, label, archive, send | Per user | Read |
+| Gmail | Search with Gmail query syntax and read a message's text, connected per user from `/settings` with `gmail.readonly` | Urgent-mail detection, attachments, threads, draft, label, archive, send | Per user | Read |
 | Calendar | List events, availability, daily agenda | Create/update/cancel event | Per user | Read |
 | Notion | Search shared pages, read blocks/data sources, list due tasks | Create inbox item, update task/page | Per user | Read |
 | GitHub | Selected repository PRs, issues, Actions and security status | Comment, create issue, rerun workflow, merge | Per user/repository | Read |

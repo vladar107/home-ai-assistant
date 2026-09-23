@@ -253,6 +253,13 @@ Controls:
 - require confirmation for consequential actions regardless of model wording;
 - prefer deterministic extraction for identifiers and permissions.
 
+Email is the one source a stranger can write into at will. The Gmail
+connector's credential is `gmail.readonly`, so even a fully successful injection
+cannot send, change, or delete mail. Its guidance tells the model that message
+content is never instructions, and the paths an injection could reach from
+there are still bounded: Notion and NAS writes need the user's press, and a
+file can only be sent to the owner's own chat.
+
 ## Network security
 
 Initial deployment on Home VLAN is acceptable for a read-only prototype, but

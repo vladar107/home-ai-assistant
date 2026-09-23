@@ -486,6 +486,46 @@ Verify, from each user's chat:
   the file appears in that user's inbox only after Confirm.
 - Asking to save into a read-only folder is refused rather than confirmed.
 
+### Gmail
+
+Each household member connects their own mailbox from `/settings`, read-only.
+The assistant needs one Google OAuth client for the household, separate from the
+one `job-apply` uses so either can be revoked alone:
+
+1. In the Google Cloud project whose OAuth app is already published to
+   production, open Google Auth Platform → Clients and create a client of type
+   **Desktop app**. Desktop clients accept any loopback redirect, so there is
+   nothing to register. A project still in Testing expires every sign-in after
+   seven days, so publish it first if it is not.
+2. Under Data Access, make sure the project lists the
+   `https://www.googleapis.com/auth/gmail.readonly` scope.
+3. Store the client secret in Keychain and set the client ID in
+   `deploy/.env.nas`:
+
+   ```sh
+   scripts/keychain-set-secret home-agent.gmail-client-secret
+   ```
+
+   ```dotenv
+   HOME_AGENT_GMAIL_ENABLED=true
+   HOME_AGENT_GMAIL_CLIENT_ID=<id>.apps.googleusercontent.com
+   ```
+
+4. Deploy. `deploy/compose.app.gmail.yaml` is applied only while Gmail is
+   enabled, and `nas-sync-secrets` installs the secret as
+   `gmail-client-secret`.
+
+For the local GoLand server, put `HOME_AGENT_GMAIL_ENABLED=true`,
+`HOME_AGENT_GMAIL_CLIENT_ID`, and `HOME_AGENT_GMAIL_CLIENT_SECRET` in the ignored
+`.env` instead.
+
+To connect, a user presses Connect Gmail in `/settings`, opens the link, passes
+Google's "unverified app" screen, and allows reading email. The browser then
+fails to open a `localhost:8080` page; the user copies that page's address into
+the chat, and the assistant deletes it and confirms the mailbox. Disconnect
+Gmail revokes the grant at Google as well. A grant removed from the Google
+account's third-party access page shows in `/settings` as needing a reconnect.
+
 ## 8. Open and verify Grafana
 
 Grafana listens on the configured NAS LAN address. Open

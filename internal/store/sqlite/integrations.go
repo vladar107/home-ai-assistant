@@ -112,3 +112,24 @@ func (s *Store) SetIntegrationWrites(ctx context.Context, principalID, name stri
 	}
 	return changed == 1, nil
 }
+
+// IntegrationAccountOwner returns the principal whose connection to the integration is bound to
+// the given account, for integrations where one account may belong to one principal only.
+func (s *Store) IntegrationAccountOwner(ctx context.Context, integration, accountID string) (string, bool, error) {
+	if s == nil || s.db == nil {
+		return "", false, fmt.Errorf("find integration account owner: SQLite store is not open")
+	}
+	var principalID string
+	err := s.db.QueryRowContext(
+		ctx,
+		`SELECT principal_id FROM integration_connections WHERE integration = ? AND workspace_id = ? ORDER BY principal_id LIMIT 1`,
+		integration, accountID,
+	).Scan(&principalID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("find integration account owner: %w", err)
+	}
+	return principalID, true, nil
+}

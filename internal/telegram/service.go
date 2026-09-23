@@ -107,6 +107,7 @@ type Service struct {
 	connections  ConnectionController
 	notion       NotionController
 	nas          NASController
+	gmail        GmailController
 	approvals    ApprovalController
 	schedules    ScheduleController
 	sections     []settingsSection
@@ -129,6 +130,7 @@ func NewService(
 	connections ConnectionController,
 	notion NotionController,
 	nasFiles NASController,
+	gmailAccess GmailController,
 	approvals ApprovalController,
 	schedules ScheduleController,
 	logger *slog.Logger,
@@ -156,6 +158,7 @@ func NewService(
 		connections:  connections,
 		notion:       notion,
 		nas:          nasFiles,
+		gmail:        gmailAccess,
 		approvals:    approvals,
 		schedules:    schedules,
 		logger:       logger,
@@ -173,6 +176,11 @@ func NewService(
 	}
 	if nasFiles != nil {
 		service.sections = append(service.sections, nasSection{nas: nasFiles, logger: logger, telemetry: service.telemetry})
+	}
+	if gmailAccess != nil {
+		section := gmailSection{gmail: gmailAccess, logger: logger, telemetry: service.telemetry}
+		service.sections = append(service.sections, section)
+		service.interceptors = append(service.interceptors, section)
 	}
 	return service, nil
 }
@@ -703,6 +711,9 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		}
 		if s.notion != nil {
 			reply += " " + NotionPrivacyLine
+		}
+		if s.gmail != nil {
+			reply += " " + GmailPrivacyLine
 		}
 		if s.schedules != nil {
 			reply += " " + SchedulePrivacyLine

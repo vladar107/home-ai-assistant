@@ -60,6 +60,13 @@ if [[ $nas_enabled == true ]]; then
     }
   done
 fi
+if [[ ${HOME_AGENT_GMAIL_ENABLED:-false} == true ]]; then
+  [[ ${HOME_AGENT_GMAIL_CLIENT_ID:-} =~ ^[A-Za-z0-9._-]+\.apps\.googleusercontent\.com$ ]] || {
+    echo "HOME_AGENT_GMAIL_CLIENT_ID must be a Google OAuth client ID" >&2; exit 2;
+  }
+  compose_files+=(-f compose.app.gmail.yaml)
+  compose_inputs+=(deploy/compose.app.gmail.yaml)
+fi
 
 users_source=${HOME_AGENT_TELEGRAM_USERS_SOURCE:-deploy/telegram-users.json}
 if [[ $users_source = /* ]]; then

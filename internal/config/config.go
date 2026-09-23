@@ -28,6 +28,7 @@ type Config struct {
 	Telegram      TelegramConfig
 	Conversation  ConversationConfig
 	Notion        NotionConfig
+	Gmail         GmailConfig
 	NAS           NASConfig
 	Observability ObservabilityConfig
 }
@@ -45,6 +46,7 @@ func Load() (Config, error) {
 		Telegram:        defaultTelegramConfig(),
 		Conversation:    defaultConversationConfig(),
 		Notion:          defaultNotionConfig(),
+		Gmail:           defaultGmailConfig(),
 		NAS:             defaultNASConfig(),
 		Observability:   defaultObservabilityConfig(),
 	}
@@ -89,6 +91,9 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if err := loadNASConfig(&cfg.NAS); err != nil {
+		return Config{}, err
+	}
+	if err := loadGmailConfig(&cfg.Gmail); err != nil {
 		return Config{}, err
 	}
 
@@ -151,6 +156,12 @@ func (c Config) Validate() error {
 	}
 	if c.NAS.Enabled && !c.Conversation.Enabled {
 		return fmt.Errorf("HOME_AGENT_NAS_ENABLED: requires HOME_AGENT_CONVERSATION_ENABLED=true")
+	}
+	if err := c.Gmail.validate(); err != nil {
+		return err
+	}
+	if c.Gmail.Enabled && !c.Conversation.Enabled {
+		return fmt.Errorf("HOME_AGENT_GMAIL_ENABLED: requires HOME_AGENT_CONVERSATION_ENABLED=true")
 	}
 	if err := c.Observability.validate(); err != nil {
 		return err

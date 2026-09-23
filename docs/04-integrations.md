@@ -222,16 +222,26 @@ unavailable until exact approval and recovery flows exist.
 
 ### Initial capabilities
 
-- Search using Gmail query syntax
-- Read metadata, snippets, and selected message bodies
-- Identify new unread candidates
-- Produce user-specific urgent-mail notifications
+- Search using Gmail query syntax (`gmail_search`), returning headers, system
+  labels, and Gmail's snippet
+- Read one message's text (`gmail_read_message`): the plain-text part, or the
+  HTML part reduced to text, with attachments listed but never opened
+- Scheduled prompts use both tools, so a recurring mail summary is a job rather
+  than a feature
+
+Urgent-mail detection and notifications are later work on top of these tools.
 
 ### Authentication
 
-Use OAuth per principal with `gmail.readonly` initially. Store refresh tokens in
-the principal’s credential scope. Do not share one mailbox credential between
-users.
+OAuth per principal with `gmail.readonly` only, through the household's own
+Google OAuth client ([plan 0025](plans/0025-gmail-read-connection.md)).
+Google's device-code flow does not permit Gmail scopes, so the user completes
+an authorization-code flow with PKCE from the phone: `/settings` sends the
+consent link, the browser fails to open the client's loopback redirect, and the
+user pastes that address into the chat, where it is intercepted before the
+model and deleted. The refresh token is stored in the principal's own
+credentials file; access tokens stay in memory. One mailbox belongs to one
+principal, and disconnecting revokes the grant at Google.
 
 ### Change detection
 
