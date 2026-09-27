@@ -1,0 +1,62 @@
+{
+  "name": "pi-web-search",
+  "version": "1.6.0",
+  "description": "Provider-native web search for pi: Gemini + URL Context, xAI Grok, OpenAI Responses (Azure/Codex/Copilot), Anthropic, and OpenCode Zen/Go",
+  "type": "module",
+  "main": "src/index.ts",
+  "keywords": [
+    "pi",
+    "pi-extension",
+    "pi-package",
+    "web-search",
+    "gemini",
+    "google",
+    "xai",
+    "grok",
+    "openai",
+    "anthropic",
+    "opencode",
+    "opencode-zen",
+    "url-context",
+    "url-analysis",
+    "youtube"
+  ],
+  "author": "ttttmr",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ttttmr/pi-web-search.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ttttmr/pi-web-search/issues"
+  },
+  "homepage": "https://github.com/ttttmr/pi-web-search#readme",
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "test:real:web-search": "node tests/real-web-search.mjs",
+    "test:real:url-context": "node tests/real-url-context.mjs"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "^0.80.3",
+    "@earendil-works/pi-coding-agent": "^0.80.3",
+    "@earendil-works/pi-tui": "^0.80.3",
+    "@types/node": "^25.9.1",
+    "typebox": "^1.1.38",
+    "typescript": "^6.0.3"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": ">=0.80.3",
+    "@earendil-works/pi-coding-agent": ">=0.80.3",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  }
+}

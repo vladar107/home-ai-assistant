@@ -49,7 +49,7 @@ shutdown, local health endpoints, and an opt-in Telegram access slice.
 | [Vision and principles](docs/01-vision-and-principles.md) | Product intent, users, outcomes, principles, and non-goals |
 | [Scope and capabilities](docs/02-scope-and-capabilities.md) | Capability inventory, access modes, phases, and example interactions |
 | [System architecture](docs/03-system-architecture.md) | Components, runtime boundary, request flows, and data model |
-| [Integrations](docs/04-integrations.md) | Telegram, Pi, Immich, NAS, UniFi, Google, Notion, and GitHub |
+| [Integrations](docs/04-integrations.md) | Telegram, Pi, Immich, NAS, UniFi, Google, Notion, GitHub, and the web |
 | [Security and privacy](docs/05-security-and-privacy.md) | Trust boundaries, credentials, policy, approvals, audit, and threats |
 | [Scheduling and notifications](docs/06-scheduling-and-notifications.md) | Durable jobs, retries, deduplication, urgent email, and briefings |
 | [Deployment and network](docs/07-deployment-and-network.md) | NAS sizing, UniFi topology, containers, storage, and remote access |

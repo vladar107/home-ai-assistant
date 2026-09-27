@@ -35,6 +35,7 @@ plan that links back to the earlier record.
 | 0023 | [Send a NAS file to the user in Telegram](0023-outbound-telegram-files.md) | done |
 | 0024 | [Durable scheduler and scheduled model turns](0024-scheduled-model-turns.md) | in-progress |
 | 0025 | [Per-user read-only Gmail connection](0025-gmail-read-connection.md) | in-progress |
+| 0026 | [Web search, page reading, weather, and PDF text](0026-web-weather-and-pdf-tools.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

@@ -108,6 +108,7 @@ type Service struct {
 	notion       NotionController
 	nas          NASController
 	gmail        GmailController
+	web          WebController
 	approvals    ApprovalController
 	schedules    ScheduleController
 	sections     []settingsSection
@@ -131,6 +132,7 @@ func NewService(
 	notion NotionController,
 	nasFiles NASController,
 	gmailAccess GmailController,
+	webAccess WebController,
 	approvals ApprovalController,
 	schedules ScheduleController,
 	logger *slog.Logger,
@@ -159,6 +161,7 @@ func NewService(
 		notion:       notion,
 		nas:          nasFiles,
 		gmail:        gmailAccess,
+		web:          webAccess,
 		approvals:    approvals,
 		schedules:    schedules,
 		logger:       logger,
@@ -181,6 +184,9 @@ func NewService(
 		section := gmailSection{gmail: gmailAccess, logger: logger, telemetry: service.telemetry}
 		service.sections = append(service.sections, section)
 		service.interceptors = append(service.interceptors, section)
+	}
+	if webAccess != nil {
+		service.sections = append(service.sections, webSection{web: webAccess, logger: logger, telemetry: service.telemetry})
 	}
 	return service, nil
 }
@@ -717,6 +723,15 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		}
 		if s.schedules != nil {
 			reply += " " + SchedulePrivacyLine
+		}
+		if s.web != nil {
+			status, err := s.web.Status(ctx, principalID)
+			if err != nil {
+				return "", nil, err
+			}
+			if status.Enabled {
+				reply += " " + WebPrivacyLine
+			}
 		}
 		return reply, nil, nil
 	case "cancel":

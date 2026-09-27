@@ -526,6 +526,47 @@ the chat, and the assistant deletes it and confirms the mailbox. Disconnect
 Gmail revokes the grant at Google as well. A grant removed from the Google
 account's third-party access page shows in `/settings` as needing a reconnect.
 
+### Web access
+
+Web search, page reading, and weather are opt-in for the deployment with
+`HOME_AGENT_WEB_ENABLED=true` in `deploy/.env.nas`, and then on for every user
+until they press Turn off web access in `/settings`. No key or secret is
+involved: search runs on each user's own model subscription through the
+vendored `pi-web-search` extension the image carries at
+`/usr/local/lib/home-agent/pi-web-search/`, and weather uses Open-Meteo's
+keyless API. Optionally name the household's place for forecasts, quoting a
+name with spaces:
+
+```dotenv
+HOME_AGENT_WEB_ENABLED=true
+HOME_AGENT_WEATHER_HOME=Amsterdam
+```
+
+With web access enabled the application refuses to start unless the extension
+file exists. For the local GoLand server, point it at the checkout in the
+ignored `.env`:
+
+```dotenv
+HOME_AGENT_WEB_ENABLED=true
+HOME_AGENT_PI_WEB_SEARCH_EXTENSION=<repo>/third_party/pi-web-search/src/index.ts
+```
+
+Verify from the operator's chat after enabling web access:
+
+1. A current-events question is answered with sources.
+2. A link is summarised.
+3. A link to a `.home` name or the NAS address is refused as a private address.
+4. Today's weather at home, and in another city, is reported.
+5. A PDF sent in the chat, and one read from the NAS, are read as text.
+6. A scheduled prompt that searches and reports the weather delivers both.
+7. `/privacy` shows the web line; after Turn off web access in `/settings` it
+   drops the line and the next turn has no web tools, while the other user's
+   `/settings` still shows web access on. Turn it back on afterwards.
+
+The extension depends on Pi internals that can change between releases, so
+every Pi upgrade must re-run the live search check (step 1) before deployment,
+alongside the device-code login check.
+
 ## 8. Open and verify Grafana
 
 Grafana listens on the configured NAS LAN address. Open

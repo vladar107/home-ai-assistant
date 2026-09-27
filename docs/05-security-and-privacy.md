@@ -61,6 +61,24 @@ delivered through the bot. Preventing local content from reaching the model
 does not prevent content explicitly sent through Telegram from reaching
 Telegram infrastructure.
 
+Third-party code runs inside the Pi process in one place: for a principal with
+web access on, the vendored `pi-web-search` extension provides `web_search`.
+It runs with the Pi process's own authority, which in the shared container is
+the application's UID and therefore every principal's data directory, and with
+the principal's model login through Pi's model registry. Its code sends search
+requests only to the configured model provider, but nothing inside the process
+enforces that, so the boundary is review: the source is vendored at a fixed
+version in `third_party/pi-web-search/`, copied into the image rather than
+installed from npm, and loaded only for principals whose web access is on,
+which is everyone who has not turned it off while the operator enables it.
+The larger `pi-web-access` package, which reads local paths, spawns
+subprocesses, and sends queries to a third-party search service, was rejected
+for that reason ([plan 0026](plans/0026-web-weather-and-pdf-tools.md)). Search
+calls bypass the broker, so they have no broker audit line, untrusted-data
+prefix, or call budget; the conversation logs each call by tool name without
+content, and the turn's guidance tells the model that search results are data,
+not instructions.
+
 ## Privacy modes for local content
 
 ### Strict-local mode
@@ -238,10 +256,17 @@ keys so restarts cannot repeat side effects.
 - Keep local index data, OCR, embeddings, snippets, and result-set mappings in
   protected NAS storage; never include them in model-visible tool output.
 
+PDFs from the chat, the NAS, or the web are untrusted files parsed in-process.
+The parser is pure Go, so a malformed file cannot corrupt memory; the extractor
+recovers from parser panics, stops after 100 pages or 512 KB of text, runs under
+the tool call's deadline, reads at most 10 MiB, and refuses encrypted files it
+cannot open. A pathological file can keep a parser goroutine busy after the
+deadline, but the turn still ends on time.
+
 ## Prompt-injection resistance
 
-Email, Notion pages, GitHub content, filenames, and photo metadata are untrusted
-data. They may contain instructions intended to manipulate the model.
+Email, Notion pages, GitHub content, web pages, search results, filenames, and
+photo metadata are untrusted data. They may contain instructions intended to manipulate the model.
 
 Controls:
 
@@ -275,6 +300,17 @@ Hardening options before adding write authority:
 
 No Docker socket, host PID namespace, privileged container, or broad filesystem
 mount should be granted to the agent.
+
+`fetch_page` and `weather_forecast` take addresses and place names from the
+model, so every request they make goes through one guarded HTTP client that
+refuses the home network. It allows only `http` and `https` on ports 80 and 443
+without credentials in the URL, resolves the host itself, and refuses loopback,
+private, link-local, CGNAT, multicast, unspecified, and IPv6 unique-local and
+site-local addresses on every connection, including each of at most five
+redirects, so DNS rebinding and a redirect to a `.home` name or the NAS both
+fail. It sends no cookies, uses a fixed user agent, stops after 15 seconds, and
+caps downloads at 2 MiB of text or 10 MiB for a PDF. Pages are fetched from the
+home connection, so a site sees the household's public address.
 
 ## Logging and privacy
 

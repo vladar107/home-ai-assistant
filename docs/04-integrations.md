@@ -52,7 +52,8 @@ and webhooks simultaneously.
 - Text and Markdown-safe responses
 - Received photos and files subject to Telegram size limits: a photo is passed
   to the model with the message that carried it, and any other file is read
-  only when the model asks for it by id
+  only when the model asks for it by id, as text or, for a PDF, as its
+  extracted text
 - Sent files: a NAS file the user asks for is uploaded to their own chat as a
   document, streamed from the mounted root without passing through the model,
   bounded at 20 MB and addressed by principal rather than by chat
@@ -105,6 +106,16 @@ Pi persists tool arguments and results in the principal's session file
 alongside the conversation history. See
 [plan 0009](plans/0009-model-tool-calls-through-pi.md).
 
+Web search is the one tool that runs inside Pi rather than through the broker.
+For a principal with web access on, the turn also loads a vendored copy of the
+third-party `pi-web-search` extension (MIT, 1.6.0, in
+`third_party/pi-web-search/`) with a second `--extension`, still under
+`--no-extensions` and `--no-builtin-tools`. It calls the provider's native
+search through the principal's own model login, so queries go only where the
+conversation already goes and need no key of their own. It is vendored and
+copied into the image, never installed at build time, so the code that runs is
+the reviewed code in git. See [plan 0026](plans/0026-web-weather-and-pdf-tools.md).
+
 ### Authentication and lifecycle caveat
 
 Local login and reuse by two new headless Go-driven processes are verified for
@@ -152,7 +163,8 @@ duplicate files where possible.
 
 - List the folders granted to a user, and the folders inside them
 - Search file and folder names
-- Read the text content of a selected file, only when the user asked for it
+- Read the text content of a selected file, or a PDF's extracted text, only
+  when the user asked for it
 - Add a file the user sent in the conversation, after an explicit confirmation,
   to the user's own inbox or to a folder they name
 - Report storage, disk, array, temperature, and backup health where available
@@ -372,6 +384,45 @@ References:
 
 - [When to build a GitHub App](https://docs.github.com/en/apps/creating-github-apps/about-creating-github-apps/deciding-when-to-build-a-github-app)
 - [GitHub notification endpoints](https://docs.github.com/en/rest/activity/notifications)
+
+## Web
+
+### Current capabilities
+
+- Search the web (`web_search`) through the vendored Pi extension described
+  under [Pi runtime](#pi-runtime), on the principal's own model subscription
+- Read a public page, text file, or PDF by its address (`fetch_page`): HTML is
+  reduced to its title, visible text, and links, and the text comes back in
+  12 KB windows with an offset to continue
+- Forecast the weather for a place name (`weather_forecast`) through
+  Open-Meteo's keyless geocoding and forecast APIs: current conditions and up
+  to seven days, or with a `date` (today to 15 days ahead) and optional
+  `from_hour`/`to_hour`, one line per hour for that day, so a day's travel plan
+  gets the weather for each place at the hours the user is there; metric, in
+  the place's own time zone; the optional
+  `HOME_AGENT_WEATHER_HOME` names the household's place for questions that name
+  none
+- Scheduled prompts may use all three, since each is a read
+
+### Access
+
+One per-user switch, "Web access" in `/settings`, covers all three. While the
+global `HOME_AGENT_WEB_ENABLED` flag is on, it is on for every user until they
+turn it off; while the flag is off, the section is hidden and nobody has web
+access. Turning it off saves an opt-out integration row without a credential;
+turning it back on deletes the row. Page reading and weather are core
+Go tools behind the broker, so they get its grant recheck, deadline, size
+limit, untrusted-data prefix, and audit log. Every request they make goes
+through one guarded client that refuses the home network; see
+[Security and privacy](05-security-and-privacy.md#network-security).
+
+### PDF text
+
+PDFs sent in the chat, read from the NAS, or fetched from the web go through
+one pure-Go extractor (`internal/pdftext`, over `github.com/ledongthuc/pdf`).
+It is not behind the web switch, since attachments and NAS files never leave
+the house. Multi-column layouts and unusual font encodings extract poorly; a
+scanned PDF with no text layer is reported as unreadable.
 
 ## Monitoring
 

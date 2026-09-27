@@ -370,10 +370,14 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 	reply := ""
 	connected, runErr := s.gate.Ready(turnCtx, request.PrincipalID)
 	var tools agentruntime.ToolSet
+	var webSearch bool
 	var attachments attachment.Turn
 	if runErr == nil && connected {
 		_ = s.deliverer.SendTyping(turnCtx, request.ChatID)
 		tools, runErr = s.toolProvider.ToolsFor(turnCtx, request.PrincipalID)
+		if runErr == nil {
+			webSearch, runErr = s.webSearchEnabled(turnCtx, request.PrincipalID)
+		}
 		if runErr != nil {
 			errorKind = "tool_provider"
 		}
@@ -400,7 +404,8 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 			Message:     s.turnMessage(request, attachments.Summary),
 			Images:      attachments.Images,
 			Tools:       tools,
-		}, discardSink{})
+			WebSearch:   webSearch,
+		}, s.turnSink(request.PrincipalID, webSearch))
 		runErr = err
 		switch {
 		case errors.Is(turnCtx.Err(), context.DeadlineExceeded):
@@ -452,6 +457,15 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		"outcome", outcome,
 		"error_kind", reportedKind,
 	)
+}
+
+// webSearchEnabled reads the principal's switch at turn start; an error fails the turn instead of
+// guessing either way.
+func (s *Service) webSearchEnabled(ctx context.Context, principalID string) (bool, error) {
+	if s.config.WebSearch == nil {
+		return false, nil
+	}
+	return s.config.WebSearch.WebSearchEnabled(ctx, principalID)
 }
 
 // turnMessage prefixes what became of the principal's last confirmation request, which was
@@ -597,6 +611,32 @@ func (s *Service) logWorkerError(ctx context.Context, principalID, errorKind str
 type discardSink struct{}
 
 func (discardSink) Emit(context.Context, agentruntime.Event) error {
+	return nil
+}
+
+// webSearchTool runs inside the runtime rather than through the broker, so its calls get no
+// broker audit line; the turn's sink records each by name instead.
+const webSearchTool = "web_search"
+
+// turnSink discards runtime events except that a turn offering web search logs each search call,
+// by name only.
+func (s *Service) turnSink(principalID string, webSearch bool) agentruntime.EventSink {
+	if !webSearch {
+		return discardSink{}
+	}
+	return webSearchSink{principalID: principalID, logger: s.logger, telemetry: s.telemetry}
+}
+
+type webSearchSink struct {
+	principalID string
+	logger      *slog.Logger
+	telemetry   Telemetry
+}
+
+func (w webSearchSink) Emit(ctx context.Context, event agentruntime.Event) error {
+	if event.Type == "tool_call" && event.Text == webSearchTool {
+		w.telemetry.ContextLogger(ctx, w.logger).InfoContext(ctx, "conversation.web_search.called", "principal_id", w.principalID, "tool", webSearchTool)
+	}
 	return nil
 }
 

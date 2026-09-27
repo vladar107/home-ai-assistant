@@ -536,3 +536,130 @@ func assertNoTurnStarted(t *testing.T, cfg pi.Config) {
 		t.Error(err)
 	}
 }
+
+// webSearchConfig points the runtime at a stand-in extension file; the fixture never loads it.
+func webSearchConfig(t *testing.T) pi.Config {
+	t.Helper()
+	cfg := config(t)
+	cfg.WebSearchExtension = filepath.Join(t.TempDir(), "index.ts")
+	if err := os.WriteFile(cfg.WebSearchExtension, []byte("export default function () {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+func extensionArgs(args []string) []string {
+	var extensions []string
+	for index, arg := range args {
+		if arg == "--extension" && index+1 < len(args) {
+			extensions = append(extensions, args[index+1])
+		}
+	}
+	return extensions
+}
+
+func TestWebSearchTurnLoadsOnlyTheSearchExtension(t *testing.T) {
+	cfg := webSearchConfig(t)
+	r := newRuntime(t, cfg)
+	run := request("web-search", "fixture:web-search")
+	run.WebSearch = true
+	sink := &eventSink{}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	result, err := r.Run(ctx, run, sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Response != "Searching.\n\nfound: synthetic search answer" {
+		t.Fatalf("response = %q", result.Response)
+	}
+	if !slices.Contains(sink.events, agentruntime.Event{Type: "tool_call", Text: "web_search"}) {
+		t.Errorf("sink did not receive the search tool name: %+v", sink.events)
+	}
+
+	report := readReport(t, cfg, testPrincipal, "web-search")
+	if slices.Contains(report.Args, "--no-tools") || !slices.Contains(report.Args, "--no-builtin-tools") || !slices.Contains(report.Args, "--no-extensions") {
+		t.Errorf("web search turn flags: %v", report.Args)
+	}
+	if extensions := extensionArgs(report.Args); !slices.Equal(extensions, []string{cfg.WebSearchExtension}) {
+		t.Errorf("extensions = %v, want only the search extension", extensions)
+	}
+	for _, entry := range report.Environment {
+		if strings.HasPrefix(entry, "HOME_AGENT_TOOL_BRIDGE_") {
+			t.Errorf("web search turn received bridge environment %q", entry)
+		}
+	}
+	if len(report.BridgeFiles) != 0 || len(report.Files) != 0 {
+		t.Errorf("web search turn wrote files: bridge=%v workspace=%v", report.BridgeFiles, report.Files)
+	}
+	if prompt := report.Args[slices.Index(report.Args, "--system-prompt")+1]; !strings.Contains(prompt, "web_search") || strings.Contains(prompt, "no integrations or tools") {
+		t.Errorf("system prompt did not describe web search: %q", prompt)
+	}
+	assertProcessStopped(t, report)
+	entries, err := os.ReadDir(agentDir(cfg, testPrincipal))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "bridge-") {
+			t.Errorf("web search turn created bridge directory %s", entry.Name())
+		}
+	}
+}
+
+func TestWebSearchTurnWithToolsLoadsBridgeFirst(t *testing.T) {
+	cfg := webSearchConfig(t)
+	r := newRuntime(t, cfg)
+	provider := &echoProvider{principal: testPrincipal}
+	run := toolRequest("web-search-tools", `fixture:call echo_tool {"text":"amber"}`, toolSet(t, provider, testPrincipal))
+	run.WebSearch = true
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	result, err := r.Run(ctx, run, &eventSink{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(result.Response, "echoed: amber") {
+		t.Fatalf("response = %q", result.Response)
+	}
+	report := readReport(t, cfg, testPrincipal, "web-search-tools")
+	if slices.Contains(report.Args, "--no-tools") || !slices.Contains(report.Args, "--no-builtin-tools") || !slices.Contains(report.Args, "--no-extensions") {
+		t.Errorf("combined turn flags: %v", report.Args)
+	}
+	extensions := extensionArgs(report.Args)
+	if len(extensions) != 2 || filepath.Base(extensions[0]) != "bridge.ts" || extensions[1] != cfg.WebSearchExtension {
+		t.Fatalf("extensions = %v, want the bridge and then the search extension", extensions)
+	}
+	if environmentValue(report, "HOME_AGENT_TOOL_BRIDGE_URL") == "" {
+		t.Errorf("combined turn lost the bridge environment: %v", report.Environment)
+	}
+	assertProcessStopped(t, report)
+	assertBridgeRemoved(t, cfg, extensions[0])
+}
+
+func TestWebSearchWithoutExtensionNeverStarts(t *testing.T) {
+	cfg := config(t)
+	r := newRuntime(t, cfg)
+	run := request("web-search-unconfigured", "hello")
+	run.WebSearch = true
+	_, err := r.Run(context.Background(), run, &eventSink{})
+	if err == nil || !strings.Contains(err.Error(), "web search") {
+		t.Fatalf("error = %v", err)
+	}
+	assertNoTurnStarted(t, cfg)
+}
+
+func TestUnavailableWebSearchExtensionFailsStartup(t *testing.T) {
+	for name, path := range map[string]string{
+		"missing":   filepath.Join(t.TempDir(), "missing.ts"),
+		"directory": t.TempDir(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := config(t)
+			cfg.WebSearchExtension = path
+			if _, err := pi.New(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "web search extension") {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
+}

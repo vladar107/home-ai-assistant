@@ -30,6 +30,7 @@ type Config struct {
 	Notion        NotionConfig
 	Gmail         GmailConfig
 	NAS           NASConfig
+	Web           WebConfig
 	Observability ObservabilityConfig
 }
 
@@ -48,6 +49,7 @@ func Load() (Config, error) {
 		Notion:          defaultNotionConfig(),
 		Gmail:           defaultGmailConfig(),
 		NAS:             defaultNASConfig(),
+		Web:             defaultWebConfig(),
 		Observability:   defaultObservabilityConfig(),
 	}
 
@@ -94,6 +96,9 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if err := loadGmailConfig(&cfg.Gmail); err != nil {
+		return Config{}, err
+	}
+	if err := loadWebConfig(&cfg.Web); err != nil {
 		return Config{}, err
 	}
 
@@ -162,6 +167,12 @@ func (c Config) Validate() error {
 	}
 	if c.Gmail.Enabled && !c.Conversation.Enabled {
 		return fmt.Errorf("HOME_AGENT_GMAIL_ENABLED: requires HOME_AGENT_CONVERSATION_ENABLED=true")
+	}
+	if err := c.Web.validate(); err != nil {
+		return err
+	}
+	if c.Web.Enabled && !c.Conversation.Enabled {
+		return fmt.Errorf("HOME_AGENT_WEB_ENABLED: requires HOME_AGENT_CONVERSATION_ENABLED=true")
 	}
 	if err := c.Observability.validate(); err != nil {
 		return err

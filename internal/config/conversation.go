@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -11,13 +12,14 @@ import (
 )
 
 const (
-	defaultPiBinary            = "pi"
-	defaultPiProvider          = "openai-codex"
-	defaultPiVersion           = "0.84.1"
-	defaultConversationTimeout = 2 * time.Minute
-	minimumConversationTimeout = 5 * time.Second
-	maximumConversationTimeout = 10 * time.Minute
-	maximumRuntimeValueRunes   = 200
+	defaultPiBinary             = "pi"
+	defaultPiProvider           = "openai-codex"
+	defaultPiVersion            = "0.84.1"
+	defaultPiWebSearchExtension = "/usr/local/lib/home-agent/pi-web-search/src/index.ts"
+	defaultConversationTimeout  = 2 * time.Minute
+	minimumConversationTimeout  = 5 * time.Second
+	maximumConversationTimeout  = 10 * time.Minute
+	maximumRuntimeValueRunes    = 200
 )
 
 type ConversationConfig struct {
@@ -27,15 +29,19 @@ type ConversationConfig struct {
 	PiProvider   string
 	PiModel      string
 	PiVersion    string
-	TurnTimeout  time.Duration
+	// PiWebSearchExtension is the vendored search extension's entry file, loaded only for
+	// principals with web access on.
+	PiWebSearchExtension string
+	TurnTimeout          time.Duration
 }
 
 func defaultConversationConfig() ConversationConfig {
 	return ConversationConfig{
-		PiBinary:    defaultPiBinary,
-		PiProvider:  defaultPiProvider,
-		PiVersion:   defaultPiVersion,
-		TurnTimeout: defaultConversationTimeout,
+		PiBinary:             defaultPiBinary,
+		PiProvider:           defaultPiProvider,
+		PiVersion:            defaultPiVersion,
+		PiWebSearchExtension: defaultPiWebSearchExtension,
+		TurnTimeout:          defaultConversationTimeout,
 	}
 }
 
@@ -56,6 +62,7 @@ func loadConversationConfig(cfg *ConversationConfig) error {
 	cfg.PiProvider = envOrDefault("HOME_AGENT_PI_PROVIDER", defaultPiProvider)
 	cfg.PiModel = os.Getenv("HOME_AGENT_PI_MODEL")
 	cfg.PiVersion = envOrDefault("HOME_AGENT_PI_VERSION", defaultPiVersion)
+	cfg.PiWebSearchExtension = envOrDefault("HOME_AGENT_PI_WEB_SEARCH_EXTENSION", defaultPiWebSearchExtension)
 
 	if value := os.Getenv("HOME_AGENT_CONVERSATION_TURN_TIMEOUT"); value != "" {
 		timeout, err := time.ParseDuration(value)
@@ -88,6 +95,10 @@ func (c ConversationConfig) validate() error {
 			utf8.RuneCountInString(c.PiNodeBinary) > maximumRuntimeValueRunes || strings.IndexFunc(c.PiNodeBinary, unicode.IsControl) >= 0 {
 			return fmt.Errorf("HOME_AGENT_PI_NODE_BINARY: must be trimmed, valid UTF-8, and no longer than 200 characters")
 		}
+	}
+	if !filepath.IsAbs(c.PiWebSearchExtension) || c.PiWebSearchExtension != filepath.Clean(c.PiWebSearchExtension) ||
+		!utf8.ValidString(c.PiWebSearchExtension) || strings.IndexFunc(c.PiWebSearchExtension, unicode.IsControl) >= 0 {
+		return fmt.Errorf("HOME_AGENT_PI_WEB_SEARCH_EXTENSION: must be a clean absolute path")
 	}
 	if c.TurnTimeout < minimumConversationTimeout || c.TurnTimeout > maximumConversationTimeout {
 		return fmt.Errorf("HOME_AGENT_CONVERSATION_TURN_TIMEOUT: must be between 5s and 10m")

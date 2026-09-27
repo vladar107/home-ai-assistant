@@ -18,6 +18,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/gmail"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/web"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/delivery"
 	"github.com/vladar107/home-ai-assistant/internal/health"
@@ -47,6 +48,7 @@ type App struct {
 	notion       *notion.Service
 	nas          *nas.Service
 	gmail        *gmail.Service
+	web          *web.Service
 	telegram     *telegram.Service
 	telemetry    *observability.Telemetry
 	ready        atomic.Bool
@@ -280,13 +282,20 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("initialize model connections: %w", err)
 		}
+		// The extension file is required only where web access can be turned on, so a local run
+		// without the vendored checkout still starts.
+		var webSearchExtension string
+		if a.cfg.Web.Enabled {
+			webSearchExtension = a.cfg.Conversation.PiWebSearchExtension
+		}
 		runtime, err := piruntime.New(ctx, piruntime.Config{
-			Binary:          a.cfg.Conversation.PiBinary,
-			NodeBinary:      a.cfg.Conversation.PiNodeBinary,
-			Provider:        a.cfg.Conversation.PiProvider,
-			Model:           a.cfg.Conversation.PiModel,
-			ExpectedVersion: a.cfg.Conversation.PiVersion,
-			ProfilesDir:     profilesDir,
+			Binary:             a.cfg.Conversation.PiBinary,
+			NodeBinary:         a.cfg.Conversation.PiNodeBinary,
+			Provider:           a.cfg.Conversation.PiProvider,
+			Model:              a.cfg.Conversation.PiModel,
+			ExpectedVersion:    a.cfg.Conversation.PiVersion,
+			ProfilesDir:        profilesDir,
+			WebSearchExtension: webSearchExtension,
 		})
 		if err != nil {
 			return fmt.Errorf("initialize Pi runtime: %w", err)
@@ -313,12 +322,28 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("initialize scheduler: %w", err)
 		}
+		var webSearch conversation.WebSearch
+		if a.cfg.Web.Enabled {
+			webService, err := web.NewService(web.Config{WeatherHome: a.cfg.Web.WeatherHome}, a.store, a.logger)
+			if err != nil {
+				return fmt.Errorf("initialize web connector: %w", err)
+			}
+			if err := a.registry.Register(webService); err != nil {
+				return err
+			}
+			if err := broker.Register(webService); err != nil {
+				return err
+			}
+			a.web = webService
+			webSearch = webService
+		}
 		conversationService, err := conversation.NewService(
 			conversation.Config{
 				TurnTimeout: a.cfg.Conversation.TurnTimeout,
 				FollowUp:    approvals,
 				Notice:      conversation.Notices{approvals, scheduler},
 				Attachments: attachments,
+				WebSearch:   webSearch,
 			},
 			a.store,
 			runtime,
@@ -435,6 +460,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	var notionController telegram.NotionController
 	var nasController telegram.NASController
 	var gmailController telegram.GmailController
+	var webController telegram.WebController
 	var approvalController telegram.ApprovalController
 	var scheduleController telegram.ScheduleController
 	if a.conversation != nil {
@@ -453,7 +479,10 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	if a.gmail != nil {
 		gmailController = a.gmail
 	}
-	service, err := telegram.NewService(client, identities, a.store, conversationController, attachmentStore, connectionController, notionController, nasController, gmailController, approvalController, scheduleController, a.logger, a.telemetry)
+	if a.web != nil {
+		webController = a.web
+	}
+	service, err := telegram.NewService(client, identities, a.store, conversationController, attachmentStore, connectionController, notionController, nasController, gmailController, webController, approvalController, scheduleController, a.logger, a.telemetry)
 	if err != nil {
 		return fmt.Errorf("initialize Telegram service: %w", err)
 	}

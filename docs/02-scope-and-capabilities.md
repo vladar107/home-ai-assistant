@@ -40,12 +40,13 @@ Automation execution has a separate four-level scale:
 
 | Domain | Initial capabilities | Later capabilities | Ownership | Initial mode |
 | --- | --- | --- | --- | --- |
-| Telegram | Receive text, photos, and files; send text/buttons and NAS files as documents | Send photos, voice messages, richer UI | Per user | Operational |
+| Telegram | Receive text, photos, and files (text and PDFs read on request); send text/buttons and NAS files as documents | Send photos, voice messages, richer UI | Per user | Operational |
 | Immich | Search by text/person/date/album, inspect metadata, return previews/originals | Create albums, upload, change metadata | Shared service with grants | Read |
-| NAS files | List granted roots, search names, read text files on request, send a file to the user in Telegram | Move, rename, delete | Per user through mounted roots | Read, plus confirmed saves |
+| NAS files | List granted roots, search names, read text files and PDFs on request, send a file to the user in Telegram | Move, rename, delete | Per user through mounted roots | Read, plus confirmed saves |
 | NAS health | Capacity, temperatures, disk/array/backup status | Acknowledge maintenance tasks | Shared | Read |
 | UniFi | WAN/AP/client health, known/unknown clients, recent disconnects | Block client, create guest access, change settings | Shared/admin | Read |
 | Gmail | Search with Gmail query syntax and read a message's text, connected per user from `/settings` with `gmail.readonly` | Urgent-mail detection, attachments, threads, draft, label, archive, send | Per user | Read |
+| Web | Search the web through the user's own model subscription, read a public page or PDF by address, forecast the weather for a named place, daily or hour by hour for one day; on by default where the operator enables it, and switched off per user in `/settings` | YouTube transcripts, JavaScript-rendered pages | Per user | Read |
 | Calendar | List events, availability, daily agenda | Create/update/cancel event | Per user | Read |
 | Notion | Search shared pages, read blocks/data sources, list due tasks | Create inbox item, update task/page | Per user | Read |
 | GitHub | Selected repository PRs, issues, Actions and security status | Comment, create issue, rerun workflow, merge | Per user/repository | Read |

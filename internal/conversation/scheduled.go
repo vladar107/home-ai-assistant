@@ -38,6 +38,10 @@ func (s *Service) RunScheduled(ctx context.Context, principalID, message string)
 		return ScheduledReply{Text: NotConnectedReply, ErrorKind: "not_connected"}, nil
 	}
 	tools, err := s.toolProvider.ReadOnlyToolsFor(turnCtx, principalID)
+	var webSearch bool
+	if err == nil {
+		webSearch, err = s.webSearchEnabled(turnCtx, principalID)
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			return ScheduledReply{}, ctx.Err()
@@ -53,7 +57,8 @@ func (s *Service) RunScheduled(ctx context.Context, principalID, message string)
 		SessionID:   sessionID,
 		Message:     message,
 		Tools:       tools,
-	}, discardSink{})
+		WebSearch:   webSearch,
+	}, s.turnSink(principalID, webSearch))
 	switch {
 	case ctx.Err() != nil:
 		return ScheduledReply{}, ctx.Err()

@@ -193,6 +193,7 @@ func (s *Service) Discard(records []Record) {
 	for _, record := range records {
 		if path, err := s.path(record); err == nil {
 			_ = os.Remove(path)
+			_ = os.Remove(path + textCacheSuffix)
 		}
 	}
 }
@@ -244,8 +245,8 @@ func (s *Service) CloseSession(ctx context.Context, principalID, sessionID strin
 }
 
 // Purge reconciles disk with the database at start: the rows of closed sessions are deleted, and
-// every file that no longer belongs to a stored attachment is removed. Bytes staged by a request
-// that was never enqueued are collected here.
+// every file that no longer belongs to a stored attachment is removed, including the cached text of
+// one whose bytes are gone. Bytes staged by a request that was never enqueued are collected here.
 func (s *Service) Purge(ctx context.Context) error {
 	active, err := s.repository.PurgeClosedAttachments(ctx)
 	if err != nil {
@@ -268,6 +269,7 @@ func (s *Service) Purge(ctx context.Context) error {
 		}
 		for _, record := range records {
 			names[record.ID] = struct{}{}
+			names[record.ID+textCacheSuffix] = struct{}{}
 		}
 	}
 
@@ -363,7 +365,7 @@ var idPattern = regexp.MustCompile(`^[0-9a-f]{8}$`)
 // describe is the one line the model reads about a file it has not opened.
 func describe(record Record) string {
 	line := fmt.Sprintf("%s (%s, %s, id %s)", record.FileName, record.MimeType, humanSize(record.SizeBytes), record.ID)
-	if readableAsText(record.MimeType, record.FileName) {
+	if readableAsText(record.MimeType, record.FileName) || isPDF(record.MimeType, record.FileName) {
 		return line + " — read it with read_attachment only if the request needs its content"
 	}
 	return line + " — its content cannot be read as text"
@@ -383,8 +385,7 @@ func humanSize(size int64) string {
 // readableAsText reports whether a file is worth offering as text. The MIME type Telegram
 // reports is the sender's claim, so the extension is a fallback rather than a contradiction.
 func readableAsText(mimeType, fileName string) bool {
-	base, _, _ := strings.Cut(strings.ToLower(strings.TrimSpace(mimeType)), ";")
-	base = strings.TrimSpace(base)
+	base := baseMIME(mimeType)
 	if strings.HasPrefix(base, "text/") {
 		return true
 	}
@@ -400,6 +401,16 @@ func readableAsText(mimeType, fileName string) bool {
 		return true
 	}
 	return false
+}
+
+// isPDF applies the same trust as readableAsText: the sender's claim first, the extension second.
+func isPDF(mimeType, fileName string) bool {
+	return baseMIME(mimeType) == "application/pdf" || strings.EqualFold(filepath.Ext(fileName), ".pdf")
+}
+
+func baseMIME(mimeType string) string {
+	base, _, _ := strings.Cut(strings.ToLower(strings.TrimSpace(mimeType)), ";")
+	return strings.TrimSpace(base)
 }
 
 func boundedName(name string) string {

@@ -13,7 +13,10 @@ type RunRequest struct {
 	Message     string
 	Images      []Image
 	Tools       ToolSet
-	Metadata    map[string]string
+	// WebSearch means the principal has web access turned on, so the runtime offers its own web
+	// search alongside the broker's tools.
+	WebSearch bool
+	Metadata  map[string]string
 }
 
 // Image is a picture the turn's message carried. It is the only non-text input a runtime accepts.

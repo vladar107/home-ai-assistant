@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -353,6 +354,33 @@ func TestReadingIsTextOnlyAndResumable(t *testing.T) {
 	}
 	if folder := f.execute("nas_read_file", `{"path":"home/Documents"}`); !folder.IsError {
 		t.Fatalf("reading a folder = %+v", folder)
+	}
+}
+
+func TestPDFsAreReadAsTheirTextInWindows(t *testing.T) {
+	f := newFixture(t)
+	handbook, err := os.ReadFile(filepath.Join("..", "..", "pdftext", "testdata", "handbook.pdf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.write(f.home, "Documents/handbook.pdf", string(handbook))
+	if err := os.WriteFile(filepath.Join(f.home, "huge.pdf"), make([]byte, (10<<20)+1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.contribute()
+
+	first := f.execute("nas_read_file", `{"path":"home/Documents/handbook.pdf"}`)
+	next := regexp.MustCompile(`of the extracted text; continue with offset_bytes (\d+)`).FindStringSubmatch(first.Text)
+	if first.IsError || next == nil || !strings.Contains(first.Text, "Household handbook, page 1") {
+		t.Fatalf("first window = %+v", first)
+	}
+	rest := f.execute("nas_read_file", `{"path":"home/Documents/handbook.pdf","offset_bytes":`+next[1]+`}`)
+	if rest.IsError || !strings.Contains(rest.Text, "Household handbook, page 5") || strings.Contains(rest.Text, "continue with offset_bytes") {
+		t.Fatalf("second window = %+v", rest)
+	}
+	oversize := f.execute("nas_read_file", `{"path":"home/huge.pdf"}`)
+	if !oversize.IsError || !strings.Contains(oversize.Text, "only PDFs up to 10.0 MB can be read") {
+		t.Fatalf("oversize PDF = %+v", oversize)
 	}
 }
 

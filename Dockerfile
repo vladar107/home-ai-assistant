@@ -31,6 +31,8 @@ RUN npm install --global --omit=dev @earendil-works/pi-coding-agent@0.84.1 \
     && test "$(pi --version)" = "0.84.1" \
     && npm cache clean --force
 
+COPY third_party/pi-web-search /usr/local/lib/home-agent/pi-web-search
+
 COPY --from=build /out/home-agent /usr/local/bin/home-agent
 
 USER 10001:10001

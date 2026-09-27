@@ -1,0 +1,182 @@
+// Package web is the web connector: for a principal whose web access is on, their turns can
+// read a public page or PDF by its address and get a weather forecast for a named place. Every
+// request goes through one guarded client that refuses the home network, so no address the model
+// is given or redirected to can reach the NAS, the router, or anything else inside the house.
+package web
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"net/url"
+	"strings"
+	"sync/atomic"
+	"time"
+
+	"github.com/vladar107/home-ai-assistant/internal/integration"
+	"github.com/vladar107/home-ai-assistant/internal/module"
+)
+
+const (
+	Integration = "web"
+	// A row for the integration records that the principal turned web access off; without one it
+	// is on, since web access is on by default wherever the operator enabled it.
+	optOutWorkspaceID   = "web-access-off"
+	optOutWorkspaceName = "Web access off"
+
+	defaultGeocodingURL = "https://geocoding-api.open-meteo.com/v1/search"
+	defaultForecastURL  = "https://api.open-meteo.com/v1/forecast"
+	maximumPlaceRunes   = 200
+)
+
+type Config struct {
+	// WeatherHome is the household's place name, used when the user names none; empty means the
+	// model asks.
+	WeatherHome string
+	// GeocodingURL and ForecastURL override the Open-Meteo endpoints; empty means the public ones.
+	GeocodingURL string
+	ForecastURL  string
+	// Resolver and Dial replace name resolution and the final connection; nil means the system
+	// resolver and a plain dialer. The guard vets every resolved address before Dial sees it, so
+	// a test can route approved public addresses to a local server without widening the guard.
+	Resolver Resolver
+	Dial     DialFunc
+	// Now is the clock that bounds an hourly forecast's date; nil means time.Now.
+	Now func() time.Time
+}
+
+// Status is a principal's web access switch.
+type Status struct {
+	Enabled bool
+}
+
+type Service struct {
+	guard        *guard
+	repository   integration.Repository
+	weatherHome  string
+	geocodingURL *url.URL
+	forecastURL  *url.URL
+	logger       *slog.Logger
+	now          func() time.Time
+
+	running atomic.Bool
+}
+
+var _ module.Module = (*Service)(nil)
+
+func NewService(cfg Config, repository integration.Repository, logger *slog.Logger) (*Service, error) {
+	if repository == nil {
+		return nil, fmt.Errorf("web repository is required")
+	}
+	if logger == nil {
+		return nil, fmt.Errorf("web logger is required")
+	}
+	home := strings.TrimSpace(cfg.WeatherHome)
+	if len([]rune(home)) > maximumPlaceRunes {
+		return nil, fmt.Errorf("weather home must be at most %d characters", maximumPlaceRunes)
+	}
+	geocoding, err := endpoint(cfg.GeocodingURL, defaultGeocodingURL)
+	if err != nil {
+		return nil, fmt.Errorf("weather geocoding URL: %w", err)
+	}
+	forecast, err := endpoint(cfg.ForecastURL, defaultForecastURL)
+	if err != nil {
+		return nil, fmt.Errorf("weather forecast URL: %w", err)
+	}
+	now := cfg.Now
+	if now == nil {
+		now = time.Now
+	}
+	return &Service{
+		now:          now,
+		guard:        newGuard(cfg.Resolver, cfg.Dial),
+		repository:   repository,
+		weatherHome:  home,
+		geocodingURL: geocoding,
+		forecastURL:  forecast,
+		logger:       logger,
+	}, nil
+}
+
+func endpoint(configured, fallback string) (*url.URL, error) {
+	if configured == "" {
+		configured = fallback
+	}
+	parsed, err := url.Parse(configured)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkURL(parsed); err != nil {
+		return nil, err
+	}
+	return parsed, nil
+}
+
+func (s *Service) Descriptor() module.Descriptor {
+	return module.Descriptor{ID: Integration, Version: "0.1.0", Kind: module.KindConnector}
+}
+
+func (s *Service) Start(context.Context) error {
+	s.running.Store(true)
+	return nil
+}
+
+func (s *Service) Ready(context.Context) error {
+	if !s.running.Load() {
+		return fmt.Errorf("web connector is not running")
+	}
+	return nil
+}
+
+func (s *Service) Shutdown(context.Context) error {
+	s.running.Store(false)
+	s.guard.client.CloseIdleConnections()
+	return nil
+}
+
+// Status reports the principal's switch. Web access is on unless the principal saved the opt-out
+// row, which carries no credential, since nothing here signs in anywhere.
+func (s *Service) Status(ctx context.Context, principalID string) (Status, error) {
+	_, optedOut, err := s.repository.LoadIntegrationConnection(ctx, principalID, Integration)
+	if err != nil {
+		return Status{}, err
+	}
+	return Status{Enabled: !optedOut}, nil
+}
+
+// SetEnabled turns the principal's web access on or off. Turning it off takes effect on the next
+// tool call, including one later in a turn already running.
+func (s *Service) SetEnabled(ctx context.Context, principalID string, enabled bool) (Status, error) {
+	if enabled {
+		deleted, err := s.repository.DeleteIntegrationConnection(ctx, principalID, Integration)
+		if err != nil {
+			return Status{}, err
+		}
+		if deleted {
+			s.logger.InfoContext(ctx, "web.access.enabled", "principal_id", principalID)
+		}
+		return Status{Enabled: true}, nil
+	}
+	status, err := s.Status(ctx, principalID)
+	if err != nil || !status.Enabled {
+		return status, err
+	}
+	if err := s.repository.SaveIntegrationConnection(ctx, integration.Connection{
+		PrincipalID:   principalID,
+		Integration:   Integration,
+		TokenKind:     integration.TokenKindInternal,
+		WorkspaceID:   optOutWorkspaceID,
+		WorkspaceName: optOutWorkspaceName,
+	}); err != nil {
+		return Status{}, err
+	}
+	s.logger.InfoContext(ctx, "web.access.disabled", "principal_id", principalID)
+	return Status{}, nil
+}
+
+// WebSearchEnabled tells the conversation whether the principal's turns load the search extension;
+// it follows the same switch as the tools here.
+func (s *Service) WebSearchEnabled(ctx context.Context, principalID string) (bool, error) {
+	status, err := s.Status(ctx, principalID)
+	return status.Enabled, err
+}

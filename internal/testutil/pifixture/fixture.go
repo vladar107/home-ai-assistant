@@ -73,11 +73,15 @@ func RunIfRequested() {
 
 func run() error {
 	args := map[string]string{}
+	var extensions []string
 	for i := 1; i < len(os.Args); i++ {
 		key := os.Args[i]
 		if i+1 < len(os.Args) && !strings.HasPrefix(os.Args[i+1], "-") {
 			i++
 			args[key] = os.Args[i]
+			if key == "--extension" {
+				extensions = append(extensions, os.Args[i])
+			}
 		}
 	}
 	var prompt struct {
@@ -109,7 +113,11 @@ func run() error {
 	for _, entry := range entries {
 		report.Files = append(report.Files, entry.Name())
 	}
-	if extension := args["--extension"]; extension != "" {
+	// Only the bridge extension is named bridge.ts; the search extension is never loaded here.
+	for _, extension := range extensions {
+		if filepath.Base(extension) != "bridge.ts" {
+			continue
+		}
 		bridgeEntries, err := os.ReadDir(filepath.Dir(extension))
 		if err != nil {
 			return err
@@ -177,6 +185,17 @@ func run() error {
 		return err
 	}
 	switch prompt.Message {
+	case "fixture:web-search":
+		// web_search runs inside Pi through the search extension, so no bridge call is made.
+		ack()
+		emit(map[string]any{"type": "message_start", "message": map[string]string{"role": "assistant"}})
+		delta("Searching.")
+		emit(map[string]any{"type": "message_update", "assistantMessageEvent": map[string]string{"type": "toolcall_start"}})
+		emit(map[string]any{"type": "tool_execution_start", "toolCallId": "call-1", "toolName": "web_search"})
+		emit(map[string]any{"type": "tool_execution_end", "toolCallId": "call-1", "toolName": "web_search", "isError": false})
+		emit(map[string]any{"type": "message_start", "message": map[string]string{"role": "assistant"}})
+		delta("found: synthetic search answer")
+		settle()
 	case "fixture:hold", "fixture:stubborn":
 		for {
 			time.Sleep(time.Hour)

@@ -23,6 +23,9 @@ const (
 	AttachmentPrivacyLine = "Photos and files you send stay on the home system for the current conversation and are removed when you start a new one with /new."
 	// Asking for a file uploads the whole file to Telegram, which reading one as text does not.
 	SentFilePrivacyLine = "A NAS file you ask for is uploaded to Telegram to reach you; nothing is sent to this chat unless you ask for it."
+	// Only the search stays with the provider the conversation already uses, so each other place a
+	// web request goes is named.
+	WebPrivacyLine = "Web access is on: web searches go to the configured model provider under your own subscription, pages you ask about are fetched from the home connection, and place names are sent to Open-Meteo for weather. It is on by default; you can turn it off in /settings."
 
 	UnsupportedAudioReply      = "I cannot listen to voice messages or audio yet. Send text, a photo, or a file and I will work with that."
 	UnsupportedVideoReply      = "I cannot watch video yet. Send text, a photo, or a file and I will work with that."

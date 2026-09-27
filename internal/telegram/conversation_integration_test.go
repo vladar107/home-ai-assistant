@@ -26,6 +26,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/gmail"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/web"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/delivery"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
@@ -140,6 +141,8 @@ type harnessOptions struct {
 	// schedules adds the scheduler, its tools, and /jobs, on the given clock.
 	schedules *testClock
 	gmail     *gmailsim.Simulator
+	// web adds the web connector and its settings section, as HOME_AGENT_WEB_ENABLED does.
+	web bool
 }
 
 // testFile is one attachment the Telegram simulator will hand out through getFile.
@@ -164,6 +167,7 @@ type conversationHarness struct {
 	notion         *notion.Service
 	nas            *nas.Service
 	gmail          *gmail.Service
+	web            *web.Service
 	approvals      *approval.Service
 	scheduler      *schedule.Service
 	auth           *codexauth.Simulator
@@ -338,6 +342,18 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		}
 		gmailController = h.gmail
 	}
+	var webController WebController
+	var webSearch conversation.WebSearch
+	if options.web {
+		h.web, err = web.NewService(web.Config{}, h.store, logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := broker.Register(h.web); err != nil {
+			t.Fatal(err)
+		}
+		webController, webSearch = h.web, h.web
+	}
 	notices := conversation.Notices{h.approvals}
 	var scheduleController ScheduleController
 	if options.schedules != nil {
@@ -356,7 +372,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		scheduleController = h.scheduler
 	}
 	h.conversation, err = conversation.NewService(
-		conversation.Config{TurnTimeout: 10 * time.Second, FollowUp: h.approvals, Notice: notices, Attachments: h.attachments},
+		conversation.Config{TurnTimeout: 10 * time.Second, FollowUp: h.approvals, Notice: notices, Attachments: h.attachments, WebSearch: webSearch},
 		h.store, runtime, h.client, broker, h.connections, logger, integrationTelemetry{turns: h.turns},
 	)
 	if err != nil {
@@ -367,7 +383,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 			t.Fatal(err)
 		}
 	}
-	h.service, err = NewService(h.client, identities, h.store, h.conversation, h.attachments, h.connections, notionController, nasController, gmailController, h.approvals, scheduleController, logger, nil)
+	h.service, err = NewService(h.client, identities, h.store, h.conversation, h.attachments, h.connections, notionController, nasController, gmailController, webController, h.approvals, scheduleController, logger, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -113,6 +113,89 @@ func TestDocumentIsReadOnlyWhenTheModelAsksForIt(t *testing.T) {
 	h.waitState(1, "delivered")
 }
 
+func TestPDFIsReadAsTextFromACacheThatNewRemoves(t *testing.T) {
+	runtime := newControlledRuntime()
+	h := newConversationHarness(t, runtime)
+	h.provision("alice", "acct-alice")
+	h.start()
+
+	handbook, err := os.ReadFile(filepath.Join("..", "pdftext", "testdata", "handbook.pdf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.addFile("doc-pdf", "documents/file_5.pdf", handbook)
+	h.push(documentUpdate(1, 101, "what does page 5 say?", MediaFile{
+		FileID: "doc-pdf", FileName: "handbook.pdf", MimeType: "application/pdf", FileSize: int64(len(handbook)),
+	}))
+
+	call := receive(t, h.ctx, runtime.calls)
+	if !strings.Contains(call.request.Message, "handbook.pdf") || !strings.Contains(call.request.Message, "read_attachment") ||
+		strings.Contains(call.request.Message, "cannot be read") {
+		t.Fatalf("turn message = %q, want the PDF offered as readable", call.request.Message)
+	}
+	id := attachmentIDPattern.FindStringSubmatch(call.request.Message)[1]
+
+	first := executeTool(t, h.ctx, call.request.Tools, "read_attachment", `{"attachment_id":"`+id+`"}`)
+	next := regexp.MustCompile(`of the extracted text; continue with offset_bytes (\d+)`).FindStringSubmatch(first.Text)
+	if first.IsError || next == nil || !strings.Contains(first.Text, "Household handbook, page 1") {
+		t.Fatalf("first window = %+v", first)
+	}
+	caches, err := filepath.Glob(filepath.Join(h.attachmentsDir, "*", id+".txt"))
+	if err != nil || len(caches) != 1 {
+		t.Fatalf("text caches = %v %v, want one beside the PDF", caches, err)
+	}
+	if info, err := os.Stat(caches[0]); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("text cache = %v %v, want mode 0600", info, err)
+	}
+	rest := executeTool(t, h.ctx, call.request.Tools, "read_attachment", `{"attachment_id":"`+id+`","offset_bytes":`+next[1]+`}`)
+	if rest.IsError || !strings.Contains(rest.Text, "Household handbook, page 5") || strings.Contains(rest.Text, "continue with offset_bytes") {
+		t.Fatalf("second window = %+v", rest)
+	}
+	// Later windows come from the cache rather than from parsing the PDF again.
+	if err := os.WriteFile(caches[0], []byte("text served from the cache"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if cached := executeTool(t, h.ctx, call.request.Tools, "read_attachment", `{"attachment_id":"`+id+`"}`); !strings.Contains(cached.Text, "text served from the cache") {
+		t.Fatalf("read after caching = %+v, want the cached text", cached)
+	}
+
+	call.answer <- agentruntime.RunResult{Response: "page 5 is about the budget"}
+	h.wantReply(101, 1, "page 5 is about the budget")
+	h.waitState(1, "delivered")
+
+	h.push(textUpdate(2, 101, "/new"))
+	h.wantReply(101, 2, NewSessionReply)
+	if files := countFiles(t, h.attachmentsDir); files != 0 {
+		t.Fatalf("attachment files on disk = %d after /new, want neither the PDF nor its text", files)
+	}
+}
+
+func TestScannedPDFIsReportedAsHavingNoText(t *testing.T) {
+	runtime := newControlledRuntime()
+	h := newConversationHarness(t, runtime)
+	h.provision("alice", "acct-alice")
+	h.start()
+
+	scanned, err := os.ReadFile(filepath.Join("..", "pdftext", "testdata", "scanned.pdf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.addFile("doc-scan", "documents/file_6.pdf", scanned)
+	h.push(documentUpdate(1, 101, "what does this letter say?", MediaFile{
+		FileID: "doc-scan", FileName: "letter.pdf", MimeType: "application/pdf", FileSize: int64(len(scanned)),
+	}))
+
+	call := receive(t, h.ctx, runtime.calls)
+	id := attachmentIDPattern.FindStringSubmatch(call.request.Message)[1]
+	read := executeTool(t, h.ctx, call.request.Tools, "read_attachment", `{"attachment_id":"`+id+`"}`)
+	if !read.IsError || !strings.Contains(read.Text, "probably a scanned document") {
+		t.Fatalf("read_attachment = %+v, want the PDF reported as scanned", read)
+	}
+
+	call.answer <- agentruntime.RunResult{Response: "it is a scan"}
+	h.wantReply(101, 1, "it is a scan")
+}
+
 func TestUnsupportedAndOversizedMediaAreAnswered(t *testing.T) {
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)

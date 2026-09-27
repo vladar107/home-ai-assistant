@@ -17,7 +17,9 @@ const (
 	// maximumReadBytes matches the attachment reader, so a file read from the NAS and the same
 	// file sent through Telegram behave alike.
 	maximumReadBytes = 12 << 10
-	maximumHits      = 25
+	// maximumPDFBytes matches the attachment file limit; a PDF is read whole to be parsed.
+	maximumPDFBytes = 10 << 20
+	maximumHits     = 25
 )
 
 // renderRoots lists the places this principal can reach, marking the ones a confirmed save can
@@ -110,6 +112,17 @@ func renderRead(location Location, chunk []byte, offset, size int64) string {
 	return header + ":\n" + string(chunk)
 }
 
+// renderPDFRead is renderRead for a PDF, whose offsets count bytes of the extracted text rather
+// than of the file.
+func renderPDFRead(location Location, chunk []byte, offset, textSize, fileSize int64) string {
+	header := fmt.Sprintf("%s (PDF, %s), text extracted from the PDF", location, formatSize(fileSize))
+	end := offset + int64(len(chunk))
+	if end < textSize {
+		header += fmt.Sprintf(", bytes %d to %d of %d of the extracted text; continue with offset_bytes %d", offset, end, textSize, end)
+	}
+	return header + ":\n" + string(chunk)
+}
+
 func formatSize(bytes int64) string {
 	switch {
 	case bytes >= 1<<30:
@@ -121,6 +134,10 @@ func formatSize(bytes int64) string {
 	default:
 		return fmt.Sprintf("%d bytes", bytes)
 	}
+}
+
+func isPDF(name string) bool {
+	return strings.EqualFold(filepath.Ext(name), ".pdf")
 }
 
 // readableAsText decides from the name alone whether a file is worth reading as text. The NAS

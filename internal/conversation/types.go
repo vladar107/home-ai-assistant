@@ -136,9 +136,16 @@ type Attachments interface {
 	Purge(ctx context.Context) error
 }
 
+// WebSearch reports whether a principal has web access on, so the runtime offers its own web
+// search in their turns; nil never offers it.
+type WebSearch interface {
+	WebSearchEnabled(ctx context.Context, principalID string) (bool, error)
+}
+
 type Config struct {
 	TurnTimeout time.Duration
 	FollowUp    FollowUp
 	Notice      Notice
 	Attachments Attachments
+	WebSearch   WebSearch
 }
