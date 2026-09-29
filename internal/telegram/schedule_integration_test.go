@@ -296,7 +296,7 @@ func TestScheduledRunsForUnavailableOwners(t *testing.T) {
 	h.start()
 	alice := h.createJob("alice", "0000000000000001", "Morning", "0 9 * * *", "Anything new?")
 	bob := h.createJob("bob", "0000000000000002", "Morning", "0 9 * * *", "Anything new?")
-	if _, err := h.db.ExecContext(h.ctx, `UPDATE telegram_allowlist SET revoked_at = '2026-09-28T06:30:00.000Z' WHERE principal_id = 'bob'`); err != nil {
+	if _, err := h.db.ExecContext(h.ctx, `UPDATE telegram_allowlist SET allowed_at = '2026-09-01T00:00:00.000Z', revoked_at = '2026-09-28T06:30:00.000Z' WHERE principal_id = 'bob'`); err != nil {
 		t.Fatal(err)
 	}
 
