@@ -43,6 +43,13 @@ type Config struct {
 	Dial     DialFunc
 	// Now is the clock that bounds an hourly forecast's date; nil means time.Now.
 	Now func() time.Time
+	// Cards keeps a day card for the reply of the turn that drew it; nil leaves weather_card out.
+	Cards Cards
+}
+
+// Cards stages a PNG for the reply of a principal's turn.
+type Cards interface {
+	Stage(principalID, turn string, png []byte) error
 }
 
 // Status is a principal's web access switch.
@@ -58,6 +65,7 @@ type Service struct {
 	forecastURL  *url.URL
 	logger       *slog.Logger
 	now          func() time.Time
+	cards        Cards
 
 	running atomic.Bool
 }
@@ -89,6 +97,7 @@ func NewService(cfg Config, repository integration.Repository, logger *slog.Logg
 	}
 	return &Service{
 		now:          now,
+		cards:        cfg.Cards,
 		guard:        newGuard(cfg.Resolver, cfg.Dial),
 		repository:   repository,
 		weatherHome:  home,

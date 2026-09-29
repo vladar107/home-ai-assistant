@@ -559,13 +559,21 @@ Verify from the operator's chat after enabling web access:
 4. Today's weather at home, and in another city, is reported.
 5. A PDF sent in the chat, and one read from the NAS, are read as text.
 6. A scheduled prompt that searches and reports the weather delivers both.
-7. `/privacy` shows the web line; after Turn off web access in `/settings` it
+7. A day plan with several places ("Amersfoort Schothorst 7–9, Utrecht 10–17, home by 18")
+   arrives as one photo message: the day card with the answer as its caption.
+8. `/privacy` shows the web line; after Turn off web access in `/settings` it
    drops the line and the next turn has no web tools, while the other user's
    `/settings` still shows web access on. Turn it back on afterwards.
 
 The extension depends on Pi internals that can change between releases, so
 every Pi upgrade must re-run the live search check (step 1) before deployment,
 alongside the device-code login check.
+
+Day cards waiting for delivery live under `<data>/outbox/` (directories 0700,
+files 0600). Each is removed once its reply is delivered, cancelled, or
+skipped, and a sweep at startup and hourly removes anything older than a day.
+The directory is safe to delete while the application is stopped; a pending
+reply then goes out as text only.
 
 ## 8. Open and verify Grafana
 

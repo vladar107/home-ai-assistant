@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/outbox"
 )
 
 const (
@@ -40,12 +41,17 @@ type Config struct {
 	Zone         string
 	TickInterval time.Duration
 	Now          func() time.Time
+	// Cards and Photos send the card a run staged with its report; nil leaves reports text only.
+	Cards  conversation.Cards
+	Photos conversation.PhotoDeliverer
 }
 
 type Service struct {
 	repository Repository
 	chats      Chats
 	deliverer  conversation.Deliverer
+	cards      conversation.Cards
+	photos     conversation.PhotoDeliverer
 	logger     *slog.Logger
 	zone       string
 	tick       time.Duration
@@ -79,6 +85,9 @@ func NewService(cfg Config, repository Repository, chats Chats, deliverer conver
 	if logger == nil {
 		return nil, fmt.Errorf("schedule logger is required")
 	}
+	if (cfg.Cards == nil) != (cfg.Photos == nil) {
+		return nil, fmt.Errorf("schedule cards and photos must be configured together")
+	}
 	if _, err := LoadZone(cfg.Zone); err != nil {
 		return nil, fmt.Errorf("schedule default zone: %w", err)
 	}
@@ -94,6 +103,8 @@ func NewService(cfg Config, repository Repository, chats Chats, deliverer conver
 		repository: repository,
 		chats:      chats,
 		deliverer:  deliverer,
+		cards:      cfg.Cards,
+		photos:     cfg.Photos,
 		logger:     logger,
 		zone:       cfg.Zone,
 		tick:       tick,
@@ -200,6 +211,11 @@ func (s *Service) runTick(ctx context.Context) {
 			s.logger.WarnContext(ctx, "schedule.tick.failed", "stage", "prune", "error", err)
 		} else {
 			s.pruned = now
+		}
+		if s.cards != nil {
+			if err := s.cards.Sweep(now.Add(-conversation.CardRetention)); err != nil && ctx.Err() == nil {
+				s.logger.WarnContext(ctx, "schedule.tick.failed", "stage", "sweep_cards", "error", err)
+			}
 		}
 	}
 	runs, err := s.repository.ScheduledRuns(ctx, StatusReady, StatusQueued)
@@ -322,6 +338,7 @@ func (s *Service) execute(ctx context.Context, run Run) (Run, bool) {
 
 	began := time.Now()
 	result, err := jobType.Handler.Run(ctx, Occurrence{
+		RunID:        run.ID,
 		PrincipalID:  run.PrincipalID,
 		JobID:        run.JobID,
 		JobName:      run.JobName,
@@ -371,11 +388,24 @@ func (s *Service) deliver(ctx context.Context, run Run) {
 		s.skip(ctx, run, StatusReady, "no_chat")
 		return
 	}
-	for _, chunk := range conversation.SplitReply(deliveryText(run)) {
+	chunks := conversation.SplitReply(deliveryText(run))
+	// A failed run's text explains the failure, so a card it staged would illustrate nothing.
+	if s.cards != nil && run.ErrorKind == "" {
+		chunks, _, err = conversation.SendCard(ctx, s.logger, s.cards, s.photos, run.PrincipalID, outbox.ScheduledTurn(run.ID), chatID, 0, chunks)
+		if err != nil {
+			if ctx.Err() == nil {
+				s.logRunError(ctx, run, "deliver", err)
+			}
+			return
+		}
+	}
+	for _, chunk := range chunks {
 		if err := s.deliverer.SendReply(ctx, chatID, 0, chunk); err != nil {
 			if isPermanent(err) {
 				if _, err := s.repository.TransitionScheduledRun(ctx, run.ID, StatusReady, StatusFailed, "", "undeliverable", s.now()); err != nil {
 					s.logRunError(ctx, run, "store_delivery", err)
+				} else {
+					s.removeCard(run)
 				}
 				s.logger.WarnContext(ctx, "schedule.run.undeliverable", "principal_id", run.PrincipalID, "job_id", run.JobID)
 				return
@@ -390,6 +420,7 @@ func (s *Service) deliver(ctx context.Context, run Run) {
 		s.logRunError(ctx, run, "store_delivery", err)
 		return
 	}
+	s.removeCard(run)
 	s.remember(run)
 	s.logger.InfoContext(ctx, "schedule.run.delivered", "principal_id", run.PrincipalID, "job_id", run.JobID)
 }
@@ -403,7 +434,14 @@ func (s *Service) skip(ctx context.Context, run Run, from, reason string) {
 		s.logRunError(ctx, run, "store_skip", err)
 		return
 	}
+	s.removeCard(run)
 	s.logger.InfoContext(ctx, "schedule.run.skipped", "principal_id", run.PrincipalID, "job_id", run.JobID, "reason", reason)
+}
+
+func (s *Service) removeCard(run Run) {
+	if s.cards != nil {
+		s.cards.Remove(run.PrincipalID, outbox.ScheduledTurn(run.ID))
+	}
 }
 
 func (s *Service) logRunError(ctx context.Context, run Run, stage string, err error) {

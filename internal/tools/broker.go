@@ -118,7 +118,7 @@ func (b *Broker) toolsFor(ctx context.Context, principalID string, readOnly bool
 	if principalID == "" {
 		return agentruntime.ToolSet{}, fmt.Errorf("tool broker requires a principal")
 	}
-	executor := &turnExecutor{broker: b, principalID: principalID, bindings: make(map[string]toolBinding)}
+	executor := &turnExecutor{broker: b, principalID: principalID, turn: TurnFrom(ctx), bindings: make(map[string]toolBinding)}
 	var guidance []string
 	var definitions []agentruntime.ToolDefinition
 	for _, provider := range b.providers {
@@ -188,10 +188,12 @@ type toolBinding struct {
 	deadline time.Duration
 }
 
-// turnExecutor binds one turn to its principal and the grant collected when the turn started.
+// turnExecutor binds one turn to its principal and the grant collected when the turn started. The
+// turn key is kept here rather than trusted to arrive on the contexts the runtime calls with.
 type turnExecutor struct {
 	broker      *Broker
 	principalID string
+	turn        string
 	bindings    map[string]toolBinding
 	calls       atomic.Int32
 }
@@ -234,7 +236,7 @@ func (e *turnExecutor) execute(ctx context.Context, call agentruntime.ToolCall) 
 	if deadline <= 0 {
 		deadline = callDeadline
 	}
-	callCtx, cancel := context.WithTimeout(ctx, deadline)
+	callCtx, cancel := context.WithTimeout(WithTurn(ctx, e.turn), deadline)
 	defer cancel()
 	result, err := binding.provider.Execute(callCtx, e.principalID, Call{Name: call.Name, Arguments: call.Arguments})
 	switch {

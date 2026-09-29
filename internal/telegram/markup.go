@@ -5,6 +5,7 @@ import "strings"
 const (
 	boldMarker  = "**"
 	fenceMarker = "```"
+	quoteMarker = "> "
 )
 
 var (
@@ -13,15 +14,34 @@ var (
 )
 
 // renderMarkup converts the Markdown subset the model and the assistant write — fenced code,
-// inline code, bold, and HTTP links — into the HTML subset Telegram parses. Every byte is escaped
-// first, so arbitrary model, user, and integration content can never open a tag of its own, and a
-// marker without its closing counterpart stays literal instead of becoming an entity Telegram
-// refuses to parse. Underscores and single asterisks are deliberately not emphasis, so identifiers
-// such as notion_update_page reach the chat unchanged.
+// inline code, bold, HTTP links, and "> " quotes — into the HTML subset Telegram parses. Every byte
+// is escaped first, so arbitrary model, user, and integration content can never open a tag of its
+// own, and a marker without its closing counterpart stays literal instead of becoming an entity
+// Telegram refuses to parse. Underscores and single asterisks are deliberately not emphasis, so
+// identifiers such as notion_update_page reach the chat unchanged. Replies are split before they
+// are rendered, so every chunk is rendered on its own and always closes the tags it opens.
 func renderMarkup(text string) string {
+	return renderBlocks(strings.ReplaceAll(text, "\r\n", "\n"), true)
+}
+
+func renderBlocks(text string, quotes bool) string {
 	var rendered strings.Builder
 	for index := 0; index < len(text); {
+		if quotes && (index == 0 || text[index-1] == '\n') {
+			if quote, width, ok := renderQuote(text[index:]); ok {
+				rendered.WriteString(quote)
+				index += width
+				continue
+			}
+		}
 		offset := strings.IndexByte(text[index:], '`')
+		if quotes {
+			if line := nextQuoteLine(text[index:]); line >= 0 && (offset < 0 || line < offset) {
+				rendered.WriteString(renderInline(text[index : index+line]))
+				index += line
+				continue
+			}
+		}
 		if offset < 0 {
 			rendered.WriteString(renderInline(text[index:]))
 			break
@@ -39,6 +59,55 @@ func renderMarkup(text string) string {
 		index += width
 	}
 	return rendered.String()
+}
+
+// nextQuoteLine reports the offset of the first line after the start of text that opens a quote.
+func nextQuoteLine(text string) int {
+	for index := 0; ; {
+		newline := strings.IndexByte(text[index:], '\n')
+		if newline < 0 {
+			return -1
+		}
+		index += newline + 1
+		if strings.HasPrefix(text[index:], quoteMarker) {
+			return index
+		}
+	}
+}
+
+// renderQuote renders the run of quoted lines at the start of text as one expandable blockquote
+// and reports its width, which stops before the newline ending the run so that newline stays a
+// line break outside the quote. Once a run has started, a bare ">" line continues it as a blank
+// quoted line.
+func renderQuote(text string) (string, int, bool) {
+	if !strings.HasPrefix(text, quoteMarker) {
+		return "", 0, false
+	}
+	var lines []string
+	width := 0
+	for index := 0; index < len(text); {
+		end := strings.IndexByte(text[index:], '\n')
+		if end < 0 {
+			end = len(text) - index
+		}
+		line := text[index : index+end]
+		switch {
+		case strings.HasPrefix(line, quoteMarker):
+			lines = append(lines, line[len(quoteMarker):])
+		case line == ">":
+			lines = append(lines, "")
+		default:
+			index = len(text)
+			continue
+		}
+		width = index + end
+		index += end + 1
+	}
+	content := strings.Trim(strings.Join(lines, "\n"), "\n")
+	if strings.TrimSpace(content) == "" {
+		return "", 0, false
+	}
+	return "<blockquote expandable>" + renderBlocks(content, false) + "</blockquote>", width, true
 }
 
 // renderCode renders the code span opening at the start of text and reports its width. A run of

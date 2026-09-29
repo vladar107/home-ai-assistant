@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"mime/multipart"
 	"net"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf16"
 	"unicode/utf8"
 )
 
@@ -526,6 +528,111 @@ func (c *Client) SendDocument(ctx context.Context, chatID int64, name string, bo
 
 	_, err = decodeResponse[Message]("sendDocument", response)
 	return err
+}
+
+// SendPhoto uploads a PNG to the chat as a photo, quoting the request like SendReply. The caption
+// is rendered like a message and, when Telegram refuses its entities, resent as the text those
+// entities would have shown, which is what CaptionFits measured.
+func (c *Client) SendPhoto(ctx context.Context, chatID, replyToMessageID int64, png []byte, caption string) error {
+	if chatID == 0 {
+		return fmt.Errorf("Telegram sendPhoto requires a chat")
+	}
+	if len(png) == 0 {
+		return fmt.Errorf("Telegram sendPhoto requires a photo to upload")
+	}
+	fields := map[string]string{"chat_id": strconv.FormatInt(chatID, 10)}
+	if replyToMessageID > 0 {
+		fields["reply_parameters"] = fmt.Sprintf(`{"message_id":%d,"allow_sending_without_reply":true}`, replyToMessageID)
+	}
+	rendered := renderMarkup(caption)
+	if strings.TrimSpace(caption) != "" {
+		fields["caption"] = rendered
+		fields["parse_mode"] = "HTML"
+	}
+	err := c.sendPhoto(ctx, fields, png)
+	if hasUnparsableEntities(err) {
+		fields["caption"] = captionText(rendered)
+		delete(fields, "parse_mode")
+		err = c.sendPhoto(ctx, fields, png)
+	}
+	return err
+}
+
+func (c *Client) sendPhoto(ctx context.Context, fields map[string]string, png []byte) (resultErr error) {
+	ctx, endTelemetry := c.telemetry.StartTelegramAPI(ctx, "sendPhoto")
+	defer func() {
+		endTelemetry(resultErr)
+	}()
+
+	var form bytes.Buffer
+	writer := multipart.NewWriter(&form)
+	for name, value := range fields {
+		if err := writer.WriteField(name, value); err != nil {
+			return fmt.Errorf("Telegram sendPhoto request could not be created")
+		}
+	}
+	part, err := writer.CreateFormFile("photo", "card.png")
+	if err != nil {
+		return fmt.Errorf("Telegram sendPhoto request could not be created")
+	}
+	if _, err := part.Write(png); err != nil {
+		return fmt.Errorf("Telegram sendPhoto request could not be created")
+	}
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("Telegram sendPhoto request could not be created")
+	}
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpointURL("sendPhoto"), &form)
+	if err != nil {
+		return fmt.Errorf("Telegram sendPhoto request could not be created")
+	}
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+
+	response, err := c.uploadClient.Do(request)
+	if err != nil {
+		return requestFailure(ctx, "sendPhoto", err)
+	}
+	defer response.Body.Close()
+
+	_, err = decodeResponse[Message]("sendPhoto", response)
+	return err
+}
+
+// CaptionFits reports whether text can be a photo caption. Telegram measures a caption after
+// parsing its entities, in UTF-16 code units, so the limit applies to what the user will see rather
+// than to the markup.
+func (c *Client) CaptionFits(text string) bool {
+	return utf16Length(captionText(renderMarkup(text))) <= captionLimit
+}
+
+const captionLimit = 1024
+
+// captionText is the text Telegram shows for rendered markup: the tags dropped and the entities
+// renderMarkup escaped turned back into characters. renderMarkup escapes every angle bracket it
+// does not write as a tag, so each one left is a tag boundary.
+func captionText(rendered string) string {
+	var text strings.Builder
+	inTag := false
+	for _, r := range rendered {
+		switch {
+		case r == '<':
+			inTag = true
+		case r == '>' && inTag:
+			inTag = false
+		case !inTag:
+			text.WriteRune(r)
+		}
+	}
+	return html.UnescapeString(text.String())
+}
+
+func utf16Length(text string) int {
+	length := 0
+	for _, r := range text {
+		length += utf16.RuneLen(r)
+	}
+	return length
 }
 
 // documentName makes a name the user chose usable in a part header. multipart escapes quotes and

@@ -402,7 +402,13 @@ References:
   the place's own time zone; the optional
   `HOME_AGENT_WEATHER_HOME` names the household's place for questions that name
   none
-- Scheduled prompts may use all three, since each is a read
+- Attach a day card to the reply (`weather_card`): for up to four legs of a
+  day (place, date, hours) it fetches the hourly forecast itself, renders a
+  PNG with the header conditions and one tile per leg, and stages it for the
+  current turn; the reply is delivered as the photo's caption, or after the
+  photo when it is too long for one. The model writes only the title, the
+  one-line summary, and the labels, never the numbers
+- Scheduled prompts may use all of them, since each is a read
 
 ### Access
 

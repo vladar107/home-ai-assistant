@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
+	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
 // ScheduledReply is what a scheduled turn produced: the text for the principal, and a short
@@ -18,15 +19,16 @@ type ScheduledReply struct {
 // RunScheduled runs one turn nobody is watching: on the principal's own subscription, in a fresh
 // session so chat history stays out of it, with read tools only, and after any chat turn of the
 // same principal has finished. Failures come back as the reply a chat turn would have given. An
-// error is returned only when ctx ends, and then nothing should be delivered.
-func (s *Service) RunScheduled(ctx context.Context, principalID, message string) (ScheduledReply, error) {
+// error is returned only when ctx ends, and then nothing should be delivered. The turn key names
+// the run, so what its tools stage goes out with its reply.
+func (s *Service) RunScheduled(ctx context.Context, principalID, turn, message string) (ScheduledReply, error) {
 	release, err := s.acquireTurn(ctx, principalID)
 	if err != nil {
 		return ScheduledReply{}, err
 	}
 	defer release()
 
-	turnCtx, cancel := context.WithTimeout(ctx, s.config.TurnTimeout)
+	turnCtx, cancel := context.WithTimeout(tools.WithTurn(ctx, turn), s.config.TurnTimeout)
 	defer cancel()
 	connected, err := s.gate.Ready(turnCtx, principalID)
 	switch {

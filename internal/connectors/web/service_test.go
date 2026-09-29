@@ -80,6 +80,13 @@ func (b *lockedBuffer) String() string {
 
 func newFixture(t *testing.T, weatherHome string) *fixture {
 	t.Helper()
+	return newFixtureWith(t, web.Config{WeatherHome: weatherHome})
+}
+
+// newFixtureWith builds the fixture around cfg, filling in the endpoints, resolver, dialer, and
+// clock the simulated Open-Meteo needs.
+func newFixtureWith(t *testing.T, cfg web.Config) *fixture {
+	t.Helper()
 	ctx := t.Context()
 	state, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
 	if err != nil {
@@ -107,20 +114,18 @@ func newFixture(t *testing.T, weatherHome string) *fixture {
 	t.Cleanup(server.Close)
 
 	logger := slog.New(slog.NewTextHandler(f.logs, nil))
-	service, err := web.NewService(web.Config{
-		WeatherHome:  weatherHome,
-		GeocodingURL: "http://geocoding.test/v1/search",
-		ForecastURL:  "http://forecast.test/v1/forecast",
-		Resolver:     resolver{},
-		Now:          func() time.Time { return time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC) },
-		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-			f.mu.Lock()
-			f.dialed = append(f.dialed, address)
-			f.mu.Unlock()
-			var dialer net.Dialer
-			return dialer.DialContext(ctx, "tcp", server.Listener.Addr().String())
-		},
-	}, state, logger)
+	cfg.GeocodingURL = "http://geocoding.test/v1/search"
+	cfg.ForecastURL = "http://forecast.test/v1/forecast"
+	cfg.Resolver = resolver{}
+	cfg.Now = func() time.Time { return time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC) }
+	cfg.Dial = func(ctx context.Context, network, address string) (net.Conn, error) {
+		f.mu.Lock()
+		f.dialed = append(f.dialed, address)
+		f.mu.Unlock()
+		var dialer net.Dialer
+		return dialer.DialContext(ctx, "tcp", server.Listener.Addr().String())
+	}
+	service, err := web.NewService(cfg, state, logger)
 	if err != nil {
 		t.Fatal(err)
 	}

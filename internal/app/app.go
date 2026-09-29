@@ -25,6 +25,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/module"
 	"github.com/vladar107/home-ai-assistant/internal/observability"
+	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	piruntime "github.com/vladar107/home-ai-assistant/internal/runtime/pi"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
@@ -313,18 +314,22 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		if err := broker.Register(attachments); err != nil {
 			return err
 		}
+		cards, err := outbox.New(filepath.Join(a.cfg.DataDir, "outbox"))
+		if err != nil {
+			return fmt.Errorf("initialize outbox: %w", err)
+		}
 		approvals, err := approval.NewService(approval.Config{}, a.store, client, a.logger)
 		if err != nil {
 			return fmt.Errorf("initialize approvals: %w", err)
 		}
 		// Scheduled runs reach only the owner's own chat, resolved from the allowlist at delivery.
-		scheduler, err := schedule.NewService(schedule.Config{Zone: a.cfg.Timezone}, a.store, a.store, client, approvals, a.logger)
+		scheduler, err := schedule.NewService(schedule.Config{Zone: a.cfg.Timezone, Cards: cards, Photos: client}, a.store, a.store, client, approvals, a.logger)
 		if err != nil {
 			return fmt.Errorf("initialize scheduler: %w", err)
 		}
 		var webSearch conversation.WebSearch
 		if a.cfg.Web.Enabled {
-			webService, err := web.NewService(web.Config{WeatherHome: a.cfg.Web.WeatherHome}, a.store, a.logger)
+			webService, err := web.NewService(web.Config{WeatherHome: a.cfg.Web.WeatherHome, Cards: cards}, a.store, a.logger)
 			if err != nil {
 				return fmt.Errorf("initialize web connector: %w", err)
 			}
@@ -344,6 +349,8 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 				Notice:      conversation.Notices{approvals, scheduler},
 				Attachments: attachments,
 				WebSearch:   webSearch,
+				Cards:       cards,
+				Photos:      client,
 			},
 			a.store,
 			runtime,

@@ -30,6 +30,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/delivery"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
+	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
@@ -143,6 +144,9 @@ type harnessOptions struct {
 	gmail     *gmailsim.Simulator
 	// web adds the web connector and its settings section, as HOME_AGENT_WEB_ENABLED does.
 	web bool
+	// cards adds the outbox and the stage_card test tool that stages a card for the turn's reply.
+	cards       bool
+	turnTimeout time.Duration
 }
 
 // testFile is one attachment the Telegram simulator will hand out through getFile.
@@ -177,6 +181,11 @@ type conversationHarness struct {
 	updates        chan []Update
 	messages       chan sentMessage
 	documents      chan sentDocument
+	photos         chan sentPhoto
+	outbox         *outbox.Box
+	outboxDir      string
+	photoStatuses  []int
+	photoReason    string
 	edits          chan editedMessage
 	deletes        chan deletedMessage
 	answers        chan callbackAnswer
@@ -221,7 +230,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	ctx, cancel := context.WithTimeout(context.Background(), integrationTimeout)
 	t.Cleanup(cancel)
 	h := &conversationHarness{
-		t: t, ctx: ctx, updates: make(chan []Update, 20), messages: make(chan sentMessage, 100), documents: make(chan sentDocument, 20), edits: make(chan editedMessage, 100),
+		t: t, ctx: ctx, updates: make(chan []Update, 20), messages: make(chan sentMessage, 100), documents: make(chan sentDocument, 20), photos: make(chan sentPhoto, 20), edits: make(chan editedMessage, 100),
 		answers: make(chan callbackAnswer, 100), deletes: make(chan deletedMessage, 100), offsets: make(chan int64, 100), registrations: make(chan commandRegistration, 10),
 		turns: make(chan turnOutcome, 20), logs: &lockedBuffer{}, files: make(map[string]testFile),
 	}
@@ -354,10 +363,27 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		}
 		webController, webSearch = h.web, h.web
 	}
+	var cards conversation.Cards
+	var photos conversation.PhotoDeliverer
+	if options.cards {
+		h.outboxDir = filepath.Join(t.TempDir(), "outbox")
+		h.outbox, err = outbox.New(h.outboxDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := broker.Register(cardProvider{box: h.outbox}); err != nil {
+			t.Fatal(err)
+		}
+		cards, photos = h.outbox, h.client
+	}
+	turnTimeout := options.turnTimeout
+	if turnTimeout == 0 {
+		turnTimeout = 10 * time.Second
+	}
 	notices := conversation.Notices{h.approvals}
 	var scheduleController ScheduleController
 	if options.schedules != nil {
-		h.scheduler, err = schedule.NewService(schedule.Config{Zone: "Europe/Amsterdam", TickInterval: 10 * time.Millisecond, Now: options.schedules.Now},
+		h.scheduler, err = schedule.NewService(schedule.Config{Zone: "Europe/Amsterdam", TickInterval: 10 * time.Millisecond, Now: options.schedules.Now, Cards: cards, Photos: photos},
 			h.store, h.store, h.client, h.approvals, logger)
 		if err != nil {
 			t.Fatal(err)
@@ -372,7 +398,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		scheduleController = h.scheduler
 	}
 	h.conversation, err = conversation.NewService(
-		conversation.Config{TurnTimeout: 10 * time.Second, FollowUp: h.approvals, Notice: notices, Attachments: h.attachments, WebSearch: webSearch},
+		conversation.Config{TurnTimeout: turnTimeout, FollowUp: h.approvals, Notice: notices, Attachments: h.attachments, WebSearch: webSearch, Cards: cards, Photos: photos},
 		h.store, runtime, h.client, broker, h.connections, logger, integrationTelemetry{turns: h.turns},
 	)
 	if err != nil {
@@ -398,6 +424,10 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 	if filepath.Base(r.URL.Path) == "sendDocument" {
 		h.serveDocumentUpload(w, r)
+		return
+	}
+	if filepath.Base(r.URL.Path) == "sendPhoto" {
+		h.servePhotoUpload(w, r)
 		return
 	}
 	if err := r.ParseForm(); err != nil {

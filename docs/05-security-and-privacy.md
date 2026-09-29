@@ -263,6 +263,13 @@ the tool call's deadline, reads at most 10 MiB, and refuses encrypted files it
 cannot open. A pathological file can keep a parser goroutine busy after the
 deadline, but the turn still ends on time.
 
+A day card is rendered in the application and staged under
+`<data>/outbox/<principal>/{chat,schedule}/` (directories 0700, files 0600)
+only until its turn's reply is delivered, cancelled, or skipped; `/new`
+discards pending chat cards, and a sweep removes anything older than a day at
+startup and hourly. A staged card only ever goes to its own principal's chat,
+and a failed or interrupted turn never carries one.
+
 ## Prompt-injection resistance
 
 Email, Notion pages, GitHub content, web pages, search results, filenames, and

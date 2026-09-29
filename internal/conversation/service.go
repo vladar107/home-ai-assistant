@@ -13,13 +13,18 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
+	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
+	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
 const (
 	maximumMessageRunes = 4096
 	maximumReplyRunes   = 4000
 	deliveryRetryDelay  = 5 * time.Second
+
+	// CardRetention is how long a staged card may wait for its reply before a sweep removes it.
+	CardRetention = 24 * time.Hour
 )
 
 const (
@@ -87,6 +92,9 @@ func NewService(
 	if telemetry == nil {
 		return nil, fmt.Errorf("conversation telemetry is required")
 	}
+	if (config.Cards == nil) != (config.Photos == nil) {
+		return nil, fmt.Errorf("conversation cards and photos must be configured together")
+	}
 
 	return &Service{
 		config:       config,
@@ -122,6 +130,11 @@ func (s *Service) Start(ctx context.Context) error {
 			s.cancel = nil
 			s.mu.Unlock()
 			return fmt.Errorf("purge conversation attachments: %w", err)
+		}
+	}
+	if s.config.Cards != nil {
+		if err := s.config.Cards.Sweep(time.Now().Add(-CardRetention)); err != nil {
+			s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "conversation.cards.sweep_failed", "error", err)
 		}
 	}
 
@@ -253,6 +266,9 @@ func (s *Service) NewSession(ctx context.Context, principalID string) (bool, err
 			return false, err
 		}
 	}
+	if s.config.Cards != nil {
+		s.config.Cards.Discard(principalID)
+	}
 	s.mu.Lock()
 	cancel := s.inflight[principalID]
 	s.mu.Unlock()
@@ -338,7 +354,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 	}
 	defer release()
 
-	turnCtx, cancel := context.WithTimeout(ctx, s.config.TurnTimeout)
+	turnCtx, cancel := context.WithTimeout(tools.WithTurn(ctx, outbox.ChatTurn(request.ID)), s.config.TurnTimeout)
 	s.mu.Lock()
 	s.inflight[request.PrincipalID] = cancel
 	s.mu.Unlock()
@@ -412,6 +428,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 			errorKind = "timeout"
 			reply = TimeoutReply
 		case errors.Is(turnCtx.Err(), context.Canceled):
+			s.removeCard(request)
 			endTurn("cancelled", "cancelled")
 			return
 		case runErr != nil || strings.TrimSpace(result.Response) == "":
@@ -446,6 +463,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		}
 	}
 	if !saved {
+		s.removeCard(request)
 		endTurn("cancelled", "cancelled")
 		return
 	}
@@ -507,9 +525,19 @@ func (s *Service) deliver(ctx context.Context, request Request) error {
 		return nil
 	}
 	replyTo := request.TelegramMessageID
-	for _, chunk := range SplitReply(request.ResponseText) {
+	chunks := SplitReply(request.ResponseText)
+	// A failed turn's text explains the failure, so a card it staged would illustrate nothing.
+	if s.config.Cards != nil && request.ErrorKind == "" {
+		chunks, replyTo, err = SendCard(deliveryCtx, s.telemetry.ContextLogger(deliveryCtx, s.logger), s.config.Cards, s.config.Photos, request.PrincipalID, outbox.ChatTurn(request.ID), request.ChatID, replyTo, chunks)
+		if err != nil {
+			_ = s.repository.ReleaseConversationDelivery(ctx, request.ID)
+			return err
+		}
+	}
+	for _, chunk := range chunks {
 		if err := s.deliverer.SendReply(deliveryCtx, request.ChatID, replyTo, chunk); err != nil {
 			if isPermanentDeliveryError(err) {
+				s.removeCard(request)
 				return s.repository.CancelConversationDelivery(ctx, request.ID)
 			}
 			_ = s.repository.ReleaseConversationDelivery(ctx, request.ID)
@@ -521,12 +549,19 @@ func (s *Service) deliver(ctx context.Context, request Request) error {
 		_ = s.repository.ReleaseConversationDelivery(ctx, request.ID)
 		return err
 	}
+	s.removeCard(request)
 	if s.config.FollowUp != nil {
 		if err := s.config.FollowUp.AfterDelivery(deliveryCtx, request.PrincipalID, request.ChatID); err != nil && ctx.Err() == nil {
 			s.logWorkerError(ctx, request.PrincipalID, "follow_up")
 		}
 	}
 	return nil
+}
+
+func (s *Service) removeCard(request Request) {
+	if s.config.Cards != nil {
+		s.config.Cards.Remove(request.PrincipalID, outbox.ChatTurn(request.ID))
+	}
 }
 
 func isPermanentDeliveryError(err error) bool {

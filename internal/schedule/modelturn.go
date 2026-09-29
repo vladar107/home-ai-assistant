@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/outbox"
 )
 
 const (
@@ -23,7 +24,7 @@ const (
 // TurnRunner is the conversation service as a scheduled model turn sees it: one isolated,
 // read-only turn on the principal's own subscription.
 type TurnRunner interface {
-	RunScheduled(ctx context.Context, principalID, message string) (conversation.ScheduledReply, error)
+	RunScheduled(ctx context.Context, principalID, turn, message string) (conversation.ScheduledReply, error)
 }
 
 type modelTurnConfig struct {
@@ -83,7 +84,7 @@ func (m modelTurn) Run(ctx context.Context, occurrence Occurrence) (Result, erro
 	if err != nil {
 		return Result{Text: FailedText, ErrorKind: "config"}, nil
 	}
-	reply, err := m.runner.RunScheduled(ctx, occurrence.PrincipalID, scheduledMessage(occurrence, config.Prompt))
+	reply, err := m.runner.RunScheduled(ctx, occurrence.PrincipalID, outbox.ScheduledTurn(occurrence.RunID), scheduledMessage(occurrence, config.Prompt))
 	if err != nil {
 		return Result{}, err
 	}

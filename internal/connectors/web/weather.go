@@ -119,11 +119,7 @@ func (s *Service) weatherForecast(ctx context.Context, principalID string, reque
 	if !ok {
 		return errorResult(fmt.Sprintf("No place called %q was found; ask the user for a nearby town or a more precise name.", location))
 	}
-	query := url.Values{
-		"latitude":  {strconv.FormatFloat(found.Latitude, 'f', 4, 64)},
-		"longitude": {strconv.FormatFloat(found.Longitude, 'f', 4, 64)},
-		"timezone":  {"auto"},
-	}
+	query := placeQuery(found)
 	if hourly {
 		if err := s.checkHourlyDate(found, window.date); err != nil {
 			return errorResult(err.Error())
@@ -197,6 +193,14 @@ func (s *Service) checkHourlyDate(found place, date time.Time) error {
 			today.Format(time.DateOnly), last.Format(time.DateOnly), maximumHourlyDaysAhead, placeName(found))
 	}
 	return nil
+}
+
+func placeQuery(found place) url.Values {
+	return url.Values{
+		"latitude":  {strconv.FormatFloat(found.Latitude, 'f', 4, 64)},
+		"longitude": {strconv.FormatFloat(found.Longitude, 'f', 4, 64)},
+		"timezone":  {"auto"},
+	}
 }
 
 func (s *Service) geocode(ctx context.Context, name string) (place, bool, error) {
@@ -315,16 +319,10 @@ func renderForecast(found place, result forecast) (string, error) {
 }
 
 func renderHourly(found place, result forecast, window hourWindow) (string, error) {
+	if err := checkHourly(result); err != nil {
+		return "", err
+	}
 	hourly := result.Hourly
-	if hourly == nil || len(hourly.Time) == 0 {
-		return "", errWeatherMalformed
-	}
-	count := len(hourly.Time)
-	for _, length := range []int{len(hourly.Temperature), len(hourly.Apparent), len(hourly.Probability), len(hourly.Rain), len(hourly.Code), len(hourly.Wind), len(hourly.Gusts)} {
-		if length != count {
-			return "", errWeatherMalformed
-		}
-	}
 
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "Weather for %s", placeName(found))
@@ -367,6 +365,20 @@ func renderHourly(found place, result forecast, window hourWindow) (string, erro
 		return "", errWeatherMalformed
 	}
 	return strings.TrimRight(builder.String(), "\n"), nil
+}
+
+func checkHourly(result forecast) error {
+	hourly := result.Hourly
+	if hourly == nil || len(hourly.Time) == 0 {
+		return errWeatherMalformed
+	}
+	count := len(hourly.Time)
+	for _, length := range []int{len(hourly.Temperature), len(hourly.Apparent), len(hourly.Probability), len(hourly.Rain), len(hourly.Code), len(hourly.Wind), len(hourly.Gusts)} {
+		if length != count {
+			return errWeatherMalformed
+		}
+	}
+	return nil
 }
 
 func sameDay(a, b time.Time) bool {

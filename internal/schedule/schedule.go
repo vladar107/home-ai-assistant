@@ -84,6 +84,7 @@ type Repository interface {
 
 // Occurrence is what a job type's handler receives: one run of one principal's job.
 type Occurrence struct {
+	RunID        string
 	PrincipalID  string
 	JobID        string
 	JobName      string

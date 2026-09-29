@@ -139,3 +139,31 @@ func TestExecuteTimesOutWhenTheProviderOutrunsItsDeadline(t *testing.T) {
 		t.Errorf("result = %+v, want the timed-out text", result)
 	}
 }
+
+// The runtime may call a tool on a context of its own, so the turn key collected with the tools
+// is what the provider must see.
+func TestExecuteCarriesTheTurnKeyToTheProvider(t *testing.T) {
+	broker := testBroker(t)
+	seen := make(chan string, 1)
+	provider := &fakeProvider{
+		principal:   testPrincipal,
+		definitions: []Definition{testDefinition("turn_tool", 0)},
+		respond: func(ctx context.Context, _ Call) (Result, error) {
+			seen <- TurnFrom(ctx)
+			return Result{Text: "ok"}, nil
+		},
+	}
+	if err := broker.Register(provider); err != nil {
+		t.Fatal(err)
+	}
+	set, err := broker.ReadOnlyToolsFor(WithTurn(context.Background(), "turn-1"), testPrincipal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := set.Executor.Execute(context.Background(), agentruntime.ToolCall{Name: "turn_tool", Arguments: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if turn := <-seen; turn != "turn-1" {
+		t.Fatalf("provider saw turn %q, want turn-1", turn)
+	}
+}

@@ -26,6 +26,17 @@ func TestRenderMarkupRendersASafeSubset(t *testing.T) {
 		{"unbalanced fence", "```\nunclosed < block", "```\nunclosed &lt; block"},
 		{"unbalanced link", "[label](https://x", "[label](https://x"},
 		{"empty markers", "**** `` []()", "**** `` []()"},
+		{"single-line quote", "> 🚆 **On time**", "<blockquote expandable>🚆 <b>On time</b></blockquote>"},
+		{"multi-line quote", "Trains:\n> line one\n>\n> line two\nDone.", "Trains:\n<blockquote expandable>line one\n\nline two</blockquote>\nDone."},
+		{"separate quotes", "> one\n\n> two", "<blockquote expandable>one</blockquote>\n\n<blockquote expandable>two</blockquote>"},
+		{"markup inside a quote", "> **a < b** see [x](https://x/y) and `c > d`", `<blockquote expandable><b>a &lt; b</b> see <a href="https://x/y">x</a> and <code>c &gt; d</code></blockquote>`},
+		{"quote inside fenced code", "```\n> not a quote\n```\n> a quote", "<pre><code>&gt; not a quote</code></pre>\n<blockquote expandable>a quote</blockquote>"},
+		{"quote at the start", "> first\nthen text", "<blockquote expandable>first</blockquote>\nthen text"},
+		{"quote at the end", "text first\n> last\n", "text first\n<blockquote expandable>last</blockquote>\n"},
+		{"quote with CRLF", "intro\r\n> one\r\n> two\r\noutro", "intro\n<blockquote expandable>one\ntwo</blockquote>\noutro"},
+		{"greater-than mid-line", "a > b\nc >d\n>e", "a &gt; b\nc &gt;d\n&gt;e"},
+		{"empty quote", "> \ntext", "&gt; \ntext"},
+		{"bold across lines", "**a\nb**", "<b>a\nb</b>"},
 		{"plain text unchanged", "Notion writes are on.", "Notion writes are on."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

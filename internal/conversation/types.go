@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
+	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 )
 
@@ -142,10 +143,31 @@ type WebSearch interface {
 	WebSearchEnabled(ctx context.Context, principalID string) (bool, error)
 }
 
+// Cards holds the image a turn's tool staged to go out with its reply, keyed by the turn.
+type Cards interface {
+	Card(principalID, turn string) (outbox.Card, bool, error)
+	MarkSent(principalID, turn string, captioned bool) error
+	Remove(principalID, turn string)
+	// Discard removes everything the principal has staged.
+	Discard(principalID string)
+	// Sweep removes whatever was staged before the given time.
+	Sweep(before time.Time) error
+}
+
+// PhotoDeliverer sends a card as a photo, quoting like Deliverer.SendReply, with an optional
+// caption; CaptionFits reports whether a reply chunk can be that caption.
+type PhotoDeliverer interface {
+	SendPhoto(ctx context.Context, chatID, replyTo int64, png []byte, caption string) error
+	CaptionFits(caption string) bool
+}
+
 type Config struct {
 	TurnTimeout time.Duration
 	FollowUp    FollowUp
 	Notice      Notice
 	Attachments Attachments
 	WebSearch   WebSearch
+	// Cards and Photos attach a staged card to a successful reply; nil leaves replies text only.
+	Cards  Cards
+	Photos PhotoDeliverer
 }
