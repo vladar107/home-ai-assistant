@@ -21,6 +21,7 @@ const (
 	maximumEventBytes    = 4 << 20
 	maximumResponseBytes = 256 << 10
 	processStopGrace     = 2 * time.Second
+	versionTimeout       = 30 * time.Second
 )
 
 const (
@@ -93,13 +94,21 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 		}
 	}
 
-	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	// Node loads Pi's whole module graph even for --version, which took over 5 seconds on the NAS.
+	checkCtx, cancel := context.WithTimeout(ctx, versionTimeout)
 	defer cancel()
 	versionArgs := append(append([]string(nil), argsPrefix...), "--version")
 	versionCommand := exec.CommandContext(checkCtx, binary, versionArgs...)
 	versionCommand.Env = environment
 	output, err := versionCommand.Output()
 	if err != nil {
+		if errors.Is(checkCtx.Err(), context.DeadlineExceeded) {
+			return nil, fmt.Errorf("check Pi version: no answer within %s", versionTimeout)
+		}
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return nil, fmt.Errorf("check Pi version: executable exited with %d: %s", exitErr.ExitCode(), firstLine(exitErr.Stderr))
+		}
 		return nil, fmt.Errorf("check Pi version: executable did not report a version")
 	}
 	if version := strings.TrimSpace(string(output)); version != cfg.ExpectedVersion {
@@ -548,4 +557,13 @@ func preparePrivateDirectory(path, purpose string) error {
 
 func isPrivateDirectory(info os.FileInfo) bool {
 	return info.Mode()&os.ModeSymlink == 0 && info.IsDir() && info.Mode().Perm() == 0o700
+}
+
+// firstLine keeps a failed command's report to one short line for the startup error.
+func firstLine(output []byte) string {
+	line, _, _ := strings.Cut(strings.TrimSpace(string(output)), "\n")
+	if len(line) > 200 {
+		line = line[:200]
+	}
+	return line
 }
