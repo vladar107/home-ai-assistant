@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/daycard"
@@ -17,18 +18,35 @@ const (
 	maximumSummaryRunes = 160
 	maximumLabelRunes   = 40
 
+	maximumTrains          = 3
+	maximumTrainLabelRunes = 20
+	// trainTimeout bounds the train statuses well inside cardTimeout, so a slow NS turns into a
+	// refusal the model can act on rather than the broker's timeout.
+	trainTimeout = 20 * time.Second
+
 	daylightFields = "sunrise,sunset"
 	// notableGust is the gust speed, in km/h, from which a leg's tile mentions the wind.
 	notableGust = 40
 
 	noTurnText = "A card can only be attached during a conversation turn."
+
+	trainsUnavailableText = "Train status is not available for this card; call weather_card again without trains and describe the trains in the reply."
 )
 
 type cardRequest struct {
-	Title    string           `json:"title"`
-	Summary  string           `json:"summary"`
-	Language string           `json:"language"`
-	Legs     []cardLegRequest `json:"legs"`
+	Title    string             `json:"title"`
+	Summary  string             `json:"summary"`
+	Language string             `json:"language"`
+	Legs     []cardLegRequest   `json:"legs"`
+	Trains   []cardTrainRequest `json:"trains"`
+}
+
+type cardTrainRequest struct {
+	Label    string `json:"label"`
+	From     string `json:"from"`
+	To       string `json:"to"`
+	DateTime string `json:"date_time"`
+	ArriveBy bool   `json:"arrive_by"`
 }
 
 type cardLegRequest struct {
@@ -42,11 +60,24 @@ type cardLegRequest struct {
 // cardWords are the fixed words on a card; everything else on it is a number or the model's text.
 type cardWords struct {
 	feelsLike, millimetres, gusts, dry string
+	// minutesLate is a format for a train's minutes late, such as "+%d min". disruption is the
+	// milder word for a slower train, disrupted the one for a red row.
+	onTime, minutesLate, cancelled, bus, noConnection, disruption, disrupted, noTrain string
 }
 
 var cardLanguages = map[string]cardWords{
-	"en": {feelsLike: "feels like", millimetres: "mm", gusts: "gusts", dry: "dry"},
-	"ru": {feelsLike: "ощущается", millimetres: "мм", gusts: "порывы", dry: "сухо"},
+	"en": {feelsLike: "feels like", millimetres: "mm", gusts: "gusts", dry: "dry",
+		onTime: "on time", minutesLate: "+%d min", cancelled: "cancelled", bus: "bus", noConnection: "no connection",
+		disruption: "disruption", disrupted: "disrupted", noTrain: "no train"},
+	"ru": {feelsLike: "ощущается", millimetres: "мм", gusts: "порывы", dry: "сухо",
+		onTime: "вовремя", minutesLate: "+%d мин", cancelled: "отменён", bus: "автобус", noConnection: "нет пересадки",
+		disruption: "помехи", disrupted: "сбой", noTrain: "нет поезда"},
+}
+
+var trainLevels = map[daycard.TrainStatus]string{
+	daycard.TrainOnTime:    "green",
+	daycard.TrainSlower:    "yellow",
+	daycard.TrainDisrupted: "red",
 }
 
 // severity ranks conditions by how much they matter to someone out and about; a leg shows the
@@ -122,6 +153,29 @@ func (s *Service) weatherCard(ctx context.Context, principalID string, request c
 		}
 		legs = append(legs, leg)
 	}
+	if len(request.Trains) > 0 && s.trains == nil {
+		return errorResult(trainsUnavailableText), nil
+	}
+	if len(request.Trains) > maximumTrains {
+		return errorResult(fmt.Sprintf("A card shows at most %d trains.", maximumTrains)), nil
+	}
+	queries := make([]TrainQuery, 0, len(request.Trains))
+	for index, requested := range request.Trains {
+		query, err := parseCardTrain(requested)
+		if err != nil {
+			return errorResult(fmt.Sprintf("Train %d: %s", index+1, err)), nil
+		}
+		queries = append(queries, query)
+	}
+
+	var trains <-chan trainOutcome
+	if len(queries) > 0 {
+		trainCtx, cancel := context.WithTimeout(ctx, trainTimeout)
+		defer cancel()
+		outcome := make(chan trainOutcome, 1)
+		go func() { outcome <- s.trainReports(trainCtx, principalID, queries) }()
+		trains = outcome
+	}
 
 	places := map[string]place{}
 	forecasts := map[string]forecast{}
@@ -194,6 +248,47 @@ func (s *Service) weatherCard(ctx context.Context, principalID string, request c
 		fmt.Fprintf(&report, "; the tile reads %q.\n", detail)
 	}
 
+	var reports []TrainReport
+	if trains != nil {
+		outcome := <-trains
+		if outcome.err != nil {
+			var refusal *TrainRefusal
+			if !errors.As(outcome.err, &refusal) {
+				return tools.Result{}, outcome.err
+			}
+			text := fmt.Sprintf("Train %d: %s", outcome.failed+1, refusal.Text)
+			if refusal.Unavailable {
+				text = strings.TrimSuffix(text, ".") + "; call weather_card again without trains."
+			}
+			return errorResult(text), nil
+		}
+		reports = outcome.reports
+		report.WriteString("Trains:\n")
+	}
+	for index, train := range reports {
+		row := daycard.Train{
+			Label:  strings.TrimSpace(request.Trains[index].Label),
+			Status: train.Level,
+			Badge:  trainBadge(train, words),
+			Times:  trainTimes(train),
+		}
+		card.Trains = append(card.Trains, row)
+		fmt.Fprintf(&report, "- %q, %s → %s: %s; the row reads %q", row.Label, train.From, train.To, trainLevels[row.Status], row.Badge)
+		if row.Times != "" {
+			fmt.Fprintf(&report, " and %q", row.Times)
+		}
+		switch {
+		case !train.Found:
+		case train.Transfers == 0:
+			report.WriteString(", direct")
+		case train.Transfers == 1:
+			report.WriteString(", 1 transfer")
+		default:
+			fmt.Fprintf(&report, ", %d transfers", train.Transfers)
+		}
+		fmt.Fprintf(&report, "; %s.\n", train.Reason)
+	}
+
 	png, err := daycard.Render(card)
 	if err != nil {
 		return tools.Result{}, fmt.Errorf("render day card: %w", err)
@@ -201,7 +296,7 @@ func (s *Service) weatherCard(ctx context.Context, principalID string, request c
 	if err := s.cards.Stage(principalID, turn, png); err != nil {
 		return tools.Result{}, fmt.Errorf("stage day card: %w", err)
 	}
-	s.logger.InfoContext(ctx, "web.card.staged", "principal_id", principalID, "legs", len(card.Legs), "bytes", len(png))
+	s.logger.InfoContext(ctx, "web.card.staged", "principal_id", principalID, "legs", len(card.Legs), "trains", len(card.Trains), "bytes", len(png))
 	return tools.Result{Text: "The day card is ready and goes out as a photo with your reply, which becomes its caption; a later card in this turn would replace it.\n" +
 		report.String() +
 		"The card already shows these numbers: keep the reply to about 800 characters and do not repeat them."}, nil
@@ -327,4 +422,101 @@ func (r legReading) detail(words cardWords) string {
 		text += fmt.Sprintf(" · %s %.0f", words.gusts, r.gust)
 	}
 	return text
+}
+
+func parseCardTrain(requested cardTrainRequest) (TrainQuery, error) {
+	label := strings.TrimSpace(requested.Label)
+	if label == "" {
+		return TrainQuery{}, errors.New("give the row a label, such as There or Back")
+	}
+	if len([]rune(label)) > maximumTrainLabelRunes {
+		return TrainQuery{}, fmt.Errorf("label must be at most %d characters", maximumTrainLabelRunes)
+	}
+	query := TrainQuery{From: strings.TrimSpace(requested.From), To: strings.TrimSpace(requested.To), ArriveBy: requested.ArriveBy}
+	if query.From == "" || query.To == "" {
+		return TrainQuery{}, errors.New("give the from and to stations")
+	}
+	at, err := time.Parse("2006-01-02T15:04", strings.TrimSpace(requested.DateTime))
+	if err != nil {
+		return TrainQuery{}, errors.New("date_time must be Dutch local time written as YYYY-MM-DDTHH:MM, such as 2026-09-29T08:10")
+	}
+	query.At = at
+	return query, nil
+}
+
+// trainOutcome is every train's report, or the first failure in the card's order with its index.
+type trainOutcome struct {
+	reports []TrainReport
+	failed  int
+	err     error
+}
+
+// trainReports asks for every train at once, so the slowest one bounds the wait.
+func (s *Service) trainReports(ctx context.Context, principalID string, queries []TrainQuery) trainOutcome {
+	reports := make([]TrainReport, len(queries))
+	failures := make([]error, len(queries))
+	var group sync.WaitGroup
+	for index, query := range queries {
+		group.Go(func() {
+			reports[index], failures[index] = s.trains.TripStatus(ctx, principalID, query)
+		})
+	}
+	group.Wait()
+	for index, err := range failures {
+		if err != nil {
+			return trainOutcome{failed: index, err: err}
+		}
+	}
+	return trainOutcome{reports: reports}
+}
+
+// trainBadge names the dominant cause, so a row that is red for a cancelled leg never reads as a
+// few minutes late.
+func trainBadge(report TrainReport, words cardWords) string {
+	switch report.Cause {
+	case TrainCauseNoTrip:
+		return words.noTrain
+	case TrainCauseCancelled:
+		return words.cancelled
+	case TrainCauseAlternative:
+		return words.bus
+	case TrainCauseMissedConnection:
+		return words.noConnection
+	case TrainCauseDelay, TrainCauseLonger:
+		if minutes := max(report.DelayMinutes, report.ExtraMinutes); minutes > 0 {
+			return fmt.Sprintf(words.minutesLate, minutes)
+		}
+	}
+	switch report.Level {
+	case daycard.TrainOnTime:
+		return words.onTime
+	case daycard.TrainSlower:
+		return words.disruption
+	default:
+		return words.disrupted
+	}
+}
+
+// trainTimes is the live departure → arrival where NS has live times, else the planned ones; the
+// pill beside it already says how late that is, and a card row has no room for both spans. A
+// cancelled train shows its plan.
+func trainTimes(report TrainReport) string {
+	if !report.Found || report.PlannedDeparture.IsZero() || report.PlannedArrival.IsZero() {
+		return ""
+	}
+	span := func(departure, arrival time.Time) string {
+		return departure.Format("15:04") + " → " + arrival.Format("15:04")
+	}
+	planned := span(report.PlannedDeparture, report.PlannedArrival)
+	if report.Cancelled {
+		return planned
+	}
+	departure, arrival := report.PlannedDeparture, report.PlannedArrival
+	if !report.ActualDeparture.IsZero() {
+		departure = report.ActualDeparture
+	}
+	if !report.ActualArrival.IsZero() {
+		arrival = report.ActualArrival
+	}
+	return span(departure, arrival)
 }

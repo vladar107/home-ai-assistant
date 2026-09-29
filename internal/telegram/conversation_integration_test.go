@@ -26,6 +26,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/gmail"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/ns"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/web"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/delivery"
@@ -144,6 +145,8 @@ type harnessOptions struct {
 	gmail     *gmailsim.Simulator
 	// web adds the web connector and its settings section, as HOME_AGENT_WEB_ENABLED does.
 	web bool
+	// ns adds the NS connector against the given gateway, as an operator key does.
+	ns string
 	// cards adds the outbox and the stage_card test tool that stages a card for the turn's reply.
 	cards       bool
 	turnTimeout time.Duration
@@ -172,6 +175,7 @@ type conversationHarness struct {
 	nas            *nas.Service
 	gmail          *gmail.Service
 	web            *web.Service
+	ns             *ns.Service
 	approvals      *approval.Service
 	scheduler      *schedule.Service
 	auth           *codexauth.Simulator
@@ -363,6 +367,17 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		}
 		webController, webSearch = h.web, h.web
 	}
+	var nsController NSController
+	if options.ns != "" {
+		h.ns, err = ns.NewService(ns.Config{APIKey: "test-key", BaseURL: options.ns}, h.store, logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := broker.Register(h.ns); err != nil {
+			t.Fatal(err)
+		}
+		nsController = h.ns
+	}
 	var cards conversation.Cards
 	var photos conversation.PhotoDeliverer
 	if options.cards {
@@ -409,7 +424,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 			t.Fatal(err)
 		}
 	}
-	h.service, err = NewService(h.client, identities, h.store, h.conversation, h.attachments, h.connections, notionController, nasController, gmailController, webController, h.approvals, scheduleController, logger, nil)
+	h.service, err = NewService(h.client, identities, h.store, h.conversation, h.attachments, h.connections, notionController, nasController, gmailController, webController, nsController, h.approvals, scheduleController, logger, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

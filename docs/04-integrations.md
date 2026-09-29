@@ -430,6 +430,38 @@ It is not behind the web switch, since attachments and NAS files never leave
 the house. Multi-column layouts and unusual font encodings extract poorly; a
 scanned PDF with no text layer is reported as unreadable.
 
+## Trains (NS)
+
+### Current capabilities
+
+- Plan trips (`ns_trips`) between two stations, optionally via a third, at a
+  time or to arrive by one: up to five options with planned and live times,
+  delays, tracks and track changes, each leg and transfer, duration, crowding,
+  status, and messages
+- List the next departures from a station (`ns_departures`)
+- List calamities, disruptions, and engineering works (`ns_disruptions`),
+  nationally or for one station, with cause, advice, and expected end; results
+  are capped so they fit the broker's result limit
+- Scheduled prompts may use all three, since each is a read
+
+Stations are resolved in Go from NS's station list, refreshed at most daily, so
+a user can say "Utrecht" or "AMFS"; an ambiguous name returns candidates to the
+model. Times are Europe/Amsterdam. Results are cached for 30 seconds to protect
+the daily quota.
+
+### Access
+
+The household shares one NS API Portal subscription key (product "Ns-App");
+train data is public and nothing a user asks is tied to their identity at NS.
+The key is `HOME_AGENT_NS_API_KEY` in the local `.env`, or
+`HOME_AGENT_NS_API_KEY_FILE` for the Docker secret in production. While a key is
+configured, "Trains (NS)" in `/settings` is on for every user until they turn
+it off; without a key the section is hidden and no user has the tools. Turning
+it off saves an opt-out integration row without a credential; turning it back on
+deletes the row. The tools are core Go tools behind the broker and reach only
+NS's fixed gateway host through a dedicated client that refuses redirects. See
+[plan 0027](plans/0027-ns-train-information.md).
+
 ## Monitoring
 
 The agent exposes application metrics to Prometheus and queries health through

@@ -67,6 +67,10 @@ if [[ ${HOME_AGENT_GMAIL_ENABLED:-false} == true ]]; then
   compose_files+=(-f compose.app.gmail.yaml)
   compose_inputs+=(deploy/compose.app.gmail.yaml)
 fi
+if [[ ${HOME_AGENT_NS_ENABLED:-false} == true ]]; then
+  compose_files+=(-f compose.app.ns.yaml)
+  compose_inputs+=(deploy/compose.app.ns.yaml)
+fi
 
 users_source=${HOME_AGENT_TELEGRAM_USERS_SOURCE:-deploy/telegram-users.json}
 if [[ $users_source = /* ]]; then

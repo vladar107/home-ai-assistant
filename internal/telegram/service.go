@@ -109,6 +109,7 @@ type Service struct {
 	nas          NASController
 	gmail        GmailController
 	web          WebController
+	ns           NSController
 	approvals    ApprovalController
 	schedules    ScheduleController
 	sections     []settingsSection
@@ -133,6 +134,7 @@ func NewService(
 	nasFiles NASController,
 	gmailAccess GmailController,
 	webAccess WebController,
+	nsTrains NSController,
 	approvals ApprovalController,
 	schedules ScheduleController,
 	logger *slog.Logger,
@@ -162,6 +164,7 @@ func NewService(
 		nas:          nasFiles,
 		gmail:        gmailAccess,
 		web:          webAccess,
+		ns:           nsTrains,
 		approvals:    approvals,
 		schedules:    schedules,
 		logger:       logger,
@@ -187,6 +190,9 @@ func NewService(
 	}
 	if webAccess != nil {
 		service.sections = append(service.sections, webSection{web: webAccess, logger: logger, telemetry: service.telemetry})
+	}
+	if nsTrains != nil {
+		service.sections = append(service.sections, nsSection{ns: nsTrains, logger: logger, telemetry: service.telemetry})
 	}
 	return service, nil
 }
@@ -731,6 +737,15 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 			}
 			if status.Enabled {
 				reply += " " + WebPrivacyLine
+			}
+		}
+		if s.ns != nil {
+			status, err := s.ns.Status(ctx, principalID)
+			if err != nil {
+				return "", nil, err
+			}
+			if status.Enabled {
+				reply += " " + NSPrivacyLine
 			}
 		}
 		return reply, nil, nil

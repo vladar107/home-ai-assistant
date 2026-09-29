@@ -1,0 +1,15 @@
+{
+ "timestamp": "2026-10-04T16:13:02+0000",
+ "path": "/api/v3/trips",
+ "requestId": "d05555a2-f45e-4c42-9afa-ac2f67a6b319",
+ "code": 400,
+ "message": "Bad Request",
+ "errors": [
+  {
+   "message": "The planned journey is too far in the past or too far in the future. Unfortunately we are unable to provide travel advice. Please try a different date.",
+   "arguments": [],
+   "type": "INVALID_TRAVELADVICE_DATE",
+   "lang": "en"
+  }
+ ]
+}

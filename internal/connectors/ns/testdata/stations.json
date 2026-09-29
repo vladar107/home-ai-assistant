@@ -1,0 +1,457 @@
+{
+ "payload": [
+  {
+   "UICCode": "8001063",
+   "code": "ABG",
+   "land": "D",
+   "namen": {
+    "lang": "Hamburg-Bergedorf",
+    "middel": "Hamb.-Bergedorf",
+    "kort": "Bergedorf"
+   },
+   "synoniemen": [],
+   "stationType": "INTERCITY_STATION"
+  },
+  {
+   "UICCode": "8008094",
+   "code": "DUSSEL",
+   "land": "D",
+   "namen": {
+    "lang": "Düsseldorf Hbf",
+    "middel": "Düsseldorf Hbf",
+    "kort": "Düsseldrf"
+   },
+   "synoniemen": [
+    "Dusseldorf",
+    "Dusseldorf Hbf"
+   ],
+   "stationType": "MEGA_STATION"
+  },
+  {
+   "UICCode": "8015032",
+   "code": "KKD",
+   "land": "D",
+   "namen": {
+    "lang": "Köln Messe/Deutz",
+    "middel": "Köln Messe/Deutz",
+    "kort": "Köln Messe"
+   },
+   "synoniemen": [
+    "Koln Deutz"
+   ],
+   "stationType": "MEGA_STATION"
+  },
+  {
+   "UICCode": "8400054",
+   "code": "AMFS",
+   "land": "NL",
+   "namen": {
+    "lang": "Amersfoort Schothorst",
+    "middel": "Schothorst",
+    "kort": "Schothorst"
+   },
+   "synoniemen": [],
+   "stationType": "STOPTREIN_STATION"
+  },
+  {
+   "UICCode": "8400055",
+   "code": "AMF",
+   "land": "NL",
+   "namen": {
+    "lang": "Amersfoort Centraal",
+    "middel": "Amersfoort C.",
+    "kort": "Amersfrt C"
+   },
+   "synoniemen": [
+    "Amersfoort CS",
+    "Amersfoort"
+   ],
+   "stationType": "KNOOPPUNT_INTERCITY_STATION"
+  },
+  {
+   "UICCode": "8400056",
+   "code": "RAI",
+   "land": "NL",
+   "namen": {
+    "lang": "Amsterdam RAI",
+    "middel": "RAI",
+    "kort": "RAI"
+   },
+   "synoniemen": [],
+   "stationType": "STOPTREIN_STATION"
+  },
+  {
+   "UICCode": "8400057",
+   "code": "ASA",
+   "land": "NL",
+   "namen": {
+    "lang": "Amsterdam Amstel",
+    "middel": "Amstel",
+    "kort": "Amstel"
+   },
+   "synoniemen": [],
+   "stationType": "INTERCITY_STATION"
+  },
+  {
+   "UICCode": "8400058",
+   "code": "ASD",
+   "land": "NL",
+   "namen": {
+    "lang": "Amsterdam Centraal",
+    "middel": "Amsterdam C.",
+    "kort": "Amsterdm C"
+   },
+   "synoniemen": [
+    "Amsterdam CS",
+    "Amsterdam"
+   ],
+   "stationType": "MEGA_STATION"
+  },
+  {
+   "UICCode": "8400059",
+   "code": "ASS",
+   "land": "NL",
+   "namen": {
+    "lang": "Amsterdam Sloterdijk",
+    "middel": "Sloterdijk",
+    "kort": "Sloterdijk"
+   },
+   "synoniemen": [],
+   "stationType": "KNOOPPUNT_INTERCITY_STATION"
+  },
+  {
+   "UICCode": "8400060",
+   "code": "ASDM",
+   "land": "NL",
+   "namen": {
+    "lang": "Amsterdam Muiderpoort",
+    "middel": "Muiderpoort",
+    "kort": "Muiderprt"
+   },
+   "synoniemen": [],
+   "stationType": "STOPTREIN_STATION"
+  },
+  {
+   "UICCode": "8400061",
+   "code": "ASDZ",
+   "land": "NL",
+   "namen": {
+    "lang": "Amsterdam Zuid",
+    "middel": "Amsterdam Zuid",
+    "kort": "Amsterdm Z"
+   },
+   "synoniemen": [],
+   "stationType": "INTERCITY_STATION"
+  },
+  {
+   "UICCode": "8400074",
+   "code": "ASB",
+   "land": "NL",
+   "namen": {
+    "lang": "Amsterdam Bijlmer ArenA",
+    "middel": "Bijlmer ArenA",
+    "kort": "Bijlmer A"
+   },
+   "synoniemen": [],
+   "stationType": "KNOOPPUNT_STOPTREIN_STATION"
+  },
+  {
+   "UICCode": "8400079",
+   "code": "ASDL",
+   "land": "NL",
+   "namen": {
+    "lang": "Amsterdam Lelylaan",
+    "middel": "Lelylaan",
+    "kort": "Lelylaan"
+   },
+   "synoniemen": [],
+   "stationType": "STOPTREIN_STATION"
+  },
+  {
+   "UICCode": "8400131",
+   "code": "BD",
+   "land": "NL",
+   "namen": {
+    "lang": "Breda",
+    "middel": "Breda",
+    "kort": "Breda"
+   },
+   "synoniemen": [],
+   "stationType": "KNOOPPUNT_INTERCITY_STATION"
+  },
+  {
+   "UICCode": "8400180",
+   "code": "DDR",
+   "land": "NL",
+   "namen": {
+    "lang": "Dordrecht",
+    "middel": "Dordrecht",
+    "kort": "Dordrecht"
+   },
+   "synoniemen": [],
+   "stationType": "KNOOPPUNT_INTERCITY_STATION"
+  },
+  {
+   "UICCode": "8400231",
+   "code": "ASHD",
+   "land": "NL",
+   "namen": {
+    "lang": "Amsterdam Holendrecht",
+    "middel": "Holendrecht",
+    "kort": "Holendrcht"
+   },
+   "synoniemen": [],
+   "stationType": "STOPTREIN_STATION"
+  },
+  {
+   "UICCode": "8400235",
+   "code": "ASSP",
+   "land": "NL",
+   "namen": {
+    "lang": "Amsterdam Science Park",
+    "middel": "Science Park",
+    "kort": "Scienceprk"
+   },
+   "synoniemen": [],
+   "stationType": "STOPTREIN_STATION"
+  },
+  {
+   "UICCode": "8400278",
+   "code": "GVM",
+   "land": "NL",
+   "namen": {
+    "lang": "Den Haag Mariahoeve",
+    "middel": "Mariahoeve",
+    "kort": "Mariahoeve"
+   },
+   "synoniemen": [],
+   "stationType": "STOPTREIN_STATION"
+  },
+  {
+   "UICCode": "8400279",
+   "code": "GVMW",
+   "land": "NL",
+   "namen": {
+    "lang": "Den Haag Moerwijk",
+    "middel": "Moerwijk",
+    "kort": "Moerwijk"
+   },
+   "synoniemen": [],
+   "stationType": "STOPTREIN_STATION"
+  },
+  {
+   "UICCode": "8400280",
+   "code": "GV",
+   "land": "NL",
+   "namen": {
+    "lang": "Den Haag HS",
+    "middel": "Den Haag HS",
+    "kort": "Dn Haag HS"
+   },
+   "synoniemen": [
+    "Den Haag Hollands Spoor",
+    "Hollands Spoor"
+   ],
+   "stationType": "KNOOPPUNT_INTERCITY_STATION"
+  },
+  {
+   "UICCode": "8400282",
+   "code": "GVC",
+   "land": "NL",
+   "namen": {
+    "lang": "Den Haag Centraal",
+    "middel": "Den Haag C.",
+    "kort": "Den Haag C"
+   },
+   "synoniemen": [
+    "Den Haag CS",
+    "Den Haag",
+    "'s-Gravenhage"
+   ],
+   "stationType": "MEGA_STATION"
+  },
+  {
+   "UICCode": "8400319",
+   "code": "HT",
+   "land": "NL",
+   "namen": {
+    "lang": "'s-Hertogenbosch",
+    "middel": "'s-Hertogenbosch",
+    "kort": "Den Bosch"
+   },
+   "synoniemen": [
+    "Den Bosch",
+    "Hertogenbosch ('s)"
+   ],
+   "stationType": "KNOOPPUNT_INTERCITY_STATION"
+  },
+  {
+   "UICCode": "8400320",
+   "code": "HTO",
+   "land": "NL",
+   "namen": {
+    "lang": "'s-Hertogenbosch Oost",
+    "middel": "'s-Hertogenb. O.",
+    "kort": "Dn Bosch O"
+   },
+   "synoniemen": [
+    "Hertogenbosch Oost ('s)",
+    "Den Bosch Oost"
+   ],
+   "stationType": "STOPTREIN_STATION"
+  },
+  {
+   "UICCode": "8400428",
+   "code": "MRB",
+   "land": "NL",
+   "namen": {
+    "lang": "Mariënberg",
+    "middel": "Mariënberg",
+    "kort": "Mariënberg"
+   },
+   "synoniemen": [
+    "Marienberg"
+   ],
+   "stationType": "KNOOPPUNT_SNELTREIN_STATION"
+  },
+  {
+   "UICCode": "8400606",
+   "code": "UTVR",
+   "land": "NL",
+   "namen": {
+    "lang": "Utrecht Vaartsche Rijn",
+    "middel": "Vaartsche Rijn",
+    "kort": "VaartscheR"
+   },
+   "synoniemen": [],
+   "stationType": "KNOOPPUNT_STOPTREIN_STATION"
+  },
+  {
+   "UICCode": "8400607",
+   "code": "UTLR",
+   "land": "NL",
+   "namen": {
+    "lang": "Utrecht Leidsche Rijn",
+    "middel": "Leidsche Rijn",
+    "kort": "LeidscheRn"
+   },
+   "synoniemen": [],
+   "stationType": "STOPTREIN_STATION"
+  },
+  {
+   "UICCode": "8400613",
+   "code": "UTZL",
+   "land": "NL",
+   "namen": {
+    "lang": "Utrecht Zuilen",
+    "middel": "Zuilen",
+    "kort": "Zuilen"
+   },
+   "synoniemen": [],
+   "stationType": "STOPTREIN_STATION"
+  },
+  {
+   "UICCode": "8400614",
+   "code": "UTT",
+   "land": "NL",
+   "namen": {
+    "lang": "Utrecht Terwijde",
+    "middel": "Terwijde",
+    "kort": "Terwijde"
+   },
+   "synoniemen": [],
+   "stationType": "STOPTREIN_STATION"
+  },
+  {
+   "UICCode": "8400620",
+   "code": "UTO",
+   "land": "NL",
+   "namen": {
+    "lang": "Utrecht Overvecht",
+    "middel": "Overvecht",
+    "kort": "Overvecht"
+   },
+   "synoniemen": [],
+   "stationType": "KNOOPPUNT_STOPTREIN_STATION"
+  },
+  {
+   "UICCode": "8400621",
+   "code": "UT",
+   "land": "NL",
+   "namen": {
+    "lang": "Utrecht Centraal",
+    "middel": "Utrecht C.",
+    "kort": "Utrecht C"
+   },
+   "synoniemen": [
+    "Utrecht CS",
+    "Utrecht"
+   ],
+   "stationType": "MEGA_STATION"
+  },
+  {
+   "UICCode": "8400623",
+   "code": "UTLN",
+   "land": "NL",
+   "namen": {
+    "lang": "Utrecht Lunetten",
+    "middel": "Lunetten",
+    "kort": "Lunetten"
+   },
+   "synoniemen": [],
+   "stationType": "STOPTREIN_STATION"
+  },
+  {
+   "UICCode": "8400624",
+   "code": "UTM",
+   "land": "NL",
+   "namen": {
+    "lang": "Utrecht Maliebaan",
+    "middel": "Maliebaan",
+    "kort": "Maliebaan"
+   },
+   "synoniemen": [
+    "Spoorwegmuseum"
+   ],
+   "stationType": "STOPTREIN_STATION"
+  },
+  {
+   "UICCode": "8400638",
+   "code": "FWD",
+   "land": "NL",
+   "namen": {
+    "lang": "Feanwâlden",
+    "middel": "Feanwâlden",
+    "kort": "Feanwâlden"
+   },
+   "synoniemen": [
+    "Feanwalden"
+   ],
+   "stationType": "STOPTREIN_STATION"
+  },
+  {
+   "UICCode": "8400747",
+   "code": "ZL",
+   "land": "NL",
+   "namen": {
+    "lang": "Zwolle",
+    "middel": "Zwolle",
+    "kort": "Zwolle"
+   },
+   "synoniemen": [],
+   "stationType": "KNOOPPUNT_INTERCITY_STATION"
+  },
+  {
+   "UICCode": "8013552",
+   "code": "HANN",
+   "land": "D",
+   "namen": {
+    "lang": "Hannover Hbf",
+    "middel": "Hannover Hbf",
+    "kort": "Hannover H"
+   },
+   "synoniemen": [],
+   "stationType": "MEGA_STATION"
+  }
+ ]
+}

@@ -319,6 +319,15 @@ fail. It sends no cookies, uses a fixed user agent, stops after 15 seconds, and
 caps downloads at 2 MiB of text or 10 MiB for a PDF. Pages are fetched from the
 home connection, so a site sees the household's public address.
 
+The NS tools (`ns_trips`, `ns_departures`, `ns_disruptions`) do not take
+addresses from the model. They use a dedicated client fixed to NS's gateway
+host, with redirects refused, no proxy, a 15-second timeout, and a 4 MiB body
+limit. The operator's subscription key travels only in a request header; it is
+never placed in a URL or logged, and error bodies are reduced to a status
+sentence. The key is shared by the household, and the stations and times a user
+asks about reach NS without their identity, which `/privacy` states while trains
+are on for that user.
+
 ## Logging and privacy
 
 Safe default audit fields:

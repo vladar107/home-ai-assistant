@@ -36,6 +36,7 @@ plan that links back to the earlier record.
 | 0024 | [Durable scheduler and scheduled model turns](0024-scheduled-model-turns.md) | in-progress |
 | 0025 | [Per-user read-only Gmail connection](0025-gmail-read-connection.md) | in-progress |
 | 0026 | [Web search, page reading, weather, and PDF text](0026-web-weather-and-pdf-tools.md) | done |
+| 0027 | [NS train information: trips, departures, and disruptions](0027-ns-train-information.md) | in-progress |
 | 0028 | [A visual day card with the reply as its caption](0028-day-card.md) | in-progress |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`

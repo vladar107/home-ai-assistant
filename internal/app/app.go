@@ -18,8 +18,10 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/gmail"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/ns"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/web"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/daycard"
 	"github.com/vladar107/home-ai-assistant/internal/delivery"
 	"github.com/vladar107/home-ai-assistant/internal/health"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
@@ -50,6 +52,7 @@ type App struct {
 	nas          *nas.Service
 	gmail        *gmail.Service
 	web          *web.Service
+	ns           *ns.Service
 	telegram     *telegram.Service
 	telemetry    *observability.Telemetry
 	ready        atomic.Bool
@@ -327,9 +330,18 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("initialize scheduler: %w", err)
 		}
+		var nsService *ns.Service
+		var trains web.Trains
+		if a.cfg.NS.Enabled() {
+			nsService, err = ns.NewService(ns.Config{APIKey: a.cfg.NS.APIKey}, a.store, a.logger)
+			if err != nil {
+				return fmt.Errorf("initialize NS connector: %w", err)
+			}
+			trains = nsTrains{nsService}
+		}
 		var webSearch conversation.WebSearch
 		if a.cfg.Web.Enabled {
-			webService, err := web.NewService(web.Config{WeatherHome: a.cfg.Web.WeatherHome, Cards: cards}, a.store, a.logger)
+			webService, err := web.NewService(web.Config{WeatherHome: a.cfg.Web.WeatherHome, Cards: cards, Trains: trains}, a.store, a.logger)
 			if err != nil {
 				return fmt.Errorf("initialize web connector: %w", err)
 			}
@@ -447,6 +459,15 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			}
 			a.gmail = gmailService
 		}
+		if nsService != nil {
+			if err := a.registry.Register(nsService); err != nil {
+				return err
+			}
+			if err := broker.Register(nsService); err != nil {
+				return err
+			}
+			a.ns = nsService
+		}
 	}
 
 	identities, err := identity.NewService(a.store, configured)
@@ -468,6 +489,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	var nasController telegram.NASController
 	var gmailController telegram.GmailController
 	var webController telegram.WebController
+	var nsController telegram.NSController
 	var approvalController telegram.ApprovalController
 	var scheduleController telegram.ScheduleController
 	if a.conversation != nil {
@@ -489,7 +511,10 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	if a.web != nil {
 		webController = a.web
 	}
-	service, err := telegram.NewService(client, identities, a.store, conversationController, attachmentStore, connectionController, notionController, nasController, gmailController, webController, approvalController, scheduleController, a.logger, a.telemetry)
+	if a.ns != nil {
+		nsController = a.ns
+	}
+	service, err := telegram.NewService(client, identities, a.store, conversationController, attachmentStore, connectionController, notionController, nasController, gmailController, webController, nsController, approvalController, scheduleController, a.logger, a.telemetry)
 	if err != nil {
 		return fmt.Errorf("initialize Telegram service: %w", err)
 	}
@@ -610,4 +635,62 @@ func nasRoots(configured config.NASRoots) []nas.PrincipalRoots {
 		})
 	}
 	return roots
+}
+
+// nsTrains lets the web connector's day card ask the NS connector for train statuses, so neither
+// connector depends on the other.
+type nsTrains struct {
+	service *ns.Service
+}
+
+var trainLevels = map[ns.Level]daycard.TrainStatus{
+	ns.LevelOnTime:    daycard.TrainOnTime,
+	ns.LevelSlower:    daycard.TrainSlower,
+	ns.LevelDisrupted: daycard.TrainDisrupted,
+}
+
+var trainCauses = map[ns.Cause]web.TrainCause{
+	ns.CauseNone:             web.TrainCauseNone,
+	ns.CauseDelay:            web.TrainCauseDelay,
+	ns.CauseLonger:           web.TrainCauseLonger,
+	ns.CauseCancelled:        web.TrainCauseCancelled,
+	ns.CauseAlternative:      web.TrainCauseAlternative,
+	ns.CauseMissedConnection: web.TrainCauseMissedConnection,
+	ns.CauseDisruption:       web.TrainCauseDisruption,
+	ns.CauseNoTrip:           web.TrainCauseNoTrip,
+}
+
+func (t nsTrains) Enabled(ctx context.Context, principalID string) (bool, error) {
+	status, err := t.service.Status(ctx, principalID)
+	if err != nil {
+		return false, err
+	}
+	return status.Enabled, nil
+}
+
+func (t nsTrains) TripStatus(ctx context.Context, principalID string, query web.TrainQuery) (web.TrainReport, error) {
+	status, err := t.service.TripStatus(ctx, principalID, ns.StatusQuery{From: query.From, To: query.To, At: query.At, ArriveBy: query.ArriveBy})
+	if err != nil {
+		var refusal *ns.RefusalError
+		if errors.As(err, &refusal) {
+			return web.TrainReport{}, &web.TrainRefusal{Text: refusal.Text, Unavailable: refusal.Unavailable}
+		}
+		return web.TrainReport{}, err
+	}
+	return web.TrainReport{
+		Level:            trainLevels[status.Level],
+		Cause:            trainCauses[status.Cause],
+		From:             status.From,
+		To:               status.To,
+		Found:            status.Found,
+		Cancelled:        status.Cancelled,
+		PlannedDeparture: status.PlannedDeparture,
+		ActualDeparture:  status.ActualDeparture,
+		PlannedArrival:   status.PlannedArrival,
+		ActualArrival:    status.ActualArrival,
+		DelayMinutes:     status.DelayMinutes,
+		ExtraMinutes:     status.ExtraMinutes,
+		Transfers:        status.Transfers,
+		Reason:           status.Reason,
+	}, nil
 }

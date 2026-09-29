@@ -19,7 +19,8 @@ const (
 	// toolTimeout leaves the guarded client's own 15-second limit room to report a slow site
 	// before the broker gives up on the call, and covers the two requests a forecast makes.
 	toolTimeout = 35 * time.Second
-	// cardTimeout covers a geocoding and a forecast request for each of up to four legs.
+	// cardTimeout covers a geocoding and a forecast request for each of up to four legs; the
+	// train statuses are asked for alongside them under their own shorter limit.
 	cardTimeout = 45 * time.Second
 
 	DisabledText = "Web access is off for this user; they can turn it on in /settings."
@@ -35,23 +36,42 @@ const cardGuidance = " weather_card draws the day's weather as a picture that go
 	"It fetches every number itself; you give the title, a one-line summary, and the legs, and set language to the language of your reply. " +
 	"When a card is attached, keep the reply to about 800 characters so it fits as the photo's caption, and never repeat the per-leg numbers the card already shows; give the advice they lead to instead."
 
-var cardDefinition = tools.Definition{
-	Name:        toolCard,
-	Description: "Draw a day card, a weather picture sent as a photo with your reply: a header with the first leg's first hour and one tile per leg with its worst weather, average temperature, total precipitation, and strong gusts, all taken from the forecast.",
-	Risk:        tools.RiskRead,
-	Timeout:     cardTimeout,
-	InputSchema: json.RawMessage(`{"type":"object","properties":{` +
-		`"title":{"type":"string","maxLength":100,"description":"The card's top line, such as the day and route: Mon 28.09 · Amersfoort Schothorst → Utrecht."},` +
-		`"summary":{"type":"string","maxLength":160,"description":"One sentence about the day's weather in the reply's language, such as Rain in the morning, drizzle in the evening."},` +
-		`"language":{"type":"string","enum":["en","ru"],"description":"Language of the card's fixed words (feels like, mm, gusts, dry); default en."},` +
-		`"legs":{"type":"array","minItems":1,"maxItems":4,"description":"The day's legs in order; the header shows the first leg's first hour.","items":{"type":"object","properties":{` +
-		`"label":{"type":"string","maxLength":40,"description":"Tile heading; default the place and hours, such as Utrecht · 09–17."},` +
-		`"place":{"type":"string","description":"A town or city name, optionally with its country; empty means the household's home."},` +
-		`"date":{"type":"string","pattern":"^[0-9]{4}-[0-9]{2}-[0-9]{2}$","description":"The leg's day in the place's local calendar, YYYY-MM-DD, from today up to 15 days ahead."},` +
-		`"from_hour":{"type":"integer","minimum":0,"maximum":23,"description":"First local hour of the leg, inclusive."},` +
-		`"to_hour":{"type":"integer","minimum":0,"maximum":23,"description":"Last local hour of the leg, inclusive."}},` +
-		`"required":["date","from_hour","to_hour"],"additionalProperties":false}}},` +
-		`"required":["title","summary","legs"],"additionalProperties":false}`),
+const trainsGuidance = " When ns_trips is offered and the day involves train travel, give weather_card a trains entry for each travel direction, such as there and back, with the stations and the time the user leaves or, with arrive_by, must arrive; the card then shows each train's status, still in one weather_card per turn."
+
+const cardLegsSchema = `"legs":{"type":"array","minItems":1,"maxItems":4,"description":"The day's legs in order; the header shows the first leg's first hour.","items":{"type":"object","properties":{` +
+	`"label":{"type":"string","maxLength":40,"description":"Tile heading; default the place and hours, such as Utrecht · 09–17."},` +
+	`"place":{"type":"string","description":"A town or city name, optionally with its country; empty means the household's home."},` +
+	`"date":{"type":"string","pattern":"^[0-9]{4}-[0-9]{2}-[0-9]{2}$","description":"The leg's day in the place's local calendar, YYYY-MM-DD, from today up to 15 days ahead."},` +
+	`"from_hour":{"type":"integer","minimum":0,"maximum":23,"description":"First local hour of the leg, inclusive."},` +
+	`"to_hour":{"type":"integer","minimum":0,"maximum":23,"description":"Last local hour of the leg, inclusive."}},` +
+	`"required":["date","from_hour","to_hour"],"additionalProperties":false}}`
+
+const cardTrainsSchema = `"trains":{"type":"array","maxItems":3,"description":"Optional NS train status rows, one per travel direction; the status and times come from NS.","items":{"type":"object","properties":{` +
+	`"label":{"type":"string","maxLength":20,"description":"Row heading in the reply's language, such as There or Back."},` +
+	`"from":{"type":"string","description":"Departure station name or code, such as Amersfoort Schothorst."},` +
+	`"to":{"type":"string","description":"Arrival station name or code, such as Utrecht."},` +
+	`"date_time":{"type":"string","pattern":"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}$","description":"Dutch local time as YYYY-MM-DDTHH:MM: the earliest departure, or with arrive_by the latest arrival."},` +
+	`"arrive_by":{"type":"boolean","description":"True to treat date_time as the latest arrival."}},` +
+	`"required":["label","from","to","date_time"],"additionalProperties":false}}`
+
+// cardDefinition lists trains only when the card can ask for the principal's train statuses.
+func cardDefinition(trains bool) tools.Definition {
+	properties := cardLegsSchema
+	if trains {
+		properties += "," + cardTrainsSchema
+	}
+	return tools.Definition{
+		Name:        toolCard,
+		Description: "Draw a day card, a weather picture sent as a photo with your reply: a header with the first leg's first hour and one tile per leg with its worst weather, average temperature, total precipitation, and strong gusts, all taken from the forecast.",
+		Risk:        tools.RiskRead,
+		Timeout:     cardTimeout,
+		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
+			`"title":{"type":"string","maxLength":100,"description":"The card's top line, such as the day and route: Mon 28.09 · Amersfoort Schothorst → Utrecht."},` +
+			`"summary":{"type":"string","maxLength":160,"description":"One sentence about the day's weather in the reply's language, such as Rain in the morning, drizzle in the evening."},` +
+			`"language":{"type":"string","enum":["en","ru"],"description":"Language of the card's fixed words (feels like, mm, gusts, dry, train statuses); default en."},` +
+			properties + `},` +
+			`"required":["title","summary","legs"],"additionalProperties":false}`),
+	}
 }
 
 var definitions = []tools.Definition{
@@ -95,9 +115,19 @@ func (s *Service) Contribute(ctx context.Context, principalID string) (tools.Con
 	if s.cards == nil {
 		return tools.Contribution{Guidance: s.guidance(), Definitions: definitions}, nil
 	}
+	trains := false
+	if s.trains != nil {
+		if trains, err = s.trains.Enabled(ctx, principalID); err != nil {
+			return tools.Contribution{}, err
+		}
+	}
+	guidance := s.guidance() + cardGuidance
+	if trains {
+		guidance += trainsGuidance
+	}
 	return tools.Contribution{
-		Guidance:    s.guidance() + cardGuidance,
-		Definitions: append(slices.Clone(definitions), cardDefinition),
+		Guidance:    guidance,
+		Definitions: append(slices.Clone(definitions), cardDefinition(trains)),
 	}, nil
 }
 

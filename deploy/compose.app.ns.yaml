@@ -1,0 +1,13 @@
+# NS train information. Applied on top of compose.app.yaml only when HOME_AGENT_NS_ENABLED is true,
+# so a deployment without the feature needs no NS API key on the NAS.
+services:
+  home-agent:
+    environment:
+      HOME_AGENT_NS_API_KEY_FILE: /run/secrets/ns-api-key
+    secrets:
+      - source: ns-api-key
+        target: ns-api-key
+
+secrets:
+  ns-api-key:
+    file: ${HOME_AGENT_SECRETS_PATH:?set HOME_AGENT_SECRETS_PATH}/ns-api-key

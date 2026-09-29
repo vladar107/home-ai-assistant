@@ -56,8 +56,8 @@ exactly as today.
   weather code already requests. This avoids adding `is_day` to the hourly
   fields and leaves the `weather_forecast` request unchanged.
 
-  The layout is fixed: a 1,280 px wide image, a header, and 1–4 leg tiles. No
-  text is smaller than 28 px, because Telegram recompresses photos to JPEG. A
+  The layout is fixed: a 1,080 px wide image, a header, and 1–4 leg tiles. No
+  text is smaller than 36 px, because Telegram recompresses photos to JPEG. A
   gradient chosen from the header condition (clear, cloudy, rain, snow,
   storm) keeps text legible whatever the Telegram theme. Any text that does
   not fit is truncated with an ellipsis, never overflowing.
@@ -195,7 +195,7 @@ exactly as today.
 - `gofmt -l`, `go mod tidy -diff`, `go vet ./...`,
   `go build -buildvcs=false ./...`, `go test -race ./...`,
   `scripts/check-plans`.
-- Renderer: every sample decodes as a 1,280 px wide PNG; long labels are
+- Renderer: every sample decodes as a 1,080 px wide PNG; long labels are
   truncated; every WMO code maps to an icon. The operator reviews the sample
   PNGs before the tool is built.
 - Against the fake Telegram and the Open-Meteo simulator:
@@ -226,6 +226,54 @@ exactly as today.
   [0027](0027-ns-train-information.md), arrives as one photo message
   resembling the mockup, on both the phone and the desktop client.
 
+## Revision after the first live card
+
+2026-09-29, the first scheduled card on the operator's phone:
+
+- **Text too small to read.** The phone showed the 1,280 px image at about
+  45%, so 28 px text became unreadable.
+- **Text cut off.** The summary and the leg labels
+  ("Amersfoort → Utrecht…") were cut.
+- **Train status not visible at a glance.** The status sat as prose in the
+  caption, although the mockup's coloured status pills were the point.
+
+Changes:
+
+- **Readable at phone size.** The card becomes 1,080 px wide with a height
+  that follows the content, and no text is smaller than 36 px.
+  - The summary spans the full width under the header on up to two lines.
+  - Each tile's label takes two lines: the place, then the hours.
+  - The header label and the feels-like text grow to match.
+- **Train status on the card, computed from NS.** Telegram colours every
+  quote in the bot's accent colour, so colour can only live in the image.
+  - `weather_card` takes an optional `trains` list of up to three
+    directions. Each has a `label`, `from`, `to`, `date_time`, and
+    `arrive_by`.
+  - For each direction the NS connector plans the trip and picks the one the
+    user would take: the first trip departing at or after the requested time,
+    or, with `arrive_by`, the last one arriving by it.
+  - It classifies that trip:
+    - **red:** cancelled or part-cancelled, alternative transport, not
+      reachable, no trip found, or 15 or more minutes late;
+    - **yellow:** 3–14 minutes late, a journey 5 or more minutes longer than
+      planned, or a trip status other than NORMAL;
+    - **green:** otherwise.
+  - The card draws one row per direction:
+    - a coloured status pill with "on time", "+12 min", or "cancelled" in the
+      card's language;
+    - the label;
+    - the departure → arrival, live where NS has live times and planned
+      otherwise (a cancelled train shows its plan), since the pill already
+      says how late it is.
+  - The status text and times come from the connector, never from the model.
+  - The web connector reaches this through a narrow `Trains` interface that
+    `app.go` fills with the NS service. The service applies the principal's
+    own NS switch; the list is refused, not ignored, when NS is off for them
+    or not configured.
+  - The tool's result lists each row's status and reason, so the caption can
+    explain it. The guidance heads each caption quote with the matching
+    🟢/🟡/🔴 emoji.
+
 ## Risks and open questions
 
 - The Telegram caption limit of 1,024 characters is tight. When the model
@@ -236,6 +284,5 @@ exactly as today.
 - Font and icon assets add about 1 MB to the binary.
 - The dominant-icon rule per leg (most severe condition, or most frequent) is
   a judgement call to settle on the samples.
-- Train statuses stay in the caption rather than the image, as in the
-  mockup. Drawing them into the card would make the image depend on the NS
-  tools and is left for later.
+- Train status rows depend on the NS connector; without it the card still
+  draws the weather, and a `trains` list is refused rather than invented.

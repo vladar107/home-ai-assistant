@@ -47,6 +47,7 @@ Automation execution has a separate four-level scale:
 | UniFi | WAN/AP/client health, known/unknown clients, recent disconnects | Block client, create guest access, change settings | Shared/admin | Read |
 | Gmail | Search with Gmail query syntax and read a message's text, connected per user from `/settings` with `gmail.readonly` | Urgent-mail detection, attachments, threads, draft, label, archive, send | Per user | Read |
 | Web | Search the web through the user's own model subscription, read a public page or PDF by address, forecast the weather for a named place, daily or hour by hour for one day; on by default where the operator enables it, and switched off per user in `/settings` | YouTube transcripts, JavaScript-rendered pages | Per user | Read |
+| Trains (NS) | Plan trips between Dutch stations with live delays, cancellations, platform changes, and crowding; list a station's departures; report disruptions and engineering works; on by default where the operator configures an NS key, and switched off per user in `/settings` | Tickets, fares, buying or changing anything, journeys outside the NS network | Per user | Read |
 | Calendar | List events, availability, daily agenda | Create/update/cancel event | Per user | Read |
 | Notion | Search shared pages, read blocks/data sources, list due tasks | Create inbox item, update task/page | Per user | Read |
 | GitHub | Selected repository PRs, issues, Actions and security status | Comment, create issue, rerun workflow, merge | Per user/repository | Read |

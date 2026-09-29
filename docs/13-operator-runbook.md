@@ -575,6 +575,44 @@ skipped, and a sweep at startup and hourly removes anything older than a day.
 The directory is safe to delete while the application is stopped; a pending
 reply then goes out as text only.
 
+### NS train information
+
+Train information needs one NS API Portal subscription key for the household.
+It is free:
+
+1. Sign up at `https://apiportal.ns.nl/`, open Products, and subscribe to the
+   **Ns-App** product. The key appears under the profile's subscriptions.
+2. Store the key in Keychain (already done if the item exists), under service
+   `ns.api-key` and account `home-ai-assistant`:
+
+   ```sh
+   security add-generic-password -a home-ai-assistant -s ns.api-key -w
+   ```
+
+3. Enable it in `deploy/.env.nas` and deploy. `deploy/compose.app.ns.yaml` is
+   applied only while NS is enabled, and `nas-sync-secrets` installs the key as
+   the `ns-api-key` secret read through `HOME_AGENT_NS_API_KEY_FILE`:
+
+   ```dotenv
+   HOME_AGENT_NS_ENABLED=true
+   ```
+
+For the local GoLand server, put `HOME_AGENT_NS_API_KEY` in the ignored `.env`
+instead. To rotate, regenerate the key in the portal, update the Keychain item
+with `security add-generic-password -U`, run `scripts/nas-sync-secrets`, and
+redeploy. Never paste the key into a chat or a log. Every user gets Trains (NS)
+in `/settings`, on by default; a user's Turn off trains removes the tools for
+that user only.
+
+Verify from the operator's chat:
+
+1. A trip between two cities returns times, tracks, and delays.
+2. Departures from a station and the current disruptions are reported.
+3. `/privacy` shows the trains line; after Turn off trains in `/settings` it
+   drops the line and the next turn has no `ns_` tools, while the other user's
+   `/settings` still shows trains on. Turn it back on afterwards.
+4. A scheduled prompt that plans a commute delivers trips with the weather.
+
 ## 8. Open and verify Grafana
 
 Grafana listens on the configured NAS LAN address. Open

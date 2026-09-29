@@ -2,9 +2,11 @@ package web_test
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"image/png"
 	"io"
+	"maps"
 	"net/http"
 	"path/filepath"
 	"slices"
@@ -266,5 +268,264 @@ func TestWeatherCardFollowsTheWebSwitch(t *testing.T) {
 	}
 	if got := toolNames(f.toolSet("bob")); !slices.Contains(got, "weather_card") {
 		t.Fatalf("bob's tools = %v", got)
+	}
+}
+
+// fakeTrains stands in for the NS connector at the web connector's Trains boundary: it answers
+// each direction, keyed by its from station, and records what it was asked.
+type fakeTrains struct {
+	mu       sync.Mutex
+	reports  map[string]web.TrainReport
+	failures map[string]error
+	off      map[string]bool
+	asked    []string
+}
+
+func (f *fakeTrains) Enabled(_ context.Context, principalID string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return !f.off[principalID], nil
+}
+
+func (f *fakeTrains) TripStatus(_ context.Context, principalID string, query web.TrainQuery) (web.TrainReport, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.asked = append(f.asked, fmt.Sprintf("%s %s→%s %s arrive_by=%t", principalID, query.From, query.To, query.At.Format("2006-01-02 15:04"), query.ArriveBy))
+	if err := f.failures[query.From]; err != nil {
+		return web.TrainReport{}, err
+	}
+	return f.reports[query.From], nil
+}
+
+func newTrainsFixture(t *testing.T, trains *fakeTrains) (*fixture, *outbox.Box) {
+	t.Helper()
+	box, err := outbox.New(filepath.Join(t.TempDir(), "outbox"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return newFixtureWith(t, web.Config{Cards: box, Trains: trains}), box
+}
+
+func dutch(t *testing.T, clock string) time.Time {
+	t.Helper()
+	location, err := time.LoadLocation("Europe/Amsterdam")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := time.ParseInLocation("2006-01-02 15:04", "2026-09-28 "+clock, location)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed
+}
+
+func trainReport(t *testing.T, level daycard.TrainStatus, planned, actual [2]string) web.TrainReport {
+	t.Helper()
+	report := web.TrainReport{
+		Level: level, From: "Amersfoort Schothorst", To: "Utrecht Centraal", Found: true, Transfers: 1,
+		PlannedDeparture: dutch(t, planned[0]), PlannedArrival: dutch(t, planned[1]),
+	}
+	if actual[0] != "" {
+		report.ActualDeparture, report.ActualArrival = dutch(t, actual[0]), dutch(t, actual[1])
+	}
+	return report
+}
+
+func trainsCard(language string, trains ...map[string]any) map[string]any {
+	return map[string]any{
+		"title":    "Mon 28.09 · Amsterdam",
+		"summary":  "Dry morning.",
+		"language": language,
+		"legs":     []map[string]any{{"place": "Amsterdam", "date": "2026-09-28", "from_hour": 6, "to_hour": 9}},
+		"trains":   trains,
+	}
+}
+
+func TestWeatherCardShowsTrainStatuses(t *testing.T) {
+	onTime := trainReport(t, daycard.TrainOnTime, [2]string{"08:10", "09:02"}, [2]string{"08:10", "09:02"})
+	onTime.Reason = "on time"
+	late := trainReport(t, daycard.TrainSlower, [2]string{"08:10", "09:02"}, [2]string{"08:22", "09:14"})
+	late.From = "Amersfoort"
+	late.Cause, late.DelayMinutes, late.Reason = web.TrainCauseDelay, 12, "12 min late; Disruption: fewer trains between Amersfoort and Baarn"
+	cancelled := trainReport(t, daycard.TrainDisrupted, [2]string{"17:31", "18:20"}, [2]string{"17:35", "18:24"})
+	cancelled.From, cancelled.To = "Utrecht Centraal", "Amersfoort Schothorst"
+	cancelled.Cause, cancelled.Cancelled, cancelled.DelayMinutes, cancelled.Transfers, cancelled.Reason = web.TrainCauseCancelled, true, 4, 0, "IC 3027 cancelled; 4 min late"
+	longer := trainReport(t, daycard.TrainSlower, [2]string{"08:10", "09:02"}, [2]string{"08:10", "09:08"})
+	longer.Cause, longer.ExtraMinutes, longer.Transfers, longer.Reason = web.TrainCauseLonger, 6, 2, "6 min longer than planned"
+	bus := web.TrainReport{Level: daycard.TrainDisrupted, Cause: web.TrainCauseAlternative, From: "Amersfoort", To: "Baarn", Found: true,
+		PlannedDeparture: dutch(t, "07:40"), PlannedArrival: dutch(t, "07:47"), DelayMinutes: 3, Reason: "alternative transport; 3 min late"}
+	missing := web.TrainReport{Level: daycard.TrainDisrupted, Cause: web.TrainCauseNoTrip, From: "Utrecht Centraal", To: "Amersfoort Schothorst", Reason: "no trip found"}
+	unreachable := trainReport(t, daycard.TrainDisrupted, [2]string{"08:10", "09:02"}, [2]string{"08:13", "09:05"})
+	unreachable.Cause, unreachable.DelayMinutes, unreachable.Reason = web.TrainCauseMissedConnection, 3, "a connection cannot be made; 3 min late"
+	troubled := trainReport(t, daycard.TrainSlower, [2]string{"08:10", "09:02"}, [2]string{"08:10", "09:02"})
+	troubled.From, troubled.Cause, troubled.Reason = "Amersfoort", web.TrainCauseDisruption, "Disruption: fewer trains"
+	delayed := trainReport(t, daycard.TrainDisrupted, [2]string{"17:31", "18:20"}, [2]string{"17:31", "18:40"})
+	delayed.From, delayed.To = "Utrecht Centraal", "Amersfoort Schothorst"
+	delayed.Cause, delayed.DelayMinutes, delayed.Reason = web.TrainCauseDelay, 20, "20 min late"
+
+	for _, test := range []struct {
+		name     string
+		language string
+		reports  map[string]web.TrainReport
+		want     []string
+	}{
+		{
+			name:     "english",
+			language: "en",
+			reports:  map[string]web.TrainReport{"Amersfoort Schothorst": onTime, "Amersfoort": late, "Utrecht": cancelled},
+			want: []string{
+				"Trains:\n",
+				`- "There", Amersfoort Schothorst → Utrecht Centraal: green; the row reads "on time" and "08:10 → 09:02", 1 transfer; on time.`,
+				`- "Via Amersfoort", Amersfoort → Utrecht Centraal: yellow; the row reads "+12 min" and "08:22 → 09:14", 1 transfer; 12 min late; Disruption: fewer trains between Amersfoort and Baarn.`,
+				`- "Back", Utrecht Centraal → Amersfoort Schothorst: red; the row reads "cancelled" and "17:31 → 18:20", direct; IC 3027 cancelled; 4 min late.`,
+			},
+		},
+		{
+			name:     "russian",
+			language: "ru",
+			reports:  map[string]web.TrainReport{"Amersfoort Schothorst": longer, "Amersfoort": bus, "Utrecht": missing},
+			want: []string{
+				`- "There", Amersfoort Schothorst → Utrecht Centraal: yellow; the row reads "+6 мин" and "08:10 → 09:08", 2 transfers; 6 min longer than planned.`,
+				`- "Via Amersfoort", Amersfoort → Baarn: red; the row reads "автобус" and "07:40 → 07:47", direct; alternative transport; 3 min late.`,
+				`- "Back", Utrecht Centraal → Amersfoort Schothorst: red; the row reads "нет поезда"; no trip found.`,
+			},
+		},
+		{
+			name:     "connection, disruption, and delay",
+			language: "en",
+			reports:  map[string]web.TrainReport{"Amersfoort Schothorst": unreachable, "Amersfoort": troubled, "Utrecht": delayed},
+			want: []string{
+				`- "There", Amersfoort Schothorst → Utrecht Centraal: red; the row reads "no connection" and "08:13 → 09:05", 1 transfer; a connection cannot be made; 3 min late.`,
+				`- "Via Amersfoort", Amersfoort → Utrecht Centraal: yellow; the row reads "disruption" and "08:10 → 09:02", 1 transfer; Disruption: fewer trains.`,
+				`- "Back", Utrecht Centraal → Amersfoort Schothorst: red; the row reads "+20 min" and "17:31 → 18:40", 1 transfer; 20 min late.`,
+			},
+		},
+		{
+			name:     "russian disruption",
+			language: "ru",
+			reports:  map[string]web.TrainReport{"Amersfoort Schothorst": onTime, "Amersfoort": troubled, "Utrecht": cancelled},
+			want: []string{
+				`- "Via Amersfoort", Amersfoort → Utrecht Centraal: yellow; the row reads "помехи" and "08:10 → 09:02", 1 transfer; Disruption: fewer trains.`,
+				`- "Back", Utrecht Centraal → Amersfoort Schothorst: red; the row reads "отменён" and "17:31 → 18:20", direct; IC 3027 cancelled; 4 min late.`,
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			trains := &fakeTrains{reports: test.reports}
+			f, box := newTrainsFixture(t, trains)
+			f.openMeteoDay()
+			turn := outbox.ChatTurn(turnID)
+
+			set, err := f.broker.ToolsFor(tools.WithTurn(f.ctx, turn), "alice")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(set.Guidance, "trains entry for each travel direction") {
+				t.Fatalf("guidance lacks trains: %s", set.Guidance)
+			}
+			result := f.callWith(set, "weather_card", trainsCard(test.language,
+				map[string]any{"label": "There", "from": "Amersfoort Schothorst", "to": "Utrecht", "date_time": "2026-09-28T08:10"},
+				map[string]any{"label": "Via Amersfoort", "from": "Amersfoort", "to": "Utrecht", "date_time": "2026-09-28T08:05"},
+				map[string]any{"label": "Back", "from": "Utrecht", "to": "Amersfoort Schothorst", "date_time": "2026-09-28T18:30", "arrive_by": true},
+			))
+			wantText(t, result, test.want...)
+			stagedCard(t, box, turn)
+			slices.Sort(trains.asked)
+			if want := []string{
+				"alice Amersfoort Schothorst→Utrecht 2026-09-28 08:10 arrive_by=false",
+				"alice Amersfoort→Utrecht 2026-09-28 08:05 arrive_by=false",
+				"alice Utrecht→Amersfoort Schothorst 2026-09-28 18:30 arrive_by=true",
+			}; !slices.Equal(trains.asked, want) {
+				t.Fatalf("asked %v", trains.asked)
+			}
+			if !strings.Contains(f.logs.String(), "trains=3") {
+				t.Fatalf("logs lack the train count:\n%s", f.logs.String())
+			}
+		})
+	}
+}
+
+func TestWeatherCardOffersTrainsOnlyWithTrainInformationOn(t *testing.T) {
+	f, _ := newTrainsFixture(t, &fakeTrains{off: map[string]bool{"alice": true}})
+	offersTrains := func(principalID string) bool {
+		t.Helper()
+		contribution, err := f.service.Contribute(f.ctx, principalID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		schema := false
+		for _, definition := range contribution.Definitions {
+			if definition.Name == "weather_card" {
+				schema = strings.Contains(string(definition.InputSchema), `"trains"`)
+			}
+		}
+		if guidance := strings.Contains(contribution.Guidance, "trains entry"); guidance != schema {
+			t.Fatalf("%s: trains in guidance %t but in schema %t", principalID, guidance, schema)
+		}
+		return schema
+	}
+	if offersTrains("alice") {
+		t.Fatal("weather_card offers trains to alice with her train information off")
+	}
+	if !offersTrains("bob") {
+		t.Fatal("weather_card does not offer trains to bob")
+	}
+}
+
+func TestWeatherCardTrainRefusals(t *testing.T) {
+	train := map[string]any{"label": "There", "from": "Amersfoort Schothorst", "to": "Utrecht", "date_time": "2026-09-28T08:10"}
+	with := func(key string, value any) map[string]any {
+		changed := maps.Clone(train)
+		changed[key] = value
+		return changed
+	}
+	turn := outbox.ChatTurn(turnID)
+
+	withoutTrains, _ := newCardFixture(t)
+	withoutTrains.openMeteoDay()
+	contribution, err := withoutTrains.service.Contribute(withoutTrains.ctx, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, definition := range contribution.Definitions {
+		if definition.Name == "weather_card" && strings.Contains(string(definition.InputSchema), "trains") {
+			t.Fatalf("weather_card offers trains without a train source: %s", definition.InputSchema)
+		}
+	}
+	if strings.Contains(contribution.Guidance, "trains entry") {
+		t.Fatalf("guidance offers trains without a train source: %s", contribution.Guidance)
+	}
+	wantError(t, withoutTrains.callInTurn(turn, trainsCard("en", train)), "Train status is not available")
+
+	trains := &fakeTrains{}
+	f, box := newTrainsFixture(t, trains)
+	f.openMeteoDay()
+	for _, tc := range []struct {
+		name   string
+		trains []map[string]any
+		want   string
+	}{
+		{"four trains", []map[string]any{train, train, train, train}, "at most 3 trains"},
+		{"no label", []map[string]any{with("label", " ")}, "Train 1: give the row a label"},
+		{"long label", []map[string]any{train, with("label", strings.Repeat("я", 21))}, "Train 2: label must be at most 20 characters"},
+		{"no station", []map[string]any{with("to", "")}, "Train 1: give the from and to stations"},
+		{"bad time", []map[string]any{with("date_time", "tomorrow 8")}, "Train 1: date_time must be Dutch local time"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wantError(t, f.callInTurn(turn, trainsCard("en", tc.trains...)), tc.want)
+		})
+	}
+	if len(trains.asked) != 0 {
+		t.Fatalf("invalid trains were asked about: %v", trains.asked)
+	}
+
+	back := map[string]any{"label": "Back", "from": "Utrecht", "to": "Amersfoort Schothorst", "date_time": "2026-09-28T18:30"}
+	trains.failures = map[string]error{"Utrecht": &web.TrainRefusal{Text: `No NS station matches to "Utrecht".`}}
+	wantError(t, f.callInTurn(turn, trainsCard("en", train, back)), `Train 2: No NS station matches to "Utrecht".`)
+	trains.failures = map[string]error{"Amersfoort Schothorst": &web.TrainRefusal{Text: "Train information is off for this user; they can turn it on in /settings.", Unavailable: true}}
+	wantError(t, f.callInTurn(turn, trainsCard("en", back, train)),
+		"Train 2: Train information is off for this user; they can turn it on in /settings; call weather_card again without trains.")
+	if _, found, err := box.Card("alice", turn); err != nil || found {
+		t.Fatalf("a refused call staged a card: %v %v", found, err)
 	}
 }

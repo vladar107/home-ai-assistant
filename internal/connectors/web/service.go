@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/daycard"
 	"github.com/vladar107/home-ai-assistant/internal/integration"
 	"github.com/vladar107/home-ai-assistant/internal/module"
 )
@@ -45,12 +46,78 @@ type Config struct {
 	Now func() time.Time
 	// Cards keeps a day card for the reply of the turn that drew it; nil leaves weather_card out.
 	Cards Cards
+	// Trains reports train statuses for a day card's trains; nil leaves trains off the card.
+	Trains Trains
 }
 
 // Cards stages a PNG for the reply of a principal's turn.
 type Cards interface {
 	Stage(principalID, turn string, png []byte) error
 }
+
+// Trains reports how the train a principal would take in one direction is running, under their
+// own train information switch. A *TrainRefusal is told to the model; any other error fails the
+// call.
+type Trains interface {
+	// Enabled reports whether the principal's train information switch is on.
+	Enabled(ctx context.Context, principalID string) (bool, error)
+	TripStatus(ctx context.Context, principalID string, query TrainQuery) (TrainReport, error)
+}
+
+// TrainQuery is one travel direction. At's wall clock is Dutch local time.
+type TrainQuery struct {
+	From     string
+	To       string
+	At       time.Time
+	ArriveBy bool
+}
+
+// TrainReport is the train a principal would take, classified. An actual time is zero when there
+// is no live time for it.
+type TrainReport struct {
+	Level daycard.TrainStatus
+	Cause TrainCause
+	// From and To are the resolved station names.
+	From      string
+	To        string
+	Found     bool
+	Cancelled bool
+
+	PlannedDeparture time.Time
+	ActualDeparture  time.Time
+	PlannedArrival   time.Time
+	ActualArrival    time.Time
+	DelayMinutes     int
+	ExtraMinutes     int
+	Transfers        int
+	// Reason says in a few English words why the train has its level.
+	Reason string
+}
+
+// TrainCause is the dominant reason a train has its level.
+type TrainCause int
+
+const (
+	TrainCauseNone TrainCause = iota
+	TrainCauseDelay
+	TrainCauseLonger
+	TrainCauseCancelled
+	TrainCauseAlternative
+	TrainCauseMissedConnection
+	TrainCauseDisruption
+	TrainCauseNoTrip
+)
+
+// TrainRefusal is a sentence the model is told instead of a train status, such as train
+// information being off for the principal.
+type TrainRefusal struct {
+	Text string
+	// Unavailable marks a refusal about train information itself, such as it being off or NS
+	// failing, rather than about the requested stations; retrying without trains is the way out.
+	Unavailable bool
+}
+
+func (e *TrainRefusal) Error() string { return e.Text }
 
 // Status is a principal's web access switch.
 type Status struct {
@@ -66,6 +133,7 @@ type Service struct {
 	logger       *slog.Logger
 	now          func() time.Time
 	cards        Cards
+	trains       Trains
 
 	running atomic.Bool
 }
@@ -98,6 +166,7 @@ func NewService(cfg Config, repository integration.Repository, logger *slog.Logg
 	return &Service{
 		now:          now,
 		cards:        cfg.Cards,
+		trains:       cfg.Trains,
 		guard:        newGuard(cfg.Resolver, cfg.Dial),
 		repository:   repository,
 		weatherHome:  home,
