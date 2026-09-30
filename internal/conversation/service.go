@@ -22,6 +22,7 @@ const (
 	maximumMessageRunes = 4096
 	maximumReplyRunes   = 4000
 	deliveryRetryDelay  = 5 * time.Second
+	toolHintBudget      = 800 * time.Millisecond
 
 	// CardRetention is how long a staged card may wait for its reply before a sweep removes it.
 	CardRetention = 24 * time.Hour
@@ -388,10 +389,13 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 	var tools agentruntime.ToolSet
 	var webSearch bool
 	var attachments attachment.Turn
+	var hint string
 	if runErr == nil && connected {
 		_ = s.deliverer.SendTyping(turnCtx, request.ChatID)
 		tools, runErr = s.toolProvider.ToolsFor(turnCtx, request.PrincipalID)
+		var hinted <-chan string
 		if runErr == nil {
+			hinted = s.startToolHint(turnCtx, request, tools)
 			webSearch, runErr = s.webSearchEnabled(turnCtx, request.PrincipalID)
 		}
 		if runErr != nil {
@@ -402,6 +406,9 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 			if runErr != nil {
 				errorKind, reportedKind = "runtime", "attachments"
 			}
+		}
+		if hinted != nil && runErr == nil {
+			hint = <-hinted
 		}
 	} else if runErr == nil {
 		errorKind, reportedKind = "runtime", "not_connected"
@@ -414,10 +421,13 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 			reply = UnavailableReply
 		}
 	} else {
+		if s.config.Recent != nil {
+			s.config.Recent.RecordMessage(request.PrincipalID, request.Message)
+		}
 		result, err := s.runtime.Run(turnCtx, agentruntime.RunRequest{
 			PrincipalID: request.PrincipalID,
 			SessionID:   request.RuntimeSessionID,
-			Message:     s.turnMessage(request, attachments.Summary),
+			Message:     s.turnMessage(request, attachments.Summary, hint),
 			Images:      attachments.Images,
 			Tools:       tools,
 			WebSearch:   webSearch,
@@ -486,11 +496,41 @@ func (s *Service) webSearchEnabled(ctx context.Context, principalID string) (boo
 	return s.config.WebSearch.WebSearchEnabled(ctx, principalID)
 }
 
+// startToolHint asks for the tool the message most likely needs while the rest of the turn is
+// set up. The answer is advisory: any failure, a late answer, or a name the turn does not offer
+// yields "". A nil result means no hint was started.
+func (s *Service) startToolHint(ctx context.Context, request Request, tools agentruntime.ToolSet) <-chan string {
+	if s.config.ToolHint == nil || tools.Empty() || strings.TrimSpace(request.Message) == "" {
+		return nil
+	}
+	result := make(chan string, 1)
+	go func() {
+		hintCtx, cancel := context.WithTimeout(ctx, toolHintBudget)
+		defer cancel()
+		name, err := s.config.ToolHint.Hint(hintCtx, request.PrincipalID, request.Message, tools.Definitions)
+		if err != nil {
+			s.telemetry.ContextLogger(ctx, s.logger).DebugContext(ctx, "conversation.tool_hint.failed")
+			name = ""
+		}
+		for _, definition := range tools.Definitions {
+			if definition.Name == name && name != "" {
+				result <- name
+				return
+			}
+		}
+		result <- ""
+	}()
+	return result
+}
+
 // turnMessage prefixes what became of the principal's last confirmation request, which was
 // resolved between turns and which the model would otherwise have to guess at, and appends what
 // the message carried so the model can see its files without reading them.
-func (s *Service) turnMessage(request Request, attachments string) string {
+func (s *Service) turnMessage(request Request, attachments, hint string) string {
 	message := request.Message
+	if hint != "" {
+		message = "[system] Likely relevant tool: " + hint + ". Ignore this if it does not fit the request.\n\n" + message
+	}
 	if s.config.Notice != nil {
 		if notice := s.config.Notice.PendingNotice(request.PrincipalID); notice != "" {
 			message = "[system] " + notice + "\n\n" + message

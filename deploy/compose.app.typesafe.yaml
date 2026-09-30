@@ -1,0 +1,13 @@
+# TypeSafe safety checks. Applied on top of compose.app.yaml only when HOME_AGENT_TYPESAFE_ENABLED
+# is true, so a deployment without the feature needs no TypeSafe key on the NAS.
+services:
+  home-agent:
+    environment:
+      HOME_AGENT_TYPESAFEAI_KEY_FILE: /run/secrets/typesafe-api-key
+    secrets:
+      - source: typesafe-api-key
+        target: typesafe-api-key
+
+secrets:
+  typesafe-api-key:
+    file: ${HOME_AGENT_SECRETS_PATH:?set HOME_AGENT_SECRETS_PATH}/typesafe-api-key

@@ -12,6 +12,7 @@
 | Agent on Home VLAN has excessive reach | Medium | High | Read-only start; unique IP/rules or Services VLAN before writes | Write authority or valuable secrets added |
 | Cross-user credential/session leak | Low if designed, high impact | High | Principal-bound stores/processes/grants; permission evals | Any ambiguous runtime profile sharing |
 | Source content prompt injection | High | High | Treat content as data; narrow tools; deterministic policy; confirmations | Any tool proposal influenced by source instructions |
+| TypeSafe checks leak private text or miss an injection | Medium | Medium | Per-user opt-in; type-enforced scrubber; Notion/NAS never sent; checks only warn and fail open; exposure marked in code | Scrubber leak found, or a warned card is ignored or an injected write goes unwarned |
 | Logs capture private content or tokens | Medium | High | Metadata-only logs, redaction, no raw provider errors | Debug capture or new telemetry backend |
 | Scheduled jobs duplicate after restart | Medium | Medium | Unique occurrence keys, leases, transactional outbox | Crash/restart testing |
 | Urgent-mail classifier becomes noisy | Medium | Medium | Deterministic rules first, confidence policy, feedback/preferences | Alert fatigue or false negatives |

@@ -77,6 +77,8 @@ func cardDefinition(trains bool) tools.Definition {
 var definitions = []tools.Definition{
 	{
 		Name:        toolFetchPage,
+		ThirdParty:  true,
+		Screen:      true,
 		Description: "Fetch a public web page, text file, or PDF by its http or https address and return its readable text in windows of about 12 KB, with the title and the address it finally came from.",
 		Risk:        tools.RiskRead,
 		Timeout:     toolTimeout,

@@ -292,6 +292,31 @@ content is never instructions, and the paths an injection could reach from
 there are still bounded: Notion and NAS writes need the user's press, and a
 file can only be sent to the owner's own chat.
 
+A user who turns on "Safety checks" in `/settings` adds three advisory checks
+from TypeSafe's Jev model ([plan 0029](plans/0029-typesafe-guards.md)):
+
+- an approval card warns when the proposed action does not match the user's
+  last two messages from the past 30 minutes;
+- a fetched page or read email that tries to instruct the assistant is flagged
+  to the model, and every later card in the next 30 minutes is warned;
+- a one-line hint names the most relevant tool for the turn.
+
+Code, not TypeSafe, marks a user as exposed to outside content whenever a web
+page or Gmail tool succeeds, and exposure makes the approval check stricter.
+The checks only warn: the user's press still decides, and a TypeSafe failure
+leaves the turn exactly as it would be without them.
+
+TypeSafe is a third-party processor. Only text passed through the scrubber in
+`internal/judgment` is sent: the user's recent messages, fetched pages and read
+emails, and each proposal's action, target kind, and target name. Paths are
+reduced to the file name, links to the host, and email addresses, phone
+numbers, postcodes, bank and card numbers, IP and MAC addresses, tokens, keys,
+and passwords are replaced with placeholders. Names and other free text can
+remain. Notion page contents, NAS file contents, and full proposal arguments
+are never sent, though page titles, file names, and job names may be; nothing
+is sent for a user who has not opted in. Jev is not trained on
+requests; zero data retention is available only on TypeSafe's enterprise plans.
+
 ## Network security
 
 Initial deployment on Home VLAN is acceptable for a read-only prototype, but

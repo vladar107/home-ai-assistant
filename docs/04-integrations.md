@@ -462,6 +462,26 @@ deletes the row. The tools are core Go tools behind the broker and reach only
 NS's fixed gateway host through a dedicated client that refuses redirects. See
 [plan 0027](plans/0027-ns-train-information.md).
 
+## TypeSafe
+
+### Current capabilities
+
+Advisory safety checks for users who opt in under `/settings`: warnings on
+approval cards for actions the user did not ask for, screening of fetched pages
+and read emails for text that tries to instruct the assistant, and a one-line
+tool hint per turn. See [plan 0029](plans/0029-typesafe-guards.md) and
+[Security and Privacy](05-security-and-privacy.md#prompt-injection-resistance)
+for what is sent and what is scrubbed first.
+
+### Access
+
+The household shares one TypeSafe API key: `HOME_AGENT_TYPESAFEAI_KEY` in the
+local `.env`, or `HOME_AGENT_TYPESAFEAI_KEY_FILE` for the Docker secret in
+production. It is not a model subscription, so it is not bound to a principal.
+Without a key the setting is hidden and nothing is sent. The model is pinned to
+`jev-1.13.0`; each request logs the version that answered, its latency, and its
+answers, never its content.
+
 ## Monitoring
 
 The agent exposes application metrics to Prometheus and queries health through

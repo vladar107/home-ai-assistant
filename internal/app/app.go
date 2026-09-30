@@ -25,6 +25,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/delivery"
 	"github.com/vladar107/home-ai-assistant/internal/health"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
+	"github.com/vladar107/home-ai-assistant/internal/judgment"
 	"github.com/vladar107/home-ai-assistant/internal/module"
 	"github.com/vladar107/home-ai-assistant/internal/observability"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
@@ -33,6 +34,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/telegram"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
+	"github.com/vladar107/home-ai-assistant/internal/turnstate"
 )
 
 type App struct {
@@ -53,6 +55,7 @@ type App struct {
 	gmail        *gmail.Service
 	web          *web.Service
 	ns           *ns.Service
+	typeSafe     *judgment.OptInService
 	telegram     *telegram.Service
 	telemetry    *observability.Telemetry
 	ready        atomic.Bool
@@ -325,6 +328,26 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("initialize approvals: %w", err)
 		}
+		// Interface values stay nil without a key, so no user message is kept in memory for nothing.
+		var recent conversation.MessageRecorder
+		var toolHint conversation.ToolHinter
+		if a.cfg.TypeSafe.Enabled() {
+			registry := turnstate.New(nil)
+			broker.SetExposure(registry)
+			recent = registry
+			judge, err := judgment.NewClient(judgment.Config{APIKey: a.cfg.TypeSafe.APIKey, Logger: a.logger, Telemetry: a.telemetry})
+			if err != nil {
+				return fmt.Errorf("initialize TypeSafe client: %w", err)
+			}
+			typeSafe, err := judgment.NewOptInService(a.store, a.logger, nil)
+			if err != nil {
+				return fmt.Errorf("initialize TypeSafe opt-in: %w", err)
+			}
+			broker.SetScreener(judgment.NewScreener(judge, typeSafe, registry))
+			approvals.SetIntentChecker(judgment.NewIntentChecker(judge, typeSafe, registry, registry))
+			toolHint = judgment.NewToolHinter(judge, typeSafe)
+			a.typeSafe = typeSafe
+		}
 		// Scheduled runs reach only the owner's own chat, resolved from the allowlist at delivery.
 		scheduler, err := schedule.NewService(schedule.Config{Zone: a.cfg.Timezone, Cards: cards, Photos: client}, a.store, a.store, client, approvals, a.logger)
 		if err != nil {
@@ -363,6 +386,8 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 				WebSearch:   webSearch,
 				Cards:       cards,
 				Photos:      client,
+				Recent:      recent,
+				ToolHint:    toolHint,
 			},
 			a.store,
 			runtime,
@@ -517,6 +542,9 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	service, err := telegram.NewService(client, identities, a.store, conversationController, attachmentStore, connectionController, notionController, nasController, gmailController, webController, nsController, approvalController, scheduleController, a.logger, a.telemetry)
 	if err != nil {
 		return fmt.Errorf("initialize Telegram service: %w", err)
+	}
+	if a.typeSafe != nil {
+		service.SetTypeSafe(a.typeSafe)
 	}
 	a.telegram = service
 	return nil

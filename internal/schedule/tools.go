@@ -147,7 +147,7 @@ func (s *Service) proposeJob(ctx context.Context, principalID string, call tools
 		return tools.Result{}, err
 	}
 	summary := proposalSummary(prepared)
-	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: toolPropose, Arguments: canonical, Summary: summary}); err != nil {
+	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: toolPropose, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "schedule", TargetKind: "recurring job", TargetName: job.Name}}); err != nil {
 		s.logger.WarnContext(ctx, "schedule.proposal.failed", "principal_id", principalID, "tool", call.Name, "error", err)
 		return tools.Result{Text: "the proposal could not be recorded", IsError: true}, nil
 	}
@@ -174,7 +174,7 @@ func (s *Service) proposeRemoval(ctx context.Context, principalID string, call t
 		return tools.Result{}, err
 	}
 	summary := fmt.Sprintf("Delete the scheduled job %q (%s, %s). It will not run again.", job.Name, job.Cron, job.Zone)
-	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: toolRemove, Arguments: canonical, Summary: summary}); err != nil {
+	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: toolRemove, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "remove", TargetKind: "scheduled job", TargetName: job.Name}}); err != nil {
 		s.logger.WarnContext(ctx, "schedule.proposal.failed", "principal_id", principalID, "tool", call.Name, "error", err)
 		return tools.Result{Text: "the proposal could not be recorded", IsError: true}, nil
 	}

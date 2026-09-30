@@ -109,6 +109,7 @@ type Service struct {
 	nas          NASController
 	gmail        GmailController
 	web          WebController
+	typeSafe     TypeSafeController
 	ns           NSController
 	approvals    ApprovalController
 	schedules    ScheduleController
@@ -195,6 +196,16 @@ func NewService(
 		service.sections = append(service.sections, nsSection{ns: nsTrains, logger: logger, telemetry: service.telemetry})
 	}
 	return service, nil
+}
+
+// SetTypeSafe adds the safety checks section to /settings and its line to /privacy; call it before
+// Start. A nil controller leaves both out.
+func (s *Service) SetTypeSafe(typeSafe TypeSafeController) {
+	if typeSafe == nil {
+		return
+	}
+	s.typeSafe = typeSafe
+	s.sections = append(s.sections, typeSafeSection{typeSafe: typeSafe})
 }
 
 func (s *Service) Start(ctx context.Context) error {
@@ -746,6 +757,15 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 			}
 			if status.Enabled {
 				reply += " " + NSPrivacyLine
+			}
+		}
+		if s.typeSafe != nil {
+			enabled, err := s.typeSafe.Status(ctx, principalID)
+			if err != nil {
+				return "", nil, err
+			}
+			if enabled {
+				reply += " " + TypeSafePrivacyLine
 			}
 		}
 		return reply, nil, nil

@@ -134,6 +134,16 @@ func (s *Store) FinishApproval(ctx context.Context, id, from, status, reason, ou
 	return changed == 1, nil
 }
 
+func (s *Store) SetApprovalSummary(ctx context.Context, id, summary string) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("update approval summary: SQLite store is not open")
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE approvals SET summary = ? WHERE id = ? AND status = 'pending'`, summary, id); err != nil {
+		return fmt.Errorf("update approval summary: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) SetApprovalMessage(ctx context.Context, id string, chatID, messageID int64) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("record approval message: SQLite store is not open")

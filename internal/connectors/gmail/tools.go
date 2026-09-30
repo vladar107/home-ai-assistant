@@ -33,6 +33,7 @@ const guidance = "Gmail: this user's own mailbox, read-only. gmail_search takes 
 var definitions = []tools.Definition{
 	{
 		Name:        toolSearch,
+		ThirdParty:  true,
 		Description: "Search this user's Gmail with Gmail search syntax and list the matching messages with sender, subject, date, labels, and snippet.",
 		Risk:        tools.RiskRead,
 		Timeout:     searchTimeout,
@@ -43,6 +44,8 @@ var definitions = []tools.Definition{
 	},
 	{
 		Name:        toolRead,
+		ThirdParty:  true,
+		Screen:      true,
 		Description: "Read the text of one Gmail message by its id, with its headers and the names of its attachments.",
 		Risk:        tools.RiskRead,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +

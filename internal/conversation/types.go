@@ -111,6 +111,17 @@ type Notice interface {
 	PendingNotice(principalID string) string
 }
 
+// MessageRecorder remembers the raw text of each user message a chat turn runs, for guards that
+// judge an action against what the user asked.
+type MessageRecorder interface {
+	RecordMessage(principalID, text string)
+}
+
+// ToolHinter names the offered tool a message most likely needs, or "" when none clearly fits.
+type ToolHinter interface {
+	Hint(ctx context.Context, principalID, message string, tools []agentruntime.ToolDefinition) (string, error)
+}
+
 // Notices joins several sources of notices into one, in order.
 type Notices []Notice
 
@@ -165,8 +176,10 @@ type Config struct {
 	TurnTimeout time.Duration
 	FollowUp    FollowUp
 	Notice      Notice
+	Recent      MessageRecorder
 	Attachments Attachments
 	WebSearch   WebSearch
+	ToolHint    ToolHinter
 	// Cards and Photos attach a staged card to a successful reply; nil leaves replies text only.
 	Cards  Cards
 	Photos PhotoDeliverer

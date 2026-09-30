@@ -40,6 +40,8 @@ const (
 	DefaultLifetime      = 10 * time.Minute
 	DefaultSweepInterval = 30 * time.Second
 	maximumSummaryRunes  = 3000
+	intentCheckTimeout   = 3 * time.Second
+	IntentWarning        = "⚠️ This does not look like something you asked for. Check it carefully before confirming."
 	executionTimeout     = 45 * time.Second
 	idBytes              = 8
 
@@ -51,6 +53,22 @@ type Proposal struct {
 	Tool      string
 	Arguments json.RawMessage
 	Summary   string
+	Intent    Intent
+}
+
+// Intent is a short description of a proposed action for the intent check, which sends it to an
+// external service after redaction. It must never carry bodies, IDs, URLs or paths: only a verb,
+// the kind of target, and its human-readable name.
+type Intent struct {
+	Verb       string
+	TargetKind string
+	TargetName string
+}
+
+// IntentChecker judges whether a proposed action looks like something the user asked for.
+type IntentChecker interface {
+	// Mismatch reports true when the action does not look requested.
+	Mismatch(ctx context.Context, principalID, tool string, intent Intent) (bool, error)
 }
 
 // Record is the durable approval. Arguments hold the canonical form whose hash is stored.
@@ -103,6 +121,8 @@ type Repository interface {
 	// FinishApproval moves a record to a terminal status with a reason and outcome.
 	FinishApproval(ctx context.Context, id, from, status, reason, outcome string) (bool, error)
 	SetApprovalMessage(ctx context.Context, id string, chatID, messageID int64) error
+	// SetApprovalSummary replaces the summary of a pending record.
+	SetApprovalSummary(ctx context.Context, id, summary string) error
 	// ExpireApprovals moves every pending record past its expiry, or every pending and confirmed
 	// record when all is set, to expired or failed, returning the changed records.
 	ExpireApprovals(ctx context.Context, now time.Time, all bool) ([]Record, error)
@@ -132,6 +152,8 @@ type Service struct {
 
 	mu        sync.Mutex
 	executors map[string]Executor
+	checker   IntentChecker
+	intents   map[string]Intent
 	notices   map[string]string
 	cancel    context.CancelFunc
 	done      chan struct{}
@@ -164,6 +186,7 @@ func NewService(cfg Config, repository Repository, deliverer Deliverer, logger *
 		now:           time.Now,
 		executors:     make(map[string]Executor),
 		notices:       make(map[string]string),
+		intents:       make(map[string]Intent),
 	}, nil
 }
 
@@ -174,6 +197,13 @@ func (s *Service) SetLifetime(lifetime time.Duration) {
 	if lifetime > 0 {
 		s.lifetime = lifetime
 	}
+}
+
+// SetIntentChecker enables the intent check on proposals delivered from now on.
+func (s *Service) SetIntentChecker(checker IntentChecker) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.checker = checker
 }
 
 // RegisterExecutor binds a connector to the tools it can execute once confirmed.
@@ -299,6 +329,11 @@ func (s *Service) Propose(ctx context.Context, principalID string, proposal Prop
 	if err != nil {
 		return Record{}, fmt.Errorf("store approval: %w", err)
 	}
+	if proposal.Intent != (Intent{}) {
+		s.mu.Lock()
+		s.intents[id] = proposal.Intent
+		s.mu.Unlock()
+	}
 	s.logger.InfoContext(ctx, "approval.proposed", "principal_id", principalID, "approval_id", id, "tool", proposal.Tool, "replaced", hadPrevious)
 	if hadPrevious {
 		s.report(ctx, replaced)
@@ -315,7 +350,51 @@ func (s *Service) AfterDelivery(ctx context.Context, principalID string, chatID 
 	if !found || record.MessageID != 0 {
 		return nil
 	}
+	record = s.checkIntent(ctx, record)
+	current, found, err := s.repository.PendingApproval(ctx, principalID)
+	if err != nil {
+		return err
+	}
+	if !found || current.ID != record.ID || current.MessageID != 0 {
+		return nil
+	}
 	return s.send(ctx, record, chatID)
+}
+
+// checkIntent prepends a warning to a proposal that does not look requested. The intent is used
+// once, so a proposal resent after a failed delivery keeps the summary already stored.
+func (s *Service) checkIntent(ctx context.Context, record Record) Record {
+	s.mu.Lock()
+	checker := s.checker
+	intent, hasIntent := s.intents[record.ID]
+	delete(s.intents, record.ID)
+	s.mu.Unlock()
+	if checker == nil || !hasIntent {
+		return record
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, intentCheckTimeout)
+	defer cancel()
+	mismatch, err := checker.Mismatch(checkCtx, record.PrincipalID, record.Tool, intent)
+	if err != nil {
+		s.logger.WarnContext(ctx, "approval.intent_check.failed", "principal_id", record.PrincipalID, "approval_id", record.ID)
+		return record
+	}
+	if !mismatch {
+		return record
+	}
+	summary := truncateRunes(IntentWarning+"\n\n"+record.Summary, maximumSummaryRunes)
+	if err := s.repository.SetApprovalSummary(ctx, record.ID, summary); err != nil {
+		s.logger.WarnContext(ctx, "approval.intent_warning.unsaved", "principal_id", record.PrincipalID, "approval_id", record.ID)
+		return record
+	}
+	record.Summary = summary
+	return record
+}
+
+func (s *Service) dropIntent(id string) {
+	s.mu.Lock()
+	delete(s.intents, id)
+	s.mu.Unlock()
 }
 
 func (s *Service) send(ctx context.Context, record Record, chatID int64) error {
@@ -353,6 +432,7 @@ func (s *Service) Press(ctx context.Context, principalID, action, approvalID str
 	if !found || record.PrincipalID != principalID {
 		return "", false, nil
 	}
+	s.dropIntent(record.ID)
 	if record.Status != StatusPending {
 		return finalText(record), true, nil
 	}
@@ -425,6 +505,7 @@ func (s *Service) execute(ctx context.Context, record Record) string {
 
 // report edits the proposal message of a record resolved without a press, when it has one.
 func (s *Service) report(ctx context.Context, record Record) {
+	s.dropIntent(record.ID)
 	s.rememberNotice(record)
 	s.logger.InfoContext(ctx, "approval.resolved", "principal_id", record.PrincipalID, "approval_id", record.ID, "status", record.Status, "reason", record.Reason)
 	if record.ChatID == 0 || record.MessageID == 0 {

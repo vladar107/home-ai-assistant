@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 
@@ -137,7 +138,7 @@ func (s *Service) executeSave(ctx context.Context, principalID string, call tool
 	if err != nil {
 		return tools.Result{}, err
 	}
-	proposal := approval.Proposal{Tool: toolSaveAttachment, Arguments: canonical, Summary: saveSummary(record, location, missing)}
+	proposal := approval.Proposal{Tool: toolSaveAttachment, Arguments: canonical, Summary: saveSummary(record, location, missing), Intent: approval.Intent{Verb: "save", TargetKind: "file", TargetName: path.Base(location.Path)}}
 	if _, err := s.proposer.Propose(ctx, principalID, proposal); err != nil {
 		s.logger.WarnContext(ctx, "nas.proposal.failed", "principal_id", principalID, "tool", call.Name, "error", err)
 		return tools.Result{Text: "the proposal could not be recorded", IsError: true}, nil

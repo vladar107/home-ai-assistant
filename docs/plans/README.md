@@ -38,6 +38,7 @@ plan that links back to the earlier record.
 | 0026 | [Web search, page reading, weather, and PDF text](0026-web-weather-and-pdf-tools.md) | done |
 | 0027 | [NS train information: trips, departures, and disruptions](0027-ns-train-information.md) | in-progress |
 | 0028 | [A visual day card with the reply as its caption](0028-day-card.md) | in-progress |
+| 0029 | [TypeSafe judgments for approvals, outside content, and tool hints](0029-typesafe-guards.md) | in-progress |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

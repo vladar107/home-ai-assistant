@@ -613,6 +613,33 @@ Verify from the operator's chat:
    `/settings` still shows trains on. Turn it back on afterwards.
 4. A scheduled prompt that plans a commute delivers trips with the weather.
 
+### TypeSafe safety checks
+
+The safety checks of [plan 0029](plans/0029-typesafe-guards.md) need one
+TypeSafe API key for the household, from `https://console.typesafe.ai/keys`.
+
+1. Store the key in Keychain under service `typesafe.api-key` and account
+   `home-ai-assistant`:
+
+   ```sh
+   scripts/keychain-set-secret typesafe.api-key
+   ```
+
+2. Enable it in `deploy/.env.nas`, run `scripts/nas-sync-secrets`, and deploy.
+   `deploy/compose.app.typesafe.yaml` is applied only while this is true and
+   reads the `typesafe-api-key` secret through `HOME_AGENT_TYPESAFEAI_KEY_FILE`:
+
+   ```dotenv
+   HOME_AGENT_TYPESAFE_ENABLED=true
+   ```
+
+For the local GoLand server, put `HOME_AGENT_TYPESAFEAI_KEY` in the ignored
+`.env`. Rotate like the NS key. Each user then sees "Safety checks" in
+`/settings`, off until they turn it on; nothing about a user who has not opted
+in is sent. Check `home_agent_judgment_requests` and
+`home_agent_judgment_duration_bucket` in Grafana for failures and latency;
+every failure leaves the turn as it would be without the checks.
+
 ## 8. Open and verify Grafana
 
 Grafana listens on the configured NAS LAN address. Open

@@ -71,6 +71,10 @@ if [[ ${HOME_AGENT_NS_ENABLED:-false} == true ]]; then
   compose_files+=(-f compose.app.ns.yaml)
   compose_inputs+=(deploy/compose.app.ns.yaml)
 fi
+if [[ ${HOME_AGENT_TYPESAFE_ENABLED:-false} == true ]]; then
+  compose_files+=(-f compose.app.typesafe.yaml)
+  compose_inputs+=(deploy/compose.app.typesafe.yaml)
+fi
 
 users_source=${HOME_AGENT_TELEGRAM_USERS_SOURCE:-deploy/telegram-users.json}
 if [[ $users_source = /* ]]; then

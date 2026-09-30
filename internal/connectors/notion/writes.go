@@ -109,11 +109,11 @@ func (s *Service) propose(ctx context.Context, principalID, token string, call t
 	if err != nil {
 		return "", err
 	}
-	summary, err := s.prepareProposal(ctx, token, call.Name, arguments)
+	summary, intent, err := s.prepareProposal(ctx, token, call.Name, arguments)
 	if err != nil {
 		return "", err
 	}
-	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: call.Name, Arguments: arguments, Summary: summary}); err != nil {
+	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: call.Name, Arguments: arguments, Summary: summary, Intent: intent}); err != nil {
 		s.logger.WarnContext(ctx, "notion.proposal.failed", "principal_id", principalID, "tool", call.Name, "error", err)
 		return "", fmt.Errorf("the proposal could not be recorded")
 	}
@@ -368,8 +368,9 @@ func valueShape(propertyType string) string {
 // confirms: the page it changes and, for every property, the value it replaces. Both need the
 // target itself, so it is read once for the two of them, and a page that is not shared fails
 // before anything is proposed.
-func (s *Service) prepareProposal(ctx context.Context, token, tool string, arguments json.RawMessage) (string, error) {
+func (s *Service) prepareProposal(ctx context.Context, token, tool string, arguments json.RawMessage) (string, approval.Intent, error) {
 	var builder strings.Builder
+	var intent approval.Intent
 	switch tool {
 	case toolCreatePage:
 		var create createArguments
@@ -379,13 +380,14 @@ func (s *Service) prepareProposal(ctx context.Context, token, tool string, argum
 			parent = "data source " + create.ParentID
 			if dataSource, found := s.dataSourceSchema(ctx, token, create.ParentID); found {
 				if err := validateAgainstSchema(dataSource.Properties, create.Properties); err != nil {
-					return "", err
+					return "", approval.Intent{}, err
 				}
 				if name := strings.TrimSpace(plainText(dataSource.Title)); name != "" {
 					parent = boldName(name)
 				}
 			}
 		}
+		intent = approval.Intent{Verb: "create", TargetKind: "Notion page", TargetName: create.Title}
 		fmt.Fprintf(&builder, "Notion · create page\n%s in %s", boldName(create.Title), parent)
 		writeLines(&builder, renderInputProperties(create.Properties))
 		writeParagraphs(&builder, create.Paragraphs)
@@ -394,11 +396,12 @@ func (s *Service) prepareProposal(ctx context.Context, token, tool string, argum
 		_ = json.Unmarshal(arguments, &update)
 		page, err := s.client.Page(ctx, token, update.PageID)
 		if err != nil {
-			return "", err
+			return "", approval.Intent{}, err
 		}
 		if err := s.checkRowProperties(ctx, token, page.Parent.DataSourceID, update.Properties); err != nil {
-			return "", err
+			return "", approval.Intent{}, err
 		}
+		intent = approval.Intent{Verb: "update", TargetKind: "Notion page", TargetName: objectTitle(page)}
 		fmt.Fprintf(&builder, "Notion · update page\n%s", pageLink(page))
 		writeLines(&builder, renderPropertyChanges(page.Properties, update.Properties))
 	case toolAppendBlocks:
@@ -406,12 +409,13 @@ func (s *Service) prepareProposal(ctx context.Context, token, tool string, argum
 		_ = json.Unmarshal(arguments, &appendTo)
 		page, err := s.client.Page(ctx, token, appendTo.PageID)
 		if err != nil {
-			return "", err
+			return "", approval.Intent{}, err
 		}
+		intent = approval.Intent{Verb: "append to", TargetKind: "Notion page", TargetName: objectTitle(page)}
 		fmt.Fprintf(&builder, "Notion · append %d paragraph(s)\n%s", len(appendTo.Paragraphs), pageLink(page))
 		writeParagraphs(&builder, appendTo.Paragraphs)
 	}
-	return builder.String(), nil
+	return builder.String(), intent, nil
 }
 
 // pageLink renders the page as a bold link the user can open, and as a bold title alone when the

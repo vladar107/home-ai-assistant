@@ -53,6 +53,8 @@ type Telemetry struct {
 	telegramRetries              metric.Int64Counter
 	conversationTurns            metric.Int64Counter
 	conversationTurnDuration     metric.Float64Histogram
+	judgmentRequests             metric.Int64Counter
+	judgmentDuration             metric.Float64Histogram
 	storeOperations              metric.Int64Counter
 	storeOperationDuration       metric.Float64Histogram
 }
@@ -222,6 +224,21 @@ func newTelemetry(tracer trace.Tracer, meter metric.Meter) (*Telemetry, error) {
 	); err != nil {
 		return nil, fmt.Errorf("create conversation turn duration histogram: %w", err)
 	}
+	if t.judgmentRequests, err = meter.Int64Counter(
+		"home_agent.judgment.requests",
+		metric.WithDescription("TypeSafe judgment requests completed."),
+		metric.WithUnit("{request}"),
+	); err != nil {
+		return nil, fmt.Errorf("create judgment request counter: %w", err)
+	}
+	if t.judgmentDuration, err = meter.Float64Histogram(
+		"home_agent.judgment.duration",
+		metric.WithDescription("TypeSafe judgment request duration."),
+		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(requestDurationBoundaries...),
+	); err != nil {
+		return nil, fmt.Errorf("create judgment duration histogram: %w", err)
+	}
 	if t.storeOperations, err = meter.Int64Counter(
 		"home_agent.store.operations",
 		metric.WithDescription("Application store operations completed."),
@@ -371,6 +388,15 @@ func (t *Telemetry) StartConversationTurn(ctx context.Context) (context.Context,
 		t.conversationTurns.Add(ctx, 1, attributes)
 		t.conversationTurnDuration.Record(ctx, time.Since(started).Seconds(), attributes)
 	}
+}
+
+func (t *Telemetry) RecordJudgment(ctx context.Context, purpose, outcome string, duration time.Duration) {
+	attributes := metric.WithAttributes(
+		attribute.String("home_agent.purpose", purpose),
+		attribute.String("home_agent.outcome", outcome),
+	)
+	t.judgmentRequests.Add(ctx, 1, attributes)
+	t.judgmentDuration.Record(ctx, duration.Seconds(), attributes)
 }
 
 func (t *Telemetry) StartStore(ctx context.Context, operation string) (context.Context, func(error)) {
