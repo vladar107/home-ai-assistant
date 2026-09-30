@@ -19,10 +19,10 @@ func TestWeatherCardRecordsTheRender(t *testing.T) {
 	f.openMeteoDay()
 
 	f.callInTurn(outbox.ChatTurn(turnID), map[string]any{
-		"title":   "Mon 28.09 · Utrecht",
+		"title":   "Mon 28.09 · Zwolle",
 		"summary": "A stormy evening.",
 		"legs": []map[string]any{
-			{"place": "Utrecht", "date": "2026-09-28", "from_hour": 17, "to_hour": 21},
+			{"place": "Zwolle", "date": "2026-09-28", "from_hour": 17, "to_hour": 21},
 		},
 	})
 	if got := metricTotal(t, reader, "home_agent.daycard.render.duration", map[string]string{"home_agent.outcome": "success"}); got != 1 {

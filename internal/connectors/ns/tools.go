@@ -56,8 +56,8 @@ var definitions = []tools.Definition{
 		Risk:        tools.RiskRead,
 		Timeout:     toolTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
-			`"from":{"type":"string","description":"Departure station name or code, such as Amersfoort Schothorst or AMFS."},` +
-			`"to":{"type":"string","description":"Arrival station name or code, such as Utrecht or UT."},` +
+			`"from":{"type":"string","description":"Departure station name or code, such as Den Haag or GVC."},` +
+			`"to":{"type":"string","description":"Arrival station name or code, such as Zwolle or ZL."},` +
 			`"via":{"type":"string","description":"An optional station to travel through."},` +
 			dateTimeSchema + `,` +
 			`"arrive_by":{"type":"boolean","description":"True to treat date_time as the latest arrival instead of the earliest departure."}},` +

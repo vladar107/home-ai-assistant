@@ -304,12 +304,12 @@ func TestTrainsAreOnByDefaultAndAPerUserSwitch(t *testing.T) {
 	if readOnly, err := f.broker.ReadOnlyToolsFor(ctx, "alice"); err != nil || !slices.Equal(toolNames(readOnly), allTools) {
 		t.Fatalf("scheduled tools = %v %v", toolNames(readOnly), err)
 	}
-	wantText(t, f.callWith(set, "ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht"}), "SPR 5414")
+	wantText(t, f.callWith(set, "ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal"}), "SPR 5822")
 
 	if status, err := f.service.SetEnabled(ctx, "alice", false); err != nil || status.Enabled {
 		t.Fatalf("disable = %+v %v", status, err)
 	}
-	wantError(t, f.callWith(set, "ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht"}), "no longer available")
+	wantError(t, f.callWith(set, "ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal"}), "no longer available")
 	if set := f.toolSet("alice"); !set.Empty() {
 		t.Fatalf("tools after disabling = %v, want none", toolNames(set))
 	}
@@ -338,12 +338,12 @@ func TestStationNamesResolveOnceFetched(t *testing.T) {
 		wantFrom, wantTo    string
 		wantVia, wantHeader string
 	}{
-		{from: "Amersfoort Schothorst", to: "Utrecht", wantFrom: "AMFS", wantTo: "UT", wantHeader: "from Amersfoort Schothorst to Utrecht Centraal"},
+		{from: "Amersfoort Schothorst", to: "Utrecht Centraal", wantFrom: "AMFS", wantTo: "UT", wantHeader: "from Amersfoort Schothorst to Utrecht Centraal"},
 		{from: "amfs", to: "ut", wantFrom: "AMFS", wantTo: "UT", wantHeader: "from Amersfoort Schothorst to Utrecht Centraal"},
 		{from: "Amsterdam", to: "den bosch", wantFrom: "ASD", wantTo: "HT", wantHeader: "from Amsterdam Centraal to 's-Hertogenbosch"},
 		{from: "Feanwâlden", to: "Marienberg", wantFrom: "FWD", wantTo: "MRB", wantHeader: "from Feanwâlden to Mariënberg"},
 		{from: "FEANWALDEN", to: "Utrecht Zuil", via: "Amersfoort", wantFrom: "FWD", wantTo: "UTZL", wantVia: "AMF", wantHeader: "via Amersfoort Centraal"},
-		{from: "Dusseldorf", to: "Amersfoort", wantFrom: "DUSSEL", wantTo: "AMF", wantHeader: "from Düsseldorf Hbf to Amersfoort"},
+		{from: "Dusseldorf", to: "Dordrecht", wantFrom: "DUSSEL", wantTo: "DDR", wantHeader: "from Düsseldorf Hbf to Dordrecht"},
 	} {
 		arguments := map[string]any{"from": test.from, "to": test.to}
 		if test.via != "" {
@@ -365,7 +365,7 @@ func TestStationNamesResolveOnceFetched(t *testing.T) {
 		}
 	}
 	wantError(t, f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Atlantis"}), `No NS station matches to "Atlantis"`)
-	wantError(t, f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "AMFS"}), "both Amersfoort Schothorst")
+	wantError(t, f.call("ns_trips", map[string]any{"from": "Amersfoort", "to": "AMF"}), "both Amersfoort Centraal")
 
 	if got := len(f.server.seen("v2/stations")); got != 1 {
 		t.Fatalf("station list fetched %d times, want once", got)
@@ -373,8 +373,8 @@ func TestStationNamesResolveOnceFetched(t *testing.T) {
 
 	f.clock.advance(25 * time.Hour)
 	f.server.fail("v2/stations", http.StatusServiceUnavailable, "{}")
-	wantText(t, f.call("ns_trips", map[string]any{"from": "Amersfoort", "to": "Utrecht"}), "from Amersfoort to Utrecht Centraal")
-	wantText(t, f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Amersfoort"}), "from Amersfoort Schothorst to Amersfoort")
+	wantText(t, f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal"}), "from Amersfoort Schothorst to Utrecht Centraal")
+	wantText(t, f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Dordrecht"}), "from Amersfoort Schothorst to Dordrecht")
 	if got := len(f.server.seen("v2/stations")); got != 2 {
 		t.Fatalf("station list fetched %d times after a failed daily refresh, want one retry only", got)
 	}
@@ -387,13 +387,13 @@ func TestTripsRenderANormalMorning(t *testing.T) {
 	f := newFixture(t)
 	f.server.serve("v3/trips", fixtureBytes(t, "trips.json"))
 
-	result := f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht", "date_time": "2026-09-29T08:00"})
+	result := f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal", "date_time": "2026-10-05T08:00"})
 	wantText(t, result,
-		"NS trips from Amersfoort Schothorst to Utrecht Centraal, departing from Tue 29 Sep 08:00 (Dutch local time):",
-		"1. Depart 08:01 track 3, arrive 08:51 track 19; 50 min, 1 transfer, status NORMAL, crowding high, punctuality 83%, fare €14.20",
-		"   - SPR 5414 (Sprinter, direction Amsterdam Centraal): Amersfoort Schothorst 08:01 track 3 → Amsterdam Centraal 08:19 track 1; crowding high\n     change at Amsterdam Centraal: 5 min. transfer time\n   - IC 3027",
-		"Amersfoort Schothorst 08:10 track 3 → Amsterdam Centraal 08:25 track 2a (changed from 2)",
-		"ICE 225 (ICE, NS International, direction München Hbf): Amsterdam Centraal 08:31 track 5 → Utrecht Centraal 08:57 track 19; notes: Supplement",
+		"NS trips from Amersfoort Schothorst to Utrecht Centraal, departing from Mon 5 Oct 08:00 (Dutch local time):",
+		"1. Depart 07:56 track 1, arrive 08:23 track 8; 27 min, 1 transfer, status NORMAL, crowding high, punctuality 91%, fare €6.60",
+		"   - SPR 5822 (Sprinter, direction Amsterdam Muiderpoort): Amersfoort Schothorst 07:56 track 1 → Amersfoort Centraal 08:00 track 7; crowding low\n     change at Amersfoort Centraal: Transfer at same platform\n   - IC 1722",
+		"Amersfoort Schothorst 08:04 track 2 → Amersfoort Centraal 08:08 track 7a (changed from 7)",
+		"ICD 1822 (Intercity direct, direction Breda): Amersfoort Schothorst 08:04 track 2 → Amersfoort Centraal 08:08 track 7a (changed from 7); crowding low, notes: Supplement",
 		"Messages: € 3.20 supplement",
 		"5. Depart 08:34",
 	)
@@ -410,7 +410,7 @@ func TestTripsReportDelaysTrackChangesAndCancellations(t *testing.T) {
 	f := newFixture(t)
 	f.server.serve("v3/trips", fixtureBytes(t, "trips_disrupted.json"))
 
-	result := f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht"})
+	result := f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal"})
 	wantText(t, result,
 		"1. Depart 07:59 (planned 07:56, 3 min late) track 2 (changed from 1), arrive 08:23 track 8; 33 min (planned 27), 1 transfer, status DISRUPTION",
 		"Messages: Disruption: fewer trains",
@@ -430,11 +430,11 @@ func TestTripsByArrivalSendTheLocalOffset(t *testing.T) {
 	f := newFixture(t)
 	f.server.serve("v3/trips", fixtureBytes(t, "trips_arrival.json"))
 
-	wantText(t, f.call("ns_trips", map[string]any{"from": "Amersfoort", "to": "Utrecht", "date_time": "2026-09-29T09:00", "arrive_by": true}),
-		"from Amersfoort to Utrecht Centraal, arriving by Tue 29 Sep 09:00",
-		"arrive 09:00",
+	wantText(t, f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal", "date_time": "2026-10-05T09:00", "arrive_by": true}),
+		"from Amersfoort Schothorst to Utrecht Centraal, arriving by Mon 5 Oct 09:00",
+		"arrive 08:53",
 	)
-	wantText(t, f.call("ns_trips", map[string]any{"from": "Amersfoort", "to": "Utrecht", "date_time": "2026-12-01T09:00", "arrive_by": true}))
+	wantText(t, f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal", "date_time": "2026-12-01T09:00", "arrive_by": true}))
 	queries := f.server.seen("v3/trips")
 	if queries[0].Get("searchForArrival") != "true" || queries[0].Get("dateTime") != "2026-10-05T09:00:00+02:00" {
 		t.Fatalf("summer arrival query = %v", queries[0])
@@ -442,30 +442,31 @@ func TestTripsByArrivalSendTheLocalOffset(t *testing.T) {
 	if queries[1].Get("dateTime") != "2026-12-01T09:00:00+01:00" {
 		t.Fatalf("winter arrival query = %v", queries[1])
 	}
-	wantError(t, f.call("ns_trips", map[string]any{"from": "Amersfoort", "to": "Utrecht", "date_time": "tomorrow 9"}), "YYYY-MM-DDTHH:MM")
+	wantError(t, f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal", "date_time": "tomorrow 9"}), "YYYY-MM-DDTHH:MM")
 }
 
 func TestDeparturesShowLiveChanges(t *testing.T) {
 	f := newFixture(t)
 	f.server.serve("v2/departures", fixtureBytes(t, "departures.json"))
 
-	result := f.call("ns_departures", map[string]any{"station": "Amersfoort Schothorst", "limit": 3})
+	result := f.call("ns_departures", map[string]any{"station": "Amersfoort", "limit": 3})
 	wantText(t, result,
-		"NS departures from Amersfoort Schothorst from Tue 29 Sep 08:00",
-		"- Mon 28 Sep 23:10 IC 2374 to Amsterdam Centraal, track 3, via Sloterdijk",
-		"- Mon 28 Sep 23:17 (planned Mon 28 Sep 23:15, 2 min late) SPR 4879",
-		"track 9 (changed from 8)",
+		"NS departures from Amersfoort Centraal from Mon 5 Oct 08:00",
+		"- Sun 4 Oct 23:10 IC 1722 to Den Haag Centraal, track 6, via Utrecht C.",
+		"- 08:14 (planned 08:12, 2 min late) SPR 5622",
+		"track 4 (changed from 3)",
+		"SPR 5822 (Arriva) to Amsterdam Muiderpoort",
 		"; CANCELLED; Cancelled due to a broken-down train",
 	)
 	if lines := strings.Count(result.Text, "\n- "); lines != 3 {
 		t.Fatalf("got %d departures, want 3:\n%s", lines, result.Text)
 	}
 	sent := f.server.seen("v2/departures")[0]
-	if sent.Get("station") != "AMFS" || sent.Get("maxJourneys") != "3" || sent.Has("dateTime") {
+	if sent.Get("station") != "AMF" || sent.Get("maxJourneys") != "3" || sent.Has("dateTime") {
 		t.Fatalf("departures query = %v", sent)
 	}
-	wantText(t, f.call("ns_departures", map[string]any{"station": "Amersfoort Schothorst", "date_time": "2026-09-28T23:10"}), "- 23:10 IC 2374")
-	if sent := f.server.seen("v2/departures")[1]; sent.Get("dateTime") != "2026-09-28T23:10:00+02:00" {
+	wantText(t, f.call("ns_departures", map[string]any{"station": "Amersfoort", "date_time": "2026-10-04T23:10"}), "- 23:10 IC 1722")
+	if sent := f.server.seen("v2/departures")[1]; sent.Get("dateTime") != "2026-10-04T23:10:00+02:00" {
 		t.Fatalf("departures query = %v", sent)
 	}
 }
@@ -529,12 +530,12 @@ func TestDisruptionsAreFilteredOrderedAndCapped(t *testing.T) {
 		many = append(many, entries[0])
 	}
 	many = append(many, entries[3])
-	calamity := map[string]any{"type": "CALAMITY", "title": "No trains around Utrecht", "description": "A power failure stops all trains.", "isActive": true}
+	calamity := map[string]any{"type": "CALAMITY", "title": "No trains around Zwolle", "description": "A power failure stops all trains.", "isActive": true}
 	many = append(many, calamity)
 	body, _ = json.Marshal(many)
 	f.server.serve("v3/disruptions", body)
 	capped := f.call("ns_disruptions", map[string]any{"date_time": "2026-10-04T18:30"})
-	wantText(t, capped, "22 in total", "- [calamity] No trains around Utrecht. A power failure stops all trains.", "7 more not shown.")
+	wantText(t, capped, "22 in total", "- [calamity] No trains around Zwolle. A power failure stops all trains.", "7 more not shown.")
 	if !strings.HasPrefix(strings.SplitN(capped.Text, "\n", 3)[2], "- [calamity]") {
 		t.Fatalf("calamity not first:\n%s", capped.Text)
 	}
@@ -556,15 +557,15 @@ func TestDisruptionsForAnotherTimeIncludePlannedWorks(t *testing.T) {
 	}
 	saturday := map[string]any{
 		"type":     "MAINTENANCE",
-		"title":    "Amersfoort Schothorst -\n  Leiden Centraal",
+		"title":    "Amersfoort Centraal -\n  Utrecht Centraal",
 		"isActive": false,
 		"start":    "2026-10-06T01:00:00+0200",
 		"end":      "2026-10-08T04:00:00+0200",
 		"timespans": []map[string]any{{
-			"start":     "2026-10-03T01:00:00+0200",
-			"end":       "2026-10-05T04:00:00+0200",
-			"period":    "Saturday 3 and Sunday 4 October",
-			"situation": map[string]any{"label": "No trains between Amersfoort Schothorst and Leiden Centraal."},
+			"start":     "2026-10-06T01:00:00+0200",
+			"end":       "2026-10-08T04:00:00+0200",
+			"period":    "Tuesday 6 and Wednesday 7 October",
+			"situation": map[string]any{"label": "No trains between Amersfoort Centraal and Utrecht Centraal."},
 		}},
 	}
 	planned, err := json.Marshal(append(entries, saturday))
@@ -586,9 +587,9 @@ func TestDisruptionsForAnotherTimeIncludePlannedWorks(t *testing.T) {
 	}
 	weekend := f.call("ns_disruptions", map[string]any{"date_time": "2026-10-06T10:00"})
 	wantText(t, weekend,
-		"at Sat 3 Oct 10:00 (Dutch local time), 2 in total:",
-		"- [maintenance] Amersfoort Schothorst - Leiden Centraal. Situation: No trains between Amersfoort Schothorst and Leiden Centraal. Period: Saturday 3 and Sunday 4 October.",
-		"Groningen - Leer",
+		"at Tue 6 Oct 10:00 (Dutch local time), 2 in total:",
+		"- [maintenance] Amersfoort Centraal - Utrecht Centraal. Situation: No trains between Amersfoort Centraal and Utrecht Centraal. Period: Tuesday 6 and Wednesday 7 October.",
+		"Amsterdam - Brussel - London",
 	)
 	queries := f.server.seen("v3/disruptions")
 	if queries[0].Get("isActive") != "true" || queries[1].Has("isActive") {
@@ -620,7 +621,7 @@ func TestStationListRefreshWaitsHonourTheCallersContext(t *testing.T) {
 		_, _ = w.Write(stations)
 	})
 	f.server.serve("v2/departures", fixtureBytes(t, "departures.json"))
-	departures := map[string]any{"station": "Amersfoort Schothorst"}
+	departures := map[string]any{"station": "Amersfoort"}
 
 	leader := f.start(t.Context(), "ns_departures", departures)
 	<-requested
@@ -634,7 +635,7 @@ func TestStationListRefreshWaitsHonourTheCallersContext(t *testing.T) {
 		t.Fatal("a waiter stayed blocked on another caller's station list fetch past its own deadline")
 	}
 	close(release)
-	wantText(t, <-leader, "NS departures from Amersfoort Schothorst")
+	wantText(t, <-leader, "NS departures from Amersfoort Centraal")
 
 	f.clock.advance(25 * time.Hour)
 	release = make(chan struct{})
@@ -644,7 +645,7 @@ func TestStationListRefreshWaitsHonourTheCallersContext(t *testing.T) {
 	giveUp()
 	<-abandoned
 	close(release)
-	wantText(t, f.call("ns_departures", departures), "NS departures from Amersfoort Schothorst")
+	wantText(t, f.call("ns_departures", departures), "NS departures from Amersfoort Centraal")
 	if got := len(f.server.seen("v2/stations")); got != 3 {
 		t.Fatalf("station list fetched %d times, want a fresh try after a caller gave up rather than a retry delay", got)
 	}
@@ -667,7 +668,7 @@ func TestFailuresBecomeOneSentenceWithoutTheKey(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			f := newFixture(t)
 			f.server.fail("v3/trips", test.status, test.body)
-			result := f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht", "date_time": "2026-12-20T08:00"})
+			result := f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal", "date_time": "2026-12-20T08:00"})
 			if !result.IsError || result.Text != test.want {
 				t.Fatalf("result = %+v, want the error %q", result, test.want)
 			}
@@ -685,11 +686,11 @@ func TestFailuresBecomeOneSentenceWithoutTheKey(t *testing.T) {
 	f.server.route("v3/trips", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "https://example.test/elsewhere", http.StatusFound)
 	})
-	wantError(t, f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht"}), "NS returned an unexpected response.")
+	wantError(t, f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal"}), "NS returned an unexpected response.")
 
 	f = newFixture(t)
 	f.server.fail("v2/stations", http.StatusUnauthorized, `{}`)
-	wantError(t, f.call("ns_departures", map[string]any{"station": "Amersfoort Schothorst"}), "NS refused the operator's API key")
+	wantError(t, f.call("ns_departures", map[string]any{"station": "Amersfoort"}), "NS refused the operator's API key")
 	for _, request := range f.server.allRequests() {
 		if strings.Contains(request.String(), apiKey) {
 			t.Fatalf("the key travelled in a URL: %s", request)
@@ -700,7 +701,7 @@ func TestFailuresBecomeOneSentenceWithoutTheKey(t *testing.T) {
 func TestResultsAreCachedForThirtySeconds(t *testing.T) {
 	f := newFixture(t)
 	f.server.serve("v3/trips", fixtureBytes(t, "trips.json"))
-	trip := map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht"}
+	trip := map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal"}
 
 	first := f.call("ns_trips", trip)
 	f.clock.advance(20 * time.Second)
@@ -711,12 +712,12 @@ func TestResultsAreCachedForThirtySeconds(t *testing.T) {
 	if got := len(f.server.seen("v3/trips")); got != 1 {
 		t.Fatalf("NS asked %d times within 30 seconds, want once", got)
 	}
-	f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht", "arrive_by": true})
+	f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal", "arrive_by": true})
 	if got := len(f.server.seen("v3/trips")); got != 2 {
 		t.Fatalf("a different request was served from the cache")
 	}
 	f.clock.advance(11 * time.Second)
-	f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht", "date_time": "2026-09-29T08:00"})
+	f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal", "date_time": "2026-10-05T08:00"})
 	if got := len(f.server.seen("v3/trips")); got != 3 {
 		t.Fatalf("NS asked %d times after the cache expired, want 3", got)
 	}
@@ -804,9 +805,9 @@ func TestTripStatusClassifiesTheTripTheUserWouldTake(t *testing.T) {
 		}), at: "07:50", level: ns.LevelSlower, cause: ns.CauseLonger, found: true, extra: 5, times: "07:56 CEST 07:56 CEST 08:23 CEST 08:23 CEST", reason: "5 min longer than planned"},
 		{name: "status not normal", body: tripsVariant(t, func(trip map[string]any, legs []map[string]any) {
 			trip["status"] = "DISRUPTION"
-			legs[0]["notes"] = []any{map[string]any{"value": "Disruption: fewer trains between Amersfoort and Baarn"}}
-		}), at: "08:00", level: ns.LevelSlower, cause: ns.CauseDisruption, found: true, times: "08:01 CEST 08:01 CEST 08:51 CEST 08:51 CEST",
-			reason: "Disruption: fewer trains between Amersfoort and Baarn"},
+			legs[0]["notes"] = []any{map[string]any{"value": "Disruption: fewer trains between Amersfoort and Utrecht"}}
+		}), at: "07:50", level: ns.LevelSlower, cause: ns.CauseDisruption, found: true, times: "07:56 CEST 07:56 CEST 08:23 CEST 08:23 CEST",
+			reason: "Disruption: fewer trains between Amersfoort and Utrecht"},
 		{name: "a connection cannot be made", body: tripsVariant(t, func(_ map[string]any, legs []map[string]any) {
 			legs[1]["reachable"] = false
 		}), at: "07:50", level: ns.LevelDisrupted, cause: ns.CauseMissedConnection, found: true, times: "07:56 CEST 07:56 CEST 08:23 CEST 08:23 CEST", reason: "a connection cannot be made"},
@@ -826,7 +827,7 @@ func TestTripStatusClassifiesTheTripTheUserWouldTake(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			f.clock.advance(time.Minute)
 			f.server.serve("v3/trips", test.body)
-			status, err := f.service.TripStatus(t.Context(), "alice", ns.StatusQuery{From: "Amersfoort Schothorst", To: "Utrecht", At: at(test.at), ArriveBy: test.arriveBy})
+			status, err := f.service.TripStatus(t.Context(), "alice", ns.StatusQuery{From: "Amersfoort Schothorst", To: "Utrecht Centraal", At: at(test.at), ArriveBy: test.arriveBy})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -850,9 +851,9 @@ func TestTripStatusSharesTheTripsCacheAndRefuses(t *testing.T) {
 	f := newFixture(t)
 	f.server.serve("v3/trips", fixtureBytes(t, "trips.json"))
 	ctx := t.Context()
-	query := ns.StatusQuery{From: "Amersfoort Schothorst", To: "Utrecht", At: time.Date(2026, 9, 29, 8, 0, 0, 0, time.UTC)}
+	query := ns.StatusQuery{From: "Amersfoort Schothorst", To: "Utrecht Centraal", At: time.Date(2026, 10, 5, 8, 0, 0, 0, time.UTC)}
 
-	wantText(t, f.call("ns_trips", map[string]any{"from": "AMFS", "to": "UT", "date_time": "2026-09-29T08:00"}), "SPR 5414")
+	wantText(t, f.call("ns_trips", map[string]any{"from": "AMFS", "to": "UT", "date_time": "2026-10-05T08:00"}), "SPR 5822")
 	if status, err := f.service.TripStatus(ctx, "alice", query); err != nil || status.Level != ns.LevelOnTime {
 		t.Fatalf("status = %+v %v", status, err)
 	}

@@ -39,7 +39,7 @@ const cardGuidance = " weather_card draws the day's weather as a picture that go
 const trainsGuidance = " When ns_trips is offered and the day involves train travel, give weather_card a trains entry for each travel direction, such as there and back, with the stations and the time the user leaves or, with arrive_by, must arrive; the card then shows each train's status, still in one weather_card per turn."
 
 const cardLegsSchema = `"legs":{"type":"array","minItems":1,"maxItems":4,"description":"The day's legs in order; the header shows the first leg's first hour.","items":{"type":"object","properties":{` +
-	`"label":{"type":"string","maxLength":40,"description":"Tile heading; default the place and hours, such as Utrecht · 09–17."},` +
+	`"label":{"type":"string","maxLength":40,"description":"Tile heading; default the place and hours, such as Zwolle · 09–17."},` +
 	`"place":{"type":"string","description":"A town or city name, optionally with its country; empty means the household's home."},` +
 	`"date":{"type":"string","pattern":"^[0-9]{4}-[0-9]{2}-[0-9]{2}$","description":"The leg's day in the place's local calendar, YYYY-MM-DD, from today up to 15 days ahead."},` +
 	`"from_hour":{"type":"integer","minimum":0,"maximum":23,"description":"First local hour of the leg, inclusive."},` +
@@ -48,8 +48,8 @@ const cardLegsSchema = `"legs":{"type":"array","minItems":1,"maxItems":4,"descri
 
 const cardTrainsSchema = `"trains":{"type":"array","maxItems":3,"description":"Optional NS train status rows, one per travel direction; the status and times come from NS.","items":{"type":"object","properties":{` +
 	`"label":{"type":"string","maxLength":20,"description":"Row heading in the reply's language, such as There or Back."},` +
-	`"from":{"type":"string","description":"Departure station name or code, such as Amersfoort Schothorst."},` +
-	`"to":{"type":"string","description":"Arrival station name or code, such as Utrecht."},` +
+	`"from":{"type":"string","description":"Departure station name or code, such as Den Haag."},` +
+	`"to":{"type":"string","description":"Arrival station name or code, such as Zwolle."},` +
 	`"date_time":{"type":"string","pattern":"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}$","description":"Dutch local time as YYYY-MM-DDTHH:MM: the earliest departure, or with arrive_by the latest arrival."},` +
 	`"arrive_by":{"type":"boolean","description":"True to treat date_time as the latest arrival."}},` +
 	`"required":["label","from","to","date_time"],"additionalProperties":false}}`
@@ -66,7 +66,7 @@ func cardDefinition(trains bool) tools.Definition {
 		Risk:        tools.RiskRead,
 		Timeout:     cardTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
-			`"title":{"type":"string","maxLength":100,"description":"The card's top line, such as the day and route: Mon 28.09 · Amersfoort Schothorst → Utrecht."},` +
+			`"title":{"type":"string","maxLength":100,"description":"The card's top line, such as the day and route: Mon 28.09 · Den Haag → Zwolle."},` +
 			`"summary":{"type":"string","maxLength":160,"description":"One sentence about the day's weather in the reply's language, such as Rain in the morning, drizzle in the evening."},` +
 			`"language":{"type":"string","enum":["en","ru"],"description":"Language of the card's fixed words (feels like, mm, gusts, dry, train statuses); default en."},` +
 			properties + `},` +
@@ -93,7 +93,7 @@ var definitions = []tools.Definition{
 		Risk:        tools.RiskRead,
 		Timeout:     toolTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
-			`"location":{"type":"string","description":"A town or city name, optionally with its country, such as Utrecht, Netherlands."},` +
+			`"location":{"type":"string","description":"A town or city name, optionally with its country, such as Zwolle, Netherlands."},` +
 			`"days":{"type":"integer","minimum":1,"maximum":7,"description":"Days of forecast including today, default 3; ignored when date is given."},` +
 			`"date":{"type":"string","pattern":"^[0-9]{4}-[0-9]{2}-[0-9]{2}$","description":"A day in the place's local calendar, YYYY-MM-DD, from today up to 15 days ahead; returns an hourly forecast for that day instead of the daily summary."},` +
 			`"from_hour":{"type":"integer","minimum":0,"maximum":23,"description":"First local hour of the hourly forecast, inclusive; needs date, default 0."},` +

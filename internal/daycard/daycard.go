@@ -36,9 +36,9 @@ var (
 
 // Card is the content of one day card.
 type Card struct {
-	// Title is the top line, such as "Пн 12.10 · Amersfoort Schothorst → Utrecht".
+	// Title is the top line, such as "Пн 12.10 · Den Haag → Zwolle".
 	Title string
-	// HeaderLabel says where and when the header forecast applies, such as "Amersfoort Schothorst · 07:00".
+	// HeaderLabel says where and when the header forecast applies, such as "Den Haag · 07:00".
 	HeaderLabel    string
 	Icon           Condition
 	Night          bool
@@ -71,7 +71,7 @@ type Train struct {
 
 // Leg is one tile, such as a place and its hours.
 type Leg struct {
-	// Label is the place and its hours, such as "Amersfoort Schothorst · 07–09"; the part after the last " · "
+	// Label is the place and its hours, such as "Den Haag · 07–09"; the part after the last " · "
 	// goes on the tile's second line.
 	Label       string
 	Icon        Condition
@@ -278,7 +278,7 @@ func detailOffset(text font.Face) int {
 	return 36 + capHeight(text)
 }
 
-// fitLabel cuts the place rather than the time in a label such as "Amersfoort Schothorst · 07:00".
+// fitLabel cuts the place rather than the time in a label such as "Den Haag · 07:00".
 func fitLabel(face font.Face, label string, width int) string {
 	place, hours := splitLabel(label)
 	if hours == "" || measure(face, label) <= width {
@@ -291,7 +291,7 @@ func fitLabel(face font.Face, label string, width int) string {
 	return place + suffix
 }
 
-// splitLabel separates "Amersfoort Schothorst · 07–09" into the place and the hours.
+// splitLabel separates "Den Haag · 07–09" into the place and the hours.
 func splitLabel(label string) (place, hours string) {
 	index := strings.LastIndex(label, " · ")
 	if index < 0 {

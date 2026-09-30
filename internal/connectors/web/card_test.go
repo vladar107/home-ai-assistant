@@ -24,12 +24,12 @@ import (
 
 const turnID = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
 
-const geocodingUtrecht = `{"results":[{"id":2745912,"name":"Utrecht","latitude":52.09083,"longitude":5.12222,` +
-	`"timezone":"Europe/Amsterdam","country":"Netherlands","admin1":"Utrecht"}]}`
+const geocodingZwolle = `{"results":[{"id":2743477,"name":"Zwolle","latitude":52.5125,"longitude":6.09444,` +
+	`"timezone":"Europe/Amsterdam","country":"Netherlands","admin1":"Overijssel"}]}`
 
-// hourlyUtrecht is a cold, overcast 2026-09-28 with a wet evening: light rain from 17:00 to
+// hourlyZwolle is a cold, overcast 2026-09-28 with a wet evening: light rain from 17:00 to
 // 20:00, a thunderstorm at 18:00 and snow at 19:00.
-func hourlyUtrecht() string {
+func hourlyZwolle() string {
 	var times, temperatures, rain, codes, gusts []string
 	for hour := range 24 {
 		times = append(times, fmt.Sprintf(`"2026-09-28T%02d:00"`, hour))
@@ -62,7 +62,7 @@ type cardSimulator struct {
 }
 
 // openMeteoDay answers the card's requests: hourly fields plus the day's sunrise and sunset, for
-// Amsterdam and Utrecht on 2026-09-28.
+// Amsterdam and Zwolle on 2026-09-28.
 func (f *fixture) openMeteoDay() *cardSimulator {
 	simulator := &cardSimulator{}
 	f.route("geocoding.test/v1/search", func(w http.ResponseWriter, r *http.Request) {
@@ -74,8 +74,8 @@ func (f *fixture) openMeteoDay() *cardSimulator {
 		switch name {
 		case "Amsterdam":
 			_, _ = io.WriteString(w, geocodingAmsterdam)
-		case "Utrecht":
-			_, _ = io.WriteString(w, geocodingUtrecht)
+		case "Zwolle":
+			_, _ = io.WriteString(w, geocodingZwolle)
 		default:
 			_, _ = io.WriteString(w, `{"generationtime_ms":0.2}`)
 		}
@@ -97,8 +97,8 @@ func (f *fixture) openMeteoDay() *cardSimulator {
 			body := hourlyAmsterdam()
 			_, _ = io.WriteString(w, strings.TrimSuffix(body, "}")+
 				`,"daily":{"time":["2026-09-28"],"sunrise":["2026-09-28T07:33"],"sunset":["2026-09-28T19:15"]}}`)
-		case "52.0908":
-			_, _ = io.WriteString(w, hourlyUtrecht())
+		case "52.5125":
+			_, _ = io.WriteString(w, hourlyZwolle())
 		default:
 			http.Error(w, "unknown place", http.StatusBadRequest)
 		}
@@ -167,22 +167,22 @@ func TestWeatherCardStagesTheDayForTheTurn(t *testing.T) {
 	}
 
 	result := f.callInTurn(turn, map[string]any{
-		"title":   "Mon 28.09 · Amsterdam → Utrecht",
+		"title":   "Mon 28.09 · Amsterdam → Zwolle",
 		"summary": "Dry morning, a stormy evening.",
 		"legs": []map[string]any{
 			{"place": "Amsterdam", "date": "2026-09-28", "from_hour": 6, "to_hour": 9},
-			{"label": "Evening", "place": "Utrecht", "date": "2026-09-28", "from_hour": 17, "to_hour": 21},
+			{"label": "Evening", "place": "Zwolle", "date": "2026-09-28", "from_hour": 17, "to_hour": 21},
 		},
 	})
 	wantText(t, result,
 		"goes out as a photo with your reply",
 		"Header: Amsterdam · 06:00, partly cloudy, 11.0 °C (feels like 9.0 °C).",
 		`- "Amsterdam · 06–09", Mon 28 Sep, 06:00 to 09:00 in Amsterdam, North Holland, Netherlands: partly cloudy, average 11.5 °C, 0.0 mm precipitation, gusts up to 38 km/h; the tile reads "dry".`,
-		`- "Evening", Mon 28 Sep, 17:00 to 21:00 in Utrecht, Netherlands: thunderstorm, average 5.0 °C, 2.0 mm precipitation, gusts up to 30 km/h; the tile reads "2.0 mm".`,
+		`- "Evening", Mon 28 Sep, 17:00 to 21:00 in Zwolle, Overijssel, Netherlands: thunderstorm, average 5.0 °C, 2.0 mm precipitation, gusts up to 30 km/h; the tile reads "2.0 mm".`,
 		"do not repeat them",
 	)
 	stagedCard(t, box, turn)
-	if !slices.Equal(simulator.geocoded, []string{"Amsterdam", "Utrecht"}) || simulator.forecasts != 2 {
+	if !slices.Equal(simulator.geocoded, []string{"Amsterdam", "Zwolle"}) || simulator.forecasts != 2 {
 		t.Fatalf("geocoded %v with %d forecasts", simulator.geocoded, simulator.forecasts)
 	}
 	if !strings.Contains(f.logs.String(), "web.card.staged") {
@@ -322,7 +322,7 @@ func dutch(t *testing.T, clock string) time.Time {
 func trainReport(t *testing.T, level daycard.TrainStatus, planned, actual [2]string) web.TrainReport {
 	t.Helper()
 	report := web.TrainReport{
-		Level: level, From: "Amersfoort Schothorst", To: "Utrecht Centraal", Found: true, Transfers: 1,
+		Level: level, From: "Den Haag", To: "Zwolle", Found: true, Transfers: 1,
 		PlannedDeparture: dutch(t, planned[0]), PlannedArrival: dutch(t, planned[1]),
 	}
 	if actual[0] != "" {
@@ -345,22 +345,22 @@ func TestWeatherCardShowsTrainStatuses(t *testing.T) {
 	onTime := trainReport(t, daycard.TrainOnTime, [2]string{"08:10", "09:02"}, [2]string{"08:10", "09:02"})
 	onTime.Reason = "on time"
 	late := trainReport(t, daycard.TrainSlower, [2]string{"08:10", "09:02"}, [2]string{"08:22", "09:14"})
-	late.From = "Amersfoort"
-	late.Cause, late.DelayMinutes, late.Reason = web.TrainCauseDelay, 12, "12 min late; Disruption: fewer trains between Amersfoort and Baarn"
+	late.From = "Dordrecht"
+	late.Cause, late.DelayMinutes, late.Reason = web.TrainCauseDelay, 12, "12 min late; Disruption: fewer trains between Dordrecht and Utrecht"
 	cancelled := trainReport(t, daycard.TrainDisrupted, [2]string{"17:31", "18:20"}, [2]string{"17:35", "18:24"})
-	cancelled.From, cancelled.To = "Utrecht Centraal", "Amersfoort Schothorst"
+	cancelled.From, cancelled.To = "Zwolle", "Den Haag"
 	cancelled.Cause, cancelled.Cancelled, cancelled.DelayMinutes, cancelled.Transfers, cancelled.Reason = web.TrainCauseCancelled, true, 4, 0, "IC 3027 cancelled; 4 min late"
 	longer := trainReport(t, daycard.TrainSlower, [2]string{"08:10", "09:02"}, [2]string{"08:10", "09:08"})
 	longer.Cause, longer.ExtraMinutes, longer.Transfers, longer.Reason = web.TrainCauseLonger, 6, 2, "6 min longer than planned"
-	bus := web.TrainReport{Level: daycard.TrainDisrupted, Cause: web.TrainCauseAlternative, From: "Amersfoort", To: "Baarn", Found: true,
+	bus := web.TrainReport{Level: daycard.TrainDisrupted, Cause: web.TrainCauseAlternative, From: "Dordrecht", To: "Utrecht Centraal", Found: true,
 		PlannedDeparture: dutch(t, "07:40"), PlannedArrival: dutch(t, "07:47"), DelayMinutes: 3, Reason: "alternative transport; 3 min late"}
-	missing := web.TrainReport{Level: daycard.TrainDisrupted, Cause: web.TrainCauseNoTrip, From: "Utrecht Centraal", To: "Amersfoort Schothorst", Reason: "no trip found"}
+	missing := web.TrainReport{Level: daycard.TrainDisrupted, Cause: web.TrainCauseNoTrip, From: "Zwolle", To: "Den Haag", Reason: "no trip found"}
 	unreachable := trainReport(t, daycard.TrainDisrupted, [2]string{"08:10", "09:02"}, [2]string{"08:13", "09:05"})
 	unreachable.Cause, unreachable.DelayMinutes, unreachable.Reason = web.TrainCauseMissedConnection, 3, "a connection cannot be made; 3 min late"
 	troubled := trainReport(t, daycard.TrainSlower, [2]string{"08:10", "09:02"}, [2]string{"08:10", "09:02"})
-	troubled.From, troubled.Cause, troubled.Reason = "Amersfoort", web.TrainCauseDisruption, "Disruption: fewer trains"
+	troubled.From, troubled.Cause, troubled.Reason = "Dordrecht", web.TrainCauseDisruption, "Disruption: fewer trains"
 	delayed := trainReport(t, daycard.TrainDisrupted, [2]string{"17:31", "18:20"}, [2]string{"17:31", "18:40"})
-	delayed.From, delayed.To = "Utrecht Centraal", "Amersfoort Schothorst"
+	delayed.From, delayed.To = "Zwolle", "Den Haag"
 	delayed.Cause, delayed.DelayMinutes, delayed.Reason = web.TrainCauseDelay, 20, "20 min late"
 
 	for _, test := range []struct {
@@ -372,41 +372,41 @@ func TestWeatherCardShowsTrainStatuses(t *testing.T) {
 		{
 			name:     "english",
 			language: "en",
-			reports:  map[string]web.TrainReport{"Amersfoort Schothorst": onTime, "Amersfoort": late, "Utrecht": cancelled},
+			reports:  map[string]web.TrainReport{"Den Haag": onTime, "Dordrecht": late, "Zwolle": cancelled},
 			want: []string{
 				"Trains:\n",
-				`- "There", Amersfoort Schothorst → Utrecht Centraal: green; the row reads "on time" and "08:10 → 09:02", 1 transfer; on time.`,
-				`- "Via Amersfoort", Amersfoort → Utrecht Centraal: yellow; the row reads "+12 min" and "08:22 → 09:14", 1 transfer; 12 min late; Disruption: fewer trains between Amersfoort and Baarn.`,
-				`- "Back", Utrecht Centraal → Amersfoort Schothorst: red; the row reads "cancelled" and "17:31 → 18:20", direct; IC 3027 cancelled; 4 min late.`,
+				`- "There", Den Haag → Zwolle: green; the row reads "on time" and "08:10 → 09:02", 1 transfer; on time.`,
+				`- "Via Dordrecht", Dordrecht → Zwolle: yellow; the row reads "+12 min" and "08:22 → 09:14", 1 transfer; 12 min late; Disruption: fewer trains between Dordrecht and Utrecht.`,
+				`- "Back", Zwolle → Den Haag: red; the row reads "cancelled" and "17:31 → 18:20", direct; IC 3027 cancelled; 4 min late.`,
 			},
 		},
 		{
 			name:     "russian",
 			language: "ru",
-			reports:  map[string]web.TrainReport{"Amersfoort Schothorst": longer, "Amersfoort": bus, "Utrecht": missing},
+			reports:  map[string]web.TrainReport{"Den Haag": longer, "Dordrecht": bus, "Zwolle": missing},
 			want: []string{
-				`- "There", Amersfoort Schothorst → Utrecht Centraal: yellow; the row reads "+6 мин" and "08:10 → 09:08", 2 transfers; 6 min longer than planned.`,
-				`- "Via Amersfoort", Amersfoort → Baarn: red; the row reads "автобус" and "07:40 → 07:47", direct; alternative transport; 3 min late.`,
-				`- "Back", Utrecht Centraal → Amersfoort Schothorst: red; the row reads "нет поезда"; no trip found.`,
+				`- "There", Den Haag → Zwolle: yellow; the row reads "+6 мин" and "08:10 → 09:08", 2 transfers; 6 min longer than planned.`,
+				`- "Via Dordrecht", Dordrecht → Utrecht Centraal: red; the row reads "автобус" and "07:40 → 07:47", direct; alternative transport; 3 min late.`,
+				`- "Back", Zwolle → Den Haag: red; the row reads "нет поезда"; no trip found.`,
 			},
 		},
 		{
 			name:     "connection, disruption, and delay",
 			language: "en",
-			reports:  map[string]web.TrainReport{"Amersfoort Schothorst": unreachable, "Amersfoort": troubled, "Utrecht": delayed},
+			reports:  map[string]web.TrainReport{"Den Haag": unreachable, "Dordrecht": troubled, "Zwolle": delayed},
 			want: []string{
-				`- "There", Amersfoort Schothorst → Utrecht Centraal: red; the row reads "no connection" and "08:13 → 09:05", 1 transfer; a connection cannot be made; 3 min late.`,
-				`- "Via Amersfoort", Amersfoort → Utrecht Centraal: yellow; the row reads "disruption" and "08:10 → 09:02", 1 transfer; Disruption: fewer trains.`,
-				`- "Back", Utrecht Centraal → Amersfoort Schothorst: red; the row reads "+20 min" and "17:31 → 18:40", 1 transfer; 20 min late.`,
+				`- "There", Den Haag → Zwolle: red; the row reads "no connection" and "08:13 → 09:05", 1 transfer; a connection cannot be made; 3 min late.`,
+				`- "Via Dordrecht", Dordrecht → Zwolle: yellow; the row reads "disruption" and "08:10 → 09:02", 1 transfer; Disruption: fewer trains.`,
+				`- "Back", Zwolle → Den Haag: red; the row reads "+20 min" and "17:31 → 18:40", 1 transfer; 20 min late.`,
 			},
 		},
 		{
 			name:     "russian disruption",
 			language: "ru",
-			reports:  map[string]web.TrainReport{"Amersfoort Schothorst": onTime, "Amersfoort": troubled, "Utrecht": cancelled},
+			reports:  map[string]web.TrainReport{"Den Haag": onTime, "Dordrecht": troubled, "Zwolle": cancelled},
 			want: []string{
-				`- "Via Amersfoort", Amersfoort → Utrecht Centraal: yellow; the row reads "помехи" and "08:10 → 09:02", 1 transfer; Disruption: fewer trains.`,
-				`- "Back", Utrecht Centraal → Amersfoort Schothorst: red; the row reads "отменён" and "17:31 → 18:20", direct; IC 3027 cancelled; 4 min late.`,
+				`- "Via Dordrecht", Dordrecht → Zwolle: yellow; the row reads "помехи" and "08:10 → 09:02", 1 transfer; Disruption: fewer trains.`,
+				`- "Back", Zwolle → Den Haag: red; the row reads "отменён" and "17:31 → 18:20", direct; IC 3027 cancelled; 4 min late.`,
 			},
 		},
 	} {
@@ -424,17 +424,17 @@ func TestWeatherCardShowsTrainStatuses(t *testing.T) {
 				t.Fatalf("guidance lacks trains: %s", set.Guidance)
 			}
 			result := f.callWith(set, "weather_card", trainsCard(test.language,
-				map[string]any{"label": "There", "from": "Amersfoort Schothorst", "to": "Utrecht", "date_time": "2026-09-28T08:10"},
-				map[string]any{"label": "Via Amersfoort", "from": "Amersfoort", "to": "Utrecht", "date_time": "2026-09-28T08:05"},
-				map[string]any{"label": "Back", "from": "Utrecht", "to": "Amersfoort Schothorst", "date_time": "2026-09-28T18:30", "arrive_by": true},
+				map[string]any{"label": "There", "from": "Den Haag", "to": "Zwolle", "date_time": "2026-09-28T08:10"},
+				map[string]any{"label": "Via Dordrecht", "from": "Dordrecht", "to": "Zwolle", "date_time": "2026-09-28T08:05"},
+				map[string]any{"label": "Back", "from": "Zwolle", "to": "Den Haag", "date_time": "2026-09-28T18:30", "arrive_by": true},
 			))
 			wantText(t, result, test.want...)
 			stagedCard(t, box, turn)
 			slices.Sort(trains.asked)
 			if want := []string{
-				"alice Amersfoort Schothorst→Utrecht 2026-09-28 08:10 arrive_by=false",
-				"alice Amersfoort→Utrecht 2026-09-28 08:05 arrive_by=false",
-				"alice Utrecht→Amersfoort Schothorst 2026-09-28 18:30 arrive_by=true",
+				"alice Den Haag→Zwolle 2026-09-28 08:10 arrive_by=false",
+				"alice Dordrecht→Zwolle 2026-09-28 08:05 arrive_by=false",
+				"alice Zwolle→Den Haag 2026-09-28 18:30 arrive_by=true",
 			}; !slices.Equal(trains.asked, want) {
 				t.Fatalf("asked %v", trains.asked)
 			}
@@ -473,7 +473,7 @@ func TestWeatherCardOffersTrainsOnlyWithTrainInformationOn(t *testing.T) {
 }
 
 func TestWeatherCardTrainRefusals(t *testing.T) {
-	train := map[string]any{"label": "There", "from": "Amersfoort Schothorst", "to": "Utrecht", "date_time": "2026-09-28T08:10"}
+	train := map[string]any{"label": "There", "from": "Den Haag", "to": "Zwolle", "date_time": "2026-09-28T08:10"}
 	with := func(key string, value any) map[string]any {
 		changed := maps.Clone(train)
 		changed[key] = value
@@ -519,10 +519,10 @@ func TestWeatherCardTrainRefusals(t *testing.T) {
 		t.Fatalf("invalid trains were asked about: %v", trains.asked)
 	}
 
-	back := map[string]any{"label": "Back", "from": "Utrecht", "to": "Amersfoort Schothorst", "date_time": "2026-09-28T18:30"}
-	trains.failures = map[string]error{"Utrecht": &web.TrainRefusal{Text: `No NS station matches to "Utrecht".`}}
-	wantError(t, f.callInTurn(turn, trainsCard("en", train, back)), `Train 2: No NS station matches to "Utrecht".`)
-	trains.failures = map[string]error{"Amersfoort Schothorst": &web.TrainRefusal{Text: "Train information is off for this user; they can turn it on in /settings.", Unavailable: true}}
+	back := map[string]any{"label": "Back", "from": "Zwolle", "to": "Den Haag", "date_time": "2026-09-28T18:30"}
+	trains.failures = map[string]error{"Zwolle": &web.TrainRefusal{Text: `No NS station matches to "Zwolle".`}}
+	wantError(t, f.callInTurn(turn, trainsCard("en", train, back)), `Train 2: No NS station matches to "Zwolle".`)
+	trains.failures = map[string]error{"Den Haag": &web.TrainRefusal{Text: "Train information is off for this user; they can turn it on in /settings.", Unavailable: true}}
 	wantError(t, f.callInTurn(turn, trainsCard("en", back, train)),
 		"Train 2: Train information is off for this user; they can turn it on in /settings; call weather_card again without trains.")
 	if _, found, err := box.Card("alice", turn); err != nil || found {

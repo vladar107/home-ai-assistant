@@ -18,18 +18,18 @@ func TestRenderSamples(t *testing.T) {
 	long := strings.Repeat("Sint-Oedenrode-aan-de-Dommel ", 4)
 	samples := map[string]daycard.Card{
 		"ru-4-legs": {
-			Title:          "Пн 12.10 · Amersfoort Schothorst → Utrecht",
-			HeaderLabel:    "Amersfoort Schothorst · 07:00",
+			Title:          "Пн 12.10 · Den Haag → Zwolle",
+			HeaderLabel:    "Den Haag · 07:00",
 			Icon:           daycard.Rain,
 			Temperature:    10.2,
 			FeelsLike:      5.4,
 			FeelsLikeLabel: "ощущается",
 			Summary:        "Утром дождь, вечером морось.",
 			Legs: []daycard.Leg{
-				{Label: "Amersfoort Schothorst · 07–09", Icon: daycard.Rain, Temperature: 10, Detail: "3.4 мм · порывы 47"},
-				{Label: "Utrecht · 10–15", Icon: daycard.PartlyCloudy, Temperature: 13, Detail: "1.2 мм"},
-				{Label: "Utrecht · 16–17", Icon: daycard.Cloudy, Temperature: 12, Detail: "сухо"},
-				{Label: "Amersfoort Schothorst · 17–18", Icon: daycard.Drizzle, Temperature: 11, Detail: "0.8 мм"},
+				{Label: "Den Haag · 07–09", Icon: daycard.Rain, Temperature: 10, Detail: "3.4 мм · порывы 47"},
+				{Label: "Zwolle · 10–15", Icon: daycard.PartlyCloudy, Temperature: 13, Detail: "1.2 мм"},
+				{Label: "Zwolle · 16–17", Icon: daycard.Cloudy, Temperature: 12, Detail: "сухо"},
+				{Label: "Den Haag · 17–18", Icon: daycard.Drizzle, Temperature: 11, Detail: "0.8 мм"},
 			},
 		},
 		"en-1-leg": {
@@ -55,8 +55,8 @@ func TestRenderSamples(t *testing.T) {
 			Summary:        "Heavy snow through the evening with strong gusts, icy roads, and more snow expected after midnight across the whole region.",
 			Legs: []daycard.Leg{
 				{Label: long, Icon: daycard.Snow, Night: true, Temperature: -12, Detail: long},
-				{Label: "Utrecht · 18–20", Icon: daycard.Fog, Night: true, Temperature: -3, Detail: "12.4 mm · gusts 88"},
-				{Label: "Utrecht · 20–22", Icon: daycard.Thunderstorm, Temperature: 0, Detail: "dry"},
+				{Label: "Zwolle · 18–20", Icon: daycard.Fog, Night: true, Temperature: -3, Detail: "12.4 mm · gusts 88"},
+				{Label: "Zwolle · 20–22", Icon: daycard.Thunderstorm, Temperature: 0, Detail: "dry"},
 				{Label: "Home · 22–23", Icon: daycard.PartlyCloudy, Night: true, Temperature: -0.4, Detail: "0.1 mm"},
 			},
 		},
@@ -74,21 +74,21 @@ func TestRenderSamples(t *testing.T) {
 			},
 		},
 		"ru-3-legs-trains": {
-			Title:          "Вт 29.09 · Amersfoort → Utrecht → Gouda → Amersfoort",
-			HeaderLabel:    "Amersfoort · 07:00",
+			Title:          "Вт 29.09 · Dordrecht → Zwolle → Breda → Dordrecht",
+			HeaderLabel:    "Dordrecht · 07:00",
 			Icon:           daycard.Cloudy,
 			Temperature:    17,
 			FeelsLike:      17,
 			FeelsLikeLabel: "ощущается",
-			Summary:        "Утром поездка в Utrecht, днём — в Gouda; вечером возвращение. Весь день сухо и тепло.",
+			Summary:        "Утром поездка в Zwolle, днём — в Breda; вечером возвращение. Весь день сухо и тепло.",
 			Legs: []daycard.Leg{
-				{Label: "Amersfoort → Utrecht Centraal · 07–09", Icon: daycard.Cloudy, Temperature: 17, Detail: "сухо"},
-				{Label: "Utrecht → Gouda · 16:30", Icon: daycard.PartlyCloudy, Temperature: 26, Detail: "0.4 мм · порывы 32"},
-				{Label: "Gouda → Amersfoort · 18–19", Icon: daycard.PartlyCloudy, Night: true, Temperature: 22, Detail: "сухо"},
+				{Label: "Dordrecht → Zwolle · 07–09", Icon: daycard.Cloudy, Temperature: 17, Detail: "сухо"},
+				{Label: "Zwolle → Breda · 16:30", Icon: daycard.PartlyCloudy, Temperature: 26, Detail: "0.4 мм · порывы 32"},
+				{Label: "Breda → Dordrecht · 18–19", Icon: daycard.PartlyCloudy, Night: true, Temperature: 22, Detail: "сухо"},
 			},
 			Trains: []daycard.Train{
 				{Label: "Туда", Status: daycard.TrainSlower, Badge: "+12 мин", Times: "08:10 → 09:02"},
-				{Label: "Utrecht → Gouda", Status: daycard.TrainOnTime, Badge: "вовремя", Times: "16:31 → 16:52"},
+				{Label: "Zwolle → Breda", Status: daycard.TrainOnTime, Badge: "вовремя", Times: "16:31 → 16:52"},
 				{Label: "Обратно", Status: daycard.TrainDisrupted, Badge: "отменён", Times: "18:05 → 18:47"},
 			},
 		},
@@ -126,7 +126,7 @@ func TestRenderSamples(t *testing.T) {
 }
 
 func TestHeightFollowsContent(t *testing.T) {
-	base := daycard.Card{Title: "Amersfoort Schothorst", Legs: []daycard.Leg{{Label: "Amersfoort Schothorst", Icon: daycard.Rain}}}
+	base := daycard.Card{Title: "Den Haag", Legs: []daycard.Leg{{Label: "Den Haag", Icon: daycard.Rain}}}
 	withSummary := base
 	withSummary.Summary = strings.Repeat("Rain in the morning and drizzle in the evening. ", 3)
 	withTrains := base
@@ -167,7 +167,7 @@ func TestEveryConditionHasAnIcon(t *testing.T) {
 }
 
 func TestRenderRefusesInvalidCards(t *testing.T) {
-	leg := daycard.Leg{Label: "Amersfoort Schothorst", Icon: daycard.Rain}
+	leg := daycard.Leg{Label: "Den Haag", Icon: daycard.Rain}
 	for _, count := range []int{0, daycard.MaximumLegs + 1} {
 		legs := make([]daycard.Leg, count)
 		for index := range legs {
