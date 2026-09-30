@@ -110,6 +110,7 @@ type Broker struct {
 	logger    *slog.Logger
 	exposure  ExposureRecorder
 	screener  Screener
+	telemetry Telemetry
 }
 
 func NewBroker(logger *slog.Logger) (*Broker, error) {
@@ -131,6 +132,16 @@ func (b *Broker) Register(provider Provider) error {
 // SetExposure sets where third-party results are recorded, at wiring time before turns start.
 func (b *Broker) SetExposure(recorder ExposureRecorder) {
 	b.exposure = recorder
+}
+
+// Telemetry records per-call metrics.
+type Telemetry interface {
+	RecordToolCall(ctx context.Context, principal, tool, outcome string, duration time.Duration)
+}
+
+// SetTelemetry sets where call metrics are recorded, at wiring time before turns start.
+func (b *Broker) SetTelemetry(telemetry Telemetry) {
+	b.telemetry = telemetry
 }
 
 // SetScreener sets who screens results of tools marked Screen, at wiring time before turns start.
@@ -245,6 +256,13 @@ var _ agentruntime.ToolExecutor = (*turnExecutor)(nil)
 func (e *turnExecutor) Execute(ctx context.Context, call agentruntime.ToolCall) (agentruntime.ToolResult, error) {
 	started := time.Now()
 	outcome, screened, result := e.execute(ctx, call)
+	if e.broker.telemetry != nil {
+		tool := "unknown"
+		if _, bound := e.bindings[call.Name]; bound {
+			tool = call.Name
+		}
+		e.broker.telemetry.RecordToolCall(ctx, e.principalID, tool, outcome, time.Since(started))
+	}
 	attrs := []any{
 		"principal_id", e.principalID,
 		"tool", loggableToolName(call.Name),

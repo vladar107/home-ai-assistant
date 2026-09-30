@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
@@ -184,7 +185,7 @@ func (s *Store) NextConversationRequest(ctx context.Context, principalID string)
 		ctx,
 		`SELECT request.id, request.principal_id, request.chat_id, COALESCE(request.telegram_message_id, 0),
 		        request.session_id, session.runtime_session_id, request.message, request.state,
-		        COALESCE(request.response_text, ''), COALESCE(request.error_kind, '')
+		        COALESCE(request.response_text, ''), COALESCE(request.error_kind, ''), request.created_at
 		 FROM conversation_requests AS request
 		 JOIN conversation_sessions AS session
 		   ON session.id = request.session_id AND session.principal_id = request.principal_id
@@ -360,7 +361,7 @@ func loadConversationByUpdate(ctx context.Context, db queryRower, botUserID, upd
 		ctx,
 		`SELECT request.id, request.principal_id, request.chat_id, COALESCE(request.telegram_message_id, 0),
 		        request.session_id, session.runtime_session_id, request.message, request.state,
-		        COALESCE(request.response_text, ''), COALESCE(request.error_kind, '')
+		        COALESCE(request.response_text, ''), COALESCE(request.error_kind, ''), request.created_at
 		 FROM conversation_requests AS request
 		 JOIN conversation_sessions AS session
 		   ON session.id = request.session_id AND session.principal_id = request.principal_id
@@ -396,6 +397,7 @@ func loadActiveConversationSession(ctx context.Context, db queryRower, principal
 
 func scanConversationRequest(row *sql.Row) (conversation.Request, error) {
 	var request conversation.Request
+	var createdAt string
 	err := row.Scan(
 		&request.ID,
 		&request.PrincipalID,
@@ -407,8 +409,16 @@ func scanConversationRequest(row *sql.Row) (conversation.Request, error) {
 		&request.State,
 		&request.ResponseText,
 		&request.ErrorKind,
+		&createdAt,
 	)
-	return request, err
+	if err != nil {
+		return request, err
+	}
+	request.CreatedAt, err = time.Parse("2006-01-02T15:04:05.000Z", createdAt)
+	if err != nil {
+		return request, fmt.Errorf("parse conversation request creation time: %w", err)
+	}
+	return request, nil
 }
 
 func (s *Store) changeConversationState(ctx context.Context, query, identifier, operation string) (bool, error) {

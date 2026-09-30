@@ -46,6 +46,7 @@ type Request struct {
 	State             string
 	ResponseText      string
 	ErrorKind         string
+	CreatedAt         time.Time
 }
 
 type EnqueueResult struct {
@@ -96,7 +97,18 @@ type ToolProvider interface {
 
 type Telemetry interface {
 	ContextLogger(context.Context, *slog.Logger) *slog.Logger
-	StartConversationTurn(context.Context) (context.Context, func(string, string))
+	StartConversationTurn(ctx context.Context, principal, safetyChecks string) (context.Context, func(string, string))
+	RecordReply(ctx context.Context, principal, kind, outcome, safetyChecks string, duration time.Duration)
+	RecordReplyStage(ctx context.Context, principal, stage string, duration time.Duration)
+	RecordModelTurn(ctx context.Context, principal, safetyChecks string, calls int, promptTokens, outputTokens int64)
+	RecordToolCallsPerTurn(ctx context.Context, principal, safetyChecks string, calls int)
+	RecordHintFollowThrough(ctx context.Context, principal, result string)
+}
+
+// SafetyChecks reports whether a principal has opted in to the safety checks, for labelling the
+// turn's metrics; nil or an error labels the turn "unavailable".
+type SafetyChecks interface {
+	JudgmentsEnabled(ctx context.Context, principalID string) (bool, error)
 }
 
 // FollowUp runs after a turn's reply has been delivered, for work that must follow the reply
@@ -180,6 +192,8 @@ type Config struct {
 	Attachments Attachments
 	WebSearch   WebSearch
 	ToolHint    ToolHinter
+	// SafetyChecks labels the turn's metrics; nil labels every turn "unavailable".
+	SafetyChecks SafetyChecks
 	// Cards and Photos attach a staged card to a successful reply; nil leaves replies text only.
 	Cards  Cards
 	Photos PhotoDeliverer

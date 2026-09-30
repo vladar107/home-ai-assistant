@@ -215,7 +215,7 @@ type integrationTelemetry struct{ turns chan turnOutcome }
 func (integrationTelemetry) ContextLogger(_ context.Context, logger *slog.Logger) *slog.Logger {
 	return logger
 }
-func (i integrationTelemetry) StartConversationTurn(ctx context.Context) (context.Context, func(string, string)) {
+func (i integrationTelemetry) StartConversationTurn(ctx context.Context, _, _ string) (context.Context, func(string, string)) {
 	return ctx, func(outcome, errorKind string) {
 		select {
 		case i.turns <- turnOutcome{outcome: outcome, errorKind: errorKind}:
@@ -223,6 +223,14 @@ func (i integrationTelemetry) StartConversationTurn(ctx context.Context) (contex
 		}
 	}
 }
+
+func (integrationTelemetry) RecordReply(context.Context, string, string, string, string, time.Duration) {
+}
+func (integrationTelemetry) RecordReplyStage(context.Context, string, string, time.Duration) {}
+func (integrationTelemetry) RecordModelTurn(context.Context, string, string, int, int64, int64) {
+}
+func (integrationTelemetry) RecordToolCallsPerTurn(context.Context, string, string, int) {}
+func (integrationTelemetry) RecordHintFollowThrough(context.Context, string, string)     {}
 
 func newConversationHarness(t *testing.T, runtime agentruntime.AgentRuntime) *conversationHarness {
 	t.Helper()

@@ -51,6 +51,7 @@ func (c *IntentChecker) Mismatch(ctx context.Context, principalID, tool string, 
 	}
 	level := c.exposure.Exposure(principalID)
 	if level == turnstate.LevelSuspicious {
+		c.client.recordDecision(ctx, principalID, "intent", "suspicious")
 		return true, nil
 	}
 	messages := c.recent.RecentMessages(principalID)
@@ -84,5 +85,11 @@ func (c *IntentChecker) Mismatch(ctx context.Context, principalID, tool string, 
 	if level == turnstate.LevelExposed {
 		threshold = intentWarnBelowExposed
 	}
-	return probability < threshold, nil
+	warn := probability < threshold
+	result := "clean"
+	if warn {
+		result = "warned"
+	}
+	c.client.recordDecision(ctx, principalID, "intent", result)
+	return warn, nil
 }

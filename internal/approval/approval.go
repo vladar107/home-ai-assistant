@@ -153,6 +153,7 @@ type Service struct {
 	mu        sync.Mutex
 	executors map[string]Executor
 	checker   IntentChecker
+	telemetry Telemetry
 	intents   map[string]Intent
 	notices   map[string]string
 	cancel    context.CancelFunc
@@ -197,6 +198,30 @@ func (s *Service) SetLifetime(lifetime time.Duration) {
 	if lifetime > 0 {
 		s.lifetime = lifetime
 	}
+}
+
+// Telemetry records the approval lifecycle.
+type Telemetry interface {
+	RecordApproval(ctx context.Context, principal, tool, status string, warned bool)
+}
+
+// SetTelemetry sets where the approval lifecycle is recorded, at wiring time before proposals.
+func (s *Service) SetTelemetry(telemetry Telemetry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.telemetry = telemetry
+}
+
+// recordStatus counts one lifecycle step. The warning is read from the stored summary so it
+// survives a restart.
+func (s *Service) recordStatus(ctx context.Context, record Record, status string) {
+	s.mu.Lock()
+	telemetry := s.telemetry
+	s.mu.Unlock()
+	if telemetry == nil {
+		return
+	}
+	telemetry.RecordApproval(ctx, record.PrincipalID, record.Tool, status, strings.HasPrefix(record.Summary, IntentWarning))
 }
 
 // SetIntentChecker enables the intent check on proposals delivered from now on.
@@ -335,6 +360,7 @@ func (s *Service) Propose(ctx context.Context, principalID string, proposal Prop
 		s.mu.Unlock()
 	}
 	s.logger.InfoContext(ctx, "approval.proposed", "principal_id", principalID, "approval_id", id, "tool", proposal.Tool, "replaced", hadPrevious)
+	s.recordStatus(ctx, Record{PrincipalID: principalID, Tool: proposal.Tool}, "proposed")
 	if hadPrevious {
 		s.report(ctx, replaced)
 	}
@@ -437,19 +463,27 @@ func (s *Service) Press(ctx context.Context, principalID, action, approvalID str
 		return finalText(record), true, nil
 	}
 	if !s.now().Before(record.ExpiresAt) {
-		if _, err := s.repository.FinishApproval(ctx, record.ID, StatusPending, StatusExpired, ReasonTimeout, ""); err != nil {
+		finished, err := s.repository.FinishApproval(ctx, record.ID, StatusPending, StatusExpired, ReasonTimeout, "")
+		if err != nil {
 			return "", false, err
 		}
 		record.Status, record.Reason = StatusExpired, ReasonTimeout
+		if finished {
+			s.recordStatus(ctx, record, record.Status)
+		}
 		s.logger.InfoContext(ctx, "approval.resolved", "principal_id", principalID, "approval_id", record.ID, "status", record.Status, "reason", record.Reason)
 		return finalText(record), true, nil
 	}
 	switch action {
 	case ActionReject:
-		if _, err := s.repository.FinishApproval(ctx, record.ID, StatusPending, StatusRejected, "", ""); err != nil {
+		finished, err := s.repository.FinishApproval(ctx, record.ID, StatusPending, StatusRejected, "", "")
+		if err != nil {
 			return "", false, err
 		}
 		record.Status = StatusRejected
+		if finished {
+			s.recordStatus(ctx, record, record.Status)
+		}
 		s.logger.InfoContext(ctx, "approval.resolved", "principal_id", principalID, "approval_id", record.ID, "status", record.Status)
 		return finalText(record), true, nil
 	case ActionConfirm:
@@ -499,6 +533,7 @@ func (s *Service) execute(ctx context.Context, record Record) string {
 	}
 	record.Status, record.Reason, record.Outcome = status, reason, outcome
 	s.rememberNotice(record)
+	s.recordStatus(ctx, record, status)
 	s.logger.InfoContext(ctx, "approval.resolved", "principal_id", record.PrincipalID, "approval_id", record.ID, "status", status, "reason", reason)
 	return finalText(record)
 }
@@ -507,6 +542,11 @@ func (s *Service) execute(ctx context.Context, record Record) string {
 func (s *Service) report(ctx context.Context, record Record) {
 	s.dropIntent(record.ID)
 	s.rememberNotice(record)
+	status := record.Status
+	if record.Reason == ReasonReplaced {
+		status = "replaced"
+	}
+	s.recordStatus(ctx, record, status)
 	s.logger.InfoContext(ctx, "approval.resolved", "principal_id", record.PrincipalID, "approval_id", record.ID, "status", record.Status, "reason", record.Reason)
 	if record.ChatID == 0 || record.MessageID == 0 {
 		return

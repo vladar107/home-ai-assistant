@@ -56,9 +56,14 @@ func (h *ToolHinter) Hint(ctx context.Context, principalID, message string, tool
 		return "", err
 	}
 	name, confidence, ok := answers.Choice("tool")
-	if !ok || name == hintNone || confidence < hintConfidence {
+	if !ok {
 		return "", nil
 	}
+	if name == hintNone || confidence < hintConfidence {
+		h.client.recordDecision(ctx, principalID, "hint", "none")
+		return "", nil
+	}
+	h.client.recordDecision(ctx, principalID, "hint", "hinted")
 	return name, nil
 }
 

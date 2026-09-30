@@ -47,6 +47,9 @@ type Service struct {
 	gate         ConnectionGate
 	logger       *slog.Logger
 	telemetry    Telemetry
+	// startedAt is truncated like the stored created_at, so a request queued in the same
+	// millisecond as the start does not read as recovered.
+	startedAt time.Time
 
 	mu       sync.Mutex
 	ctx      context.Context
@@ -57,6 +60,15 @@ type Service struct {
 	// race on refreshing its credentials, so chat turns and scheduled runs take turns.
 	turns map[string]chan struct{}
 	wg    sync.WaitGroup
+	// captures holds what a finished chat turn measured until its reply is delivered; a restart
+	// in between loses it, and that reply is then counted as recovered.
+	captures map[string]replyCapture
+}
+
+type replyCapture struct {
+	principalID         string
+	queue, setup, model time.Duration
+	safetyChecks        string
 }
 
 func NewService(
@@ -106,6 +118,8 @@ func NewService(
 		gate:         gate,
 		logger:       logger,
 		telemetry:    telemetry,
+		startedAt:    time.Now().Truncate(time.Millisecond),
+		captures:     make(map[string]replyCapture),
 		workers:      make(map[string]chan struct{}),
 		inflight:     make(map[string]context.CancelFunc),
 		turns:        make(map[string]chan struct{}),
@@ -250,11 +264,22 @@ func (s *Service) Cancel(ctx context.Context, principalID string) (bool, error) 
 	}
 	s.mu.Lock()
 	cancel := s.inflight[principalID]
+	s.dropCaptures(principalID)
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
 	return cancelled, nil
+}
+
+// dropCaptures forgets the measurements of the principal's cancelled requests, which never reach
+// delivery. The caller holds s.mu.
+func (s *Service) dropCaptures(principalID string) {
+	for id, capture := range s.captures {
+		if capture.principalID == principalID {
+			delete(s.captures, id)
+		}
+	}
 }
 
 func (s *Service) NewSession(ctx context.Context, principalID string) (bool, error) {
@@ -272,6 +297,7 @@ func (s *Service) NewSession(ctx context.Context, principalID string) (bool, err
 	}
 	s.mu.Lock()
 	cancel := s.inflight[principalID]
+	s.dropCaptures(principalID)
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -378,8 +404,12 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 	if !claimed {
 		return
 	}
+	claimedAt := time.Now()
 
-	turnCtx, endTurn := s.telemetry.StartConversationTurn(turnCtx)
+	safetyChecks := s.safetyChecksLabel(turnCtx, request.PrincipalID)
+	turnCtx, endTurn := s.telemetry.StartConversationTurn(turnCtx, request.PrincipalID, safetyChecks)
+	var modelTime time.Duration
+	var runStarted time.Time
 
 	errorKind := ""
 	// The stored kind stays within the schema's allowed set; telemetry and logs carry the finer category.
@@ -424,6 +454,8 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		if s.config.Recent != nil {
 			s.config.Recent.RecordMessage(request.PrincipalID, request.Message)
 		}
+		sink := newCountingSink(request.PrincipalID, s.logger, s.telemetry)
+		runStarted = time.Now()
 		result, err := s.runtime.Run(turnCtx, agentruntime.RunRequest{
 			PrincipalID: request.PrincipalID,
 			SessionID:   request.RuntimeSessionID,
@@ -431,8 +463,12 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 			Images:      attachments.Images,
 			Tools:       tools,
 			WebSearch:   webSearch,
-		}, s.turnSink(request.PrincipalID, webSearch))
+		}, sink)
+		modelTime = time.Since(runStarted)
 		runErr = err
+		if err == nil && !errors.Is(turnCtx.Err(), context.Canceled) {
+			s.recordTurnMetrics(turnCtx, request.PrincipalID, safetyChecks, sink, result.Usage, !tools.Empty() || webSearch, hint)
+		}
 		switch {
 		case errors.Is(turnCtx.Err(), context.DeadlineExceeded):
 			errorKind = "timeout"
@@ -477,6 +513,18 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		endTurn("cancelled", "cancelled")
 		return
 	}
+	if runStarted.IsZero() {
+		runStarted = time.Now()
+	}
+	s.mu.Lock()
+	s.captures[request.ID] = replyCapture{
+		principalID:  request.PrincipalID,
+		queue:        max(claimedAt.Sub(request.CreatedAt), 0),
+		setup:        runStarted.Sub(claimedAt),
+		model:        modelTime,
+		safetyChecks: safetyChecks,
+	}
+	s.mu.Unlock()
 	endTurn(outcome, reportedKind)
 	s.telemetry.ContextLogger(ctx, s.logger).Info(
 		"conversation.turn.completed",
@@ -562,8 +610,12 @@ func (s *Service) deliver(ctx context.Context, request Request) error {
 		return err
 	}
 	if !claimed {
+		s.mu.Lock()
+		delete(s.captures, request.ID)
+		s.mu.Unlock()
 		return nil
 	}
+	deliveryStarted := time.Now()
 	replyTo := request.TelegramMessageID
 	chunks := SplitReply(request.ResponseText)
 	// A failed turn's text explains the failure, so a card it staged would illustrate nothing.
@@ -578,6 +630,14 @@ func (s *Service) deliver(ctx context.Context, request Request) error {
 		if err := s.deliverer.SendReply(deliveryCtx, request.ChatID, replyTo, chunk); err != nil {
 			if isPermanentDeliveryError(err) {
 				s.removeCard(request)
+				s.mu.Lock()
+				capture, captured := s.captures[request.ID]
+				delete(s.captures, request.ID)
+				s.mu.Unlock()
+				if !captured {
+					capture.safetyChecks = "unavailable"
+				}
+				s.telemetry.RecordReply(ctx, request.PrincipalID, "chat", "undeliverable", capture.safetyChecks, max(time.Since(request.CreatedAt), 0))
 				return s.repository.CancelConversationDelivery(ctx, request.ID)
 			}
 			_ = s.repository.ReleaseConversationDelivery(ctx, request.ID)
@@ -589,6 +649,7 @@ func (s *Service) deliver(ctx context.Context, request Request) error {
 		_ = s.repository.ReleaseConversationDelivery(ctx, request.ID)
 		return err
 	}
+	s.recordReply(ctx, request, deliveryStarted)
 	s.removeCard(request)
 	if s.config.FollowUp != nil {
 		if err := s.config.FollowUp.AfterDelivery(deliveryCtx, request.PrincipalID, request.ChatID); err != nil && ctx.Err() == nil {
@@ -596,6 +657,70 @@ func (s *Service) deliver(ctx context.Context, request Request) error {
 		}
 	}
 	return nil
+}
+
+// recordReply counts a delivered reply. The stages are recorded only for a plain delivered
+// reply, because dashboards divide their sums by the delivered chat reply count.
+func (s *Service) recordReply(ctx context.Context, request Request, deliveryStarted time.Time) {
+	s.mu.Lock()
+	capture, captured := s.captures[request.ID]
+	delete(s.captures, request.ID)
+	s.mu.Unlock()
+
+	outcome := "delivered"
+	switch {
+	case !captured || request.CreatedAt.Before(s.startedAt):
+		outcome = "recovered"
+	case request.ErrorKind != "":
+		outcome = "failed"
+	}
+	if !captured {
+		capture.safetyChecks = "unavailable"
+	}
+	now := time.Now()
+	s.telemetry.RecordReply(ctx, request.PrincipalID, "chat", outcome, capture.safetyChecks, max(now.Sub(request.CreatedAt), 0))
+	if outcome != "delivered" {
+		return
+	}
+	s.telemetry.RecordReplyStage(ctx, request.PrincipalID, "queue", capture.queue)
+	s.telemetry.RecordReplyStage(ctx, request.PrincipalID, "setup", capture.setup)
+	s.telemetry.RecordReplyStage(ctx, request.PrincipalID, "model", capture.model)
+	s.telemetry.RecordReplyStage(ctx, request.PrincipalID, "delivery", now.Sub(deliveryStarted))
+}
+
+// safetyChecksLabel reads the principal's opt-in once per turn; any failure to know is "unavailable".
+func (s *Service) safetyChecksLabel(ctx context.Context, principalID string) string {
+	if s.config.SafetyChecks == nil {
+		return "unavailable"
+	}
+	enabled, err := s.config.SafetyChecks.JudgmentsEnabled(ctx, principalID)
+	switch {
+	case err != nil:
+		return "unavailable"
+	case enabled:
+		return "on"
+	default:
+		return "off"
+	}
+}
+
+func (s *Service) recordTurnMetrics(ctx context.Context, principalID, safetyChecks string, sink *countingSink, usage agentruntime.Usage, offeredTools bool, hint string) {
+	s.telemetry.RecordModelTurn(ctx, principalID, safetyChecks, usage.ModelCalls, usage.PromptTokens, usage.OutputTokens)
+	calls, called := sink.snapshot()
+	if offeredTools {
+		s.telemetry.RecordToolCallsPerTurn(ctx, principalID, safetyChecks, calls)
+	}
+	if hint == "" {
+		return
+	}
+	result := "no_tool"
+	switch {
+	case called[hint]:
+		result = "followed"
+	case calls > 0:
+		result = "other_tool"
+	}
+	s.telemetry.RecordHintFollowThrough(ctx, principalID, result)
 }
 
 func (s *Service) removeCard(request Request) {
@@ -683,36 +808,47 @@ func (s *Service) logWorkerError(ctx context.Context, principalID, errorKind str
 	)
 }
 
-type discardSink struct{}
-
-func (discardSink) Emit(context.Context, agentruntime.Event) error {
-	return nil
-}
-
 // webSearchTool runs inside the runtime rather than through the broker, so its calls get no
 // broker audit line; the turn's sink records each by name instead.
 const webSearchTool = "web_search"
 
-// turnSink discards runtime events except that a turn offering web search logs each search call,
-// by name only.
-func (s *Service) turnSink(principalID string, webSearch bool) agentruntime.EventSink {
-	if !webSearch {
-		return discardSink{}
-	}
-	return webSearchSink{principalID: principalID, logger: s.logger, telemetry: s.telemetry}
-}
-
-type webSearchSink struct {
+// countingSink remembers which tools a turn called, by name only, and logs each web search call.
+type countingSink struct {
 	principalID string
 	logger      *slog.Logger
 	telemetry   Telemetry
+
+	mu     sync.Mutex
+	calls  int
+	called map[string]bool
 }
 
-func (w webSearchSink) Emit(ctx context.Context, event agentruntime.Event) error {
-	if event.Type == "tool_call" && event.Text == webSearchTool {
-		w.telemetry.ContextLogger(ctx, w.logger).InfoContext(ctx, "conversation.web_search.called", "principal_id", w.principalID, "tool", webSearchTool)
+func newCountingSink(principalID string, logger *slog.Logger, telemetry Telemetry) *countingSink {
+	return &countingSink{principalID: principalID, logger: logger, telemetry: telemetry, called: make(map[string]bool)}
+}
+
+func (c *countingSink) Emit(ctx context.Context, event agentruntime.Event) error {
+	if event.Type != "tool_call" {
+		return nil
+	}
+	c.mu.Lock()
+	c.calls++
+	c.called[event.Text] = true
+	c.mu.Unlock()
+	if event.Text == webSearchTool {
+		c.telemetry.ContextLogger(ctx, c.logger).InfoContext(ctx, "conversation.web_search.called", "principal_id", c.principalID, "tool", webSearchTool)
 	}
 	return nil
+}
+
+func (c *countingSink) snapshot() (int, map[string]bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	called := make(map[string]bool, len(c.called))
+	for name := range c.called {
+		called[name] = true
+	}
+	return c.calls, called
 }
 
 func newID() (string, error) {

@@ -60,9 +60,15 @@ type quietTelemetry struct{}
 func (quietTelemetry) ContextLogger(_ context.Context, logger *slog.Logger) *slog.Logger {
 	return logger
 }
-func (quietTelemetry) StartConversationTurn(ctx context.Context) (context.Context, func(string, string)) {
+func (quietTelemetry) StartConversationTurn(ctx context.Context, _, _ string) (context.Context, func(string, string)) {
 	return ctx, func(string, string) {}
 }
+
+func (quietTelemetry) RecordReply(context.Context, string, string, string, string, time.Duration) {}
+func (quietTelemetry) RecordReplyStage(context.Context, string, string, time.Duration)            {}
+func (quietTelemetry) RecordModelTurn(context.Context, string, string, int, int64, int64)         {}
+func (quietTelemetry) RecordToolCallsPerTurn(context.Context, string, string, int)                {}
+func (quietTelemetry) RecordHintFollowThrough(context.Context, string, string)                    {}
 
 // runHintTurn runs one chat turn against a fake TypeSafe answering with the given body after the
 // given delay and returns the message the runtime received.

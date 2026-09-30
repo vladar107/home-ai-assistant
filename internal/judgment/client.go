@@ -31,6 +31,15 @@ const (
 // Recorder receives one measurement per completed request.
 type Recorder interface {
 	RecordJudgment(ctx context.Context, purpose, outcome string, duration time.Duration)
+	RecordJudgmentDecision(ctx context.Context, principal, purpose, result string)
+}
+
+// recordDecision counts what a completed judgment concluded for the principal.
+func (c *Client) recordDecision(ctx context.Context, principalID, purpose, result string) {
+	if c.telemetry == nil {
+		return
+	}
+	c.telemetry.RecordJudgmentDecision(ctx, principalID, purpose, result)
 }
 
 // Question is one typed question in a request.

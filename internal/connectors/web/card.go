@@ -289,7 +289,15 @@ func (s *Service) weatherCard(ctx context.Context, principalID string, request c
 		fmt.Fprintf(&report, "; %s.\n", train.Reason)
 	}
 
+	renderStarted := time.Now()
 	png, err := daycard.Render(card)
+	if s.telemetry != nil {
+		outcome := "success"
+		if err != nil {
+			outcome = "error"
+		}
+		s.telemetry.RecordDayCardRender(ctx, outcome, time.Since(renderStarted))
+	}
 	if err != nil {
 		return tools.Result{}, fmt.Errorf("render day card: %w", err)
 	}

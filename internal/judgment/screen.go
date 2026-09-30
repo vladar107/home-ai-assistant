@@ -54,8 +54,10 @@ func (s *Screener) Screen(ctx context.Context, principalID, _ string, text strin
 	instructions, _ := answers.Noul(instructionsForAIQuestID)
 	action, _ := answers.Noul(requestsActionQuestionID)
 	if instructions < instructionsThreshold && action < requestsActionThreshold {
+		s.client.recordDecision(ctx, principalID, screenPurpose, "clean")
 		return false, nil
 	}
+	s.client.recordDecision(ctx, principalID, screenPurpose, "flagged")
 	s.marker.MarkSuspicious(principalID)
 	return true, nil
 }

@@ -129,6 +129,28 @@ protected logs or audit only when required for diagnosis or accountability.
 - Container restart/OOM state where safely observable
 - Disk/array/backup health through supported sources
 
+### Reply, model, and business metrics
+
+[Plan 0030](plans/0030-reply-and-business-metrics.md) defines the exact names and labels.
+Activity metrics carry the principal, and reply and turn metrics also carry
+`safety_checks` (`on`, `off`, `unavailable`), so users with and without the
+TypeSafe checks can be compared over the same period.
+
+- Reply time from queued to delivered, by kind and outcome. Replies to requests
+  recovered after a restart, or never delivered, have their own outcomes.
+- Stages of a delivered chat reply: queue, setup (including the tool-hint wait),
+  model, and delivery. Their means stay within the mean reply time.
+- Model call duration per assistant message, token counters by type, and model
+  calls and prompt tokens per turn.
+- Tool calls by tool and outcome, tool duration (including TypeSafe screening
+  for screened tools), and tool calls per turn.
+- Day-card render duration.
+- The approval lifecycle, by status and by whether the card carried a TypeSafe
+  warning.
+- TypeSafe decisions and hint follow-through, as well as request latency and
+  outcome.
+- Scheduled runs by outcome.
+
 ## Logs
 
 Use structured logs on stdout with levels and stable event names. The container
@@ -218,6 +240,8 @@ that repository, never saved from the browser.
 - Availability
 - Telegram lag and errors
 - Turn rate, latency, and failures
+- Reply latency and its stage breakdown, model, tools, day card, approvals,
+  safety checks, and usage per user, filtered by a principal variable
 - Runtime restarts
 - Integration health
 - Pending jobs and outbox depth

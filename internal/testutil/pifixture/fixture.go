@@ -185,6 +185,31 @@ func run() error {
 		return err
 	}
 	switch prompt.Message {
+	case "fixture:usage", "fixture:usage-missing":
+		// Two assistant messages around a web_search call, as Pi reports model usage per message.
+		ack()
+		// User and tool result messages carry usage-shaped fields the runtime must ignore.
+		noise := map[string]int{"input": 1000, "output": 1000, "cacheRead": 1000, "cacheWrite": 1000}
+		emit(map[string]any{"type": "message_start", "message": map[string]any{"role": "user"}})
+		emit(map[string]any{"type": "message_end", "message": map[string]any{"role": "user", "usage": noise}})
+		emit(map[string]any{"type": "message_start", "message": map[string]string{"role": "assistant", "provider": "fixture-provider", "model": "fixture-model"}})
+		delta("Searching.")
+		emit(map[string]any{"type": "message_end", "message": map[string]any{
+			"role": "assistant", "provider": "fixture-provider", "model": "fixture-model", "stopReason": "toolUse",
+			"usage": map[string]int{"input": 100, "output": 20, "cacheRead": 50, "cacheWrite": 10, "totalTokens": 180},
+		}})
+		emit(map[string]any{"type": "tool_execution_start", "toolCallId": "call-1", "toolName": "web_search"})
+		emit(map[string]any{"type": "tool_execution_end", "toolCallId": "call-1", "toolName": "web_search", "isError": false})
+		emit(map[string]any{"type": "message_start", "message": map[string]any{"role": "toolResult"}})
+		emit(map[string]any{"type": "message_end", "message": map[string]any{"role": "toolResult", "usage": noise}})
+		emit(map[string]any{"type": "message_start", "message": map[string]string{"role": "assistant", "provider": "fixture-provider", "model": "fixture-model"}})
+		delta("found")
+		final := map[string]any{"role": "assistant", "provider": "fixture-provider", "model": "fixture-model", "stopReason": "stop"}
+		if prompt.Message == "fixture:usage" {
+			final["usage"] = map[string]int{"input": 30, "output": 5, "cacheRead": 120, "cacheWrite": 0, "totalTokens": 155}
+		}
+		emit(map[string]any{"type": "message_end", "message": final})
+		settle()
 	case "fixture:web-search":
 		// web_search runs inside Pi through the search extension, so no bridge call is made.
 		ack()

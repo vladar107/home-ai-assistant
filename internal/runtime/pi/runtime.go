@@ -54,6 +54,18 @@ type Runtime struct {
 	model              string
 	profilesDir        string
 	webSearchExtension string
+	telemetry          Telemetry
+}
+
+// Telemetry receives one record per assistant message, timed from its message_start.
+type Telemetry interface {
+	RecordModelCall(ctx context.Context, principal, provider, model, stopReason string, duration time.Duration)
+	RecordModelTokens(ctx context.Context, principal, provider, model string, input, output, cacheRead, cacheWrite int64)
+}
+
+// SetTelemetry must be called before the first turn.
+func (r *Runtime) SetTelemetry(telemetry Telemetry) {
+	r.telemetry = telemetry
 }
 
 var _ agentruntime.AgentRuntime = (*Runtime)(nil)
@@ -236,7 +248,7 @@ func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink
 		return agentruntime.RunResult{}, fmt.Errorf("send Pi prompt: request could not be written")
 	}
 
-	state := &turnState{toolsEnabled: toolsEnabled, sink: sink}
+	state := &turnState{toolsEnabled: toolsEnabled, sink: sink, telemetry: r.telemetry, principal: request.PrincipalID}
 	for {
 		select {
 		case event, ok := <-events:
@@ -245,6 +257,9 @@ func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink
 				return agentruntime.RunResult{}, fmt.Errorf("read Pi output: event stream ended early")
 			}
 			if category, actionable := providerFailure(event); actionable {
+				if event.Type == "message_end" && event.Message != nil && event.Message.Role == "assistant" {
+					state.recordAssistantMessage(ctx, event.Message)
+				}
 				// Pi may be waiting between its own retries; abort_retry ends the turn now.
 				_ = json.NewEncoder(stdin).Encode(map[string]string{"type": "abort_retry"})
 				stopProcess(cmd, stdin, waitResult)
@@ -264,7 +279,7 @@ func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink
 				if result == "" {
 					return agentruntime.RunResult{}, fmt.Errorf("Pi runtime returned an empty response")
 				}
-				return agentruntime.RunResult{Response: result}, nil
+				return agentruntime.RunResult{Response: result, Usage: state.usage}, nil
 			}
 		case err := <-scanErrors:
 			stopProcess(cmd, stdin, waitResult)
@@ -372,9 +387,19 @@ type rpcEvent struct {
 }
 
 type rpcMessage struct {
-	Role         string `json:"role"`
-	StopReason   string `json:"stopReason"`
-	ErrorMessage string `json:"errorMessage"`
+	Role         string    `json:"role"`
+	Provider     string    `json:"provider"`
+	Model        string    `json:"model"`
+	StopReason   string    `json:"stopReason"`
+	ErrorMessage string    `json:"errorMessage"`
+	Usage        *rpcUsage `json:"usage"`
+}
+
+type rpcUsage struct {
+	Input      int64 `json:"input"`
+	Output     int64 `json:"output"`
+	CacheRead  int64 `json:"cacheRead"`
+	CacheWrite int64 `json:"cacheWrite"`
 }
 
 type assistantMessageEvent struct {
@@ -450,6 +475,10 @@ type turnState struct {
 	response           strings.Builder
 	promptAcknowledged bool
 	separatorPending   bool
+	telemetry          Telemetry
+	principal          string
+	messageStarted     time.Time
+	usage              agentruntime.Usage
 }
 
 func (s *turnState) consume(ctx context.Context, event rpcEvent) (bool, error) {
@@ -464,6 +493,13 @@ func (s *turnState) consume(ctx context.Context, event rpcEvent) (bool, error) {
 	case "message_start":
 		if event.Message != nil && event.Message.Role == "assistant" && s.response.Len() > 0 {
 			s.separatorPending = true
+		}
+		if event.Message != nil && event.Message.Role == "assistant" {
+			s.messageStarted = time.Now()
+		}
+	case "message_end":
+		if event.Message != nil && event.Message.Role == "assistant" {
+			s.recordAssistantMessage(ctx, event.Message)
 		}
 	case "message_update":
 		if event.AssistantMessageEvent == nil {
@@ -494,6 +530,24 @@ func (s *turnState) consume(ctx context.Context, event rpcEvent) (bool, error) {
 		return false, fmt.Errorf("Pi runtime reported an extension error")
 	}
 	return false, nil
+}
+
+func (s *turnState) recordAssistantMessage(ctx context.Context, message *rpcMessage) {
+	started := s.messageStarted
+	s.messageStarted = time.Time{}
+	s.usage.ModelCalls++
+	if s.telemetry != nil && !started.IsZero() {
+		s.telemetry.RecordModelCall(ctx, s.principal, message.Provider, message.Model, message.StopReason, time.Since(started))
+	}
+	usage := message.Usage
+	if usage == nil {
+		return
+	}
+	s.usage.PromptTokens += usage.Input + usage.CacheRead + usage.CacheWrite
+	s.usage.OutputTokens += usage.Output
+	if s.telemetry != nil {
+		s.telemetry.RecordModelTokens(ctx, s.principal, message.Provider, message.Model, usage.Input, usage.Output, usage.CacheRead, usage.CacheWrite)
+	}
 }
 
 func (s *turnState) appendText(ctx context.Context, delta string) error {

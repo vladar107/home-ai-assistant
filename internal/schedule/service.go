@@ -58,6 +58,9 @@ type Service struct {
 	now        func() time.Time
 	types      map[string]JobType
 	proposer   Proposer
+	telemetry  Telemetry
+	safety     SafetyChecks
+	startedAt  time.Time
 
 	mu       sync.Mutex
 	cancel   context.CancelFunc
@@ -68,6 +71,76 @@ type Service struct {
 	notices  map[string][]string
 	pruned   time.Time
 	workers  sync.WaitGroup
+}
+
+// Run outcomes recorded in metrics, matching the chat reply outcomes: the scheduler delivered the
+// report, delivered a failure report, could not deliver permanently, delivered a run that was due
+// before this process started, or ended the run without a report.
+const (
+	runDelivered     = "delivered"
+	runFailed        = "failed"
+	runUndeliverable = "undeliverable"
+	runRecovered     = "recovered"
+	runSkipped       = "skipped"
+)
+
+// Telemetry records scheduled run metrics.
+type Telemetry interface {
+	RecordScheduleRun(ctx context.Context, principal, outcome string)
+	RecordReply(ctx context.Context, principal, kind, outcome, safetyChecks string, duration time.Duration)
+}
+
+// SafetyChecks reports whether a principal has opted in to the safety checks, for labelling the
+// scheduled reply metrics.
+type SafetyChecks interface {
+	JudgmentsEnabled(ctx context.Context, principalID string) (bool, error)
+}
+
+// SetTelemetry sets where run metrics are recorded, at wiring time before the scheduler starts.
+func (s *Service) SetTelemetry(telemetry Telemetry) {
+	s.telemetry = telemetry
+}
+
+// SetSafetyChecks sets the opt-in lookup that labels scheduled reply metrics; without it they
+// are labelled "unavailable".
+func (s *Service) SetSafetyChecks(checks SafetyChecks) {
+	s.safety = checks
+}
+
+// recordRun counts a finished run. A run that ended with a report also records the time from its
+// scheduled occurrence to now, which survives a restart because the occurrence is stored.
+func (s *Service) recordRun(ctx context.Context, run Run, outcome string) {
+	if s.telemetry == nil {
+		return
+	}
+	if outcome == runDelivered || outcome == runFailed {
+		switch {
+		case run.ScheduledFor.Before(s.startedAt):
+			outcome = runRecovered
+		case run.ErrorKind != "":
+			outcome = runFailed
+		}
+	}
+	s.telemetry.RecordScheduleRun(ctx, run.PrincipalID, outcome)
+	if outcome == runSkipped {
+		return
+	}
+	s.telemetry.RecordReply(ctx, run.PrincipalID, "scheduled", outcome, s.safetyLabel(ctx, run.PrincipalID), max(s.now().Sub(run.ScheduledFor), 0))
+}
+
+func (s *Service) safetyLabel(ctx context.Context, principalID string) string {
+	if s.safety == nil {
+		return "unavailable"
+	}
+	enabled, err := s.safety.JudgmentsEnabled(ctx, principalID)
+	switch {
+	case err != nil:
+		return "unavailable"
+	case enabled:
+		return "on"
+	default:
+		return "off"
+	}
 }
 
 // NewService builds the scheduler. A nil proposer leaves out the tools that create and remove jobs
@@ -109,6 +182,7 @@ func NewService(cfg Config, repository Repository, chats Chats, deliverer conver
 		zone:       cfg.Zone,
 		tick:       tick,
 		now:        now,
+		startedAt:  now(),
 		types:      make(map[string]JobType),
 		proposer:   proposer,
 		wake:       make(chan struct{}, 1),
@@ -406,6 +480,7 @@ func (s *Service) deliver(ctx context.Context, run Run) {
 					s.logRunError(ctx, run, "store_delivery", err)
 				} else {
 					s.removeCard(run)
+					s.recordRun(ctx, run, runUndeliverable)
 				}
 				s.logger.WarnContext(ctx, "schedule.run.undeliverable", "principal_id", run.PrincipalID, "job_id", run.JobID)
 				return
@@ -422,6 +497,7 @@ func (s *Service) deliver(ctx context.Context, run Run) {
 	}
 	s.removeCard(run)
 	s.remember(run)
+	s.recordRun(ctx, run, runDelivered)
 	s.logger.InfoContext(ctx, "schedule.run.delivered", "principal_id", run.PrincipalID, "job_id", run.JobID)
 }
 
@@ -435,6 +511,7 @@ func (s *Service) skip(ctx context.Context, run Run, from, reason string) {
 		return
 	}
 	s.removeCard(run)
+	s.recordRun(ctx, run, runSkipped)
 	s.logger.InfoContext(ctx, "schedule.run.skipped", "principal_id", run.PrincipalID, "job_id", run.JobID, "reason", reason)
 }
 

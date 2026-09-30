@@ -32,6 +32,8 @@ var (
 	requestDurationBoundaries   = []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60}
 	turnDurationBoundaries      = []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 30, 60, 120, 180, 300}
 	lifecycleDurationBoundaries = []float64{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5, 10, 30, 60}
+	callCountBoundaries         = []float64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	tokenBoundaries             = []float64{500, 1000, 2000, 4000, 8000, 16000, 32000, 64000, 128000, 256000, 512000, 1024000}
 )
 
 type Telemetry struct {
@@ -57,6 +59,20 @@ type Telemetry struct {
 	judgmentDuration             metric.Float64Histogram
 	storeOperations              metric.Int64Counter
 	storeOperationDuration       metric.Float64Histogram
+	replyDuration                metric.Float64Histogram
+	replyStageDuration           metric.Float64Histogram
+	modelCallDuration            metric.Float64Histogram
+	modelTokens                  metric.Int64Counter
+	modelCallsPerTurn            metric.Int64Histogram
+	modelTurnTokens              metric.Int64Histogram
+	toolCalls                    metric.Int64Counter
+	toolDuration                 metric.Float64Histogram
+	toolCallsPerTurn             metric.Int64Histogram
+	dayCardRenderDuration        metric.Float64Histogram
+	approvals                    metric.Int64Counter
+	judgmentDecisions            metric.Int64Counter
+	hintFollowThrough            metric.Int64Counter
+	scheduleRuns                 metric.Int64Counter
 }
 
 func New(ctx context.Context, cfg config.ObservabilityConfig, logger *slog.Logger) (*Telemetry, error) {
@@ -100,17 +116,11 @@ func New(ctx context.Context, cfg config.ObservabilityConfig, logger *slog.Logge
 		sdkmetric.WithResource(res),
 	)
 
-	telemetry, err := newTelemetry(
-		tracerProvider.Tracer(instrumentationName),
-		meterProvider.Meter(instrumentationName),
-	)
+	telemetry, err := newEnabledTelemetry(tracerProvider, meterProvider)
 	if err != nil {
 		_ = errors.Join(tracerProvider.Shutdown(ctx), meterProvider.Shutdown(ctx))
 		return nil, err
 	}
-	telemetry.enabled = true
-	telemetry.tracerProvider = tracerProvider
-	telemetry.meterProvider = meterProvider
 
 	otel.SetTracerProvider(tracerProvider)
 	otel.SetMeterProvider(meterProvider)
@@ -118,6 +128,28 @@ func New(ctx context.Context, cfg config.ObservabilityConfig, logger *slog.Logge
 		logger.Warn("telemetry.export.failed")
 	}))
 
+	return telemetry, nil
+}
+
+// NewWithReader builds enabled telemetry whose metrics flow to reader and whose traces are not exported.
+func NewWithReader(reader sdkmetric.Reader) (*Telemetry, error) {
+	return newEnabledTelemetry(
+		sdktrace.NewTracerProvider(),
+		sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)),
+	)
+}
+
+func newEnabledTelemetry(tracerProvider *sdktrace.TracerProvider, meterProvider *sdkmetric.MeterProvider) (*Telemetry, error) {
+	telemetry, err := newTelemetry(
+		tracerProvider.Tracer(instrumentationName),
+		meterProvider.Meter(instrumentationName),
+	)
+	if err != nil {
+		return nil, err
+	}
+	telemetry.enabled = true
+	telemetry.tracerProvider = tracerProvider
+	telemetry.meterProvider = meterProvider
 	return telemetry, nil
 }
 
@@ -254,11 +286,90 @@ func newTelemetry(tracer trace.Tracer, meter metric.Meter) (*Telemetry, error) {
 	); err != nil {
 		return nil, fmt.Errorf("create store operation duration histogram: %w", err)
 	}
+	if err := t.createBusinessInstruments(meter); err != nil {
+		return nil, err
+	}
 	if err := registerRuntimeMetrics(meter); err != nil {
 		return nil, err
 	}
 
 	return t, nil
+}
+
+func (t *Telemetry) createBusinessInstruments(meter metric.Meter) error {
+	var err error
+	seconds := func(name, description string, boundaries []float64) (metric.Float64Histogram, error) {
+		histogram, err := meter.Float64Histogram(name,
+			metric.WithDescription(description),
+			metric.WithUnit("s"),
+			metric.WithExplicitBucketBoundaries(boundaries...),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("create %s histogram: %w", name, err)
+		}
+		return histogram, nil
+	}
+	counts := func(name, description, unit string, boundaries []float64) (metric.Int64Histogram, error) {
+		histogram, err := meter.Int64Histogram(name,
+			metric.WithDescription(description),
+			metric.WithUnit(unit),
+			metric.WithExplicitBucketBoundaries(boundaries...),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("create %s histogram: %w", name, err)
+		}
+		return histogram, nil
+	}
+	counter := func(name, description, unit string) (metric.Int64Counter, error) {
+		c, err := meter.Int64Counter(name, metric.WithDescription(description), metric.WithUnit(unit))
+		if err != nil {
+			return nil, fmt.Errorf("create %s counter: %w", name, err)
+		}
+		return c, nil
+	}
+	if t.replyDuration, err = seconds("home_agent.reply.duration", "Time from accepted message to final reply delivered.", turnDurationBoundaries); err != nil {
+		return err
+	}
+	if t.replyStageDuration, err = seconds("home_agent.reply.stage.duration", "Reply pipeline stage duration.", turnDurationBoundaries); err != nil {
+		return err
+	}
+	if t.modelCallDuration, err = seconds("home_agent.model.call.duration", "Model call duration.", turnDurationBoundaries); err != nil {
+		return err
+	}
+	if t.modelTokens, err = counter("home_agent.model.tokens", "Model tokens reported by the runtime.", "{token}"); err != nil {
+		return err
+	}
+	if t.modelCallsPerTurn, err = counts("home_agent.model.calls_per_turn", "Model calls made in one turn.", "{call}", callCountBoundaries); err != nil {
+		return err
+	}
+	if t.modelTurnTokens, err = counts("home_agent.model.turn_tokens", "Model tokens used in one turn.", "{token}", tokenBoundaries); err != nil {
+		return err
+	}
+	if t.toolCalls, err = counter("home_agent.tool.calls", "Tool calls completed.", "{call}"); err != nil {
+		return err
+	}
+	if t.toolDuration, err = seconds("home_agent.tool.duration", "Tool call duration.", requestDurationBoundaries); err != nil {
+		return err
+	}
+	if t.toolCallsPerTurn, err = counts("home_agent.tool.calls_per_turn", "Tool calls made in one turn.", "{call}", callCountBoundaries); err != nil {
+		return err
+	}
+	if t.dayCardRenderDuration, err = seconds("home_agent.daycard.render.duration", "Day card render duration.", requestDurationBoundaries); err != nil {
+		return err
+	}
+	if t.approvals, err = counter("home_agent.approvals", "Approval lifecycle events.", "{approval}"); err != nil {
+		return err
+	}
+	if t.judgmentDecisions, err = counter("home_agent.judgment.decisions", "TypeSafe judgment decisions made.", "{decision}"); err != nil {
+		return err
+	}
+	if t.hintFollowThrough, err = counter("home_agent.hint.follow_through", "Hint follow-through results.", "{hint}"); err != nil {
+		return err
+	}
+	if t.scheduleRuns, err = counter("home_agent.schedule.runs", "Scheduled runs completed.", "{run}"); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (t *Telemetry) Shutdown(ctx context.Context) error {
@@ -372,8 +483,15 @@ func (t *Telemetry) RecordTelegramRetry(ctx context.Context, reason string) {
 	t.telegramRetries.Add(ctx, 1, metric.WithAttributes(attribute.String("home_agent.reason", reason)))
 }
 
-func (t *Telemetry) StartConversationTurn(ctx context.Context) (context.Context, func(string, string)) {
-	ctx, span := t.tracer.Start(ctx, "home_agent.conversation.turn")
+func (t *Telemetry) StartConversationTurn(ctx context.Context, principal, safetyChecks string) (context.Context, func(string, string)) {
+	principal = labelOr(principal, "unknown")
+	safetyChecks = labelOr(safetyChecks, "unavailable")
+	ctx, span := t.tracer.Start(ctx, "home_agent.conversation.turn",
+		trace.WithAttributes(
+			attribute.String("home_agent.principal", principal),
+			attribute.String("home_agent.safety_checks", safetyChecks),
+		),
+	)
 	started := time.Now()
 	return ctx, func(outcome, errorKind string) {
 		if errorKind == "" {
@@ -384,6 +502,8 @@ func (t *Telemetry) StartConversationTurn(ctx context.Context) (context.Context,
 		attributes := metric.WithAttributes(
 			attribute.String("home_agent.outcome", outcome),
 			attribute.String("home_agent.error_kind", errorKind),
+			attribute.String("home_agent.principal", principal),
+			attribute.String("home_agent.safety_checks", safetyChecks),
 		)
 		t.conversationTurns.Add(ctx, 1, attributes)
 		t.conversationTurnDuration.Record(ctx, time.Since(started).Seconds(), attributes)
@@ -397,6 +517,117 @@ func (t *Telemetry) RecordJudgment(ctx context.Context, purpose, outcome string,
 	)
 	t.judgmentRequests.Add(ctx, 1, attributes)
 	t.judgmentDuration.Record(ctx, duration.Seconds(), attributes)
+}
+
+func (t *Telemetry) RecordReply(ctx context.Context, principal, kind, outcome, safetyChecks string, duration time.Duration) {
+	t.replyDuration.Record(ctx, duration.Seconds(), metric.WithAttributes(
+		principalAttr(principal),
+		labelAttr("home_agent.kind", kind, "unknown"),
+		labelAttr("home_agent.outcome", outcome, "unknown"),
+		safetyChecksAttr(safetyChecks),
+	))
+}
+
+func (t *Telemetry) RecordReplyStage(ctx context.Context, principal, stage string, duration time.Duration) {
+	t.replyStageDuration.Record(ctx, duration.Seconds(), metric.WithAttributes(
+		principalAttr(principal),
+		labelAttr("home_agent.stage", stage, "unknown"),
+	))
+}
+
+func (t *Telemetry) RecordModelCall(ctx context.Context, principal, provider, model, stopReason string, duration time.Duration) {
+	t.modelCallDuration.Record(ctx, duration.Seconds(), metric.WithAttributes(
+		principalAttr(principal),
+		labelAttr("home_agent.provider", provider, "unknown"),
+		labelAttr("home_agent.model", model, "unknown"),
+		labelAttr("home_agent.stop_reason", stopReason, "unknown"),
+	))
+}
+
+func (t *Telemetry) RecordModelTokens(ctx context.Context, principal, provider, model string, input, output, cacheRead, cacheWrite int64) {
+	for _, tokens := range []struct {
+		kind  string
+		count int64
+	}{{"input", input}, {"output", output}, {"cache_read", cacheRead}, {"cache_write", cacheWrite}} {
+		if tokens.count == 0 {
+			continue
+		}
+		t.modelTokens.Add(ctx, tokens.count, metric.WithAttributes(
+			principalAttr(principal),
+			labelAttr("home_agent.provider", provider, "unknown"),
+			labelAttr("home_agent.model", model, "unknown"),
+			attribute.String("home_agent.type", tokens.kind),
+		))
+	}
+}
+
+func (t *Telemetry) RecordModelTurn(ctx context.Context, principal, safetyChecks string, calls int, promptTokens, outputTokens int64) {
+	// A runtime that reported no model calls reported nothing, which is not a zero-call turn.
+	if calls == 0 {
+		return
+	}
+	t.modelCallsPerTurn.Record(ctx, int64(calls), metric.WithAttributes(principalAttr(principal), safetyChecksAttr(safetyChecks)))
+	if promptTokens == 0 && outputTokens == 0 {
+		return
+	}
+	for _, tokens := range []struct {
+		direction string
+		count     int64
+	}{{"prompt", promptTokens}, {"output", outputTokens}} {
+		t.modelTurnTokens.Record(ctx, tokens.count, metric.WithAttributes(
+			principalAttr(principal),
+			safetyChecksAttr(safetyChecks),
+			attribute.String("home_agent.direction", tokens.direction),
+		))
+	}
+}
+
+func (t *Telemetry) RecordToolCall(ctx context.Context, principal, tool, outcome string, duration time.Duration) {
+	toolAttr := labelAttr("home_agent.tool", tool, "unknown")
+	outcomeAttr := labelAttr("home_agent.outcome", outcome, "unknown")
+	t.toolCalls.Add(ctx, 1, metric.WithAttributes(principalAttr(principal), toolAttr, outcomeAttr))
+	t.toolDuration.Record(ctx, duration.Seconds(), metric.WithAttributes(toolAttr, outcomeAttr))
+}
+
+func (t *Telemetry) RecordToolCallsPerTurn(ctx context.Context, principal, safetyChecks string, calls int) {
+	t.toolCallsPerTurn.Record(ctx, int64(calls), metric.WithAttributes(principalAttr(principal), safetyChecksAttr(safetyChecks)))
+}
+
+func (t *Telemetry) RecordDayCardRender(ctx context.Context, outcome string, duration time.Duration) {
+	t.dayCardRenderDuration.Record(ctx, duration.Seconds(), metric.WithAttributes(
+		labelAttr("home_agent.outcome", outcome, "unknown"),
+	))
+}
+
+func (t *Telemetry) RecordApproval(ctx context.Context, principal, tool, status string, warned bool) {
+	t.approvals.Add(ctx, 1, metric.WithAttributes(
+		principalAttr(principal),
+		labelAttr("home_agent.tool", tool, "unknown"),
+		labelAttr("home_agent.status", status, "unknown"),
+		attribute.Bool("home_agent.warned", warned),
+	))
+}
+
+func (t *Telemetry) RecordJudgmentDecision(ctx context.Context, principal, purpose, result string) {
+	t.judgmentDecisions.Add(ctx, 1, metric.WithAttributes(
+		principalAttr(principal),
+		labelAttr("home_agent.purpose", purpose, "unknown"),
+		labelAttr("home_agent.result", result, "unknown"),
+	))
+}
+
+func (t *Telemetry) RecordHintFollowThrough(ctx context.Context, principal, result string) {
+	t.hintFollowThrough.Add(ctx, 1, metric.WithAttributes(
+		principalAttr(principal),
+		labelAttr("home_agent.result", result, "unknown"),
+	))
+}
+
+func (t *Telemetry) RecordScheduleRun(ctx context.Context, principal, outcome string) {
+	t.scheduleRuns.Add(ctx, 1, metric.WithAttributes(
+		principalAttr(principal),
+		labelAttr("home_agent.outcome", outcome, "unknown"),
+	))
 }
 
 func (t *Telemetry) StartStore(ctx context.Context, operation string) (context.Context, func(error)) {
@@ -414,6 +645,25 @@ func (t *Telemetry) StartStore(ctx context.Context, operation string) (context.C
 		t.storeOperations.Add(ctx, 1, attributes)
 		t.storeOperationDuration.Record(ctx, time.Since(started).Seconds(), attributes)
 	}
+}
+
+func labelOr(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func labelAttr(key, value, fallback string) attribute.KeyValue {
+	return attribute.String(key, labelOr(value, fallback))
+}
+
+func principalAttr(principal string) attribute.KeyValue {
+	return labelAttr("home_agent.principal", principal, "unknown")
+}
+
+func safetyChecksAttr(safetyChecks string) attribute.KeyValue {
+	return labelAttr("home_agent.safety_checks", safetyChecks, "unavailable")
 }
 
 func outcomeForError(err error) string {

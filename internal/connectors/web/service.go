@@ -134,11 +134,22 @@ type Service struct {
 	now          func() time.Time
 	cards        Cards
 	trains       Trains
+	telemetry    Telemetry
 
 	running atomic.Bool
 }
 
 var _ module.Module = (*Service)(nil)
+
+// Telemetry records day-card render metrics.
+type Telemetry interface {
+	RecordDayCardRender(ctx context.Context, outcome string, duration time.Duration)
+}
+
+// SetTelemetry sets where render metrics are recorded, at wiring time before turns start.
+func (s *Service) SetTelemetry(telemetry Telemetry) {
+	s.telemetry = telemetry
+}
 
 func NewService(cfg Config, repository integration.Repository, logger *slog.Logger) (*Service, error) {
 	if repository == nil {

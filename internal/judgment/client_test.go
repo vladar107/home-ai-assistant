@@ -23,6 +23,8 @@ func (f *fakeRecorder) RecordJudgment(_ context.Context, purpose, outcome string
 	f.calls = append(f.calls, recorded{purpose, outcome})
 }
 
+func (f *fakeRecorder) RecordJudgmentDecision(context.Context, string, string, string) {}
+
 func newTestClient(t *testing.T, server *httptest.Server, logs io.Writer, recorder Recorder) *Client {
 	t.Helper()
 	client, err := NewClient(Config{

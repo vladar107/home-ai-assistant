@@ -307,10 +307,12 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("initialize Pi runtime: %w", err)
 		}
+		runtime.SetTelemetry(a.telemetry)
 		broker, err := tools.NewBroker(a.logger)
 		if err != nil {
 			return fmt.Errorf("initialize tool broker: %w", err)
 		}
+		broker.SetTelemetry(a.telemetry)
 		attachments, err := attachment.NewService(attachment.Config{
 			Directory: filepath.Join(a.cfg.DataDir, "attachments"),
 		}, a.store, a.logger)
@@ -328,9 +330,11 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("initialize approvals: %w", err)
 		}
+		approvals.SetTelemetry(a.telemetry)
 		// Interface values stay nil without a key, so no user message is kept in memory for nothing.
 		var recent conversation.MessageRecorder
 		var toolHint conversation.ToolHinter
+		var safetyChecks conversation.SafetyChecks
 		if a.cfg.TypeSafe.Enabled() {
 			registry := turnstate.New(nil)
 			broker.SetExposure(registry)
@@ -346,6 +350,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			broker.SetScreener(judgment.NewScreener(judge, typeSafe, registry))
 			approvals.SetIntentChecker(judgment.NewIntentChecker(judge, typeSafe, registry, registry))
 			toolHint = judgment.NewToolHinter(judge, typeSafe)
+			safetyChecks = typeSafe
 			a.typeSafe = typeSafe
 		}
 		// Scheduled runs reach only the owner's own chat, resolved from the allowlist at delivery.
@@ -353,6 +358,8 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("initialize scheduler: %w", err)
 		}
+		scheduler.SetTelemetry(a.telemetry)
+		scheduler.SetSafetyChecks(safetyChecks)
 		var nsService *ns.Service
 		var trains web.Trains
 		if a.cfg.NS.Enabled() {
@@ -368,6 +375,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			if err != nil {
 				return fmt.Errorf("initialize web connector: %w", err)
 			}
+			webService.SetTelemetry(a.telemetry)
 			if err := a.registry.Register(webService); err != nil {
 				return err
 			}
@@ -379,15 +387,16 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		}
 		conversationService, err := conversation.NewService(
 			conversation.Config{
-				TurnTimeout: a.cfg.Conversation.TurnTimeout,
-				FollowUp:    approvals,
-				Notice:      conversation.Notices{approvals, scheduler},
-				Attachments: attachments,
-				WebSearch:   webSearch,
-				Cards:       cards,
-				Photos:      client,
-				Recent:      recent,
-				ToolHint:    toolHint,
+				TurnTimeout:  a.cfg.Conversation.TurnTimeout,
+				FollowUp:     approvals,
+				Notice:       conversation.Notices{approvals, scheduler},
+				Attachments:  attachments,
+				WebSearch:    webSearch,
+				Cards:        cards,
+				Photos:       client,
+				Recent:       recent,
+				ToolHint:     toolHint,
+				SafetyChecks: safetyChecks,
 			},
 			a.store,
 			runtime,

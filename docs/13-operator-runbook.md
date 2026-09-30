@@ -640,6 +640,24 @@ in is sent. Check `home_agent_judgment_requests` and
 `home_agent_judgment_duration_bucket` in Grafana for failures and latency;
 every failure leaves the turn as it would be without the checks.
 
+### Measuring the safety checks
+
+[Plan 0030](plans/0030-reply-and-business-metrics.md) sets the baseline:
+
+1. Deploy with `HOME_AGENT_TYPESAFE_ENABLED=true` and nobody opted in. Nothing is
+   sent to TypeSafe, and every user is labelled `off` rather than
+   `unavailable`.
+2. After at least seven days, record the baseline from the home-agent
+   dashboard in plan 0030:
+   - reply p50 and p95 and the stage split;
+   - model calls, tool calls, and prompt tokens per turn;
+   - tool error and budget-exhaustion rates;
+   - approval reject and expire rates;
+   - cache share.
+3. Users then turn on Safety checks in `/settings`. Compare the same panels
+   split by `safety_checks` over the next one to two weeks. With two users,
+   prefer means and per-turn distributions to p95.
+
 ## 8. Open and verify Grafana
 
 Grafana listens on the configured NAS LAN address. Open

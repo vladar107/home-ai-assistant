@@ -60,7 +60,7 @@ func (s *Service) RunScheduled(ctx context.Context, principalID, turn, message s
 		Message:     message,
 		Tools:       tools,
 		WebSearch:   webSearch,
-	}, s.turnSink(principalID, webSearch))
+	}, newCountingSink(principalID, s.logger, s.telemetry))
 	switch {
 	case ctx.Err() != nil:
 		return ScheduledReply{}, ctx.Err()
