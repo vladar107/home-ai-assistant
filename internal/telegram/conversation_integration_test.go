@@ -150,6 +150,9 @@ type harnessOptions struct {
 	// cards adds the outbox and the stage_card test tool that stages a card for the turn's reply.
 	cards       bool
 	turnTimeout time.Duration
+	// location turns on the current-time line, read from clock when one is given.
+	location *time.Location
+	clock    *testClock
 }
 
 // testFile is one attachment the Telegram simulator will hand out through getFile.
@@ -420,8 +423,12 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		notices = append(notices, h.scheduler)
 		scheduleController = h.scheduler
 	}
+	var now func() time.Time
+	if options.clock != nil {
+		now = options.clock.Now
+	}
 	h.conversation, err = conversation.NewService(
-		conversation.Config{TurnTimeout: turnTimeout, FollowUp: h.approvals, Notice: notices, Attachments: h.attachments, WebSearch: webSearch, Cards: cards, Photos: photos},
+		conversation.Config{TurnTimeout: turnTimeout, FollowUp: h.approvals, Notice: notices, Attachments: h.attachments, WebSearch: webSearch, Cards: cards, Photos: photos, Location: options.location, Now: now},
 		h.store, runtime, h.client, broker, h.connections, logger, integrationTelemetry{turns: h.turns},
 	)
 	if err != nil {

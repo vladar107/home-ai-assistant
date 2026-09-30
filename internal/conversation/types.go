@@ -197,4 +197,9 @@ type Config struct {
 	// Cards and Photos attach a staged card to a successful reply; nil leaves replies text only.
 	Cards  Cards
 	Photos PhotoDeliverer
+	// Location is the household's time zone; each chat turn then tells the model the current
+	// local time. Nil leaves the time out.
+	Location *time.Location
+	// Now is the clock that time is read from; nil means time.Now.
+	Now func() time.Time
 }

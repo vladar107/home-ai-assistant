@@ -7,6 +7,7 @@
 - Prefer narrow, typed integrations and least-privilege access over general-purpose tool authority.
 - Make ordinary natural-language conversation the primary Telegram experience; keep commands as deterministic shortcuts and operational controls.
 - Make integrations user-scoped: each authorized user must be able to discover, configure, enable, and disable their own integrations independently.
+- Give the model the current local date, weekday, time, and time zone (`HOME_AGENT_TIMEZONE`) on every turn, chat and scheduled alike, so it never falls back to its training cutoff. Put it in the turn's message, not the system prompt, so the prompt stays cacheable.
 - Require each user to connect their own model subscription through a principal-bound authentication profile. Never share or fall back to another user's subscription; separate conversation sessions alone do not satisfy this boundary.
 
 ## Immutable Plans

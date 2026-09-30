@@ -105,6 +105,9 @@ func NewService(
 	if telemetry == nil {
 		return nil, fmt.Errorf("conversation telemetry is required")
 	}
+	if config.Now == nil {
+		config.Now = time.Now
+	}
 	if (config.Cards == nil) != (config.Photos == nil) {
 		return nil, fmt.Errorf("conversation cards and photos must be configured together")
 	}
@@ -583,6 +586,12 @@ func (s *Service) turnMessage(request Request, attachments, hint string) string 
 		if notice := s.config.Notice.PendingNotice(request.PrincipalID); notice != "" {
 			message = "[system] " + notice + "\n\n" + message
 		}
+	}
+	if s.config.Location != nil {
+		// The time goes in the message rather than the system prompt, so the prompt stays
+		// cacheable and the session history keeps when each message was sent.
+		now := s.config.Now().In(s.config.Location).Format("Monday 2 January 2006, 15:04 MST")
+		message = "[system] Current local time: " + now + " (" + s.config.Location.String() + ").\n\n" + message
 	}
 	if attachments == "" {
 		return message

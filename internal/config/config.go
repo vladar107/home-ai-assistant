@@ -23,7 +23,8 @@ type Config struct {
 	ShutdownTimeout  time.Duration
 	AllowNonLoopback bool
 	DataDir          string
-	// Timezone is the IANA zone scheduled jobs use unless a job names its own.
+	// Timezone is the household's IANA zone: chat turns tell the model the time in it, and
+	// scheduled jobs use it unless a job names its own.
 	Timezone      string
 	Telegram      TelegramConfig
 	Conversation  ConversationConfig

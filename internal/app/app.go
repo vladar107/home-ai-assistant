@@ -385,6 +385,10 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			a.web = webService
 			webSearch = webService
 		}
+		location, err := time.LoadLocation(a.cfg.Timezone)
+		if err != nil {
+			return fmt.Errorf("load household time zone: %w", err)
+		}
 		conversationService, err := conversation.NewService(
 			conversation.Config{
 				TurnTimeout:  a.cfg.Conversation.TurnTimeout,
@@ -397,6 +401,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 				Recent:       recent,
 				ToolHint:     toolHint,
 				SafetyChecks: safetyChecks,
+				Location:     location,
 			},
 			a.store,
 			runtime,

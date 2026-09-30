@@ -41,6 +41,7 @@ plan that links back to the earlier record.
 | 0029 | [TypeSafe judgments for approvals, outside content, and tool hints](0029-typesafe-guards.md) | in-progress |
 | 0030 | [Reply latency, model, and business metrics](0030-reply-and-business-metrics.md) | in-progress |
 | 0031 | [Consolidate documentation into a README, C4 diagrams, and an operations guide](0031-documentation-consolidation.md) | done |
+| 0032 | [Tell the model the current local time on every chat turn](0032-current-time-in-turns.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.
