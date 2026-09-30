@@ -40,6 +40,7 @@ plan that links back to the earlier record.
 | 0028 | [A visual day card with the reply as its caption](0028-day-card.md) | in-progress |
 | 0029 | [TypeSafe judgments for approvals, outside content, and tool hints](0029-typesafe-guards.md) | in-progress |
 | 0030 | [Reply latency, model, and business metrics](0030-reply-and-business-metrics.md) | in-progress |
+| 0031 | [Consolidate documentation into a README, C4 diagrams, and an operations guide](0031-documentation-consolidation.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.
