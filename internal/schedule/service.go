@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -374,9 +375,22 @@ func (s *Service) dispatch(ctx context.Context, run Run) {
 			if run, ok = s.execute(ctx, run); !ok {
 				return
 			}
+		} else if !s.stillReady(ctx, run) {
+			return
 		}
 		s.deliver(ctx, run)
 	}()
+}
+
+// stillReady rereads a ready run once it is claimed. The tick's snapshot can predate a delivery
+// that finished in the meantime, and delivering from it would send the report twice.
+func (s *Service) stillReady(ctx context.Context, run Run) bool {
+	ready, err := s.repository.ScheduledRuns(ctx, StatusReady)
+	if err != nil {
+		s.logRunError(ctx, run, "reload_run", err)
+		return false
+	}
+	return slices.ContainsFunc(ready, func(current Run) bool { return current.ID == run.ID })
 }
 
 // execute runs one queued occurrence and stores its reply, returning the ready run.
