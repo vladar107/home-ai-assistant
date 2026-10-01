@@ -52,6 +52,17 @@ func (h *conversationHarness) proposeTurn(runtime *controlledRuntime, updateID i
 	if proposal.chatID != 101 || proposal.replyTo != 0 || !strings.Contains(proposal.text, "Expires in") {
 		h.t.Fatalf("proposal message = %+v", proposal)
 	}
+	// The message ID is stored only after the send returns; a restart before that leaves the
+	// expiry with no message to edit.
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for h.countRows(`SELECT count(*) FROM approvals WHERE message_id = ?`, proposal.messageID) == 0 {
+		select {
+		case <-ticker.C:
+		case <-h.ctx.Done():
+			h.t.Fatalf("proposal message %d was never recorded", proposal.messageID)
+		}
+	}
 	return proposal
 }
 
