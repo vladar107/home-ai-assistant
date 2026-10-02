@@ -3,6 +3,7 @@ package ns
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -13,11 +14,12 @@ const (
 	stationListLifetime = 24 * time.Hour
 	// stationRetryDelay keeps a failing refresh from costing a request on every call while the
 	// stale list still answers.
-	stationRetryDelay    = 15 * time.Minute
-	maximumCandidates    = 8
-	maximumStationRunes  = 100
-	homeCountry          = "NL"
-	centralStationSuffix = " centraal"
+	stationRetryDelay     = 15 * time.Minute
+	maximumCandidates     = 8
+	maximumStationRunes   = 100
+	homeCountry           = "NL"
+	centralStationSuffix  = " centraal"
+	minimumNamedFormBytes = 3
 )
 
 type station struct {
@@ -128,6 +130,9 @@ type resolution struct {
 	station    station
 	found      bool
 	candidates []station
+	// named lists the stations whose names occur inside a query that matched none, such as the
+	// town in a bus stop's name.
+	named []station
 }
 
 func resolveStation(list []station, query string) resolution {
@@ -172,7 +177,51 @@ func resolveStation(list []station, query string) resolution {
 		}
 		return resolution{candidates: hits}
 	}
-	return resolution{}
+	return resolution{named: namedStations(list, normalized)}
+}
+
+// namedStations finds the stations one of whose forms occurs as whole words in a normalized query.
+// A station whose form lies inside another hit's longer form is dropped, so "amsterdam science
+// park" names Amsterdam Science Park and not every station called Amsterdam.
+func namedStations(list []station, normalized string) []station {
+	padded := " " + normalized + " "
+	type hit struct {
+		entry station
+		form  string
+	}
+	var found []hit
+	for _, entry := range list {
+		longest := ""
+		for _, form := range entry.forms {
+			// Two-letter abbreviations would match ordinary words in a stop's name.
+			if len(form) >= minimumNamedFormBytes && len(form) > len(longest) && strings.Contains(padded, " "+form+" ") {
+				longest = form
+			}
+		}
+		if longest != "" {
+			found = append(found, hit{entry, longest})
+		}
+	}
+	if domestic := slices.DeleteFunc(slices.Clone(found), func(h hit) bool { return h.entry.land != homeCountry }); len(domestic) > 0 {
+		found = domestic
+	}
+	var hits []station
+	for _, candidate := range found {
+		covered := false
+		for _, other := range found {
+			if len(other.form) > len(candidate.form) && strings.Contains(" "+other.form+" ", " "+candidate.form+" ") {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			hits = append(hits, candidate.entry)
+		}
+	}
+	if len(hits) > maximumCandidates {
+		hits = hits[:maximumCandidates]
+	}
+	return hits
 }
 
 func inCountry(list []station, land string) []station {
@@ -188,14 +237,27 @@ func inCountry(list []station, land string) []station {
 // resolutionError is the sentence the model sees when a name does not pick out one station.
 func resolutionError(role, query string, match resolution) string {
 	if len(match.candidates) == 0 {
-		return fmt.Sprintf("No NS station matches %s %q; ask the user for the station's name.", role, clip(query, maximumStationRunes))
-	}
-	names := make([]string, 0, len(match.candidates))
-	for _, candidate := range match.candidates {
-		names = append(names, fmt.Sprintf("%s (%s)", candidate.name, candidate.code))
+		text := fmt.Sprintf("No NS station matches %s %q; NS tools only know railway stations, so plan a leg to or from a bus, tram, or metro stop separately.",
+			role, clip(query, maximumStationRunes))
+		switch len(match.named) {
+		case 0:
+			return text + " Ask the user for the railway station's name."
+		case 1:
+			return text + fmt.Sprintf(" The railway station named in it is %s; call again with it if the user takes the train there, or ask them.", stationNames(match.named))
+		default:
+			return text + fmt.Sprintf(" Railway stations named in it: %s; call again with the one the user takes the train from or to, or ask them.", stationNames(match.named))
+		}
 	}
 	return fmt.Sprintf("%s %q matches several NS stations: %s. Call again with the name or code of the one the user means, or ask them.",
-		role, clip(query, maximumStationRunes), strings.Join(names, ", "))
+		role, clip(query, maximumStationRunes), stationNames(match.candidates))
+}
+
+func stationNames(list []station) string {
+	names := make([]string, 0, len(list))
+	for _, entry := range list {
+		names = append(names, fmt.Sprintf("%s (%s)", entry.name, entry.code))
+	}
+	return strings.Join(names, ", ")
 }
 
 // normalize folds a station name for matching: lower case, no accents, and punctuation as spaces,

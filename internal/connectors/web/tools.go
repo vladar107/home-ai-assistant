@@ -48,8 +48,8 @@ const cardLegsSchema = `"legs":{"type":"array","minItems":1,"maxItems":4,"descri
 
 const cardTrainsSchema = `"trains":{"type":"array","maxItems":3,"description":"Optional NS train status rows, one per travel direction; the status and times come from NS.","items":{"type":"object","properties":{` +
 	`"label":{"type":"string","maxLength":20,"description":"Row heading in the reply's language, such as There or Back."},` +
-	`"from":{"type":"string","description":"Departure station name or code, such as Den Haag."},` +
-	`"to":{"type":"string","description":"Arrival station name or code, such as Zwolle."},` +
+	`"from":{"type":"string","description":"Departure railway station name or code, such as Den Haag; never a bus or tram stop."},` +
+	`"to":{"type":"string","description":"Arrival railway station name or code, such as Zwolle; never a bus or tram stop."},` +
 	`"date_time":{"type":"string","pattern":"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}$","description":"Dutch local time as YYYY-MM-DDTHH:MM: the earliest departure, or with arrive_by the latest arrival."},` +
 	`"arrive_by":{"type":"boolean","description":"True to treat date_time as the latest arrival."}},` +
 	`"required":["label","from","to","date_time"],"additionalProperties":false}}`
