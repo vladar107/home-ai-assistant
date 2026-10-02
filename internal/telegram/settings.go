@@ -18,6 +18,9 @@ const (
 	ModelNotConnectedLine = "Model subscription: not connected."
 
 	maximumCallbackDataBytes = 64
+	// labelCallbackData marks a button that only labels the rows below it; pressing it changes
+	// nothing, so the settings message is not edited.
+	labelCallbackData = "label"
 )
 
 var errUnknownSettingsAction = errors.New("unknown settings action")
@@ -35,6 +38,8 @@ type settingsSection interface {
 type settingsView struct {
 	lines   []string
 	buttons []InlineButton
+	// rows are further keyboard rows, for a section with a row per item.
+	rows [][]InlineButton
 }
 
 // messageInterceptor lets a section consume an ordinary message before it is enqueued for the
@@ -63,6 +68,7 @@ func renderSettings(ctx context.Context, principalID string, sections []settings
 		if len(view.buttons) > 0 {
 			keyboard = append(keyboard, view.buttons)
 		}
+		keyboard = append(keyboard, view.rows...)
 	}
 	lines = append(lines, SettingsPrivacyLine)
 	return strings.Join(lines, "\n"), keyboard, nil

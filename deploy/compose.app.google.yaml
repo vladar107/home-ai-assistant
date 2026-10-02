@@ -1,0 +1,17 @@
+# Google accounts for Gmail and Calendar. Applied on top of compose.app.yaml only when
+# HOME_AGENT_GOOGLE_ENABLED is true, so a deployment without the feature needs no OAuth client
+# secret on the NAS.
+services:
+  home-agent:
+    environment:
+      HOME_AGENT_GOOGLE_ENABLED: "true"
+      HOME_AGENT_GOOGLE_CLIENT_ID: ${HOME_AGENT_GOOGLE_CLIENT_ID:?set HOME_AGENT_GOOGLE_CLIENT_ID}
+      HOME_AGENT_GOOGLE_CLIENT_SECRET_FILE: /run/secrets/google-client-secret
+      HOME_AGENT_GOOGLE_REDIRECT_URL: ${HOME_AGENT_GOOGLE_REDIRECT_URL:-http://localhost:8080/callback}
+    secrets:
+      - source: google-client-secret
+        target: google-client-secret
+
+secrets:
+  google-client-secret:
+    file: ${HOME_AGENT_SECRETS_PATH:?set HOME_AGENT_SECRETS_PATH}/google-client-secret

@@ -107,7 +107,7 @@ type Service struct {
 	connections  ConnectionController
 	notion       NotionController
 	nas          NASController
-	gmail        GmailController
+	google       GoogleController
 	web          WebController
 	typeSafe     TypeSafeController
 	ns           NSController
@@ -134,7 +134,7 @@ func NewService(
 	connections ConnectionController,
 	notion NotionController,
 	nasFiles NASController,
-	gmailAccess GmailController,
+	googleAccess GoogleController,
 	webAccess WebController,
 	nsTrains NSController,
 	buses BusController,
@@ -165,7 +165,7 @@ func NewService(
 		connections:  connections,
 		notion:       notion,
 		nas:          nasFiles,
-		gmail:        gmailAccess,
+		google:       googleAccess,
 		web:          webAccess,
 		ns:           nsTrains,
 		bus:          buses,
@@ -187,8 +187,8 @@ func NewService(
 	if nasFiles != nil {
 		service.sections = append(service.sections, nasSection{nas: nasFiles, logger: logger, telemetry: service.telemetry})
 	}
-	if gmailAccess != nil {
-		section := gmailSection{gmail: gmailAccess, logger: logger, telemetry: service.telemetry}
+	if googleAccess != nil {
+		section := googleSection{google: googleAccess, logger: logger, telemetry: service.telemetry}
 		service.sections = append(service.sections, section)
 		service.interceptors = append(service.interceptors, section)
 	}
@@ -609,6 +609,9 @@ func (s *Service) processCallback(ctx context.Context, callback *CallbackQuery) 
 		return processingResult{}, "answer_callback", err
 	}
 
+	if callback.Data == labelCallbackData {
+		return processingResult{event: "telegram.callback.handled", principalID: principalID, command: "label"}, "", nil
+	}
 	if action, approvalID, isApproval := approval.ParseCallback(callback.Data); isApproval {
 		return s.processApprovalPress(ctx, callback, principalID, action, approvalID)
 	}
@@ -741,8 +744,8 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		if s.notion != nil {
 			reply += " " + NotionPrivacyLine
 		}
-		if s.gmail != nil {
-			reply += " " + GmailPrivacyLine
+		if s.google != nil {
+			reply += " " + GooglePrivacyLine
 		}
 		if s.schedules != nil {
 			reply += " " + SchedulePrivacyLine

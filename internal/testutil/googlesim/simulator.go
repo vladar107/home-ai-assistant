@@ -1,7 +1,8 @@
-// Package gmailsim is a loopback simulator of the Google endpoints the Gmail connector uses: the
-// consent screen as a function a test calls, the token and revocation endpoints with PKCE checks,
-// and the read-only Gmail API over a set of mailboxes. It records every request without tokens.
-package gmailsim
+// Package googlesim is a loopback simulator of the Google endpoints the Google and Gmail connectors
+// use: the consent screen as a function a test calls, the token, revocation, and userinfo
+// endpoints with PKCE checks, and the read-only Gmail API over a set of mailboxes. It records every
+// request without tokens.
+package googlesim
 
 import (
 	"crypto/sha256"
@@ -19,11 +20,30 @@ import (
 )
 
 const (
-	ClientID     = "test-client.apps.googleusercontent.com"
-	ClientSecret = "test-client-secret"
-	RedirectURL  = "http://localhost:8080/callback"
-	readonly     = "https://www.googleapis.com/auth/gmail.readonly"
+	ClientID      = "test-client.apps.googleusercontent.com"
+	ClientSecret  = "test-client-secret"
+	RedirectURL   = "http://localhost:8080/callback"
+	mailScope     = "https://www.googleapis.com/auth/gmail.readonly"
+	calendarScope = "https://www.googleapis.com/auth/calendar.readonly"
+	requested     = "openid email " + mailScope + " " + calendarScope
 )
+
+// Grant is what the user leaves ticked on the consent screen.
+type Grant struct {
+	Mail     bool
+	Calendar bool
+}
+
+func (g Grant) scope() string {
+	scope := "openid https://www.googleapis.com/auth/userinfo.email"
+	if g.Mail {
+		scope += " " + mailScope
+	}
+	if g.Calendar {
+		scope += " " + calendarScope
+	}
+	return scope
+}
 
 type Message struct {
 	ID          string
@@ -53,6 +73,11 @@ type grant struct {
 	scope     string
 }
 
+type token struct {
+	account string
+	scope   string
+}
+
 type Simulator struct {
 	server *httptest.Server
 	t      *testing.T
@@ -60,8 +85,9 @@ type Simulator struct {
 	mu        sync.Mutex
 	mailboxes map[string][]Message
 	codes     map[string]grant
-	refreshes map[string]string
-	accesses  map[string]string
+	refreshes map[string]token
+	accesses  map[string]token
+	subjects  map[string]string
 	revoked   []string
 	requests  []Request
 	counter   int
@@ -73,8 +99,9 @@ func New(t *testing.T) *Simulator {
 		t:         t,
 		mailboxes: make(map[string][]Message),
 		codes:     make(map[string]grant),
-		refreshes: make(map[string]string),
-		accesses:  make(map[string]string),
+		refreshes: make(map[string]token),
+		accesses:  make(map[string]token),
+		subjects:  make(map[string]string),
 	}
 	sim.server = httptest.NewServer(http.HandlerFunc(sim.serve))
 	t.Cleanup(sim.server.Close)
@@ -86,6 +113,32 @@ func (s *Simulator) Client() *http.Client { return s.server.Client() }
 func (s *Simulator) AuthURL() string      { return s.server.URL + "/o/oauth2/v2/auth" }
 func (s *Simulator) TokenURL() string     { return s.server.URL + "/token" }
 func (s *Simulator) RevokeURL() string    { return s.server.URL + "/revoke" }
+func (s *Simulator) UserInfoURL() string  { return s.server.URL + "/v1/userinfo" }
+
+// Subject is the stable Google subject id of the account, assigned on first use.
+func (s *Simulator) Subject(account string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.subject(account)
+}
+
+func (s *Simulator) subject(account string) string {
+	if id, found := s.subjects[account]; found {
+		return id
+	}
+	id := strconv.Itoa(100000000000000000 + len(s.subjects) + 1)
+	s.subjects[account] = id
+	return id
+}
+
+// AccountFor reports which account an access token belongs to, for a simulator of another Google
+// API that accepts this one's tokens.
+func (s *Simulator) AccountFor(access string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	issued, found := s.accesses[access]
+	return issued.account, found
+}
 func (s *Simulator) AddMailbox(account string, messages ...Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -94,22 +147,19 @@ func (s *Simulator) AddMailbox(account string, messages ...Message) {
 
 // Consent plays the user on Google's consent screen for the given link: it checks the link the
 // connector built and returns the address the browser would be sent to. grantGmail false is the
-// user unticking the Gmail box.
-func (s *Simulator) Consent(link, account string, grantGmail bool) string {
+// products the user left ticked.
+func (s *Simulator) Consent(link, account string, granted Grant) string {
 	s.t.Helper()
 	parsed, err := url.Parse(link)
 	if err != nil {
 		s.t.Fatalf("consent link: %v", err)
 	}
 	query := parsed.Query()
-	if query.Get("client_id") != ClientID || query.Get("redirect_uri") != RedirectURL || query.Get("scope") != readonly ||
+	if query.Get("client_id") != ClientID || query.Get("redirect_uri") != RedirectURL || query.Get("scope") != requested || query.Get("include_granted_scopes") != "true" ||
 		query.Get("access_type") != "offline" || query.Get("code_challenge_method") != "S256" || query.Get("code_challenge") == "" || query.Get("state") == "" {
 		s.t.Fatalf("consent link carries unexpected parameters: %v", query)
 	}
-	scope := readonly
-	if !grantGmail {
-		scope = "openid"
-	}
+	scope := granted.scope()
 	s.mu.Lock()
 	s.counter++
 	code := fmt.Sprintf("4/code-%d", s.counter)
@@ -122,14 +172,14 @@ func (s *Simulator) Consent(link, account string, grantGmail bool) string {
 func (s *Simulator) RevokeGrant(account string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for token, owner := range s.refreshes {
-		if owner == account {
-			delete(s.refreshes, token)
+	for value, issued := range s.refreshes {
+		if issued.account == account {
+			delete(s.refreshes, value)
 		}
 	}
-	for token, owner := range s.accesses {
-		if owner == account {
-			delete(s.accesses, token)
+	for value, issued := range s.accesses {
+		if issued.account == account {
+			delete(s.accesses, value)
 		}
 	}
 }
@@ -138,7 +188,7 @@ func (s *Simulator) RevokeGrant(account string) {
 func (s *Simulator) ExpireAccessTokens() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.accesses = make(map[string]string)
+	s.accesses = make(map[string]token)
 }
 
 func (s *Simulator) Revoked() []string {
@@ -160,11 +210,11 @@ func (s *Simulator) serve(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost && r.URL.Path == "/revoke":
 		_ = r.ParseForm()
 		s.mu.Lock()
-		token := r.PostForm.Get("token")
+		value := r.PostForm.Get("token")
 		s.requests = append(s.requests, Request{Method: r.Method, Path: r.URL.Path})
-		account := s.refreshes[token]
+		account := s.refreshes[value].account
 		if account == "" {
-			account = s.accesses[token]
+			account = s.accesses[value].account
 		}
 		s.mu.Unlock()
 		if account != "" {
@@ -174,6 +224,20 @@ func (s *Simulator) serve(w http.ResponseWriter, r *http.Request) {
 			s.mu.Unlock()
 		}
 		w.WriteHeader(http.StatusOK)
+	case r.Method == http.MethodGet && r.URL.Path == "/v1/userinfo":
+		s.mu.Lock()
+		issued, found := s.accesses[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")]
+		s.requests = append(s.requests, Request{Method: r.Method, Path: r.URL.Path, Account: issued.account})
+		var subject string
+		if found {
+			subject = s.subject(issued.account)
+		}
+		s.mu.Unlock()
+		if !found {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid_token"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"sub": subject, "email": issued.account, "email_verified": true})
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/gmail/v1/users/me/"):
 		s.serveGmail(w, r)
 	default:
@@ -203,21 +267,21 @@ func (s *Simulator) serveToken(w http.ResponseWriter, r *http.Request) {
 		account, scope = issued.account, issued.scope
 		s.counter++
 		refresh = fmt.Sprintf("refresh-%d", s.counter)
-		s.refreshes[refresh] = account
+		s.refreshes[refresh] = token{account: account, scope: scope}
 	case "refresh_token":
-		account = s.refreshes[r.PostForm.Get("refresh_token")]
-		if account == "" {
+		issued := s.refreshes[r.PostForm.Get("refresh_token")]
+		if issued.account == "" {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_grant"})
 			return
 		}
-		scope = readonly
+		account, scope = issued.account, issued.scope
 	default:
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unsupported_grant_type"})
 		return
 	}
 	s.counter++
 	access := fmt.Sprintf("access-%d", s.counter)
-	s.accesses[access] = account
+	s.accesses[access] = token{account: account, scope: scope}
 	body := map[string]any{"access_token": access, "expires_in": 3599, "scope": scope, "token_type": "Bearer"}
 	if refresh != "" {
 		body["refresh_token"] = refresh
@@ -227,7 +291,8 @@ func (s *Simulator) serveToken(w http.ResponseWriter, r *http.Request) {
 
 func (s *Simulator) serveGmail(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
-	account := s.accesses[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")]
+	issued := s.accesses[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")]
+	account := issued.account
 	s.requests = append(s.requests, Request{Method: r.Method, Path: r.URL.Path, Query: r.URL.Query(), Account: account})
 	mailbox := append([]Message(nil), s.mailboxes[account]...)
 	s.mu.Unlock()
@@ -235,10 +300,12 @@ func (s *Simulator) serveGmail(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": map[string]any{"code": 401}})
 		return
 	}
+	if !strings.Contains(issued.scope, mailScope) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": map[string]any{"code": 403}})
+		return
+	}
 	path := strings.TrimPrefix(r.URL.Path, "/gmail/v1/users/me/")
 	switch {
-	case path == "profile":
-		writeJSON(w, http.StatusOK, map[string]any{"emailAddress": account})
 	case path == "messages":
 		limit, _ := strconv.Atoi(r.URL.Query().Get("maxResults"))
 		var matches []map[string]string

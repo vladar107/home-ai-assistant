@@ -25,6 +25,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connection"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/bus"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/gmail"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/google"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/ns"
@@ -37,7 +38,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/codexauth"
-	"github.com/vladar107/home-ai-assistant/internal/testutil/gmailsim"
+	"github.com/vladar107/home-ai-assistant/internal/testutil/googlesim"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/notionsim"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
@@ -143,7 +144,7 @@ type harnessOptions struct {
 	nasRoots            []nas.PrincipalRoots
 	// schedules adds the scheduler, its tools, and /jobs, on the given clock.
 	schedules *testClock
-	gmail     *gmailsim.Simulator
+	google    *googlesim.Simulator
 	// web adds the web connector and its settings section, as HOME_AGENT_WEB_ENABLED does.
 	web bool
 	// ns adds the NS connector against the given gateway, as an operator key does.
@@ -181,7 +182,7 @@ type conversationHarness struct {
 	connections    *connection.Service
 	notion         *notion.Service
 	nas            *nas.Service
-	gmail          *gmail.Service
+	google         *google.Service
 	web            *web.Service
 	ns             *ns.Service
 	bus            *bus.Service
@@ -357,20 +358,24 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		}
 		nasController = h.nas
 	}
-	var gmailController GmailController
-	if sim := options.gmail; sim != nil {
-		h.gmail, err = gmail.NewService(gmail.Config{
-			CredentialsDir: h.credentialsDir, ClientID: gmailsim.ClientID, ClientSecret: gmailsim.ClientSecret,
-			RedirectURL: gmailsim.RedirectURL, AuthURL: sim.AuthURL(), TokenURL: sim.TokenURL(), RevokeURL: sim.RevokeURL(),
-			APIBaseURL: sim.URL(), HTTPClient: sim.Client(),
-		}, h.store, h.store, logger)
+	var googleController GoogleController
+	if sim := options.google; sim != nil {
+		h.google, err = google.NewService(google.Config{
+			CredentialsDir: h.credentialsDir, ClientID: googlesim.ClientID, ClientSecret: googlesim.ClientSecret,
+			RedirectURL: googlesim.RedirectURL, AuthURL: sim.AuthURL(), TokenURL: sim.TokenURL(), RevokeURL: sim.RevokeURL(),
+			UserInfoURL: sim.UserInfoURL(), HTTPClient: sim.Client(),
+		}, h.store, logger)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := broker.Register(h.gmail); err != nil {
+		mail, err := gmail.NewService(gmail.Config{APIBaseURL: sim.URL(), HTTPClient: sim.Client()}, h.google, logger)
+		if err != nil {
 			t.Fatal(err)
 		}
-		gmailController = h.gmail
+		if err := broker.Register(mail); err != nil {
+			t.Fatal(err)
+		}
+		googleController = h.google
 	}
 	var webController WebController
 	var webSearch conversation.WebSearch
@@ -459,7 +464,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 			t.Fatal(err)
 		}
 	}
-	h.service, err = NewService(h.client, identities, h.store, h.conversation, h.attachments, h.connections, notionController, nasController, gmailController, webController, nsController, busController, h.approvals, scheduleController, logger, nil)
+	h.service, err = NewService(h.client, identities, h.store, h.conversation, h.attachments, h.connections, notionController, nasController, googleController, webController, nsController, busController, h.approvals, scheduleController, logger, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -761,6 +766,11 @@ func (h *conversationHarness) start() {
 	}
 	if h.notion != nil {
 		if err := h.notion.Start(h.ctx); err != nil {
+			h.t.Fatal(err)
+		}
+	}
+	if h.google != nil {
+		if err := h.google.Start(h.ctx); err != nil {
 			h.t.Fatal(err)
 		}
 	}

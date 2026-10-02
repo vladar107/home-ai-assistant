@@ -45,6 +45,7 @@ plan that links back to the earlier record.
 | 0033 | [Bus information: trips, stop status, and disruptions](0033-live-bus-information.md) | done |
 | 0034 | [Make unfinished model calls and rare failures visible](0034-unfinished-model-calls.md) | done |
 | 0035 | [Upgrade Pi to 1.0.0](0035-pi-1-0-upgrade.md) | done |
+| 0036 | [Several Google accounts per user, with Mail and Calendar switches](0036-google-accounts.md) | in-progress |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

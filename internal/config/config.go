@@ -29,7 +29,7 @@ type Config struct {
 	Telegram      TelegramConfig
 	Conversation  ConversationConfig
 	Notion        NotionConfig
-	Gmail         GmailConfig
+	Google        GoogleConfig
 	NAS           NASConfig
 	Web           WebConfig
 	NS            NSConfig
@@ -51,7 +51,7 @@ func Load() (Config, error) {
 		Telegram:        defaultTelegramConfig(),
 		Conversation:    defaultConversationConfig(),
 		Notion:          defaultNotionConfig(),
-		Gmail:           defaultGmailConfig(),
+		Google:          defaultGoogleConfig(),
 		NAS:             defaultNASConfig(),
 		Web:             defaultWebConfig(),
 		NS:              defaultNSConfig(),
@@ -102,7 +102,7 @@ func Load() (Config, error) {
 	if err := loadNASConfig(&cfg.NAS); err != nil {
 		return Config{}, err
 	}
-	if err := loadGmailConfig(&cfg.Gmail); err != nil {
+	if err := loadGoogleConfig(&cfg.Google); err != nil {
 		return Config{}, err
 	}
 	if err := loadWebConfig(&cfg.Web); err != nil {
@@ -178,11 +178,11 @@ func (c Config) Validate() error {
 	if c.NAS.Enabled && !c.Conversation.Enabled {
 		return fmt.Errorf("HOME_AGENT_NAS_ENABLED: requires HOME_AGENT_CONVERSATION_ENABLED=true")
 	}
-	if err := c.Gmail.validate(); err != nil {
+	if err := c.Google.validate(); err != nil {
 		return err
 	}
-	if c.Gmail.Enabled && !c.Conversation.Enabled {
-		return fmt.Errorf("HOME_AGENT_GMAIL_ENABLED: requires HOME_AGENT_CONVERSATION_ENABLED=true")
+	if c.Google.Enabled && !c.Conversation.Enabled {
+		return fmt.Errorf("HOME_AGENT_GOOGLE_ENABLED: requires HOME_AGENT_CONVERSATION_ENABLED=true")
 	}
 	if err := c.Web.validate(); err != nil {
 		return err

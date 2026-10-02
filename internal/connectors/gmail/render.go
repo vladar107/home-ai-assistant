@@ -32,16 +32,17 @@ var (
 	blankLines     = regexp.MustCompile(`\n\s*\n\s*\n+`)
 )
 
-func renderSearch(query string, messages []Message, more bool) string {
-	if len(messages) == 0 {
-		return fmt.Sprintf("No messages match %q.", query)
-	}
+func renderSearch(query string, messages []Message, more bool, failures []string) string {
 	var builder strings.Builder
-	fmt.Fprintf(&builder, "%d messages match %q", len(messages), query)
-	if more {
-		builder.WriteString(" (more exist; narrow the search to see others)")
+	if len(messages) == 0 {
+		fmt.Fprintf(&builder, "No messages match %q.", query)
+	} else {
+		fmt.Fprintf(&builder, "%d messages match %q, newest first", len(messages), query)
+		if more {
+			builder.WriteString(" (more exist; narrow the search to see others)")
+		}
+		builder.WriteString(":\n")
 	}
-	builder.WriteString(":\n")
 	for _, message := range messages {
 		builder.WriteString("\n")
 		writeHeaders(&builder, message)
@@ -49,11 +50,17 @@ func renderSearch(query string, messages []Message, more bool) string {
 			fmt.Fprintf(&builder, "Snippet: %s\n", truncateRunes(snippet, maximumSnippetRunes))
 		}
 	}
+	for _, failure := range failures {
+		fmt.Fprintf(&builder, "\n%s\n", failure)
+	}
 	return builder.String()
 }
 
 func writeHeaders(builder *strings.Builder, message Message) {
 	fmt.Fprintf(builder, "id %s (thread %s)\n", message.ID, message.ThreadID)
+	if message.Account != "" {
+		fmt.Fprintf(builder, "Account: %s\n", message.Account)
+	}
 	for _, name := range metadataHeaders {
 		if value := header(message.Payload, name); value != "" {
 			fmt.Fprintf(builder, "%s: %s\n", name, truncateRunes(value, maximumHeaderRunes))

@@ -17,6 +17,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connection"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/bus"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/gmail"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/google"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/ns"
@@ -53,7 +54,7 @@ type App struct {
 	scheduler    *schedule.Service
 	notion       *notion.Service
 	nas          *nas.Service
-	gmail        *gmail.Service
+	google       *google.Service
 	web          *web.Service
 	ns           *ns.Service
 	bus          *bus.Service
@@ -477,30 +478,34 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			}
 			a.nas = nasService
 		}
-		if a.cfg.Gmail.Enabled {
-			secret := a.cfg.Gmail.ClientSecret
+		if a.cfg.Google.Enabled {
+			secret := a.cfg.Google.ClientSecret
 			if secret == "" {
-				secret, err = gmail.LoadClientSecretFile(a.cfg.Gmail.ClientSecretFile)
+				secret, err = google.LoadClientSecretFile(a.cfg.Google.ClientSecretFile)
 				if err != nil {
 					return err
 				}
 			}
-			gmailService, err := gmail.NewService(gmail.Config{
+			googleService, err := google.NewService(google.Config{
 				CredentialsDir: filepath.Join(a.cfg.DataDir, "integrations"),
-				ClientID:       a.cfg.Gmail.ClientID,
+				ClientID:       a.cfg.Google.ClientID,
 				ClientSecret:   secret,
-				RedirectURL:    a.cfg.Gmail.RedirectURL,
-			}, a.store, a.store, a.logger)
+				RedirectURL:    a.cfg.Google.RedirectURL,
+			}, a.store, a.logger)
+			if err != nil {
+				return fmt.Errorf("initialize Google connector: %w", err)
+			}
+			if err := a.registry.Register(googleService); err != nil {
+				return err
+			}
+			gmailService, err := gmail.NewService(gmail.Config{}, googleService, a.logger)
 			if err != nil {
 				return fmt.Errorf("initialize Gmail connector: %w", err)
-			}
-			if err := a.registry.Register(gmailService); err != nil {
-				return err
 			}
 			if err := broker.Register(gmailService); err != nil {
 				return err
 			}
-			a.gmail = gmailService
+			a.google = googleService
 		}
 		if nsService != nil {
 			if err := a.registry.Register(nsService); err != nil {
@@ -543,7 +548,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	var connectionController telegram.ConnectionController
 	var notionController telegram.NotionController
 	var nasController telegram.NASController
-	var gmailController telegram.GmailController
+	var googleController telegram.GoogleController
 	var webController telegram.WebController
 	var nsController telegram.NSController
 	var busController telegram.BusController
@@ -562,8 +567,8 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	if a.nas != nil {
 		nasController = a.nas
 	}
-	if a.gmail != nil {
-		gmailController = a.gmail
+	if a.google != nil {
+		googleController = a.google
 	}
 	if a.web != nil {
 		webController = a.web
@@ -574,7 +579,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	if a.bus != nil {
 		busController = a.bus
 	}
-	service, err := telegram.NewService(client, identities, a.store, conversationController, attachmentStore, connectionController, notionController, nasController, gmailController, webController, nsController, busController, approvalController, scheduleController, a.logger, a.telemetry)
+	service, err := telegram.NewService(client, identities, a.store, conversationController, attachmentStore, connectionController, notionController, nasController, googleController, webController, nsController, busController, approvalController, scheduleController, a.logger, a.telemetry)
 	if err != nil {
 		return fmt.Errorf("initialize Telegram service: %w", err)
 	}

@@ -16,7 +16,7 @@ flowchart TB
     telegram["Telegram Bot API"]
     model["Model provider<br/>each user's own subscription"]
     notion["Notion"]
-    gmail["Gmail"]
+    google["Google<br/>Gmail"]
     ns["NS API<br/>Dutch trains"]
     meteo["Open-Meteo<br/>weather"]
     ovapi["OVapi<br/>live buses, notices"]
@@ -29,7 +29,7 @@ flowchart TB
     agent <-->|outbound long polling| telegram
     agent -->|turns, web search| model
     agent -->|read, confirmed writes| notion
-    agent -->|read-only| gmail
+    agent -->|read-only, several accounts per user| google
     agent -->|trips, departures, disruptions| ns
     agent -->|forecasts| meteo
     agent -->|departures, stop list, notices| ovapi
@@ -49,7 +49,7 @@ an outbound HTTPS client, and administrative interfaces stay on the LAN.
 ```mermaid
 flowchart TB
     telegram["Telegram Bot API"]
-    ext["External APIs<br/>model provider, Notion, Gmail, NS, OVapi, Transitous, Open-Meteo, TypeSafe"]
+    ext["External APIs<br/>model provider, Notion, Google, NS, OVapi, Transitous, Open-Meteo, TypeSafe"]
 
     subgraph nas["NAS"]
         subgraph app["home-ai-assistant Compose project"]
@@ -112,6 +112,7 @@ flowchart TB
 
     subgraph connectors["connectors"]
         notion["notion"]
+        google["google<br/>accounts, grants"]
         gmail["gmail"]
         nasc["nas"]
         nsc["ns"]
