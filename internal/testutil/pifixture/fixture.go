@@ -151,7 +151,9 @@ func run() error {
 	delta := func(text string) {
 		emit(map[string]any{"type": "message_update", "assistantMessageEvent": map[string]string{"type": "text_delta", "delta": text}})
 	}
-	ack := func() { emit(map[string]any{"type": "response", "command": "prompt", "success": true}) }
+	ack := func() {
+		emit(map[string]any{"type": "response", "command": "prompt", "success": true, "data": map[string]string{"disposition": "started"}})
+	}
 	settle := func() { emit(map[string]string{"type": "agent_settled"}) }
 	failMessage := func(text string) {
 		emit(map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "stopReason": "error", "errorMessage": text}})
@@ -214,11 +216,13 @@ func run() error {
 		emit(map[string]any{"type": "message_end", "message": final})
 		settle()
 	case "fixture:pi-tools":
-		// Pi 0.84.1's own order for a parallel tool batch: turn_start precedes every assistant
+		// Pi 1.0.0's own order for a parallel tool batch: turn_start precedes every assistant
 		// request, and tool ends arrive in completion order before the tool result messages.
 		ack()
 		emit(map[string]string{"type": "agent_start"})
 		emit(map[string]string{"type": "turn_start"})
+		emit(map[string]any{"type": "message_start", "message": map[string]any{"role": "system"}})
+		emit(map[string]any{"type": "message_end", "message": map[string]any{"role": "system"}})
 		emit(map[string]any{"type": "message_start", "message": map[string]any{"role": "user"}})
 		emit(map[string]any{"type": "message_end", "message": map[string]any{"role": "user"}})
 		emit(map[string]any{"type": "message_start", "message": map[string]string{"role": "assistant"}})
@@ -241,16 +245,19 @@ func run() error {
 		emit(map[string]string{"type": "agent_end"})
 		settle()
 	case "fixture:pi-retry", "fixture:pi-retry-exhausted":
-		// Pi 0.84.1 schedules a retry only after the failed attempt's turn and run end, then
+		// Pi 1.0.0 schedules a retry only after the failed attempt's turn and run end, then
 		// sleeps through the backoff before starting a new run.
 		ack()
 		emit(map[string]string{"type": "agent_start"})
 		emit(map[string]string{"type": "turn_start"})
+		emit(map[string]any{"type": "message_start", "message": map[string]any{"role": "system"}})
+		emit(map[string]any{"type": "message_end", "message": map[string]any{"role": "system"}})
 		emit(map[string]any{"type": "message_start", "message": map[string]string{"role": "assistant"}})
 		failMessage(otherText)
 		emit(map[string]string{"type": "turn_end"})
 		emit(map[string]any{"type": "agent_end", "willRetry": true})
 		retryStart(otherText)
+		emit(map[string]string{"type": "entry_appended"})
 		time.Sleep(RetryBackoff)
 		emit(map[string]string{"type": "agent_start"})
 		emit(map[string]string{"type": "turn_start"})

@@ -14,7 +14,7 @@ import (
 const (
 	defaultPiBinary             = "pi"
 	defaultPiProvider           = "openai-codex"
-	defaultPiVersion            = "0.84.1"
+	defaultPiVersion            = "1.0.0"
 	defaultPiWebSearchExtension = "/usr/local/lib/home-agent/pi-web-search/src/index.ts"
 	defaultConversationTimeout  = 2 * time.Minute
 	minimumConversationTimeout  = 5 * time.Second

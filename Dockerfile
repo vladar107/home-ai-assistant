@@ -27,8 +27,8 @@ RUN apk add --no-cache ca-certificates wget \
     && mkdir -p /etc/home-agent \
     && chown 10001:10001 /var/lib/home-agent
 
-RUN npm install --global --omit=dev @earendil-works/pi-coding-agent@0.84.1 \
-    && test "$(pi --version)" = "0.84.1" \
+RUN npm install --global --omit=dev @earendil-works/pi-coding-agent@1.0.0 \
+    && test "$(pi --version)" = "1.0.0" \
     && npm cache clean --force
 
 COPY third_party/pi-web-search /usr/local/lib/home-agent/pi-web-search

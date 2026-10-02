@@ -54,6 +54,15 @@ pi auth check --provider openai-codex --json
 If GoLand does not inherit the shell `PATH` (for example with `fnm`), set
 `HOME_AGENT_PI_BINARY` and `HOME_AGENT_PI_NODE_BINARY` to absolute paths.
 
+When upgrading Pi, change the version in the `Dockerfile`, the config default,
+both env examples, the compose default, and the ignored `.env` and
+`deploy/.env.nas` together, and upgrade the Mac's global install at the same
+time; the app refuses to start on a mismatch.
+Since 1.0, Pi ships codemode, `tool_search`, MCP, and llama.cpp as built-in
+extensions. `--no-extensions` keeps them off, so check after each upgrade that
+a turn only offers the app's own tools. Pi must never receive a TypeSafe key
+(`TYPESAFE_API_KEY`): judgments go through the app's redactor.
+
 Tests need no credentials, Node, or Pi. They use temporary SQLite databases, a
 loopback Telegram simulator, and a Go subprocess that speaks Pi's RPC protocol:
 

@@ -404,6 +404,7 @@ type rpcEvent struct {
 	ToolName              string                 `json:"toolName"`
 	Attempt               int                    `json:"attempt"`
 	WillRetry             bool                   `json:"willRetry"`
+	Data                  json.RawMessage        `json:"data"`
 	Message               *rpcMessage            `json:"message"`
 	AssistantMessageEvent *assistantMessageEvent `json:"assistantMessageEvent"`
 }
@@ -636,6 +637,13 @@ func (s *turnState) consume(ctx context.Context, event rpcEvent) (bool, error) {
 		if event.Command == "prompt" {
 			if !event.Success {
 				return false, fmt.Errorf("Pi runtime rejected the prompt")
+			}
+			var data struct {
+				Disposition string `json:"disposition"`
+			}
+			_ = json.Unmarshal(event.Data, &data)
+			if data.Disposition != "" && data.Disposition != "started" {
+				return false, fmt.Errorf("Pi runtime did not start a run for the prompt")
 			}
 			s.promptAcknowledged = true
 		}
