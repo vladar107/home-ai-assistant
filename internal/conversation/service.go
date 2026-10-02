@@ -432,22 +432,22 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 			webSearch, runErr = s.webSearchEnabled(turnCtx, request.PrincipalID)
 		}
 		if runErr != nil {
-			errorKind = "tool_provider"
+			errorKind = ErrorKindToolProvider
 		}
 		if runErr == nil && s.config.Attachments != nil {
 			attachments, runErr = s.config.Attachments.Turn(turnCtx, request.PrincipalID, request.ID)
 			if runErr != nil {
-				errorKind, reportedKind = "runtime", "attachments"
+				errorKind, reportedKind = ErrorKindRuntime, ErrorKindAttachments
 			}
 		}
 		if hinted != nil && runErr == nil {
 			hint = <-hinted
 		}
 	} else if runErr == nil {
-		errorKind, reportedKind = "runtime", "not_connected"
+		errorKind, reportedKind = ErrorKindRuntime, ErrorKindNotConnected
 		reply = NotConnectedReply
 	} else {
-		errorKind = "runtime"
+		errorKind = ErrorKindRuntime
 	}
 	if errorKind != "" {
 		if reply == "" {
@@ -474,14 +474,14 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		}
 		switch {
 		case errors.Is(turnCtx.Err(), context.DeadlineExceeded):
-			errorKind = "timeout"
+			errorKind = ErrorKindTimeout
 			reply = TimeoutReply
 		case errors.Is(turnCtx.Err(), context.Canceled):
 			s.removeCard(request)
 			endTurn("cancelled", "cancelled")
 			return
 		case runErr != nil || strings.TrimSpace(result.Response) == "":
-			errorKind = "runtime"
+			errorKind = ErrorKindRuntime
 			reply, reportedKind = failureReply(runErr)
 		default:
 			reply = result.Response
@@ -751,12 +751,12 @@ func failureReply(err error) (string, string) {
 	if errors.As(err, &providerErr) {
 		switch providerErr.Category {
 		case agentruntime.FailureQuota:
-			return QuotaReply, string(agentruntime.FailureQuota)
+			return QuotaReply, ErrorKindProviderQuota
 		case agentruntime.FailureAuth:
-			return ReconnectReply, string(agentruntime.FailureAuth)
+			return ReconnectReply, ErrorKindProviderAuth
 		}
 	}
-	return UnavailableReply, "runtime"
+	return UnavailableReply, ErrorKindRuntime
 }
 
 // awaitTurn waits for the principal's turn slot. While another turn holds it the user sees the

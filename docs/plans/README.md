@@ -43,6 +43,7 @@ plan that links back to the earlier record.
 | 0031 | [Consolidate documentation into a README, C4 diagrams, and an operations guide](0031-documentation-consolidation.md) | done |
 | 0032 | [Tell the model the current local time on every chat turn](0032-current-time-in-turns.md) | done |
 | 0033 | [Bus information: trips, stop status, and disruptions](0033-live-bus-information.md) | in-progress |
+| 0034 | [Make unfinished model calls and rare failures visible](0034-unfinished-model-calls.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

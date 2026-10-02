@@ -62,6 +62,7 @@ type Telemetry struct {
 	replyDuration                metric.Float64Histogram
 	replyStageDuration           metric.Float64Histogram
 	modelCallDuration            metric.Float64Histogram
+	modelCalls                   metric.Int64Counter
 	modelTokens                  metric.Int64Counter
 	modelCallsPerTurn            metric.Int64Histogram
 	modelTurnTokens              metric.Int64Histogram
@@ -131,10 +132,11 @@ func New(ctx context.Context, cfg config.ObservabilityConfig, logger *slog.Logge
 	return telemetry, nil
 }
 
-// NewWithReader builds enabled telemetry whose metrics flow to reader and whose traces are not exported.
-func NewWithReader(reader sdkmetric.Reader) (*Telemetry, error) {
+// NewWithReader builds enabled telemetry whose metrics flow to reader and whose traces are not
+// exported unless options add a span processor.
+func NewWithReader(reader sdkmetric.Reader, options ...sdktrace.TracerProviderOption) (*Telemetry, error) {
 	return newEnabledTelemetry(
-		sdktrace.NewTracerProvider(),
+		sdktrace.NewTracerProvider(options...),
 		sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)),
 	)
 }
@@ -334,6 +336,9 @@ func (t *Telemetry) createBusinessInstruments(meter metric.Meter) error {
 		return err
 	}
 	if t.modelCallDuration, err = seconds("home_agent.model.call.duration", "Model call duration.", turnDurationBoundaries); err != nil {
+		return err
+	}
+	if t.modelCalls, err = counter("home_agent.model.calls", "Model calls ended, by outcome.", "{call}"); err != nil {
 		return err
 	}
 	if t.modelTokens, err = counter("home_agent.model.tokens", "Model tokens reported by the runtime.", "{token}"); err != nil {
@@ -542,6 +547,66 @@ func (t *Telemetry) RecordModelCall(ctx context.Context, principal, provider, mo
 		labelAttr("home_agent.model", model, "unknown"),
 		labelAttr("home_agent.stop_reason", stopReason, "unknown"),
 	))
+}
+
+// StartModelCall opens a model call span under the turn; the first function adds a Pi retry event
+// and the second ends the call with its outcome.
+func (t *Telemetry) StartModelCall(ctx context.Context, principal string) (context.Context, func(string), func(string)) {
+	ctx, span := t.tracer.Start(ctx, "home_agent.model.call", trace.WithAttributes(principalAttr(principal)))
+	retried := func(category string) {
+		span.AddEvent("pi.auto_retry", trace.WithAttributes(labelAttr("home_agent.category", category, "unknown")))
+	}
+	return ctx, retried, func(outcome string) {
+		outcome = labelOr(outcome, "unknown")
+		span.SetAttributes(attribute.String("home_agent.outcome", outcome))
+		if outcome == "completed" {
+			span.SetStatus(codes.Ok, "")
+		} else {
+			span.SetStatus(codes.Error, "model call "+outcome)
+		}
+		span.End()
+		t.modelCalls.Add(ctx, 1, metric.WithAttributes(principalAttr(principal), labelAttr("home_agent.outcome", outcome, "unknown")))
+	}
+}
+
+// StartToolCall opens a tool call span under the turn; the returned function ends it with the
+// call's outcome. The tool must already be a bound name or "unknown".
+func (t *Telemetry) StartToolCall(ctx context.Context, principal, tool string) (context.Context, func(string)) {
+	ctx, span := t.tracer.Start(ctx, "home_agent.tool.call", trace.WithAttributes(
+		principalAttr(principal),
+		labelAttr("home_agent.tool", tool, "unknown"),
+	))
+	return ctx, func(outcome string) {
+		outcome = labelOr(outcome, "unknown")
+		span.SetAttributes(attribute.String("home_agent.outcome", outcome))
+		if outcome == "success" {
+			span.SetStatus(codes.Ok, "")
+		} else {
+			span.SetStatus(codes.Error, "tool call "+outcome)
+		}
+		span.End()
+	}
+}
+
+// ZeroRareOutcomes creates each principal's rare failure series at zero, so increase() sees their
+// first occurrence. The label tuples must match the ones StartConversationTurn and StartModelCall
+// record.
+func (t *Telemetry) ZeroRareOutcomes(ctx context.Context, principals, turnErrorKinds []string) {
+	for _, principal := range principals {
+		for _, errorKind := range turnErrorKinds {
+			for _, safetyChecks := range []string{"on", "off", "unavailable"} {
+				t.conversationTurns.Add(ctx, 0, metric.WithAttributes(
+					attribute.String("home_agent.outcome", "error"),
+					attribute.String("home_agent.error_kind", errorKind),
+					principalAttr(principal),
+					safetyChecksAttr(safetyChecks),
+				))
+			}
+		}
+		for _, outcome := range []string{"timeout", "cancelled", "failed"} {
+			t.modelCalls.Add(ctx, 0, metric.WithAttributes(principalAttr(principal), labelAttr("home_agent.outcome", outcome, "unknown")))
+		}
+	}
 }
 
 func (t *Telemetry) RecordModelTokens(ctx context.Context, principal, provider, model string, input, output, cacheRead, cacheWrite int64) {

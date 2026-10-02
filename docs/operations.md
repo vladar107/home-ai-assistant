@@ -177,6 +177,16 @@ dashboards show activity after `/status`, and that Tempo finds traces for
 `service.name=home-agent`. Dashboards are provisioned from `home-monitoring`; edit
 them there.
 
+Rare failure series (turn errors per error kind and safety check, and the
+`timeout`, `cancelled`, and `failed` model-call outcomes) are created at zero at
+startup, so `increase()` counts the first failure. `home_agent_model_calls`
+counts every model call by outcome: a call that Pi retries and then recovers
+counts once as `completed`, while `timeout` and `cancelled` mean the turn ended
+while the model call was still open. Each turn's trace shows
+`home_agent.model.call` spans (with `pi.auto_retry` events) and
+`home_agent.tool.call` spans. A model call that Pi had to retry logs one
+`pi.model_call.retried` warning with its `category`, `retries`, and `outcome`.
+
 Add a Telegram contact point `Hearthwatch` with the alert bot token and chat ID
 from Keychain. Start with an alert on an absent `home_agent_application_running`
 metric, pending for two minutes.

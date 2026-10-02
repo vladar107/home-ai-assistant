@@ -14,6 +14,30 @@ import (
 
 var ErrBusy = errors.New("a conversation turn is already pending")
 
+// Error kinds a failed turn reports to telemetry. Startup creates each kind's series at zero from
+// TurnErrorKinds, so a new kind belongs there too.
+const (
+	ErrorKindTimeout       = "timeout"
+	ErrorKindRuntime       = "runtime"
+	ErrorKindToolProvider  = "tool_provider"
+	ErrorKindAttachments   = "attachments"
+	ErrorKindNotConnected  = "not_connected"
+	ErrorKindProviderQuota = string(agentruntime.FailureQuota)
+	ErrorKindProviderAuth  = string(agentruntime.FailureAuth)
+)
+
+func TurnErrorKinds() []string {
+	return []string{
+		ErrorKindTimeout,
+		ErrorKindRuntime,
+		ErrorKindToolProvider,
+		ErrorKindAttachments,
+		ErrorKindNotConnected,
+		ErrorKindProviderQuota,
+		ErrorKindProviderAuth,
+	}
+}
+
 const (
 	RequestStateQueued = "queued"
 	RequestStateReady  = "ready"

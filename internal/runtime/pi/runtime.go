@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -44,6 +45,8 @@ type Config struct {
 	// WebSearchExtension is the entry file of the vendored search extension; empty disables web
 	// search.
 	WebSearchExtension string
+	// Logger receives the per-call warning about Pi's own retries; nil discards it.
+	Logger *slog.Logger
 }
 
 type Runtime struct {
@@ -54,13 +57,19 @@ type Runtime struct {
 	model              string
 	profilesDir        string
 	webSearchExtension string
+	logger             *slog.Logger
 	telemetry          Telemetry
 }
 
-// Telemetry receives one record per assistant message, timed from its message_start.
+// Telemetry receives one record per assistant message, timed from its message_start, and one span
+// per model call, which also covers calls that never finish.
 type Telemetry interface {
 	RecordModelCall(ctx context.Context, principal, provider, model, stopReason string, duration time.Duration)
 	RecordModelTokens(ctx context.Context, principal, provider, model string, input, output, cacheRead, cacheWrite int64)
+	// StartModelCall returns the call's span context, a function that records one Pi retry by
+	// category, and one that ends the call with its outcome.
+	StartModelCall(ctx context.Context, principal string) (context.Context, func(string), func(string))
+	ContextLogger(ctx context.Context, logger *slog.Logger) *slog.Logger
 }
 
 // SetTelemetry must be called before the first turn.
@@ -127,6 +136,11 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 		return nil, fmt.Errorf("check Pi version: got %q, want %q", version, cfg.ExpectedVersion)
 	}
 
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
+
 	return &Runtime{
 		binary:             binary,
 		argsPrefix:         argsPrefix,
@@ -135,6 +149,7 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 		model:              cfg.Model,
 		profilesDir:        profilesDir,
 		webSearchExtension: cfg.WebSearchExtension,
+		logger:             logger,
 	}, nil
 }
 
@@ -235,6 +250,7 @@ func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink
 		waitResult <- cmd.Wait()
 	}()
 
+	state := &turnState{toolsEnabled: toolsEnabled, sink: sink, telemetry: r.telemetry, logger: r.logger, principal: request.PrincipalID}
 	prompt := map[string]any{
 		"id":      request.SessionID,
 		"type":    "prompt",
@@ -247,8 +263,11 @@ func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink
 		stopProcess(cmd, stdin, waitResult)
 		return agentruntime.RunResult{}, fmt.Errorf("send Pi prompt: request could not be written")
 	}
+	state.openModelCall(ctx)
+	defer func() {
+		state.closeModelCall(unfinishedOutcome(ctx))
+	}()
 
-	state := &turnState{toolsEnabled: toolsEnabled, sink: sink, telemetry: r.telemetry, principal: request.PrincipalID}
 	for {
 		select {
 		case event, ok := <-events:
@@ -256,6 +275,7 @@ func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink
 				stopProcess(cmd, stdin, waitResult)
 				return agentruntime.RunResult{}, fmt.Errorf("read Pi output: event stream ended early")
 			}
+			state.trackModelCall(ctx, event)
 			if category, actionable := providerFailure(event); actionable {
 				if event.Type == "message_end" && event.Message != nil && event.Message.Role == "assistant" {
 					state.recordAssistantMessage(ctx, event.Message)
@@ -382,6 +402,8 @@ type rpcEvent struct {
 	Success               bool                   `json:"success"`
 	ErrorMessage          string                 `json:"errorMessage"`
 	ToolName              string                 `json:"toolName"`
+	Attempt               int                    `json:"attempt"`
+	WillRetry             bool                   `json:"willRetry"`
 	Message               *rpcMessage            `json:"message"`
 	AssistantMessageEvent *assistantMessageEvent `json:"assistantMessageEvent"`
 }
@@ -438,6 +460,10 @@ func providerFailure(event rpcEvent) (agentruntime.FailureCategory, bool) {
 	default:
 		return "", false
 	}
+	return actionableFailure(text)
+}
+
+func actionableFailure(text string) (agentruntime.FailureCategory, bool) {
 	lowered := strings.ToLower(text)
 	for _, candidate := range failureCategories {
 		if strings.Contains(lowered, candidate.substring) {
@@ -445,6 +471,54 @@ func providerFailure(event rpcEvent) (agentruntime.FailureCategory, bool) {
 		}
 	}
 	return "", false
+}
+
+// Pi reports a retry only by its error text, so its category is a coarse reading of that text.
+var retryCategories = []struct{ substring, category string }{
+	{"rate limit", "rate_limit"},
+	{"rate_limit", "rate_limit"},
+	{"too many requests", "rate_limit"},
+	{"429", "rate_limit"},
+	{"overloaded", "overloaded"},
+	{"529", "overloaded"},
+	{"503", "overloaded"},
+	{"service unavailable", "overloaded"},
+	{"timed out", "timeout"},
+	{"timeout", "timeout"},
+	{"500", "server_error"},
+	{"502", "server_error"},
+	{"504", "server_error"},
+	{"server error", "server_error"},
+	{"internal error", "server_error"},
+	{"network", "network"},
+	{"connection", "network"},
+	{"fetch failed", "network"},
+	{"socket", "network"},
+}
+
+func retryCategory(text string) string {
+	if category, actionable := actionableFailure(text); actionable {
+		return string(category)
+	}
+	lowered := strings.ToLower(text)
+	for _, candidate := range retryCategories {
+		if strings.Contains(lowered, candidate.substring) {
+			return candidate.category
+		}
+	}
+	return "other"
+}
+
+// unfinishedOutcome reads the context first: once the deadline passes Pi is interrupted, and its
+// abort events, exit, or closed stream can arrive before ctx.Done is selected.
+func unfinishedOutcome(ctx context.Context) string {
+	switch {
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		return "timeout"
+	case errors.Is(ctx.Err(), context.Canceled):
+		return "cancelled"
+	}
+	return "failed"
 }
 
 func scanEvents(reader io.Reader, events chan<- rpcEvent, scanErrors chan<- error, done <-chan struct{}) {
@@ -476,9 +550,84 @@ type turnState struct {
 	promptAcknowledged bool
 	separatorPending   bool
 	telemetry          Telemetry
+	logger             *slog.Logger
 	principal          string
 	messageStarted     time.Time
 	usage              agentruntime.Usage
+	modelCall          *modelCall
+}
+
+// modelCall lasts from the moment control passes to the model until its outcome is known: an
+// assistant message that succeeded, a failure Pi will not retry, or the end of the turn. Pi's own
+// retries and their backoff stay inside the call. turn_start precedes every assistant request,
+// after the prompt and after each tool batch.
+type modelCall struct {
+	ctx      context.Context
+	retried  func(string)
+	end      func(string)
+	retries  int
+	category string
+	// failed holds an errored message's outcome until agent_end says whether Pi retries it.
+	failed bool
+}
+
+func (s *turnState) openModelCall(ctx context.Context) {
+	if s.modelCall != nil {
+		return
+	}
+	call := &modelCall{ctx: ctx, retried: func(string) {}, end: func(string) {}}
+	if s.telemetry != nil {
+		call.ctx, call.retried, call.end = s.telemetry.StartModelCall(ctx, s.principal)
+	}
+	s.modelCall = call
+}
+
+func (s *turnState) closeModelCall(outcome string) {
+	call := s.modelCall
+	if call == nil {
+		return
+	}
+	s.modelCall = nil
+	call.end(outcome)
+	if call.retries == 0 {
+		return
+	}
+	logger := s.logger
+	if s.telemetry != nil {
+		logger = s.telemetry.ContextLogger(call.ctx, logger)
+	}
+	logger.Warn("pi.model_call.retried",
+		"principal_id", s.principal,
+		"category", call.category,
+		"retries", call.retries,
+		"outcome", outcome,
+	)
+}
+
+func (s *turnState) trackModelCall(ctx context.Context, event rpcEvent) {
+	switch event.Type {
+	case "turn_start":
+		s.openModelCall(ctx)
+	case "agent_end":
+		if s.modelCall == nil || !s.modelCall.failed {
+			return
+		}
+		if event.WillRetry {
+			s.modelCall.failed = false
+			return
+		}
+		s.closeModelCall(unfinishedOutcome(ctx))
+	case "auto_retry_start":
+		s.openModelCall(ctx)
+		category := retryCategory(event.ErrorMessage)
+		s.modelCall.retried(category)
+		s.modelCall.retries = max(s.modelCall.retries+1, event.Attempt)
+		s.modelCall.category = category
+	case "auto_retry_end":
+		if !event.Success {
+			s.closeModelCall(unfinishedOutcome(ctx))
+		}
+	}
 }
 
 func (s *turnState) consume(ctx context.Context, event rpcEvent) (bool, error) {
@@ -536,6 +685,13 @@ func (s *turnState) recordAssistantMessage(ctx context.Context, message *rpcMess
 	started := s.messageStarted
 	s.messageStarted = time.Time{}
 	s.usage.ModelCalls++
+	// Pi reports its own run failures as an assistant message that no turn_start preceded.
+	s.openModelCall(ctx)
+	if message.StopReason == "error" || message.StopReason == "aborted" {
+		s.modelCall.failed = true
+	} else {
+		s.closeModelCall("completed")
+	}
 	if s.telemetry != nil && !started.IsZero() {
 		s.telemetry.RecordModelCall(ctx, s.principal, message.Provider, message.Model, message.StopReason, time.Since(started))
 	}

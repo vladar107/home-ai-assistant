@@ -16,6 +16,9 @@ import (
 
 const Version = "0.0.0-fixture"
 
+// RetryBackoff is how long the retry scenario waits between its failed attempt and the retry.
+const RetryBackoff = 300 * time.Millisecond
+
 type Report struct {
 	Args        []string `json:"args"`
 	Environment []string `json:"environment"`
@@ -209,6 +212,62 @@ func run() error {
 			final["usage"] = map[string]int{"input": 30, "output": 5, "cacheRead": 120, "cacheWrite": 0, "totalTokens": 155}
 		}
 		emit(map[string]any{"type": "message_end", "message": final})
+		settle()
+	case "fixture:pi-tools":
+		// Pi 0.84.1's own order for a parallel tool batch: turn_start precedes every assistant
+		// request, and tool ends arrive in completion order before the tool result messages.
+		ack()
+		emit(map[string]string{"type": "agent_start"})
+		emit(map[string]string{"type": "turn_start"})
+		emit(map[string]any{"type": "message_start", "message": map[string]any{"role": "user"}})
+		emit(map[string]any{"type": "message_end", "message": map[string]any{"role": "user"}})
+		emit(map[string]any{"type": "message_start", "message": map[string]string{"role": "assistant"}})
+		emit(map[string]any{"type": "message_update", "assistantMessageEvent": map[string]string{"type": "toolcall_start"}})
+		emit(map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "stopReason": "toolUse"}})
+		emit(map[string]any{"type": "tool_execution_start", "toolCallId": "call-1", "toolName": "web_search"})
+		emit(map[string]any{"type": "tool_execution_start", "toolCallId": "call-2", "toolName": "web_search"})
+		emit(map[string]any{"type": "tool_execution_end", "toolCallId": "call-2", "toolName": "web_search", "isError": false})
+		emit(map[string]any{"type": "tool_execution_end", "toolCallId": "call-1", "toolName": "web_search", "isError": false})
+		for range 2 {
+			emit(map[string]any{"type": "message_start", "message": map[string]any{"role": "toolResult"}})
+			emit(map[string]any{"type": "message_end", "message": map[string]any{"role": "toolResult"}})
+		}
+		emit(map[string]string{"type": "turn_end"})
+		emit(map[string]string{"type": "turn_start"})
+		emit(map[string]any{"type": "message_start", "message": map[string]string{"role": "assistant"}})
+		delta("found")
+		emit(map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "stopReason": "stop"}})
+		emit(map[string]string{"type": "turn_end"})
+		emit(map[string]string{"type": "agent_end"})
+		settle()
+	case "fixture:pi-retry", "fixture:pi-retry-exhausted":
+		// Pi 0.84.1 schedules a retry only after the failed attempt's turn and run end, then
+		// sleeps through the backoff before starting a new run.
+		ack()
+		emit(map[string]string{"type": "agent_start"})
+		emit(map[string]string{"type": "turn_start"})
+		emit(map[string]any{"type": "message_start", "message": map[string]string{"role": "assistant"}})
+		failMessage(otherText)
+		emit(map[string]string{"type": "turn_end"})
+		emit(map[string]any{"type": "agent_end", "willRetry": true})
+		retryStart(otherText)
+		time.Sleep(RetryBackoff)
+		emit(map[string]string{"type": "agent_start"})
+		emit(map[string]string{"type": "turn_start"})
+		emit(map[string]any{"type": "message_start", "message": map[string]string{"role": "assistant"}})
+		if prompt.Message == "fixture:pi-retry-exhausted" {
+			failMessage(otherText)
+			emit(map[string]string{"type": "turn_end"})
+			emit(map[string]any{"type": "agent_end", "willRetry": false})
+			emit(map[string]any{"type": "auto_retry_end", "success": false, "attempt": 1, "finalError": otherText})
+			settle()
+			break
+		}
+		delta("recovered")
+		emit(map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "stopReason": "stop"}})
+		emit(map[string]any{"type": "auto_retry_end", "success": true, "attempt": 1})
+		emit(map[string]string{"type": "turn_end"})
+		emit(map[string]string{"type": "agent_end"})
 		settle()
 	case "fixture:web-search":
 		// web_search runs inside Pi through the search extension, so no bridge call is made.

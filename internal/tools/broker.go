@@ -134,8 +134,9 @@ func (b *Broker) SetExposure(recorder ExposureRecorder) {
 	b.exposure = recorder
 }
 
-// Telemetry records per-call metrics.
+// Telemetry records per-call metrics and traces.
 type Telemetry interface {
+	StartToolCall(ctx context.Context, principal, tool string) (context.Context, func(outcome string))
 	RecordToolCall(ctx context.Context, principal, tool, outcome string, duration time.Duration)
 }
 
@@ -255,12 +256,18 @@ var _ agentruntime.ToolExecutor = (*turnExecutor)(nil)
 
 func (e *turnExecutor) Execute(ctx context.Context, call agentruntime.ToolCall) (agentruntime.ToolResult, error) {
 	started := time.Now()
-	outcome, screened, result := e.execute(ctx, call)
+	tool := "unknown"
+	if _, bound := e.bindings[call.Name]; bound {
+		tool = call.Name
+	}
+	spanCtx := ctx
+	finishSpan := func(string) {}
 	if e.broker.telemetry != nil {
-		tool := "unknown"
-		if _, bound := e.bindings[call.Name]; bound {
-			tool = call.Name
-		}
+		spanCtx, finishSpan = e.broker.telemetry.StartToolCall(ctx, e.principalID, tool)
+	}
+	outcome, screened, result := e.execute(spanCtx, call)
+	finishSpan(outcome)
+	if e.broker.telemetry != nil {
 		e.broker.telemetry.RecordToolCall(ctx, e.principalID, tool, outcome, time.Since(started))
 	}
 	attrs := []any{

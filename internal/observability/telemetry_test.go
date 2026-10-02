@@ -2,6 +2,7 @@ package observability
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -86,6 +87,85 @@ func TestBusinessMetricsAreRecordedWithNormalizedLabels(t *testing.T) {
 		}
 		if !anyMatches(sets, tt.want) {
 			t.Errorf("%s: no data point carries labels %v", tt.metric, tt.want)
+		}
+	}
+}
+
+func TestRareOutcomeSeriesStartAtZero(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	telemetry, err := NewWithReader(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = telemetry.Shutdown(context.Background()) })
+	ctx := context.Background()
+	principals := []string{"alice", "bob"}
+	errorKinds := []string{"timeout", "runtime", "tool_provider", "attachments", "not_connected", "provider_quota", "provider_auth"}
+	telemetry.ZeroRareOutcomes(ctx, principals, errorKinds)
+
+	type series struct{ metric, labels string }
+	collect := func() map[series]int64 {
+		t.Helper()
+		var collected metricdata.ResourceMetrics
+		if err := reader.Collect(ctx, &collected); err != nil {
+			t.Fatal(err)
+		}
+		values := map[series]int64{}
+		for _, scope := range collected.ScopeMetrics {
+			for _, m := range scope.Metrics {
+				if m.Name != "home_agent.conversation.turns" && m.Name != "home_agent.model.calls" {
+					continue
+				}
+				if sum, ok := m.Data.(metricdata.Sum[int64]); ok {
+					for _, p := range sum.DataPoints {
+						values[series{m.Name, p.Attributes.Encoded(attribute.DefaultEncoder())}] = p.Value
+					}
+				}
+			}
+		}
+		return values
+	}
+	zeroed := collect()
+	turnSeries, callSeries := 0, 0
+	for key, value := range zeroed {
+		if value != 0 {
+			t.Errorf("%s{%s} = %d, want 0", key.metric, key.labels, value)
+		}
+		if key.metric == "home_agent.conversation.turns" {
+			turnSeries++
+		} else {
+			callSeries++
+		}
+	}
+	if want := len(principals) * len(errorKinds) * 3; turnSeries != want {
+		t.Errorf("zeroed turn series = %d, want %d", turnSeries, want)
+	}
+	if want := len(principals) * 3; callSeries != want {
+		t.Errorf("zeroed model call series = %d, want %d", callSeries, want)
+	}
+
+	// Real increments must land on the zeroed series rather than start new ones.
+	for _, kind := range errorKinds {
+		for _, safetyChecks := range []string{"on", "off", "unavailable"} {
+			_, end := telemetry.StartConversationTurn(ctx, "alice", safetyChecks)
+			end("error", kind)
+		}
+	}
+	for _, outcome := range []string{"timeout", "cancelled", "failed"} {
+		_, _, end := telemetry.StartModelCall(ctx, "alice")
+		end(outcome)
+	}
+	incremented := collect()
+	if len(incremented) != len(zeroed) {
+		t.Fatalf("increments created %d new series", len(incremented)-len(zeroed))
+	}
+	for key := range zeroed {
+		want := int64(0)
+		if strings.Contains(key.labels, "home_agent.principal=alice") {
+			want = 1
+		}
+		if incremented[key] != want {
+			t.Errorf("%s{%s} = %d after increments, want %d", key.metric, key.labels, incremented[key], want)
 		}
 	}
 }
