@@ -11,6 +11,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/connectors/gmail"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
+	"github.com/vladar107/home-ai-assistant/internal/testutil/calendarsim"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/googlesim"
 )
 
@@ -48,6 +49,20 @@ func googleSimulator(t *testing.T) *googlesim.Simulator {
 		Snippet: "Please prepare", Labels: []string{"UNREAD", "INBOX"}, Received: received.Add(time.Hour), PlainText: "Please prepare the slides.",
 	})
 	sim.AddMailbox(bobMailbox, googlesim.Message{ID: "b1", ThreadID: "tb", From: "x@example.com", Subject: "Bob only", Labels: []string{"UNREAD"}, Received: received})
+	return sim
+}
+
+func calendarSimulator(t *testing.T, google *googlesim.Simulator) *calendarsim.Simulator {
+	t.Helper()
+	sim := calendarsim.New(t, google.AccountFor)
+	sim.AddCalendar(aliceMailbox, calendarsim.Calendar{ID: aliceMailbox, Summary: "Alice", Primary: true, AccessRole: "owner"})
+	sim.AddEvents(aliceMailbox, aliceMailbox, calendarsim.Event{
+		ID: "e1", Summary: "Dentist", Start: time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC), End: time.Date(2026, 10, 3, 9, 30, 0, 0, time.UTC),
+	})
+	sim.AddCalendar(aliceWork, calendarsim.Calendar{ID: aliceWork, Summary: "Work", Primary: true, AccessRole: "owner"})
+	sim.AddEvents(aliceWork, aliceWork, calendarsim.Event{
+		ID: "e2", Summary: "Standup", Start: time.Date(2026, 10, 3, 8, 0, 0, 0, time.UTC), End: time.Date(2026, 10, 3, 8, 15, 0, 0, time.UTC),
+	})
 	return sim
 }
 
@@ -94,7 +109,7 @@ func (h *conversationHarness) connectGoogle(sim *googlesim.Simulator, firstUpdat
 func TestGoogleAccountsSearchSwitchesAndDisconnect(t *testing.T) {
 	runtime := newControlledRuntime()
 	sim := googleSimulator(t)
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{google: sim})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{google: sim, calendar: calendarSimulator(t, sim)})
 	h.provision("alice", "account-alice")
 	h.provision("bob", "account-bob")
 	h.start()
@@ -124,7 +139,7 @@ func TestGoogleAccountsSearchSwitchesAndDisconnect(t *testing.T) {
 	h.push(textUpdate(8, 101, "anything important?"))
 	call := receive(t, h.ctx, runtime.calls)
 	names := toolNames(call.request.Tools)
-	for _, want := range []string{"gmail_search", "gmail_read_message"} {
+	for _, want := range []string{"gmail_search", "gmail_read_message", "calendar_events", "calendar_read_event"} {
 		if !slices.Contains(names, want) {
 			t.Fatalf("alice's tools lack %s: %v", want, names)
 		}
@@ -160,13 +175,17 @@ func TestGoogleAccountsSearchSwitchesAndDisconnect(t *testing.T) {
 	if wrong := executeTool(t, call.ctx, call.request.Tools, "gmail_read_message", `{"account":"alice@work.example","id":"m1"}`); !wrong.IsError || !strings.Contains(wrong.Text, "No message with that id") {
 		t.Fatalf("a message read from the wrong account = %+v", wrong)
 	}
+	events := executeTool(t, call.ctx, call.request.Tools, "calendar_events", `{"start":"2026-10-03","end":"2026-10-03"}`)
+	if events.IsError || !strings.Contains(events.Text, "Dentist") || strings.Contains(events.Text, "Standup") {
+		t.Fatalf("calendar events with Calendar on for one account = %+v", events)
+	}
 	call.answer <- agentruntime.RunResult{Response: "Your rent is going up."}
 	h.wantReply(101, 8, "Your rent is going up.")
 	h.waitState(8, "delivered")
 
 	h.push(textUpdate(9, 202, "check my mail"))
 	bobCall := receive(t, h.ctx, runtime.calls)
-	if names := toolNames(bobCall.request.Tools); slices.Contains(names, "gmail_search") {
+	if names := toolNames(bobCall.request.Tools); slices.Contains(names, "gmail_search") || slices.Contains(names, "calendar_events") {
 		t.Fatalf("bob was offered Google tools without connecting: %v", names)
 	}
 	bobCall.answer <- agentruntime.RunResult{Response: "not connected"}

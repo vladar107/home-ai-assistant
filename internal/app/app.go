@@ -16,6 +16,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/config"
 	"github.com/vladar107/home-ai-assistant/internal/connection"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/bus"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/calendar"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/gmail"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/google"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
@@ -503,6 +504,13 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 				return fmt.Errorf("initialize Gmail connector: %w", err)
 			}
 			if err := broker.Register(gmailService); err != nil {
+				return err
+			}
+			calendarService, err := calendar.NewService(calendar.Config{Location: location}, googleService, a.logger)
+			if err != nil {
+				return fmt.Errorf("initialize Calendar connector: %w", err)
+			}
+			if err := broker.Register(calendarService); err != nil {
 				return err
 			}
 			a.google = googleService

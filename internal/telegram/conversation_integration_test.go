@@ -24,6 +24,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
 	"github.com/vladar107/home-ai-assistant/internal/connection"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/bus"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/calendar"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/gmail"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/google"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
@@ -37,6 +38,7 @@ import (
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
+	"github.com/vladar107/home-ai-assistant/internal/testutil/calendarsim"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/codexauth"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/googlesim"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/notionsim"
@@ -145,6 +147,8 @@ type harnessOptions struct {
 	// schedules adds the scheduler, its tools, and /jobs, on the given clock.
 	schedules *testClock
 	google    *googlesim.Simulator
+	// calendar serves the Calendar API for the google simulator's tokens; nil leaves Calendar out.
+	calendar *calendarsim.Simulator
 	// web adds the web connector and its settings section, as HOME_AGENT_WEB_ENABLED does.
 	web bool
 	// ns adds the NS connector against the given gateway, as an operator key does.
@@ -374,6 +378,17 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		}
 		if err := broker.Register(mail); err != nil {
 			t.Fatal(err)
+		}
+		if calendarSim := options.calendar; calendarSim != nil {
+			calendars, err := calendar.NewService(calendar.Config{
+				Location: time.UTC, APIBaseURL: calendarSim.APIBaseURL(), HTTPClient: calendarSim.Client(),
+			}, h.google, logger)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := broker.Register(calendars); err != nil {
+				t.Fatal(err)
+			}
 		}
 		googleController = h.google
 	}

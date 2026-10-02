@@ -16,7 +16,7 @@ flowchart TB
     telegram["Telegram Bot API"]
     model["Model provider<br/>each user's own subscription"]
     notion["Notion"]
-    google["Google<br/>Gmail"]
+    google["Google<br/>Gmail, Calendar"]
     ns["NS API<br/>Dutch trains"]
     meteo["Open-Meteo<br/>weather"]
     ovapi["OVapi<br/>live buses, notices"]
@@ -114,6 +114,7 @@ flowchart TB
         notion["notion"]
         google["google<br/>accounts, grants"]
         gmail["gmail"]
+        calendar["calendar"]
         nasc["nas"]
         nsc["ns"]
         busc["bus"]
@@ -204,5 +205,5 @@ it can write, the approval service (the executor for confirmed proposals).
 | Tag-pinned manual deploys; CI builds the image but has no NAS access | The operator stays the only path to production, and each deploy records its digest |
 | Secrets in macOS Keychain, only the needed copies on the NAS | Recovery stays with the operator; secrets stay out of Git, CI, images, and env values |
 
-Not built: Immich, UniFi, GitHub, and calendar connectors; Home Assistant; local
+Not built: Immich, UniFi, and GitHub connectors; Home Assistant; local
 inference; RAG.
