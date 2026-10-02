@@ -1,0 +1,9 @@
+route_id,agency_id,route_short_name,route_long_name,route_desc,route_type,route_color,route_text_color,route_url
+141865,UOV,2,U-link Amersfoort CS - Nieuwland,,3,213a8f,ffffff,
+141866,UOV,3,U-link Amersfoort CS - Vathorst,,3,e98300,ffffff,
+141867,UOV,4,U-bus Amersfoort CS - Schothorst,,3,fcd900,000000,
+141868,UOV,5,U-bus Amersfoort CS - Vathorst,,3,fcd900,000000,
+141870,UOV,7,U-bus Amersfoort CS - Schothorst,,3,fcd900,000000,
+141872,UOV,9,U-bus Amersfoort CS - Leusderkwartier,,3,fcd900,000000,
+141875,UOV,17,U-link Amersfoort CS - Leusden,,3,09d700,ffffff,
+143769,UOV,376,U-liner Science Park - Bunschoten-Spakenburg,,3,74a0b6,ffffff,

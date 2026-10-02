@@ -19,6 +19,8 @@ flowchart TB
     gmail["Gmail"]
     ns["NS API<br/>Dutch trains"]
     meteo["Open-Meteo<br/>weather"]
+    ovapi["OVapi<br/>live buses, notices"]
+    transitous["Transitous<br/>journey planner"]
     typesafe["TypeSafe<br/>optional safety checks"]
     nasfiles["NAS shares<br/>household files"]
     ghcr["GitHub + GHCR<br/>source, CI, image"]
@@ -30,6 +32,8 @@ flowchart TB
     agent -->|read-only| gmail
     agent -->|trips, departures, disruptions| ns
     agent -->|forecasts| meteo
+    agent -->|departures, stop list, notices| ovapi
+    agent -->|planned trips, departures| transitous
     agent -->|judgments| typesafe
     agent -->|mounted roots| nasfiles
     operator -->|push| ghcr
@@ -45,7 +49,7 @@ an outbound HTTPS client, and administrative interfaces stay on the LAN.
 ```mermaid
 flowchart TB
     telegram["Telegram Bot API"]
-    ext["External APIs<br/>model provider, Notion, Gmail, NS, Open-Meteo, TypeSafe"]
+    ext["External APIs<br/>model provider, Notion, Gmail, NS, OVapi, Transitous, Open-Meteo, TypeSafe"]
 
     subgraph nas["NAS"]
         subgraph app["home-ai-assistant Compose project"]
@@ -111,6 +115,7 @@ flowchart TB
         gmail["gmail"]
         nasc["nas"]
         nsc["ns"]
+        busc["bus"]
         web["web<br/>pages, weather"]
     end
 

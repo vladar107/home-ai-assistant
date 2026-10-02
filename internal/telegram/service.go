@@ -111,6 +111,7 @@ type Service struct {
 	web          WebController
 	typeSafe     TypeSafeController
 	ns           NSController
+	bus          BusController
 	approvals    ApprovalController
 	schedules    ScheduleController
 	sections     []settingsSection
@@ -136,6 +137,7 @@ func NewService(
 	gmailAccess GmailController,
 	webAccess WebController,
 	nsTrains NSController,
+	buses BusController,
 	approvals ApprovalController,
 	schedules ScheduleController,
 	logger *slog.Logger,
@@ -166,6 +168,7 @@ func NewService(
 		gmail:        gmailAccess,
 		web:          webAccess,
 		ns:           nsTrains,
+		bus:          buses,
 		approvals:    approvals,
 		schedules:    schedules,
 		logger:       logger,
@@ -194,6 +197,9 @@ func NewService(
 	}
 	if nsTrains != nil {
 		service.sections = append(service.sections, nsSection{ns: nsTrains, logger: logger, telemetry: service.telemetry})
+	}
+	if buses != nil {
+		service.sections = append(service.sections, busSection{bus: buses, logger: logger, telemetry: service.telemetry})
 	}
 	return service, nil
 }
@@ -757,6 +763,15 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 			}
 			if status.Enabled {
 				reply += " " + NSPrivacyLine
+			}
+		}
+		if s.bus != nil {
+			status, err := s.bus.Status(ctx, principalID)
+			if err != nil {
+				return "", nil, err
+			}
+			if status.Enabled {
+				reply += " " + BusPrivacyLine + " " + BusPlanningPrivacyLine
 			}
 		}
 		if s.typeSafe != nil {

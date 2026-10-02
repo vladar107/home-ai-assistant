@@ -23,6 +23,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
 	"github.com/vladar107/home-ai-assistant/internal/connection"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/bus"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/gmail"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
@@ -147,6 +148,10 @@ type harnessOptions struct {
 	web bool
 	// ns adds the NS connector against the given gateway, as an operator key does.
 	ns string
+	// bus adds the bus connector against the given base URL, as HOME_AGENT_BUS_ENABLED does, with
+	// busContact as the operator's Transitous contact.
+	bus        string
+	busContact string
 	// cards adds the outbox and the stage_card test tool that stages a card for the turn's reply.
 	cards       bool
 	turnTimeout time.Duration
@@ -179,6 +184,7 @@ type conversationHarness struct {
 	gmail          *gmail.Service
 	web            *web.Service
 	ns             *ns.Service
+	bus            *bus.Service
 	approvals      *approval.Service
 	scheduler      *schedule.Service
 	auth           *codexauth.Simulator
@@ -389,6 +395,20 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		}
 		nsController = h.ns
 	}
+	var busController BusController
+	if options.bus != "" {
+		h.bus, err = bus.NewService(bus.Config{
+			HomeStop: "50420100", Contact: options.busContact,
+			OVapiURL: options.bus, GTFSURL: options.bus, TransitousURL: options.bus,
+		}, h.store, logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := broker.Register(h.bus); err != nil {
+			t.Fatal(err)
+		}
+		busController = h.bus
+	}
 	var cards conversation.Cards
 	var photos conversation.PhotoDeliverer
 	if options.cards {
@@ -439,7 +459,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 			t.Fatal(err)
 		}
 	}
-	h.service, err = NewService(h.client, identities, h.store, h.conversation, h.attachments, h.connections, notionController, nasController, gmailController, webController, nsController, h.approvals, scheduleController, logger, nil)
+	h.service, err = NewService(h.client, identities, h.store, h.conversation, h.attachments, h.connections, notionController, nasController, gmailController, webController, nsController, busController, h.approvals, scheduleController, logger, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

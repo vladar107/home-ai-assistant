@@ -1,0 +1,466 @@
+package bus
+
+import (
+	"archive/zip"
+	"context"
+	"encoding/csv"
+	"errors"
+	"fmt"
+	"io"
+	"math"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+	"unicode"
+)
+
+const (
+	directoryLifetime = 24 * time.Hour
+	// directoryRetryDelay keeps a failing refresh from costing a download on every call while the
+	// stale directory still answers.
+	directoryRetryDelay = 15 * time.Minute
+
+	gtfsArchive = "gtfs-nl.zip"
+	// stops.txt was 1.5 MB compressed and 5.6 MB unzipped on 2026-10-02.
+	maximumEntryBytes = 8 << 20
+	// rangeBudget bounds what one directory refresh may download: the archive's directory, both
+	// entries, and the blocks they straddle.
+	rangeBudget = 24 << 20
+
+	maximumCandidates = 8
+	maximumStopRunes  = 100
+	// samePlaceMeters is how close exact matches must lie to count as one place, such as the
+	// railway platforms and the bus stop of one station, which the feed names differently.
+	samePlaceMeters = 500
+)
+
+// stopGroup is one named stop: every platform the GTFS feed lists under the same name, which is
+// how travellers think of a stop, even where the feed splits it across stop areas.
+type stopGroup struct {
+	name string
+	// codes are the timing point codes OVapi knows the platforms by, and platforms their letters.
+	codes     []string
+	platforms map[string]string
+	// stopIDs are the GTFS stop identifiers alerts and Transitous use for the same platforms; a
+	// group always has at least one.
+	stopIDs  []string
+	lat, lon float64
+	forms    []string
+}
+
+type route struct {
+	id     string
+	agency string
+	short  string
+	long   string
+}
+
+// stopIndex is the national stop and route directory built from the GTFS feed.
+type stopIndex struct {
+	groups   []*stopGroup
+	byCode   map[string]*stopGroup
+	byStopID map[string]*stopGroup
+	routes   map[string]route
+}
+
+// directory is the stop index, fetched on first use and at most once a day after that.
+type directory struct {
+	fetch func(context.Context) (gtfsTables, error)
+	now   func() time.Time
+
+	mu         sync.Mutex
+	index      *stopIndex
+	fetchedAt  time.Time
+	retryAfter time.Time
+	refresh    *refresh
+}
+
+// refresh is one fetch of the directory that concurrent callers wait on instead of repeating.
+type refresh struct {
+	done  chan struct{}
+	index *stopIndex
+	err   error
+	// abandoned marks a fetch that failed because its caller gave up, which says nothing about the
+	// feed, so waiters try again themselves.
+	abandoned bool
+}
+
+// load returns the stop index. A refresh that fails while an older index is at hand returns that
+// index together with the refresh error, so the caller can log it and carry on.
+func (d *directory) load(ctx context.Context) (*stopIndex, error) {
+	for {
+		d.mu.Lock()
+		now := d.now()
+		if d.index != nil && (now.Sub(d.fetchedAt) < directoryLifetime || now.Before(d.retryAfter)) {
+			index := d.index
+			d.mu.Unlock()
+			return index, nil
+		}
+		if running := d.refresh; running != nil {
+			stale := d.index
+			d.mu.Unlock()
+			select {
+			case <-running.done:
+				if running.abandoned {
+					continue
+				}
+				return running.index, running.err
+			case <-ctx.Done():
+				return stale, transportError(ctx.Err())
+			}
+		}
+		running := &refresh{done: make(chan struct{})}
+		d.refresh = running
+		d.mu.Unlock()
+
+		tables, err := d.fetch(ctx)
+		var index *stopIndex
+		if err == nil {
+			index, err = buildIndex(tables)
+		}
+
+		d.mu.Lock()
+		switch {
+		case err == nil:
+			d.index, d.fetchedAt, d.retryAfter = index, now, time.Time{}
+		case ctx.Err() != nil:
+			running.abandoned = true
+		case d.index != nil:
+			d.retryAfter = now.Add(directoryRetryDelay)
+		}
+		running.index, running.err = d.index, err
+		d.refresh = nil
+		d.mu.Unlock()
+		close(running.done)
+		return running.index, running.err
+	}
+}
+
+type gtfsTables struct {
+	stops  [][]string
+	routes [][]string
+}
+
+// directoryTables reads stops.txt and routes.txt out of the national GTFS archive by range
+// requests, without downloading the rest of it.
+func (c *client) directoryTables(ctx context.Context) (gtfsTables, error) {
+	reader, err := c.openRange(ctx, gtfsArchive, rangeBudget)
+	if err != nil {
+		return gtfsTables{}, err
+	}
+	archive, err := zip.NewReader(reader, reader.Size())
+	if err != nil {
+		return gtfsTables{}, archiveError(err)
+	}
+	var tables gtfsTables
+	if tables.stops, err = readTable(archive, "stops.txt"); err != nil {
+		return gtfsTables{}, err
+	}
+	if tables.routes, err = readTable(archive, "routes.txt"); err != nil {
+		return gtfsTables{}, err
+	}
+	return tables, nil
+}
+
+func readTable(archive *zip.Reader, name string) ([][]string, error) {
+	for _, file := range archive.File {
+		if file.Name != name {
+			continue
+		}
+		if file.UncompressedSize64 > maximumEntryBytes {
+			return nil, errMalformed
+		}
+		opened, err := file.Open()
+		if err != nil {
+			return nil, archiveError(err)
+		}
+		defer opened.Close()
+		reader := csv.NewReader(io.LimitReader(opened, maximumEntryBytes))
+		reader.FieldsPerRecord = -1
+		reader.LazyQuotes = true
+		reader.ReuseRecord = false
+		records, err := reader.ReadAll()
+		if err != nil {
+			return nil, archiveError(err)
+		}
+		return records, nil
+	}
+	return nil, errMalformed
+}
+
+// archiveError keeps a request failure's class and reduces anything else the zip or CSV reader
+// reports to a malformed archive.
+func archiveError(err error) error {
+	var failure *apiError
+	if errors.As(err, &failure) {
+		return failure
+	}
+	return errMalformed
+}
+
+func buildIndex(tables gtfsTables) (*stopIndex, error) {
+	stops, err := columns(tables.stops, "stop_id", "stop_code", "stop_name", "stop_lat", "stop_lon", "location_type")
+	if err != nil {
+		return nil, err
+	}
+	routes, err := columns(tables.routes, "route_id", "agency_id", "route_short_name", "route_long_name")
+	if err != nil {
+		return nil, err
+	}
+
+	index := &stopIndex{
+		byCode:   make(map[string]*stopGroup),
+		byStopID: make(map[string]*stopGroup),
+		routes:   make(map[string]route),
+	}
+	byName := make(map[string]*stopGroup)
+	counts := make(map[*stopGroup]float64)
+	for _, record := range tables.stops[1:] {
+		if kind := stops.get(record, "location_type"); kind != "" && kind != "0" {
+			continue
+		}
+		name := strings.TrimSpace(stops.get(record, "stop_name"))
+		id := stops.get(record, "stop_id")
+		if name == "" || id == "" {
+			continue
+		}
+		group := byName[name]
+		if group == nil {
+			group = &stopGroup{name: name, forms: nameForms(name), platforms: make(map[string]string)}
+			byName[name] = group
+		}
+		group.stopIDs = append(group.stopIDs, id)
+		if code := stops.get(record, "stop_code"); digitsOnly(code) {
+			group.codes = append(group.codes, code)
+			if platform := stops.get(record, "platform_code"); platform != "" {
+				group.platforms[code] = clip(platform, 10)
+			}
+		}
+		lat, latErr := strconv.ParseFloat(stops.get(record, "stop_lat"), 64)
+		lon, lonErr := strconv.ParseFloat(stops.get(record, "stop_lon"), 64)
+		if latErr == nil && lonErr == nil {
+			counts[group]++
+			group.lat += (lat - group.lat) / counts[group]
+			group.lon += (lon - group.lon) / counts[group]
+		}
+	}
+	// A stop without timing point codes has no live OVapi data,
+	// but Transitous still answers for it.
+	for _, group := range byName {
+		if counts[group] == 0 {
+			continue
+		}
+		index.groups = append(index.groups, group)
+		for _, code := range group.codes {
+			index.byCode[code] = group
+		}
+		for _, id := range group.stopIDs {
+			index.byStopID[id] = group
+		}
+	}
+	if len(index.groups) == 0 {
+		return nil, errMalformed
+	}
+	sort.Slice(index.groups, func(i, j int) bool { return index.groups[i].name < index.groups[j].name })
+
+	for _, record := range tables.routes[1:] {
+		entry := route{
+			id:     routes.get(record, "route_id"),
+			agency: routes.get(record, "agency_id"),
+			short:  strings.TrimSpace(routes.get(record, "route_short_name")),
+			long:   strings.TrimSpace(routes.get(record, "route_long_name")),
+		}
+		if entry.id != "" {
+			index.routes[entry.id] = entry
+		}
+	}
+	return index, nil
+}
+
+type columnIndex map[string]int
+
+func columns(table [][]string, required ...string) (columnIndex, error) {
+	if len(table) == 0 {
+		return nil, errMalformed
+	}
+	found := make(columnIndex)
+	for position, name := range table[0] {
+		found[strings.TrimPrefix(strings.TrimSpace(name), "\ufeff")] = position
+	}
+	for _, name := range required {
+		if _, ok := found[name]; !ok {
+			return nil, errMalformed
+		}
+	}
+	return found, nil
+}
+
+func (c columnIndex) get(record []string, name string) string {
+	position, ok := c[name]
+	if !ok || position >= len(record) {
+		return ""
+	}
+	return strings.TrimSpace(record[position])
+}
+
+// nameForms are the ways a stop can be asked for: GTFS writes "Town, Stop name",
+// people say "Town Stop name", or just "Stop name" when the town is obvious.
+func nameForms(name string) []string {
+	forms := []string{normalize(name)}
+	if town, rest, found := strings.Cut(name, ","); found {
+		town, rest = normalize(town), normalize(rest)
+		if rest != "" {
+			forms = append(forms, rest)
+			if !strings.HasPrefix(rest, town+" ") && rest != town {
+				forms = append(forms, town+" "+rest)
+			}
+		}
+	}
+	return forms
+}
+
+// resolution is a stop name matched against the directory: one stop, or the candidates the model
+// has to choose from.
+type resolution struct {
+	group      *stopGroup
+	candidates []*stopGroup
+}
+
+func (i *stopIndex) resolve(query string) resolution {
+	trimmed := strings.TrimSpace(query)
+	if group, found := i.byCode[trimmed]; found {
+		return resolution{group: group}
+	}
+	normalized := normalize(trimmed)
+	if normalized == "" {
+		return resolution{}
+	}
+	matchers := []func(string) bool{
+		func(form string) bool { return form == normalized },
+		func(form string) bool { return strings.HasPrefix(form, normalized+" ") },
+		func(form string) bool { return strings.HasPrefix(form, normalized) },
+		func(form string) bool { return strings.Contains(form, normalized) },
+	}
+	for tier, matches := range matchers {
+		exact := tier == 0
+		var hits []*stopGroup
+		for _, group := range i.groups {
+			for _, form := range group.forms {
+				if matches(form) {
+					hits = append(hits, group)
+					break
+				}
+			}
+		}
+		if len(hits) == 0 {
+			continue
+		}
+		if len(hits) == 1 {
+			return resolution{group: hits[0]}
+		}
+		if exact && samePlace(hits) {
+			return resolution{group: busiest(hits)}
+		}
+		if len(hits) > maximumCandidates {
+			hits = hits[:maximumCandidates]
+		}
+		return resolution{candidates: hits}
+	}
+	return resolution{}
+}
+
+func samePlace(groups []*stopGroup) bool {
+	for _, a := range groups {
+		for _, b := range groups {
+			if distanceMeters(a.lat, a.lon, b.lat, b.lon) > samePlaceMeters {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// busiest prefers the stop OVapi knows most platforms of, then the one with most platforms.
+func busiest(groups []*stopGroup) *stopGroup {
+	best := groups[0]
+	for _, group := range groups[1:] {
+		if len(group.codes) > len(best.codes) || (len(group.codes) == len(best.codes) && len(group.stopIDs) > len(best.stopIDs)) {
+			best = group
+		}
+	}
+	return best
+}
+
+func distanceMeters(latA, lonA, latB, lonB float64) float64 {
+	const earthRadius = 6371000
+	toRadians := math.Pi / 180
+	dLat, dLon := (latB-latA)*toRadians, (lonB-lonA)*toRadians
+	h := math.Sin(dLat/2)*math.Sin(dLat/2) + math.Cos(latA*toRadians)*math.Cos(latB*toRadians)*math.Sin(dLon/2)*math.Sin(dLon/2)
+	return 2 * earthRadius * math.Asin(math.Sqrt(h))
+}
+
+// resolutionError is the sentence the model sees when a name does not pick out one stop.
+func resolutionError(role, query string, match resolution) string {
+	if len(match.candidates) == 0 {
+		return fmt.Sprintf("No bus stop matches %s %q; ask the user for the stop's name, written as \"Town, Stop\".", role, clip(query, maximumStopRunes))
+	}
+	names := make([]string, 0, len(match.candidates))
+	for _, candidate := range match.candidates {
+		names = append(names, candidate.name)
+	}
+	return fmt.Sprintf("%s %q matches several bus stops: %s. Call again with the full name of the one the user means, or ask them.",
+		role, clip(query, maximumStopRunes), strings.Join(names, "; "))
+}
+
+// normalize folds a stop name for matching: lower case, no accents, and punctuation as spaces, so
+// "'s-Hertogenbosch" and "s Hertogenbosch" meet.
+func normalize(name string) string {
+	var builder strings.Builder
+	space := false
+	for _, r := range strings.ToLower(name) {
+		if folded, found := accentFolds[r]; found {
+			if space && builder.Len() > 0 {
+				builder.WriteByte(' ')
+			}
+			builder.WriteString(folded)
+			space = false
+			continue
+		}
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			if space && builder.Len() > 0 {
+				builder.WriteByte(' ')
+			}
+			builder.WriteRune(r)
+			space = false
+			continue
+		}
+		space = true
+	}
+	return builder.String()
+}
+
+var accentFolds = func() map[rune]string {
+	folds := map[rune]string{'æ': "ae", 'œ': "oe", 'ß': "ss", 'ø': "o", 'ł': "l", 'đ': "d"}
+	for base, accented := range map[string]string{
+		"a": "àáâãäåāăą",
+		"c": "çćĉċč",
+		"e": "èéêëēĕėęě",
+		"g": "ĝğġģ",
+		"i": "ìíîïĩīĭįı",
+		"n": "ñńņňŉ",
+		"o": "òóôõöōŏő",
+		"r": "ŕŗř",
+		"s": "śŝşš",
+		"t": "ţťŧ",
+		"u": "ùúûüũūŭůűų",
+		"y": "ýÿŷ",
+		"z": "źżž",
+	} {
+		for _, r := range accented {
+			folds[r] = base
+		}
+	}
+	return folds
+}()

@@ -25,8 +25,10 @@ const (
 	SentFilePrivacyLine = "A NAS file you ask for is uploaded to Telegram to reach you; nothing is sent to this chat unless you ask for it."
 	// Only the search stays with the provider the conversation already uses, so each other place a
 	// web request goes is named.
-	WebPrivacyLine = "Web access is on: web searches go to the configured model provider under your own subscription, pages you ask about are fetched from the home connection, and place names are sent to Open-Meteo for weather. It is on by default; you can turn it off in /settings."
-	NSPrivacyLine  = "Trains are on: the stations, routes, and times you ask about are sent to NS (Nederlandse Spoorwegen) to look up live train information. It is on by default; you can turn it off in /settings."
+	WebPrivacyLine         = "Web access is on: web searches go to the configured model provider under your own subscription, pages you ask about are fetched from the home connection, and place names are sent to Open-Meteo for weather. It is on by default; you can turn it off in /settings."
+	NSPrivacyLine          = "Trains are on: the stations, routes, and times you ask about are sent to NS (Nederlandse Spoorwegen) to look up live train information. It is on by default; you can turn it off in /settings."
+	BusPrivacyLine         = "Buses are on: the stops you ask about are sent to OVapi, over plain HTTP, to look up live departures and disruptions. It is on by default; you can turn it off in /settings."
+	BusPlanningPrivacyLine = "Places and times for planned trips are sent to Transitous, a volunteer-run journey planner (transitous.org/sources), using open transit data and © OpenStreetMap contributors."
 
 	UnsupportedAudioReply      = "I cannot listen to voice messages or audio yet. Send text, a photo, or a file and I will work with that."
 	UnsupportedVideoReply      = "I cannot watch video yet. Send text, a photo, or a file and I will work with that."

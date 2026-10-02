@@ -15,6 +15,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
 	"github.com/vladar107/home-ai-assistant/internal/config"
 	"github.com/vladar107/home-ai-assistant/internal/connection"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/bus"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/gmail"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
@@ -55,6 +56,7 @@ type App struct {
 	gmail        *gmail.Service
 	web          *web.Service
 	ns           *ns.Service
+	bus          *bus.Service
 	typeSafe     *judgment.OptInService
 	telegram     *telegram.Service
 	telemetry    *observability.Telemetry
@@ -507,6 +509,19 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			}
 			a.ns = nsService
 		}
+		if a.cfg.Bus.Enabled {
+			busService, err := bus.NewService(bus.Config{HomeStop: a.cfg.Bus.HomeStop, Contact: a.cfg.Bus.Contact}, a.store, a.logger)
+			if err != nil {
+				return fmt.Errorf("initialize bus connector: %w", err)
+			}
+			if err := a.registry.Register(busService); err != nil {
+				return err
+			}
+			if err := broker.Register(busService); err != nil {
+				return err
+			}
+			a.bus = busService
+		}
 	}
 
 	identities, err := identity.NewService(a.store, configured)
@@ -529,6 +544,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	var gmailController telegram.GmailController
 	var webController telegram.WebController
 	var nsController telegram.NSController
+	var busController telegram.BusController
 	var approvalController telegram.ApprovalController
 	var scheduleController telegram.ScheduleController
 	if a.conversation != nil {
@@ -553,7 +569,10 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	if a.ns != nil {
 		nsController = a.ns
 	}
-	service, err := telegram.NewService(client, identities, a.store, conversationController, attachmentStore, connectionController, notionController, nasController, gmailController, webController, nsController, approvalController, scheduleController, a.logger, a.telemetry)
+	if a.bus != nil {
+		busController = a.bus
+	}
+	service, err := telegram.NewService(client, identities, a.store, conversationController, attachmentStore, connectionController, notionController, nasController, gmailController, webController, nsController, busController, approvalController, scheduleController, a.logger, a.telemetry)
 	if err != nil {
 		return fmt.Errorf("initialize Telegram service: %w", err)
 	}

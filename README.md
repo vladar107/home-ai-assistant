@@ -24,6 +24,8 @@ borrowed between users.
   chat, and file photos into an inbox after confirmation.
 - **Web.** Search, page reading, PDF text, and weather.
 - **Trains.** NS trips, departures, and disruptions.
+- **Buses.** Live departures, direct buses, and operator disruption notices from
+  OVapi, and trips at any time or with changes planned by Transitous.
 - **Day cards.** A rendered image with the day's weather and trains, sent with
   the reply as its caption.
 - **Schedules.** Recurring model turns ("every weekday at 07:30, plan my commute")
@@ -68,7 +70,7 @@ internal/telegram/     Telegram client, poller, commands, /settings
 internal/conversation/ turn coordination
 internal/runtime/pi/   Pi subprocess and tool bridge
 internal/tools/        tool broker
-internal/connectors/   notion, gmail, nas, ns, web
+internal/connectors/   notion, gmail, nas, ns, bus, web
 internal/store/sqlite/ persistence and migrations
 deploy/                Compose files and configuration examples
 scripts/               operator scripts (deploy, secrets, checks)
