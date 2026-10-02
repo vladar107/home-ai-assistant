@@ -1,6 +1,6 @@
 # 0025 — Per-user read-only Gmail connection
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 

@@ -1,6 +1,6 @@
 # 0028 — A visual day card with the reply as its caption
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 

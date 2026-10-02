@@ -33,16 +33,16 @@ plan that links back to the earlier record.
 | 0021 | [NAS files through mounted per-user roots](0021-nas-file-access.md) | done |
 | 0022 | [Monitoring stack in its own repository with a single deployment directory](0022-monitoring-repository-split.md) | done |
 | 0023 | [Send a NAS file to the user in Telegram](0023-outbound-telegram-files.md) | done |
-| 0024 | [Durable scheduler and scheduled model turns](0024-scheduled-model-turns.md) | in-progress |
-| 0025 | [Per-user read-only Gmail connection](0025-gmail-read-connection.md) | in-progress |
+| 0024 | [Durable scheduler and scheduled model turns](0024-scheduled-model-turns.md) | done |
+| 0025 | [Per-user read-only Gmail connection](0025-gmail-read-connection.md) | done |
 | 0026 | [Web search, page reading, weather, and PDF text](0026-web-weather-and-pdf-tools.md) | done |
-| 0027 | [NS train information: trips, departures, and disruptions](0027-ns-train-information.md) | in-progress |
-| 0028 | [A visual day card with the reply as its caption](0028-day-card.md) | in-progress |
+| 0027 | [NS train information: trips, departures, and disruptions](0027-ns-train-information.md) | done |
+| 0028 | [A visual day card with the reply as its caption](0028-day-card.md) | done |
 | 0029 | [TypeSafe judgments for approvals, outside content, and tool hints](0029-typesafe-guards.md) | in-progress |
-| 0030 | [Reply latency, model, and business metrics](0030-reply-and-business-metrics.md) | in-progress |
+| 0030 | [Reply latency, model, and business metrics](0030-reply-and-business-metrics.md) | done |
 | 0031 | [Consolidate documentation into a README, C4 diagrams, and an operations guide](0031-documentation-consolidation.md) | done |
 | 0032 | [Tell the model the current local time on every chat turn](0032-current-time-in-turns.md) | done |
-| 0033 | [Bus information: trips, stop status, and disruptions](0033-live-bus-information.md) | in-progress |
+| 0033 | [Bus information: trips, stop status, and disruptions](0033-live-bus-information.md) | done |
 | 0034 | [Make unfinished model calls and rare failures visible](0034-unfinished-model-calls.md) | done |
 | 0035 | [Upgrade Pi to 1.0.0](0035-pi-1-0-upgrade.md) | done |
 

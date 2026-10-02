@@ -1,6 +1,6 @@
 # 0024 — Durable scheduler and scheduled model turns
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 

@@ -1,6 +1,6 @@
 # 0030 — Reply latency, model, and business metrics
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
