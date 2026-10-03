@@ -1,6 +1,6 @@
 # 0043 — Shared location in conversation and location-aware tools
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
