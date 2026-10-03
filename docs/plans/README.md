@@ -51,6 +51,7 @@ plan that links back to the earlier record.
 | 0039 | [Home Assistant: everyday control through its MCP server, sensitive actions confirmed](0039-home-assistant.md) | done |
 | 0040 | [One-time jobs and reminders](0040-one-time-jobs-and-reminders.md) | done |
 | 0041 | [Grouped /settings with an overview and pages](0041-grouped-settings.md) | done |
+| 0042 | [Batched approvals](0042-batched-approvals.md) | in-progress |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

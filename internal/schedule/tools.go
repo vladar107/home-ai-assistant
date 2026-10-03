@@ -39,7 +39,7 @@ func proposeGuidance(zone string) string {
 		"for example 0 9 * * 1 is Mondays at 09:00 and 30 7 * * 1-5 is weekdays at 07:30. A recurring job may run at most once an hour. " +
 		"A one-time job takes at instead, a local date and time such as 2026-10-04 07:30 that you work out from the current time. " +
 		"Each run is a separate turn the user does not watch, with only read-only tools, so the prompt must say exactly what to look at and what to report, on its own, without relying on this conversation. " +
-		"schedule_remove proposes deleting a job by its id from schedule_list. Only one proposal can wait at a time."
+		"schedule_remove proposes deleting a job by its id from schedule_list. Every proposal you make in this turn is shown to the user together and confirmed or rejected as one batch, so propose every job change the request needs in this turn, once each, since a proposal cannot be withdrawn; a proposal in a later turn replaces a batch still waiting."
 }
 
 func reminderGuidance(zone string) string {
@@ -255,6 +255,9 @@ func (s *Service) proposeJob(ctx context.Context, principalID string, call tools
 	}
 	summary := proposalSummary(prepared)
 	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: toolPropose, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "schedule", TargetKind: targetKind, TargetName: job.Name}}); err != nil {
+		if errors.Is(err, approval.ErrBundleFull) {
+			return tools.Result{Text: err.Error(), IsError: true}, nil
+		}
 		s.logger.WarnContext(ctx, "schedule.proposal.failed", "principal_id", principalID, "tool", call.Name, "error", err)
 		return tools.Result{Text: "the proposal could not be recorded", IsError: true}, nil
 	}
@@ -282,6 +285,9 @@ func (s *Service) proposeRemoval(ctx context.Context, principalID string, call t
 	}
 	summary := fmt.Sprintf("Delete the scheduled job %q (%s). It will not run again.", job.Name, DescribeJob(job, s.zone))
 	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: toolRemove, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "remove", TargetKind: "scheduled job", TargetName: job.Name}}); err != nil {
+		if errors.Is(err, approval.ErrBundleFull) {
+			return tools.Result{Text: err.Error(), IsError: true}, nil
+		}
 		s.logger.WarnContext(ctx, "schedule.proposal.failed", "principal_id", principalID, "tool", call.Name, "error", err)
 		return tools.Result{Text: "the proposal could not be recorded", IsError: true}, nil
 	}

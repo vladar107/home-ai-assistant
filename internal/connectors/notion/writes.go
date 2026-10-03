@@ -28,7 +28,7 @@ const (
 
 const writeGuidance = "Notion writes are on, and every write needs the user's confirmation: notion_create_page, notion_update_page, and notion_append_blocks only propose a change. " +
 	"After your reply the user sees the exact proposal with Confirm and Reject buttons, so describe what you proposed and never claim it was written. " +
-	"Only one proposal can wait at a time, so propose a single change per turn; a second proposal replaces the first. " +
+	"Every proposal you make in this turn is shown to the user together and confirmed or rejected as one batch, so propose every change the request needs in this turn, once each, since a proposal cannot be withdrawn; a proposal in a later turn replaces a batch still waiting. " +
 	"Property values are Notion API property value objects keyed by property name, for example {\"Status\": {\"status\": {\"name\": \"Done\"}}}. " +
 	"Read the target's structure before proposing property values: notion_get_page shows a row's Structure line, and a data source lists every property with the options it accepts. " +
 	"Spell an option exactly as the table spells it, because Notion cannot add one. " +
@@ -114,6 +114,9 @@ func (s *Service) propose(ctx context.Context, principalID, token string, call t
 		return "", err
 	}
 	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: call.Name, Arguments: arguments, Summary: summary, Intent: intent}); err != nil {
+		if errors.Is(err, approval.ErrBundleFull) {
+			return "", err
+		}
 		s.logger.WarnContext(ctx, "notion.proposal.failed", "principal_id", principalID, "tool", call.Name, "error", err)
 		return "", fmt.Errorf("the proposal could not be recorded")
 	}

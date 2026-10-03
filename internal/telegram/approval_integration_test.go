@@ -143,10 +143,11 @@ func TestNotionWritesAreProposedConfirmedAndExecutedOnce(t *testing.T) {
 	if countRequests(sim, "POST", "/v1/pages") != 0 {
 		t.Fatal("a proposal reached Notion during the turn")
 	}
-	pending, found, err := h.store.PendingApproval(h.ctx, "alice")
-	if err != nil || !found || pending.Tool != "notion_create_page" || pending.MessageID != 0 {
-		t.Fatalf("pending approval = %+v found=%v err=%v", pending, found, err)
+	waiting, err := h.store.PendingApprovals(h.ctx, "alice")
+	if err != nil || len(waiting) != 1 || waiting[0].Tool != "notion_create_page" || waiting[0].MessageID != 0 {
+		t.Fatalf("pending approvals = %+v err=%v", waiting, err)
 	}
+	pending := waiting[0]
 	call.answer <- agentruntime.RunResult{Response: "I proposed adding Buy milk"}
 	h.wantReply(101, 4, "I proposed adding Buy milk")
 	h.waitState(4, "delivered")
@@ -368,4 +369,89 @@ func TestNotionProposalsExpireFailSafelyAndDoNotSurviveRestart(t *testing.T) {
 		t.Fatalf("retried update approval = %s", status)
 	}
 	h.assertNotionSecretHidden(aliceNotionToken)
+}
+
+func TestProposalsOfOneTurnAreConfirmedTogetherAndRunPastAFailure(t *testing.T) {
+	runtime := newControlledRuntime()
+	sim := writableNotionSimulator(t)
+	sim.SharePage(aliceNotionToken, notionsim.Page{
+		ID: "page-chores", Title: "Chores", URL: "https://notion.so/page-chores", LastEdited: "2026-09-05T10:00:00.000Z", DataSourceID: "ds-tasks",
+		Properties: map[string]any{"Status": notionsim.StatusProperty("Open")},
+	})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{notion: sim})
+	h.provision("alice", "acct-alice-1111")
+	h.installNotionToken("alice", aliceNotionToken)
+	h.start()
+	h.enableNotionWrites(1, 2, 101)
+
+	h.push(textUpdate(3, 101, "close both tasks"))
+	call := receive(t, h.ctx, runtime.calls)
+	for _, page := range []string{"page-groceries", "page-chores"} {
+		result, err := call.request.Tools.Executor.Execute(call.ctx, agentruntime.ToolCall{Name: "notion_update_page", Arguments: json.RawMessage(
+			`{"page_id":"` + page + `","properties":{"Status":{"status":{"name":"Done"}}}}`)})
+		if err != nil || result.IsError || !strings.Contains(result.Text, "awaiting the user's confirmation") {
+			t.Fatalf("proposal for %s = %+v %v", page, result, err)
+		}
+	}
+	call.answer <- agentruntime.RunResult{Response: "proposed both"}
+	h.wantReply(101, 3, "proposed both")
+	h.waitState(3, "delivered")
+	proposal := h.nextMessage()
+	for _, want := range []string{"2 changes, confirmed or rejected together:", "1. Notion · update page", "Groceries", "2. Notion · update page", "Chores", "Expires in 10 minutes."} {
+		if !strings.Contains(proposal.text, want) {
+			t.Fatalf("bundle proposal lacks %q: %s", want, proposal.text)
+		}
+	}
+	select {
+	case extra := <-h.messages:
+		t.Fatalf("a second proposal message was sent: %+v", extra)
+	case <-time.After(200 * time.Millisecond):
+	}
+	confirmData, _ := approvalButtons(t, proposal.keyboard)
+	bundleID := approvalID(confirmData)
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for h.countRows(`SELECT count(*) FROM approvals WHERE bundle_id = ? AND message_id = ?`, bundleID, proposal.messageID) != 2 {
+		select {
+		case <-ticker.C:
+		case <-h.ctx.Done():
+			t.Fatalf("proposal message %d was never recorded for the bundle", proposal.messageID)
+		}
+	}
+	if countRequests(sim, "PATCH", "/v1/pages/page-groceries")+countRequests(sim, "PATCH", "/v1/pages/page-chores") != 0 {
+		t.Fatal("a proposal reached Notion before confirmation")
+	}
+
+	sim.FailNext(400, "")
+	h.push(callbackUpdate(4, 101, proposal.messageID, confirmData))
+	h.wantAnswer(4)
+	edit := h.nextEdit()
+	if edit.messageID != proposal.messageID || len(edit.keyboard) != 0 ||
+		!strings.Contains(edit.text, "Failed. Notion rejected the request; nothing was written.") || !strings.Contains(edit.text, "Done. Updated.") ||
+		strings.Index(edit.text, "Failed.") > strings.Index(edit.text, "Done.") {
+		t.Fatalf("bundle after confirm = %+v", edit)
+	}
+	if countRequests(sim, "PATCH", "/v1/pages/page-groceries") != 1 || countRequests(sim, "PATCH", "/v1/pages/page-chores") != 1 {
+		t.Fatalf("update requests = %d groceries, %d chores, want 1 each", countRequests(sim, "PATCH", "/v1/pages/page-groceries"), countRequests(sim, "PATCH", "/v1/pages/page-chores"))
+	}
+	var order []string
+	for _, request := range sim.Requests() {
+		if request.Method == "PATCH" {
+			order = append(order, request.Path)
+		}
+	}
+	if strings.Join(order, " ") != "/v1/pages/page-groceries /v1/pages/page-chores" {
+		t.Fatalf("update order = %v", order)
+	}
+
+	h.push(textUpdate(5, 101, "what happened?"))
+	informed := receive(t, h.ctx, runtime.calls)
+	if !strings.HasPrefix(informed.request.Message, "[system] Your 2 proposals were shown and resolved together. (1) Your notion_update_page proposal was confirmed but failed: ") ||
+		!strings.Contains(informed.request.Message, "(2) The user confirmed your notion_update_page proposal and it was executed. Updated.") ||
+		!strings.HasSuffix(informed.request.Message, "what happened?") {
+		t.Fatalf("turn after a bundle = %q", informed.request.Message)
+	}
+	informed.answer <- agentruntime.RunResult{Response: "one failed"}
+	h.wantReply(101, 5, "one failed")
+	h.waitState(5, "delivered")
 }

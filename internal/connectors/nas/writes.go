@@ -33,7 +33,7 @@ func writeGuidance(status Status) string {
 		"Give folder only when the user says where the file belongs, such as a folder for finances; " + destination + ". " +
 		"Only these folders can be saved to: " + strings.Join(writable, ", ") + ". Everything else on the NAS is read-only. " +
 		"After your reply the user sees the exact destination with Confirm and Reject buttons, so describe what you proposed and never claim it was saved. " +
-		"Only one proposal can wait at a time, so propose a single save per turn; a second proposal replaces the first. " +
+		"Every proposal you make in this turn is shown to the user together and confirmed or rejected as one batch, so propose every save the request needs in this turn, once each, since a proposal cannot be withdrawn; a proposal in a later turn replaces a batch still waiting. " +
 		"A save can only add a new file: a name already in use is refused rather than replaced, and nothing already on the NAS can be changed or removed. " +
 		"Use list_attachments to find the id of the file the user sent."
 }
@@ -140,6 +140,9 @@ func (s *Service) executeSave(ctx context.Context, principalID string, call tool
 	}
 	proposal := approval.Proposal{Tool: toolSaveAttachment, Arguments: canonical, Summary: saveSummary(record, location, missing), Intent: approval.Intent{Verb: "save", TargetKind: "file", TargetName: path.Base(location.Path)}}
 	if _, err := s.proposer.Propose(ctx, principalID, proposal); err != nil {
+		if errors.Is(err, approval.ErrBundleFull) {
+			return tools.Result{Text: err.Error(), IsError: true}, nil
+		}
 		s.logger.WarnContext(ctx, "nas.proposal.failed", "principal_id", principalID, "tool", call.Name, "error", err)
 		return tools.Result{Text: "the proposal could not be recorded", IsError: true}, nil
 	}

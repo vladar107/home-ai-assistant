@@ -171,6 +171,9 @@ func (s *Service) propose(ctx context.Context, principalID string, snap *snapsho
 	}
 	intent := approval.Intent{Verb: verb, TargetKind: entity.domain, TargetName: entity.name}
 	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: toolServiceCall, Arguments: encoded, Summary: summary, Intent: intent}); err != nil {
+		if errors.Is(err, approval.ErrBundleFull) {
+			return "", err
+		}
 		s.logger.WarnContext(ctx, "homeassistant.proposal.failed", "principal_id", principalID, "error", err)
 		return "", fmt.Errorf("the proposal could not be recorded")
 	}

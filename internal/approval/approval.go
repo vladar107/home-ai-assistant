@@ -1,6 +1,7 @@
-// Package approval is the core approval state machine for confirmed actions: a connector proposes
-// an exact action during a turn, the bot shows it to the same user with Confirm and Reject
-// buttons, and the core executes a confirmed proposal exactly once through the connector.
+// Package approval is the core approval state machine for confirmed actions: connectors propose
+// exact actions during a turn, the bot shows the turn's proposals to the same user as one bundle
+// with Confirm and Reject buttons, and the core executes each confirmed proposal exactly once
+// through its connector.
 package approval
 
 import (
@@ -13,10 +14,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf16"
 )
 
 const (
@@ -45,8 +48,17 @@ const (
 	executionTimeout     = 45 * time.Second
 	idBytes              = 8
 
-	ProposedText = "Proposed and awaiting the user's confirmation; nothing has been written yet. The user sees the exact proposal with Confirm and Reject buttons after your reply. Do not claim it was done."
+	maximumBundleItems = 10
+	// bundleSummaryUnits leaves room in Telegram's 4096-unit message for the header, the expiry
+	// line, and a cut outcome line per item.
+	bundleSummaryUnits = 2500
+	bundleOutcomeRunes = 120
+
+	ProposedText = "Proposed and awaiting the user's confirmation; nothing has been written yet. After your reply the user sees this turn's proposals together with one Confirm and one Reject button. Do not claim it was done."
 )
+
+// ErrBundleFull is returned for a proposal that no longer fits the bundle waiting for confirmation.
+var ErrBundleFull = errors.New("the batch of changes waiting for the user's confirmation is full; nothing was added. Tell the user to confirm or reject it first, then propose the rest")
 
 // Proposal is what a connector asks the user to confirm: the exact tool call and its rendering.
 type Proposal struct {
@@ -71,9 +83,12 @@ type IntentChecker interface {
 	Mismatch(ctx context.Context, principalID, tool string, intent Intent) (bool, error)
 }
 
-// Record is the durable approval. Arguments hold the canonical form whose hash is stored.
+// Record is the durable approval. Arguments hold the canonical form whose hash is stored. Records
+// proposed in one turn share a bundle, named by its first record's ID and ordered by position.
 type Record struct {
 	ID          string
+	BundleID    string
+	Position    int
 	PrincipalID string
 	Tool        string
 	Arguments   json.RawMessage
@@ -86,6 +101,7 @@ type Record struct {
 	MessageID   int64
 	CreatedAt   time.Time
 	ExpiresAt   time.Time
+	StartedAt   time.Time
 	FinishedAt  time.Time
 }
 
@@ -110,21 +126,29 @@ type Executor interface {
 }
 
 type Repository interface {
-	// CreateApproval stores a pending record after expiring the principal's previous pending one
-	// with ReasonReplaced; the replaced record is returned when there was one.
-	CreateApproval(context.Context, Record) (Record, bool, error)
+	// CreateApproval stores a pending record. A record whose bundle is its own starts a new bundle
+	// after expiring every pending record of the principal with ReasonReplaced, and those are
+	// returned; any other record joins its bundle.
+	CreateApproval(context.Context, Record) ([]Record, error)
 	LoadApproval(context.Context, string) (Record, bool, error)
-	// PendingApproval returns the principal's pending record, if any.
-	PendingApproval(context.Context, string) (Record, bool, error)
-	// ConfirmApproval moves a pending, unexpired record of the principal to confirmed.
-	ConfirmApproval(ctx context.Context, id, principalID string, now time.Time) (bool, error)
+	// LoadBundle returns a bundle's records in position order.
+	LoadBundle(ctx context.Context, bundleID string) ([]Record, error)
+	// PendingApprovals returns the principal's pending records in position order.
+	PendingApprovals(context.Context, string) ([]Record, error)
+	// ConfirmBundle moves the pending, unexpired records of the principal's bundle to confirmed,
+	// reporting whether any moved.
+	ConfirmBundle(ctx context.Context, bundleID, principalID string, now time.Time) (bool, error)
+	// StartApproval marks a confirmed record as executing, so a restart can tell it from one that
+	// never ran.
+	StartApproval(ctx context.Context, id string, now time.Time) error
 	// FinishApproval moves a record to a terminal status with a reason and outcome.
 	FinishApproval(ctx context.Context, id, from, status, reason, outcome string) (bool, error)
-	SetApprovalMessage(ctx context.Context, id string, chatID, messageID int64) error
+	SetApprovalMessage(ctx context.Context, bundleID string, chatID, messageID int64) error
 	// SetApprovalSummary replaces the summary of a pending record.
 	SetApprovalSummary(ctx context.Context, id, summary string) error
 	// ExpireApprovals moves every pending record past its expiry, or every pending and confirmed
-	// record when all is set, to expired or failed, returning the changed records.
+	// record when all is set, to expired, or to failed for a confirmed record that had started,
+	// returning the changed records.
 	ExpireApprovals(ctx context.Context, now time.Time, all bool) ([]Record, error)
 	// UndeliveredApprovals returns pending records whose chat is known but whose message never
 	// reached Telegram.
@@ -149,6 +173,9 @@ type Service struct {
 	lifetime      time.Duration
 	sweepInterval time.Duration
 	now           func() time.Time
+
+	// proposing serializes proposals, so parallel tool calls in one turn join the same bundle.
+	proposing sync.Mutex
 
 	mu        sync.Mutex
 	executors map[string]Executor
@@ -267,9 +294,7 @@ func (s *Service) Start(ctx context.Context) error {
 		s.mu.Unlock()
 		return fmt.Errorf("expire approvals after restart: %w", err)
 	}
-	for _, record := range expired {
-		s.report(ctx, record)
-	}
+	s.report(ctx, expired)
 	go s.sweep(runCtx, done)
 	return nil
 }
@@ -308,14 +333,13 @@ func (s *Service) sweep(ctx context.Context, done chan<- struct{}) {
 			}
 			continue
 		}
-		for _, record := range expired {
-			s.report(ctx, record)
-		}
+		s.report(ctx, expired)
 		s.resendUndelivered(ctx)
 	}
 }
 
-// Propose records an exact action for the principal, replacing any pending proposal.
+// Propose records an exact action for the principal. It joins the bundle of this turn's
+// undelivered proposals, or starts a new bundle that replaces any pending one.
 func (s *Service) Propose(ctx context.Context, principalID string, proposal Proposal) (Record, error) {
 	if principalID == "" || proposal.Tool == "" || strings.TrimSpace(proposal.Summary) == "" {
 		return Record{}, fmt.Errorf("approval proposal is incomplete")
@@ -335,106 +359,180 @@ func (s *Service) Propose(ctx context.Context, principalID string, proposal Prop
 		return Record{}, err
 	}
 	digest := sha256.Sum256(canonical)
-	now := s.now()
-	s.mu.Lock()
-	lifetime := s.lifetime
-	s.mu.Unlock()
-	record := Record{
-		ID:          id,
-		PrincipalID: principalID,
-		Tool:        proposal.Tool,
-		Arguments:   canonical,
-		Hash:        hex.EncodeToString(digest[:]),
-		Summary:     truncateRunes(strings.TrimSpace(proposal.Summary), maximumSummaryRunes),
-		Status:      StatusPending,
-		CreatedAt:   now,
-		ExpiresAt:   now.Add(lifetime),
-	}
-	replaced, hadPrevious, err := s.repository.CreateApproval(ctx, record)
-	if err != nil {
-		return Record{}, fmt.Errorf("store approval: %w", err)
+	s.proposing.Lock()
+	record, replaced, err := s.store(ctx, principalID, proposal.Tool, canonical, hex.EncodeToString(digest[:]), proposal.Summary, id)
+	s.proposing.Unlock()
+	if err != nil || record.ID != id {
+		return record, err
 	}
 	if proposal.Intent != (Intent{}) {
 		s.mu.Lock()
 		s.intents[id] = proposal.Intent
 		s.mu.Unlock()
 	}
-	s.logger.InfoContext(ctx, "approval.proposed", "principal_id", principalID, "approval_id", id, "tool", proposal.Tool, "replaced", hadPrevious)
+	s.logger.InfoContext(ctx, "approval.proposed", "principal_id", principalID, "approval_id", id, "bundle_id", record.BundleID, "tool", proposal.Tool, "replaced", len(replaced) > 0)
 	s.recordStatus(ctx, Record{PrincipalID: principalID, Tool: proposal.Tool}, "proposed")
-	if hadPrevious {
-		s.report(ctx, replaced)
-	}
+	s.report(ctx, replaced)
 	return record, nil
 }
 
-// AfterDelivery sends the principal's pending proposal to the chat once the turn's reply is out.
+// store joins the record to the turn's bundle or starts a new one, returning the records it
+// replaced. An identical proposal already in the bundle is returned instead of a new record.
+func (s *Service) store(ctx context.Context, principalID, tool string, canonical json.RawMessage, hash, summary, id string) (Record, []Record, error) {
+	pending, err := s.repository.PendingApprovals(ctx, principalID)
+	if err != nil {
+		return Record{}, nil, fmt.Errorf("load pending approvals: %w", err)
+	}
+	now := s.now()
+	s.mu.Lock()
+	lifetime := s.lifetime
+	s.mu.Unlock()
+	record := Record{
+		ID:          id,
+		BundleID:    id,
+		PrincipalID: principalID,
+		Tool:        tool,
+		Arguments:   canonical,
+		Hash:        hash,
+		Summary:     truncateRunes(strings.TrimSpace(summary), maximumSummaryRunes),
+		Status:      StatusPending,
+		CreatedAt:   now,
+		ExpiresAt:   now.Add(lifetime),
+	}
+	if joinable(pending, now, lifetime) {
+		for _, item := range pending {
+			if item.Tool == record.Tool && item.Hash == record.Hash {
+				return item, nil, nil
+			}
+		}
+		if !fits(pending, record) {
+			return Record{}, nil, ErrBundleFull
+		}
+		first, last := pending[0], pending[len(pending)-1]
+		record.BundleID, record.Position = first.BundleID, last.Position+1
+		record.CreatedAt, record.ExpiresAt = first.CreatedAt, first.ExpiresAt
+	}
+	replaced, err := s.repository.CreateApproval(ctx, record)
+	if err != nil {
+		return Record{}, nil, fmt.Errorf("store approval: %w", err)
+	}
+	return record, replaced, nil
+}
+
+// joinable reports whether the pending records are one bundle that this turn is still building:
+// not yet sent, and young enough that a turn whose reply never went out does not pass its
+// proposals, or a deadline about to lapse, to a later turn.
+func joinable(pending []Record, now time.Time, lifetime time.Duration) bool {
+	if len(pending) == 0 {
+		return false
+	}
+	first := pending[0]
+	for _, item := range pending {
+		if item.BundleID != first.BundleID || item.ChatID != 0 {
+			return false
+		}
+	}
+	return now.Sub(first.CreatedAt) < lifetime/2 && now.Before(first.ExpiresAt)
+}
+
+// fits reports whether the record can join the bundle within the item limit and a summary budget
+// that leaves room for an intent warning on every item.
+func fits(bundle []Record, record Record) bool {
+	if len(bundle) >= maximumBundleItems {
+		return false
+	}
+	units := 0
+	for _, item := range append(slices.Clone(bundle), record) {
+		units += utf16Units(item.Summary) + utf16Units(IntentWarning) + 2
+	}
+	return units <= bundleSummaryUnits
+}
+
+// AfterDelivery sends the principal's undelivered bundle to the chat once the turn's reply is out.
 func (s *Service) AfterDelivery(ctx context.Context, principalID string, chatID int64) error {
-	record, found, err := s.repository.PendingApproval(ctx, principalID)
+	bundle, err := s.repository.PendingApprovals(ctx, principalID)
 	if err != nil {
 		return err
 	}
-	if !found || record.MessageID != 0 {
+	if len(bundle) == 0 || bundle[0].MessageID != 0 {
 		return nil
 	}
-	record = s.checkIntent(ctx, record)
-	current, found, err := s.repository.PendingApproval(ctx, principalID)
+	s.checkIntents(ctx, bundle)
+	// Holding proposals off until the message is recorded keeps a late proposal from joining a
+	// bundle the user has already been shown without it.
+	s.proposing.Lock()
+	defer s.proposing.Unlock()
+	current, err := s.repository.PendingApprovals(ctx, principalID)
 	if err != nil {
 		return err
 	}
-	if !found || current.ID != record.ID || current.MessageID != 0 {
+	if len(current) == 0 || current[0].BundleID != bundle[0].BundleID || current[0].MessageID != 0 {
 		return nil
 	}
-	return s.send(ctx, record, chatID)
+	return s.send(ctx, current, chatID)
+}
+
+// checkIntents runs the intent check on every item of the bundle at once.
+func (s *Service) checkIntents(ctx context.Context, bundle []Record) {
+	var group sync.WaitGroup
+	for _, record := range bundle {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			s.checkIntent(ctx, record)
+		}()
+	}
+	group.Wait()
 }
 
 // checkIntent prepends a warning to a proposal that does not look requested. The intent is used
 // once, so a proposal resent after a failed delivery keeps the summary already stored.
-func (s *Service) checkIntent(ctx context.Context, record Record) Record {
+func (s *Service) checkIntent(ctx context.Context, record Record) {
 	s.mu.Lock()
 	checker := s.checker
 	intent, hasIntent := s.intents[record.ID]
 	delete(s.intents, record.ID)
 	s.mu.Unlock()
 	if checker == nil || !hasIntent {
-		return record
+		return
 	}
 	checkCtx, cancel := context.WithTimeout(ctx, intentCheckTimeout)
 	defer cancel()
 	mismatch, err := checker.Mismatch(checkCtx, record.PrincipalID, record.Tool, intent)
 	if err != nil {
 		s.logger.WarnContext(ctx, "approval.intent_check.failed", "principal_id", record.PrincipalID, "approval_id", record.ID)
-		return record
+		return
 	}
 	if !mismatch {
-		return record
+		return
 	}
 	summary := truncateRunes(IntentWarning+"\n\n"+record.Summary, maximumSummaryRunes)
 	if err := s.repository.SetApprovalSummary(ctx, record.ID, summary); err != nil {
 		s.logger.WarnContext(ctx, "approval.intent_warning.unsaved", "principal_id", record.PrincipalID, "approval_id", record.ID)
-		return record
 	}
-	record.Summary = summary
-	return record
 }
 
-func (s *Service) dropIntent(id string) {
+func (s *Service) dropIntents(bundle []Record) {
 	s.mu.Lock()
-	delete(s.intents, id)
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+	for _, record := range bundle {
+		delete(s.intents, record.ID)
+	}
 }
 
-func (s *Service) send(ctx context.Context, record Record, chatID int64) error {
-	messageID, err := s.deliverer.SendProposal(ctx, chatID, proposalText(record), callbackData(ActionConfirm, record.ID), callbackData(ActionReject, record.ID))
+func (s *Service) send(ctx context.Context, bundle []Record, chatID int64) error {
+	first := bundle[0]
+	messageID, err := s.deliverer.SendProposal(ctx, chatID, bundleText(bundle), callbackData(ActionConfirm, first.BundleID), callbackData(ActionReject, first.BundleID))
 	if err != nil {
 		// The chat is remembered so the sweep can retry until the proposal expires.
-		_ = s.repository.SetApprovalMessage(ctx, record.ID, chatID, 0)
-		s.logger.WarnContext(ctx, "approval.proposal.undeliverable", "principal_id", record.PrincipalID, "approval_id", record.ID, "error", err)
+		_ = s.repository.SetApprovalMessage(ctx, first.BundleID, chatID, 0)
+		s.logger.WarnContext(ctx, "approval.proposal.undeliverable", "principal_id", first.PrincipalID, "bundle_id", first.BundleID, "error", err)
 		return err
 	}
-	if err := s.repository.SetApprovalMessage(ctx, record.ID, chatID, messageID); err != nil {
+	if err := s.repository.SetApprovalMessage(ctx, first.BundleID, chatID, messageID); err != nil {
 		return err
 	}
-	s.logger.InfoContext(ctx, "approval.proposal.sent", "principal_id", record.PrincipalID, "approval_id", record.ID)
+	s.logger.InfoContext(ctx, "approval.proposal.sent", "principal_id", first.PrincipalID, "bundle_id", first.BundleID, "items", len(bundle))
 	return nil
 }
 
@@ -443,8 +541,8 @@ func (s *Service) resendUndelivered(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	for _, record := range undelivered {
-		_ = s.send(ctx, record, record.ChatID)
+	for _, bundle := range groupBundles(undelivered) {
+		_ = s.send(ctx, bundle, bundle[0].ChatID)
 	}
 }
 
@@ -458,58 +556,84 @@ func (s *Service) Press(ctx context.Context, principalID, action, approvalID str
 	if !found || record.PrincipalID != principalID {
 		return "", false, nil
 	}
-	s.dropIntent(record.ID)
-	if record.Status != StatusPending {
-		return finalText(record), true, nil
+	bundle, err := s.repository.LoadBundle(ctx, record.BundleID)
+	if err != nil {
+		return "", false, err
 	}
-	if !s.now().Before(record.ExpiresAt) {
-		finished, err := s.repository.FinishApproval(ctx, record.ID, StatusPending, StatusExpired, ReasonTimeout, "")
-		if err != nil {
+	s.dropIntents(bundle)
+	pending := slices.IndexFunc(bundle, func(item Record) bool { return item.Status == StatusPending })
+	if pending < 0 {
+		return bundleText(bundle), true, nil
+	}
+	if !s.now().Before(bundle[pending].ExpiresAt) {
+		if err := s.finishPending(ctx, bundle, StatusExpired, ReasonTimeout); err != nil {
 			return "", false, err
 		}
-		record.Status, record.Reason = StatusExpired, ReasonTimeout
-		if finished {
-			s.recordStatus(ctx, record, record.Status)
-		}
-		s.logger.InfoContext(ctx, "approval.resolved", "principal_id", principalID, "approval_id", record.ID, "status", record.Status, "reason", record.Reason)
-		return finalText(record), true, nil
+		return bundleText(bundle), true, nil
 	}
 	switch action {
 	case ActionReject:
-		finished, err := s.repository.FinishApproval(ctx, record.ID, StatusPending, StatusRejected, "", "")
-		if err != nil {
+		if err := s.finishPending(ctx, bundle, StatusRejected, ""); err != nil {
 			return "", false, err
 		}
-		record.Status = StatusRejected
-		if finished {
-			s.recordStatus(ctx, record, record.Status)
-		}
-		s.logger.InfoContext(ctx, "approval.resolved", "principal_id", principalID, "approval_id", record.ID, "status", record.Status)
-		return finalText(record), true, nil
+		return bundleText(bundle), true, nil
 	case ActionConfirm:
-		confirmed, err := s.repository.ConfirmApproval(ctx, record.ID, principalID, s.now())
+		confirmed, err := s.repository.ConfirmBundle(ctx, record.BundleID, principalID, s.now())
 		if err != nil {
 			return "", false, err
 		}
 		if !confirmed {
-			current, _, err := s.repository.LoadApproval(ctx, approvalID)
+			current, err := s.repository.LoadBundle(ctx, record.BundleID)
 			if err != nil {
 				return "", false, err
 			}
-			return finalText(current), true, nil
+			return bundleText(current), true, nil
 		}
-		record.Status = StatusConfirmed
-		return s.execute(ctx, record), true, nil
+		for index := range bundle {
+			if bundle[index].Status == StatusPending {
+				bundle[index].Status = StatusConfirmed
+				bundle[index] = s.execute(ctx, bundle[index])
+			}
+		}
+		s.rememberNotice(bundle)
+		return bundleText(bundle), true, nil
 	default:
 		return "", false, nil
 	}
 }
 
-func (s *Service) execute(ctx context.Context, record Record) string {
+// finishPending moves the bundle's pending records to a terminal status, in place.
+func (s *Service) finishPending(ctx context.Context, bundle []Record, status, reason string) error {
+	for index := range bundle {
+		record := &bundle[index]
+		if record.Status != StatusPending {
+			continue
+		}
+		finished, err := s.repository.FinishApproval(ctx, record.ID, StatusPending, status, reason, "")
+		if err != nil {
+			return err
+		}
+		record.Status, record.Reason = status, reason
+		if finished {
+			s.recordStatus(ctx, *record, record.Status)
+		}
+		s.logger.InfoContext(ctx, "approval.resolved", "principal_id", record.PrincipalID, "approval_id", record.ID, "bundle_id", record.BundleID, "status", record.Status, "reason", record.Reason)
+	}
+	return nil
+}
+
+func (s *Service) execute(ctx context.Context, record Record) Record {
 	s.mu.Lock()
 	executor, bound := s.executors[record.Tool]
 	s.mu.Unlock()
 	status, reason, outcome := StatusFailed, ReasonNoExecutor, ""
+	if bound {
+		if err := s.repository.StartApproval(ctx, record.ID, s.now()); err != nil {
+			// Without the mark a restart would report the action as never run, so it is not run.
+			s.logger.ErrorContext(ctx, "approval.start_failed", "principal_id", record.PrincipalID, "approval_id", record.ID)
+			bound, reason = false, ReasonExecutorFailed
+		}
+	}
 	if bound {
 		executionCtx, cancel := context.WithTimeout(ctx, executionTimeout)
 		result, err := executor.ExecuteApproved(executionCtx, record)
@@ -532,44 +656,81 @@ func (s *Service) execute(ctx context.Context, record Record) string {
 		s.logger.ErrorContext(ctx, "approval.finish_failed", "principal_id", record.PrincipalID, "approval_id", record.ID, "status", status)
 	}
 	record.Status, record.Reason, record.Outcome = status, reason, outcome
-	s.rememberNotice(record)
 	s.recordStatus(ctx, record, status)
-	s.logger.InfoContext(ctx, "approval.resolved", "principal_id", record.PrincipalID, "approval_id", record.ID, "status", status, "reason", reason)
-	return finalText(record)
+	s.logger.InfoContext(ctx, "approval.resolved", "principal_id", record.PrincipalID, "approval_id", record.ID, "bundle_id", record.BundleID, "status", status, "reason", reason)
+	return record
 }
 
-// report edits the proposal message of a record resolved without a press, when it has one.
-func (s *Service) report(ctx context.Context, record Record) {
-	s.dropIntent(record.ID)
-	s.rememberNotice(record)
-	status := record.Status
-	if record.Reason == ReasonReplaced {
-		status = "replaced"
+// report records records resolved without a press and edits each of their bundles' messages.
+func (s *Service) report(ctx context.Context, records []Record) {
+	s.dropIntents(records)
+	for _, record := range records {
+		status := record.Status
+		if record.Reason == ReasonReplaced {
+			status = "replaced"
+		}
+		s.recordStatus(ctx, record, status)
+		s.logger.InfoContext(ctx, "approval.resolved", "principal_id", record.PrincipalID, "approval_id", record.ID, "bundle_id", record.BundleID, "status", record.Status, "reason", record.Reason)
 	}
-	s.recordStatus(ctx, record, status)
-	s.logger.InfoContext(ctx, "approval.resolved", "principal_id", record.PrincipalID, "approval_id", record.ID, "status", record.Status, "reason", record.Reason)
-	if record.ChatID == 0 || record.MessageID == 0 {
-		return
-	}
-	if err := s.deliverer.EditText(ctx, record.ChatID, record.MessageID, finalText(record)); err != nil {
-		s.logger.WarnContext(ctx, "approval.report.failed", "principal_id", record.PrincipalID, "approval_id", record.ID, "error", err)
+	for _, changed := range groupBundles(records) {
+		bundle, err := s.repository.LoadBundle(ctx, changed[0].BundleID)
+		if err != nil || len(bundle) == 0 {
+			bundle = changed
+		}
+		s.rememberNotice(bundle)
+		first := bundle[0]
+		if first.ChatID == 0 || first.MessageID == 0 {
+			continue
+		}
+		if err := s.deliverer.EditText(ctx, first.ChatID, first.MessageID, bundleText(bundle)); err != nil {
+			s.logger.WarnContext(ctx, "approval.report.failed", "principal_id", first.PrincipalID, "bundle_id", first.BundleID, "error", err)
+		}
 	}
 }
 
-// rememberNotice keeps what became of a resolved proposal until the principal's next turn, so the
-// model answers from the outcome it never saw instead of assuming its proposal is still waiting.
-// Only the latest resolution is kept, and a proposal the model itself replaced needs no notice.
-func (s *Service) rememberNotice(record Record) {
-	if record.Reason == ReasonReplaced {
+// groupBundles splits records into bundles, keeping their order.
+func groupBundles(records []Record) [][]Record {
+	var bundles [][]Record
+	index := make(map[string]int)
+	for _, record := range records {
+		position, seen := index[record.BundleID]
+		if !seen {
+			position = len(bundles)
+			index[record.BundleID] = position
+			bundles = append(bundles, nil)
+		}
+		bundles[position] = append(bundles[position], record)
+	}
+	return bundles
+}
+
+// rememberNotice keeps what became of a resolved bundle until the principal's next turn, so the
+// model answers from the outcome it never saw instead of assuming its proposals are still waiting.
+// Only the latest resolution is kept, and proposals the model itself replaced need no notice.
+func (s *Service) rememberNotice(bundle []Record) {
+	var notices []string
+	for _, record := range bundle {
+		if record.Reason == ReasonReplaced {
+			continue
+		}
+		if notice := noticeText(record); notice != "" {
+			notices = append(notices, notice)
+		}
+	}
+	if len(notices) == 0 {
 		return
 	}
-	notice := noticeText(record)
-	if notice == "" {
-		return
+	notice := notices[0]
+	if len(notices) > 1 {
+		notice = fmt.Sprintf("Your %d proposals were shown and resolved together. ", len(notices))
+		for index, text := range notices {
+			notice += fmt.Sprintf("(%d) %s ", index+1, text)
+		}
+		notice = strings.TrimSpace(notice)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.notices[record.PrincipalID] = notice
+	s.notices[bundle[0].PrincipalID] = notice
 }
 
 // PendingNotice takes the principal's unreported proposal resolution, if there is one.
@@ -616,45 +777,78 @@ func callbackData(action, id string) string {
 	return "approval:" + action + ":" + id
 }
 
-func proposalText(record Record) string {
-	return record.Summary + "\n\nExpires in " + fmtMinutes(record.ExpiresAt.Sub(record.CreatedAt)) + "."
+// bundleText renders a bundle: a single proposal as itself, and more as a numbered list with each
+// item's result under it, or one shared result when they all ended the same way.
+func bundleText(bundle []Record) string {
+	if len(bundle) == 1 {
+		return finalText(bundle[0])
+	}
+	shared := statusLine(bundle[0], bundleOutcomeRunes)
+	for _, record := range bundle[1:] {
+		if statusLine(record, bundleOutcomeRunes) != shared {
+			shared = ""
+			break
+		}
+	}
+	var builder strings.Builder
+	fmt.Fprintf(&builder, "%d changes, confirmed or rejected together:", len(bundle))
+	for index, record := range bundle {
+		fmt.Fprintf(&builder, "\n\n%d. %s", index+1, record.Summary)
+		if shared == "" {
+			builder.WriteString("\n" + statusLine(record, bundleOutcomeRunes))
+		}
+	}
+	if shared != "" {
+		builder.WriteString("\n\n" + shared)
+	}
+	return builder.String()
 }
 
 func finalText(record Record) string {
+	line := statusLine(record, maximumSummaryRunes)
+	if line == "" {
+		return record.Summary
+	}
+	return record.Summary + "\n\n" + line
+}
+
+// statusLine says where a record stands, with its outcome cut to limit runes.
+func statusLine(record Record, limit int) string {
+	outcome := truncateRunes(record.Outcome, limit)
 	switch record.Status {
 	case StatusPending:
-		return proposalText(record)
+		return "Expires in " + fmtMinutes(record.ExpiresAt.Sub(record.CreatedAt)) + "."
 	case StatusConfirmed:
-		return record.Summary + "\n\nConfirmed; executing."
+		return "Confirmed; executing."
 	case StatusExecuted:
-		return record.Summary + "\n\nDone. " + record.Outcome
+		return "Done. " + outcome
 	case StatusRejected:
-		return record.Summary + "\n\nRejected; nothing was written."
+		return "Rejected; nothing was written."
 	case StatusExpired:
 		switch record.Reason {
 		case ReasonReplaced:
-			return record.Summary + "\n\nReplaced by a newer proposal; nothing was written."
+			return "Replaced by a newer proposal; nothing was written."
 		case ReasonRestart:
-			return record.Summary + "\n\nExpired because the assistant restarted; nothing was written."
+			return "Expired because the assistant restarted; nothing was written."
 		default:
-			return record.Summary + "\n\nExpired; nothing was written."
+			return "Expired; nothing was written."
 		}
 	case StatusFailed:
 		switch record.Reason {
 		case ReasonInterrupted:
-			return record.Summary + "\n\nThe assistant restarted while executing this; check Notion before trying again."
+			return "The assistant restarted while executing this; check Notion before trying again."
 		case ReasonTimeout:
-			return record.Summary + "\n\nExecution timed out; check the target before trying again."
+			return "Execution timed out; check the target before trying again."
 		case ReasonNoExecutor, ReasonExecutorFailed:
-			return record.Summary + "\n\nExecution failed before anything was written."
+			return "Execution failed before anything was written."
 		default:
-			if record.Outcome != "" {
-				return record.Summary + "\n\nFailed. " + record.Outcome
+			if outcome != "" {
+				return "Failed. " + outcome
 			}
-			return record.Summary + "\n\nFailed."
+			return "Failed."
 		}
 	default:
-		return record.Summary
+		return ""
 	}
 }
 
@@ -747,4 +941,12 @@ func truncateRunes(text string, limit int) string {
 		return text
 	}
 	return string(runes[:limit]) + "…"
+}
+
+func utf16Units(text string) int {
+	units := 0
+	for _, r := range text {
+		units += utf16.RuneLen(r)
+	}
+	return units
 }
