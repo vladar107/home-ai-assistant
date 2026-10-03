@@ -1,6 +1,6 @@
 # 0042 — Batched approvals
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
