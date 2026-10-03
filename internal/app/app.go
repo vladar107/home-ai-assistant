@@ -362,7 +362,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			a.typeSafe = typeSafe
 		}
 		// Scheduled runs reach only the owner's own chat, resolved from the allowlist at delivery.
-		scheduler, err := schedule.NewService(schedule.Config{Zone: a.cfg.Timezone, Cards: cards, Photos: client}, a.store, a.store, client, approvals, a.logger)
+		scheduler, err := schedule.NewService(schedule.Config{Zone: a.cfg.Timezone, Cards: cards, Photos: client, Reminders: telegram.ReminderSender{Client: client}}, a.store, a.store, client, approvals, a.logger)
 		if err != nil {
 			return fmt.Errorf("initialize scheduler: %w", err)
 		}
@@ -423,6 +423,9 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			return fmt.Errorf("initialize conversation service: %w", err)
 		}
 		if err := scheduler.Register(schedule.ModelTurn(conversationService)); err != nil {
+			return err
+		}
+		if err := scheduler.Register(schedule.Reminder(scheduler.Now)); err != nil {
 			return err
 		}
 		if err := broker.Register(scheduler); err != nil {

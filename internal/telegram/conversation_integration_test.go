@@ -464,7 +464,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	notices := conversation.Notices{h.approvals}
 	var scheduleController ScheduleController
 	if options.schedules != nil {
-		h.scheduler, err = schedule.NewService(schedule.Config{Zone: "Europe/Amsterdam", TickInterval: 10 * time.Millisecond, Now: options.schedules.Now, Cards: cards, Photos: photos},
+		h.scheduler, err = schedule.NewService(schedule.Config{Zone: "Europe/Amsterdam", TickInterval: 10 * time.Millisecond, Now: options.schedules.Now, Cards: cards, Photos: photos, Reminders: ReminderSender{Client: h.client}},
 			h.store, h.store, h.client, h.approvals, logger)
 		if err != nil {
 			t.Fatal(err)
@@ -491,6 +491,9 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	}
 	if h.scheduler != nil {
 		if err := h.scheduler.Register(schedule.ModelTurn(h.conversation)); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.scheduler.Register(schedule.Reminder(h.scheduler.Now)); err != nil {
 			t.Fatal(err)
 		}
 	}

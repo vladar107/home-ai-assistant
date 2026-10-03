@@ -16,9 +16,11 @@ const (
 	maximumCatchUpSteps = 10000
 )
 
-// Schedule is a standard five-field cron expression evaluated in one time zone.
+// Schedule is a standard five-field cron expression evaluated in one time zone, or, when Once is
+// set, that single instant.
 type Schedule struct {
 	Expression string
+	Once       time.Time
 	Location   *time.Location
 	spec       cron.Schedule
 }
@@ -65,6 +67,12 @@ func LoadZone(zone string) (*time.Location, error) {
 // When clocks go forward, a time inside the missing hour does not exist and that day's occurrence
 // is skipped, which is the parser's own behaviour.
 func (s Schedule) Next(after time.Time) time.Time {
+	if !s.Once.IsZero() {
+		if s.Once.After(after) {
+			return s.Once
+		}
+		return time.Time{}
+	}
 	local := after.In(s.Location)
 	next := s.spec.Next(local)
 	if !next.IsZero() && sameWallClock(next, local) {

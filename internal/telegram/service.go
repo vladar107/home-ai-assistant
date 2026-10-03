@@ -621,8 +621,11 @@ func (s *Service) processCallback(ctx context.Context, callback *CallbackQuery) 
 	if action, approvalID, isApproval := approval.ParseCallback(callback.Data); isApproval {
 		return s.processApprovalPress(ctx, callback, principalID, action, approvalID)
 	}
-	if action, jobID, isJob := parseJobCallback(callback.Data); isJob && s.schedules != nil {
-		return s.processJobPress(ctx, callback, principalID, action, jobID)
+	if action, jobID, page, isJob := parseJobCallback(callback.Data); isJob && s.schedules != nil {
+		return s.processJobPress(ctx, callback, principalID, action, jobID, page)
+	}
+	if snooze, jobID, isSnooze := parseReminderCallback(callback.Data); isSnooze && s.schedules != nil {
+		return s.processSnoozePress(ctx, callback, principalID, snooze, jobID)
 	}
 
 	result := processingResult{event: "telegram.callback.handled", principalID: principalID, command: "settings"}
@@ -697,7 +700,7 @@ func (s *Service) processApprovalPress(ctx context.Context, callback *CallbackQu
 
 // processJobPress acts on one of the principal's jobs and refreshes the /jobs message from current
 // state, so a button on an outdated list cannot act on anything but the principal's own job.
-func (s *Service) processJobPress(ctx context.Context, callback *CallbackQuery, principalID, action, jobID string) (processingResult, string, error) {
+func (s *Service) processJobPress(ctx context.Context, callback *CallbackQuery, principalID, action, jobID string, page int) (processingResult, string, error) {
 	result := processingResult{event: "telegram.callback.handled", principalID: principalID, command: "jobs." + action}
 	chatID, messageID := callback.Message.Chat.ID, callback.Message.MessageID
 	followUp, err := actOnJob(ctx, principalID, action, jobID, s.schedules)
@@ -708,7 +711,7 @@ func (s *Service) processJobPress(ctx context.Context, callback *CallbackQuery, 
 		return processingResult{}, "jobs_action", err
 	}
 
-	text, keyboard, err := renderJobs(ctx, principalID, s.schedules)
+	text, keyboard, err := renderJobs(ctx, principalID, s.schedules, page)
 	if err != nil {
 		return processingResult{}, "render_jobs", err
 	}
@@ -830,7 +833,7 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		if s.schedules == nil {
 			return HelpReply, nil, nil
 		}
-		return renderJobs(ctx, principalID, s.schedules)
+		return renderJobs(ctx, principalID, s.schedules, 1)
 	case "settings":
 		if len(s.sections) == 0 {
 			return HelpReply, nil, nil

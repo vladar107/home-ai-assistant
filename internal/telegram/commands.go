@@ -56,7 +56,7 @@ func registeredCommands(conversationEnabled, settingsEnabled, jobsEnabled bool) 
 		)
 	}
 	if jobsEnabled {
-		commands = append(commands, BotCommand{Command: "jobs", Description: "Show and manage your scheduled jobs"})
+		commands = append(commands, BotCommand{Command: "jobs", Description: "Show and manage your reminders and scheduled jobs"})
 	}
 	if settingsEnabled {
 		commands = append(commands, BotCommand{Command: "settings", Description: "Show and change your settings"})

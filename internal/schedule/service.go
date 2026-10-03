@@ -30,6 +30,9 @@ const (
 
 	InterruptedText = "This run was interrupted by a restart and was not retried. It will run again at its next scheduled time."
 	FailedText      = "This run could not be completed."
+	MissedText      = "This one-time job did not run: the assistant was offline when it was due, and it is too late to run it now."
+	// OneTimeInterruptedText replaces InterruptedText for a job that has no next scheduled time.
+	OneTimeInterruptedText = "This one-time run was interrupted by a restart and was not retried."
 )
 
 // Chats resolves the principal's own private chat, which is the only place a run is delivered.
@@ -45,6 +48,13 @@ type Config struct {
 	// Cards and Photos send the card a run staged with its report; nil leaves reports text only.
 	Cards  conversation.Cards
 	Photos conversation.PhotoDeliverer
+	// Reminders sends reminders with their snooze buttons; nil sends them as plain text.
+	Reminders ReminderDeliverer
+}
+
+// ReminderDeliverer sends one reminder to its owner's chat with buttons that snooze the job.
+type ReminderDeliverer interface {
+	SendReminder(ctx context.Context, chatID int64, jobID, text string) error
 }
 
 type Service struct {
@@ -53,6 +63,7 @@ type Service struct {
 	deliverer  conversation.Deliverer
 	cards      conversation.Cards
 	photos     conversation.PhotoDeliverer
+	reminders  ReminderDeliverer
 	logger     *slog.Logger
 	zone       string
 	tick       time.Duration
@@ -179,6 +190,7 @@ func NewService(cfg Config, repository Repository, chats Chats, deliverer conver
 		deliverer:  deliverer,
 		cards:      cfg.Cards,
 		photos:     cfg.Photos,
+		reminders:  cfg.Reminders,
 		logger:     logger,
 		zone:       cfg.Zone,
 		tick:       tick,
@@ -306,7 +318,8 @@ func (s *Service) runTick(ctx context.Context) {
 }
 
 // advance queues the latest occurrence of every due job, if it is recent enough for its type's
-// catch-up window, and moves the job to its next occurrence after now.
+// catch-up window, and moves the job to its next occurrence after now. A one-time job always
+// queues its occurrence and finishes, so a run too late to execute can still tell its owner.
 func (s *Service) advance(ctx context.Context, now time.Time) error {
 	jobs, err := s.repository.DueScheduledJobs(ctx, now)
 	if err != nil {
@@ -314,7 +327,7 @@ func (s *Service) advance(ctx context.Context, now time.Time) error {
 	}
 	for _, job := range jobs {
 		jobType, known := s.types[job.Type]
-		schedule, err := ParseSchedule(job.Cron, job.Zone)
+		schedule, err := JobSchedule(job)
 		if err != nil || !known {
 			// A job that can no longer be understood is paused rather than retried every tick.
 			if _, pauseErr := s.repository.SetScheduledJobEnabled(ctx, job.PrincipalID, job.ID, false, job.NextRunAt, now); pauseErr != nil {
@@ -324,11 +337,11 @@ func (s *Service) advance(ctx context.Context, now time.Time) error {
 			continue
 		}
 		latest, next := schedule.Latest(job.NextRunAt, now)
-		if next.IsZero() {
+		if next.IsZero() && !job.OneTime() {
 			next = now.AddDate(100, 0, 0)
 		}
 		var run *Run
-		if !latest.IsZero() && now.Sub(latest) <= jobType.CatchUp {
+		if !latest.IsZero() && (job.OneTime() || now.Sub(latest) <= jobType.CatchUp) {
 			id, err := newRunID()
 			if err != nil {
 				return err
@@ -401,7 +414,8 @@ func (s *Service) execute(ctx context.Context, run Run) (Run, bool) {
 		s.skip(ctx, run, StatusQueued, "unknown_type")
 		return run, false
 	}
-	if !run.Manual && now.Sub(run.ScheduledFor) > jobType.CatchUp {
+	missed := !run.Manual && now.Sub(run.ScheduledFor) > jobType.CatchUp
+	if missed && !run.JobOneTime {
 		s.skip(ctx, run, StatusQueued, "stale")
 		return run, false
 	}
@@ -425,15 +439,18 @@ func (s *Service) execute(ctx context.Context, run Run) (Run, bool) {
 	}
 
 	began := time.Now()
-	result, err := jobType.Handler.Run(ctx, Occurrence{
-		RunID:        run.ID,
-		PrincipalID:  run.PrincipalID,
-		JobID:        run.JobID,
-		JobName:      run.JobName,
-		Config:       run.Config,
-		ScheduledFor: run.ScheduledFor,
-		Location:     location,
-	})
+	result := Result{Text: MissedText, ErrorKind: "missed"}
+	if !missed {
+		result, err = jobType.Handler.Run(ctx, Occurrence{
+			RunID:        run.ID,
+			PrincipalID:  run.PrincipalID,
+			JobID:        run.JobID,
+			JobName:      run.JobName,
+			Config:       run.Config,
+			ScheduledFor: run.ScheduledFor,
+			Location:     location,
+		})
+	}
 	if ctx.Err() != nil {
 		return run, false
 	}
@@ -476,6 +493,10 @@ func (s *Service) deliver(ctx context.Context, run Run) {
 		s.skip(ctx, run, StatusReady, "no_chat")
 		return
 	}
+	if run.JobType == TypeReminder && s.reminders != nil && run.ErrorKind == "" {
+		s.finishDelivery(ctx, run, s.reminders.SendReminder(ctx, chatID, run.JobID, deliveryText(run)))
+		return
+	}
 	chunks := conversation.SplitReply(deliveryText(run))
 	// A failed run's text explains the failure, so a card it staged would illustrate nothing.
 	if s.cards != nil && run.ErrorKind == "" {
@@ -489,21 +510,30 @@ func (s *Service) deliver(ctx context.Context, run Run) {
 	}
 	for _, chunk := range chunks {
 		if err := s.deliverer.SendReply(ctx, chatID, 0, chunk); err != nil {
-			if isPermanent(err) {
-				if _, err := s.repository.TransitionScheduledRun(ctx, run.ID, StatusReady, StatusFailed, "", "undeliverable", s.now()); err != nil {
-					s.logRunError(ctx, run, "store_delivery", err)
-				} else {
-					s.removeCard(run)
-					s.recordRun(ctx, run, runUndeliverable)
-				}
-				s.logger.WarnContext(ctx, "schedule.run.undeliverable", "principal_id", run.PrincipalID, "job_id", run.JobID)
-				return
-			}
-			if ctx.Err() == nil {
-				s.logRunError(ctx, run, "deliver", err)
-			}
+			s.finishDelivery(ctx, run, err)
 			return
 		}
+	}
+	s.finishDelivery(ctx, run, nil)
+}
+
+// finishDelivery records how sending a ready run ended. A transient failure leaves it ready.
+func (s *Service) finishDelivery(ctx context.Context, run Run, err error) {
+	if err != nil {
+		if isPermanent(err) {
+			if _, err := s.repository.TransitionScheduledRun(ctx, run.ID, StatusReady, StatusFailed, "", "undeliverable", s.now()); err != nil {
+				s.logRunError(ctx, run, "store_delivery", err)
+			} else {
+				s.removeCard(run)
+				s.recordRun(ctx, run, runUndeliverable)
+			}
+			s.logger.WarnContext(ctx, "schedule.run.undeliverable", "principal_id", run.PrincipalID, "job_id", run.JobID)
+			return
+		}
+		if ctx.Err() == nil {
+			s.logRunError(ctx, run, "deliver", err)
+		}
+		return
 	}
 	if _, err := s.repository.TransitionScheduledRun(ctx, run.ID, StatusReady, StatusDelivered, "", run.ErrorKind, s.now()); err != nil {
 		s.logRunError(ctx, run, "store_delivery", err)
@@ -516,6 +546,12 @@ func (s *Service) deliver(ctx context.Context, run Run) {
 }
 
 func deliveryText(run Run) string {
+	if run.JobOneTime && run.ErrorKind == "interrupted" {
+		run.Reply = OneTimeInterruptedText
+	}
+	if run.JobType == TypeReminder && run.ErrorKind == "" {
+		return "⏰ " + strings.TrimSpace(run.Reply)
+	}
 	return "**Scheduled: " + run.JobName + "**\n\n" + strings.TrimSpace(run.Reply)
 }
 
@@ -544,6 +580,9 @@ func (s *Service) logRunError(ctx context.Context, run Run, stage string, err er
 func (s *Service) remember(run Run) {
 	report := truncateRunes(strings.TrimSpace(run.Reply), maximumNoticeRunes)
 	notice := fmt.Sprintf("Your scheduled job %q just sent the user this report:\n%s", run.JobName, report)
+	if run.JobType == TypeReminder {
+		notice = fmt.Sprintf("The user's reminder (job id %s) was just delivered to them:\n%s", run.JobID, report)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	notices := append(s.notices[run.PrincipalID], notice)
@@ -577,7 +616,7 @@ func (s *Service) SetEnabled(ctx context.Context, principalID, jobID string, ena
 	now := s.now()
 	next := job.NextRunAt
 	if enabled {
-		schedule, err := ParseSchedule(job.Cron, job.Zone)
+		schedule, err := JobSchedule(job)
 		if err != nil {
 			return false, err
 		}
@@ -625,9 +664,17 @@ type Prepared struct {
 	Schedule Schedule
 }
 
+// Timing is when a job runs: a five-field cron expression, or At, a local date and time such as
+// 2026-10-04 08:30 for a job that runs once. Zone is empty for the default zone.
+type Timing struct {
+	Cron string
+	At   string
+	Zone string
+}
+
 // Prepare validates a job the principal asked for against its type's rules. It is used both when
 // the job is proposed and again when the confirmed proposal is executed.
-func (s *Service) Prepare(principalID, name, jobType, cron, zone string, config json.RawMessage) (Prepared, error) {
+func (s *Service) Prepare(principalID, name, jobType string, timing Timing, config json.RawMessage) (Prepared, error) {
 	registered, known := s.types[jobType]
 	if !known {
 		return Prepared{}, fmt.Errorf("that kind of job is not available")
@@ -636,16 +683,29 @@ func (s *Service) Prepare(principalID, name, jobType, cron, zone string, config 
 	if name == "" || !utf8.ValidString(name) || utf8.RuneCountInString(name) > maximumNameRunes || strings.IndexFunc(name, unicode.IsControl) >= 0 {
 		return Prepared{}, fmt.Errorf("the name must be a single line of at most %d characters", maximumNameRunes)
 	}
-	if strings.TrimSpace(zone) == "" {
+	zone := strings.TrimSpace(timing.Zone)
+	if zone == "" {
 		zone = s.zone
 	}
-	schedule, err := ParseSchedule(cron, zone)
-	if err != nil {
-		return Prepared{}, err
-	}
 	now := s.now()
-	if err := schedule.CheckInterval(now, registered.MinimumInterval); err != nil {
-		return Prepared{}, err
+	var schedule Schedule
+	var err error
+	switch hasCron, hasAt := strings.TrimSpace(timing.Cron) != "", strings.TrimSpace(timing.At) != ""; {
+	case hasCron == hasAt:
+		return Prepared{}, fmt.Errorf("give either a cron expression for a recurring job or a date and time for a one-time job")
+	case hasAt:
+		if schedule, err = ParseOnce(timing.At, zone, now); err != nil {
+			return Prepared{}, err
+		}
+	case registered.Once:
+		return Prepared{}, fmt.Errorf("this kind of job runs once; give a date and time instead of a cron expression")
+	default:
+		if schedule, err = ParseSchedule(timing.Cron, zone); err != nil {
+			return Prepared{}, err
+		}
+		if err := schedule.CheckInterval(now, registered.MinimumInterval); err != nil {
+			return Prepared{}, err
+		}
 	}
 	if err := registered.Handler.Validate(config); err != nil {
 		return Prepared{}, err
@@ -656,6 +716,7 @@ func (s *Service) Prepare(principalID, name, jobType, cron, zone string, config 
 			Name:        name,
 			Type:        jobType,
 			Cron:        schedule.Expression,
+			RunAt:       schedule.Once,
 			Zone:        zone,
 			Config:      config,
 			Enabled:     true,
@@ -671,11 +732,58 @@ func (s *Service) Prepare(principalID, name, jobType, cron, zone string, config 
 func (s *Service) Create(ctx context.Context, id string, prepared Prepared) (bool, error) {
 	job := prepared.Job
 	job.ID = id
-	created, err := s.repository.CreateScheduledJob(ctx, job, MaximumJobsPerPrincipal)
+	created, err := s.repository.CreateScheduledJob(ctx, job, job.Limit())
 	if err == nil && created {
 		s.logger.InfoContext(ctx, "schedule.job.created", "principal_id", job.PrincipalID, "job_id", id, "job_type", job.Type)
 	}
 	return created, err
+}
+
+// Snooze is how far a delivered reminder is moved.
+type Snooze string
+
+const (
+	SnoozeTenMinutes Snooze = "10m"
+	SnoozeHour       Snooze = "1h"
+	// SnoozeTomorrow moves the reminder to its own local time on the next day that is still ahead.
+	SnoozeTomorrow Snooze = "tomorrow"
+)
+
+// Snooze makes one of the principal's delivered reminders pending again. A reminder that was
+// cancelled, pruned, or is already pending is reported as not snoozed, so a second press of the
+// same button cannot move it twice.
+func (s *Service) Snooze(ctx context.Context, principalID, jobID string, snooze Snooze) (Job, bool, error) {
+	job, found, err := s.repository.LoadScheduledJob(ctx, principalID, jobID)
+	if err != nil || !found || job.Type != TypeReminder || job.FinishedAt.IsZero() {
+		return Job{}, false, err
+	}
+	location, err := LoadZone(job.Zone)
+	if err != nil {
+		return Job{}, false, err
+	}
+	now := s.now()
+	var at time.Time
+	switch snooze {
+	case SnoozeTenMinutes:
+		at = now.Add(10 * time.Minute)
+	case SnoozeHour:
+		at = now.Add(time.Hour)
+	case SnoozeTomorrow:
+		local := job.RunAt.In(location)
+		for days := 1; !at.After(now); days++ {
+			at = time.Date(local.Year(), local.Month(), local.Day()+days, local.Hour(), local.Minute(), 0, 0, location)
+		}
+	default:
+		return Job{}, false, fmt.Errorf("unknown snooze %q", snooze)
+	}
+	at = at.Truncate(time.Second).UTC()
+	revived, err := s.repository.ReviveScheduledJob(ctx, principalID, jobID, TypeReminder, at, now)
+	if err != nil || !revived {
+		return Job{}, false, err
+	}
+	s.logger.InfoContext(ctx, "schedule.reminder.snoozed", "principal_id", principalID, "job_id", jobID, "snooze", string(snooze))
+	job.RunAt, job.NextRunAt, job.FinishedAt = at, at, time.Time{}
+	return job, true, nil
 }
 
 // DefaultZone is the zone a job gets when none is named.

@@ -104,7 +104,7 @@ flowchart TB
     connection["<b>connection</b><br/>per-user model subscription"]
     broker["<b>tools</b><br/>broker: grants, budgets,<br/>untrusted-result marking"]
     approval["<b>approval</b><br/>Confirm / Reject proposals,<br/>exactly-once execution"]
-    schedule["<b>schedule</b><br/>durable jobs,<br/>scheduled model turns"]
+    schedule["<b>schedule</b><br/>durable jobs, reminders,<br/>scheduled model turns"]
     judgment["<b>judgment</b><br/>TypeSafe screening, intent checks,<br/>tool hints (opt-in)"]
     integration["<b>integration</b><br/>per-user enable / disable"]
     attach["<b>attachment</b><br/>inbound photos and files"]
@@ -185,8 +185,10 @@ it can write, the approval service (the executor for confirmed proposals).
   enforced by the application, never by prompt instructions. Pi inherits a minimal
   environment without the Telegram token.
 - **Read first, confirm writes.** Writes to Notion, the NAS, and schedules are
-  off until the user turns them on and are always confirmed per action. The
-  exception is Home Assistant: everyday actions on devices exposed to Assist run
+  off until the user turns them on and are always confirmed per action. A
+  reminder is set and cancelled without confirmation, since it only sends its
+  owner's own text to their own chat, and scheduled turns cannot set one. The
+  other exception is Home Assistant: everyday actions on devices exposed to Assist run
   without confirmation and are not offered in scheduled turns; sensitive ones
   (labelled `assistant-confirm`, or locks, alarm panels, valves, sirens, cameras,
   firmware updates, and garage, gate, or door covers) are confirmed per action. If

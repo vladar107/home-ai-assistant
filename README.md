@@ -30,8 +30,9 @@ borrowed between users.
   OVapi, and trips at any time or with changes planned by Transitous.
 - **Day cards.** A rendered image with the day's weather and trains, sent with
   the reply as its caption.
-- **Schedules.** Recurring model turns ("every weekday at 07:30, plan my commute")
-  that the user confirms and that survive restarts.
+- **Schedules.** Recurring or one-time model turns ("every weekday at 07:30, plan
+  my trip to work") that the user confirms and that survive restarts, and reminders
+  ("remind me at five to call mom") that are set at once and can be snoozed.
 - **Safety checks.** Optional, per-user TypeSafe screening of outside content,
   approvals, and tool choice.
 

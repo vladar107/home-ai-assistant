@@ -55,7 +55,7 @@ func (h *conversationHarness) createJob(principalID, id, name, cron, prompt stri
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	prepared, err := h.scheduler.Prepare(principalID, name, schedule.TypeModelTurn, cron, "", config)
+	prepared, err := h.scheduler.Prepare(principalID, name, schedule.TypeModelTurn, schedule.Timing{Cron: cron}, config)
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func TestJobsCommandControlsAndSharesTheTurnSlot(t *testing.T) {
 	if !strings.Contains(list.text, "1. Daily digest\n30 7 * * * (Europe/Amsterdam), next Tue 29 Sep 07:30 CEST") {
 		t.Fatalf("jobs = %q", list.text)
 	}
-	if data := buttonData(list.keyboard); !slices.Equal(data, []string{"jobs:pause:" + job.ID, "jobs:run:" + job.ID, "jobs:delete:" + job.ID}) {
+	if data := buttonData(list.keyboard); !slices.Equal(data, []string{"jobs:pause:" + job.ID + ":1", "jobs:run:" + job.ID + ":1", "jobs:delete:" + job.ID + ":1"}) {
 		t.Fatalf("jobs buttons = %v", data)
 	}
 
@@ -259,7 +259,7 @@ func TestJobsCommandControlsAndSharesTheTurnSlot(t *testing.T) {
 	}
 
 	paused := h.pressJob(4, list.messageID, "jobs:pause:"+job.ID)
-	if !strings.Contains(paused.text, "Daily digest\n30 7 * * * (Europe/Amsterdam), paused") || !slices.Contains(buttonData(paused.keyboard), "jobs:resume:"+job.ID) {
+	if !strings.Contains(paused.text, "Daily digest\n30 7 * * * (Europe/Amsterdam), paused") || !slices.Contains(buttonData(paused.keyboard), "jobs:resume:"+job.ID+":1") {
 		t.Fatalf("jobs after pause = %+v", paused)
 	}
 	clock.Set(t, "2026-09-29T07:31:00+02:00")
