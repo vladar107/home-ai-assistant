@@ -109,18 +109,29 @@ func (s *Service) propose(ctx context.Context, principalID, token string, call t
 	if err != nil {
 		return "", err
 	}
-	summary, intent, err := s.prepareProposal(ctx, token, call.Name, arguments)
-	if err != nil {
+	if err := s.record(ctx, principalID, token, call.Name, arguments); err != nil {
 		return "", err
 	}
-	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: call.Name, Arguments: arguments, Summary: summary, Intent: intent}); err != nil {
-		if errors.Is(err, approval.ErrBundleFull) {
-			return "", err
-		}
-		s.logger.WarnContext(ctx, "notion.proposal.failed", "principal_id", principalID, "tool", call.Name, "error", err)
-		return "", fmt.Errorf("the proposal could not be recorded")
-	}
 	return approval.ProposedText, nil
+}
+
+// record checks validated write arguments against their target and records the proposal.
+func (s *Service) record(ctx context.Context, principalID, token, tool string, arguments json.RawMessage) error {
+	if s.proposer == nil {
+		return fmt.Errorf("Notion writes are not available")
+	}
+	summary, intent, err := s.prepareProposal(ctx, token, tool, arguments)
+	if err != nil {
+		return err
+	}
+	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: tool, Arguments: arguments, Summary: summary, Intent: intent}); err != nil {
+		if errors.Is(err, approval.ErrBundleFull) {
+			return err
+		}
+		s.logger.WarnContext(ctx, "notion.proposal.failed", "principal_id", principalID, "tool", tool, "error", err)
+		return fmt.Errorf("the proposal could not be recorded")
+	}
+	return nil
 }
 
 // validateWrite checks the model's arguments and returns them re-encoded without unknown fields.

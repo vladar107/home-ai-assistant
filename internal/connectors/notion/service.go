@@ -38,6 +38,13 @@ type Config struct {
 	HTTPClient     *http.Client
 	// IntakeLifetime bounds how long a Connect Notion press waits for the token; zero means ten minutes.
 	IntakeLifetime time.Duration
+	// DisplayNames maps principal IDs to their configured display names, whose initials pick each
+	// user's score column in the movie table.
+	DisplayNames map[string]string
+	// Location is the household time zone that movie night dates are read in; nil means UTC.
+	Location *time.Location
+	// Now is the clock; nil means time.Now.
+	Now func() time.Time
 }
 
 // Status is the non-secret view of a principal's Notion connection.
@@ -66,6 +73,8 @@ type Service struct {
 	intakeLifetime time.Duration
 	logger         *slog.Logger
 	now            func() time.Time
+	displayNames   map[string]string
+	location       *time.Location
 
 	mu      sync.Mutex
 	intakes map[string]time.Time
@@ -94,6 +103,14 @@ func NewService(cfg Config, repository integration.Repository, proposer Proposer
 	if lifetime <= 0 {
 		lifetime = intakeLifetime
 	}
+	location := cfg.Location
+	if location == nil {
+		location = time.UTC
+	}
+	now := cfg.Now
+	if now == nil {
+		now = time.Now
+	}
 	return &Service{
 		client:         client,
 		credentials:    credentials,
@@ -102,7 +119,9 @@ func NewService(cfg Config, repository integration.Repository, proposer Proposer
 		chatConnect:    cfg.ChatConnect,
 		intakeLifetime: lifetime,
 		logger:         logger,
-		now:            time.Now,
+		now:            now,
+		displayNames:   cfg.DisplayNames,
+		location:       location,
 		intakes:        make(map[string]time.Time),
 	}, nil
 }

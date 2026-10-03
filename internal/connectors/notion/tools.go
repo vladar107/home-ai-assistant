@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/vladar107/home-ai-assistant/internal/tools"
@@ -80,10 +81,10 @@ func (s *Service) Contribute(ctx context.Context, principalID string) (tools.Con
 	if !status.Connected {
 		return tools.Contribution{}, nil
 	}
-	contribution := tools.Contribution{Guidance: readGuidance, Definitions: append([]tools.Definition(nil), readDefinitions...)}
+	contribution := tools.Contribution{Guidance: readGuidance + movieGuidance, Definitions: slices.Concat(readDefinitions, movieReadDefinitions)}
 	if status.WritesEnabled && s.proposer != nil {
-		contribution.WriteGuidance = writeGuidance
-		contribution.Definitions = append(contribution.Definitions, writeDefinitions...)
+		contribution.WriteGuidance = writeGuidance + movieWriteGuidance
+		contribution.Definitions = slices.Concat(contribution.Definitions, writeDefinitions, movieWriteDefinitions)
 	}
 	return contribution, nil
 }
@@ -99,9 +100,12 @@ func (s *Service) Execute(ctx context.Context, principalID string, call tools.Ca
 		return tools.Result{Text: NotConnectedText, IsError: true}, nil
 	}
 	var text string
-	if isWriteTool(call.Name) {
+	switch {
+	case isMovieTool(call.Name):
+		text, err = s.movies(ctx, principalID, token, call)
+	case isWriteTool(call.Name):
 		text, err = s.propose(ctx, principalID, token, call)
-	} else {
+	default:
 		text, err = s.run(ctx, token, call)
 	}
 	if err != nil {

@@ -476,10 +476,16 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		a.tools = broker
 		a.approvals = approvals
 		if a.cfg.Notion.Enabled {
+			displayNames := make(map[string]string, len(a.cfg.Telegram.Users))
+			for _, user := range a.cfg.Telegram.Users {
+				displayNames[user.PrincipalID] = user.DisplayName
+			}
 			notionService, err := notion.NewService(notion.Config{
 				CredentialsDir: filepath.Join(a.cfg.DataDir, "integrations"),
 				APIBaseURL:     a.cfg.Notion.APIBaseURL,
 				ChatConnect:    a.cfg.Notion.ChatConnect,
+				DisplayNames:   displayNames,
+				Location:       location,
 			}, a.store, approvals, a.logger)
 			if err != nil {
 				return fmt.Errorf("initialize Notion connector: %w", err)

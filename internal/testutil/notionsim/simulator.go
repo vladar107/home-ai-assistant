@@ -343,12 +343,19 @@ func (s *Simulator) query(w http.ResponseWriter, token string, dataSource *DataS
 			return
 		}
 		if len(sorts) > 0 {
+			created := make(map[*Page]int, len(pages))
+			for i, page := range pages {
+				created[page] = i
+			}
 			sort.SliceStable(pages, func(i, j int) bool {
 				first, _ := sorts[0].(map[string]any)
 				direction, _ := first["direction"].(string)
 				less := pages[i].Title < pages[j].Title
-				if timestamp, _ := first["timestamp"].(string); timestamp == "last_edited_time" {
+				switch timestamp, _ := first["timestamp"].(string); timestamp {
+				case "last_edited_time":
 					less = pages[i].LastEdited < pages[j].LastEdited
+				case "created_time":
+					less = created[pages[i]] < created[pages[j]]
 				}
 				if direction == "descending" {
 					return !less

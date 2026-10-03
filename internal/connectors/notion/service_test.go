@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
@@ -58,6 +59,10 @@ type fixture struct {
 	service   *notion.Service
 	proposals *recorder
 	logs      *lockedBuffer
+	// now and displayNames are the clock and the principal names the service reads; a test may
+	// change them.
+	now          *time.Time
+	displayNames map[string]string
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -83,11 +88,20 @@ func newFixture(t *testing.T) *fixture {
 	sim.AddToken(token, notionsim.Token{Kind: "internal", BotName: "Connector", WorkspaceID: "ws", WorkspaceName: "Workspace"})
 	logs := &lockedBuffer{}
 	proposals := &recorder{}
-	service, err := notion.NewService(notion.Config{CredentialsDir: credentialsDir, APIBaseURL: sim.URL(), HTTPClient: sim.Client()}, store, proposals, slog.New(slog.NewTextHandler(logs, nil)))
+	zone, err := time.LoadLocation("Europe/Amsterdam")
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &fixture{t: t, ctx: ctx, sim: sim, service: service, proposals: proposals, logs: logs}
+	now := time.Date(2026, time.October, 3, 20, 0, 0, 0, zone)
+	displayNames := map[string]string{"alice": "Alice"}
+	service, err := notion.NewService(notion.Config{
+		CredentialsDir: credentialsDir, APIBaseURL: sim.URL(), HTTPClient: sim.Client(),
+		DisplayNames: displayNames, Location: zone, Now: func() time.Time { return now },
+	}, store, proposals, slog.New(slog.NewTextHandler(logs, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &fixture{t: t, ctx: ctx, sim: sim, service: service, proposals: proposals, logs: logs, now: &now, displayNames: displayNames}
 }
 
 func (f *fixture) execute(name, arguments string) tools.Result {
@@ -156,7 +170,7 @@ func TestPageSizeCapAndCursor(t *testing.T) {
 	for index := 1; index <= 27; index++ {
 		f.sim.SharePage(token, notionsim.Page{ID: fmt.Sprintf("page-%02d", index), Title: fmt.Sprintf("Item %02d", index), URL: "https://notion.so/p", LastEdited: "2026-09-01T00:00:00.000Z"})
 	}
-	if contribution := f.contribute(); len(contribution.Definitions) != 4 {
+	if contribution := f.contribute(); len(contribution.Definitions) != 5 {
 		t.Fatalf("contribution = %+v", contribution)
 	}
 	first := f.execute("notion_search", `{"limit":50}`)
