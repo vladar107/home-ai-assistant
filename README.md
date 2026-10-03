@@ -28,6 +28,9 @@ borrowed between users.
   Everyday actions run immediately; sensitive devices are confirmed.
 - **Buses.** Live departures, direct buses, and operator disruption notices from
   OVapi, and trips at any time or with changes planned by Transitous.
+- **Shared location.** Share a pin or a live location in the chat and ask about
+  "here": buses and weather at that point, and nearby pharmacies, shops, or cafés
+  from OpenStreetMap. Only the latest position is kept, briefly.
 - **Day cards.** A rendered image with the day's weather and trains, sent with
   the reply as its caption.
 - **Schedules.** Recurring or one-time model turns ("every weekday at 07:30, plan
@@ -73,7 +76,8 @@ internal/telegram/     Telegram client, poller, commands, /settings
 internal/conversation/ turn coordination
 internal/runtime/pi/   Pi subprocess and tool bridge
 internal/tools/        tool broker
-internal/connectors/   notion, gmail, nas, ns, bus, web, homeassistant
+internal/connectors/   notion, gmail, nas, ns, bus, web, homeassistant, places
+internal/location/     shared positions and their expiry
 internal/store/sqlite/ persistence and migrations
 deploy/                Compose files and configuration examples
 scripts/               operator scripts (deploy, secrets, checks)

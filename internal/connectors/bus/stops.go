@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -399,6 +400,41 @@ func distanceMeters(latA, lonA, latB, lonB float64) float64 {
 	dLat, dLon := (latB-latA)*toRadians, (lonB-lonA)*toRadians
 	h := math.Sin(dLat/2)*math.Sin(dLat/2) + math.Cos(latA*toRadians)*math.Cos(latB*toRadians)*math.Sin(dLon/2)*math.Sin(dLon/2)
 	return 2 * earthRadius * math.Asin(math.Sqrt(h))
+}
+
+var coordinatesPattern = regexp.MustCompile(`^([+-]?[0-9]+(?:\.[0-9]+)?)\s*,\s*([+-]?[0-9]+(?:\.[0-9]+)?)$`)
+
+// parseCoordinates reads a "lat,lon" query in decimal degrees. matched tells the query has that
+// shape, in which case err says whether the numbers are a point on Earth.
+func parseCoordinates(query string) (lat, lon float64, matched bool, err error) {
+	parts := coordinatesPattern.FindStringSubmatch(strings.TrimSpace(query))
+	if parts == nil {
+		return 0, 0, false, nil
+	}
+	lat, latErr := strconv.ParseFloat(parts[1], 64)
+	lon, lonErr := strconv.ParseFloat(parts[2], 64)
+	if latErr != nil || lonErr != nil || math.IsInf(lat, 0) || math.IsInf(lon, 0) || math.Abs(lat) > 90 || math.Abs(lon) > 180 {
+		return 0, 0, true, errors.New("coordinates must be decimal degrees as lat,lon, with latitude within 90 and longitude within 180")
+	}
+	return lat, lon, true, nil
+}
+
+// nearbyStop is a stop group with its distance from a point.
+type nearbyStop struct {
+	group  *stopGroup
+	meters float64
+}
+
+// nearest lists the stop groups within a radius of a point, closest first.
+func (i *stopIndex) nearest(lat, lon, radius float64) []nearbyStop {
+	var found []nearbyStop
+	for _, group := range i.groups {
+		if meters := distanceMeters(lat, lon, group.lat, group.lon); meters <= radius {
+			found = append(found, nearbyStop{group: group, meters: meters})
+		}
+	}
+	sort.SliceStable(found, func(a, b int) bool { return found[a].meters < found[b].meters })
+	return found
 }
 
 // resolutionError is the sentence the model sees when a name does not pick out one stop.

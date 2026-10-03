@@ -32,11 +32,13 @@ const (
 var errWeatherMalformed = errors.New("the weather service returned an unexpected response")
 
 type weatherRequest struct {
-	Location string `json:"location"`
-	Days     int    `json:"days"`
-	Date     string `json:"date"`
-	FromHour *int   `json:"from_hour"`
-	ToHour   *int   `json:"to_hour"`
+	Location  string   `json:"location"`
+	Latitude  *float64 `json:"latitude"`
+	Longitude *float64 `json:"longitude"`
+	Days      int      `json:"days"`
+	Date      string   `json:"date"`
+	FromHour  *int     `json:"from_hour"`
+	ToHour    *int     `json:"to_hour"`
 }
 
 type place struct {
@@ -91,10 +93,18 @@ type hourWindow struct {
 
 func (s *Service) weatherForecast(ctx context.Context, principalID string, request weatherRequest) tools.Result {
 	location := strings.TrimSpace(request.Location)
-	if location == "" {
+	byCoordinates := request.Latitude != nil || request.Longitude != nil
+	switch {
+	case byCoordinates && location != "":
+		return errorResult("give either location or latitude and longitude, not both")
+	case byCoordinates && (request.Latitude == nil || request.Longitude == nil):
+		return errorResult("latitude and longitude must be given together")
+	case byCoordinates && !validCoordinates(*request.Latitude, *request.Longitude):
+		return errorResult("latitude must be between -90 and 90 and longitude between -180 and 180")
+	case !byCoordinates && location == "":
 		location = s.weatherHome
 	}
-	if location == "" {
+	if !byCoordinates && location == "" {
 		return errorResult(askForPlaceText)
 	}
 	if len([]rune(location)) > maximumPlaceRunes {
@@ -112,12 +122,22 @@ func (s *Service) weatherForecast(ctx context.Context, principalID string, reque
 		return errorResult(err.Error())
 	}
 
-	found, ok, err := s.geocode(ctx, location)
-	if err != nil {
-		return s.weatherFailure(ctx, principalID, err)
-	}
-	if !ok {
-		return errorResult(fmt.Sprintf("No place called %q was found; ask the user for a nearby town or a more precise name.", location))
+	var found place
+	if byCoordinates {
+		found = place{
+			Name:      fmt.Sprintf("your location (%.4f, %.4f)", *request.Latitude, *request.Longitude),
+			Latitude:  *request.Latitude,
+			Longitude: *request.Longitude,
+		}
+	} else {
+		var ok bool
+		found, ok, err = s.geocode(ctx, location)
+		if err != nil {
+			return s.weatherFailure(ctx, principalID, err)
+		}
+		if !ok {
+			return errorResult(fmt.Sprintf("No place called %q was found; ask the user for a nearby town or a more precise name.", location))
+		}
 	}
 	query := placeQuery(found)
 	if hourly {
@@ -193,6 +213,10 @@ func (s *Service) checkHourlyDate(found place, date time.Time) error {
 			today.Format(time.DateOnly), last.Format(time.DateOnly), maximumHourlyDaysAhead, placeName(found))
 	}
 	return nil
+}
+
+func validCoordinates(latitude, longitude float64) bool {
+	return math.Abs(latitude) <= 90 && math.Abs(longitude) <= 180
 }
 
 func placeQuery(found place) url.Values {

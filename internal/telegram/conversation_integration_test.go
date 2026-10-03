@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -35,6 +36,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/delivery"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
+	"github.com/vladar107/home-ai-assistant/internal/location"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
@@ -166,6 +168,16 @@ type harnessOptions struct {
 	// location turns on the current-time line, read from clock when one is given.
 	location *time.Location
 	clock    *testClock
+	// locations enables shared locations on the clock, naming every place locationName.
+	locations    bool
+	locationName string
+	pinTTL       time.Duration
+}
+
+type fixedDescriber string
+
+func (d fixedDescriber) Describe(context.Context, float64, float64) (string, error) {
+	return string(d), nil
 }
 
 // testFile is one attachment the Telegram simulator will hand out through getFile.
@@ -194,6 +206,7 @@ type conversationHarness struct {
 	ns             *ns.Service
 	homeAssistant  *homeassistant.Service
 	bus            *bus.Service
+	locations      *location.Service
 	approvals      *approval.Service
 	scheduler      *schedule.Service
 	auth           *codexauth.Simulator
@@ -482,8 +495,21 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	if options.clock != nil {
 		now = options.clock.Now
 	}
+	var locationTurns conversation.Locations
+	if options.locations {
+		ttl := cmp.Or(options.pinTTL, time.Hour)
+		h.locations, err = location.NewService(location.Config{
+			Policy:        location.Policy{PinTTL: ttl, LiveSilence: time.Hour, LiveGrace: 15 * time.Minute},
+			PruneInterval: time.Hour, Describer: fixedDescriber(cmp.Or(options.locationName, "Stationsplein 1, Leiden")),
+			Zone: cmp.Or(options.location, time.UTC), Now: now,
+		}, h.store, logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		locationTurns = h.locations
+	}
 	h.conversation, err = conversation.NewService(
-		conversation.Config{TurnTimeout: turnTimeout, FollowUp: h.approvals, Notice: notices, Attachments: h.attachments, WebSearch: webSearch, Cards: cards, Photos: photos, Location: options.location, Now: now},
+		conversation.Config{Locations: locationTurns, TurnTimeout: turnTimeout, FollowUp: h.approvals, Notice: notices, Attachments: h.attachments, WebSearch: webSearch, Cards: cards, Photos: photos, Location: options.location, Now: now},
 		h.store, runtime, h.client, broker, h.connections, logger, integrationTelemetry{turns: h.turns},
 	)
 	if err != nil {
@@ -500,6 +526,9 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	h.service, err = NewService(h.client, identities, h.store, h.conversation, h.attachments, h.connections, notionController, nasController, googleController, webController, nsController, homeAssistantController, busController, h.approvals, scheduleController, logger, nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if h.locations != nil {
+		h.service.SetLocations(h.locations)
 	}
 	t.Cleanup(h.stop)
 	return h

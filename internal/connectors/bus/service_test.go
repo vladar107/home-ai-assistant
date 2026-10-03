@@ -605,6 +605,61 @@ func TestStopNamesResolveOrOfferCandidates(t *testing.T) {
 	}
 }
 
+func TestStopStatusFromCoordinatesPicksTheNearestStop(t *testing.T) {
+	f := newFixture(t, options{})
+	text := f.text("bus_stop_status", map[string]any{"stop": "52.1560, 5.3850"})
+	wantContains(t, text,
+		"Nearest stop to the given point: Amersfoort, Stadhuis, ",
+		"Other stops within 1 km: Amersfoort, Centrum, ",
+		"Live departures from Amersfoort, Stadhuis",
+	)
+	if !strings.HasPrefix(text, "Nearest stop") {
+		t.Fatalf("the nearest-stop line is not first: %s", text)
+	}
+
+	far := f.call("bus_stop_status", map[string]any{"stop": "52.0,5.0"})
+	if !far.IsError || !strings.Contains(far.Text, "within 1 km") {
+		t.Fatalf("a point far from any stop = %+v", far)
+	}
+}
+
+func TestTripFromCoordinatesIsPlannedThroughTransitous(t *testing.T) {
+	f := newFixture(t, options{contact: contact})
+	text := f.text("bus_trip", map[string]any{"from": "52.1560,5.3850", "to": "Amersfoort Centraal Station"})
+	wantContains(t, text, "Planned trips from your location to Amersfoort, Centraal Station")
+	if got := len(f.server.seen("/ovapi/tpc/")); got != 0 {
+		t.Fatalf("OVapi asked %d times for a trip from a point", got)
+	}
+	requests := f.server.seen("/transitous/v5/plan")
+	if len(requests) != 1 {
+		t.Fatalf("plan requests = %d", len(requests))
+	}
+	if got := requests[0].URL.Query().Get("fromPlace"); got != "52.156000,5.385000" {
+		t.Fatalf("fromPlace = %q", got)
+	}
+
+	f.text("bus_trip", map[string]any{"from": "Amersfoort Stadhuis", "to": "52.1530, 5.3730"})
+	requests = f.server.seen("/transitous/v5/plan")
+	if got := requests[len(requests)-1].URL.Query().Get("toPlace"); got != "52.153000,5.373000" {
+		t.Fatalf("toPlace = %q", got)
+	}
+}
+
+func TestInvalidCoordinatesAreRefused(t *testing.T) {
+	f := newFixture(t, options{})
+	for _, point := range []string{"91.0,4.5", "52.0,181.0", "-90.5,10"} {
+		if result := f.call("bus_stop_status", map[string]any{"stop": point}); !result.IsError {
+			t.Fatalf("bus_stop_status(%q) answered: %s", point, result.Text)
+		}
+		if result := f.call("bus_trip", map[string]any{"from": point, "to": "Amersfoort Centraal Station"}); !result.IsError {
+			t.Fatalf("bus_trip from %q answered: %s", point, result.Text)
+		}
+	}
+	if got := len(f.server.seen("/transitous/")); got != 0 {
+		t.Fatalf("Transitous asked %d times about invalid coordinates", got)
+	}
+}
+
 func TestHomeStopMustBeKnown(t *testing.T) {
 	f := newFixture(t, options{homeStop: "12345678"})
 	result := f.call("bus_stop_status", map[string]any{})

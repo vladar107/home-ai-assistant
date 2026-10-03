@@ -57,7 +57,7 @@ func (s *Service) RunScheduled(ctx context.Context, principalID, turn, message s
 	result, runErr := s.runtime.Run(turnCtx, agentruntime.RunRequest{
 		PrincipalID: principalID,
 		SessionID:   sessionID,
-		Message:     message,
+		Message:     withPlace(s.locationLine(turnCtx, principalID), message),
 		Tools:       tools,
 		WebSearch:   webSearch,
 	}, newCountingSink(principalID, s.logger, s.telemetry))
@@ -72,4 +72,11 @@ func (s *Service) RunScheduled(ctx context.Context, principalID, turn, message s
 	default:
 		return ScheduledReply{Text: result.Response}, nil
 	}
+}
+
+func withPlace(place, message string) string {
+	if place == "" {
+		return message
+	}
+	return "[system] " + place + "\n\n" + message
 }

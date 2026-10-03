@@ -23,6 +23,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/ns"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/places"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/web"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/daycard"
@@ -30,6 +31,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/health"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/judgment"
+	userlocation "github.com/vladar107/home-ai-assistant/internal/location"
 	"github.com/vladar107/home-ai-assistant/internal/module"
 	"github.com/vladar107/home-ai-assistant/internal/observability"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
@@ -61,6 +63,7 @@ type App struct {
 	ns            *ns.Service
 	homeAssistant *homeassistant.Service
 	bus           *bus.Service
+	locations     *userlocation.Service
 	typeSafe      *judgment.OptInService
 	telegram      *telegram.Service
 	telemetry     *observability.Telemetry
@@ -397,6 +400,37 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("load household time zone: %w", err)
 		}
+		var turnLocations conversation.Locations
+		if a.cfg.Location.Enabled {
+			placesService, err := places.NewService(places.Config{Contact: a.cfg.Location.Contact}, a.logger)
+			if err != nil {
+				return fmt.Errorf("initialize places connector: %w", err)
+			}
+			if err := a.registry.Register(placesService); err != nil {
+				return err
+			}
+			if err := broker.Register(placesService); err != nil {
+				return err
+			}
+			locationService, err := userlocation.NewService(userlocation.Config{
+				Policy: userlocation.Policy{
+					PinTTL:      a.cfg.Location.PinTTL,
+					LiveSilence: a.cfg.Location.LiveSilence,
+					LiveGrace:   a.cfg.Location.LiveGrace,
+				},
+				PruneInterval: a.cfg.Location.PruneInterval,
+				Describer:     placesService,
+				Zone:          location,
+			}, a.store, a.logger)
+			if err != nil {
+				return fmt.Errorf("initialize locations: %w", err)
+			}
+			if err := a.registry.Register(locationService); err != nil {
+				return err
+			}
+			a.locations = locationService
+			turnLocations = locationService
+		}
 		conversationService, err := conversation.NewService(
 			conversation.Config{
 				TurnTimeout:  a.cfg.Conversation.TurnTimeout,
@@ -410,6 +444,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 				ToolHint:     toolHint,
 				SafetyChecks: safetyChecks,
 				Location:     location,
+				Locations:    turnLocations,
 			},
 			a.store,
 			runtime,
@@ -618,6 +653,9 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	}
 	if a.typeSafe != nil {
 		service.SetTypeSafe(a.typeSafe)
+	}
+	if a.locations != nil {
+		service.SetLocations(a.locations)
 	}
 	a.telegram = service
 	return nil

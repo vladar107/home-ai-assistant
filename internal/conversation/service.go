@@ -462,7 +462,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		result, err := s.runtime.Run(turnCtx, agentruntime.RunRequest{
 			PrincipalID: request.PrincipalID,
 			SessionID:   request.RuntimeSessionID,
-			Message:     s.turnMessage(request, attachments.Summary, hint),
+			Message:     s.turnMessage(request, attachments.Summary, hint, s.locationLine(turnCtx, request.PrincipalID)),
 			Images:      attachments.Images,
 			Tools:       tools,
 			WebSearch:   webSearch,
@@ -577,7 +577,7 @@ func (s *Service) startToolHint(ctx context.Context, request Request, tools agen
 // turnMessage prefixes what became of the principal's last confirmation request, which was
 // resolved between turns and which the model would otherwise have to guess at, and appends what
 // the message carried so the model can see its files without reading them.
-func (s *Service) turnMessage(request Request, attachments, hint string) string {
+func (s *Service) turnMessage(request Request, attachments, hint, place string) string {
 	message := request.Message
 	if hint != "" {
 		message = "[system] Likely relevant tool: " + hint + ". Ignore this if it does not fit the request.\n\n" + message
@@ -587,6 +587,7 @@ func (s *Service) turnMessage(request Request, attachments, hint string) string 
 			message = "[system] " + notice + "\n\n" + message
 		}
 	}
+	message = withPlace(place, message)
 	if s.config.Location != nil {
 		// The time goes in the message rather than the system prompt, so the prompt stays
 		// cacheable and the session history keeps when each message was sent.
@@ -904,4 +905,18 @@ func wait(ctx context.Context, duration time.Duration) bool {
 	case <-ctx.Done():
 		return false
 	}
+}
+
+// locationLine is where the principal is, for the turn's message. A failed lookup leaves the
+// line out rather than failing the turn.
+func (s *Service) locationLine(ctx context.Context, principalID string) string {
+	if s.config.Locations == nil {
+		return ""
+	}
+	line, err := s.config.Locations.TurnLine(ctx, principalID)
+	if err != nil {
+		s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "conversation.location.failed", "principal_id", principalID, "error", err)
+		return ""
+	}
+	return line
 }

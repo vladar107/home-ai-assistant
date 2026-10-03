@@ -89,11 +89,13 @@ var definitions = []tools.Definition{
 	},
 	{
 		Name:        toolWeather,
-		Description: "Get current weather and a daily forecast for a place by name, or an hourly forecast for one day and a range of hours, in metric units and the place's local time.",
+		Description: "Get current weather and a daily forecast for a place name or coordinates, such as the user's shared location from the turn's [system] User's location line, or an hourly forecast for one day and a range of hours, in metric units and the place's local time.",
 		Risk:        tools.RiskRead,
 		Timeout:     toolTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"location":{"type":"string","description":"A town or city name, optionally with its country, such as Zwolle, Netherlands."},` +
+			`"latitude":{"type":"number","minimum":-90,"maximum":90,"description":"Latitude in decimal degrees, with longitude; use instead of location for a point such as the user's shared location."},` +
+			`"longitude":{"type":"number","minimum":-180,"maximum":180,"description":"Longitude in decimal degrees, with latitude; use instead of location for a point such as the user's shared location."},` +
 			`"days":{"type":"integer","minimum":1,"maximum":7,"description":"Days of forecast including today, default 3; ignored when date is given."},` +
 			`"date":{"type":"string","pattern":"^[0-9]{4}-[0-9]{2}-[0-9]{2}$","description":"A day in the place's local calendar, YYYY-MM-DD, from today up to 15 days ahead; returns an hourly forecast for that day instead of the daily summary."},` +
 			`"from_hour":{"type":"integer","minimum":0,"maximum":23,"description":"First local hour of the hourly forecast, inclusive; needs date, default 0."},` +

@@ -96,6 +96,7 @@ var settingsGroups = []settingsGroup{
 	{id: "accounts", title: "Accounts", members: []string{googleSectionPrefix, notionSectionPrefix}},
 	{id: "home", title: "Home & files", inline: true, members: []string{homeAssistantSectionPrefix, nasSectionPrefix}},
 	{id: "tools", title: "Everyday tools", inline: true, members: []string{webSectionPrefix, nsSectionPrefix, busSectionPrefix}},
+	{id: "location", title: "Location", inline: true, members: []string{locationSectionPrefix}},
 	{id: "safety", title: "Safety & privacy", inline: true, members: []string{typeSafeSectionPrefix}},
 }
 

@@ -115,6 +115,7 @@ type Service struct {
 	bus           BusController
 	approvals     ApprovalController
 	schedules     ScheduleController
+	locations     LocationController
 	sections      []settingsSection
 	interceptors  []messageInterceptor
 	logger        *slog.Logger
@@ -420,6 +421,9 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 	if update.CallbackQuery != nil {
 		return s.processCallback(ctx, update.CallbackQuery)
 	}
+	if update.EditedMessage != nil {
+		return s.processEdit(ctx, update.EditedMessage)
+	}
 	if update.Message == nil {
 		return ignoredResult("non_message"), "", nil
 	}
@@ -446,6 +450,10 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 	}
 	if strings.HasPrefix(strings.TrimSpace(message.Text), "/") {
 		return ignoredResult("command_for_other_bot"), "", nil
+	}
+
+	if message.Location != nil || message.Venue != nil {
+		return s.processLocation(ctx, message, authorization.Principal.ID)
 	}
 
 	carried, unsupported := classifyMedia(message)
@@ -795,6 +803,9 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 			if status.Enabled {
 				reply += " " + BusPrivacyLine + " " + BusPlanningPrivacyLine
 			}
+		}
+		if s.locations != nil {
+			reply += " " + LocationPrivacyLine
 		}
 		if s.typeSafe != nil {
 			enabled, err := s.typeSafe.Status(ctx, principalID)

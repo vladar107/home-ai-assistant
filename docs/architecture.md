@@ -21,7 +21,8 @@ flowchart TB
     ha["Home Assistant<br/>MCP server, Assist API"]
     meteo["Open-Meteo<br/>weather"]
     ovapi["OVapi<br/>live buses, notices"]
-    transitous["Transitous<br/>journey planner"]
+    transitous["Transitous<br/>journey planner, addresses"]
+    overpass["Overpass<br/>OpenStreetMap places"]
     typesafe["TypeSafe<br/>optional safety checks"]
     nasfiles["NAS shares<br/>household files"]
     ghcr["GitHub + GHCR<br/>source, CI, image"]
@@ -35,7 +36,8 @@ flowchart TB
     agent -->|reads, device actions, confirmed service calls| ha
     agent -->|forecasts| meteo
     agent -->|departures, stop list, notices| ovapi
-    agent -->|planned trips, departures| transitous
+    agent -->|planned trips, departures, addresses| transitous
+    agent -->|nearby places| overpass
     agent -->|judgments| typesafe
     agent -->|mounted roots| nasfiles
     operator -->|push| ghcr
@@ -51,7 +53,7 @@ an outbound HTTPS client, and administrative interfaces stay on the LAN.
 ```mermaid
 flowchart TB
     telegram["Telegram Bot API"]
-    ext["External APIs<br/>model provider, Notion, Google, NS, Home Assistant, OVapi, Transitous, Open-Meteo, TypeSafe"]
+    ext["External APIs<br/>model provider, Notion, Google, NS, Home Assistant, OVapi, Transitous, Overpass, Open-Meteo, TypeSafe"]
 
     subgraph nas["NAS"]
         subgraph app["home-ai-assistant Compose project"]
@@ -107,6 +109,7 @@ flowchart TB
     schedule["<b>schedule</b><br/>durable jobs, reminders,<br/>scheduled model turns"]
     judgment["<b>judgment</b><br/>TypeSafe screening, intent checks,<br/>tool hints (opt-in)"]
     integration["<b>integration</b><br/>per-user enable / disable"]
+    loc["<b>location</b><br/>latest shared position, expiry"]
     attach["<b>attachment</b><br/>inbound photos and files"]
     delivery["<b>delivery</b><br/>outbound files"]
     card["<b>daycard / outbox</b><br/>rendered day cards"]
@@ -122,6 +125,7 @@ flowchart TB
         hac["homeassistant<br/>MCP tools, history, confirmed calls"]
         busc["bus"]
         web["web<br/>pages, weather"]
+        placesc["places<br/>nearby places, addresses"]
     end
 
     store[("<b>store/sqlite</b><br/>migrations")]
@@ -133,6 +137,9 @@ flowchart TB
     tg --> connection
     tg --> integration
     tg --> approval
+    tg --> loc
+    conv --> loc
+    loc --> placesc
     conv --> runtime
     conv --> broker
     conv --> card
@@ -148,7 +155,7 @@ flowchart TB
     nasc --> delivery
     web --> pdf
     connectors --> integration
-    identity & conv & approval & schedule & connection & integration --> store
+    identity & conv & approval & schedule & connection & integration & loc --> store
 ```
 
 `internal/app` wires these together. Each connector registers with the module
@@ -201,7 +208,10 @@ it can write, the approval service (the executor for confirmed proposals).
 - **NAS isolation by mount.** Only inbox and shared-drop paths are mounted
   writable; the per-principal roots file decides which user sees which folders.
 - **Quiet telemetry.** Logs and traces carry principal IDs, tool names, outcomes,
-  and sizes, never message text, usernames, or tokens.
+  and sizes, never message text, usernames, tokens, or locations.
+- **Short-lived location.** Only each user's latest shared position is stored. It is
+  used while fresh, then deleted by a prune with SQLite `secure_delete` on; a user
+  forgets it at once from `/settings`, and a forgotten live share stays ignored.
 
 ## Key decisions
 

@@ -52,6 +52,7 @@ plan that links back to the earlier record.
 | 0040 | [One-time jobs and reminders](0040-one-time-jobs-and-reminders.md) | done |
 | 0041 | [Grouped /settings with an overview and pages](0041-grouped-settings.md) | done |
 | 0042 | [Batched approvals](0042-batched-approvals.md) | in-progress |
+| 0043 | [Shared location in conversation and location-aware tools](0043-shared-location.md) | in-progress |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

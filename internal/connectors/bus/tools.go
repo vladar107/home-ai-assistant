@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -39,6 +40,11 @@ const (
 
 	DisabledText   = "Bus information is off for this user; they can turn it on in /settings."
 	noHomeStopText = "No home stop is configured; ask the user which stop they mean."
+
+	// nearbyRadius is how far from a point bus_stop_status looks for stops, and alternatives is
+	// how many further stops it names beside the one it picks.
+	nearbyRadius = 1000
+	alternatives = 2
 )
 
 const guidance = "Buses: bus_trip gives trips between two stops or places, and bus_stop_status gives a stop's live departure board; both default to the household's home stop and add the operators' disruption notices for the stops and lines involved. " +
@@ -57,8 +63,8 @@ var definitions = []tools.Definition{
 		Risk:        tools.RiskRead,
 		Timeout:     toolTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
-			`"to":{"type":"string","description":"Destination stop or place, such as \"Amersfoort Centraal Station\" or \"Leiden, Leiden Centraal\"."},` +
-			`"from":{"type":"string","description":"Departure stop or place; default the household's home stop."},` +
+			`"to":{"type":"string","description":"Destination stop or place, such as \"Utrecht Centraal\" or \"Utrecht, Centraal Station\"; also accepts coordinates as lat,lon, such as the user's shared location."},` +
+			`"from":{"type":"string","description":"Departure stop or place; also accepts coordinates as lat,lon, such as the user's shared location; default the household's home stop."},` +
 			dateTimeSchema + `,` +
 			`"arrive_by":{"type":"boolean","description":"True to treat date_time as the latest arrival instead of the earliest departure."},` +
 			`"limit":{"type":"integer","minimum":1,"maximum":10,"description":"How many trips, default 5."}},` +
@@ -70,7 +76,7 @@ var definitions = []tools.Definition{
 		Risk:        tools.RiskRead,
 		Timeout:     toolTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
-			`"stop":{"type":"string","description":"Stop name or timing point code; default the household's home stop."},` +
+			`"stop":{"type":"string","description":"Stop name or timing point code; also accepts coordinates as lat,lon, such as the user's shared location, for the nearest stop within 1 km; default the household's home stop."},` +
 			`"limit":{"type":"integer","minimum":1,"maximum":30,"description":"How many departures, default 15."}},` +
 			`"additionalProperties":false}`),
 	},
@@ -202,10 +208,59 @@ func (s *Service) stopStatus(ctx context.Context, principalID string, request st
 	if failure != nil {
 		return *failure
 	}
-	group, failure := s.findStop(index, "stop", request.Stop, true)
+	group, nearby, failure := s.findBoardStop(index, request.Stop)
 	if failure != nil {
 		return *failure
 	}
+	result := s.board(ctx, principalID, index, group, limit)
+	if len(nearby) > 0 && !result.IsError {
+		result.Text = nearbyLine(group, nearby) + result.Text
+	}
+	return result
+}
+
+// findBoardStop resolves a stop name or, for coordinates, the nearest stop within nearbyRadius;
+// nearby then holds the stops that follow it.
+func (s *Service) findBoardStop(index *stopIndex, query string) (*stopGroup, []nearbyStop, *tools.Result) {
+	lat, lon, matched, err := parseCoordinates(query)
+	if !matched {
+		group, failure := s.findStop(index, "stop", query, true)
+		return group, nil, failure
+	}
+	if err != nil {
+		result := errorResult(err.Error())
+		return nil, nil, &result
+	}
+	found := index.nearest(lat, lon, nearbyRadius)
+	if len(found) == 0 {
+		result := errorResult("No bus stop is within 1 km of the given point; ask the user for a stop name or a nearer place.")
+		return nil, nil, &result
+	}
+	if len(found) > 1+alternatives {
+		found = found[:1+alternatives]
+	}
+	return found[0].group, found, nil
+}
+
+func nearbyLine(chosen *stopGroup, found []nearbyStop) string {
+	var builder strings.Builder
+	fmt.Fprintf(&builder, "Nearest stop to the given point: %s, %s away.", chosen.name, roundedMeters(found[0].meters))
+	if len(found) > 1 {
+		others := make([]string, 0, len(found)-1)
+		for _, other := range found[1:] {
+			others = append(others, fmt.Sprintf("%s, %s", other.group.name, roundedMeters(other.meters)))
+		}
+		builder.WriteString(" Other stops within 1 km: " + strings.Join(others, "; ") + ".")
+	}
+	builder.WriteString("\n")
+	return builder.String()
+}
+
+func roundedMeters(meters float64) string {
+	return fmt.Sprintf("%d m", int(math.Round(meters/10))*10)
+}
+
+func (s *Service) board(ctx context.Context, principalID string, index *stopIndex, group *stopGroup, limit int) tools.Result {
 	now := s.now().In(s.location)
 	covered := scope{stops: map[*stopGroup]bool{group: true}, anyLineAtStop: true}
 	if len(group.codes) > 0 {
@@ -254,6 +309,18 @@ func (s *Service) findPlace(ctx context.Context, principalID string, index *stop
 	if len([]rune(query)) > maximumStopRunes {
 		result := errorResult(fmt.Sprintf("%s must be at most %d characters", role, maximumStopRunes))
 		return place{}, &result
+	}
+	lat, lon, matched, err := parseCoordinates(query)
+	if matched {
+		if err != nil {
+			result := errorResult(fmt.Sprintf("%s: %s", role, err))
+			return place{}, &result
+		}
+		name := "your location"
+		if role == "to" {
+			name = "the given point"
+		}
+		return place{name: name, lat: lat, lon: lon}, nil
 	}
 	match := index.resolve(query)
 	if match.group != nil {
@@ -324,7 +391,13 @@ func tripScope(index *stopIndex, from, to *stopGroup, trips []directTrip) scope 
 			routes[id] = true
 		}
 	}
-	return scope{stops: map[*stopGroup]bool{from: true, to: true}, routes: routes}
+	stops := make(map[*stopGroup]bool)
+	for _, group := range []*stopGroup{from, to} {
+		if group != nil {
+			stops[group] = true
+		}
+	}
+	return scope{stops: stops, routes: routes}
 }
 
 func planScope(index *stopIndex, from, to place, response planResponse) scope {

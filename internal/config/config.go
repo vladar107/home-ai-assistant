@@ -35,6 +35,7 @@ type Config struct {
 	NS            NSConfig
 	HA            HAConfig
 	Bus           BusConfig
+	Location      LocationConfig
 	TypeSafe      TypeSafeConfig
 	Observability ObservabilityConfig
 }
@@ -58,6 +59,7 @@ func Load() (Config, error) {
 		NS:              defaultNSConfig(),
 		HA:              defaultHAConfig(),
 		Bus:             defaultBusConfig(),
+		Location:        defaultLocationConfig(),
 		TypeSafe:        defaultTypeSafeConfig(),
 		Observability:   defaultObservabilityConfig(),
 	}
@@ -111,6 +113,9 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if err := loadBusConfig(&cfg.Bus); err != nil {
+		return Config{}, err
+	}
+	if err := loadLocationConfig(&cfg.Location); err != nil {
 		return Config{}, err
 	}
 	if err := loadNSConfig(&cfg.NS); err != nil {
@@ -212,6 +217,12 @@ func (c Config) Validate() error {
 	}
 	if c.Bus.Enabled && !c.Conversation.Enabled {
 		return fmt.Errorf("HOME_AGENT_BUS_ENABLED: requires HOME_AGENT_CONVERSATION_ENABLED=true")
+	}
+	if err := c.Location.validate(); err != nil {
+		return err
+	}
+	if c.Location.Enabled && !c.Conversation.Enabled {
+		return fmt.Errorf("HOME_AGENT_LOCATION_ENABLED: requires HOME_AGENT_CONVERSATION_ENABLED=true")
 	}
 	if err := c.TypeSafe.validate(); err != nil {
 		return err

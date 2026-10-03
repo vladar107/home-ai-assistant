@@ -61,6 +61,7 @@ type Bot struct {
 type Update struct {
 	UpdateID      int64          `json:"update_id"`
 	Message       *Message       `json:"message"`
+	EditedMessage *Message       `json:"edited_message"`
 	CallbackQuery *CallbackQuery `json:"callback_query"`
 }
 
@@ -85,10 +86,14 @@ type Message struct {
 	MessageID int64       `json:"message_id"`
 	From      *User       `json:"from"`
 	Chat      Chat        `json:"chat"`
+	Date      int64       `json:"date"`
+	EditDate  int64       `json:"edit_date"`
 	Text      string      `json:"text"`
 	Caption   string      `json:"caption"`
 	Photo     []PhotoSize `json:"photo"`
 	Document  *MediaFile  `json:"document"`
+	Location  *Location   `json:"location"`
+	Venue     *Venue      `json:"venue"`
 	// The kinds below cannot reach the model through the runtime; they are read only so the
 	// message can be answered instead of ignored.
 	Voice     *MediaFile `json:"voice"`
@@ -97,6 +102,21 @@ type Message struct {
 	VideoNote *MediaFile `json:"video_note"`
 	Sticker   *MediaFile `json:"sticker"`
 	Animation *MediaFile `json:"animation"`
+}
+
+// Location is a shared point. LivePeriod is set only while a live location is running.
+type Location struct {
+	Latitude           float64 `json:"latitude"`
+	Longitude          float64 `json:"longitude"`
+	HorizontalAccuracy float64 `json:"horizontal_accuracy"`
+	LivePeriod         int64   `json:"live_period"`
+}
+
+// Venue is a named place; a message carrying one also carries its location.
+type Venue struct {
+	Location Location `json:"location"`
+	Title    string   `json:"title"`
+	Address  string   `json:"address"`
 }
 
 // PhotoSize is one rendition of a photo; Telegram lists them from smallest to largest.
@@ -256,7 +276,7 @@ func (c *Client) GetMe(ctx context.Context) (Bot, error) {
 
 func (c *Client) GetUpdates(ctx context.Context, offset int64) ([]Update, error) {
 	params := url.Values{
-		"allowed_updates": {`["message","callback_query"]`},
+		"allowed_updates": {`["message","edited_message","callback_query"]`},
 		"offset":          {strconv.FormatInt(offset, 10)},
 		"timeout":         {strconv.FormatInt(c.pollSeconds, 10)},
 	}

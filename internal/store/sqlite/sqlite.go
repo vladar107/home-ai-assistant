@@ -153,6 +153,9 @@ func dataSourceName(absolutePath string) string {
 	// Every transaction here writes; deferred ones that read first fail with
 	// SQLITE_BUSY on a stale WAL snapshot instead of waiting for the busy timeout.
 	query.Set("_txlock", "immediate")
+	// Deleted rows are zeroed rather than left in free pages, so a forgotten or expired location
+	// cannot be read back from the database file.
+	query.Add("_pragma", "secure_delete(1)")
 
 	dsn := url.URL{
 		Scheme:   "file",

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -510,6 +511,53 @@ func TestWeatherForecastUsesTheConfiguredHome(t *testing.T) {
 	wantText(t, f.callWith(set, "weather_forecast", map[string]any{"days": 2}), "Weather for Amsterdam, North Holland, Netherlands")
 	if len(*queries) != 1 || (*queries)[0] != "Amsterdam" {
 		t.Fatalf("geocoding queries = %v", *queries)
+	}
+}
+
+func TestWeatherForecastAcceptsCoordinates(t *testing.T) {
+	f := newFixture(t, "Amsterdam")
+	var mu sync.Mutex
+	var geocoded int
+	var forecasted []url.Values
+	f.route("geocoding.test/v1/search", func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		geocoded++
+		mu.Unlock()
+		http.Error(w, "unexpected geocoding", http.StatusBadRequest)
+	})
+	f.route("forecast.test/v1/forecast", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		forecasted = append(forecasted, r.URL.Query())
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, forecastAmsterdam)
+	})
+
+	wantText(t, f.call("alice", "weather_forecast", map[string]any{"latitude": 52.16612, "longitude": 4.48111, "days": 2}),
+		"Weather for your location (52.1661, 4.4811) (local time zone Europe/Amsterdam)")
+	mu.Lock()
+	if geocoded != 0 || len(forecasted) != 1 ||
+		forecasted[0].Get("latitude") != "52.1661" || forecasted[0].Get("longitude") != "4.4811" || forecasted[0].Get("timezone") != "auto" {
+		t.Fatalf("geocoded = %d, forecasts = %v", geocoded, forecasted)
+	}
+	mu.Unlock()
+
+	for _, tc := range []struct {
+		arguments map[string]any
+		want      string
+	}{
+		{map[string]any{"location": "Amsterdam", "latitude": 52.1, "longitude": 4.4}, "not both"},
+		{map[string]any{"latitude": 52.1}, "must be given together"},
+		{map[string]any{"longitude": 4.4}, "must be given together"},
+		{map[string]any{"latitude": 91.0, "longitude": 4.4}, "latitude must be between -90 and 90"},
+		{map[string]any{"latitude": 52.1, "longitude": -180.5}, "longitude between -180 and 180"},
+	} {
+		wantError(t, f.call("alice", "weather_forecast", tc.arguments), tc.want)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if geocoded != 0 || len(forecasted) != 1 {
+		t.Fatalf("refused requests reached the services: geocoded = %d, forecasts = %d", geocoded, len(forecasted))
 	}
 }
 

@@ -208,6 +208,11 @@ type PhotoDeliverer interface {
 	CaptionFits(caption string) bool
 }
 
+// Locations describes a principal's shared position for a turn, or returns "" when there is none.
+type Locations interface {
+	TurnLine(ctx context.Context, principalID string) (string, error)
+}
+
 type Config struct {
 	TurnTimeout time.Duration
 	FollowUp    FollowUp
@@ -221,6 +226,8 @@ type Config struct {
 	// Cards and Photos attach a staged card to a successful reply; nil leaves replies text only.
 	Cards  Cards
 	Photos PhotoDeliverer
+	// Locations tells each turn where its user is while they share a location; nil leaves it out.
+	Locations Locations
 	// Location is the household's time zone; each chat turn then tells the model the current
 	// local time. Nil leaves the time out.
 	Location *time.Location
