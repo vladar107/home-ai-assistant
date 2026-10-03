@@ -1,6 +1,6 @@
 # 0039 — Home Assistant: everyday control through its MCP server, sensitive actions confirmed
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
