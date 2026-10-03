@@ -30,6 +30,14 @@ type webSection struct {
 
 func (w webSection) prefix() string { return webSectionPrefix }
 
+func (w webSection) summary(ctx context.Context, principalID string) (settingsSummary, error) {
+	status, err := w.web.Status(ctx, principalID)
+	if err != nil {
+		return settingsSummary{}, err
+	}
+	return settingsSummary{name: "Web", state: onOff(status.Enabled)}, nil
+}
+
 func (w webSection) render(ctx context.Context, principalID string) (settingsView, error) {
 	status, err := w.web.Status(ctx, principalID)
 	if err != nil {
@@ -47,16 +55,16 @@ func (w webSection) render(ctx context.Context, principalID string) (settingsVie
 	}, nil
 }
 
-func (w webSection) act(ctx context.Context, principalID string, _ int64, action string) (string, error) {
+func (w webSection) act(ctx context.Context, principalID string, _ int64, action string) (settingsOutcome, error) {
 	switch action {
 	case webOnAction, webOffAction:
 		enabled := action == webOnAction
 		if _, err := w.web.SetEnabled(ctx, principalID, enabled); err != nil {
-			return "", err
+			return settingsOutcome{}, err
 		}
 		w.telemetry.ContextLogger(ctx, w.logger).InfoContext(ctx, "web.access.changed", "principal_id", principalID, "enabled", enabled)
-		return "", nil
+		return settingsOutcome{}, nil
 	default:
-		return "", errUnknownSettingsAction
+		return settingsOutcome{}, errUnknownSettingsAction
 	}
 }

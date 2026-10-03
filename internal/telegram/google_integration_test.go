@@ -125,18 +125,22 @@ func TestGoogleAccountsSearchSwitchesAndDisconnect(t *testing.T) {
 	if !h.googleCredential("alice", personal) || !h.googleCredential("alice", work) {
 		t.Fatal("a grant was not stored")
 	}
-	settings := h.requestSettings(7, 101)
+	overview := h.requestSettings(7, 101)
+	if !strings.Contains(overview.text, "Accounts: Google 2 accounts") || !slices.Equal(buttonData(overview.keyboard), []string{"nav:model", "nav:accounts"}) {
+		t.Fatalf("settings overview = %+v", overview)
+	}
+	settings := h.openSettingsPage(8, 101, settingsMessageID(7), "accounts")
 	for _, want := range []string{"alice@example.com: Mail on, Calendar on.", "alice@work.example: Mail on, Calendar not allowed."} {
 		if !strings.Contains(settings.text, want) {
 			t.Fatalf("settings lack %q: %s", want, settings.text)
 		}
 	}
 	if data := buttonData(settings.keyboard); !slices.Contains(data, "google:mail-off:"+personal) || !slices.Contains(data, "google:calendar-off:"+personal) ||
-		slices.Contains(data, "google:calendar-on:"+work) || !slices.Contains(data, "google:disconnect:"+work) {
+		slices.Contains(data, "google:calendar-on:"+work) || !slices.Contains(data, "google:disconnect:"+work) || data[len(data)-1] != "nav:root" {
 		t.Fatalf("settings buttons = %v", data)
 	}
 
-	h.push(textUpdate(8, 101, "anything important?"))
+	h.push(textUpdate(9, 101, "anything important?"))
 	call := receive(t, h.ctx, runtime.calls)
 	names := toolNames(call.request.Tools)
 	for _, want := range []string{"gmail_search", "gmail_read_message", "calendar_events", "calendar_read_event"} {
@@ -180,41 +184,41 @@ func TestGoogleAccountsSearchSwitchesAndDisconnect(t *testing.T) {
 		t.Fatalf("calendar events with Calendar on for one account = %+v", events)
 	}
 	call.answer <- agentruntime.RunResult{Response: "Your rent is going up."}
-	h.wantReply(101, 8, "Your rent is going up.")
-	h.waitState(8, "delivered")
+	h.wantReply(101, 9, "Your rent is going up.")
+	h.waitState(9, "delivered")
 
-	h.push(textUpdate(9, 202, "check my mail"))
+	h.push(textUpdate(10, 202, "check my mail"))
 	bobCall := receive(t, h.ctx, runtime.calls)
 	if names := toolNames(bobCall.request.Tools); slices.Contains(names, "gmail_search") || slices.Contains(names, "calendar_events") {
 		t.Fatalf("bob was offered Google tools without connecting: %v", names)
 	}
 	bobCall.answer <- agentruntime.RunResult{Response: "not connected"}
-	h.wantReply(202, 9, "not connected")
-	h.waitState(9, "delivered")
+	h.wantReply(202, 10, "not connected")
+	h.waitState(10, "delivered")
 
-	h.requestSettings(10, 101)
-	if edit := h.press(11, 101, settingsMessageID(10), "google:mail-off:"+personal); !strings.Contains(edit.text, "alice@example.com: Mail off, Calendar on.") {
+	h.requestSettings(11, 101)
+	if edit := h.press(12, 101, settingsMessageID(11), "google:mail-off:"+personal); !strings.Contains(edit.text, "alice@example.com: Mail off, Calendar on.") {
 		t.Fatalf("settings after switching Mail off = %+v", edit)
 	}
-	h.push(textUpdate(12, 101, "any mail?"))
+	h.push(textUpdate(13, 101, "any mail?"))
 	call = receive(t, h.ctx, runtime.calls)
 	if search := executeTool(t, call.ctx, call.request.Tools, "gmail_search", `{"query":"is:unread"}`); search.IsError ||
 		!strings.Contains(search.Text, "id w1") || strings.Contains(search.Text, "id m1") {
 		t.Fatalf("search with Mail off for one account = %+v", search)
 	}
 	call.answer <- agentruntime.RunResult{Response: "one"}
-	h.wantReply(101, 12, "one")
-	h.waitState(12, "delivered")
+	h.wantReply(101, 13, "one")
+	h.waitState(13, "delivered")
 
-	if reply := h.connectGoogle(sim, 13, 101, aliceMailbox, bothProducts); reply != "alice@example.com is connected read-only: Mail off, Calendar on." {
+	if reply := h.connectGoogle(sim, 14, 101, aliceMailbox, bothProducts); reply != "alice@example.com is connected read-only: Mail off, Calendar on." {
 		t.Fatalf("reconnect reply = %q", reply)
 	}
 	if revoked := sim.Revoked(); len(revoked) != 0 {
 		t.Fatalf("a reconnect revoked %v", revoked)
 	}
 
-	h.requestSettings(16, 101)
-	edit := h.press(17, 101, settingsMessageID(16), "google:disconnect:"+work)
+	h.requestSettings(17, 101)
+	edit := h.press(18, 101, settingsMessageID(17), "google:disconnect:"+work)
 	if strings.Contains(edit.text, aliceWork) || !strings.Contains(edit.text, "alice@example.com:") {
 		t.Fatalf("settings after disconnecting one account = %+v", edit)
 	}
@@ -224,7 +228,7 @@ func TestGoogleAccountsSearchSwitchesAndDisconnect(t *testing.T) {
 	if revoked := sim.Revoked(); !slices.Equal(revoked, []string{aliceWork}) {
 		t.Fatalf("revoked at Google = %v", revoked)
 	}
-	if edit := h.press(18, 101, settingsMessageID(16), "google:disconnect:"+personal); !strings.Contains(edit.text, GoogleNotConnectedLine) {
+	if edit := h.press(19, 101, settingsMessageID(17), "google:disconnect:"+personal); !strings.Contains(edit.text, GoogleNotConnectedLine) {
 		t.Fatalf("settings after disconnecting both = %+v", edit)
 	}
 }
@@ -286,16 +290,17 @@ func TestGoogleSignInRefusalsAndRevokedGrant(t *testing.T) {
 	h.wantReply(101, 19, "reconnect please")
 	h.waitState(19, "delivered")
 	settings := h.requestSettings(20, 101)
-	if !strings.Contains(settings.text, "alice@example.com: Google no longer accepts the connection.") ||
-		!strings.Contains(settings.text, "alice@work.example: Mail not allowed, Calendar on.") ||
-		slices.Contains(buttonData(settings.keyboard), "google:mail-off:"+sim.Subject(aliceMailbox)) {
-		t.Fatalf("settings after revocation = %+v", settings)
+	if !strings.Contains(settings.text, "Reconnect alice@example.com in Accounts › Google.") || !slices.Equal(buttonData(settings.keyboard), []string{"nav:model", "nav:accounts"}) {
+		t.Fatalf("settings overview after revocation = %+v", settings)
 	}
-	if edit := h.press(21, 101, settingsMessageID(20), "google:mail-on:"+sim.Subject(aliceWork)); !strings.Contains(edit.text, "Mail not allowed") {
+	page := h.openSettingsPage(21, 101, settingsMessageID(20), "accounts")
+	if !strings.Contains(page.text, "alice@example.com: Google no longer accepts the connection.") ||
+		!strings.Contains(page.text, "alice@work.example: Mail not allowed, Calendar on.") ||
+		slices.Contains(buttonData(page.keyboard), "google:mail-off:"+sim.Subject(aliceMailbox)) {
+		t.Fatalf("settings after revocation = %+v", page)
+	}
+	if edit := h.press(22, 101, settingsMessageID(20), "google:mail-on:"+sim.Subject(aliceWork)); !strings.Contains(edit.text, "Mail not allowed") || !strings.Contains(edit.text, GoogleNotGrantedReply) {
 		t.Fatalf("switching on a product that was not granted = %+v", edit)
-	}
-	if reply := h.nextMessage(); reply.text != GoogleNotGrantedReply {
-		t.Fatalf("not granted reply = %+v", reply)
 	}
 }
 

@@ -32,6 +32,14 @@ type busSection struct {
 
 func (b busSection) prefix() string { return busSectionPrefix }
 
+func (b busSection) summary(ctx context.Context, principalID string) (settingsSummary, error) {
+	status, err := b.bus.Status(ctx, principalID)
+	if err != nil {
+		return settingsSummary{}, err
+	}
+	return settingsSummary{name: "Buses", state: onOff(status.Enabled)}, nil
+}
+
 func (b busSection) render(ctx context.Context, principalID string) (settingsView, error) {
 	status, err := b.bus.Status(ctx, principalID)
 	if err != nil {
@@ -49,16 +57,16 @@ func (b busSection) render(ctx context.Context, principalID string) (settingsVie
 	}, nil
 }
 
-func (b busSection) act(ctx context.Context, principalID string, _ int64, action string) (string, error) {
+func (b busSection) act(ctx context.Context, principalID string, _ int64, action string) (settingsOutcome, error) {
 	switch action {
 	case busOnAction, busOffAction:
 		enabled := action == busOnAction
 		if _, err := b.bus.SetEnabled(ctx, principalID, enabled); err != nil {
-			return "", err
+			return settingsOutcome{}, err
 		}
 		b.telemetry.ContextLogger(ctx, b.logger).InfoContext(ctx, "bus.changed", "principal_id", principalID, "enabled", enabled)
-		return "", nil
+		return settingsOutcome{}, nil
 	default:
-		return "", errUnknownSettingsAction
+		return settingsOutcome{}, errUnknownSettingsAction
 	}
 }

@@ -40,26 +40,38 @@ func (h *conversationHarness) requestSettings(updateID, userID int64) sentMessag
 	return message
 }
 
-// press submits a button press and expects the answer followed by the refreshed settings message.
+// press submits a button press and expects the answer followed by the refreshed settings page.
 func (h *conversationHarness) press(updateID, userID, messageID int64, data string) editedMessage {
 	h.t.Helper()
 	h.push(callbackUpdate(updateID, userID, messageID, data))
 	h.wantAnswer(updateID)
 	edit := h.nextEdit()
-	if edit.chatID != userID || edit.messageID != messageID || !strings.HasPrefix(edit.text, SettingsTitle+"\n") {
+	if edit.chatID != userID || edit.messageID != messageID || !strings.HasPrefix(edit.text, SettingsTitle) {
 		h.t.Fatalf("settings edit = %+v", edit)
 	}
 	return edit
 }
 
-// requestConnect opens the settings, presses Connect, and returns the user code from the instructions.
-func (h *conversationHarness) requestConnect(settingsUpdateID, pressUpdateID, userID int64) string {
+// openSettingsPage opens a settings page such as "tools" or "accounts.google" on an existing
+// settings message.
+func (h *conversationHarness) openSettingsPage(updateID, userID, messageID int64, page string) editedMessage {
 	h.t.Helper()
-	settings := h.requestSettings(settingsUpdateID, userID)
-	if !strings.Contains(settings.text, ModelNotConnectedLine) || !slices.Equal(buttonData(settings.keyboard), []string{"model:connect"}) {
+	return h.press(updateID, userID, messageID, settingsNavPrefix+":"+page)
+}
+
+// requestConnect opens the settings and the model page, presses Connect, and returns the user code
+// from the instructions. It consumes three update IDs starting at firstUpdateID.
+func (h *conversationHarness) requestConnect(firstUpdateID, userID int64) string {
+	h.t.Helper()
+	settings := h.requestSettings(firstUpdateID, userID)
+	if !strings.Contains(settings.text, "Model: not connected") || !slices.Equal(buttonData(settings.keyboard), []string{"nav:model"}) {
 		h.t.Fatalf("settings before connect = %+v", settings)
 	}
-	if edit := h.press(pressUpdateID, userID, settingsMessageID(settingsUpdateID), "model:connect"); !strings.Contains(edit.text, ModelNotConnectedLine) {
+	page := h.openSettingsPage(firstUpdateID+1, userID, settingsMessageID(firstUpdateID), "model")
+	if !strings.Contains(page.text, ModelNotConnectedLine) || !slices.Equal(buttonData(page.keyboard), []string{"model:connect", "nav:root"}) {
+		h.t.Fatalf("model page before connect = %+v", page)
+	}
+	if edit := h.press(firstUpdateID+2, userID, settingsMessageID(firstUpdateID), "model:connect"); !strings.Contains(edit.text, ModelNotConnectedLine) {
 		h.t.Fatalf("settings after pressing connect = %+v", edit)
 	}
 	message := h.nextMessage()
@@ -132,7 +144,7 @@ func TestConnectCeremonyBindsSubscription(t *testing.T) {
 			t.Fatalf("registered commands %v, want settings without the connection commands", names)
 		}
 	}
-	code := h.requestConnect(1, 2, 101)
+	code := h.requestConnect(1, 101)
 	if _, exists := h.credentialFile("alice"); exists {
 		t.Fatal("credential written before approval")
 	}
@@ -166,18 +178,21 @@ func TestConnectCeremonyBindsSubscription(t *testing.T) {
 		t.Fatalf("provider requests did not follow the protocol: %+v", h.auth.Requests())
 	}
 
-	settings := h.requestSettings(3, 101)
-	if !strings.Contains(settings.text, "ending in 1234") || !slices.Equal(buttonData(settings.keyboard), []string{"model:disconnect"}) {
+	settings := h.requestSettings(4, 101)
+	if !strings.Contains(settings.text, "Model: connected") || !slices.Equal(buttonData(settings.keyboard), []string{"nav:model"}) {
 		t.Fatalf("settings after connect = %+v", settings)
 	}
-	h.push(textUpdate(4, 101, "hello"))
+	if page := h.openSettingsPage(5, 101, settingsMessageID(4), "model"); !strings.Contains(page.text, "ending in 1234") || !slices.Equal(buttonData(page.keyboard), []string{"model:disconnect", "nav:root"}) {
+		t.Fatalf("model page after connect = %+v", page)
+	}
+	h.push(textUpdate(6, 101, "hello"))
 	call := receive(t, h.ctx, runtime.calls)
 	if call.request.PrincipalID != "alice" {
 		t.Fatalf("unexpected principal %+v", call.request)
 	}
 	call.answer <- agentruntimeResult("hi")
-	h.wantReply(101, 4, "hi")
-	h.waitState(4, "delivered")
+	h.wantReply(101, 6, "hi")
+	h.waitState(6, "delivered")
 	h.assertNoSecretLeaked("acct-alice-1234")
 }
 
@@ -185,21 +200,24 @@ func TestConnectOutcomes(t *testing.T) {
 	t.Run("denied", func(t *testing.T) {
 		h := newConversationHarness(t, newControlledRuntime())
 		h.start()
-		code := h.requestConnect(1, 2, 101)
+		code := h.requestConnect(1, 101)
 		h.auth.Deny(code)
 		h.wantMessage(101, connection.ConnectDeniedReply)
 		if _, exists := h.credentialFile("alice"); exists {
 			t.Fatal("denied ceremony wrote a credential")
 		}
-		settings := h.requestSettings(3, 101)
-		if !strings.Contains(settings.text, ModelNotConnectedLine) || !slices.Equal(buttonData(settings.keyboard), []string{"model:connect"}) {
+		settings := h.requestSettings(4, 101)
+		if !strings.Contains(settings.text, "Model: not connected") || !slices.Equal(buttonData(settings.keyboard), []string{"nav:model"}) {
 			t.Fatalf("settings after denial = %+v", settings)
+		}
+		if page := h.openSettingsPage(5, 101, settingsMessageID(4), "model"); !slices.Equal(buttonData(page.keyboard), []string{"model:connect", "nav:root"}) {
+			t.Fatalf("model page after denial = %+v", page)
 		}
 	})
 	t.Run("expired", func(t *testing.T) {
 		h := newConversationHarnessWithOptions(t, newControlledRuntime(), harnessOptions{codeTimeout: 2 * time.Second})
 		h.start()
-		h.requestConnect(1, 2, 101)
+		h.requestConnect(1, 101)
 		h.wantMessage(101, connection.ConnectExpiredReply)
 		if _, exists := h.credentialFile("alice"); exists {
 			t.Fatal("expired ceremony wrote a credential")
@@ -208,8 +226,8 @@ func TestConnectOutcomes(t *testing.T) {
 	t.Run("replaced", func(t *testing.T) {
 		h := newConversationHarness(t, newControlledRuntime())
 		h.start()
-		first := h.requestConnect(1, 2, 101)
-		second := h.requestConnect(3, 4, 101)
+		first := h.requestConnect(1, 101)
+		second := h.requestConnect(4, 101)
 		h.auth.Approve(first, "acct-old")
 		h.auth.Approve(second, "acct-new")
 		h.wantMessage(101, connection.ConnectedReply)
@@ -217,14 +235,15 @@ func TestConnectOutcomes(t *testing.T) {
 		if !exists || record["accountId"] != "acct-new" {
 			t.Fatalf("credential = %v exists=%v", record, exists)
 		}
-		if settings := h.requestSettings(5, 101); !strings.Contains(settings.text, "ending in -new") {
-			t.Fatalf("after replacement got %+v", settings)
+		h.requestSettings(7, 101)
+		if page := h.openSettingsPage(8, 101, settingsMessageID(7), "model"); !strings.Contains(page.text, "ending in -new") {
+			t.Fatalf("after replacement got %+v", page)
 		}
 	})
 	t.Run("pending as error then approved", func(t *testing.T) {
 		h := newConversationHarness(t, newControlledRuntime())
 		h.start()
-		code := h.requestConnect(1, 2, 101)
+		code := h.requestConnect(1, 101)
 		h.auth.PendingAsError(code)
 		h.auth.Approve(code, "acct-alice")
 		h.wantMessage(101, connection.ConnectedReply)
@@ -232,7 +251,7 @@ func TestConnectOutcomes(t *testing.T) {
 	t.Run("slow down", func(t *testing.T) {
 		h := newConversationHarness(t, newControlledRuntime())
 		h.start()
-		code := h.requestConnect(1, 2, 101)
+		code := h.requestConnect(1, 101)
 		h.auth.SlowDownOnce(code)
 		h.auth.Approve(code, "acct-alice")
 		h.wantMessage(101, connection.ConnectedReply)
@@ -244,7 +263,7 @@ func TestAccountBoundToAnotherPrincipalIsRejected(t *testing.T) {
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "acct-shared")
 	h.start()
-	code := h.requestConnect(1, 2, 202)
+	code := h.requestConnect(1, 202)
 	h.auth.Approve(code, "acct-shared")
 	h.wantMessage(202, connection.AccountAlreadyBoundReply)
 	if _, exists := h.credentialFile("bob"); exists {
@@ -253,9 +272,9 @@ func TestAccountBoundToAnotherPrincipalIsRejected(t *testing.T) {
 	if _, found, err := h.store.LoadModelConnection(h.ctx, "bob"); err != nil || found {
 		t.Fatalf("bob has a connection row: found=%v err=%v", found, err)
 	}
-	h.push(textUpdate(3, 202, "hello"))
-	h.wantReply(202, 3, conversation.NotConnectedReply)
-	h.waitState(3, "delivered")
+	h.push(textUpdate(4, 202, "hello"))
+	h.wantReply(202, 4, conversation.NotConnectedReply)
+	h.waitState(4, "delivered")
 	select {
 	case call := <-runtime.calls:
 		t.Fatalf("unconnected principal reached the runtime: %+v", call.request)
@@ -297,11 +316,14 @@ func TestDisconnectCancelsRunningTurnAndBlocksQueuedWork(t *testing.T) {
 	h.push(textUpdate(1, 101, "long request"))
 	call := receive(t, h.ctx, runtime.calls)
 	settings := h.requestSettings(2, 101)
-	if !strings.Contains(settings.text, "ending in lice") || !slices.Equal(buttonData(settings.keyboard), []string{"model:disconnect"}) {
+	if !strings.Contains(settings.text, "Model: connected") || !slices.Equal(buttonData(settings.keyboard), []string{"nav:model"}) {
 		t.Fatalf("settings while connected = %+v", settings)
 	}
-	edit := h.press(3, 101, settingsMessageID(2), "model:disconnect")
-	if !strings.Contains(edit.text, ModelNotConnectedLine) || !slices.Equal(buttonData(edit.keyboard), []string{"model:connect"}) {
+	if page := h.openSettingsPage(3, 101, settingsMessageID(2), "model"); !strings.Contains(page.text, "ending in lice") || !slices.Equal(buttonData(page.keyboard), []string{"model:disconnect", "nav:root"}) {
+		t.Fatalf("model page while connected = %+v", page)
+	}
+	edit := h.press(4, 101, settingsMessageID(2), "model:disconnect")
+	if !strings.Contains(edit.text, ModelNotConnectedLine) || !slices.Equal(buttonData(edit.keyboard), []string{"model:connect", "nav:root"}) {
 		t.Fatalf("settings after disconnect = %+v", edit)
 	}
 	receive(t, h.ctx, call.ctx.Done())
@@ -312,11 +334,11 @@ func TestDisconnectCancelsRunningTurnAndBlocksQueuedWork(t *testing.T) {
 	if _, found, err := h.store.LoadModelConnection(h.ctx, "alice"); err != nil || found {
 		t.Fatalf("connection row survived disconnect: found=%v err=%v", found, err)
 	}
-	h.push(textUpdate(4, 101, "hello again"))
-	h.wantReply(101, 4, conversation.NotConnectedReply)
-	h.waitState(4, "delivered")
+	h.push(textUpdate(5, 101, "hello again"))
+	h.wantReply(101, 5, conversation.NotConnectedReply)
+	h.waitState(5, "delivered")
 	// A stale Disconnect button on the old settings message only refreshes the view.
-	if edit := h.press(5, 101, settingsMessageID(2), "model:disconnect"); !strings.Contains(edit.text, ModelNotConnectedLine) {
+	if edit := h.press(6, 101, settingsMessageID(2), "model:disconnect"); !strings.Contains(edit.text, ModelNotConnectedLine) {
 		t.Fatalf("stale disconnect rendered %+v", edit)
 	}
 	select {
@@ -331,23 +353,23 @@ func TestConnectionSurvivesRestartButPendingCeremonyDoesNot(t *testing.T) {
 	h := newConversationHarness(t, runtime)
 	h.provision("bob", "acct-bob")
 	h.start()
-	code := h.requestConnect(1, 2, 101)
-	h.waitOffset(3)
+	code := h.requestConnect(1, 101)
+	h.waitOffset(4)
 	h.stop()
 	h.start()
 	h.auth.Approve(code, "acct-alice")
-	if settings := h.requestSettings(3, 101); !strings.Contains(settings.text, ModelNotConnectedLine) {
+	if settings := h.requestSettings(4, 101); !strings.Contains(settings.text, "Model: not connected") {
 		t.Fatalf("stale ceremony connected after restart: %+v", settings)
 	}
-	h.push(textUpdate(4, 202, "hello"))
+	h.push(textUpdate(5, 202, "hello"))
 	call := receive(t, h.ctx, runtime.calls)
 	if call.request.PrincipalID != "bob" {
 		t.Fatalf("unexpected principal %+v", call.request)
 	}
 	call.answer <- agentruntimeResult("hi bob")
-	h.wantReply(202, 4, "hi bob")
-	h.waitState(4, "delivered")
-	fresh := h.requestConnect(5, 6, 101)
+	h.wantReply(202, 5, "hi bob")
+	h.waitState(5, "delivered")
+	fresh := h.requestConnect(6, 101)
 	h.auth.Approve(fresh, "acct-alice")
 	h.wantMessage(101, connection.ConnectedReply)
 	if _, exists := h.credentialFile("alice"); !exists {

@@ -35,6 +35,18 @@ type homeAssistantSection struct {
 
 func (h homeAssistantSection) prefix() string { return homeAssistantSectionPrefix }
 
+func (h homeAssistantSection) summary(ctx context.Context, principalID string) (settingsSummary, error) {
+	status, err := h.homeAssistant.Status(ctx, principalID)
+	if err != nil {
+		return settingsSummary{}, err
+	}
+	summary := settingsSummary{name: "Home", state: onOff(status.Enabled)}
+	if exposure := h.homeAssistant.Exposure(ctx); status.Enabled && (!exposure.Checked || len(exposure.Conflicts) > 0) {
+		summary.attention = "Home actions are paused; see Home & files."
+	}
+	return summary, nil
+}
+
 func (h homeAssistantSection) render(ctx context.Context, principalID string) (settingsView, error) {
 	status, err := h.homeAssistant.Status(ctx, principalID)
 	if err != nil {
@@ -60,16 +72,16 @@ func (h homeAssistantSection) render(ctx context.Context, principalID string) (s
 	}, nil
 }
 
-func (h homeAssistantSection) act(ctx context.Context, principalID string, _ int64, action string) (string, error) {
+func (h homeAssistantSection) act(ctx context.Context, principalID string, _ int64, action string) (settingsOutcome, error) {
 	switch action {
 	case homeAssistantOnAction, homeAssistantOffAction:
 		enabled := action == homeAssistantOnAction
 		if _, err := h.homeAssistant.SetEnabled(ctx, principalID, enabled); err != nil {
-			return "", err
+			return settingsOutcome{}, err
 		}
 		h.telemetry.ContextLogger(ctx, h.logger).InfoContext(ctx, "homeassistant.home.changed", "principal_id", principalID, "enabled", enabled)
-		return "", nil
+		return settingsOutcome{}, nil
 	default:
-		return "", errUnknownSettingsAction
+		return settingsOutcome{}, errUnknownSettingsAction
 	}
 }

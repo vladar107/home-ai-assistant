@@ -629,24 +629,25 @@ func (s *Service) processCallback(ctx context.Context, callback *CallbackQuery) 
 	}
 
 	result := processingResult{event: "telegram.callback.handled", principalID: principalID, command: "settings"}
-	followUp := ""
-	section, action, known := settingsSectionFor(s.sections, callback.Data)
-	if known {
-		followUp, err = section.act(ctx, principalID, chatID, action)
-		if errors.Is(err, errUnknownSettingsAction) {
-			known, err = false, nil
-		}
-		if err != nil {
+	page, outcome := settingsRootPage, settingsOutcome{}
+	if target, isNav := settingsNavFor(callback.Data); isNav {
+		page, result.command = target, "settings.nav"
+	} else if section, action, known := settingsSectionFor(s.sections, callback.Data); known {
+		page = settingsPageOf(s.sections, section.prefix())
+		outcome, err = section.act(ctx, principalID, chatID, action)
+		switch {
+		case errors.Is(err, errUnknownSettingsAction):
+			result.reason = "unknown_action"
+		case err != nil:
 			return processingResult{}, "settings_action", err
+		default:
+			result.command = section.prefix() + "." + action
 		}
-	}
-	if known {
-		result.command = section.prefix() + "." + action
 	} else {
 		result.reason = "unknown_action"
 	}
 
-	text, keyboard, err := renderSettings(ctx, principalID, s.sections)
+	text, keyboard, err := renderSettings(ctx, principalID, s.sections, page, outcome.note)
 	if err != nil {
 		return processingResult{}, "render_settings", err
 	}
@@ -655,8 +656,8 @@ func (s *Service) processCallback(ctx context.Context, callback *CallbackQuery) 
 		// Telegram no longer allows editing an old message; a fresh settings message replaces it.
 		err = s.client.SendKeyboard(ctx, chatID, 0, text, keyboard)
 	}
-	if err == nil && followUp != "" {
-		err = s.client.SendReply(ctx, chatID, 0, followUp)
+	if err == nil && outcome.message != "" {
+		err = s.client.SendReply(ctx, chatID, 0, outcome.message)
 	}
 	if err != nil {
 		if isPermanentAPIError(err) {
@@ -838,7 +839,7 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		if len(s.sections) == 0 {
 			return HelpReply, nil, nil
 		}
-		text, keyboard, err := renderSettings(ctx, principalID, s.sections)
+		text, keyboard, err := renderSettings(ctx, principalID, s.sections, settingsRootPage, "")
 		if err != nil {
 			return "", nil, err
 		}

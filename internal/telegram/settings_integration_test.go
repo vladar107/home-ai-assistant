@@ -25,11 +25,18 @@ func TestSettingsCallbacksAreAuthorizedAnsweredAndRefreshed(t *testing.T) {
 		callbackUpdate(6, 101, settingsMessageID(1), "nope"),
 		callbackUpdate(7, 101, settingsMessageID(1), strings.Repeat("model:disconnect", 5)),
 	)
-	// Only Alice's presses are answered, and an unknown action just refreshes the current view.
+	// Only Alice's presses are answered; an unknown action refreshes its section and unknown data the overview.
 	for _, id := range []int64{5, 6, 7} {
 		h.wantAnswer(id)
 		edit := h.nextEdit()
-		if edit.messageID != settingsMessageID(1) || !strings.Contains(edit.text, "ending in 1111") || !slices.Equal(buttonData(edit.keyboard), []string{"model:disconnect"}) {
+		if edit.messageID != settingsMessageID(1) {
+			t.Fatalf("unknown action %d rendered %+v", id, edit)
+		}
+		if id == 5 {
+			if !strings.HasPrefix(edit.text, "Settings › Model") || !strings.Contains(edit.text, "ending in 1111") || !slices.Equal(buttonData(edit.keyboard), []string{"model:disconnect", "nav:root"}) {
+				t.Fatalf("unknown action %d rendered %+v", id, edit)
+			}
+		} else if !strings.Contains(edit.text, "Model: connected") || !slices.Equal(buttonData(edit.keyboard), []string{"nav:model"}) {
 			t.Fatalf("unknown action %d rendered %+v", id, edit)
 		}
 	}
@@ -72,7 +79,7 @@ func TestSettingsEditFallsBackWhenTelegramRejectsTheEdit(t *testing.T) {
 		t.Fatalf("rejected edit = %+v", edit)
 	}
 	fresh := h.nextMessage()
-	if fresh.chatID != 101 || fresh.replyTo != 0 || !strings.Contains(fresh.text, ModelNotConnectedLine) || !slices.Equal(buttonData(fresh.keyboard), []string{"model:connect"}) {
+	if fresh.chatID != 101 || fresh.replyTo != 0 || !strings.Contains(fresh.text, ModelNotConnectedLine) || !slices.Equal(buttonData(fresh.keyboard), []string{"model:connect", "nav:root"}) {
 		t.Fatalf("fallback settings message = %+v", fresh)
 	}
 

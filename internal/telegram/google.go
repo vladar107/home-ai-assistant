@@ -71,6 +71,31 @@ type googleSection struct {
 
 func (g googleSection) prefix() string { return googleSectionPrefix }
 
+func (g googleSection) summary(ctx context.Context, principalID string) (settingsSummary, error) {
+	statuses, err := g.google.Status(ctx, principalID)
+	if err != nil {
+		return settingsSummary{}, err
+	}
+	summary := settingsSummary{name: "Google", state: "not connected"}
+	switch len(statuses) {
+	case 0:
+	case 1:
+		summary.state = "1 account"
+	default:
+		summary.state = fmt.Sprintf("%d accounts", len(statuses))
+	}
+	var stale []string
+	for _, status := range statuses {
+		if status.NeedsReconnect {
+			stale = append(stale, status.Address)
+		}
+	}
+	if len(stale) > 0 {
+		summary.attention = "Reconnect " + strings.Join(stale, ", ") + " in Accounts › Google."
+	}
+	return summary, nil
+}
+
 // render lists every account under a header button showing its address, followed by a row of its
 // action buttons.
 func (g googleSection) render(ctx context.Context, principalID string) (settingsView, error) {
@@ -116,32 +141,32 @@ func productButton(accountID string, product google.Product, name string, enable
 	}
 }
 
-func (g googleSection) act(ctx context.Context, principalID string, _ int64, action string) (string, error) {
+func (g googleSection) act(ctx context.Context, principalID string, _ int64, action string) (settingsOutcome, error) {
 	if action == googleConnectAction {
 		link, err := g.google.BeginSignIn(principalID)
 		if err != nil {
-			return "", err
+			return settingsOutcome{}, err
 		}
 		g.telemetry.ContextLogger(ctx, g.logger).InfoContext(ctx, "google.signin.started", "principal_id", principalID)
-		return GoogleSignInInstructions + link, nil
+		return settingsOutcome{message: GoogleSignInInstructions + link}, nil
 	}
 	verb, accountID, found := strings.Cut(action, ":")
 	if !found || accountID == "" {
-		return "", errUnknownSettingsAction
+		return settingsOutcome{}, errUnknownSettingsAction
 	}
 	switch verb {
 	case googleDisconnectAction:
 		_, err := g.google.Disconnect(ctx, principalID, accountID)
-		return "", err
+		return settingsOutcome{}, err
 	case "mail-on", "mail-off", "calendar-on", "calendar-off":
 		product, state, _ := strings.Cut(verb, "-")
 		_, err := g.google.SetProduct(ctx, principalID, accountID, google.Product(product), state == "on")
 		if errors.Is(err, google.ErrNotGranted) {
-			return GoogleNotGrantedReply, nil
+			return settingsOutcome{note: GoogleNotGrantedReply}, nil
 		}
-		return "", err
+		return settingsOutcome{}, err
 	default:
-		return "", errUnknownSettingsAction
+		return settingsOutcome{}, errUnknownSettingsAction
 	}
 }
 

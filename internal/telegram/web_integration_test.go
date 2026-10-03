@@ -139,52 +139,56 @@ func TestWebAccessSwitchControlsSearchAndWebTools(t *testing.T) {
 	h.push(textUpdate(2, 101, "/privacy"))
 	h.wantReply(101, 2, ConversationPrivacyReply+" "+AttachmentPrivacyLine+" "+WebPrivacyLine)
 
-	settings := h.requestSettings(3, 101)
+	overview := h.requestSettings(3, 101)
+	if !strings.Contains(overview.text, "Everyday tools: Web on") || !slices.Contains(buttonData(overview.keyboard), "nav:tools") {
+		t.Fatalf("settings overview = %+v", overview)
+	}
+	settings := h.openSettingsPage(4, 101, settingsMessageID(3), "tools")
 	if !strings.Contains(settings.text, WebOnLine) || !slices.Contains(buttonData(settings.keyboard), "web:off") || slices.Contains(buttonData(settings.keyboard), "web:on") {
 		t.Fatalf("settings by default = %+v", settings)
 	}
 
-	h.push(textUpdate(4, 101, "fixture:web-search"))
-	h.wantReply(101, 4, "Searching.\n\nfound: synthetic search answer")
-	h.waitState(4, "delivered")
+	h.push(textUpdate(5, 101, "fixture:web-search"))
+	h.wantReply(101, 5, "Searching.\n\nfound: synthetic search answer")
+	h.waitState(5, "delivered")
 	if logs := h.logs.String(); !strings.Contains(logs, "conversation.web_search.called") || !strings.Contains(logs, "principal_id=alice tool=web_search") {
 		t.Fatalf("search call not logged: %s", logs)
 	}
 	assertWebTurn(t, latestReport(t, profiles, "alice"), extension)
 
 	// The real guard refuses a private address before any connection is made.
-	h.push(textUpdate(5, 101, `fixture:call fetch_page {"url":"http://127.0.0.1/"}`))
+	h.push(textUpdate(6, 101, `fixture:call fetch_page {"url":"http://127.0.0.1/"}`))
 	refused := h.nextMessage()
 	if refused.chatID != 101 || !strings.Contains(refused.text, "error:") || !strings.Contains(refused.text, "private network") {
 		t.Fatalf("fetch of a private address = %+v", refused)
 	}
-	h.waitState(5, "delivered")
+	h.waitState(6, "delivered")
 
-	edit := h.press(6, 101, settingsMessageID(3), "web:off")
-	if !strings.Contains(edit.text, WebOffLine) || !slices.Contains(buttonData(edit.keyboard), "web:on") || slices.Contains(buttonData(edit.keyboard), "web:off") {
+	edit := h.press(7, 101, settingsMessageID(3), "web:off")
+	if !strings.Contains(edit.text, WebOffLine) || !slices.Contains(buttonData(edit.keyboard), "web:on") || !slices.Contains(buttonData(edit.keyboard), "nav:root") || slices.Contains(buttonData(edit.keyboard), "web:off") {
 		t.Fatalf("settings after turning web access off = %+v", edit)
 	}
-	h.push(textUpdate(7, 101, "hello again"))
-	h.wantReply(101, 7, "reply: hello again")
-	h.waitState(7, "delivered")
+	h.push(textUpdate(8, 101, "hello again"))
+	h.wantReply(101, 8, "reply: hello again")
+	h.waitState(8, "delivered")
 	assertToolLess(t, latestReport(t, profiles, "alice"))
-	h.push(textUpdate(8, 101, "/privacy"))
-	h.wantReply(101, 8, ConversationPrivacyReply+" "+AttachmentPrivacyLine)
+	h.push(textUpdate(9, 101, "/privacy"))
+	h.wantReply(101, 9, ConversationPrivacyReply+" "+AttachmentPrivacyLine)
 
-	h.push(textUpdate(9, 202, "hello"))
-	h.wantReply(202, 9, "reply: hello")
-	h.waitState(9, "delivered")
+	h.push(textUpdate(10, 202, "hello"))
+	h.wantReply(202, 10, "reply: hello")
+	h.waitState(10, "delivered")
 	assertWebTurn(t, latestReport(t, profiles, "bob"), extension)
-	h.push(textUpdate(10, 202, "/privacy"))
-	h.wantReply(202, 10, ConversationPrivacyReply+" "+AttachmentPrivacyLine+" "+WebPrivacyLine)
+	h.push(textUpdate(11, 202, "/privacy"))
+	h.wantReply(202, 11, ConversationPrivacyReply+" "+AttachmentPrivacyLine+" "+WebPrivacyLine)
 
-	h.requestSettings(11, 101)
-	if edit := h.press(12, 101, settingsMessageID(11), "web:on"); !strings.Contains(edit.text, WebOnLine) || !slices.Contains(buttonData(edit.keyboard), "web:off") {
+	h.requestSettings(12, 101)
+	if edit := h.press(13, 101, settingsMessageID(12), "web:on"); !strings.Contains(edit.text, WebOnLine) || !slices.Contains(buttonData(edit.keyboard), "web:off") {
 		t.Fatalf("settings after turning web access back on = %+v", edit)
 	}
-	h.push(textUpdate(13, 101, "hello once more"))
-	h.wantReply(101, 13, "reply: hello once more")
-	h.waitState(13, "delivered")
+	h.push(textUpdate(14, 101, "hello once more"))
+	h.wantReply(101, 14, "reply: hello once more")
+	h.waitState(14, "delivered")
 	assertWebTurn(t, latestReport(t, profiles, "alice"), extension)
 }
 

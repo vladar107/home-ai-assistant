@@ -28,6 +28,14 @@ type typeSafeSection struct {
 
 func (t typeSafeSection) prefix() string { return typeSafeSectionPrefix }
 
+func (t typeSafeSection) summary(ctx context.Context, principalID string) (settingsSummary, error) {
+	enabled, err := t.typeSafe.Status(ctx, principalID)
+	if err != nil {
+		return settingsSummary{}, err
+	}
+	return settingsSummary{name: "Safety checks", state: "safety checks " + onOff(enabled)}, nil
+}
+
 func (t typeSafeSection) render(ctx context.Context, principalID string) (settingsView, error) {
 	enabled, err := t.typeSafe.Status(ctx, principalID)
 	if err != nil {
@@ -45,18 +53,18 @@ func (t typeSafeSection) render(ctx context.Context, principalID string) (settin
 	}, nil
 }
 
-func (t typeSafeSection) act(ctx context.Context, principalID string, _ int64, action string) (string, error) {
+func (t typeSafeSection) act(ctx context.Context, principalID string, _ int64, action string) (settingsOutcome, error) {
 	switch action {
 	case typeSafeOnAction:
 		if err := t.typeSafe.Enable(ctx, principalID); err != nil {
-			return "", err
+			return settingsOutcome{}, err
 		}
 	case typeSafeOffAction:
 		if err := t.typeSafe.Disable(ctx, principalID); err != nil {
-			return "", err
+			return settingsOutcome{}, err
 		}
 	default:
-		return "", errUnknownSettingsAction
+		return settingsOutcome{}, errUnknownSettingsAction
 	}
-	return "", nil
+	return settingsOutcome{}, nil
 }

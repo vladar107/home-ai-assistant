@@ -59,25 +59,29 @@ func TestBusesSwitchControlsToolsPerUser(t *testing.T) {
 	h.push(textUpdate(2, 101, "/privacy"))
 	h.wantReply(101, 2, ConversationPrivacyReply+" "+AttachmentPrivacyLine+" "+BusPrivacyLine+" "+BusPlanningPrivacyLine)
 
-	settings := h.requestSettings(3, 101)
+	overview := h.requestSettings(3, 101)
+	if !strings.Contains(overview.text, "Everyday tools: Buses on") || !slices.Contains(buttonData(overview.keyboard), "nav:tools") {
+		t.Fatalf("settings overview = %+v", overview)
+	}
+	settings := h.openSettingsPage(4, 101, settingsMessageID(3), "tools")
 	if !strings.Contains(settings.text, BusOnLine) || !strings.Contains(settings.text, BusPlanningLine) ||
 		!slices.Contains(buttonData(settings.keyboard), "bus:off") || slices.Contains(buttonData(settings.keyboard), "bus:on") {
 		t.Fatalf("settings by default = %+v", settings)
 	}
 
-	edit := h.press(4, 101, settingsMessageID(3), "bus:off")
-	if !strings.Contains(edit.text, BusOffLine) || !slices.Contains(buttonData(edit.keyboard), "bus:on") || slices.Contains(buttonData(edit.keyboard), "bus:off") {
+	edit := h.press(5, 101, settingsMessageID(3), "bus:off")
+	if !strings.Contains(edit.text, BusOffLine) || !slices.Contains(buttonData(edit.keyboard), "bus:on") || !slices.Contains(buttonData(edit.keyboard), "nav:root") || slices.Contains(buttonData(edit.keyboard), "bus:off") {
 		t.Fatalf("settings after turning buses off = %+v", edit)
 	}
-	wantBuses(offered(5, 101), false)
-	h.push(textUpdate(6, 101, "/privacy"))
-	h.wantReply(101, 6, ConversationPrivacyReply+" "+AttachmentPrivacyLine)
+	wantBuses(offered(6, 101), false)
+	h.push(textUpdate(7, 101, "/privacy"))
+	h.wantReply(101, 7, ConversationPrivacyReply+" "+AttachmentPrivacyLine)
 
-	wantBuses(offered(7, 202), true)
+	wantBuses(offered(8, 202), true)
 
-	h.requestSettings(8, 101)
-	if edit := h.press(9, 101, settingsMessageID(8), "bus:on"); !strings.Contains(edit.text, BusOnLine) || !slices.Contains(buttonData(edit.keyboard), "bus:off") {
+	h.requestSettings(9, 101)
+	if edit := h.press(10, 101, settingsMessageID(9), "bus:on"); !strings.Contains(edit.text, BusOnLine) || !slices.Contains(buttonData(edit.keyboard), "bus:off") {
 		t.Fatalf("settings after turning buses back on = %+v", edit)
 	}
-	wantBuses(offered(10, 101), true)
+	wantBuses(offered(11, 101), true)
 }

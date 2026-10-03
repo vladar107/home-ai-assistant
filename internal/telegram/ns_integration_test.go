@@ -68,26 +68,30 @@ func TestTrainsSwitchControlsToolsPerUser(t *testing.T) {
 	h.push(textUpdate(2, 101, "/privacy"))
 	h.wantReply(101, 2, ConversationPrivacyReply+" "+AttachmentPrivacyLine+" "+NSPrivacyLine)
 
-	settings := h.requestSettings(3, 101)
+	overview := h.requestSettings(3, 101)
+	if !strings.Contains(overview.text, "Everyday tools: Trains on") || !slices.Contains(buttonData(overview.keyboard), "nav:tools") {
+		t.Fatalf("settings overview = %+v", overview)
+	}
+	settings := h.openSettingsPage(4, 101, settingsMessageID(3), "tools")
 	if !strings.Contains(settings.text, NSOnLine) || !slices.Contains(buttonData(settings.keyboard), "ns:off") || slices.Contains(buttonData(settings.keyboard), "ns:on") {
 		t.Fatalf("settings by default = %+v", settings)
 	}
 
-	edit := h.press(4, 101, settingsMessageID(3), "ns:off")
-	if !strings.Contains(edit.text, NSOffLine) || !slices.Contains(buttonData(edit.keyboard), "ns:on") || slices.Contains(buttonData(edit.keyboard), "ns:off") {
+	edit := h.press(5, 101, settingsMessageID(3), "ns:off")
+	if !strings.Contains(edit.text, NSOffLine) || !slices.Contains(buttonData(edit.keyboard), "ns:on") || !slices.Contains(buttonData(edit.keyboard), "nav:root") || slices.Contains(buttonData(edit.keyboard), "ns:off") {
 		t.Fatalf("settings after turning trains off = %+v", edit)
 	}
-	wantTrains(offered(5, 101), false)
-	h.push(textUpdate(6, 101, "/privacy"))
-	h.wantReply(101, 6, ConversationPrivacyReply+" "+AttachmentPrivacyLine)
+	wantTrains(offered(6, 101), false)
+	h.push(textUpdate(7, 101, "/privacy"))
+	h.wantReply(101, 7, ConversationPrivacyReply+" "+AttachmentPrivacyLine)
 
-	wantTrains(offered(7, 202), true)
-	h.push(textUpdate(8, 202, "/privacy"))
-	h.wantReply(202, 8, ConversationPrivacyReply+" "+AttachmentPrivacyLine+" "+NSPrivacyLine)
+	wantTrains(offered(8, 202), true)
+	h.push(textUpdate(9, 202, "/privacy"))
+	h.wantReply(202, 9, ConversationPrivacyReply+" "+AttachmentPrivacyLine+" "+NSPrivacyLine)
 
-	h.requestSettings(9, 101)
-	if edit := h.press(10, 101, settingsMessageID(9), "ns:on"); !strings.Contains(edit.text, NSOnLine) || !slices.Contains(buttonData(edit.keyboard), "ns:off") {
+	h.requestSettings(10, 101)
+	if edit := h.press(11, 101, settingsMessageID(10), "ns:on"); !strings.Contains(edit.text, NSOnLine) || !slices.Contains(buttonData(edit.keyboard), "ns:off") {
 		t.Fatalf("settings after turning trains back on = %+v", edit)
 	}
-	wantTrains(offered(11, 101), true)
+	wantTrains(offered(12, 101), true)
 }

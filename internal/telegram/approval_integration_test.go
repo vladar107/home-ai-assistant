@@ -32,7 +32,9 @@ func (h *conversationHarness) enableNotionWrites(settingsUpdate, pressUpdate, us
 	h.t.Helper()
 	h.requestSettings(settingsUpdate, userID)
 	edit := h.press(pressUpdate, userID, settingsMessageID(settingsUpdate), "notion:writes-on")
-	h.wantMessage(userID, NotionWritesOnReply)
+	if !strings.Contains(edit.text, NotionWritesOnReply) {
+		h.t.Fatalf("settings after enabling writes = %+v", edit)
+	}
 	return edit
 }
 
@@ -273,8 +275,9 @@ func TestNotionWritesAreProposedConfirmedAndExecutedOnce(t *testing.T) {
 
 	// Writes off again removes the write tools.
 	h.requestSettings(20, 101)
-	h.press(21, 101, settingsMessageID(20), "notion:writes-off")
-	h.wantMessage(101, NotionWritesOffReply)
+	if edit := h.press(21, 101, settingsMessageID(20), "notion:writes-off"); !strings.Contains(edit.text, NotionWritesOffReply) {
+		t.Fatalf("settings after disabling writes = %+v", edit)
+	}
 	h.push(textUpdate(22, 101, "read only again"))
 	call = receive(t, h.ctx, runtime.calls)
 	if len(call.request.Tools.Definitions) != 4 {

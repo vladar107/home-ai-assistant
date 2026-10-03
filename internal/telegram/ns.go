@@ -30,6 +30,14 @@ type nsSection struct {
 
 func (n nsSection) prefix() string { return nsSectionPrefix }
 
+func (n nsSection) summary(ctx context.Context, principalID string) (settingsSummary, error) {
+	status, err := n.ns.Status(ctx, principalID)
+	if err != nil {
+		return settingsSummary{}, err
+	}
+	return settingsSummary{name: "Trains", state: onOff(status.Enabled)}, nil
+}
+
 func (n nsSection) render(ctx context.Context, principalID string) (settingsView, error) {
 	status, err := n.ns.Status(ctx, principalID)
 	if err != nil {
@@ -47,16 +55,16 @@ func (n nsSection) render(ctx context.Context, principalID string) (settingsView
 	}, nil
 }
 
-func (n nsSection) act(ctx context.Context, principalID string, _ int64, action string) (string, error) {
+func (n nsSection) act(ctx context.Context, principalID string, _ int64, action string) (settingsOutcome, error) {
 	switch action {
 	case nsOnAction, nsOffAction:
 		enabled := action == nsOnAction
 		if _, err := n.ns.SetEnabled(ctx, principalID, enabled); err != nil {
-			return "", err
+			return settingsOutcome{}, err
 		}
 		n.telemetry.ContextLogger(ctx, n.logger).InfoContext(ctx, "ns.trains.changed", "principal_id", principalID, "enabled", enabled)
-		return "", nil
+		return settingsOutcome{}, nil
 	default:
-		return "", errUnknownSettingsAction
+		return settingsOutcome{}, errUnknownSettingsAction
 	}
 }

@@ -45,7 +45,11 @@ func TestSettingsShowsNASFoldersAndSavingSwitch(t *testing.T) {
 	h.start()
 	h.provision("alice", "account-alice")
 
-	settings := h.requestSettings(1, 101)
+	overview := h.requestSettings(1, 101)
+	if !strings.Contains(overview.text, "Home &amp; files: NAS saving off") || !slices.Contains(buttonData(overview.keyboard), "nav:home") {
+		t.Fatalf("settings overview = %+v", overview)
+	}
+	settings := h.openSettingsPage(2, 101, settingsMessageID(1), "home")
 	if !strings.Contains(settings.text, "NAS: home, inbox. Saving off, to inbox.") {
 		t.Fatalf("settings = %+v", settings)
 	}
@@ -53,17 +57,15 @@ func TestSettingsShowsNASFoldersAndSavingSwitch(t *testing.T) {
 		t.Fatalf("no saving switch = %+v", settings.keyboard)
 	}
 
-	enabled := h.press(2, 101, settings.messageID, "nas:writes-on")
-	if !strings.Contains(enabled.text, "Saving on, to inbox.") || !slices.Contains(buttonData(enabled.keyboard), "nas:writes-off") {
+	enabled := h.press(3, 101, settingsMessageID(1), "nas:writes-on")
+	if !strings.Contains(enabled.text, "Saving on, to inbox.") || !strings.Contains(enabled.text, NASWritesOnReply) || !slices.Contains(buttonData(enabled.keyboard), "nas:writes-off") || !slices.Contains(buttonData(enabled.keyboard), "nav:root") {
 		t.Fatalf("settings after enabling saving = %+v", enabled)
 	}
-	h.wantMessage(101, NASWritesOnReply)
 
-	disabled := h.press(3, 101, settings.messageID, "nas:writes-off")
-	if !strings.Contains(disabled.text, "Saving off, to inbox.") {
+	disabled := h.press(4, 101, settingsMessageID(1), "nas:writes-off")
+	if !strings.Contains(disabled.text, "Saving off, to inbox.") || !strings.Contains(disabled.text, NASWritesOffReply) {
 		t.Fatalf("settings after disabling saving = %+v", disabled)
 	}
-	h.wantMessage(101, NASWritesOffReply)
 }
 
 // A user with no writable root must not be offered a switch that cannot do anything.
@@ -72,7 +74,8 @@ func TestSettingsHidesSavingSwitchWithoutAWritableRoot(t *testing.T) {
 	h.start()
 	h.provision("alice", "account-alice")
 
-	settings := h.requestSettings(1, 101)
+	h.requestSettings(1, 101)
+	settings := h.openSettingsPage(2, 101, settingsMessageID(1), "home")
 	if !strings.Contains(settings.text, "NAS: home (read-only).") || !strings.Contains(settings.text, NASSavingUnavailableLine) {
 		t.Fatalf("settings without a writable root = %+v", settings)
 	}
@@ -90,7 +93,8 @@ func TestSettingsReportsNoNASFoldersForAnUnconfiguredUser(t *testing.T) {
 	h.start()
 	h.provision("alice", "account-alice")
 
-	settings := h.requestSettings(1, 101)
+	h.requestSettings(1, 101)
+	settings := h.openSettingsPage(2, 101, settingsMessageID(1), "home")
 	if !strings.Contains(settings.text, NASNoAccessLine) {
 		t.Fatalf("settings for an unconfigured user = %+v", settings)
 	}

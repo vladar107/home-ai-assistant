@@ -31,22 +31,26 @@ func TestTypeSafeSettingsToggleThroughTheSettingsFlow(t *testing.T) {
 	if enabled("alice") {
 		t.Fatal("safety checks are on by default")
 	}
-	settings := h.requestSettings(1, 101)
+	overview := h.requestSettings(1, 101)
+	if !strings.Contains(overview.text, "Safety &amp; privacy: safety checks off") || !slices.Equal(buttonData(overview.keyboard), []string{"nav:model", "nav:safety"}) {
+		t.Fatalf("settings overview = %+v", overview)
+	}
+	settings := h.openSettingsPage(2, 101, settingsMessageID(1), "safety")
 	if !strings.Contains(settings.text, "Safety checks (TypeSafe): off.") || !strings.Contains(settings.text, "never sent") ||
 		!slices.Contains(buttonData(settings.keyboard), "typesafe:on") {
 		t.Fatalf("default settings = %+v", settings)
 	}
 
-	on := h.press(2, 101, settingsMessageID(1), "typesafe:on")
-	if !enabled("alice") || enabled("bob") || !strings.Contains(on.text, "Safety checks (TypeSafe): on.") || !slices.Contains(buttonData(on.keyboard), "typesafe:off") {
+	on := h.press(3, 101, settingsMessageID(1), "typesafe:on")
+	if !enabled("alice") || enabled("bob") || !strings.Contains(on.text, "Safety checks (TypeSafe): on.") || !slices.Contains(buttonData(on.keyboard), "typesafe:off") || !slices.Contains(buttonData(on.keyboard), "nav:root") {
 		t.Fatalf("after turning on: %+v", on)
 	}
-	h.push(textUpdate(3, 101, "/privacy"))
+	h.push(textUpdate(4, 101, "/privacy"))
 	if privacy := h.nextMessage(); !strings.Contains(privacy.text, TypeSafePrivacyLine) {
 		t.Fatalf("privacy reply = %q", privacy.text)
 	}
 
-	off := h.press(4, 101, settingsMessageID(1), "typesafe:off")
+	off := h.press(5, 101, settingsMessageID(1), "typesafe:off")
 	if enabled("alice") || !strings.Contains(off.text, "Safety checks (TypeSafe): off.") {
 		t.Fatalf("after turning off: %+v", off)
 	}

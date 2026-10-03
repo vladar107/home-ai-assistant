@@ -121,8 +121,12 @@ func TestNotionOperatorTokenIsAdoptedAndDisconnected(t *testing.T) {
 	h.installNotionToken("bob", "ntn_bogus999")
 	h.start()
 
-	settings := h.requestSettings(1, 101)
-	if !strings.Contains(settings.text, NotionConnectedLine(aliceStatus)) || !slices.Equal(buttonData(settings.keyboard), []string{"model:disconnect", "notion:writes-on", "notion:disconnect"}) {
+	overview := h.requestSettings(1, 101)
+	if !strings.Contains(overview.text, "Accounts: Notion writes off") || !slices.Equal(buttonData(overview.keyboard), []string{"nav:model", "nav:accounts"}) {
+		t.Fatalf("settings overview after adoption = %+v", overview)
+	}
+	settings := h.openSettingsPage(2, 101, settingsMessageID(1), "accounts")
+	if !strings.Contains(settings.text, NotionConnectedLine(aliceStatus)) || !slices.Equal(buttonData(settings.keyboard), []string{"notion:writes-on", "notion:disconnect", "nav:root"}) {
 		t.Fatalf("settings after adoption = %+v", settings)
 	}
 	record, found, err := h.store.LoadIntegrationConnection(h.ctx, "alice", "notion")
@@ -132,13 +136,14 @@ func TestNotionOperatorTokenIsAdoptedAndDisconnected(t *testing.T) {
 	if calls := usersMeRequests(sim); len(calls) != 1 || calls[0].Token != aliceNotionToken || calls[0].Version != notionsim.Version {
 		t.Fatalf("adoption requests = %+v", calls)
 	}
-	h.requestSettings(2, 101)
+	h.requestSettings(3, 101)
 	if calls := usersMeRequests(sim); len(calls) != 1 {
 		t.Fatalf("an adopted token was verified again: %+v", calls)
 	}
 
-	bobSettings := h.requestSettings(3, 202)
-	if !strings.Contains(bobSettings.text, NotionInvalidTokenLine) || !slices.Equal(buttonData(bobSettings.keyboard), []string{"model:disconnect", "notion:disconnect"}) {
+	h.requestSettings(4, 202)
+	bobSettings := h.openSettingsPage(5, 202, settingsMessageID(4), "accounts")
+	if !strings.Contains(bobSettings.text, NotionInvalidTokenLine) || !slices.Equal(buttonData(bobSettings.keyboard), []string{"notion:disconnect", "nav:root"}) {
 		t.Fatalf("settings with an invalid file = %+v", bobSettings)
 	}
 	if _, exists := h.notionTokenFile("bob"); !exists {
@@ -148,21 +153,21 @@ func TestNotionOperatorTokenIsAdoptedAndDisconnected(t *testing.T) {
 		t.Fatalf("invalid token created a row: found=%v err=%v", found, err)
 	}
 
-	h.push(textUpdate(4, 101, "secret_abcDEF123"))
-	if deleted := h.nextDelete(); deleted.chatID != 101 || deleted.messageID != requestMessageID(4) {
+	h.push(textUpdate(6, 101, "secret_abcDEF123"))
+	if deleted := h.nextDelete(); deleted.chatID != 101 || deleted.messageID != requestMessageID(6) {
 		t.Fatalf("token guard deleted %+v", deleted)
 	}
 	h.wantMessage(101, NotionTokenGuardReply)
-	h.push(textUpdate(5, 101, "/privacy"))
-	h.wantReply(101, 5, ConversationPrivacyReply+" "+AttachmentPrivacyLine+" "+NotionPrivacyLine)
+	h.push(textUpdate(7, 101, "/privacy"))
+	h.wantReply(101, 7, ConversationPrivacyReply+" "+AttachmentPrivacyLine+" "+NotionPrivacyLine)
 	select {
 	case call := <-runtime.calls:
 		t.Fatalf("a token-looking message reached the model: %+v", call.request)
 	default:
 	}
 
-	edit := h.press(6, 101, settingsMessageID(1), "notion:disconnect")
-	if !strings.Contains(edit.text, NotionOperatorLine) || !slices.Equal(buttonData(edit.keyboard), []string{"model:disconnect"}) {
+	edit := h.press(8, 101, settingsMessageID(1), "notion:disconnect")
+	if !strings.Contains(edit.text, NotionOperatorLine) || !slices.Equal(buttonData(edit.keyboard), []string{"nav:root"}) {
 		t.Fatalf("settings after disconnect = %+v", edit)
 	}
 	if _, exists := h.notionTokenFile("alice"); exists {
@@ -184,16 +189,20 @@ func TestNotionChatConnectIntake(t *testing.T) {
 	h.provision("bob", "acct-bob-2222")
 	h.start()
 
-	settings := h.requestSettings(1, 101)
-	if !strings.Contains(settings.text, NotionNotConnectedLine) || !slices.Equal(buttonData(settings.keyboard), []string{"model:disconnect", "notion:connect"}) {
+	overview := h.requestSettings(1, 101)
+	if !strings.Contains(overview.text, "Accounts: Notion not connected") || !slices.Equal(buttonData(overview.keyboard), []string{"nav:model", "nav:accounts"}) {
+		t.Fatalf("settings overview before connect = %+v", overview)
+	}
+	settings := h.openSettingsPage(2, 101, settingsMessageID(1), "accounts")
+	if !strings.Contains(settings.text, NotionNotConnectedLine) || !slices.Equal(buttonData(settings.keyboard), []string{"notion:connect", "nav:root"}) {
 		t.Fatalf("settings before connect = %+v", settings)
 	}
-	if edit := h.press(2, 101, settingsMessageID(1), "notion:connect"); !strings.Contains(edit.text, NotionNotConnectedLine) {
+	if edit := h.press(3, 101, settingsMessageID(1), "notion:connect"); !strings.Contains(edit.text, NotionNotConnectedLine) {
 		t.Fatalf("settings after pressing connect = %+v", edit)
 	}
 	h.wantMessage(101, NotionConnectInstructions)
-	h.push(textUpdate(3, 101, aliceNotionToken))
-	if deleted := h.nextDelete(); deleted.chatID != 101 || deleted.messageID != requestMessageID(3) {
+	h.push(textUpdate(4, 101, aliceNotionToken))
+	if deleted := h.nextDelete(); deleted.chatID != 101 || deleted.messageID != requestMessageID(4) {
 		t.Fatalf("token message deletion = %+v", deleted)
 	}
 	h.wantMessage(101, NotionConnectedReply(aliceStatus))
@@ -203,18 +212,19 @@ func TestNotionChatConnectIntake(t *testing.T) {
 	if record, found, err := h.store.LoadIntegrationConnection(h.ctx, "alice", "notion"); err != nil || !found || record.TokenKind != "internal" {
 		t.Fatalf("connection row = %+v found=%v err=%v", record, found, err)
 	}
-	if after := h.requestSettings(4, 101); !strings.Contains(after.text, NotionConnectedLine(aliceStatus)) {
+	h.requestSettings(5, 101)
+	if after := h.openSettingsPage(6, 101, settingsMessageID(5), "accounts"); !strings.Contains(after.text, NotionConnectedLine(aliceStatus)) {
 		t.Fatalf("settings after connect = %+v", after)
 	}
 
 	// A second press replaces the pending intake; a rejected token is deleted and nothing stored.
-	h.requestSettings(5, 202)
-	for _, id := range []int64{6, 7} {
-		h.press(id, 202, settingsMessageID(5), "notion:connect")
+	h.requestSettings(7, 202)
+	for _, id := range []int64{8, 9} {
+		h.press(id, 202, settingsMessageID(7), "notion:connect")
 		h.wantMessage(202, NotionConnectInstructions)
 	}
-	h.push(textUpdate(8, 202, "ntn_wrongtoken"))
-	if deleted := h.nextDelete(); deleted.chatID != 202 || deleted.messageID != requestMessageID(8) {
+	h.push(textUpdate(10, 202, "ntn_wrongtoken"))
+	if deleted := h.nextDelete(); deleted.chatID != 202 || deleted.messageID != requestMessageID(10) {
 		t.Fatalf("rejected token deletion = %+v", deleted)
 	}
 	h.wantMessage(202, NotionInvalidTokenReply)
@@ -223,11 +233,11 @@ func TestNotionChatConnectIntake(t *testing.T) {
 	}
 
 	// Something that is not a token ends the intake without deletion or a model turn.
-	h.press(9, 202, settingsMessageID(5), "notion:connect")
+	h.press(11, 202, settingsMessageID(7), "notion:connect")
 	h.wantMessage(202, NotionConnectInstructions)
-	h.push(textUpdate(10, 202, "how do I get a token?"))
+	h.push(textUpdate(12, 202, "how do I get a token?"))
 	h.wantMessage(202, NotionNotATokenReply)
-	h.waitOffset(11)
+	h.waitOffset(13)
 	select {
 	case deleted := <-h.deletes:
 		t.Fatalf("a non-token message was deleted: %+v", deleted)
@@ -237,28 +247,29 @@ func TestNotionChatConnectIntake(t *testing.T) {
 	}
 
 	// An expired intake treats the next message as conversation.
-	h.press(11, 202, settingsMessageID(5), "notion:connect")
+	h.press(13, 202, settingsMessageID(7), "notion:connect")
 	h.wantMessage(202, NotionConnectInstructions)
 	time.Sleep(400 * time.Millisecond)
-	h.push(textUpdate(12, 202, "hello model"))
+	h.push(textUpdate(14, 202, "hello model"))
 	call := receive(t, h.ctx, runtime.calls)
 	if call.request.PrincipalID != "bob" || call.request.Message != "hello model" || !call.request.Tools.Empty() {
 		t.Fatalf("expired intake request = %+v", call.request)
 	}
 	call.answer <- agentruntime.RunResult{Response: "hi bob"}
-	h.wantReply(202, 12, "hi bob")
-	h.waitState(12, "delivered")
+	h.wantReply(202, 14, "hi bob")
+	h.waitState(14, "delivered")
 
 	// A failed deletion still connects and asks the user to delete the message.
 	h.mu.Lock()
 	h.deleteStatus = 400
 	h.mu.Unlock()
-	h.press(13, 202, settingsMessageID(5), "notion:connect")
+	h.press(15, 202, settingsMessageID(7), "notion:connect")
 	h.wantMessage(202, NotionConnectInstructions)
-	h.push(textUpdate(14, 202, bobNotionToken))
+	h.push(textUpdate(16, 202, bobNotionToken))
 	h.nextDelete()
 	h.wantMessage(202, NotionConnectedReply(bobStatus)+" "+DeleteFailedLine)
-	if after := h.requestSettings(15, 202); !strings.Contains(after.text, NotionConnectedLine(bobStatus)) || !strings.Contains(after.text, "personal access token") {
+	h.requestSettings(17, 202)
+	if after := h.openSettingsPage(18, 202, settingsMessageID(17), "accounts"); !strings.Contains(after.text, NotionConnectedLine(bobStatus)) || !strings.Contains(after.text, "personal access token") {
 		t.Fatalf("settings after personal connect = %+v", after)
 	}
 	h.assertNotionSecretHidden(aliceNotionToken, bobNotionToken, "ntn_wrongtoken")

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 
 	"github.com/vladar107/home-ai-assistant/internal/connection"
@@ -25,14 +26,29 @@ const (
 
 var errUnknownSettingsAction = errors.New("unknown settings action")
 
-// settingsSection renders one group of a principal's settings and performs the actions behind
+// settingsSection renders one part of a principal's settings and performs the actions behind
 // the buttons it rendered. Callback data is "<prefix>:<action>".
 type settingsSection interface {
 	prefix() string
+	// summary is the section's state in a few words, for the overview and its group page.
+	summary(context.Context, string) (settingsSummary, error)
 	render(context.Context, string) (settingsView, error)
-	// act performs a validated action and returns a plain message for the user when one is
-	// needed beyond the refreshed view; an unknown action yields errUnknownSettingsAction.
-	act(ctx context.Context, principalID string, chatID int64, action string) (string, error)
+	// act performs a validated action; an unknown action yields errUnknownSettingsAction.
+	act(ctx context.Context, principalID string, chatID int64, action string) (settingsOutcome, error)
+}
+
+type settingsSummary struct {
+	name  string
+	state string
+	// attention names something the user has to act on; the overview flags it.
+	attention string
+}
+
+type settingsOutcome struct {
+	// note confirms the action on the refreshed page.
+	note string
+	// message is sent on its own because the user acts on it, such as sign-in instructions.
+	message string
 }
 
 type settingsView struct {
@@ -56,22 +72,218 @@ type interception struct {
 	reason string
 }
 
-func renderSettings(ctx context.Context, principalID string, sections []settingsSection) (string, InlineKeyboard, error) {
-	lines := []string{SettingsTitle, ""}
-	var keyboard InlineKeyboard
-	for _, section := range sections {
-		view, err := section.render(ctx, principalID)
-		if err != nil {
-			return "", nil, err
+const (
+	// settingsNavPrefix callbacks name the page to show: "nav:root", "nav:<group>", or
+	// "nav:<group>.<section>". Pages are derived from the data alone, so nothing is stored.
+	settingsNavPrefix = "nav"
+	settingsRootPage  = "root"
+	settingsBackText  = "‹ Back"
+	attentionMark     = "⚠"
+)
+
+type settingsGroup struct {
+	id    string
+	title string
+	// inline groups show their sections' controls on the group page; the others link to a page
+	// per section.
+	inline  bool
+	members []string
+}
+
+// settingsGroups orders the overview; a section missing from it is never shown.
+var settingsGroups = []settingsGroup{
+	{id: "model", title: "Model", members: []string{modelSectionPrefix}},
+	{id: "accounts", title: "Accounts", members: []string{googleSectionPrefix, notionSectionPrefix}},
+	{id: "home", title: "Home & files", inline: true, members: []string{homeAssistantSectionPrefix, nasSectionPrefix}},
+	{id: "tools", title: "Everyday tools", inline: true, members: []string{webSectionPrefix, nsSectionPrefix, busSectionPrefix}},
+	{id: "safety", title: "Safety & privacy", inline: true, members: []string{typeSafeSectionPrefix}},
+}
+
+func settingsMembers(sections []settingsSection, group settingsGroup) []settingsSection {
+	var members []settingsSection
+	for _, prefix := range group.members {
+		for _, section := range sections {
+			if section.prefix() == prefix {
+				members = append(members, section)
+			}
 		}
-		lines = append(lines, view.lines...)
-		if len(view.buttons) > 0 {
-			keyboard = append(keyboard, view.buttons)
-		}
-		keyboard = append(keyboard, view.rows...)
 	}
-	lines = append(lines, SettingsPrivacyLine)
+	return members
+}
+
+// showsInline reports whether a group page carries its sections' controls; a group with a single
+// configured section needs no page in between.
+func showsInline(group settingsGroup, members []settingsSection) bool {
+	return group.inline || len(members) == 1
+}
+
+// settingsPageOf is the page that holds a section's controls, shown again after its actions.
+func settingsPageOf(sections []settingsSection, prefix string) string {
+	for _, group := range settingsGroups {
+		if !slices.Contains(group.members, prefix) {
+			continue
+		}
+		if showsInline(group, settingsMembers(sections, group)) {
+			return group.id
+		}
+		return group.id + "." + prefix
+	}
+	return settingsRootPage
+}
+
+func navButton(text, page string) InlineButton {
+	return InlineButton{Text: text, CallbackData: settingsNavPrefix + ":" + page}
+}
+
+func flagged(text string, attention bool) string {
+	if attention {
+		return text + " " + attentionMark
+	}
+	return text
+}
+
+func onOff(enabled bool) string {
+	if enabled {
+		return "on"
+	}
+	return "off"
+}
+
+func crumbs(titles ...string) string {
+	return strings.Join(append([]string{SettingsTitle}, titles...), " › ")
+}
+
+// renderSettings renders a page; an unknown page falls back to the overview.
+func renderSettings(ctx context.Context, principalID string, sections []settingsSection, page, note string) (string, InlineKeyboard, error) {
+	groupID, sectionPrefix, _ := strings.Cut(page, ".")
+	for _, group := range settingsGroups {
+		if group.id != groupID {
+			continue
+		}
+		members := settingsMembers(sections, group)
+		if len(members) == 0 {
+			break
+		}
+		if sectionPrefix == "" || showsInline(group, members) {
+			return renderSettingsGroup(ctx, principalID, group, members, note)
+		}
+		for _, section := range members {
+			if section.prefix() == sectionPrefix {
+				return renderSettingsSection(ctx, principalID, group, section, note)
+			}
+		}
+	}
+	return renderSettingsOverview(ctx, principalID, sections)
+}
+
+func renderSettingsOverview(ctx context.Context, principalID string, sections []settingsSection) (string, InlineKeyboard, error) {
+	var attention, overview []string
+	var buttons []InlineButton
+	for _, group := range settingsGroups {
+		members := settingsMembers(sections, group)
+		if len(members) == 0 {
+			continue
+		}
+		states := make([]string, 0, len(members))
+		needsAttention := false
+		for _, section := range members {
+			summary, err := section.summary(ctx, principalID)
+			if err != nil {
+				return "", nil, err
+			}
+			if len(group.members) == 1 {
+				states = append(states, summary.state)
+			} else {
+				states = append(states, summary.name+" "+summary.state)
+			}
+			if summary.attention != "" {
+				attention = append(attention, attentionMark+" "+summary.attention)
+				needsAttention = true
+			}
+		}
+		overview = append(overview, group.title+": "+strings.Join(states, ", "))
+		buttons = append(buttons, navButton(flagged(group.title, needsAttention), group.id))
+	}
+	lines := []string{SettingsTitle, ""}
+	if len(attention) > 0 {
+		lines = append(append(lines, attention...), "")
+	}
+	lines = append(append(lines, overview...), "", SettingsPrivacyLine)
+	var keyboard InlineKeyboard
+	for start := 0; start < len(buttons); start += 2 {
+		keyboard = append(keyboard, buttons[start:min(start+2, len(buttons))])
+	}
 	return strings.Join(lines, "\n"), keyboard, nil
+}
+
+func renderSettingsGroup(ctx context.Context, principalID string, group settingsGroup, members []settingsSection, note string) (string, InlineKeyboard, error) {
+	lines := []string{crumbs(group.title), ""}
+	var keyboard InlineKeyboard
+	if showsInline(group, members) {
+		for i, section := range members {
+			view, err := section.render(ctx, principalID)
+			if err != nil {
+				return "", nil, err
+			}
+			if i > 0 {
+				lines = append(lines, "")
+			}
+			lines = append(lines, view.lines...)
+			keyboard = appendView(keyboard, view)
+		}
+	} else {
+		var row []InlineButton
+		for _, section := range members {
+			summary, err := section.summary(ctx, principalID)
+			if err != nil {
+				return "", nil, err
+			}
+			lines = append(lines, summary.name+": "+summary.state)
+			if summary.attention != "" {
+				lines = append(lines, attentionMark+" "+summary.attention)
+			}
+			row = append(row, navButton(flagged(summary.name, summary.attention != ""), group.id+"."+section.prefix()))
+		}
+		keyboard = append(keyboard, row)
+	}
+	return finishPage(lines, keyboard, note, settingsRootPage)
+}
+
+func renderSettingsSection(ctx context.Context, principalID string, group settingsGroup, section settingsSection, note string) (string, InlineKeyboard, error) {
+	summary, err := section.summary(ctx, principalID)
+	if err != nil {
+		return "", nil, err
+	}
+	view, err := section.render(ctx, principalID)
+	if err != nil {
+		return "", nil, err
+	}
+	lines := append([]string{crumbs(group.title, summary.name), ""}, view.lines...)
+	return finishPage(lines, appendView(nil, view), note, group.id)
+}
+
+func appendView(keyboard InlineKeyboard, view settingsView) InlineKeyboard {
+	if len(view.buttons) > 0 {
+		keyboard = append(keyboard, view.buttons)
+	}
+	return append(keyboard, view.rows...)
+}
+
+func finishPage(lines []string, keyboard InlineKeyboard, note, back string) (string, InlineKeyboard, error) {
+	if note != "" {
+		lines = append(lines, "", note)
+	}
+	keyboard = append(keyboard, []InlineButton{navButton(settingsBackText, back)})
+	return strings.Join(lines, "\n"), keyboard, nil
+}
+
+// settingsNavFor resolves a navigation callback to its page.
+func settingsNavFor(data string) (string, bool) {
+	prefix, page, found := strings.Cut(data, ":")
+	if prefix != settingsNavPrefix || !found || page == "" || len(data) > maximumCallbackDataBytes {
+		return "", false
+	}
+	return page, true
 }
 
 // settingsSectionFor resolves callback data to its section and action; anything outside the fixed
@@ -107,6 +319,17 @@ type modelSection struct {
 
 func (m modelSection) prefix() string { return modelSectionPrefix }
 
+func (m modelSection) summary(ctx context.Context, principalID string) (settingsSummary, error) {
+	status, err := m.connections.Status(ctx, principalID)
+	if err != nil {
+		return settingsSummary{}, err
+	}
+	if !status.Connected {
+		return settingsSummary{name: "Model", state: "not connected", attention: "Connect your model subscription to start talking to me."}, nil
+	}
+	return settingsSummary{name: "Model", state: "connected"}, nil
+}
+
 func (m modelSection) render(ctx context.Context, principalID string) (settingsView, error) {
 	status, err := m.connections.Status(ctx, principalID)
 	if err != nil {
@@ -124,27 +347,27 @@ func (m modelSection) render(ctx context.Context, principalID string) (settingsV
 	}, nil
 }
 
-func (m modelSection) act(ctx context.Context, principalID string, chatID int64, action string) (string, error) {
+func (m modelSection) act(ctx context.Context, principalID string, chatID int64, action string) (settingsOutcome, error) {
 	switch action {
 	case modelConnectAction:
 		ceremony, err := m.connections.Connect(ctx, principalID, chatID)
 		if err != nil {
 			m.telemetry.ContextLogger(ctx, m.logger).WarnContext(ctx, "telegram.connection.start_failed", "principal_id", principalID, "error", err)
-			return connection.ConnectFailedReply, nil
+			return settingsOutcome{message: connection.ConnectFailedReply}, nil
 		}
-		return ConnectInstructions(ceremony), nil
+		return settingsOutcome{message: ConnectInstructions(ceremony)}, nil
 	case modelDisconnectAction:
 		if m.conversation != nil {
 			if _, err := m.conversation.Cancel(ctx, principalID); err != nil {
-				return "", err
+				return settingsOutcome{}, err
 			}
 		}
 		if _, err := m.connections.Disconnect(ctx, principalID); err != nil {
-			return "", err
+			return settingsOutcome{}, err
 		}
-		return "", nil
+		return settingsOutcome{}, nil
 	default:
-		return "", errUnknownSettingsAction
+		return settingsOutcome{}, errUnknownSettingsAction
 	}
 }
 
@@ -207,6 +430,23 @@ type notionSection struct {
 
 func (n notionSection) prefix() string { return notionSectionPrefix }
 
+func (n notionSection) summary(ctx context.Context, principalID string) (settingsSummary, error) {
+	status, err := n.notion.Status(ctx, principalID)
+	if err != nil {
+		return settingsSummary{}, err
+	}
+	switch {
+	case status.Problem == notion.ProblemInvalidToken:
+		return settingsSummary{name: "Notion", state: "token rejected", attention: "Notion rejected your token; install a fresh one or disconnect."}, nil
+	case status.Problem == notion.ProblemUnavailable:
+		return settingsSummary{name: "Notion", state: "unavailable"}, nil
+	case status.Connected:
+		return settingsSummary{name: "Notion", state: "writes " + onOff(status.WritesEnabled)}, nil
+	default:
+		return settingsSummary{name: "Notion", state: "not connected"}, nil
+	}
+}
+
 func (n notionSection) render(ctx context.Context, principalID string) (settingsView, error) {
 	status, err := n.notion.Status(ctx, principalID)
 	if err != nil {
@@ -234,36 +474,36 @@ func (n notionSection) render(ctx context.Context, principalID string) (settings
 	}
 }
 
-func (n notionSection) act(ctx context.Context, principalID string, _ int64, action string) (string, error) {
+func (n notionSection) act(ctx context.Context, principalID string, _ int64, action string) (settingsOutcome, error) {
 	switch action {
 	case notionConnectAction:
 		if !n.notion.ChatConnectEnabled() {
-			return "", errUnknownSettingsAction
+			return settingsOutcome{}, errUnknownSettingsAction
 		}
 		n.notion.BeginIntake(principalID)
 		n.telemetry.ContextLogger(ctx, n.logger).InfoContext(ctx, "notion.intake.started", "principal_id", principalID)
-		return NotionConnectInstructions, nil
+		return settingsOutcome{message: NotionConnectInstructions}, nil
 	case notionDisconnectAction:
 		if _, err := n.notion.Disconnect(ctx, principalID); err != nil {
-			return "", err
+			return settingsOutcome{}, err
 		}
-		return "", nil
+		return settingsOutcome{}, nil
 	case notionWritesOnAction, notionWritesOffAction:
 		enabled := action == notionWritesOnAction
 		status, err := n.notion.SetWrites(ctx, principalID, enabled)
 		if err != nil {
-			return "", err
+			return settingsOutcome{}, err
 		}
 		if !status.Connected {
-			return "", nil
+			return settingsOutcome{}, nil
 		}
 		n.telemetry.ContextLogger(ctx, n.logger).InfoContext(ctx, "notion.writes.changed", "principal_id", principalID, "enabled", enabled)
 		if enabled {
-			return NotionWritesOnReply, nil
+			return settingsOutcome{note: NotionWritesOnReply}, nil
 		}
-		return NotionWritesOffReply, nil
+		return settingsOutcome{note: NotionWritesOffReply}, nil
 	default:
-		return "", errUnknownSettingsAction
+		return settingsOutcome{}, errUnknownSettingsAction
 	}
 }
 
@@ -330,6 +570,21 @@ type nasSection struct {
 
 func (n nasSection) prefix() string { return nasSectionPrefix }
 
+func (n nasSection) summary(ctx context.Context, principalID string) (settingsSummary, error) {
+	status, err := n.nas.Status(ctx, principalID)
+	if err != nil {
+		return settingsSummary{}, err
+	}
+	switch {
+	case !status.Connected:
+		return settingsSummary{name: "NAS", state: "no folders"}, nil
+	case !status.CanSave:
+		return settingsSummary{name: "NAS", state: "read-only"}, nil
+	default:
+		return settingsSummary{name: "NAS", state: "saving " + onOff(status.WritesEnabled)}, nil
+	}
+}
+
 func (n nasSection) render(ctx context.Context, principalID string) (settingsView, error) {
 	status, err := n.nas.Status(ctx, principalID)
 	if err != nil {
@@ -349,23 +604,23 @@ func (n nasSection) render(ctx context.Context, principalID string) (settingsVie
 	}
 }
 
-func (n nasSection) act(ctx context.Context, principalID string, _ int64, action string) (string, error) {
+func (n nasSection) act(ctx context.Context, principalID string, _ int64, action string) (settingsOutcome, error) {
 	switch action {
 	case nasWritesOnAction, nasWritesOffAction:
 		enabled := action == nasWritesOnAction
 		status, err := n.nas.SetWrites(ctx, principalID, enabled)
 		if err != nil {
-			return "", err
+			return settingsOutcome{}, err
 		}
 		if !status.Connected || !status.CanSave {
-			return "", nil
+			return settingsOutcome{}, nil
 		}
 		n.telemetry.ContextLogger(ctx, n.logger).InfoContext(ctx, "nas.writes.changed", "principal_id", principalID, "enabled", enabled)
 		if enabled {
-			return NASWritesOnReply, nil
+			return settingsOutcome{note: NASWritesOnReply}, nil
 		}
-		return NASWritesOffReply, nil
+		return settingsOutcome{note: NASWritesOffReply}, nil
 	default:
-		return "", errUnknownSettingsAction
+		return settingsOutcome{}, errUnknownSettingsAction
 	}
 }
