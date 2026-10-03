@@ -99,25 +99,26 @@ type cursorStore interface {
 }
 
 type Service struct {
-	client       botAPI
-	identities   identityResolver
-	cursors      cursorStore
-	conversation ConversationController
-	attachments  AttachmentStore
-	connections  ConnectionController
-	notion       NotionController
-	nas          NASController
-	google       GoogleController
-	web          WebController
-	typeSafe     TypeSafeController
-	ns           NSController
-	bus          BusController
-	approvals    ApprovalController
-	schedules    ScheduleController
-	sections     []settingsSection
-	interceptors []messageInterceptor
-	logger       *slog.Logger
-	telemetry    Telemetry
+	client        botAPI
+	identities    identityResolver
+	cursors       cursorStore
+	conversation  ConversationController
+	attachments   AttachmentStore
+	connections   ConnectionController
+	notion        NotionController
+	nas           NASController
+	google        GoogleController
+	web           WebController
+	typeSafe      TypeSafeController
+	ns            NSController
+	homeAssistant HomeAssistantController
+	bus           BusController
+	approvals     ApprovalController
+	schedules     ScheduleController
+	sections      []settingsSection
+	interceptors  []messageInterceptor
+	logger        *slog.Logger
+	telemetry     Telemetry
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -137,6 +138,7 @@ func NewService(
 	googleAccess GoogleController,
 	webAccess WebController,
 	nsTrains NSController,
+	home HomeAssistantController,
 	buses BusController,
 	approvals ApprovalController,
 	schedules ScheduleController,
@@ -157,22 +159,23 @@ func NewService(
 	}
 
 	service := &Service{
-		client:       client,
-		identities:   identities,
-		cursors:      cursors,
-		conversation: conversation,
-		attachments:  attachments,
-		connections:  connections,
-		notion:       notion,
-		nas:          nasFiles,
-		google:       googleAccess,
-		web:          webAccess,
-		ns:           nsTrains,
-		bus:          buses,
-		approvals:    approvals,
-		schedules:    schedules,
-		logger:       logger,
-		telemetry:    telemetryOrNoop(telemetry),
+		client:        client,
+		identities:    identities,
+		cursors:       cursors,
+		conversation:  conversation,
+		attachments:   attachments,
+		connections:   connections,
+		notion:        notion,
+		nas:           nasFiles,
+		google:        googleAccess,
+		web:           webAccess,
+		ns:            nsTrains,
+		homeAssistant: home,
+		bus:           buses,
+		approvals:     approvals,
+		schedules:     schedules,
+		logger:        logger,
+		telemetry:     telemetryOrNoop(telemetry),
 	}
 	if connections != nil {
 		service.sections = append(service.sections, modelSection{
@@ -197,6 +200,9 @@ func NewService(
 	}
 	if nsTrains != nil {
 		service.sections = append(service.sections, nsSection{ns: nsTrains, logger: logger, telemetry: service.telemetry})
+	}
+	if home != nil {
+		service.sections = append(service.sections, homeAssistantSection{homeAssistant: home, logger: logger, telemetry: service.telemetry})
 	}
 	if buses != nil {
 		service.sections = append(service.sections, busSection{bus: buses, logger: logger, telemetry: service.telemetry})
@@ -766,6 +772,15 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 			}
 			if status.Enabled {
 				reply += " " + NSPrivacyLine
+			}
+		}
+		if s.homeAssistant != nil {
+			status, err := s.homeAssistant.Status(ctx, principalID)
+			if err != nil {
+				return "", nil, err
+			}
+			if status.Enabled {
+				reply += " " + HomeAssistantPrivacyLine
 			}
 		}
 		if s.bus != nil {

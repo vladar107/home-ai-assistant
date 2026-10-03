@@ -71,6 +71,10 @@ if [[ ${HOME_AGENT_NS_ENABLED:-false} == true ]]; then
   compose_files+=(-f compose.app.ns.yaml)
   compose_inputs+=(deploy/compose.app.ns.yaml)
 fi
+if [[ ${HOME_AGENT_HA_ENABLED:-false} == true ]]; then
+  compose_files+=(-f compose.app.homeassistant.yaml)
+  compose_inputs+=(deploy/compose.app.homeassistant.yaml)
+fi
 if [[ ${HOME_AGENT_TYPESAFE_ENABLED:-false} == true ]]; then
   compose_files+=(-f compose.app.typesafe.yaml)
   compose_inputs+=(deploy/compose.app.typesafe.yaml)

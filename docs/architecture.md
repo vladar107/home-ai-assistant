@@ -18,6 +18,7 @@ flowchart TB
     notion["Notion"]
     google["Google<br/>Gmail, Calendar"]
     ns["NS API<br/>Dutch trains"]
+    ha["Home Assistant<br/>MCP server, Assist API"]
     meteo["Open-Meteo<br/>weather"]
     ovapi["OVapi<br/>live buses, notices"]
     transitous["Transitous<br/>journey planner"]
@@ -31,6 +32,7 @@ flowchart TB
     agent -->|read, confirmed writes| notion
     agent -->|read-only, several accounts per user| google
     agent -->|trips, departures, disruptions| ns
+    agent -->|reads, device actions, confirmed service calls| ha
     agent -->|forecasts| meteo
     agent -->|departures, stop list, notices| ovapi
     agent -->|planned trips, departures| transitous
@@ -49,7 +51,7 @@ an outbound HTTPS client, and administrative interfaces stay on the LAN.
 ```mermaid
 flowchart TB
     telegram["Telegram Bot API"]
-    ext["External APIs<br/>model provider, Notion, Google, NS, OVapi, Transitous, Open-Meteo, TypeSafe"]
+    ext["External APIs<br/>model provider, Notion, Google, NS, Home Assistant, OVapi, Transitous, Open-Meteo, TypeSafe"]
 
     subgraph nas["NAS"]
         subgraph app["home-ai-assistant Compose project"]
@@ -117,6 +119,7 @@ flowchart TB
         calendar["calendar"]
         nasc["nas"]
         nsc["ns"]
+        hac["homeassistant<br/>MCP tools, history, confirmed calls"]
         busc["bus"]
         web["web<br/>pages, weather"]
     end
@@ -182,7 +185,15 @@ it can write, the approval service (the executor for confirmed proposals).
   enforced by the application, never by prompt instructions. Pi inherits a minimal
   environment without the Telegram token.
 - **Read first, confirm writes.** Writes to Notion, the NAS, and schedules are
-  off until the user turns them on and are always confirmed per action.
+  off until the user turns them on and are always confirmed per action. The
+  exception is Home Assistant: everyday actions on devices exposed to Assist run
+  without confirmation and are not offered in scheduled turns; sensitive ones
+  (labelled `assistant-confirm`, or locks, alarm panels, valves, sirens, cameras,
+  firmware updates, and garage, gate, or door covers) are confirmed per action. If
+  such a device is exposed, all immediate actions are withheld and reads remain.
+- **Home Assistant scope.** One household token from a dedicated non-admin Home
+  Assistant user. Only entities exposed to Assist are reachable by the MCP tools;
+  the tool, exposure, and label snapshot is cached for 5 minutes.
 - **Untrusted input.** Tool results, web pages, email, and model output are marked
   and treated as data. Private and loopback addresses are refused by the web tools.
 - **NAS isolation by mount.** Only inbox and shared-drop paths are mounted
@@ -205,5 +216,5 @@ it can write, the approval service (the executor for confirmed proposals).
 | Tag-pinned manual deploys; CI builds the image but has no NAS access | The operator stays the only path to production, and each deploy records its digest |
 | Secrets in macOS Keychain, only the needed copies on the NAS | Recovery stays with the operator; secrets stay out of Git, CI, images, and env values |
 
-Not built: Immich, UniFi, and GitHub connectors; Home Assistant; local
+Not built: photo-library, network-controller, and GitHub connectors; local
 inference; RAG.

@@ -27,6 +27,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/calendar"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/gmail"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/google"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/homeassistant"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/ns"
@@ -153,6 +154,8 @@ type harnessOptions struct {
 	web bool
 	// ns adds the NS connector against the given gateway, as an operator key does.
 	ns string
+	// homeAssistant adds the Home Assistant connector against the given URL, as an operator token does.
+	homeAssistant string
 	// bus adds the bus connector against the given base URL, as HOME_AGENT_BUS_ENABLED does, with
 	// busContact as the operator's Transitous contact.
 	bus        string
@@ -189,6 +192,7 @@ type conversationHarness struct {
 	google         *google.Service
 	web            *web.Service
 	ns             *ns.Service
+	homeAssistant  *homeassistant.Service
 	bus            *bus.Service
 	approvals      *approval.Service
 	scheduler      *schedule.Service
@@ -415,6 +419,17 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		}
 		nsController = h.ns
 	}
+	var homeAssistantController HomeAssistantController
+	if options.homeAssistant != "" {
+		h.homeAssistant, err = homeassistant.NewService(homeassistant.Config{Token: "test-token", BaseURL: options.homeAssistant}, h.store, h.approvals, logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := broker.Register(h.homeAssistant); err != nil {
+			t.Fatal(err)
+		}
+		homeAssistantController = h.homeAssistant
+	}
 	var busController BusController
 	if options.bus != "" {
 		h.bus, err = bus.NewService(bus.Config{
@@ -479,7 +494,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 			t.Fatal(err)
 		}
 	}
-	h.service, err = NewService(h.client, identities, h.store, h.conversation, h.attachments, h.connections, notionController, nasController, googleController, webController, nsController, busController, h.approvals, scheduleController, logger, nil)
+	h.service, err = NewService(h.client, identities, h.store, h.conversation, h.attachments, h.connections, notionController, nasController, googleController, webController, nsController, homeAssistantController, busController, h.approvals, scheduleController, logger, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -166,10 +166,35 @@ that user turns it on or off for themselves. Optional Compose overlays
 | Google (Gmail, Calendar) | `HOME_AGENT_GOOGLE_ENABLED=true`, `HOME_AGENT_GOOGLE_CLIENT_ID` | `scripts/keychain-set-secret home-agent.google-client-secret` | Desktop-app OAuth client in a published Google project (no logo, so no verification) with the Gmail and Calendar APIs enabled and `gmail.readonly` and `calendar.readonly` on the consent screen. Each user connects any number of accounts by pasting the failed `localhost` redirect URL into the chat, then switches Mail and Calendar per account in `/settings`. |
 | Web | `HOME_AGENT_WEB_ENABLED=true`, optional `HOME_AGENT_WEATHER_HOME` | none | Search runs on the user's own subscription through the vendored `pi-web-search` extension; weather uses Open-Meteo. Locally set `HOME_AGENT_PI_WEB_SEARCH_EXTENSION=<repo>/third_party/pi-web-search/src/index.ts`. Re-check live search on every Pi upgrade. |
 | NS trains | `HOME_AGENT_NS_ENABLED=true` | Keychain `ns.api-key` (Ns-App product at apiportal.ns.nl) | |
+| Home Assistant | `HOME_AGENT_HA_ENABLED=true`; locally `HOME_AGENT_HA_TOKEN`, optional `HOME_AGENT_HA_URL` (default `https://ha.home`) | Keychain `home-assistant.token`, synced as Docker secret `ha-token` | One household long-lived token; see the setup below. The overlay `deploy/compose.app.homeassistant.yaml` reaches Home Assistant at `http://homeassistant:8123` through host-gateway, because it uses host networking and the NAS cannot reach the Caddy macvlan edge. Per-user "Home" switch in `/settings`, on by default. |
 | Buses | `HOME_AGENT_BUS_ENABLED=true`, `HOME_AGENT_BUS_HOME_STOP`, optional `HOME_AGENT_BUS_CONTACT` | none | Live data from OVapi (plain HTTP, no key); the stop list is read daily from OVapi's GTFS archive by range requests. The home stop is any timing point code of the stop (`stop_code` in GTFS `stops.txt`). Planned trips and boards for stops OVapi has no live data for go to Transitous; set the contact, which its terms ask for, to label those requests. Its use is private and non-commercial. |
 | TypeSafe checks | `HOME_AGENT_TYPESAFE_ENABLED=true` | `scripts/keychain-set-secret typesafe.api-key` | Each user opts in. Nothing is sent for users who have not. A failed check leaves the turn unchanged. |
 
 After changing a secret, run `scripts/nas-sync-secrets` and redeploy.
+
+### Home Assistant setup
+
+1. Create a dedicated non-admin Home Assistant user ("Home Agent") and a
+   long-lived access token for it.
+2. Add the "Model Context Protocol Server" integration with the Assist API.
+3. In Settings → Voice assistants → Expose, expose the everyday devices.
+   Consider turning off "expose new entities" so nothing appears by accident.
+4. Label sensitive devices `assistant-confirm` and keep them unexposed. They are
+   then offered only through `ha_confirmed_devices` and `ha_service_call`, which
+   always ask for approval.
+5. Store the token in Keychain; `scripts/keychain-set-secret` does not cover it:
+   `security add-generic-password -a home-ai-assistant -s home-assistant.token -U -w`.
+6. Set `HOME_AGENT_HA_ENABLED=true` in `deploy/.env.nas`, run
+   `scripts/nas-sync-secrets`, and deploy as for NS.
+
+Locks, alarm panels, valves, sirens, cameras, firmware updates, and garage, gate,
+or door covers count as needing confirmation. If one is exposed, or shares a name
+with a labelled entity, all immediate actions are withheld, reads remain, and
+`/settings` names the conflicting devices. Tools, exposure, and labels are cached
+for 5 minutes.
+
+To add a device, expose it (everyday) or label it `assistant-confirm` (confirmed).
+No code change is needed.
 
 ## 6. Grafana and alerts
 
@@ -239,7 +264,8 @@ sending duplicate replies.
 
 - Telegram token: revoke in BotFather, update Keychain, run
   `scripts/nas-sync-secrets`, and restart only its consumer.
-- NS and TypeSafe keys: regenerate, `security add-generic-password -U …`, sync, and
+- NS, TypeSafe, and Home Assistant keys: regenerate (for Home Assistant, a new
+  token for the Home Agent user), `security add-generic-password -U …`, sync, and
   redeploy.
 - `grafana.admin-password`: rotate in Grafana and Keychain together.
   `grafana.secret-key` needs Grafana's re-encryption procedure.

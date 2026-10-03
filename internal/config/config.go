@@ -33,6 +33,7 @@ type Config struct {
 	NAS           NASConfig
 	Web           WebConfig
 	NS            NSConfig
+	HA            HAConfig
 	Bus           BusConfig
 	TypeSafe      TypeSafeConfig
 	Observability ObservabilityConfig
@@ -55,6 +56,7 @@ func Load() (Config, error) {
 		NAS:             defaultNASConfig(),
 		Web:             defaultWebConfig(),
 		NS:              defaultNSConfig(),
+		HA:              defaultHAConfig(),
 		Bus:             defaultBusConfig(),
 		TypeSafe:        defaultTypeSafeConfig(),
 		Observability:   defaultObservabilityConfig(),
@@ -112,6 +114,9 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if err := loadNSConfig(&cfg.NS); err != nil {
+		return Config{}, err
+	}
+	if err := loadHAConfig(&cfg.HA); err != nil {
 		return Config{}, err
 	}
 	if err := loadTypeSafeConfig(&cfg.TypeSafe); err != nil {
@@ -195,6 +200,12 @@ func (c Config) Validate() error {
 	}
 	if c.NS.Enabled() && !c.Conversation.Enabled {
 		return fmt.Errorf("HOME_AGENT_NS_API_KEY or HOME_AGENT_NS_API_KEY_FILE: requires HOME_AGENT_CONVERSATION_ENABLED=true")
+	}
+	if err := c.HA.validate(); err != nil {
+		return err
+	}
+	if c.HA.Enabled() && !c.Conversation.Enabled {
+		return fmt.Errorf("HOME_AGENT_HA_TOKEN or HOME_AGENT_HA_TOKEN_FILE: requires HOME_AGENT_CONVERSATION_ENABLED=true")
 	}
 	if err := c.Bus.validate(); err != nil {
 		return err

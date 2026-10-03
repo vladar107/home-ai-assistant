@@ -1,0 +1,19 @@
+# Home Assistant. Applied on top of compose.app.yaml only when HOME_AGENT_HA_ENABLED is true,
+# so a deployment without the feature needs no Home Assistant token on the NAS.
+services:
+  home-agent:
+    environment:
+      HOME_AGENT_HA_TOKEN_FILE: /run/secrets/ha-token
+      HOME_AGENT_HA_URL: http://homeassistant:8123
+    # Home Assistant runs with host networking on the NAS, and the NAS cannot reach the Caddy edge
+    # on its own macvlan, so the container talks to Home Assistant's host port over a hop that
+    # never leaves the NAS.
+    extra_hosts:
+      - "homeassistant:host-gateway"
+    secrets:
+      - source: ha-token
+        target: ha-token
+
+secrets:
+  ha-token:
+    file: ${HOME_AGENT_SECRETS_PATH:?set HOME_AGENT_SECRETS_PATH}/ha-token

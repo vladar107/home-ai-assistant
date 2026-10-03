@@ -19,6 +19,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/calendar"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/gmail"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/google"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/homeassistant"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/ns"
@@ -41,28 +42,29 @@ import (
 )
 
 type App struct {
-	cfg          config.Config
-	logger       *slog.Logger
-	registry     *module.Registry
-	modules      []module.Module
-	server       *http.Server
-	store        *sqlite.Store
-	connections  *connection.Service
-	attachments  *attachment.Service
-	conversation *conversation.Service
-	tools        *tools.Broker
-	approvals    *approval.Service
-	scheduler    *schedule.Service
-	notion       *notion.Service
-	nas          *nas.Service
-	google       *google.Service
-	web          *web.Service
-	ns           *ns.Service
-	bus          *bus.Service
-	typeSafe     *judgment.OptInService
-	telegram     *telegram.Service
-	telemetry    *observability.Telemetry
-	ready        atomic.Bool
+	cfg           config.Config
+	logger        *slog.Logger
+	registry      *module.Registry
+	modules       []module.Module
+	server        *http.Server
+	store         *sqlite.Store
+	connections   *connection.Service
+	attachments   *attachment.Service
+	conversation  *conversation.Service
+	tools         *tools.Broker
+	approvals     *approval.Service
+	scheduler     *schedule.Service
+	notion        *notion.Service
+	nas           *nas.Service
+	google        *google.Service
+	web           *web.Service
+	ns            *ns.Service
+	homeAssistant *homeassistant.Service
+	bus           *bus.Service
+	typeSafe      *judgment.OptInService
+	telegram      *telegram.Service
+	telemetry     *observability.Telemetry
+	ready         atomic.Bool
 }
 
 func New(cfg config.Config, registry *module.Registry, logger *slog.Logger) (*App, error) {
@@ -524,6 +526,22 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			}
 			a.ns = nsService
 		}
+		if a.cfg.HA.Enabled() {
+			homeAssistantService, err := homeassistant.NewService(homeassistant.Config{Token: a.cfg.HA.Token, BaseURL: a.cfg.HA.URL}, a.store, approvals, a.logger)
+			if err != nil {
+				return fmt.Errorf("initialize Home Assistant connector: %w", err)
+			}
+			if err := a.registry.Register(homeAssistantService); err != nil {
+				return err
+			}
+			if err := broker.Register(homeAssistantService); err != nil {
+				return err
+			}
+			if err := approvals.RegisterExecutor(homeAssistantService); err != nil {
+				return err
+			}
+			a.homeAssistant = homeAssistantService
+		}
 		if a.cfg.Bus.Enabled {
 			busService, err := bus.NewService(bus.Config{HomeStop: a.cfg.Bus.HomeStop, Contact: a.cfg.Bus.Contact}, a.store, a.logger)
 			if err != nil {
@@ -559,6 +577,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	var googleController telegram.GoogleController
 	var webController telegram.WebController
 	var nsController telegram.NSController
+	var homeAssistantController telegram.HomeAssistantController
 	var busController telegram.BusController
 	var approvalController telegram.ApprovalController
 	var scheduleController telegram.ScheduleController
@@ -584,10 +603,13 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	if a.ns != nil {
 		nsController = a.ns
 	}
+	if a.homeAssistant != nil {
+		homeAssistantController = a.homeAssistant
+	}
 	if a.bus != nil {
 		busController = a.bus
 	}
-	service, err := telegram.NewService(client, identities, a.store, conversationController, attachmentStore, connectionController, notionController, nasController, googleController, webController, nsController, busController, approvalController, scheduleController, a.logger, a.telemetry)
+	service, err := telegram.NewService(client, identities, a.store, conversationController, attachmentStore, connectionController, notionController, nasController, googleController, webController, nsController, homeAssistantController, busController, approvalController, scheduleController, a.logger, a.telemetry)
 	if err != nil {
 		return fmt.Errorf("initialize Telegram service: %w", err)
 	}
