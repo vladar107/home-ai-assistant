@@ -49,7 +49,7 @@ plan that links back to the earlier record.
 | 0037 | [Read-only Google Calendar](0037-google-calendar.md) | done |
 | 0038 | [Tell the model that NS tools take railway stations only](0038-railway-stations-only.md) | done |
 | 0039 | [Home Assistant: everyday control through its MCP server, sensitive actions confirmed](0039-home-assistant.md) | done |
-| 0040 | [One-time jobs and reminders](0040-one-time-jobs-and-reminders.md) | in-progress |
+| 0040 | [One-time jobs and reminders](0040-one-time-jobs-and-reminders.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

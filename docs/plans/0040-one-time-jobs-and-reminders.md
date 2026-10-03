@@ -1,6 +1,6 @@
 # 0040 — One-time jobs and reminders
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
