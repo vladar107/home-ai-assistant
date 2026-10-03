@@ -45,9 +45,9 @@ plan that links back to the earlier record.
 | 0033 | [Bus information: trips, stop status, and disruptions](0033-live-bus-information.md) | done |
 | 0034 | [Make unfinished model calls and rare failures visible](0034-unfinished-model-calls.md) | done |
 | 0035 | [Upgrade Pi to 1.0.0](0035-pi-1-0-upgrade.md) | done |
-| 0036 | [Several Google accounts per user, with Mail and Calendar switches](0036-google-accounts.md) | in-progress |
-| 0037 | [Read-only Google Calendar](0037-google-calendar.md) | in-progress |
-| 0038 | [Tell the model that NS tools take railway stations only](0038-railway-stations-only.md) | in-progress |
+| 0036 | [Several Google accounts per user, with Mail and Calendar switches](0036-google-accounts.md) | done |
+| 0037 | [Read-only Google Calendar](0037-google-calendar.md) | done |
+| 0038 | [Tell the model that NS tools take railway stations only](0038-railway-stations-only.md) | done |
 | 0039 | [Home Assistant: everyday control through its MCP server, sensitive actions confirmed](0039-home-assistant.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`

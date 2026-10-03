@@ -1,6 +1,6 @@
 # 0038 — Tell the model that NS tools take railway stations only
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 

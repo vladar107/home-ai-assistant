@@ -1,6 +1,6 @@
 # 0036 — Several Google accounts per user, with Mail and Calendar switches
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 

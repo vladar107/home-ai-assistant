@@ -1,6 +1,6 @@
 # 0037 — Read-only Google Calendar
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
