@@ -19,6 +19,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/calendar"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/gmail"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/google"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/grafana"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/homeassistant"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
@@ -62,6 +63,7 @@ type App struct {
 	web           *web.Service
 	ns            *ns.Service
 	homeAssistant *homeassistant.Service
+	grafana       *grafana.Service
 	bus           *bus.Service
 	locations     *userlocation.Service
 	typeSafe      *judgment.OptInService
@@ -586,6 +588,24 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			}
 			a.homeAssistant = homeAssistantService
 		}
+		if a.cfg.Grafana.Enabled() {
+			grafanaService, err := grafana.NewService(grafana.Config{
+				Token:      a.cfg.Grafana.Token,
+				BaseURL:    a.cfg.Grafana.URL,
+				Principals: a.cfg.Grafana.Principals,
+				Location:   location,
+			}, a.store, a.logger)
+			if err != nil {
+				return fmt.Errorf("initialize Grafana connector: %w", err)
+			}
+			if err := a.registry.Register(grafanaService); err != nil {
+				return err
+			}
+			if err := broker.Register(grafanaService); err != nil {
+				return err
+			}
+			a.grafana = grafanaService
+		}
 		if a.cfg.Bus.Enabled {
 			busService, err := bus.NewService(bus.Config{HomeStop: a.cfg.Bus.HomeStop, Contact: a.cfg.Bus.Contact}, a.store, a.logger)
 			if err != nil {
@@ -662,6 +682,9 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	}
 	if a.locations != nil {
 		service.SetLocations(a.locations)
+	}
+	if a.grafana != nil {
+		service.SetGrafana(a.grafana)
 	}
 	a.telegram = service
 	return nil

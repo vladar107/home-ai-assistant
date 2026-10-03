@@ -28,6 +28,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/calendar"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/gmail"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/google"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/grafana"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/homeassistant"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
@@ -158,6 +159,8 @@ type harnessOptions struct {
 	ns string
 	// homeAssistant adds the Home Assistant connector against the given URL, as an operator token does.
 	homeAssistant string
+	// grafana adds the Grafana connector against the given URL for alice alone, as an operator token does.
+	grafana string
 	// bus adds the bus connector against the given base URL, as HOME_AGENT_BUS_ENABLED does, with
 	// busContact as the operator's Transitous contact.
 	bus        string
@@ -205,6 +208,7 @@ type conversationHarness struct {
 	web            *web.Service
 	ns             *ns.Service
 	homeAssistant  *homeassistant.Service
+	grafana        *grafana.Service
 	bus            *bus.Service
 	locations      *location.Service
 	approvals      *approval.Service
@@ -443,6 +447,15 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		}
 		homeAssistantController = h.homeAssistant
 	}
+	if options.grafana != "" {
+		h.grafana, err = grafana.NewService(grafana.Config{Token: "test-token", BaseURL: options.grafana, Principals: []string{"alice"}}, h.store, logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := broker.Register(h.grafana); err != nil {
+			t.Fatal(err)
+		}
+	}
 	var busController BusController
 	if options.bus != "" {
 		h.bus, err = bus.NewService(bus.Config{
@@ -529,6 +542,9 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	}
 	if h.locations != nil {
 		h.service.SetLocations(h.locations)
+	}
+	if h.grafana != nil {
+		h.service.SetGrafana(h.grafana)
 	}
 	t.Cleanup(h.stop)
 	return h

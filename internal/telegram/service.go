@@ -116,6 +116,7 @@ type Service struct {
 	approvals     ApprovalController
 	schedules     ScheduleController
 	locations     LocationController
+	grafana       GrafanaController
 	sections      []settingsSection
 	interceptors  []messageInterceptor
 	logger        *slog.Logger
@@ -637,11 +638,12 @@ func (s *Service) processCallback(ctx context.Context, callback *CallbackQuery) 
 	}
 
 	result := processingResult{event: "telegram.callback.handled", principalID: principalID, command: "settings"}
+	sections := sectionsFor(s.sections, principalID)
 	page, outcome := settingsRootPage, settingsOutcome{}
 	if target, isNav := settingsNavFor(callback.Data); isNav {
 		page, result.command = target, "settings.nav"
-	} else if section, action, known := settingsSectionFor(s.sections, callback.Data); known {
-		page = settingsPageOf(s.sections, section.prefix())
+	} else if section, action, known := settingsSectionFor(sections, callback.Data); known {
+		page = settingsPageOf(sections, section.prefix())
 		outcome, err = section.act(ctx, principalID, chatID, action)
 		switch {
 		case errors.Is(err, errUnknownSettingsAction):
@@ -655,7 +657,7 @@ func (s *Service) processCallback(ctx context.Context, callback *CallbackQuery) 
 		result.reason = "unknown_action"
 	}
 
-	text, keyboard, err := renderSettings(ctx, principalID, s.sections, page, outcome.note)
+	text, keyboard, err := renderSettings(ctx, principalID, sections, page, outcome.note)
 	if err != nil {
 		return processingResult{}, "render_settings", err
 	}
@@ -807,6 +809,15 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		if s.locations != nil {
 			reply += " " + LocationPrivacyLine
 		}
+		if s.grafana != nil {
+			status, err := s.grafana.Status(ctx, principalID)
+			if err != nil {
+				return "", nil, err
+			}
+			if status.Enabled {
+				reply += " " + GrafanaPrivacyLine
+			}
+		}
 		if s.typeSafe != nil {
 			enabled, err := s.typeSafe.Status(ctx, principalID)
 			if err != nil {
@@ -850,7 +861,7 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		if len(s.sections) == 0 {
 			return HelpReply, nil, nil
 		}
-		text, keyboard, err := renderSettings(ctx, principalID, s.sections, settingsRootPage, "")
+		text, keyboard, err := renderSettings(ctx, principalID, sectionsFor(s.sections, principalID), settingsRootPage, "")
 		if err != nil {
 			return "", nil, err
 		}

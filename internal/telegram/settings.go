@@ -37,6 +37,25 @@ type settingsSection interface {
 	act(ctx context.Context, principalID string, chatID int64, action string) (settingsOutcome, error)
 }
 
+// restrictedSection is a section only some principals may see, such as one the operator configured
+// for themselves alone.
+type restrictedSection interface {
+	availableTo(principalID string) bool
+}
+
+// sectionsFor is the sections the principal may see; a restricted section is absent for everyone
+// else, so its buttons resolve to nothing even when forged.
+func sectionsFor(sections []settingsSection, principalID string) []settingsSection {
+	visible := make([]settingsSection, 0, len(sections))
+	for _, section := range sections {
+		if restricted, ok := section.(restrictedSection); ok && !restricted.availableTo(principalID) {
+			continue
+		}
+		visible = append(visible, section)
+	}
+	return visible
+}
+
 type settingsSummary struct {
 	name  string
 	state string
@@ -97,6 +116,7 @@ var settingsGroups = []settingsGroup{
 	{id: "home", title: "Home & files", inline: true, members: []string{homeAssistantSectionPrefix, nasSectionPrefix}},
 	{id: "tools", title: "Everyday tools", inline: true, members: []string{webSectionPrefix, nsSectionPrefix, busSectionPrefix}},
 	{id: "location", title: "Location", inline: true, members: []string{locationSectionPrefix}},
+	{id: "monitoring", title: "Monitoring", inline: true, members: []string{grafanaSectionPrefix}},
 	{id: "safety", title: "Safety & privacy", inline: true, members: []string{typeSafeSectionPrefix}},
 }
 

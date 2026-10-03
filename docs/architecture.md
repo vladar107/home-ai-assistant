@@ -76,6 +76,7 @@ flowchart TB
     pi -->|tool calls over loopback<br/>per-turn bearer token| go
     pi -->|model requests| ext
     go -->|HTTPS| ext
+    go -->|dashboards, PromQL, LogQL<br/>read-only service account| grafana
     go --> db
     go --> files
     go --> shares
@@ -123,6 +124,7 @@ flowchart TB
         nasc["nas"]
         nsc["ns"]
         hac["homeassistant<br/>MCP tools, history, confirmed calls"]
+        grafanac["grafana<br/>dashboards, metrics, logs"]
         busc["bus"]
         web["web<br/>pages, weather"]
         placesc["places<br/>nearby places, addresses"]
@@ -203,6 +205,9 @@ it can write, the approval service (the executor for confirmed proposals).
 - **Home Assistant scope.** One household token from a dedicated non-admin Home
   Assistant user. Only entities exposed to Assist are reachable by the MCP tools;
   the tool, exposure, and label snapshot is cached for 5 minutes.
+- **Grafana scope.** One Viewer service-account token, offered only to the
+  principals in `HOME_AGENT_GRAFANA_PRINCIPALS`. Queries go through Grafana's
+  data source proxy and are bounded in range, resolution, series, and lines.
 - **Untrusted input.** Tool results, web pages, email, and model output are marked
   and treated as data. Private and loopback addresses are refused by the web tools.
 - **NAS isolation by mount.** Only inbox and shared-drop paths are mounted

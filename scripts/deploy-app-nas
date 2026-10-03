@@ -75,6 +75,10 @@ if [[ ${HOME_AGENT_HA_ENABLED:-false} == true ]]; then
   compose_files+=(-f compose.app.homeassistant.yaml)
   compose_inputs+=(deploy/compose.app.homeassistant.yaml)
 fi
+if [[ ${HOME_AGENT_GRAFANA_ENABLED:-false} == true ]]; then
+  compose_files+=(-f compose.app.grafana.yaml)
+  compose_inputs+=(deploy/compose.app.grafana.yaml)
+fi
 if [[ ${HOME_AGENT_TYPESAFE_ENABLED:-false} == true ]]; then
   compose_files+=(-f compose.app.typesafe.yaml)
   compose_inputs+=(deploy/compose.app.typesafe.yaml)

@@ -54,6 +54,7 @@ plan that links back to the earlier record.
 | 0042 | [Batched approvals](0042-batched-approvals.md) | done |
 | 0043 | [Shared location in conversation and location-aware tools](0043-shared-location.md) | done |
 | 0044 | [Movie night tools for the Notion movie table](0044-movie-night-tools.md) | in-progress |
+| 0045 | [Grafana metrics and logs in conversation](0045-grafana-metrics-and-logs.md) | in-progress |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

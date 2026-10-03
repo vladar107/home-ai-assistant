@@ -34,6 +34,7 @@ type Config struct {
 	Web           WebConfig
 	NS            NSConfig
 	HA            HAConfig
+	Grafana       GrafanaConfig
 	Bus           BusConfig
 	Location      LocationConfig
 	TypeSafe      TypeSafeConfig
@@ -58,6 +59,7 @@ func Load() (Config, error) {
 		Web:             defaultWebConfig(),
 		NS:              defaultNSConfig(),
 		HA:              defaultHAConfig(),
+		Grafana:         defaultGrafanaConfig(),
 		Bus:             defaultBusConfig(),
 		Location:        defaultLocationConfig(),
 		TypeSafe:        defaultTypeSafeConfig(),
@@ -122,6 +124,9 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if err := loadHAConfig(&cfg.HA); err != nil {
+		return Config{}, err
+	}
+	if err := loadGrafanaConfig(&cfg.Grafana); err != nil {
 		return Config{}, err
 	}
 	if err := loadTypeSafeConfig(&cfg.TypeSafe); err != nil {
@@ -211,6 +216,12 @@ func (c Config) Validate() error {
 	}
 	if c.HA.Enabled() && !c.Conversation.Enabled {
 		return fmt.Errorf("HOME_AGENT_HA_TOKEN or HOME_AGENT_HA_TOKEN_FILE: requires HOME_AGENT_CONVERSATION_ENABLED=true")
+	}
+	if err := c.Grafana.validate(); err != nil {
+		return err
+	}
+	if c.Grafana.Enabled() && !c.Conversation.Enabled {
+		return fmt.Errorf("HOME_AGENT_GRAFANA_TOKEN or HOME_AGENT_GRAFANA_TOKEN_FILE: requires HOME_AGENT_CONVERSATION_ENABLED=true")
 	}
 	if err := c.Bus.validate(); err != nil {
 		return err
