@@ -1,6 +1,6 @@
 # 0041 — Grouped /settings with an overview and pages
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
@@ -31,13 +31,16 @@ the button that leads to it.
   - Everyday tools: web, trains, and buses, controls on the group page.
   - Safety & privacy: safety checks, controls on the group page.
 - A group with no configured sections is left out. A group with a single
-  section links straight to that section's page.
+  configured section shows that section's controls on the group page.
 - Navigation is stateless: `nav:<page>` callbacks name the page, and a section
-  action re-renders the page that holds that section. A stale or forged press
-  still only refreshes a view, and an old pre-change settings message keeps
-  working because section callbacks are unchanged.
-- Each section gains a one-line summary for the overview and an optional
-  attention line; its existing render becomes its page content.
+  action re-renders the page that holds that section. A known section with an
+  unknown action re-renders that section's page; anything else shows the
+  overview. An old pre-change settings message keeps working because section
+  callbacks are unchanged.
+- Each section gains a summary (name, state, and an optional attention line);
+  its existing render becomes its page content. Attention covers a model that
+  is not connected, a Google account to reconnect, a rejected Notion token,
+  and paused home actions, and marks the group's button with ⚠.
 - A toggle's confirmation becomes a line on the refreshed page instead of a
   separate message. Messages the user must act on stay separate: model and
   Google sign-in instructions, the Notion token intake, and failure replies.
@@ -72,6 +75,5 @@ the button that leads to it.
 
 - Group pages that hold several sections keep each section's full prose and
   button row; shortening that text is left for later.
-- Another agent is changing `internal/telegram/service.go` for plan 0040;
-  edits here stay inside the settings branch, and the commit stages only
-  these hunks.
+- The integration tests configure Google and Notion separately, so the
+  Accounts page that links to both, and its per-section pages, have no test.
