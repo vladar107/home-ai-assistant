@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 /HANDOFF.md
+/CLAUDE.local.md
 /deploy/runtime.env
 /deploy/telegram-users.json
 /deploy/nas-roots.json

@@ -45,6 +45,8 @@ all checks. A rule in `CLAUDE.md` keeps it that way.
 5. Force-push, ask GitHub Support to purge cached and unreferenced commits, and
    only then make the repository public.
 6. Redeploy the application on the NAS so it uses the renamed settings.
+7. When the repository becomes public, turn on GitHub private vulnerability
+   reporting, which `SECURITY.md` (plan 0052) points reporters to.
 
 ## Files affected
 
