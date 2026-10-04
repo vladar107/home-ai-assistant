@@ -1,0 +1,1318 @@
+{
+ "source": "HARP",
+ "trips": [
+  {
+   "idx": 0,
+   "uid": "arnu|fromStation=8400055|requestedFromStation=8400055|toStation=8013552|requestedToStation=8013552|plannedFromTime=2026-10-05T08:34:00+02:00|plannedArrivalTime=2026-10-05T12:01:00+02:00|excludeHighSpeedTrains=false|showLiftInfo=false|searchForAccessibleTrip=false|localTrainsOnly=false|disabledTransportModalities=BUS,FERRY,TRAM,METRO|travelAssistance=false|tripSummaryHash=366992882",
+   "ctxRecon": "arnu|fromStation=8400055|requestedFromStation=8400055|toStation=8013552|requestedToStation=8013552|plannedFromTime=2026-10-05T08:34:00+02:00|plannedArrivalTime=2026-10-05T12:01:00+02:00|excludeHighSpeedTrains=false|showLiftInfo=false|searchForAccessibleTrip=false|localTrainsOnly=false|disabledTransportModalities=BUS,FERRY,TRAM,METRO|travelAssistance=false|tripSummaryHash=366992882",
+   "sourceCtxRecon": "¶HKI¶T$A=1@O=Amersfoort Centraal@L=1100978@a=128@$A=1@O=Hannover Hbf@L=1103636@a=128@$202610050834$202610051201$ICE 143 $$1$$$$$$¶KC¶#VE#2#CF#100#CA#0#CM#0#SICT#0#AM#16465#AM2#0#RT#31#¶KCC¶#VE#0#ERG#1#HIN#0#ECK#13474|13474|13681|13681|0|0|485|13430|1|0|10|0|0|-2147483648#¶KRCC¶#VE#1#MRTF#",
+   "plannedDurationInMinutes": 207,
+   "actualDurationInMinutes": 207,
+   "transfers": 0,
+   "status": "NORMAL",
+   "legs": [
+    {
+     "idx": "0",
+     "name": "ICE 143",
+     "travelType": "PUBLIC_TRANSIT",
+     "direction": "Hannover Hbf",
+     "partCancelled": false,
+     "cancelled": false,
+     "isAfterCancelledLeg": false,
+     "isOnOrAfterCancelledLeg": false,
+     "changePossible": true,
+     "alternativeTransport": false,
+     "journeyDetailRef": "HARP_MM-2|#VN#1#ST#1790761283#PI#0#ZI#222#TA#0#DA#51026#1S#1100978#1T#834#LS#1103636#LT#1201#PU#784#RT#1#CA#ICE#ZE#143#ZB#ICE 143 #PC#0#FR#1100978#FT#834#TO#1103636#TT#1201#",
+     "origin": {
+      "name": "Amersfoort Centraal",
+      "rawLocationName": "Amersfoort Centraal",
+      "lng": 5.37055540084839,
+      "lat": 52.1538887023926,
+      "countryCode": "NL",
+      "uicCode": "8400055",
+      "uicCdCode": "118400055",
+      "stationCode": "AMF",
+      "type": "STATION",
+      "plannedTimeZoneOffset": 120,
+      "plannedDateTime": "2026-10-05T08:34:00+0200",
+      "actualTimeZoneOffset": 120,
+      "actualDateTime": "2026-10-05T08:34:00+0200",
+      "plannedTrack": "4a",
+      "actualTrack": "4a",
+      "checkinStatus": "NOTHING",
+      "notes": []
+     },
+     "destination": {
+      "name": "Hannover Hbf",
+      "rawLocationName": "Hannover Hbf",
+      "lng": 9.7416759,
+      "lat": 52.3770401,
+      "countryCode": "D",
+      "uicCode": "8013552",
+      "uicCdCode": "108013552",
+      "stationCode": "HANN",
+      "type": "STATION",
+      "plannedTimeZoneOffset": 120,
+      "plannedDateTime": "2026-10-05T12:01:00+0200",
+      "actualTimeZoneOffset": 120,
+      "actualDateTime": "2026-10-05T12:01:00+0200",
+      "plannedTrack": "9",
+      "actualTrack": "9",
+      "checkinStatus": "NOTHING",
+      "notes": []
+     },
+     "product": {
+      "productType": "Product",
+      "number": "143",
+      "categoryCode": "ICE",
+      "shortCategoryName": "ICE",
+      "longCategoryName": "ICE",
+      "operatorCode": "NS",
+      "operatorName": "NS International",
+      "operatorAdministrativeCode": 202,
+      "type": "TRAIN",
+      "displayName": "ICE",
+      "nameNesProperties": {
+       "color": "text-body"
+      },
+      "iconNesProperties": {
+       "color": "text-body",
+       "icon": "train"
+      },
+      "notes": [
+       [
+        {
+         "value": "ICE",
+         "shortValue": "ICE",
+         "accessibilityValue": "ICE",
+         "key": "PRODUCT_NAME",
+         "noteType": "ATTRIBUTE",
+         "isPresentationRequired": true,
+         "nesProperties": {
+          "color": "text-body"
+         }
+        }
+       ],
+       [
+        {
+         "value": "to Hannover Hbf",
+         "shortValue": "to Hannover Hbf",
+         "accessibilityValue": "to Hannover Hbf",
+         "key": "PRODUCT_DIRECTION",
+         "noteType": "ATTRIBUTE",
+         "isPresentationRequired": true,
+         "nesProperties": {
+          "color": "text-body"
+         }
+        }
+       ],
+       [
+        {
+         "value": "7 intermediate stops",
+         "shortValue": "7 intermediate stops",
+         "accessibilityValue": "7 intermediate stops",
+         "key": "PRODUCT_INTERMEDIATE_STOPS",
+         "noteType": "ATTRIBUTE",
+         "isPresentationRequired": true,
+         "nesProperties": {
+          "color": "text-body"
+         }
+        }
+       ],
+       [
+        {
+         "value": "Supplement",
+         "shortValue": "Supplement",
+         "accessibilityValue": "Supplement",
+         "key": "PRODUCT_SUPPLEMENT",
+         "noteType": "ATTRIBUTE",
+         "isPresentationRequired": true,
+         "nesProperties": {
+          "color": "text-warning-contrast",
+          "type": "warning"
+         }
+        }
+       ]
+      ],
+      "nesTagVariant": "Neutral"
+     },
+     "notes": [
+      {
+       "value": "Supplement",
+       "shortValue": "Supplement",
+       "accessibilityValue": "Supplement",
+       "key": "ZA",
+       "noteType": "ATTRIBUTE",
+       "isPresentationRequired": true
+      }
+     ],
+     "stops": [
+      {
+       "uicCode": "8400055",
+       "uicCdCode": "118400055",
+       "name": "Amersfoort Centraal",
+       "lat": 52.1538887023926,
+       "lng": 5.37055540084839,
+       "countryCode": "NL",
+       "notes": [],
+       "routeIdx": 0,
+       "plannedDepartureDateTime": "2026-10-05T08:34:00+0200",
+       "plannedDepartureTimeZoneOffset": 120,
+       "actualDepartureDateTime": "2026-10-05T08:34:00+0200",
+       "actualDepartureTimeZoneOffset": 120,
+       "actualDepartureTrack": "4a",
+       "plannedDepartureTrack": "4a",
+       "plannedArrivalTrack": "4a",
+       "actualArrivalTrack": "4a",
+       "departureDelayInSeconds": 0,
+       "cancelled": false,
+       "borderStop": false,
+       "passing": false
+      },
+      {
+       "uicCode": "8400066",
+       "uicCdCode": "118400066",
+       "name": "Apeldoorn",
+       "lat": 52.2091674804687,
+       "lng": 5.97027778625488,
+       "countryCode": "NL",
+       "notes": [],
+       "routeIdx": 2,
+       "plannedDepartureDateTime": "2026-10-05T09:02:00+0200",
+       "plannedDepartureTimeZoneOffset": 120,
+       "actualDepartureDateTime": "2026-10-05T09:02:00+0200",
+       "actualDepartureTimeZoneOffset": 120,
+       "plannedArrivalDateTime": "2026-10-05T08:58:00+0200",
+       "plannedArrivalTimeZoneOffset": 120,
+       "actualArrivalDateTime": "2026-10-05T08:58:00+0200",
+       "actualArrivalTimeZoneOffset": 120,
+       "actualDepartureTrack": "4",
+       "plannedDepartureTrack": "4",
+       "plannedArrivalTrack": "4",
+       "actualArrivalTrack": "4",
+       "departureDelayInSeconds": 0,
+       "arrivalDelayInSeconds": 0,
+       "cancelled": false,
+       "borderStop": false,
+       "passing": false
+      },
+      {
+       "uicCode": "8400173",
+       "uicCdCode": "118400173",
+       "name": "Deventer",
+       "lat": 52.2574996948242,
+       "lng": 6.16055536270142,
+       "countryCode": "NL",
+       "notes": [],
+       "routeIdx": 5,
+       "plannedDepartureDateTime": "2026-10-05T09:18:00+0200",
+       "plannedDepartureTimeZoneOffset": 120,
+       "actualDepartureDateTime": "2026-10-05T09:18:00+0200",
+       "actualDepartureTimeZoneOffset": 120,
+       "plannedArrivalDateTime": "2026-10-05T09:12:00+0200",
+       "plannedArrivalTimeZoneOffset": 120,
+       "actualArrivalDateTime": "2026-10-05T09:12:00+0200",
+       "actualArrivalTimeZoneOffset": 120,
+       "actualDepartureTrack": "1",
+       "plannedDepartureTrack": "1",
+       "plannedArrivalTrack": "1",
+       "actualArrivalTrack": "1",
+       "departureDelayInSeconds": 0,
+       "arrivalDelayInSeconds": 0,
+       "cancelled": false,
+       "borderStop": false,
+       "passing": false
+      },
+      {
+       "uicCode": "8400316",
+       "uicCdCode": "118400316",
+       "name": "Hengelo",
+       "lat": 52.2616653442383,
+       "lng": 6.79388904571533,
+       "countryCode": "NL",
+       "notes": [],
+       "routeIdx": 13,
+       "plannedDepartureDateTime": "2026-10-05T09:52:00+0200",
+       "plannedDepartureTimeZoneOffset": 120,
+       "actualDepartureDateTime": "2026-10-05T09:52:00+0200",
+       "actualDepartureTimeZoneOffset": 120,
+       "plannedArrivalDateTime": "2026-10-05T09:51:00+0200",
+       "plannedArrivalTimeZoneOffset": 120,
+       "actualArrivalDateTime": "2026-10-05T09:51:00+0200",
+       "actualArrivalTimeZoneOffset": 120,
+       "actualDepartureTrack": "3",
+       "plannedDepartureTrack": "3",
+       "plannedArrivalTrack": "3",
+       "actualArrivalTrack": "3",
+       "departureDelayInSeconds": 0,
+       "arrivalDelayInSeconds": 0,
+       "cancelled": false,
+       "borderStop": false,
+       "passing": false
+      },
+      {
+       "uicCode": "8021156",
+       "uicCdCode": "108021156",
+       "name": "Bad Bentheim",
+       "lat": 52.309685595156,
+       "lng": 7.15853691101074,
+       "countryCode": "D",
+       "notes": [],
+       "routeIdx": 16,
+       "plannedDepartureDateTime": "2026-10-05T10:12:00+0200",
+       "plannedDepartureTimeZoneOffset": 120,
+       "actualDepartureDateTime": "2026-10-05T10:12:00+0200",
+       "actualDepartureTimeZoneOffset": 120,
+       "plannedArrivalDateTime": "2026-10-05T10:09:00+0200",
+       "plannedArrivalTimeZoneOffset": 120,
+       "actualArrivalDateTime": "2026-10-05T10:09:00+0200",
+       "actualArrivalTimeZoneOffset": 120,
+       "actualDepartureTrack": "1",
+       "plannedDepartureTrack": "1",
+       "plannedArrivalTrack": "1",
+       "actualArrivalTrack": "1",
+       "departureDelayInSeconds": 0,
+       "arrivalDelayInSeconds": 0,
+       "cancelled": false,
+       "borderStop": false,
+       "passing": false
+      },
+      {
+       "uicCode": "8021067",
+       "uicCdCode": "108021067",
+       "name": "Rheine",
+       "lat": 52.276299,
+       "lng": 7.434255,
+       "countryCode": "D",
+       "notes": [],
+       "routeIdx": 17,
+       "plannedDepartureDateTime": "2026-10-05T10:26:00+0200",
+       "plannedDepartureTimeZoneOffset": 120,
+       "actualDepartureDateTime": "2026-10-05T10:26:00+0200",
+       "actualDepartureTimeZoneOffset": 120,
+       "plannedArrivalDateTime": "2026-10-05T10:24:00+0200",
+       "plannedArrivalTimeZoneOffset": 120,
+       "actualArrivalDateTime": "2026-10-05T10:24:00+0200",
+       "actualArrivalTimeZoneOffset": 120,
+       "actualDepartureTrack": "4",
+       "plannedDepartureTrack": "4",
+       "plannedArrivalTrack": "4",
+       "actualArrivalTrack": "4",
+       "departureDelayInSeconds": 0,
+       "arrivalDelayInSeconds": 0,
+       "cancelled": false,
+       "borderStop": false,
+       "passing": false
+      },
+      {
+       "uicCode": "8021025",
+       "uicCdCode": "108021025",
+       "name": "Osnabrück Hbf",
+       "lat": 52.272851,
+       "lng": 8.061781,
+       "countryCode": "D",
+       "notes": [],
+       "routeIdx": 18,
+       "plannedDepartureDateTime": "2026-10-05T10:54:00+0200",
+       "plannedDepartureTimeZoneOffset": 120,
+       "actualDepartureDateTime": "2026-10-05T10:54:00+0200",
+       "actualDepartureTimeZoneOffset": 120,
+       "plannedArrivalDateTime": "2026-10-05T10:51:00+0200",
+       "plannedArrivalTimeZoneOffset": 120,
+       "actualArrivalDateTime": "2026-10-05T10:51:00+0200",
+       "actualArrivalTimeZoneOffset": 120,
+       "actualDepartureTrack": "11",
+       "plannedDepartureTrack": "11",
+       "plannedArrivalTrack": "11",
+       "actualArrivalTrack": "11",
+       "departureDelayInSeconds": 0,
+       "arrivalDelayInSeconds": 0,
+       "cancelled": false,
+       "borderStop": false,
+       "passing": false
+      },
+      {
+       "uicCode": "8021173",
+       "uicCdCode": "108021173",
+       "name": "Bünde (Westf)",
+       "lat": 52.202075,
+       "lng": 8.573876,
+       "countryCode": "D",
+       "notes": [],
+       "routeIdx": 19,
+       "plannedDepartureDateTime": "2026-10-05T11:16:00+0200",
+       "plannedDepartureTimeZoneOffset": 120,
+       "actualDepartureDateTime": "2026-10-05T11:16:00+0200",
+       "actualDepartureTimeZoneOffset": 120,
+       "plannedArrivalDateTime": "2026-10-05T11:14:00+0200",
+       "plannedArrivalTimeZoneOffset": 120,
+       "actualArrivalDateTime": "2026-10-05T11:14:00+0200",
+       "actualArrivalTimeZoneOffset": 120,
+       "actualDepartureTrack": "2",
+       "plannedDepartureTrack": "2",
+       "plannedArrivalTrack": "2",
+       "actualArrivalTrack": "2",
+       "departureDelayInSeconds": 0,
+       "arrivalDelayInSeconds": 0,
+       "cancelled": false,
+       "borderStop": false,
+       "passing": false
+      },
+      {
+       "uicCode": "8013552",
+       "uicCdCode": "108013552",
+       "name": "Hannover Hbf",
+       "lat": 52.3770401,
+       "lng": 9.7416759,
+       "countryCode": "D",
+       "notes": [],
+       "routeIdx": 20,
+       "plannedArrivalDateTime": "2026-10-05T12:01:00+0200",
+       "plannedArrivalTimeZoneOffset": 120,
+       "actualArrivalDateTime": "2026-10-05T12:01:00+0200",
+       "actualArrivalTimeZoneOffset": 120,
+       "actualDepartureTrack": "9",
+       "plannedDepartureTrack": "9",
+       "plannedArrivalTrack": "9",
+       "actualArrivalTrack": "9",
+       "arrivalDelayInSeconds": 0,
+       "cancelled": false,
+       "borderStop": false,
+       "passing": false
+      }
+     ],
+     "crowdForecast": "UNKNOWN",
+     "shorterStock": false,
+     "journeyDetail": [
+      {
+       "type": "TRAIN_XML",
+       "link": {
+        "uri": "/api/v2/journey?id=HARP_MM-2|#VN#1#ST#1790761283#PI#0#ZI#222#TA#0#DA#51026#1S#1100978#1T#834#LS#1103636#LT#1201#PU#784#RT#1#CA#ICE#ZE#143#ZB#ICE 143 #PC#0#FR#1100978#FT#834#TO#1103636#TT#1201#&train=143&datetime=2026-10-05T08:34:00+02:00"
+       }
+      }
+     ],
+     "reachable": true,
+     "plannedDurationInMinutes": 207,
+     "actualDurationInMinutes": 207,
+     "nesProperties": {
+      "color": "text-info",
+      "scope": "LEG_LINE",
+      "styles": {
+       "type": "LineStyles",
+       "dashed": false
+      }
+     },
+     "duration": {
+      "value": "3:27 h.",
+      "accessibilityValue": "3 hours and 27 minutes",
+      "nesProperties": {
+       "color": "text-body"
+      }
+     },
+     "preSteps": [],
+     "postSteps": [],
+     "distanceInMeters": 312469,
+     "ticketActions": [
+      {
+       "type": "SUPPLEMENT"
+      }
+     ]
+    }
+   ],
+   "checksum": "cfa66043_3",
+   "crowdForecast": "UNKNOWN",
+   "optimal": true,
+   "fares": [],
+   "fareOptions": {
+    "isInternationalBookable": true,
+    "isInternational": true,
+    "isEticketBuyable": false,
+    "isPossibleWithOvChipkaart": false,
+    "isTotalPriceUnknown": false,
+    "reasonEticketNotBuyable": {
+     "reason": "UNKNOWN_PRICE",
+     "description": "You cannot purchase a ticket for this trip because the price is unknown for this trip."
+    }
+   },
+   "nsiLink": {
+    "url": "https://www.nsinternational.com/en/traintickets-v3/#/search/AMF/HANN/20261005/0834/1201?stationType=domestic&cookieConsent=false",
+    "showInternationalBanner": true
+   },
+   "type": "NS",
+   "shareUrl": {
+    "uri": "https://www.ns.nl/rpx?ctx=arnu%7CfromStation%3D8400055%7CrequestedFromStation%3D8400055%7CtoStation%3D8013552%7CrequestedToStation%3D8013552%7CplannedFromTime%3D2026-10-05T08%3A34%3A00%2B02%3A00%7CplannedArrivalTime%3D2026-10-05T12%3A01%3A00%2B02%3A00%7CexcludeHighSpeedTrains%3Dfalse%7CshowLiftInfo%3Dfalse%7CsearchForAccessibleTrip%3Dfalse%7ClocalTrainsOnly%3Dfalse%7CdisabledTransportModalities%3DBUS%2CFERRY%2CTRAM%2CMETRO%7CtravelAssistance%3Dfalse%7CtripSummaryHash%3D366992882"
+   },
+   "realtime": true,
+   "modalityListItems": [
+    {
+     "name": "ICE",
+     "nameNesProperties": {
+      "color": "text-subtle",
+      "styles": {
+       "type": "TextStyles",
+       "strikethrough": false,
+       "bold": false
+      }
+     },
+     "iconNesProperties": {
+      "color": "text-body",
+      "icon": "train"
+     },
+     "actualTrack": "4a",
+     "accessibilityName": "ICE"
+    }
+   ]
+  },
+  {
+   "idx": 1,
+   "uid": "arnu|fromStation=8400055|requestedFromStation=8400055|toStation=8013552|requestedToStation=8013552|plannedFromTime=2026-10-05T08:40:00+02:00|plannedArrivalTime=2026-10-05T13:28:00+02:00|excludeHighSpeedTrains=false|showLiftInfo=false|searchForAccessibleTrip=false|localTrainsOnly=false|disabledTransportModalities=BUS,FERRY,TRAM,METRO|travelAssistance=false|tripSummaryHash=2005711689",
+   "ctxRecon": "arnu|fromStation=8400055|requestedFromStation=8400055|toStation=8013552|requestedToStation=8013552|plannedFromTime=2026-10-05T08:40:00+02:00|plannedArrivalTime=2026-10-05T13:28:00+02:00|excludeHighSpeedTrains=false|showLiftInfo=false|searchForAccessibleTrip=false|localTrainsOnly=false|disabledTransportModalities=BUS,FERRY,TRAM,METRO|travelAssistance=false|tripSummaryHash=2005711689",
+   "sourceCtxRecon": "¶HKI¶T$A=1@O=Amersfoort Centraal@L=1100696@a=128@$A=1@O=Utrecht Centraal@L=1100697@a=128@$202610050840$202610050853$IC 1724 $$1$$$$$$§W$A=1@O=Utrecht Centraal@L=1100697@a=128@$A=1@O=Utrecht Centraal@L=1100728@a=128@$202610050853$202610050858$$$1$$$$$$§T$A=1@O=Utrecht Centraal@L=1100728@a=128@$A=1@O=Duisburg Hbf@L=8000086@a=128@$202610050902$202610051032$ICE 225 $$3$$$$$$§T$A=1@O=Duisburg Hbf@L=8000086@a=128@$A=1@O=Hannover Hbf@L=1103636@a=128@$202610051106$202610051328$ICE 547 $$1$$$$$$¶KC¶#VE#2#CF#100#CA#0#CM#0#SICT#0#AM#16465#AM2#0#RT#31#¶KCC¶#VE#0#ERG#260#HIN#0#ECK#13480|13480|13768|13768|0|0|485|13475|2|0|10|0|0|-2147483648#¶KRCC¶#VE#1#MRTF#",
+   "plannedDurationInMinutes": 288,
+   "actualDurationInMinutes": 288,
+   "transfers": 2,
+   "status": "NORMAL",
+   "legs": [
+    {
+     "idx": "0",
+     "name": "IC 1724",
+     "travelType": "PUBLIC_TRANSIT",
+     "direction": "Den Haag Centraal",
+     "partCancelled": false,
+     "cancelled": false,
+     "isAfterCancelledLeg": false,
+     "isOnOrAfterCancelledLeg": false,
+     "changePossible": true,
+     "alternativeTransport": false,
+     "journeyDetailRef": "HARP_MM-2|#VN#1#ST#1790761283#PI#0#ZI#440035#TA#1#DA#51026#1S#1100691#1T#715#LS#1100998#LT#935#PU#784#RT#1#CA#IC#ZE#1724#ZB#IC 1724 #PC#1#FR#1100691#FT#715#TO#1100998#TT#935#",
+     "origin": {
+      "name": "Amersfoort Centraal",
+      "rawLocationName": "Amersfoort Centraal",
+      "lng": 5.37055540084839,
+      "lat": 52.1538887023926,
+      "countryCode": "NL",
+      "uicCode": "8400055",
+      "uicCdCode": "118400055",
+      "stationCode": "AMF",
+      "type": "STATION",
+      "plannedTimeZoneOffset": 120,
+      "plannedDateTime": "2026-10-05T08:40:00+0200",
+      "actualTimeZoneOffset": 120,
+      "actualDateTime": "2026-10-05T08:40:00+0200",
+      "plannedTrack": "6",
+      "actualTrack": "6",
+      "checkinStatus": "NOTHING",
+      "notes": []
+     },
+     "destination": {
+      "name": "Utrecht Centraal",
+      "rawLocationName": "Utrecht Centraal",
+      "lng": 5.11027765274048,
+      "lat": 52.0888900756836,
+      "countryCode": "NL",
+      "uicCode": "8400621",
+      "uicCdCode": "118400621",
+      "stationCode": "UT",
+      "type": "STATION",
+      "plannedTimeZoneOffset": 120,
+      "plannedDateTime": "2026-10-05T08:53:00+0200",
+      "actualTimeZoneOffset": 120,
+      "actualDateTime": "2026-10-05T08:53:00+0200",
+      "plannedTrack": "8",
+      "actualTrack": "8",
+      "exitSide": "RIGHT",
+      "checkinStatus": "NOTHING",
+      "notes": []
+     },
+     "product": {
+      "productType": "Product",
+      "number": "1724",
+      "categoryCode": "IC",
+      "shortCategoryName": "IC",
+      "longCategoryName": "Intercity",
+      "operatorCode": "NS",
+      "operatorName": "NS",
+      "operatorAdministrativeCode": 100,
+      "type": "TRAIN",
+      "displayName": "NS Intercity",
+      "nameNesProperties": {
+       "color": "text-body"
+      },
+      "iconNesProperties": {
+       "color": "text-body",
+       "icon": "train"
+      },
+      "notes": [
+       [
+        {
+         "value": "NS Intercity",
+         "shortValue": "NS Intercity",
+         "accessibilityValue": "NS Intercity",
+         "key": "PRODUCT_NAME",
+         "noteType": "ATTRIBUTE",
+         "isPresentationRequired": true,
+         "nesProperties": {
+          "color": "text-body"
+         }
+        }
+       ],
+       [
+        {
+         "value": "to Den Haag Centraal",
+         "shortValue": "to Den Haag Centraal",
+         "accessibilityValue": "to Den Haag Centraal",
+         "key": "PRODUCT_DIRECTION",
+         "noteType": "ATTRIBUTE",
+         "isPresentationRequired": true,
+         "nesProperties": {
+          "color": "text-body"
+         }
+        }
+       ],
+       [
+        {
+         "value": "No intermediate stops",
+         "shortValue": "No intermediate stops",
+         "accessibilityValue": "No intermediate stops",
+         "key": "PRODUCT_INTERMEDIATE_STOPS",
+         "noteType": "ATTRIBUTE",
+         "isPresentationRequired": true,
+         "nesProperties": {
+          "color": "text-body"
+         }
+        }
+       ]
+      ],
+      "nesTagVariant": "Neutral"
+     },
+     "stops": [
+      {
+       "uicCode": "8400055",
+       "uicCdCode": "118400055",
+       "name": "Amersfoort Centraal",
+       "lat": 52.1538887023926,
+       "lng": 5.37055540084839,
+       "countryCode": "NL",
+       "notes": [],
+       "routeIdx": 0,
+       "plannedDepartureDateTime": "2026-10-05T08:40:00+0200",
+       "plannedDepartureTimeZoneOffset": 120,
+       "actualDepartureDateTime": "2026-10-05T08:40:00+0200",
+       "actualDepartureTimeZoneOffset": 120,
+       "actualDepartureTrack": "6",
+       "plannedDepartureTrack": "6",
+       "plannedArrivalTrack": "6",
+       "actualArrivalTrack": "6",
+       "departureDelayInSeconds": 0,
+       "cancelled": false,
+       "borderStop": false,
+       "passing": false
+      },
+      {
+       "uicCode": "8400621",
+       "uicCdCode": "118400621",
+       "name": "Utrecht Centraal",
+       "lat": 52.0888900756836,
+       "lng": 5.11027765274048,
+       "countryCode": "NL",
+       "notes": [],
+       "routeIdx": 4,
+       "plannedArrivalDateTime": "2026-10-05T08:53:00+0200",
+       "plannedArrivalTimeZoneOffset": 120,
+       "actualArrivalDateTime": "2026-10-05T08:53:00+0200",
+       "actualArrivalTimeZoneOffset": 120,
+       "actualDepartureTrack": "8",
+       "plannedDepartureTrack": "8",
+       "plannedArrivalTrack": "8",
+       "actualArrivalTrack": "8",
+       "arrivalDelayInSeconds": 0,
+       "cancelled": false,
+       "borderStop": false,
+       "passing": false
+      }
+     ],
+     "crowdForecast": "HIGH",
+     "bicycleSpotCount": 0,
+     "crossPlatformTransfer": false,
+     "shorterStock": false,
+     "journeyDetail": [
+      {
+       "type": "TRAIN_XML",
+       "link": {
+        "uri": "/api/v2/journey?id=HARP_MM-2|#VN#1#ST#1790761283#PI#0#ZI#440035#TA#1#DA#51026#1S#1100691#1T#715#LS#1100998#LT#935#PU#784#RT#1#CA#IC#ZE#1724#ZB#IC 1724 #PC#1#FR#1100691#FT#715#TO#1100998#TT#935#&train=1724&datetime=2026-10-05T08:40:00+02:00"
+       }
+      }
+     ],
+     "reachable": true,
+     "plannedDurationInMinutes": 13,
+     "actualDurationInMinutes": 13,
+     "nesProperties": {
+      "color": "text-info",
+      "scope": "LEG_LINE",
+      "styles": {
+       "type": "LineStyles",
+       "dashed": false
+      }
+     },
+     "duration": {
+      "value": "13 min.",
+      "accessibilityValue": "13 minutes",
+      "nesProperties": {
+       "color": "text-body"
+      }
+     },
+     "preSteps": [],
+     "postSteps": [],
+     "transferTimeToNextLeg": 5,
+     "distanceInMeters": 20196
+    },
+    {
+     "idx": "1",
+     "name": "ICE 225",
+     "travelType": "PUBLIC_TRANSIT",
+     "direction": "München Hbf",
+     "partCancelled": false,
+     "cancelled": false,
+     "isAfterCancelledLeg": false,
+     "isOnOrAfterCancelledLeg": false,
+     "changePossible": true,
+     "alternativeTransport": false,
+     "journeyDetailRef": "HARP_MM-2|#VN#1#ST#1790761283#PI#0#ZI#532370#TA#0#DA#51026#1S#1100937#1T#831#LS#8000261#LT#1540#PU#784#RT#3#CA#ICE#ZE#225#ZB#ICE 225 #PC#0#FR#1100937#FT#831#TO#8000261#TT#1540#",
+     "origin": {
+      "name": "Utrecht Centraal",
+      "rawLocationName": "Utrecht Centraal",
+      "lng": 5.11027765274048,
+      "lat": 52.0888900756836,
+      "countryCode": "NL",
+      "uicCode": "8400621",
+      "uicCdCode": "118400621",
+      "stationCode": "UT",
+      "type": "STATION",
+      "plannedTimeZoneOffset": 120,
+      "plannedDateTime": "2026-10-05T09:02:00+0200",
+      "actualTimeZoneOffset": 120,
+      "actualDateTime": "2026-10-05T09:02:00+0200",
+      "plannedTrack": "19",
+      "actualTrack": "19",
+      "checkinStatus": "NOTHING",
+      "notes": []
+     },
+     "destination": {
+      "name": "Duisburg Hbf",
+      "rawLocationName": "Duisburg Hbf",
+      "lng": 6.77590370178222,
+      "lat": 51.4297785713316,
+      "countryCode": "D",
+      "uicCode": "8010316",
+      "uicCdCode": "108010316",
+      "stationCode": "DUISB",
+      "type": "STATION",
+      "plannedTimeZoneOffset": 120,
+      "plannedDateTime": "2026-10-05T10:32:00+0200",
+      "actualTimeZoneOffset": 120,
+      "actualDateTime": "2026-10-05T10:32:00+0200",
+      "plannedTrack": "2",
+      "checkinStatus": "NOTHING",
+      "notes": []
+     },
+     "product": {
+      "productType": "Product",
+      "number": "225",
+      "categoryCode": "ICE",
+      "shortCategoryName": "ICE",
+      "longCategoryName": "ICE",
+      "operatorCode": "NS",
+      "operatorName": "NS International",
+      "operatorAdministrativeCode": 202,
+      "type": "TRAIN",
+      "displayName": "ICE",
+      "nameNesProperties": {
+       "color": "text-body"
+      },
+      "iconNesProperties": {
+       "color": "text-body",
+       "icon": "train"
+      },
+      "notes": [
+       [
+        {
+         "value": "ICE",
+         "shortValue": "ICE",
+         "accessibilityValue": "ICE",
+         "key": "PRODUCT_NAME",
+         "noteType": "ATTRIBUTE",
+         "isPresentationRequired": true,
+         "nesProperties": {
+          "color": "text-body"
+         }
+        }
+       ],
+       [
+        {
+         "value": "to München Hbf",
+         "shortValue": "to München Hbf",
+         "accessibilityValue": "to München Hbf",
+         "key": "PRODUCT_DIRECTION",
+         "noteType": "ATTRIBUTE",
+         "isPresentationRequired": true,
+         "nesProperties": {
+          "color": "text-body"
+         }
+        }
+       ],
+       [
+        {
+         "value": "2 intermediate stops",
+         "shortValue": "2 intermediate stops",
+         "accessibilityValue": "2 intermediate stops",
+         "key": "PRODUCT_INTERMEDIATE_STOPS",
+         "noteType": "ATTRIBUTE",
+         "isPresentationRequired": true,
+         "nesProperties": {
+          "color": "text-body"
+         }
+        }
+       ],
+       [
+        {
+         "value": "Supplement",
+         "shortValue": "Supplement",
+         "accessibilityValue": "Supplement",
+         "key": "PRODUCT_SUPPLEMENT",
+         "noteType": "ATTRIBUTE",
+         "isPresentationRequired": true,
+         "nesProperties": {
+          "color": "text-warning-contrast",
+          "type": "warning"
+         }
+        }
+       ]
+      ],
+      "nesTagVariant": "Neutral"
+     },
+     "notes": [
+      {
+       "value": "Supplement",
+       "shortValue": "Supplement",
+       "accessibilityValue": "Supplement",
+       "key": "ZA",
+       "noteType": "ATTRIBUTE",
+       "isPresentationRequired": true
+      }
+     ],
+     "transferMessages": [
+      {
+       "message": "9 min. transfer time",
+       "accessibilityMessage": "9 minutes transfer time",
+       "type": "TRANSFER_TIME",
+       "messageNesProperties": {
+        "color": "text-default",
+        "type": "informative"
+       }
+      }
+     ],
+     "stops": [
+      {
+       "uicCode": "8400621",
+       "uicCdCode": "118400621",
+       "name": "Utrecht Centraal",
+       "lat": 52.0888900756836,
+       "lng": 5.11027765274048,
+       "countryCode": "NL",
+       "notes": [],
+       "routeIdx": 0,
+       "plannedDepartureDateTime": "2026-10-05T09:02:00+0200",
+       "plannedDepartureTimeZoneOffset": 120,
+       "actualDepartureDateTime": "2026-10-05T09:02:00+0200",
+       "actualDepartureTimeZoneOffset": 120,
+       "actualDepartureTrack": "19",
+       "plannedDepartureTrack": "19",
+       "plannedArrivalTrack": "19",
+       "actualArrivalTrack": "19",
+       "departureDelayInSeconds": 0,
+       "cancelled": false,
+       "borderStop": false,
+       "passing": false
+      },
+      {
+       "uicCode": "8400071",
+       "uicCdCode": "118400071",
+       "name": "Arnhem Centraal",
+       "lat": 51.9850006103516,
+       "lng": 5.89916658401489,
+       "countryCode": "NL",
+       "notes": [],
+       "routeIdx": 9,
+       "plannedDepartureDateTime": "2026-10-05T09:34:00+0200",
+       "plannedDepartureTimeZoneOffset": 120,
+       "actualDepartureDateTime": "2026-10-05T09:34:00+0200",
+       "actualDepartureTimeZoneOffset": 120,
+       "plannedArrivalDateTime": "2026-10-05T09:32:00+0200",
+       "plannedArrivalTimeZoneOffset": 120,
+       "actualArrivalDateTime": "2026-10-05T09:32:00+0200",
+       "actualArrivalTimeZoneOffset": 120,
+       "actualDepartureTrack": "8",
+       "plannedDepartureTrack": "8",
+       "plannedArrivalTrack": "8",
+       "actualArrivalTrack": "8",
+       "departureDelayInSeconds": 0,
+       "arrivalDelayInSeconds": 0,
+       "cancelled": false,
+       "borderStop": false,
+       "passing": false
+      },
+      {
+       "uicCode": "8010263",
+       "uicCdCode": "108010263",
+       "name": "Oberhausen Hbf",
+       "lat": 51.47512,
+       "lng": 6.852038,
+       "countryCode": "D",
+       "notes": [],
+       "routeIdx": 15,
+       "plannedDepartureDateTime": "2026-10-05T10:26:00+0200",
+       "plannedDepartureTimeZoneOffset": 120,
+       "actualDepartureDateTime": "2026-10-05T10:26:00+0200",
+       "actualDepartureTimeZoneOffset": 120,
+       "plannedArrivalDateTime": "2026-10-05T10:24:00+0200",
+       "plannedArrivalTimeZoneOffset": 120,
+       "actualArrivalDateTime": "2026-10-05T10:24:00+0200",
+       "actualArrivalTimeZoneOffset": 120,
+       "plannedDepartureTrack": "12",
+       "plannedArrivalTrack": "12",
+       "departureDelayInSeconds": 0,
+       "arrivalDelayInSeconds": 0,
+       "cancelled": false,
+       "borderStop": false,
+       "passing": false
+      },
+      {
+       "uicCode": "8010316",
+       "uicCdCode": "108010316",
+       "name": "Duisburg Hbf",
+       "lat": 51.4297785713316,
+       "lng": 6.77590370178222,
+       "countryCode": "D",
+       "notes": [],
+       "routeIdx": 16,
+       "plannedArrivalDateTime": "2026-10-05T10:32:00+0200",
+       "plannedArrivalTimeZoneOffset": 120,
+       "actualArrivalDateTime": "2026-10-05T10:32:00+0200",
+       "actualArrivalTimeZoneOffset": 120,
+       "plannedDepartureTrack": "2",
+       "plannedArrivalTrack": "2",
+       "arrivalDelayInSeconds": 0,
+       "cancelled": false,
+       "borderStop": false,
+       "passing": false
+      }
+     ],
+     "crowdForecast": "UNKNOWN",
+     "crossPlatformTransfer": false,
+     "shorterStock": false,
+     "journeyDetail": [
+      {
+       "type": "TRAIN_XML",
+       "link": {
+        "uri": "/api/v2/journey?id=HARP_MM-2|#VN#1#ST#1790761283#PI#0#ZI#532370#TA#0#DA#51026#1S#1100937#1T#831#LS#8000261#LT#1540#PU#784#RT#3#CA#ICE#ZE#225#ZB#ICE 225 #PC#0#FR#1100937#FT#831#TO#8000261#TT#1540#&train=225&datetime=2026-10-05T09:02:00+02:00"
+       }
+      }
+     ],
+     "reachable": true,
+     "plannedDurationInMinutes": 90,
+     "actualDurationInMinutes": 90,
+     "nesProperties": {
+      "color": "text-info",
+      "scope": "LEG_LINE",
+      "styles": {
+       "type": "LineStyles",
+       "dashed": false
+      }
+     },
+     "duration": {
+      "value": "1:30 h.",
+      "accessibilityValue": "1 hour and 30 minutes",
+      "nesProperties": {
+       "color": "text-body"
+      }
+     },
+     "preSteps": [],
+     "postSteps": [],
+     "distanceInMeters": 150856,
+     "ticketActions": [
+      {
+       "type": "SUPPLEMENT"
+      }
+     ]
+    },
+    {
+     "idx": "2",
+     "name": "ICE 547",
+     "travelType": "PUBLIC_TRANSIT",
+     "direction": "Berlin Hbf",
+     "partCancelled": false,
+     "cancelled": false,
+     "isAfterCancelledLeg": false,
+     "isOnOrAfterCancelledLeg": false,
+     "changePossible": true,
+     "alternativeTransport": false,
+     "journeyDetailRef": "HARP_MM-2|#VN#1#ST#1790761283#PI#0#ZI#198647#TA#0#DA#51026#1S#8000085#1T#1048#LS#1113642#LT#1626#PU#784#RT#1#CA#ICE#ZE#547#ZB#ICE 547 #PC#0#FR#8000085#FT#1048#TO#1113642#TT#1626#",
+     "origin": {
+      "name": "Duisburg Hbf",
+      "rawLocationName": "Duisburg Hbf",
+      "lng": 6.77590370178222,
+      "lat": 51.4297785713316,
+      "countryCode": "D",
+      "uicCode": "8010316",
+      "uicCdCode": "108010316",
+      "stationCode": "DUISB",
+      "type": "STATION",
+      "plannedTimeZoneOffset": 120,
+      "plannedDateTime": "2026-10-05T11:06:00+0200",
+      "plannedTrack": "13",
+      "checkinStatus": "NOTHING",
+      "notes": []
+     },
+     "destination": {
+      "name": "Hannover Hbf",
+      "rawLocationName": "Hannover Hbf",
+      "lng": 9.7416759,
+      "lat": 52.3770401,
+      "countryCode": "D",
+      "uicCode": "8013552",
+      "uicCdCode": "108013552",
+      "stationCode": "HANN",
+      "type": "STATION",
+      "plannedTimeZoneOffset": 120,
+      "plannedDateTime": "2026-10-05T13:28:00+0200",
+      "plannedTrack": "9",
+      "checkinStatus": "NOTHING",
+      "notes": []
+     },
+     "product": {
+      "productType": "Product",
+      "number": "547",
+      "categoryCode": "ICE",
+      "shortCategoryName": "ICE",
+      "longCategoryName": "ICE",
+      "operatorCode": "D",
+      "operatorName": "DB Fernverkehr AG",
+      "operatorAdministrativeCode": 80,
+      "type": "TRAIN",
+      "displayName": "ICE",
+      "nameNesProperties": {
+       "color": "text-body"
+      },
+      "iconNesProperties": {
+       "color": "text-body",
+       "icon": "train"
+      },
+      "notes": [
+       [
+        {
+         "value": "ICE",
+         "shortValue": "ICE",
+         "accessibilityValue": "ICE",
+         "key": "PRODUCT_NAME",
+         "noteType": "ATTRIBUTE",
+         "isPresentationRequired": true,
+         "nesProperties": {
+          "color": "text-body"
+         }
+        }
+       ],
+       [
+        {
+         "value": "to Berlin Hbf",
+         "shortValue": "to Berlin Hbf",
+         "accessibilityValue": "to Berlin Hbf",
+         "key": "PRODUCT_DIRECTION",
+         "noteType": "ATTRIBUTE",
+         "isPresentationRequired": true,
+         "nesProperties": {
+          "color": "text-body"
+         }
+        }
+       ],
+       [
+        {
+         "value": "5 intermediate stops",
+         "shortValue": "5 intermediate stops",
+         "accessibilityValue": "5 intermediate stops",
+         "key": "PRODUCT_INTERMEDIATE_STOPS",
+         "noteType": "ATTRIBUTE",
+         "isPresentationRequired": true,
+         "nesProperties": {
+          "color": "text-body"
+         }
+        }
+       ]
+      ],
+      "nesTagVariant": "Neutral"
+     },
+     "transferMessages": [
+      {
+       "message": "34 min. transfer time",
+       "accessibilityMessage": "34 minutes transfer time",
+       "type": "TRANSFER_TIME",
+       "messageNesProperties": {
+        "color": "text-default",
+        "type": "informative"
+       }
+      }
+     ],
+     "stops": [
+      {
+       "uicCode": "8010316",
+       "uicCdCode": "108010316",
+       "name": "Duisburg Hbf",
+       "lat": 51.4297785713316,
+       "lng": 6.77590370178222,
+       "countryCode": "D",
+       "notes": [],
+       "routeIdx": 0,
+       "plannedDepartureDateTime": "2026-10-05T11:06:00+0200",
+       "plannedDepartureTimeZoneOffset": 120,
+       "plannedDepartureTrack": "13",
+       "plannedArrivalTrack": "13",
+       "cancelled": false,
+       "borderStop": false,
+       "passing": false
+      },
+      {
+       "uicCode": "8010144",
+       "uicCdCode": "108010144",
+       "name": "Gelsenkirchen Hbf",
+       "lat": 51.5049334,
+       "lng": 7.0996378,
+       "countryCode": "D",
+       "notes": [],
+       "routeIdx": 1,
+       "plannedDepartureDateTime": "2026-10-05T11:25:00+0200",
+       "plannedDepartureTimeZoneOffset": 120,
+       "plannedArrivalDateTime": "2026-10-05T11:24:00+0200",
+       "plannedArrivalTimeZoneOffset": 120,
+       "plannedDepartureTrack": "6",
+       "plannedArrivalTrack": "6",
+       "cancelled": false,
+       "borderStop": false,
+       "passing": false
+      },
+      {
+       "uicCode": "8010053",
+       "uicCdCode": "108010053",
+       "name": "Dortmund Hbf",
+       "lat": 51.517896,
+       "lng": 7.45929,
+       "countryCode": "D",
+       "notes": [],
+       "routeIdx": 2,
+       "plannedDepartureDateTime": "2026-10-05T11:47:00+0200",
+       "plannedDepartureTimeZoneOffset": 120,
+       "plannedArrivalDateTime": "2026-10-05T11:44:00+0200",
+       "plannedArrivalTimeZoneOffset": 120,
+       "plannedDepartureTrack": "16",
+       "plannedArrivalTrack": "16",
+       "cancelled": false,
+       "borderStop": false,
+       "passing": false
+      },
+      {
+       "uicCode": "8010002",
+       "uicCdCode": "108010002",
+       "name": "Hamm (Westf.)",
+       "lat": 51.678078,
+       "lng": 7.807821,
+       "countryCode": "D",
+       "notes": [],
+       "routeIdx": 3,
+       "plannedDepartureDateTime": "2026-10-05T12:06:00+0200",
+       "plannedDepartureTimeZoneOffset": 120,
+       "plannedArrivalDateTime": "2026-10-05T12:05:00+0200",
+       "plannedArrivalTimeZoneOffset": 120,
+       "plannedDepartureTrack": "9",
+       "plannedArrivalTrack": "9",
+       "cancelled": false,
+       "borderStop": false,
+       "passing": false
+      },
+      {
+       "uicCode": "8013597",
+       "uicCdCode": "108013597",
+       "name": "Bielefeld Hbf",
+       "lat": 52.029261,
+       "lng": 8.532722,
+       "countryCode": "D",
+       "notes": [],
+       "routeIdx": 4,
+       "plannedDepartureDateTime": "2026-10-05T12:36:00+0200",
+       "plannedDepartureTimeZoneOffset": 120,
+       "plannedArrivalDateTime": "2026-10-05T12:34:00+0200",
+       "plannedArrivalTimeZoneOffset": 120,
+       "plannedDepartureTrack": "2",
+       "plannedArrivalTrack": "2",
+       "cancelled": false,
+       "borderStop": false,
+       "passing": false
+      },
+      {
+       "uicCode": "8013578",
+       "uicCdCode": "108013578",
+       "name": "Minden (Westf)",
+       "lat": 52.290138,
+       "lng": 8.934728,
+       "countryCode": "D",
+       "notes": [],
+       "routeIdx": 5,
+       "plannedDepartureDateTime": "2026-10-05T13:00:00+0200",
+       "plannedDepartureTimeZoneOffset": 120,
+       "plannedArrivalDateTime": "2026-10-05T12:58:00+0200",
+       "plannedArrivalTimeZoneOffset": 120,
+       "plannedDepartureTrack": "13",
+       "plannedArrivalTrack": "13",
+       "cancelled": false,
+       "borderStop": false,
+       "passing": false
+      },
+      {
+       "uicCode": "8013552",
+       "uicCdCode": "108013552",
+       "name": "Hannover Hbf",
+       "lat": 52.3770401,
+       "lng": 9.7416759,
+       "countryCode": "D",
+       "notes": [],
+       "routeIdx": 6,
+       "plannedArrivalDateTime": "2026-10-05T13:28:00+0200",
+       "plannedArrivalTimeZoneOffset": 120,
+       "plannedDepartureTrack": "9",
+       "plannedArrivalTrack": "9",
+       "cancelled": false,
+       "borderStop": false,
+       "passing": false
+      }
+     ],
+     "crowdForecast": "UNKNOWN",
+     "shorterStock": false,
+     "journeyDetail": [
+      {
+       "type": "TRAIN_XML",
+       "link": {
+        "uri": "/api/v2/journey?id=HARP_MM-2|#VN#1#ST#1790761283#PI#0#ZI#198647#TA#0#DA#51026#1S#8000085#1T#1048#LS#1113642#LT#1626#PU#784#RT#1#CA#ICE#ZE#547#ZB#ICE 547 #PC#0#FR#8000085#FT#1048#TO#1113642#TT#1626#&train=547&datetime=2026-10-05T11:06:00+02:00"
+       }
+      }
+     ],
+     "reachable": true,
+     "plannedDurationInMinutes": 142,
+     "nesProperties": {
+      "color": "text-info",
+      "scope": "LEG_LINE",
+      "styles": {
+       "type": "LineStyles",
+       "dashed": false
+      }
+     },
+     "duration": {
+      "value": "2:22 h.",
+      "accessibilityValue": "2 hours and 22 minutes",
+      "nesProperties": {
+       "color": "text-body"
+      }
+     },
+     "preSteps": [],
+     "postSteps": [],
+     "distanceInMeters": 237718
+    }
+   ],
+   "checksum": "f9353e5c_3",
+   "crowdForecast": "HIGH",
+   "optimal": false,
+   "fares": [],
+   "fareOptions": {
+    "isInternationalBookable": true,
+    "isInternational": true,
+    "isEticketBuyable": false,
+    "isPossibleWithOvChipkaart": false,
+    "isTotalPriceUnknown": false,
+    "reasonEticketNotBuyable": {
+     "reason": "UNKNOWN_PRICE",
+     "description": "You cannot purchase a ticket for this trip because the price is unknown for this trip."
+    }
+   },
+   "nsiLink": {
+    "url": "https://www.nsinternational.com/en/traintickets-v3/#/search/AMF/HANN/20261005/0840/1328?stationType=domestic&cookieConsent=false",
+    "showInternationalBanner": true
+   },
+   "type": "NS",
+   "shareUrl": {
+    "uri": "https://www.ns.nl/rpx?ctx=arnu%7CfromStation%3D8400055%7CrequestedFromStation%3D8400055%7CtoStation%3D8013552%7CrequestedToStation%3D8013552%7CplannedFromTime%3D2026-10-05T08%3A40%3A00%2B02%3A00%7CplannedArrivalTime%3D2026-10-05T13%3A28%3A00%2B02%3A00%7CexcludeHighSpeedTrains%3Dfalse%7CshowLiftInfo%3Dfalse%7CsearchForAccessibleTrip%3Dfalse%7ClocalTrainsOnly%3Dfalse%7CdisabledTransportModalities%3DBUS%2CFERRY%2CTRAM%2CMETRO%7CtravelAssistance%3Dfalse%7CtripSummaryHash%3D2005711689"
+   },
+   "realtime": true,
+   "modalityListItems": [
+    {
+     "name": "Intercity",
+     "nameNesProperties": {
+      "color": "text-subtle",
+      "styles": {
+       "type": "TextStyles",
+       "strikethrough": false,
+       "bold": false
+      }
+     },
+     "iconNesProperties": {
+      "color": "text-body",
+      "icon": "train"
+     },
+     "actualTrack": "6",
+     "accessibilityName": "Intercity"
+    },
+    {
+     "name": "ICE",
+     "nameNesProperties": {
+      "color": "text-subtle",
+      "styles": {
+       "type": "TextStyles",
+       "strikethrough": false,
+       "bold": false
+      }
+     },
+     "iconNesProperties": {
+      "color": "text-body",
+      "icon": "train"
+     },
+     "actualTrack": "19",
+     "accessibilityName": "ICE"
+    },
+    {
+     "name": "ICE",
+     "nameNesProperties": {
+      "color": "text-subtle",
+      "styles": {
+       "type": "TextStyles",
+       "strikethrough": false,
+       "bold": false
+      }
+     },
+     "iconNesProperties": {
+      "color": "text-body",
+      "icon": "train"
+     },
+     "accessibilityName": "ICE"
+    }
+   ]
+  }
+ ],
+ "travelAdviceMessage": {
+  "title": "Due to maintenance work, the timetable below is different from what you are used to.",
+  "nesProperties": {
+   "color": "text-info",
+   "icon": "info-filled"
+  },
+  "disruptionIds": [
+   "7008290",
+   "7008197"
+  ]
+ },
+ "scrollRequestBackwardContext": "harpwh_before_2331231709_3|OB|MTµ14µ13474µ13474µ13681µ13681µ0µ0µ485µ13430µ1µ0µ10µ0µ0µ-2147483648µ1µ2|PDHµ3b34d87111079a2c763b066891455baa|RDµ5102026|RTµ75000|USµ0|RSµINIT",
+ "scrollRequestForwardContext": "harpwh_after_1890719012_3|OF|MTµ14µ13594µ13594µ13852µ13852µ0µ0µ485µ13497µ5µ0µ10µ0µ0µ-2147483648µ1µ2|PDHµ3b34d87111079a2c763b066891455baa|RDµ5102026|RTµ75000|USµ0|RSµINIT"
+}

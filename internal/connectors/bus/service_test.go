@@ -591,6 +591,8 @@ func TestStopNamesResolveOrOfferCandidates(t *testing.T) {
 		wantContains(t, f.text("bus_stop_status", map[string]any{"stop": name}), "Live departures from Amersfoort, Stadhuis")
 	}
 	// The name resolves although the stop has no OVapi codes; its board comes from Transitous.
+	wantContains(t, f.text("bus_stop_status", map[string]any{"stop": "Soest Soestdijk Noord"}), "Next departures from Soest, Soestdijk Noord")
+	// Apostrophes and hyphens fold away, so the way people type it finds "'s-Hertogenbosch".
 	wantContains(t, f.text("bus_stop_status", map[string]any{"stop": "s Hertogenbosch Centraal Station"}), "Next departures from 's-Hertogenbosch, Centraal Station")
 
 	ambiguous := f.call("bus_stop_status", map[string]any{"stop": "Centrum"})

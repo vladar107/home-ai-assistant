@@ -404,6 +404,12 @@ func TestTripsRenderANormalMorning(t *testing.T) {
 	if sent.Get("dateTime") != "2026-10-05T08:00:00+02:00" || sent.Has("searchForArrival") || sent.Get("lang") != "en" {
 		t.Fatalf("trip query = %v", sent)
 	}
+
+	f.server.serve("v3/trips", fixtureBytes(t, "trips_international.json"))
+	wantText(t, f.call("ns_trips", map[string]any{"from": "Amersfoort", "to": "Hannover", "date_time": "2026-10-05T08:00"}),
+		"ICE 143 (ICE, NS International, direction Hannover Hbf)",
+		"ICE 547 (ICE, DB Fernverkehr AG, direction Berlin Hbf)",
+	)
 }
 
 func TestTripsReportDelaysTrackChangesAndCancellations(t *testing.T) {
