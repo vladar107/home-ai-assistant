@@ -100,6 +100,12 @@ type ExposureRecorder interface {
 	MarkExposed(principalID string)
 }
 
+// TurnExposureRecorder remembers which turn read third-party content, so what that turn's
+// conversation may do afterwards can depend on it.
+type TurnExposureRecorder interface {
+	MarkTurnExposed(ctx context.Context, principalID, turn string)
+}
+
 // Screener judges whether third-party text addresses an AI assistant with instructions.
 type Screener interface {
 	Screen(ctx context.Context, principalID, tool, text string) (bool, error)
@@ -109,6 +115,7 @@ type Broker struct {
 	providers []Provider
 	logger    *slog.Logger
 	exposure  ExposureRecorder
+	turns     TurnExposureRecorder
 	screener  Screener
 	telemetry Telemetry
 }
@@ -132,6 +139,12 @@ func (b *Broker) Register(provider Provider) error {
 // SetExposure sets where third-party results are recorded, at wiring time before turns start.
 func (b *Broker) SetExposure(recorder ExposureRecorder) {
 	b.exposure = recorder
+}
+
+// SetTurnExposure sets where the turn of a third-party result is recorded, at wiring time before
+// turns start.
+func (b *Broker) SetTurnExposure(recorder TurnExposureRecorder) {
+	b.turns = recorder
 }
 
 // Telemetry records per-call metrics and traces.
@@ -320,6 +333,9 @@ func (e *turnExecutor) execute(ctx context.Context, call agentruntime.ToolCall) 
 	default:
 		if binding.thirdParty && e.broker.exposure != nil {
 			e.broker.exposure.MarkExposed(e.principalID)
+		}
+		if binding.thirdParty && e.broker.turns != nil {
+			e.broker.turns.MarkTurnExposed(ctx, e.principalID, e.turn)
 		}
 		text := untrustedResultPrefix
 		screened := ""

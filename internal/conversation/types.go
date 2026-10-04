@@ -10,6 +10,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
+	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
 var ErrBusy = errors.New("a conversation turn is already pending")
@@ -213,6 +214,14 @@ type Locations interface {
 	TurnLine(ctx context.Context, principalID string) (string, error)
 }
 
+// Memory is the principal's remembered instructions and facts, which every turn starts from.
+type Memory interface {
+	// Render is the memory as prompt text, or "" when it is off or empty.
+	Render(ctx context.Context, principalID string) (string, error)
+	// TakeNotes returns, and forgets, the lines the turn's memory writes owe its reply.
+	TakeNotes(principalID, turn string) []string
+}
+
 type Config struct {
 	TurnTimeout time.Duration
 	FollowUp    FollowUp
@@ -228,6 +237,12 @@ type Config struct {
 	Photos PhotoDeliverer
 	// Locations tells each turn where its user is while they share a location; nil leaves it out.
 	Locations Locations
+	// Memory goes into every turn's system prompt and adds a line to a reply for each write the
+	// turn made; nil leaves memory out.
+	Memory Memory
+	// Exposure records a turn that searched the web as having read third-party content; nil
+	// records nothing.
+	Exposure tools.TurnExposureRecorder
 	// Location is the household's time zone; each chat turn then tells the model the current
 	// local time. Nil leaves the time out.
 	Location *time.Location

@@ -314,3 +314,21 @@ func assertBridgeRemoved(t *testing.T, cfg pi.Config, extension string) {
 		}
 	}
 }
+
+func TestMemoryFollowsTheToolGuidanceInTheSystemPrompt(t *testing.T) {
+	cfg := config(t)
+	r := newRuntime(t, cfg)
+	provider := &echoProvider{principal: testPrincipal, guidance: "Use echo_tool to repeat text."}
+	request := toolRequest("memory", "hello", toolSet(t, provider, testPrincipal))
+	request.Memory = "Memory about this user.\n- [aaaaaaa1] likes tea"
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := r.Run(ctx, request, &eventSink{}); err != nil {
+		t.Fatal(err)
+	}
+	report := readReport(t, cfg, testPrincipal, "memory")
+	prompt := report.Args[slices.Index(report.Args, "--system-prompt")+1]
+	if !strings.HasSuffix(prompt, "Use echo_tool to repeat text.\n\n"+request.Memory) {
+		t.Fatalf("system prompt does not end with the guidance and then the memory: %q", prompt)
+	}
+}

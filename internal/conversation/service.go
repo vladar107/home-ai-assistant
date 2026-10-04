@@ -421,6 +421,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 	connected, runErr := s.gate.Ready(turnCtx, request.PrincipalID)
 	var tools agentruntime.ToolSet
 	var webSearch bool
+	var memory string
 	var attachments attachment.Turn
 	var hint string
 	if runErr == nil && connected {
@@ -430,6 +431,9 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		if runErr == nil {
 			hinted = s.startToolHint(turnCtx, request, tools)
 			webSearch, runErr = s.webSearchEnabled(turnCtx, request.PrincipalID)
+		}
+		if runErr == nil {
+			memory, runErr = s.memoryText(turnCtx, request.PrincipalID)
 		}
 		if runErr != nil {
 			errorKind = ErrorKindToolProvider
@@ -457,7 +461,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		if s.config.Recent != nil {
 			s.config.Recent.RecordMessage(request.PrincipalID, request.Message)
 		}
-		sink := newCountingSink(request.PrincipalID, s.logger, s.telemetry)
+		sink := s.newCountingSink(request.PrincipalID, outbox.ChatTurn(request.ID))
 		runStarted = time.Now()
 		result, err := s.runtime.Run(turnCtx, agentruntime.RunRequest{
 			PrincipalID: request.PrincipalID,
@@ -465,10 +469,12 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 			Message:     s.turnMessage(request, attachments.Summary, hint, s.locationLine(turnCtx, request.PrincipalID)),
 			Images:      attachments.Images,
 			Tools:       tools,
+			Memory:      memory,
 			WebSearch:   webSearch,
 		}, sink)
 		modelTime = time.Since(runStarted)
 		runErr = err
+		notes := s.memoryNotes(request.PrincipalID, outbox.ChatTurn(request.ID))
 		if err == nil && !errors.Is(turnCtx.Err(), context.Canceled) {
 			s.recordTurnMetrics(turnCtx, request.PrincipalID, safetyChecks, sink, result.Usage, !tools.Empty() || webSearch, hint)
 		}
@@ -486,6 +492,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		default:
 			reply = result.Response
 		}
+		reply = withMemoryNotes(reply, notes)
 	}
 	if reportedKind == "" {
 		reportedKind = errorKind
@@ -545,6 +552,31 @@ func (s *Service) webSearchEnabled(ctx context.Context, principalID string) (boo
 		return false, nil
 	}
 	return s.config.WebSearch.WebSearchEnabled(ctx, principalID)
+}
+
+// memoryText reads the principal's memory at turn start; an error fails the turn instead of
+// running it without what the user asked it to remember.
+func (s *Service) memoryText(ctx context.Context, principalID string) (string, error) {
+	if s.config.Memory == nil {
+		return "", nil
+	}
+	return s.config.Memory.Render(ctx, principalID)
+}
+
+func (s *Service) memoryNotes(principalID, turn string) []string {
+	if s.config.Memory == nil {
+		return nil
+	}
+	return s.config.Memory.TakeNotes(principalID, turn)
+}
+
+// withMemoryNotes ends the reply with a line for each memory write the turn made, so the user
+// does not depend on the model mentioning them.
+func withMemoryNotes(reply string, notes []string) string {
+	if len(notes) == 0 {
+		return reply
+	}
+	return strings.TrimRight(reply, "\n") + "\n\n" + strings.Join(notes, "\n")
 }
 
 // startToolHint asks for the tool the message most likely needs while the rest of the turn is
@@ -823,18 +855,22 @@ func (s *Service) logWorkerError(ctx context.Context, principalID, errorKind str
 const webSearchTool = "web_search"
 
 // countingSink remembers which tools a turn called, by name only, and logs each web search call.
+// A web search also marks the turn as having read third-party content, which the broker cannot do
+// for a tool that runs inside the runtime.
 type countingSink struct {
 	principalID string
+	turn        string
 	logger      *slog.Logger
 	telemetry   Telemetry
+	exposure    tools.TurnExposureRecorder
 
 	mu     sync.Mutex
 	calls  int
 	called map[string]bool
 }
 
-func newCountingSink(principalID string, logger *slog.Logger, telemetry Telemetry) *countingSink {
-	return &countingSink{principalID: principalID, logger: logger, telemetry: telemetry, called: make(map[string]bool)}
+func (s *Service) newCountingSink(principalID, turn string) *countingSink {
+	return &countingSink{principalID: principalID, turn: turn, logger: s.logger, telemetry: s.telemetry, exposure: s.config.Exposure, called: make(map[string]bool)}
 }
 
 func (c *countingSink) Emit(ctx context.Context, event agentruntime.Event) error {
@@ -847,6 +883,9 @@ func (c *countingSink) Emit(ctx context.Context, event agentruntime.Event) error
 	c.mu.Unlock()
 	if event.Text == webSearchTool {
 		c.telemetry.ContextLogger(ctx, c.logger).InfoContext(ctx, "conversation.web_search.called", "principal_id", c.principalID, "tool", webSearchTool)
+		if c.exposure != nil {
+			c.exposure.MarkTurnExposed(ctx, c.principalID, c.turn)
+		}
 	}
 	return nil
 }

@@ -13,6 +13,9 @@ type RunRequest struct {
 	Message     string
 	Images      []Image
 	Tools       ToolSet
+	// Memory is the principal's rendered memory, which the runtime adds to the system prompt; empty
+	// leaves the prompt without it.
+	Memory string
 	// WebSearch means the principal has web access turned on, so the runtime offers its own web
 	// search alongside the broker's tools.
 	WebSearch bool

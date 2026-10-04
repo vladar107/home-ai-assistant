@@ -36,6 +36,11 @@ borrowed between users.
 - **Schedules.** Recurring or one-time model turns ("every weekday at 07:30, plan
   my trip to work") that the user confirms and that survive restarts, and reminders
   ("remind me at five to call mom") that are set at once and can be snoozed.
+- **Memory.** Each user has a small memory of instructions and facts that the
+  assistant keeps across `/new`, scheduled runs, and restarts. Facts are saved
+  at once and shown in the reply; instructions and anything learned after
+  reading outside content are confirmed first. `/memory` lists and deletes
+  entries, and `/settings` turns memory off.
 - **Safety checks.** Optional, per-user TypeSafe screening of outside content,
   approvals, and tool choice.
 
@@ -78,6 +83,7 @@ internal/runtime/pi/   Pi subprocess and tool bridge
 internal/tools/        tool broker
 internal/connectors/   notion, gmail, nas, ns, bus, web, homeassistant, places
 internal/location/     shared positions and their expiry
+internal/memory/       per-user memory, its tools, and prompt rendering
 internal/store/sqlite/ persistence and migrations
 deploy/                Compose files and configuration examples
 scripts/               operator scripts (deploy, secrets, checks)

@@ -44,6 +44,10 @@ func (s *Service) RunScheduled(ctx context.Context, principalID, turn, message s
 	if err == nil {
 		webSearch, err = s.webSearchEnabled(turnCtx, principalID)
 	}
+	var memory string
+	if err == nil {
+		memory, err = s.memoryText(turnCtx, principalID)
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			return ScheduledReply{}, ctx.Err()
@@ -59,8 +63,9 @@ func (s *Service) RunScheduled(ctx context.Context, principalID, turn, message s
 		SessionID:   sessionID,
 		Message:     withPlace(s.locationLine(turnCtx, principalID), message),
 		Tools:       tools,
+		Memory:      memory,
 		WebSearch:   webSearch,
-	}, newCountingSink(principalID, s.logger, s.telemetry))
+	}, s.newCountingSink(principalID, turn))
 	switch {
 	case ctx.Err() != nil:
 		return ScheduledReply{}, ctx.Err()

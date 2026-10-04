@@ -116,6 +116,7 @@ var settingsGroups = []settingsGroup{
 	{id: "home", title: "Home & files", inline: true, members: []string{homeAssistantSectionPrefix, nasSectionPrefix}},
 	{id: "tools", title: "Everyday tools", inline: true, members: []string{webSectionPrefix, nsSectionPrefix, busSectionPrefix}},
 	{id: "location", title: "Location", inline: true, members: []string{locationSectionPrefix}},
+	{id: "memory", title: "Memory", inline: true, members: []string{memorySectionPrefix}},
 	{id: "monitoring", title: "Monitoring", inline: true, members: []string{grafanaSectionPrefix}},
 	{id: "safety", title: "Safety & privacy", inline: true, members: []string{typeSafeSectionPrefix}},
 }

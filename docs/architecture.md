@@ -111,6 +111,7 @@ flowchart TB
     judgment["<b>judgment</b><br/>TypeSafe screening, intent checks,<br/>tool hints (opt-in)"]
     integration["<b>integration</b><br/>per-user enable / disable"]
     loc["<b>location</b><br/>latest shared position, expiry"]
+    mem["<b>memory</b><br/>per-user instructions and facts"]
     attach["<b>attachment</b><br/>inbound photos and files"]
     delivery["<b>delivery</b><br/>outbound files"]
     card["<b>daycard / outbox</b><br/>rendered day cards"]
@@ -140,7 +141,11 @@ flowchart TB
     tg --> integration
     tg --> approval
     tg --> loc
+    tg --> mem
     conv --> loc
+    conv --> mem
+    broker --> mem
+    approval --> mem
     loc --> placesc
     conv --> runtime
     conv --> broker
@@ -157,7 +162,7 @@ flowchart TB
     nasc --> delivery
     web --> pdf
     connectors --> integration
-    identity & conv & approval & schedule & connection & integration & loc --> store
+    identity & conv & approval & schedule & connection & integration & loc & mem --> store
 ```
 
 `internal/app` wires these together. Each connector registers with the module
@@ -214,6 +219,12 @@ it can write, the approval service (the executor for confirmed proposals).
   writable; the per-principal roots file decides which user sees which folders.
 - **Quiet telemetry.** Logs and traces carry principal IDs, tool names, outcomes,
   and sizes, never message text, usernames, tokens, or locations.
+- **Memory.** Each principal's instructions and facts live in SQLite, are capped
+  in size, and are rendered into the system prompt of that principal's turns
+  only. The model writes them through tools offered in chat turns alone; an
+  instruction, and any write in a conversation that has read third-party
+  content, including a web search, needs Confirm.
+  Every write is shown in the reply, and `/memory` deletes any entry.
 - **Short-lived location.** Only each user's latest shared position is stored. It is
   used while fresh, then deleted by a prune with SQLite `secure_delete` on; a user
   forgets it at once from `/settings`, and a forgotten live share stays ignored.

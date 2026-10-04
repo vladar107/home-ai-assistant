@@ -33,6 +33,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/judgment"
 	userlocation "github.com/vladar107/home-ai-assistant/internal/location"
+	usermemory "github.com/vladar107/home-ai-assistant/internal/memory"
 	"github.com/vladar107/home-ai-assistant/internal/module"
 	"github.com/vladar107/home-ai-assistant/internal/observability"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
@@ -66,6 +67,7 @@ type App struct {
 	grafana       *grafana.Service
 	bus           *bus.Service
 	locations     *userlocation.Service
+	memory        *usermemory.Service
 	typeSafe      *judgment.OptInService
 	telegram      *telegram.Service
 	telemetry     *observability.Telemetry
@@ -344,6 +346,12 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			return fmt.Errorf("initialize approvals: %w", err)
 		}
 		approvals.SetTelemetry(a.telemetry)
+		memoryService, err := usermemory.NewService(usermemory.Config{}, a.store, approvals, a.logger)
+		if err != nil {
+			return fmt.Errorf("initialize memory: %w", err)
+		}
+		memoryService.SetTelemetry(a.telemetry)
+		broker.SetTurnExposure(memoryService)
 		// Interface values stay nil without a key, so no user message is kept in memory for nothing.
 		var recent conversation.MessageRecorder
 		var toolHint conversation.ToolHinter
@@ -360,7 +368,9 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			if err != nil {
 				return fmt.Errorf("initialize TypeSafe opt-in: %w", err)
 			}
-			broker.SetScreener(judgment.NewScreener(judge, typeSafe, registry))
+			screener := judgment.NewScreener(judge, typeSafe, registry)
+			broker.SetScreener(screener)
+			memoryService.SetScreener(screener)
 			approvals.SetIntentChecker(judgment.NewIntentChecker(judge, typeSafe, registry, registry))
 			toolHint = judgment.NewToolHinter(judge, typeSafe)
 			safetyChecks = typeSafe
@@ -447,6 +457,8 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 				SafetyChecks: safetyChecks,
 				Location:     location,
 				Locations:    turnLocations,
+				Memory:       memoryService,
+				Exposure:     memoryService,
 			},
 			a.store,
 			runtime,
@@ -471,6 +483,13 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		if err := approvals.RegisterExecutor(scheduler); err != nil {
 			return err
 		}
+		if err := broker.Register(memoryService); err != nil {
+			return err
+		}
+		if err := approvals.RegisterExecutor(memoryService); err != nil {
+			return err
+		}
+		a.memory = memoryService
 		a.scheduler = scheduler
 		a.attachments = attachments
 		a.connections = connections
@@ -685,6 +704,9 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	}
 	if a.grafana != nil {
 		service.SetGrafana(a.grafana)
+	}
+	if a.memory != nil {
+		service.SetMemory(a.memory)
 	}
 	a.telegram = service
 	return nil

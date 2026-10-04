@@ -39,6 +39,12 @@ var idPattern = regexp.MustCompile(`^[0-9a-f][0-9a-f-]{0,63}$`)
 // ChatTurn is the turn key of a conversation request.
 func ChatTurn(requestID string) string { return chatKind + "/" + requestID }
 
+// ChatRequest returns the conversation request a chat turn key names; any other turn reports false.
+func ChatRequest(turn string) (string, bool) {
+	requestID, found := strings.CutPrefix(turn, chatKind+"/")
+	return requestID, found && idPattern.MatchString(requestID)
+}
+
 // ScheduledTurn is the turn key of a scheduled run.
 func ScheduledTurn(runID string) string { return scheduleKind + "/" + runID }
 

@@ -177,7 +177,7 @@ func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink
 		"--provider", r.provider,
 		"--session-id", request.SessionID,
 		"--session-dir", sessionDir,
-		"--system-prompt", systemPrompt(request.Tools, request.WebSearch),
+		"--system-prompt", withMemory(systemPrompt(request.Tools, request.WebSearch), request.Memory),
 	)
 	environment := append(append([]string(nil), r.environment...), "PI_CODING_AGENT_DIR="+agentDir)
 	toolsEnabled := !request.Tools.Empty() || request.WebSearch
@@ -353,6 +353,15 @@ func systemPrompt(tools agentruntime.ToolSet, webSearch bool) string {
 	prompt := promptIntro + promptTools + promptOutro
 	if guidance := strings.TrimSpace(tools.Guidance); guidance != "" {
 		prompt += "\n\n" + guidance
+	}
+	return prompt
+}
+
+// withMemory ends the prompt with the principal's memory, after the tool guidance, so the prompt
+// changes only when memory does.
+func withMemory(prompt, memory string) string {
+	if memory = strings.TrimSpace(memory); memory != "" {
+		return prompt + "\n\n" + memory
 	}
 	return prompt
 }

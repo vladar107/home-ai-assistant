@@ -74,6 +74,7 @@ type Telemetry struct {
 	judgmentDecisions            metric.Int64Counter
 	hintFollowThrough            metric.Int64Counter
 	scheduleRuns                 metric.Int64Counter
+	memoryWrites                 metric.Int64Counter
 }
 
 func New(ctx context.Context, cfg config.ObservabilityConfig, logger *slog.Logger) (*Telemetry, error) {
@@ -372,6 +373,9 @@ func (t *Telemetry) createBusinessInstruments(meter metric.Meter) error {
 		return err
 	}
 	if t.scheduleRuns, err = counter("home_agent.schedule.runs", "Scheduled runs completed.", "{run}"); err != nil {
+		return err
+	}
+	if t.memoryWrites, err = counter("home_agent.memory.writes", "Memory writes by kind and outcome.", "{write}"); err != nil {
 		return err
 	}
 	return nil
@@ -691,6 +695,14 @@ func (t *Telemetry) RecordHintFollowThrough(ctx context.Context, principal, resu
 func (t *Telemetry) RecordScheduleRun(ctx context.Context, principal, outcome string) {
 	t.scheduleRuns.Add(ctx, 1, metric.WithAttributes(
 		principalAttr(principal),
+		labelAttr("home_agent.outcome", outcome, "unknown"),
+	))
+}
+
+func (t *Telemetry) RecordMemoryWrite(ctx context.Context, principal, kind, outcome string) {
+	t.memoryWrites.Add(ctx, 1, metric.WithAttributes(
+		principalAttr(principal),
+		labelAttr("home_agent.kind", kind, "unknown"),
 		labelAttr("home_agent.outcome", outcome, "unknown"),
 	))
 }

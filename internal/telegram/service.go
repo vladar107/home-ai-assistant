@@ -117,6 +117,7 @@ type Service struct {
 	schedules     ScheduleController
 	locations     LocationController
 	grafana       GrafanaController
+	memory        MemoryController
 	sections      []settingsSection
 	interceptors  []messageInterceptor
 	logger        *slog.Logger
@@ -239,6 +240,9 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 
 	commands := registeredCommands(s.conversation != nil, len(s.sections) > 0, s.schedules != nil)
+	if s.memory != nil {
+		commands = append(commands, BotCommand{Command: "memory", Description: "Show and delete what I remember about you"})
+	}
 	// Private chats resolve the all-private-chats scope before the default one, so a stale list there would hide the default registration.
 	for _, scope := range []CommandScope{"", CommandScopeAllPrivateChats} {
 		if err := s.client.SetMyCommands(ctx, scope, commands); err != nil {
@@ -633,6 +637,9 @@ func (s *Service) processCallback(ctx context.Context, callback *CallbackQuery) 
 	if action, jobID, page, isJob := parseJobCallback(callback.Data); isJob && s.schedules != nil {
 		return s.processJobPress(ctx, callback, principalID, action, jobID, page)
 	}
+	if press, isMemory := parseMemoryCallback(callback.Data); isMemory && s.memory != nil {
+		return s.processMemoryPress(ctx, callback, principalID, press)
+	}
 	if snooze, jobID, isSnooze := parseReminderCallback(callback.Data); isSnooze && s.schedules != nil {
 		return s.processSnoozePress(ctx, callback, principalID, snooze, jobID)
 	}
@@ -818,6 +825,9 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 				reply += " " + GrafanaPrivacyLine
 			}
 		}
+		if s.memory != nil {
+			reply += " " + MemoryPrivacyLine
+		}
 		if s.typeSafe != nil {
 			enabled, err := s.typeSafe.Status(ctx, principalID)
 			if err != nil {
@@ -857,6 +867,11 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 			return HelpReply, nil, nil
 		}
 		return renderJobs(ctx, principalID, s.schedules, 1)
+	case "memory":
+		if s.memory == nil {
+			return HelpReply, nil, nil
+		}
+		return renderMemory(ctx, principalID, s.memory, 1)
 	case "settings":
 		if len(s.sections) == 0 {
 			return HelpReply, nil, nil

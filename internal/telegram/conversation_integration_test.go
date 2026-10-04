@@ -38,6 +38,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/delivery"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/location"
+	"github.com/vladar107/home-ai-assistant/internal/memory"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
@@ -63,6 +64,7 @@ const (
 type runtimeCall struct {
 	request agentruntime.RunRequest
 	ctx     context.Context
+	sink    agentruntime.EventSink
 	answer  chan agentruntime.RunResult
 }
 
@@ -72,8 +74,8 @@ func newControlledRuntime() *controlledRuntime {
 	return &controlledRuntime{calls: make(chan runtimeCall, 20)}
 }
 
-func (r *controlledRuntime) Run(ctx context.Context, request agentruntime.RunRequest, _ agentruntime.EventSink) (agentruntime.RunResult, error) {
-	call := runtimeCall{request: request, ctx: ctx, answer: make(chan agentruntime.RunResult, 1)}
+func (r *controlledRuntime) Run(ctx context.Context, request agentruntime.RunRequest, sink agentruntime.EventSink) (agentruntime.RunResult, error) {
+	call := runtimeCall{request: request, ctx: ctx, sink: sink, answer: make(chan agentruntime.RunResult, 1)}
 	r.calls <- call
 	select {
 	case result := <-call.answer:
@@ -175,6 +177,9 @@ type harnessOptions struct {
 	locations    bool
 	locationName string
 	pinTTL       time.Duration
+	// memory adds per-user memory with its tools, /memory, and its settings switch, with third-party
+	// exposure recorded on the conversation.
+	memory bool
 }
 
 type fixedDescriber string
@@ -211,6 +216,7 @@ type conversationHarness struct {
 	grafana        *grafana.Service
 	bus            *bus.Service
 	locations      *location.Service
+	memory         *memory.Service
 	approvals      *approval.Service
 	scheduler      *schedule.Service
 	auth           *codexauth.Simulator
@@ -521,8 +527,25 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		}
 		locationTurns = h.locations
 	}
+	var memoryTurns conversation.Memory
+	var exposure tools.TurnExposureRecorder
+	if options.memory {
+		h.memory, err = memory.NewService(memory.Config{}, h.store, h.approvals, logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		broker.SetTurnExposure(h.memory)
+		exposure = h.memory
+		if err := broker.Register(h.memory); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.approvals.RegisterExecutor(h.memory); err != nil {
+			t.Fatal(err)
+		}
+		memoryTurns = h.memory
+	}
 	h.conversation, err = conversation.NewService(
-		conversation.Config{Locations: locationTurns, TurnTimeout: turnTimeout, FollowUp: h.approvals, Notice: notices, Attachments: h.attachments, WebSearch: webSearch, Cards: cards, Photos: photos, Location: options.location, Now: now},
+		conversation.Config{Memory: memoryTurns, Exposure: exposure, Locations: locationTurns, TurnTimeout: turnTimeout, FollowUp: h.approvals, Notice: notices, Attachments: h.attachments, WebSearch: webSearch, Cards: cards, Photos: photos, Location: options.location, Now: now},
 		h.store, runtime, h.client, broker, h.connections, logger, integrationTelemetry{turns: h.turns},
 	)
 	if err != nil {
@@ -545,6 +568,9 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	}
 	if h.grafana != nil {
 		h.service.SetGrafana(h.grafana)
+	}
+	if h.memory != nil {
+		h.service.SetMemory(h.memory)
 	}
 	t.Cleanup(h.stop)
 	return h
