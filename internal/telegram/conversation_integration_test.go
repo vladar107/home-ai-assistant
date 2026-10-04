@@ -44,6 +44,7 @@ import (
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
+	"github.com/vladar107/home-ai-assistant/internal/task"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/calendarsim"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/codexauth"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/googlesim"
@@ -183,6 +184,8 @@ type harnessOptions struct {
 	memory bool
 	// history reads Pi's session files from these directories for /sessions and the history tools.
 	history history.Directories
+	// tasks adds background tasks with this configuration, as HOME_AGENT_TASKS_ENABLED does.
+	tasks *task.Config
 }
 
 type fixedDescriber string
@@ -222,6 +225,7 @@ type conversationHarness struct {
 	memory         *memory.Service
 	approvals      *approval.Service
 	scheduler      *schedule.Service
+	tasks          *task.Service
 	auth           *codexauth.Simulator
 	profilesDir    string
 	credentialsDir string
@@ -512,8 +516,17 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		if err := h.approvals.RegisterExecutor(h.scheduler); err != nil {
 			t.Fatal(err)
 		}
-		notices = append(notices, h.scheduler)
+		notices = append(notices, conversation.OutsideNotice{Notice: h.scheduler})
 		scheduleController = h.scheduler
+	}
+	if options.tasks != nil {
+		taskConfig := *options.tasks
+		taskConfig.Cards, taskConfig.Photos = cards, photos
+		h.tasks = h.newTaskService(taskConfig)
+		if err := broker.Register(h.tasks); err != nil {
+			t.Fatal(err)
+		}
+		notices = append(notices, conversation.OutsideNotice{Notice: h.tasks})
 	}
 	var now func() time.Time
 	if options.clock != nil {
@@ -587,6 +600,10 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	}
 	if h.memory != nil {
 		h.service.SetMemory(h.memory)
+	}
+	if h.tasks != nil {
+		h.tasks.SetRunner(h.conversation)
+		h.service.SetTasks(h.tasks)
 	}
 	t.Cleanup(h.stop)
 	return h
@@ -884,6 +901,11 @@ func (h *conversationHarness) start() {
 			h.t.Fatal(err)
 		}
 	}
+	if h.tasks != nil {
+		if err := h.tasks.Start(h.ctx); err != nil {
+			h.t.Fatal(err)
+		}
+	}
 	if h.notion != nil {
 		if err := h.notion.Start(h.ctx); err != nil {
 			h.t.Fatal(err)
@@ -908,6 +930,11 @@ func (h *conversationHarness) stop() {
 	}
 	if h.scheduler != nil {
 		if err := h.scheduler.Shutdown(ctx); err != nil {
+			h.t.Error(err)
+		}
+	}
+	if h.tasks != nil {
+		if err := h.tasks.Shutdown(ctx); err != nil {
 			h.t.Error(err)
 		}
 	}

@@ -11,7 +11,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
-func runUsageTurn(t *testing.T, message string) (agentruntime.RunResult, metricdata.ResourceMetrics) {
+func runUsageTurn(t *testing.T, message string) (agentruntime.RunResult, metricdata.ResourceMetrics, *eventSink) {
 	t.Helper()
 	reader := sdkmetric.NewManualReader()
 	telemetry, err := observability.NewWithReader(reader)
@@ -25,7 +25,8 @@ func runUsageTurn(t *testing.T, message string) (agentruntime.RunResult, metricd
 	run.WebSearch = true
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	result, err := r.Run(ctx, run, &eventSink{})
+	sink := &eventSink{}
+	result, err := r.Run(ctx, run, sink)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +34,7 @@ func runUsageTurn(t *testing.T, message string) (agentruntime.RunResult, metricd
 	if err := reader.Collect(ctx, &collected); err != nil {
 		t.Fatal(err)
 	}
-	return result, collected
+	return result, collected, sink
 }
 
 func modelCallCounts(t *testing.T, collected metricdata.ResourceMetrics) map[string]uint64 {
@@ -73,10 +74,21 @@ func modelTokenCounts(t *testing.T, collected metricdata.ResourceMetrics) map[st
 }
 
 func TestAssistantMessagesRecordModelCallsAndTokens(t *testing.T) {
-	result, collected := runUsageTurn(t, "fixture:usage")
+	result, collected, sink := runUsageTurn(t, "fixture:usage")
 	wantUsage := agentruntime.Usage{ModelCalls: 2, PromptTokens: 160 + 150, OutputTokens: 25}
 	if result.Usage != wantUsage {
 		t.Errorf("usage = %+v, want %+v", result.Usage, wantUsage)
+	}
+	var streamed agentruntime.Usage
+	for _, event := range sink.events {
+		if event.Type == "model_call" {
+			streamed.ModelCalls += event.Usage.ModelCalls
+			streamed.PromptTokens += event.Usage.PromptTokens
+			streamed.OutputTokens += event.Usage.OutputTokens
+		}
+	}
+	if streamed != wantUsage {
+		t.Errorf("model_call events add up to %+v, want %+v", streamed, wantUsage)
 	}
 	calls := modelCallCounts(t, collected)
 	if len(calls) != 2 || calls["fixture-provider/fixture-model/toolUse"] != 1 || calls["fixture-provider/fixture-model/stop"] != 1 {
@@ -92,7 +104,7 @@ func TestAssistantMessagesRecordModelCallsAndTokens(t *testing.T) {
 }
 
 func TestAssistantMessageWithoutUsageCountsTheCallOnly(t *testing.T) {
-	result, collected := runUsageTurn(t, "fixture:usage-missing")
+	result, collected, _ := runUsageTurn(t, "fixture:usage-missing")
 	wantUsage := agentruntime.Usage{ModelCalls: 2, PromptTokens: 160, OutputTokens: 20}
 	if result.Usage != wantUsage {
 		t.Errorf("usage = %+v, want %+v", result.Usage, wantUsage)

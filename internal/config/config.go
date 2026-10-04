@@ -37,6 +37,7 @@ type Config struct {
 	Grafana       GrafanaConfig
 	Bus           BusConfig
 	Location      LocationConfig
+	Tasks         TasksConfig
 	TypeSafe      TypeSafeConfig
 	Observability ObservabilityConfig
 }
@@ -62,6 +63,7 @@ func Load() (Config, error) {
 		Grafana:         defaultGrafanaConfig(),
 		Bus:             defaultBusConfig(),
 		Location:        defaultLocationConfig(),
+		Tasks:           defaultTasksConfig(),
 		TypeSafe:        defaultTypeSafeConfig(),
 		Observability:   defaultObservabilityConfig(),
 	}
@@ -118,6 +120,9 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if err := loadLocationConfig(&cfg.Location); err != nil {
+		return Config{}, err
+	}
+	if err := loadTasksConfig(&cfg.Tasks); err != nil {
 		return Config{}, err
 	}
 	if err := loadNSConfig(&cfg.NS); err != nil {
@@ -234,6 +239,12 @@ func (c Config) Validate() error {
 	}
 	if c.Location.Enabled && !c.Conversation.Enabled {
 		return fmt.Errorf("HOME_AGENT_LOCATION_ENABLED: requires HOME_AGENT_CONVERSATION_ENABLED=true")
+	}
+	if err := c.Tasks.validate(); err != nil {
+		return err
+	}
+	if c.Tasks.Enabled && !c.Conversation.Enabled {
+		return fmt.Errorf("HOME_AGENT_TASKS_ENABLED: requires HOME_AGENT_CONVERSATION_ENABLED=true")
 	}
 	if err := c.TypeSafe.validate(); err != nil {
 		return err

@@ -15,8 +15,8 @@ borrowed between users.
 
 - **Conversation.** Natural-language chat with per-user context, backed by the
   [Pi](https://github.com/badlogic/pi-mono) agent runtime on the user's own model
-  subscription. `/status`, `/privacy`, `/cancel`, `/new`, `/sessions`, and
-  `/settings` are deterministic shortcuts.
+  subscription. `/status`, `/privacy`, `/cancel`, `/new`, `/sessions`,
+  `/memory`, `/tasks`, and `/settings` are deterministic shortcuts.
 - **Earlier conversations.** `/sessions` lists recent conversations to resume,
   and replying to an earlier answer continues its conversation. The assistant
   can search and read the user's own earlier conversations when asked about
@@ -45,6 +45,9 @@ borrowed between users.
   at once and shown in the reply; instructions and anything learned after
   reading outside content are confirmed first. `/memory` lists and deletes
   entries, and `/settings` turns memory off.
+- **Background tasks.** Long requests, such as a month of mail or research across
+  many pages, run as a sub-agent beside the chat and report back as a reply;
+  `/tasks` shows and cancels them.
 - **Safety checks.** Optional, per-user TypeSafe screening of outside content,
   approvals, and tool choice.
 

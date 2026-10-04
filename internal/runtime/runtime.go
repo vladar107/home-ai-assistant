@@ -67,6 +67,9 @@ type ToolResult struct {
 type Event struct {
 	Type string
 	Text string
+	// Usage is set on a "model_call" event, sent once per finished assistant message, so a long
+	// run can be measured and bounded while it is still going.
+	Usage Usage
 }
 
 type EventSink interface {

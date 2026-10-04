@@ -3,7 +3,7 @@
 // by the turn, beside the durable delivery row, so a restart in between still sends them; delivery
 // removes them, and a sweep collects what a cancelled or abandoned turn left behind. Chat turns and
 // scheduled runs keep their cards in separate subdirectories, so starting a new conversation
-// discards only the chat's.
+// discards only the chat's; background tasks keep theirs apart too.
 package outbox
 
 import (
@@ -30,6 +30,7 @@ const (
 
 	chatKind     = "chat"
 	scheduleKind = "schedule"
+	taskKind     = "task"
 )
 
 // idPattern accepts the request and run identifiers turns are keyed by and nothing that could name
@@ -47,6 +48,9 @@ func ChatRequest(turn string) (string, bool) {
 
 // ScheduledTurn is the turn key of a scheduled run.
 func ScheduledTurn(runID string) string { return scheduleKind + "/" + runID }
+
+// TaskTurn is the turn key of a background task's runs.
+func TaskTurn(taskID string) string { return taskKind + "/" + taskID }
 
 // Card is what one turn staged. A sent card has no bytes left: only whether its photo carried the
 // reply's first chunk as a caption, so a retried delivery sends neither again.
@@ -153,7 +157,8 @@ func (b *Box) Remove(principalID, turn string) {
 }
 
 // Discard removes every card the principal's conversation has staged, as when they start a new
-// one. Cards of scheduled runs belong to no conversation and stay for their own delivery.
+// one. Cards of scheduled runs and background tasks belong to no conversation and stay for their
+// own delivery.
 func (b *Box) Discard(principalID string) {
 	directory, err := b.principalDirectory(principalID)
 	if err != nil {
@@ -228,7 +233,7 @@ func (b *Box) path(principalID, turn, suffix string) (string, error) {
 		return "", err
 	}
 	kind, id, _ := strings.Cut(turn, "/")
-	if (kind != chatKind && kind != scheduleKind) || !idPattern.MatchString(id) {
+	if (kind != chatKind && kind != scheduleKind && kind != taskKind) || !idPattern.MatchString(id) {
 		return "", fmt.Errorf("outbox turn key is invalid")
 	}
 	return filepath.Join(directory, kind, id+suffix), nil

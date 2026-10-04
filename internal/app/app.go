@@ -41,6 +41,7 @@ import (
 	piruntime "github.com/vladar107/home-ai-assistant/internal/runtime/pi"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
+	"github.com/vladar107/home-ai-assistant/internal/task"
 	"github.com/vladar107/home-ai-assistant/internal/telegram"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 	"github.com/vladar107/home-ai-assistant/internal/turnstate"
@@ -59,6 +60,7 @@ type App struct {
 	tools         *tools.Broker
 	approvals     *approval.Service
 	scheduler     *schedule.Service
+	tasks         *task.Service
 	notion        *notion.Service
 	nas           *nas.Service
 	google        *google.Service
@@ -451,11 +453,24 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		if err := broker.Register(conversationHistory); err != nil {
 			return err
 		}
+		notices := conversation.Notices{approvals, conversation.OutsideNotice{Notice: scheduler}}
+		var tasks *task.Service
+		if a.cfg.Tasks.Enabled {
+			tasks, err = task.NewService(task.Config{Timeout: a.cfg.Tasks.Timeout, Cards: cards, Photos: client}, a.store, a.store, telegram.TaskMessenger{Client: client}, client, a.logger)
+			if err != nil {
+				return fmt.Errorf("initialize background tasks: %w", err)
+			}
+			tasks.SetTelemetry(a.telemetry)
+			if err := broker.Register(tasks); err != nil {
+				return err
+			}
+			notices = append(notices, conversation.OutsideNotice{Notice: tasks})
+		}
 		conversationService, err := conversation.NewService(
 			conversation.Config{
 				TurnTimeout:  a.cfg.Conversation.TurnTimeout,
 				FollowUp:     approvals,
-				Notice:       conversation.Notices{approvals, scheduler},
+				Notice:       notices,
 				Attachments:  attachments,
 				WebSearch:    webSearch,
 				Cards:        cards,
@@ -500,6 +515,10 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		}
 		a.memory = memoryService
 		a.scheduler = scheduler
+		if tasks != nil {
+			tasks.SetRunner(conversationService)
+			a.tasks = tasks
+		}
 		a.attachments = attachments
 		a.connections = connections
 		a.conversation = conversationService
@@ -717,6 +736,9 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	if a.memory != nil {
 		service.SetMemory(a.memory)
 	}
+	if a.tasks != nil {
+		service.SetTasks(a.tasks)
+	}
 	a.telegram = service
 	return nil
 }
@@ -737,6 +759,11 @@ func (a *App) startConversation(ctx context.Context) error {
 	if err := a.scheduler.Start(ctx); err != nil {
 		return errors.Join(fmt.Errorf("start scheduler: %w", err), a.conversation.Shutdown(ctx), a.approvals.Shutdown(ctx), a.connections.Shutdown(ctx))
 	}
+	if a.tasks != nil {
+		if err := a.tasks.Start(ctx); err != nil {
+			return errors.Join(fmt.Errorf("start background tasks: %w", err), a.scheduler.Shutdown(ctx), a.conversation.Shutdown(ctx), a.approvals.Shutdown(ctx), a.connections.Shutdown(ctx))
+		}
+	}
 	return nil
 }
 
@@ -745,6 +772,11 @@ func (a *App) shutdownConversation(ctx context.Context) error {
 		return nil
 	}
 	var errs []error
+	if a.tasks != nil {
+		if err := a.tasks.Shutdown(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("shutdown background tasks: %w", err))
+		}
+	}
 	if err := a.scheduler.Shutdown(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("shutdown scheduler: %w", err))
 	}

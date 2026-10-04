@@ -547,7 +547,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		result, err := s.runtime.Run(turnCtx, agentruntime.RunRequest{
 			PrincipalID: request.PrincipalID,
 			SessionID:   request.RuntimeSessionID,
-			Message:     s.turnMessage(request, attachments.Summary, hint, s.locationLine(turnCtx, request.PrincipalID)),
+			Message:     s.turnMessage(turnCtx, request, attachments.Summary, hint, s.locationLine(turnCtx, request.PrincipalID)),
 			Images:      attachments.Images,
 			Tools:       tools,
 			Memory:      memory,
@@ -690,14 +690,18 @@ func (s *Service) startToolHint(ctx context.Context, request Request, tools agen
 // turnMessage prefixes what became of the principal's last confirmation request, which was
 // resolved between turns and which the model would otherwise have to guess at, and appends what
 // the message carried so the model can see its files without reading them.
-func (s *Service) turnMessage(request Request, attachments, hint, place string) string {
+func (s *Service) turnMessage(ctx context.Context, request Request, attachments, hint, place string) string {
 	message := request.Message
 	if hint != "" {
 		message = "[system] Likely relevant tool: " + hint + ". Ignore this if it does not fit the request.\n\n" + message
 	}
 	if s.config.Notice != nil {
-		if notice := s.config.Notice.PendingNotice(request.PrincipalID); notice != "" {
+		notice, outside := pendingNotice(s.config.Notice, request.PrincipalID)
+		if notice != "" {
 			message = "[system] " + notice + "\n\n" + message
+		}
+		if outside && s.config.Exposure != nil {
+			s.config.Exposure.MarkTurnExposed(ctx, request.PrincipalID, outbox.ChatTurn(request.ID))
 		}
 	}
 	message = withPlace(place, message)

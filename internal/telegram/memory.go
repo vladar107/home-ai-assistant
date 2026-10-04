@@ -16,9 +16,10 @@ const (
 	MemoryGoneReply   = "That entry no longer exists."
 	MemoryOffNote     = "Memory is off: nothing here is used until you turn it on in /settings."
 	MemoryClearedNote = "Forgot everything."
-	MemoryOnLine      = "Memory: on (the default). I keep the preferences and facts you ask me to remember, or that I learn in conversation, and use them in every conversation and scheduled run. See and delete them with /memory."
+	MemoryOnLine      = "Memory: on (the default). I keep the preferences and facts you ask me to remember, or that I learn in conversation, and use them in every conversation, scheduled run, and background task. See and delete them with /memory."
 	MemoryOffLine     = "Memory: off. I do not use or add to what I remembered; the saved entries are kept until you delete them in /memory."
-	MemoryPrivacyLine = "Memory keeps the preferences and facts you ask me to remember, or that I learn in conversation, in the home database until you delete them with /memory. While memory is on in /settings, they are sent to your model subscription with every conversation and scheduled run."
+	MemoryHelpLine    = " /memory shows what I remember about you."
+	MemoryPrivacyLine = "Memory keeps the preferences and facts you ask me to remember, or that I learn in conversation, in the home database until you delete them with /memory. While memory is on in /settings, they are sent to your model subscription with every conversation, scheduled run, and background task."
 
 	memorySectionPrefix = "memory"
 	memoryOnAction      = "on"

@@ -676,6 +676,9 @@ func (s *turnState) consume(ctx context.Context, event rpcEvent) (bool, error) {
 	case "message_end":
 		if event.Message != nil && event.Message.Role == "assistant" {
 			s.recordAssistantMessage(ctx, event.Message)
+			if err := s.sink.Emit(ctx, agentruntime.Event{Type: "model_call", Usage: messageUsage(event.Message)}); err != nil {
+				return false, fmt.Errorf("emit Pi runtime event: %w", err)
+			}
 		}
 	case "message_update":
 		if event.AssistantMessageEvent == nil {
@@ -731,6 +734,16 @@ func (s *turnState) recordAssistantMessage(ctx context.Context, message *rpcMess
 	if s.telemetry != nil {
 		s.telemetry.RecordModelTokens(ctx, s.principal, message.Provider, message.Model, usage.Input, usage.Output, usage.CacheRead, usage.CacheWrite)
 	}
+}
+
+// messageUsage is one assistant message's share of a turn's usage.
+func messageUsage(message *rpcMessage) agentruntime.Usage {
+	usage := agentruntime.Usage{ModelCalls: 1}
+	if message.Usage != nil {
+		usage.PromptTokens = message.Usage.Input + message.Usage.CacheRead + message.Usage.CacheWrite
+		usage.OutputTokens = message.Usage.Output
+	}
+	return usage
 }
 
 func (s *turnState) appendText(ctx context.Context, delta string) error {

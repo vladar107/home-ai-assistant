@@ -77,6 +77,7 @@ type Telemetry struct {
 	memoryWrites                 metric.Int64Counter
 	conversationResumes          metric.Int64Counter
 	conversationSearches         metric.Int64Counter
+	tasks                        taskInstruments
 }
 
 func New(ctx context.Context, cfg config.ObservabilityConfig, logger *slog.Logger) (*Telemetry, error) {
@@ -386,7 +387,7 @@ func (t *Telemetry) createBusinessInstruments(meter metric.Meter) error {
 	if t.conversationSearches, err = counter("home_agent.conversation.searches", "Searches of earlier conversations, by outcome.", "{search}"); err != nil {
 		return err
 	}
-	return nil
+	return t.createTaskInstruments(meter)
 }
 
 func (t *Telemetry) Shutdown(ctx context.Context) error {

@@ -57,6 +57,7 @@ plan that links back to the earlier record.
 | 0045 | [Grafana metrics and logs in conversation](0045-grafana-metrics-and-logs.md) | in-progress |
 | 0046 | [Per-user memory the user can see and edit](0046-per-user-memory.md) | in-progress |
 | 0047 | [Return to earlier conversations](0047-earlier-conversations.md) | in-progress |
+| 0048 | [Background sub-agents that do not block the chat](0048-background-tasks.md) | in-progress |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

@@ -232,17 +232,38 @@ type ToolHinter interface {
 	Hint(ctx context.Context, principalID, message string, tools []agentruntime.ToolDefinition) (string, error)
 }
 
+// OutsideNotice is a source whose notices retell reports that may carry third-party content, such
+// as a scheduled run's or a background task's; the turn that receives one counts as having read
+// outside content.
+type OutsideNotice struct{ Notice }
+
 // Notices joins several sources of notices into one, in order.
 type Notices []Notice
 
 func (n Notices) PendingNotice(principalID string) string {
-	var pending []string
-	for _, notice := range n {
-		if text := notice.PendingNotice(principalID); text != "" {
-			pending = append(pending, text)
+	text, _ := pendingNotice(n, principalID)
+	return text
+}
+
+// pendingNotice returns the notice text and whether any part of it came from an OutsideNotice.
+func pendingNotice(source Notice, principalID string) (string, bool) {
+	switch source := source.(type) {
+	case Notices:
+		var pending []string
+		outside := false
+		for _, notice := range source {
+			if text, fromOutside := pendingNotice(notice, principalID); text != "" {
+				pending = append(pending, text)
+				outside = outside || fromOutside
+			}
 		}
+		return strings.Join(pending, "\n\n"), outside
+	case OutsideNotice:
+		text := source.PendingNotice(principalID)
+		return text, text != ""
+	default:
+		return source.PendingNotice(principalID), false
 	}
-	return strings.Join(pending, "\n\n")
 }
 
 // Attachments keeps the photos and files a principal sent, for as long as the session lives; nil

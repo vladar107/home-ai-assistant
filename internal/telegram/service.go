@@ -120,6 +120,7 @@ type Service struct {
 	locations     LocationController
 	grafana       GrafanaController
 	memory        MemoryController
+	tasks         TaskController
 	sections      []settingsSection
 	interceptors  []messageInterceptor
 	logger        *slog.Logger
@@ -244,6 +245,9 @@ func (s *Service) Start(ctx context.Context) error {
 	commands := registeredCommands(s.conversation != nil, len(s.sections) > 0, s.schedules != nil)
 	if s.memory != nil {
 		commands = append(commands, BotCommand{Command: "memory", Description: "Show and delete what I remember about you"})
+	}
+	if s.tasks != nil {
+		commands = append(commands, BotCommand{Command: "tasks", Description: "Show and cancel your background tasks"})
 	}
 	// Private chats resolve the all-private-chats scope before the default one, so a stale list there would hide the default registration.
 	for _, scope := range []CommandScope{"", CommandScopeAllPrivateChats} {
@@ -649,6 +653,9 @@ func (s *Service) processCallback(ctx context.Context, callback *CallbackQuery) 
 	if sessionID, isSession := parseSessionCallback(callback.Data); isSession && s.conversation != nil {
 		return s.processSessionPress(ctx, callback, principalID, sessionID)
 	}
+	if taskID, isTask := parseTaskCallback(callback.Data); isTask && s.tasks != nil {
+		return s.processTaskPress(ctx, callback, principalID, taskID)
+	}
 
 	result := processingResult{event: "telegram.callback.handled", principalID: principalID, command: "settings"}
 	sections := sectionsFor(s.sections, principalID)
@@ -783,6 +790,9 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		if s.schedules != nil {
 			reply += " " + SchedulePrivacyLine
 		}
+		if s.tasks != nil {
+			reply += " " + TaskPrivacyLine
+		}
 		if s.web != nil {
 			status, err := s.web.Status(ctx, principalID)
 			if err != nil {
@@ -883,6 +893,11 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 			return HelpReply, nil, nil
 		}
 		return renderMemory(ctx, principalID, s.memory, 1)
+	case "tasks":
+		if s.tasks == nil {
+			return HelpReply, nil, nil
+		}
+		return renderTasks(ctx, principalID, s.tasks)
 	case "settings":
 		if len(s.sections) == 0 {
 			return HelpReply, nil, nil
@@ -893,7 +908,14 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		}
 		return text, keyboard, nil
 	default:
-		return HelpReply, nil, nil
+		reply := HelpReply
+		if s.memory != nil {
+			reply += MemoryHelpLine
+		}
+		if s.tasks != nil {
+			reply += TasksHelpLine
+		}
+		return reply, nil, nil
 	}
 }
 

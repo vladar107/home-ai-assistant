@@ -108,6 +108,7 @@ flowchart TB
     broker["<b>tools</b><br/>broker: grants, budgets,<br/>untrusted-result marking"]
     approval["<b>approval</b><br/>Confirm / Reject proposals,<br/>exactly-once execution"]
     schedule["<b>schedule</b><br/>durable jobs, reminders,<br/>scheduled model turns"]
+    task["<b>task</b><br/>background sub-agents<br/>beside the chat"]
     judgment["<b>judgment</b><br/>TypeSafe screening, intent checks,<br/>tool hints (opt-in)"]
     integration["<b>integration</b><br/>per-user enable / disable"]
     loc["<b>location</b><br/>latest shared position, expiry"]
@@ -159,6 +160,10 @@ flowchart TB
     approval --> connectors
     approval --> schedule
     schedule --> conv
+    tg --> task
+    broker --> task
+    task --> conv
+    task --> store
     nasc --> delivery
     web --> pdf
     connectors --> integration
@@ -199,6 +204,17 @@ assistant text only, and nothing is indexed or copied into SQLite. A restart
 during a turn keeps the session, since Pi resumes a file that ends in an
 unanswered message.
 
+### A background task
+
+A request that needs many lookups is handed by the model to `task_start`, which
+is outside the turn's 8-call budget. `task` stores the task with its own Pi session
+and posts a status message with a Cancel button. One worker per principal runs it
+through `conversation` as a second Pi process beside the chat, without the
+principal's turn slot, with read tools only and its own time, tool, and model-call
+budgets. A task that reaches a limit is asked once, briefly, to report what it has.
+The report goes out as a reply to the request, and the next chat turn learns of it.
+A restart resumes a running task in its session; a second interruption fails it.
+
 ## Security model
 
 - **Identity before anything.** Only allowlisted numeric Telegram IDs in private
@@ -214,7 +230,9 @@ unanswered message.
 - **Read first, confirm writes.** Writes to Notion, the NAS, and schedules are
   off until the user turns them on and are always confirmed per action. A
   reminder is set and cancelled without confirmation, since it only sends its
-  owner's own text to their own chat, and scheduled turns cannot set one. The
+  owner's own text to their own chat, and scheduled turns cannot set one. Background
+  tasks start without confirmation too: they only spend the owner's own
+  subscription on read-only work and cannot start another task. The
   other exception is Home Assistant: everyday actions on devices exposed to Assist run
   without confirmation and are not offered in scheduled turns; sensitive ones
   (labelled `assistant-confirm`, or locks, alarm panels, valves, sirens, cameras,

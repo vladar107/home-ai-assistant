@@ -66,6 +66,9 @@ type Definition struct {
 	// Screen marks a result that may be sent, redacted, for injection screening; it requires
 	// ThirdParty.
 	Screen bool
+	// OutsideBudget keeps the tool's calls out of the turn's call budget, so a turn that has spent
+	// its budget can still hand the rest of the work to it.
+	OutsideBudget bool
 }
 
 // Contribution is what a provider grants one principal at one moment. WriteGuidance describes the
@@ -179,7 +182,7 @@ func (b *Broker) toolsFor(ctx context.Context, principalID string, readOnly bool
 	if principalID == "" {
 		return agentruntime.ToolSet{}, fmt.Errorf("tool broker requires a principal")
 	}
-	executor := &turnExecutor{broker: b, principalID: principalID, turn: TurnFrom(ctx), bindings: make(map[string]toolBinding)}
+	executor := &turnExecutor{broker: b, principalID: principalID, turn: TurnFrom(ctx), budget: callBudgetFrom(ctx), bindings: make(map[string]toolBinding)}
 	var guidance []string
 	var definitions []agentruntime.ToolDefinition
 	for _, provider := range b.providers {
@@ -199,7 +202,10 @@ func (b *Broker) toolsFor(ctx context.Context, principalID string, readOnly bool
 			if _, exists := executor.bindings[definition.Name]; exists {
 				return agentruntime.ToolSet{}, fmt.Errorf("tool %q is contributed twice", definition.Name)
 			}
-			executor.bindings[definition.Name] = toolBinding{provider: provider, deadline: definition.Timeout, thirdParty: definition.ThirdParty, screen: definition.Screen}
+			executor.bindings[definition.Name] = toolBinding{provider: provider, deadline: definition.Timeout, thirdParty: definition.ThirdParty, screen: definition.Screen, outsideBudget: definition.OutsideBudget}
+			if definition.OutsideBudget && executor.handoff == "" {
+				executor.handoff = definition.Name
+			}
 			definitions = append(definitions, agentruntime.ToolDefinition{
 				Name:        definition.Name,
 				Description: definition.Description,
@@ -249,10 +255,11 @@ func validateDefinition(definition Definition) error {
 // toolBinding is the provider a tool was contributed by, the call deadline it asked for, and how
 // its results are treated.
 type toolBinding struct {
-	provider   Provider
-	deadline   time.Duration
-	thirdParty bool
-	screen     bool
+	provider      Provider
+	deadline      time.Duration
+	thirdParty    bool
+	screen        bool
+	outsideBudget bool
 }
 
 // turnExecutor binds one turn to its principal and the grant collected when the turn started. The
@@ -262,7 +269,10 @@ type turnExecutor struct {
 	principalID string
 	turn        string
 	bindings    map[string]toolBinding
-	calls       atomic.Int32
+	budget      int32
+	// handoff names a tool outside the budget that the exhausted-budget result points to.
+	handoff string
+	calls   atomic.Int32
 }
 
 var _ agentruntime.ToolExecutor = (*turnExecutor)(nil)
@@ -298,10 +308,14 @@ func (e *turnExecutor) Execute(ctx context.Context, call agentruntime.ToolCall) 
 }
 
 func (e *turnExecutor) execute(ctx context.Context, call agentruntime.ToolCall) (string, string, agentruntime.ToolResult) {
-	if e.calls.Add(1) > maximumCallsPerTurn {
-		return "budget_exhausted", "", agentruntime.ToolResult{Text: budgetExhaustedText, IsError: true}
-	}
 	binding, known := e.bindings[call.Name]
+	if !binding.outsideBudget && e.calls.Add(1) > e.budget {
+		text := budgetExhaustedText
+		if e.handoff != "" {
+			text += fmt.Sprintf(budgetHandoffText, e.handoff)
+		}
+		return "budget_exhausted", "", agentruntime.ToolResult{Text: text, IsError: true}
+	}
 	if !known {
 		return "unknown_tool", "", agentruntime.ToolResult{Text: unavailableText, IsError: true}
 	}

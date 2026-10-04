@@ -152,7 +152,7 @@ func (s *Service) add(ctx context.Context, principalID string, call tools.Call) 
 	}
 	summary := fmt.Sprintf("Remember this %s: %q", arguments.Kind, text)
 	if arguments.Kind == KindInstruction {
-		summary += "\nIt will apply to every later conversation and scheduled run until you delete it in /memory."
+		summary += "\nIt will apply to every later conversation, scheduled run, and background task until you delete it in /memory."
 	} else {
 		summary += "\nI read outside content in this conversation, so I need your confirmation before keeping it."
 	}
