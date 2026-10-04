@@ -204,7 +204,9 @@ history: titles in `/sessions` and the model's `conversation_search` and
 `conversation_read` tools read the principal's own files on demand, user and
 assistant text only, and nothing is indexed or copied into SQLite. A restart
 during a turn keeps the session, since Pi resumes a file that ends in an
-unanswered message.
+unanswered message. Chat session files are kept; the files of scheduled runs and
+finished tasks, which no conversation refers to, are deleted 30 days after they
+were last written.
 
 ### A background task
 

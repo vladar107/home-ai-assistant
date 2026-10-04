@@ -18,6 +18,30 @@ const sessionColumns = `session.id, session.runtime_session_id, session.status =
 	COALESCE((SELECT MAX(request.created_at) FROM conversation_requests AS request
 	          WHERE request.session_id = session.id), session.created_at)`
 
+// ReferencedSessions returns the runtime session IDs of every conversation and every task kept.
+func (s *Store) ReferencedSessions(ctx context.Context) (map[string]struct{}, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("list referenced sessions: SQLite store is not open")
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT runtime_session_id FROM conversation_sessions UNION SELECT session_id FROM tasks`)
+	if err != nil {
+		return nil, fmt.Errorf("list referenced sessions: %w", err)
+	}
+	defer rows.Close()
+	referenced := make(map[string]struct{})
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan referenced session: %w", err)
+		}
+		referenced[id] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list referenced sessions: %w", err)
+	}
+	return referenced, nil
+}
+
 func (s *Store) ConversationSessions(ctx context.Context, principalID string, limit int) ([]conversation.SessionRecord, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("list conversation sessions: SQLite store is not open")

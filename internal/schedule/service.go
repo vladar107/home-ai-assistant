@@ -51,6 +51,14 @@ type Config struct {
 	Photos conversation.PhotoDeliverer
 	// Reminders sends reminders with their snooze buttons; nil sends them as plain text.
 	Reminders ReminderDeliverer
+	// Sessions removes old model sessions of finished runs and tasks; nil keeps them.
+	Sessions SessionPruner
+}
+
+// SessionPruner removes the model session files that no conversation or open task refers to and
+// that were last written before the cutoff.
+type SessionPruner interface {
+	PruneSessions(ctx context.Context, before time.Time) error
 }
 
 // ReminderDeliverer sends one reminder to its owner's chat with buttons that snooze the job.
@@ -65,6 +73,7 @@ type Service struct {
 	cards      conversation.Cards
 	photos     conversation.PhotoDeliverer
 	reminders  ReminderDeliverer
+	sessions   SessionPruner
 	logger     *slog.Logger
 	zone       string
 	tick       time.Duration
@@ -199,6 +208,7 @@ func NewService(cfg Config, repository Repository, chats Chats, deliverer conver
 		cards:      cfg.Cards,
 		photos:     cfg.Photos,
 		reminders:  cfg.Reminders,
+		sessions:   cfg.Sessions,
 		logger:     logger,
 		zone:       cfg.Zone,
 		tick:       tick,
@@ -310,6 +320,11 @@ func (s *Service) runTick(ctx context.Context) {
 		if s.cards != nil {
 			if err := s.cards.Sweep(now.Add(-conversation.CardRetention)); err != nil && ctx.Err() == nil {
 				s.logger.WarnContext(ctx, "schedule.tick.failed", "stage", "sweep_cards", "error", err)
+			}
+		}
+		if s.sessions != nil {
+			if err := s.sessions.PruneSessions(ctx, now.Add(-runRetention)); err != nil && ctx.Err() == nil {
+				s.logger.WarnContext(ctx, "schedule.tick.failed", "stage", "prune_sessions", "error", err)
 			}
 		}
 	}

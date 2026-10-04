@@ -403,6 +403,50 @@ func (r *Runtime) SessionDirectory(principalID string) (string, error) {
 	return filepath.Join(r.profilesDir, name, "sessions"), nil
 }
 
+// SessionReferences names every session a stored conversation or task still refers to.
+type SessionReferences interface {
+	ReferencedSessions(ctx context.Context) (map[string]struct{}, error)
+}
+
+// SessionPruner removes the session files of scheduled runs and tasks once they are old: those
+// sessions are written once and never resumed, while chat sessions stay for /sessions.
+type SessionPruner struct {
+	runtime    *Runtime
+	references SessionReferences
+}
+
+func (r *Runtime) SessionPruner(references SessionReferences) SessionPruner {
+	return SessionPruner{runtime: r, references: references}
+}
+
+// PruneSessions removes every principal's session files that no stored conversation or task
+// refers to and that were last written before the cutoff, so a run still writing its file is kept.
+func (p SessionPruner) PruneSessions(ctx context.Context, before time.Time) error {
+	keep, err := p.references.ReferencedSessions(ctx)
+	if err != nil {
+		return err
+	}
+	paths, err := filepath.Glob(filepath.Join(p.runtime.profilesDir, "*", "sessions", "*_*.jsonl"))
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, path := range paths {
+		name := strings.TrimSuffix(filepath.Base(path), ".jsonl")
+		if _, referenced := keep[name[strings.LastIndex(name, "_")+1:]]; referenced {
+			continue
+		}
+		info, err := os.Lstat(path)
+		if err != nil || !info.Mode().IsRegular() || !info.ModTime().Before(before) {
+			continue
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
 func restrictedEnvironment(binary string) ([]string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(homeDir) == "" || strings.ContainsAny(homeDir, "\r\n") {

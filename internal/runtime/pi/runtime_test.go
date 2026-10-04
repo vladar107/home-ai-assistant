@@ -663,3 +663,43 @@ func TestUnavailableWebSearchExtensionFailsStartup(t *testing.T) {
 		})
 	}
 }
+
+type sessionReferences map[string]struct{}
+
+func (r sessionReferences) ReferencedSessions(context.Context) (map[string]struct{}, error) {
+	return r, nil
+}
+
+func TestPrunerRemovesOnlyOldUnreferencedSessions(t *testing.T) {
+	cfg := config(t)
+	r := newRuntime(t, cfg)
+	directory := sessionDir(cfg, testPrincipal)
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cutoff := time.Now().Add(-30 * 24 * time.Hour)
+	files := map[string]time.Time{
+		"2026-01-01T00-00-00-000Z_chat-session.jsonl": cutoff.Add(-time.Hour),
+		"2026-01-01T00-00-00-000Z_old-run.jsonl":      cutoff.Add(-time.Hour),
+		"2026-01-01T00-00-00-000Z_recent-run.jsonl":   cutoff.Add(time.Hour),
+	}
+	for name, modified := range files {
+		path := filepath.Join(directory, name)
+		if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, modified, modified); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := r.SessionPruner(sessionReferences{"chat-session": {}}).PruneSessions(context.Background(), cutoff); err != nil {
+		t.Fatal(err)
+	}
+	for name := range files {
+		_, err := os.Stat(filepath.Join(directory, name))
+		if removed := errors.Is(err, fs.ErrNotExist); removed != strings.Contains(name, "old-run") {
+			t.Errorf("%s removed = %v", name, removed)
+		}
+	}
+}
