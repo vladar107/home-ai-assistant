@@ -38,6 +38,7 @@
 ## Security and Operations
 
 - Never commit tokens, passwords, private keys, runtime `.env` files, or NAS secret copies.
+- This repository is public: never commit private data such as home location, addresses, stops, household names, network addresses, or device details. Read them from configuration, and use only neutral, non-household examples in code, tests, and docs.
 - Keep local development secrets in the ignored `.env` file and production source secrets in macOS Keychain.
 - Treat Telegram numeric user IDs and other allowlist identifiers as configuration, not secrets.
 - Keep deployments manual and tag-pinned from the operator's Mac, recording the resolved image digest; CI must not receive NAS access or deployment authority.
