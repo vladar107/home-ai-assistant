@@ -1,6 +1,7 @@
 package conversation
 
 import (
+	"cmp"
 	"context"
 	"strings"
 
@@ -16,6 +17,12 @@ type TaskRun struct {
 	Turn      string
 	SessionID string
 	Message   string
+	// Instruction is the trusted text the run may open links from, the confirmed brief; empty means
+	// Message.
+	Instruction string
+	// Continued marks a run in a session that earlier runs may have filled with outside content,
+	// such as a resumed task, so the run starts as having read it.
+	Continued bool
 	// CallBudget is how many broker tool calls this run may make; zero still offers the tools but
 	// refuses every call, so a report run can only write up what the session already holds.
 	CallBudget int
@@ -39,7 +46,11 @@ type TaskReply struct {
 // timeout. Failures come back as the reply a chat turn would have given. An error is returned only
 // when ctx ends, and the caller then decides what the task became.
 func (s *Service) RunTask(ctx context.Context, run TaskRun) (TaskReply, error) {
-	runCtx := tools.WithCallBudget(tools.WithTurn(ctx, run.Turn), run.CallBudget)
+	record := tools.NewRun(cmp.Or(run.Instruction, run.Message))
+	if run.Continued {
+		record.MarkExternal("")
+	}
+	runCtx := tools.WithRun(tools.WithCallBudget(tools.WithTurn(ctx, run.Turn), run.CallBudget), record)
 	connected, err := s.gate.Ready(runCtx, run.PrincipalID)
 	switch {
 	case ctx.Err() != nil:
@@ -69,7 +80,7 @@ func (s *Service) RunTask(ctx context.Context, run TaskRun) (TaskReply, error) {
 		now := s.config.Now().In(s.config.Location).Format("Monday 2 January 2006, 15:04 MST")
 		message = "[system] Current local time: " + now + " (" + s.config.Location.String() + ").\n\n" + message
 	}
-	var sink agentruntime.EventSink = s.newCountingSink(run.PrincipalID, run.Turn)
+	var sink agentruntime.EventSink = s.newCountingSink(run.PrincipalID, run.Turn, record)
 	if run.Sink != nil {
 		sink = sinks{sink, run.Sink}
 	}

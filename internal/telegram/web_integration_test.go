@@ -148,21 +148,21 @@ func TestWebAccessSwitchControlsSearchAndWebTools(t *testing.T) {
 		t.Fatalf("settings by default = %+v", settings)
 	}
 
-	h.push(textUpdate(5, 101, "fixture:web-search"))
-	h.wantReply(101, 5, "Searching.\n\nfound: synthetic search answer")
-	h.waitState(5, "delivered")
-	if logs := h.logs.String(); !strings.Contains(logs, "conversation.web_search.called") || !strings.Contains(logs, "principal_id=alice tool=web_search") {
-		t.Fatalf("search call not logged: %s", logs)
-	}
-	assertWebTurn(t, latestReport(t, profiles, "alice"), extension)
-
 	// The real guard refuses a private address before any connection is made.
-	h.push(textUpdate(6, 101, `fixture:call fetch_page {"url":"http://127.0.0.1/"}`))
+	h.push(textUpdate(5, 101, `fixture:call fetch_page {"url":"http://127.0.0.1/"}`))
 	refused := h.nextMessage()
 	if refused.chatID != 101 || !strings.Contains(refused.text, "error:") || !strings.Contains(refused.text, "private network") {
 		t.Fatalf("fetch of a private address = %+v", refused)
 	}
+	h.waitState(5, "delivered")
+
+	h.push(textUpdate(6, 101, "fixture:web-search"))
+	h.wantReply(101, 6, "Searching.\n\nfound: synthetic search answer")
 	h.waitState(6, "delivered")
+	if logs := h.logs.String(); !strings.Contains(logs, "conversation.web_search.called") || !strings.Contains(logs, "principal_id=alice tool=web_search") {
+		t.Fatalf("search call not logged: %s", logs)
+	}
+	assertWebTurn(t, latestReport(t, profiles, "alice"), extension)
 
 	edit := h.press(7, 101, settingsMessageID(3), "web:off")
 	if !strings.Contains(edit.text, WebOffLine) || !slices.Contains(buttonData(edit.keyboard), "web:on") || !slices.Contains(buttonData(edit.keyboard), "nav:root") || slices.Contains(buttonData(edit.keyboard), "web:off") {
@@ -186,9 +186,21 @@ func TestWebAccessSwitchControlsSearchAndWebTools(t *testing.T) {
 	if edit := h.press(13, 101, settingsMessageID(12), "web:on"); !strings.Contains(edit.text, WebOnLine) || !slices.Contains(buttonData(edit.keyboard), "web:off") {
 		t.Fatalf("settings after turning web access back on = %+v", edit)
 	}
+	// The search earlier in this conversation read outside content, so search stays off until /new.
 	h.push(textUpdate(14, 101, "hello once more"))
-	h.wantReply(101, 14, "reply: hello once more")
+	withheld := h.nextMessage()
+	if withheld.chatID != 101 || !strings.Contains(withheld.text, "Web search is off in this conversation") || !strings.HasSuffix(withheld.text, "hello once more") {
+		t.Fatalf("turn after a search = %+v", withheld)
+	}
 	h.waitState(14, "delivered")
+	if named := extensions(latestReport(t, profiles, "alice")); len(named) != 1 || filepath.Base(named[0]) != "bridge.ts" {
+		t.Fatalf("extensions after a search = %v, want the bridge alone", named)
+	}
+	h.push(textUpdate(15, 101, "/new"))
+	h.wantReply(101, 15, NewSessionReply)
+	h.push(textUpdate(16, 101, "hello after new"))
+	h.wantReply(101, 16, "reply: hello after new")
+	h.waitState(16, "delivered")
 	assertWebTurn(t, latestReport(t, profiles, "alice"), extension)
 }
 

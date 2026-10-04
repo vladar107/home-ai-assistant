@@ -48,10 +48,17 @@ type Proposer interface {
 	Propose(context.Context, string, approval.Proposal) (approval.Record, error)
 }
 
+// ExposureChecker reports whether the calling conversation or run has read content written outside
+// the household.
+type ExposureChecker interface {
+	External(ctx context.Context, principalID string) bool
+}
+
 type Service struct {
 	client     *client
 	repository integration.Repository
 	proposer   Proposer
+	exposure   ExposureChecker
 	logger     *slog.Logger
 	now        func() time.Time
 
@@ -93,6 +100,12 @@ func NewService(cfg Config, repository integration.Repository, proposer Proposer
 		logger:     logger,
 		now:        now,
 	}, nil
+}
+
+// SetExposure makes immediate home actions need confirmation once the checker reports outside
+// content; nil, the default, never gates them. Call it before the service handles turns.
+func (s *Service) SetExposure(checker ExposureChecker) {
+	s.exposure = checker
 }
 
 func (s *Service) Descriptor() module.Descriptor {

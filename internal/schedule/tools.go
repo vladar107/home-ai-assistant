@@ -30,6 +30,12 @@ type Proposer interface {
 	Propose(context.Context, string, approval.Proposal) (approval.Record, error)
 }
 
+// ExposureChecker reports whether the calling conversation has read content from outside the
+// household, after which reminders wait for the user's confirmation.
+type ExposureChecker interface {
+	External(ctx context.Context, principalID string) bool
+}
+
 const listGuidance = "Scheduled jobs: schedule_list shows the user's pending reminders and scheduled jobs, each with its id, schedule, next run, and instructions. The user manages them with /jobs as well."
 
 func proposeGuidance(zone string) string {
@@ -44,7 +50,7 @@ func proposeGuidance(zone string) string {
 
 func reminderGuidance(zone string) string {
 	return "Reminders: when the user only wants to be told something at a time, such as remind me at 5 to call mom or in 20 minutes tell me to take the laundry out, use reminder_set, not schedule_propose. " +
-		"It sends the text as written at that time, without asking a model, and is set at once without confirmation. " +
+		"It sends the text as written at that time, without asking a model, and is set at once without confirmation, except after you have read content from outside the household, such as a web page or an email, in this conversation: then reminder_set only proposes the reminder, the user sees it with Confirm and Reject buttons, and you must not claim it is set. " +
 		"at is a local date and time such as 2026-10-04 17:00 in the user's time zone, " + zone + " unless they name another; work it out from the current time. " +
 		"Write the text as the reminder the user should read, such as Call mom. Repeat the time reminder_set returns to the user exactly as it gives it. " +
 		"reminder_cancel cancels a pending reminder by its id from schedule_list, also without confirmation. A reminder that should repeat is a recurring schedule_propose job instead."
@@ -60,7 +66,7 @@ var listDefinition = tools.Definition{
 var reminderDefinitions = []tools.Definition{
 	{
 		Name:        toolReminderSet,
-		Description: "Set a reminder: the text is sent to the user once, at the given local time, without confirmation.",
+		Description: "Set a reminder: the text is sent to the user once, at the given local time, without confirmation unless outside content was read in this conversation.",
 		Risk:        tools.RiskWrite,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"text":{"type":"string","description":"The reminder as the user should read it, at most 500 characters."},` +
@@ -151,6 +157,12 @@ type proposeArguments struct {
 	Timezone string `json:"timezone"`
 }
 
+type confirmedReminder struct {
+	Text string `json:"text"`
+	At   string `json:"at"`
+	Zone string `json:"zone"`
+}
+
 // confirmedJob is the canonical form the user confirms and the executor stores. At is the local
 // time as parsed, so it is validated again when the user presses Confirm.
 type confirmedJob struct {
@@ -185,6 +197,9 @@ func (s *Service) setReminder(ctx context.Context, principalID string, call tool
 	if err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
+	if s.exposure != nil && s.exposure.External(ctx, principalID) {
+		return s.proposeReminder(ctx, principalID, call, ReminderText(config), prepared)
+	}
 	id, err := newRunID()
 	if err != nil {
 		return tools.Result{}, err
@@ -197,6 +212,27 @@ func (s *Service) setReminder(ctx context.Context, principalID string, call tool
 	}
 	at := FormatOccurrence(prepared.Job.RunAt, prepared.Schedule.Location)
 	return tools.Result{Text: fmt.Sprintf("Reminder set for %s (id %s): %s", at, id, ReminderText(config))}, nil
+}
+
+func (s *Service) proposeReminder(ctx context.Context, principalID string, call tools.Call, text string, prepared Prepared) (tools.Result, error) {
+	if s.proposer == nil {
+		return tools.Result{Text: "I read outside content in this conversation, so reminders need the user's confirmation, and confirming is not available. Tell the user the reminder was not set.", IsError: true}, nil
+	}
+	job := prepared.Job
+	confirmed := confirmedReminder{Text: text, At: job.RunAt.In(prepared.Schedule.Location).Format(localTimeLayouts[0]), Zone: job.Zone}
+	canonical, err := json.Marshal(confirmed)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	summary := fmt.Sprintf("Set a reminder for %s:\n%s\nI read outside content in this conversation, so I need your confirmation.", FormatOccurrence(job.RunAt, prepared.Schedule.Location), text)
+	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: toolReminderSet, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "set", TargetKind: "reminder", TargetName: job.Name}}); err != nil {
+		if errors.Is(err, approval.ErrBundleFull) {
+			return tools.Result{Text: err.Error(), IsError: true}, nil
+		}
+		s.logger.WarnContext(ctx, "schedule.proposal.failed", "principal_id", principalID, "tool", call.Name, "error", err)
+		return tools.Result{Text: "the proposal could not be recorded", IsError: true}, nil
+	}
+	return tools.Result{Text: approval.ProposedText}, nil
 }
 
 func (s *Service) cancelReminder(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
@@ -295,7 +331,7 @@ func (s *Service) proposeRemoval(ctx context.Context, principalID string, call t
 }
 
 func (s *Service) ActionTools() []string {
-	return []string{toolPropose, toolRemove}
+	return []string{toolPropose, toolRemove, toolReminderSet}
 }
 
 // ExecuteApproved stores or deletes the confirmed job. The schedule is validated again, because
@@ -328,6 +364,26 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 			return approval.Outcome{Text: "Scheduled for " + at + "."}, nil
 		}
 		return approval.Outcome{Text: "Scheduled. First run: " + at + "."}, nil
+	case toolReminderSet:
+		var confirmed confirmedReminder
+		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
+			return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed reminder could not be read; nothing was set."}
+		}
+		config, err := ReminderConfig(confirmed.Text)
+		if err != nil {
+			return approval.Outcome{}, err
+		}
+		prepared, err := s.Prepare(record.PrincipalID, ReminderName(confirmed.Text), TypeReminder, Timing{At: confirmed.At, Zone: confirmed.Zone}, config)
+		if err != nil {
+			return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "That reminder can no longer be set (" + err.Error() + "); nothing was set."}
+		}
+		if _, err := s.Create(ctx, record.ID, prepared); err != nil {
+			if errors.Is(err, ErrTooManyJobs) {
+				return approval.Outcome{}, &approval.ActionError{Reason: "too_many", Text: tooManyText(true) + " Nothing was set."}
+			}
+			return approval.Outcome{}, err
+		}
+		return approval.Outcome{Text: "Reminder set for " + FormatOccurrence(prepared.Job.RunAt, prepared.Schedule.Location) + "."}, nil
 	case toolRemove:
 		var confirmed removeArguments
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {

@@ -86,6 +86,8 @@ type Service struct {
 	logger     *slog.Logger
 	runner     Runner
 	telemetry  Telemetry
+	proposer   Proposer
+	exposure   ExposureChecker
 
 	mu      sync.Mutex
 	ctx     context.Context
@@ -146,6 +148,18 @@ func NewService(cfg Config, repository Repository, chats Chats, messenger Messen
 // service is built after this one because its turns read this one's notices.
 func (s *Service) SetRunner(runner Runner) {
 	s.runner = runner
+}
+
+// SetProposer sets who records task proposals, at wiring time; without it a task started after
+// outside content was read is refused.
+func (s *Service) SetProposer(proposer Proposer) {
+	s.proposer = proposer
+}
+
+// SetExposure sets the check that makes task_start wait for confirmation once the conversation
+// has read outside content, at wiring time; without it tasks always start at once.
+func (s *Service) SetExposure(exposure ExposureChecker) {
+	s.exposure = exposure
 }
 
 // SetTelemetry sets where task runs are measured, at wiring time before Start.
@@ -217,12 +231,9 @@ func (s *Service) Shutdown(ctx context.Context) error {
 // Create queues a task for the principal, started from the given conversation request, and posts
 // its status message as a reply to that request's message.
 func (s *Service) Create(ctx context.Context, principalID, requestID, title, brief string) (Task, error) {
-	title, brief = strings.TrimSpace(title), strings.TrimSpace(brief)
-	if title == "" || !utf8.ValidString(title) || utf8.RuneCountInString(title) > maximumTitleRunes || strings.IndexFunc(title, unicode.IsControl) >= 0 {
-		return Task{}, inputError(fmt.Sprintf("The title must be a single line of at most %d characters.", maximumTitleRunes))
-	}
-	if brief == "" || !utf8.ValidString(brief) || utf8.RuneCountInString(brief) > maximumBriefRunes {
-		return Task{}, inputError(fmt.Sprintf("The brief must be between 1 and %d characters.", maximumBriefRunes))
+	title, brief, err := validateBrief(title, brief)
+	if err != nil {
+		return Task{}, err
 	}
 	chatID, messageID, found, err := s.repository.TaskOrigin(ctx, principalID, requestID)
 	if err != nil {
@@ -261,6 +272,18 @@ func (s *Service) Create(ctx context.Context, principalID, requestID, title, bri
 	}
 	s.notify(principalID)
 	return task, nil
+}
+
+// validateBrief trims and checks a task's title and brief.
+func validateBrief(title, brief string) (string, string, error) {
+	title, brief = strings.TrimSpace(title), strings.TrimSpace(brief)
+	if title == "" || !utf8.ValidString(title) || utf8.RuneCountInString(title) > maximumTitleRunes || strings.IndexFunc(title, unicode.IsControl) >= 0 {
+		return "", "", inputError(fmt.Sprintf("The title must be a single line of at most %d characters.", maximumTitleRunes))
+	}
+	if brief == "" || !utf8.ValidString(brief) || utf8.RuneCountInString(brief) > maximumBriefRunes {
+		return "", "", inputError(fmt.Sprintf("The brief must be between 1 and %d characters.", maximumBriefRunes))
+	}
+	return title, brief, nil
 }
 
 // Cancel ends one of the principal's open tasks at once, without a report.
@@ -484,7 +507,7 @@ func (s *Service) run(ctx context.Context, task Task, sink *progressSink) (Outco
 		sink.begin(func() { stopMain(errModelBudget) })
 		reply, err := s.runner.RunTask(mainCtx, conversation.TaskRun{
 			PrincipalID: task.PrincipalID, Turn: outbox.TaskTurn(task.ID), SessionID: task.SessionID,
-			Message: message, CallBudget: callBudget, Sink: sink,
+			Message: message, Instruction: s.firstMessage(task), Continued: task.Attempts > 1, CallBudget: callBudget, Sink: sink,
 		})
 		cause := context.Cause(mainCtx)
 		partial := sink.end(callBudget)
@@ -509,7 +532,7 @@ func (s *Service) run(ctx context.Context, task Task, sink *progressSink) (Outco
 	sink.begin(nil)
 	reply, err := s.runner.RunTask(reportCtx, conversation.TaskRun{
 		PrincipalID: task.PrincipalID, Turn: outbox.TaskTurn(task.ID), SessionID: task.SessionID,
-		Message: limitMessage(limit), Report: true, Sink: sink,
+		Message: limitMessage(limit), Instruction: s.firstMessage(task), Continued: true, Report: true, Sink: sink,
 	})
 	switch {
 	case ctx.Err() != nil:

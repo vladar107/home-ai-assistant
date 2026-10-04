@@ -465,7 +465,8 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 	}
 	defer release()
 
-	turnCtx, cancel := context.WithTimeout(tools.WithTurn(ctx, outbox.ChatTurn(request.ID)), s.config.TurnTimeout)
+	run := tools.NewRun(request.Message)
+	turnCtx, cancel := context.WithTimeout(tools.WithRun(tools.WithTurn(ctx, outbox.ChatTurn(request.ID)), run), s.config.TurnTimeout)
 	s.mu.Lock()
 	s.inflight[request.PrincipalID] = cancel
 	s.mu.Unlock()
@@ -501,7 +502,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 	reply := ""
 	connected, runErr := s.gate.Ready(turnCtx, request.PrincipalID)
 	var tools agentruntime.ToolSet
-	var webSearch bool
+	var webSearch, searchWithheld bool
 	var memory string
 	var attachments attachment.Turn
 	var hint string
@@ -512,6 +513,9 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		if runErr == nil {
 			hinted = s.startToolHint(turnCtx, request, tools)
 			webSearch, runErr = s.webSearchEnabled(turnCtx, request.PrincipalID)
+		}
+		if runErr == nil && webSearch && s.searchWithheld(turnCtx, request.PrincipalID) {
+			webSearch, searchWithheld = false, true
 		}
 		if runErr == nil {
 			memory, runErr = s.memoryText(turnCtx, request.PrincipalID)
@@ -542,12 +546,16 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		if s.config.Recent != nil {
 			s.config.Recent.RecordMessage(request.PrincipalID, request.Message)
 		}
-		sink := s.newCountingSink(request.PrincipalID, outbox.ChatTurn(request.ID))
+		notice := s.takeNotice(turnCtx, request)
+		if notice.outside && webSearch {
+			webSearch, searchWithheld = false, true
+		}
+		sink := s.newCountingSink(request.PrincipalID, outbox.ChatTurn(request.ID), run)
 		runStarted = time.Now()
 		result, err := s.runtime.Run(turnCtx, agentruntime.RunRequest{
 			PrincipalID: request.PrincipalID,
 			SessionID:   request.RuntimeSessionID,
-			Message:     s.turnMessage(turnCtx, request, attachments.Summary, hint, s.locationLine(turnCtx, request.PrincipalID)),
+			Message:     s.turnMessage(request, notice.text, attachments.Summary, hint, s.locationLine(turnCtx, request.PrincipalID), searchWithheld),
 			Images:      attachments.Images,
 			Tools:       tools,
 			Memory:      memory,
@@ -635,6 +643,13 @@ func (s *Service) webSearchEnabled(ctx context.Context, principalID string) (boo
 	return s.config.WebSearch.WebSearchEnabled(ctx, principalID)
 }
 
+// searchWithheld reports whether a chat turn's conversation has read text from outside the
+// household. Such a turn runs without web search, because the provider's search can open an
+// address the query names and so carry data out, and a search cannot be stopped once it starts.
+func (s *Service) searchWithheld(ctx context.Context, principalID string) bool {
+	return s.config.Exposure != nil && s.config.Exposure.External(ctx, principalID)
+}
+
 // memoryText reads the principal's memory at turn start; an error fails the turn instead of
 // running it without what the user asked it to remember.
 func (s *Service) memoryText(ctx context.Context, principalID string) (string, error) {
@@ -690,19 +705,41 @@ func (s *Service) startToolHint(ctx context.Context, request Request, tools agen
 // turnMessage prefixes what became of the principal's last confirmation request, which was
 // resolved between turns and which the model would otherwise have to guess at, and appends what
 // the message carried so the model can see its files without reading them.
-func (s *Service) turnMessage(ctx context.Context, request Request, attachments, hint, place string) string {
+// turnNotice is what became of the principal's earlier requests, and whether it carries text from
+// outside the household.
+type turnNotice struct {
+	text    string
+	outside bool
+}
+
+// takeNotice collects the pending notices for a turn that is about to run. A notice from outside the
+// household marks the turn as having read it, before the turn decides whether it may search.
+func (s *Service) takeNotice(ctx context.Context, request Request) turnNotice {
+	if s.config.Notice == nil {
+		return turnNotice{}
+	}
+	text, outside := pendingNotice(s.config.Notice, request.PrincipalID)
+	if outside {
+		if run := tools.RunFrom(ctx); run != nil {
+			run.MarkExternal(text)
+		}
+		if s.config.Exposure != nil {
+			s.config.Exposure.MarkTurnExposed(ctx, request.PrincipalID, outbox.ChatTurn(request.ID), true)
+		}
+	}
+	return turnNotice{text: text, outside: outside}
+}
+
+func (s *Service) turnMessage(request Request, notice, attachments, hint, place string, searchWithheld bool) string {
 	message := request.Message
+	if searchWithheld {
+		message = "[system] " + searchWithheldNotice + "\n\n" + message
+	}
 	if hint != "" {
 		message = "[system] Likely relevant tool: " + hint + ". Ignore this if it does not fit the request.\n\n" + message
 	}
-	if s.config.Notice != nil {
-		notice, outside := pendingNotice(s.config.Notice, request.PrincipalID)
-		if notice != "" {
-			message = "[system] " + notice + "\n\n" + message
-		}
-		if outside && s.config.Exposure != nil {
-			s.config.Exposure.MarkTurnExposed(ctx, request.PrincipalID, outbox.ChatTurn(request.ID))
-		}
+	if notice != "" {
+		message = "[system] " + notice + "\n\n" + message
 	}
 	message = s.withUser(request.PrincipalID, withPlace(place, message))
 	if s.config.Location != nil {
@@ -951,6 +988,10 @@ func (s *Service) logWorkerError(ctx context.Context, principalID, errorKind str
 // broker audit line; the turn's sink records each by name instead.
 const webSearchTool = "web_search"
 
+// searchWithheldNotice tells the model why a turn has no web search, so it can tell the user how
+// to get it back.
+const searchWithheldNotice = "Web search is off in this conversation because it has read content from outside the household, such as a web page or an email. If the user needs a search, tell them that /new starts a fresh conversation with search back on. fetch_page still opens links the user sends."
+
 // countingSink remembers which tools a turn called, by name only, and logs each web search call.
 // A web search also marks the turn as having read third-party content, which the broker cannot do
 // for a tool that runs inside the runtime.
@@ -960,17 +1001,22 @@ type countingSink struct {
 	logger      *slog.Logger
 	telemetry   Telemetry
 	exposure    tools.TurnExposureRecorder
+	run         *tools.Run
 
 	mu     sync.Mutex
 	calls  int
 	called map[string]bool
 }
 
-func (s *Service) newCountingSink(principalID, turn string) *countingSink {
-	return &countingSink{principalID: principalID, turn: turn, logger: s.logger, telemetry: s.telemetry, exposure: s.config.Exposure, called: make(map[string]bool)}
+func (s *Service) newCountingSink(principalID, turn string, run *tools.Run) *countingSink {
+	return &countingSink{principalID: principalID, turn: turn, logger: s.logger, telemetry: s.telemetry, exposure: s.config.Exposure, run: run, called: make(map[string]bool)}
 }
 
 func (c *countingSink) Emit(ctx context.Context, event agentruntime.Event) error {
+	if event.Type == "tool_result" && event.Tool == webSearchTool && c.run != nil {
+		c.run.MarkExternal(event.Text)
+		return nil
+	}
 	if event.Type != "tool_call" {
 		return nil
 	}
@@ -980,8 +1026,11 @@ func (c *countingSink) Emit(ctx context.Context, event agentruntime.Event) error
 	c.mu.Unlock()
 	if event.Text == webSearchTool {
 		c.telemetry.ContextLogger(ctx, c.logger).InfoContext(ctx, "conversation.web_search.called", "principal_id", c.principalID, "tool", webSearchTool)
+		if c.run != nil {
+			c.run.MarkExternal("")
+		}
 		if c.exposure != nil {
-			c.exposure.MarkTurnExposed(ctx, c.principalID, c.turn)
+			c.exposure.MarkTurnExposed(ctx, c.principalID, c.turn, true)
 		}
 	}
 	return nil

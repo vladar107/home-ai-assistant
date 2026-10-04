@@ -28,7 +28,8 @@ func (s *Service) RunScheduled(ctx context.Context, principalID, turn, message s
 	}
 	defer release()
 
-	turnCtx, cancel := context.WithTimeout(tools.WithTurn(ctx, turn), s.config.TurnTimeout)
+	run := tools.NewRun(message)
+	turnCtx, cancel := context.WithTimeout(tools.WithRun(tools.WithTurn(ctx, turn), run), s.config.TurnTimeout)
 	defer cancel()
 	connected, err := s.gate.Ready(turnCtx, principalID)
 	switch {
@@ -65,7 +66,7 @@ func (s *Service) RunScheduled(ctx context.Context, principalID, turn, message s
 		Tools:       tools,
 		Memory:      memory,
 		WebSearch:   webSearch,
-	}, s.newCountingSink(principalID, turn))
+	}, s.newCountingSink(principalID, turn, run))
 	switch {
 	case ctx.Err() != nil:
 		return ScheduledReply{}, ctx.Err()

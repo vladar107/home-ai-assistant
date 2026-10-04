@@ -37,6 +37,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/conversation/history"
 	"github.com/vladar107/home-ai-assistant/internal/delivery"
+	"github.com/vladar107/home-ai-assistant/internal/exposure"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/location"
 	"github.com/vladar107/home-ai-assistant/internal/memory"
@@ -345,6 +346,11 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	if err != nil {
 		t.Fatal(err)
 	}
+	exposures, err := exposure.NewService(h.store, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	broker.SetTurnExposure(exposures)
 	for _, provider := range options.providers {
 		if err := broker.Register(provider); err != nil {
 			t.Fatal(err)
@@ -435,6 +441,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		if err != nil {
 			t.Fatal(err)
 		}
+		h.web.SetExposure(exposures)
 		if err := broker.Register(h.web); err != nil {
 			t.Fatal(err)
 		}
@@ -457,6 +464,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		if err != nil {
 			t.Fatal(err)
 		}
+		h.homeAssistant.SetExposure(exposures)
 		if err := broker.Register(h.homeAssistant); err != nil {
 			t.Fatal(err)
 		}
@@ -510,6 +518,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		if err != nil {
 			t.Fatal(err)
 		}
+		h.scheduler.SetExposure(exposures)
 		if err := broker.Register(h.scheduler); err != nil {
 			t.Fatal(err)
 		}
@@ -546,14 +555,11 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		locationTurns = h.locations
 	}
 	var memoryTurns conversation.Memory
-	var exposure tools.TurnExposureRecorder
 	if options.memory {
 		h.memory, err = memory.NewService(memory.Config{}, h.store, h.approvals, logger)
 		if err != nil {
 			t.Fatal(err)
 		}
-		broker.SetTurnExposure(h.memory)
-		exposure = h.memory
 		if err := broker.Register(h.memory); err != nil {
 			t.Fatal(err)
 		}
@@ -574,7 +580,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		conversationHistory = reader
 	}
 	h.conversation, err = conversation.NewService(
-		conversation.Config{Memory: memoryTurns, Exposure: exposure, Locations: locationTurns, TurnTimeout: turnTimeout, FollowUp: h.approvals, Notice: notices, Attachments: h.attachments, WebSearch: webSearch, Cards: cards, Photos: photos, Location: options.location, Now: now, History: conversationHistory},
+		conversation.Config{Memory: memoryTurns, Exposure: exposures, Locations: locationTurns, TurnTimeout: turnTimeout, FollowUp: h.approvals, Notice: notices, Attachments: h.attachments, WebSearch: webSearch, Cards: cards, Photos: photos, Location: options.location, Now: now, History: conversationHistory},
 		h.store, runtime, h.client, broker, h.connections, logger, integrationTelemetry{turns: h.turns},
 	)
 	if err != nil {

@@ -67,6 +67,8 @@ type ToolResult struct {
 type Event struct {
 	Type string
 	Text string
+	// Tool names the tool of a "tool_result" event, whose Text is the result the model read.
+	Tool string
 	// Usage is set on a "model_call" event, sent once per finished assistant message, so a long
 	// run can be measured and bounded while it is still going.
 	Usage Usage

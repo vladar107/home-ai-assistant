@@ -421,11 +421,33 @@ type rpcEvent struct {
 	Success               bool                   `json:"success"`
 	ErrorMessage          string                 `json:"errorMessage"`
 	ToolName              string                 `json:"toolName"`
+	Result                *rpcToolResult         `json:"result"`
 	Attempt               int                    `json:"attempt"`
 	WillRetry             bool                   `json:"willRetry"`
 	Data                  json.RawMessage        `json:"data"`
 	Message               *rpcMessage            `json:"message"`
 	AssistantMessageEvent *assistantMessageEvent `json:"assistantMessageEvent"`
+}
+
+type rpcToolResult struct {
+	Content []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"content"`
+}
+
+// text joins the text parts of a tool result.
+func (r *rpcToolResult) text() string {
+	if r == nil {
+		return ""
+	}
+	var parts []string
+	for _, part := range r.Content {
+		if part.Type == "text" {
+			parts = append(parts, part.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 type rpcMessage struct {
@@ -702,6 +724,11 @@ func (s *turnState) consume(ctx context.Context, event rpcEvent) (bool, error) {
 	case "tool_execution_update", "tool_execution_end":
 		if !s.toolsEnabled {
 			return false, fmt.Errorf("Pi runtime emitted a tool event while tools are disabled")
+		}
+		if event.Type == "tool_execution_end" && event.Result != nil {
+			if err := s.sink.Emit(ctx, agentruntime.Event{Type: "tool_result", Tool: event.ToolName, Text: event.Result.text()}); err != nil {
+				return false, fmt.Errorf("emit Pi runtime event: %w", err)
+			}
 		}
 	case "agent_settled":
 		return true, nil

@@ -26,7 +26,7 @@ const (
 	DisabledText = "Web access is off for this user; they can turn it on in /settings."
 )
 
-const guidance = "Web: fetch_page reads a public web page or PDF by its address and returns its text in windows; use it for a link the user gave or one a search found, and never guess addresses, least of all for anything inside the home, which cannot be fetched. " +
+const guidance = "Web: fetch_page reads a public web page or PDF by its address and returns its text in windows; use it for a link the user gave or one a search found; once the conversation has read content from outside the household it opens only links the user sent or that appeared in what you read, so ask the user for any other link; never guess addresses, least of all for anything inside the home, which cannot be fetched. " +
 	"web_search, when offered, looks things up on the web; search sparingly, with as few searches as the question needs. " +
 	"weather_forecast gives current conditions and a daily forecast for a named place, or with date and optionally from_hour and to_hour, an hour-by-hour forecast for that day in the place's local time. %s " +
 	"When the user says where they will be during a day, remember that itinerary for the rest of the conversation, call weather_forecast once per place with the date and the hours they are there, and answer leg by leg (morning, afternoon, evening), pointing out rain, temperature swings, and wind that matter for travelling. " +
@@ -79,7 +79,7 @@ var definitions = []tools.Definition{
 		Name:        toolFetchPage,
 		ThirdParty:  true,
 		Screen:      true,
-		Description: "Fetch a public web page, text file, or PDF by its http or https address and return its readable text in windows of about 12 KB, with the title and the address it finally came from.",
+		Description: "Fetch a public web page, text file, or PDF by its http or https address, which must be one the user gave or one that appeared in content you read when this conversation already holds outside content, and return its readable text in windows of about 12 KB, with the title and the address it finally came from.",
 		Risk:        tools.RiskRead,
 		Timeout:     toolTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +

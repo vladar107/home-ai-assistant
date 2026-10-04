@@ -345,6 +345,7 @@ func mapTool(remote, description string, schema json.RawMessage) (mappedTool, bo
 			Risk:        risk,
 			Timeout:     toolTimeout,
 			ThirdParty:  true,
+			Household:   true,
 		},
 	}, true
 }

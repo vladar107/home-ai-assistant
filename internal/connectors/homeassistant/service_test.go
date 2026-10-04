@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -819,5 +820,139 @@ func TestServiceRejectsBadConfiguration(t *testing.T) {
 		if _, err := homeassistant.NewService(cfg, state, nil, logger); err == nil {
 			t.Fatalf("%s: configuration was accepted", name)
 		}
+	}
+}
+
+type externalFlag struct {
+	mu       sync.Mutex
+	external bool
+}
+
+func (e *externalFlag) External(context.Context, string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.external
+}
+
+func turnOnCalls(sim *simulator) []mcpCall {
+	var found []mcpCall
+	for _, call := range sim.calls() {
+		if call.name == "intent__HassTurnOn" {
+			found = append(found, call)
+		}
+	}
+	return found
+}
+
+func TestActionRunsAtOnceWhenNothingOutsideWasRead(t *testing.T) {
+	f := newFixture(t, newSimulator(livingTV))
+	f.service.SetExposure(&externalFlag{})
+
+	result := f.call(f.toolSet(), "ha_turn_on", map[string]any{"name": "Living TV"})
+	if result.IsError || strings.Contains(result.Text, approval.ProposedText) {
+		t.Fatalf("result = %+v", result)
+	}
+	if calls := turnOnCalls(f.sim); len(calls) != 1 {
+		t.Fatalf("calls = %+v", calls)
+	}
+	if _, found := f.pending(); found {
+		t.Fatal("an immediate action recorded a proposal")
+	}
+}
+
+func TestActionAfterOutsideContentIsProposedAndRunsOnlyAfterConfirmation(t *testing.T) {
+	f := newFixture(t, newSimulator(livingTV))
+	f.service.SetExposure(&externalFlag{external: true})
+
+	result := f.call(f.toolSet(), "ha_turn_on", map[string]any{"name": "Living \"TV\"\n<b>", "area": "Room"})
+	if result.IsError || !strings.Contains(result.Text, approval.ProposedText) {
+		t.Fatalf("result = %+v", result)
+	}
+	if calls := turnOnCalls(f.sim); len(calls) != 0 {
+		t.Fatalf("calls before confirmation = %+v", calls)
+	}
+	record, found := f.pending()
+	if !found || record.Tool != "ha_action" {
+		t.Fatalf("pending = %+v %v", record, found)
+	}
+	wantArguments := `{"arguments":{"area":"Room","name":"Living \"TV\"\n\u003cb\u003e"},"tool":"ha_turn_on"}`
+	if string(record.Arguments) != wantArguments {
+		t.Fatalf("arguments = %s, want %s", record.Arguments, wantArguments)
+	}
+	for _, fragment := range []string{"ha_turn_on", "Turns on a device or entity.", `Arguments: {"area":"Room","name":"Living \"TV\"\n`, "I read outside content in this conversation", "/new"} {
+		if !strings.Contains(record.Summary, fragment) {
+			t.Fatalf("summary lacks %q:\n%s", fragment, record.Summary)
+		}
+	}
+	if strings.Count(record.Summary, "\n") != 2 {
+		t.Fatalf("model-written arguments broke the summary layout:\n%s", record.Summary)
+	}
+
+	text, handled, err := f.approval.Press(t.Context(), "alice", approval.ActionConfirm, record.ID)
+	if err != nil || !handled {
+		t.Fatalf("press = %q %v %v", text, handled, err)
+	}
+	calls := turnOnCalls(f.sim)
+	if len(calls) != 1 || calls[0].arguments["name"] != "Living \"TV\"\n<b>" || calls[0].arguments["area"] != "Room" {
+		t.Fatalf("calls = %+v", calls)
+	}
+}
+
+func TestOutsideContentWithoutAProposerRefusesTheAction(t *testing.T) {
+	sim := newSimulator(livingTV)
+	f := newFixture(t, sim)
+	service, err := homeassistant.NewService(homeassistant.Config{Token: token, BaseURL: f.server.URL, Now: f.clock.Now}, f.state, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.SetExposure(&externalFlag{external: true})
+	broker, err := tools.NewBroker(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := broker.Register(service); err != nil {
+		t.Fatal(err)
+	}
+	set, err := broker.ToolsFor(t.Context(), "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantError(t, f.call(set, "ha_turn_on", map[string]any{"name": "Living TV"}), "unavailable")
+	if calls := turnOnCalls(sim); len(calls) != 0 {
+		t.Fatalf("calls = %+v", calls)
+	}
+}
+
+func TestConfirmedActionFailsWhenItIsNoLongerSafeToRun(t *testing.T) {
+	cases := map[string]func(*fixture){
+		"switch turned off": func(f *fixture) {
+			if _, err := f.service.SetEnabled(t.Context(), "alice", false); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"actions withheld": func(f *fixture) {
+			f.sim.set(func(s *simulator) { s.liveContext += frontDoor })
+		},
+	}
+	for name, change := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t, newSimulator(livingTV))
+			f.service.SetExposure(&externalFlag{external: true})
+			f.call(f.toolSet(), "ha_turn_on", map[string]any{"name": "Living TV"})
+			record, found := f.pending()
+			if !found {
+				t.Fatal("no proposal")
+			}
+			change(f)
+
+			_, err := f.service.ExecuteApproved(t.Context(), record)
+			var actionErr *approval.ActionError
+			if !errors.As(err, &actionErr) || actionErr.Text == "" {
+				t.Fatalf("err = %v, want an ActionError", err)
+			}
+			if calls := turnOnCalls(f.sim); len(calls) != 0 {
+				t.Fatalf("calls = %+v", calls)
+			}
+		})
 	}
 }

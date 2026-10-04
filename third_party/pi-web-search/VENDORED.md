@@ -7,10 +7,20 @@
   checked against the downloaded tarball.
 - Vendored: 2026-09-27, for plan
   [0026](../../docs/plans/0026-web-weather-and-pdf-tools.md).
-- `src/`, `package.json`, and `README.md` are copied from the tarball
-  unmodified. Neither the tarball nor the upstream repository ships a licence
-  file; `package.json` and the README declare MIT, so `LICENSE` holds the
-  standard MIT text with the author named in `package.json`.
+- `package.json` and `README.md` are copied from the tarball unmodified.
+  Neither the tarball nor the upstream repository ships a licence file;
+  `package.json` and the README declare MIT, so `LICENSE` holds the standard
+  MIT text with the author named in `package.json`.
+- `src/` is modified (2026-10-04, plan
+  [0051](../../docs/plans/0051-confirm-actions-after-outside-content.md)):
+  the `urls` argument of `web_search` and its code paths in `web_search.ts`
+  and `index.ts` are removed; the `url_context` tool, `src/url_context.ts`,
+  and the model-scoped tool manager that only existed to deactivate
+  `url_context` on non-Gemini models are removed. The model must not hand
+  addresses to the search provider; `fetch_page`, with its SSRF guard and
+  exposure gate, is the one way to read a given address. The README still
+  describes the removed `urls` argument and `url_context`; it is left as
+  upstream. `format.ts` keeps its now-unused URL-context helpers.
 
 The image copies this directory to `/usr/local/lib/home-agent/pi-web-search`.
 The application loads `src/index.ts` with `--extension` only for principals

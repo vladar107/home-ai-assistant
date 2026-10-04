@@ -334,9 +334,10 @@ type Config struct {
 	// Memory goes into every turn's system prompt and adds a line to a reply for each write the
 	// turn made; nil leaves memory out.
 	Memory Memory
-	// Exposure records a turn that searched the web as having read third-party content; nil
-	// records nothing.
-	Exposure tools.TurnExposureRecorder
+	// Exposure records a turn that searched the web or carried an outside notice as having read
+	// text from outside the household, and turns web search off in a conversation that has; nil
+	// records nothing and leaves search as the switch says.
+	Exposure Exposure
 	// Location is the household's time zone; each chat turn then tells the model the current
 	// local time. Nil leaves the time out.
 	Location *time.Location
@@ -347,4 +348,11 @@ type Config struct {
 	// DisplayNames tells each turn which household member its user is; a principal without a
 	// name goes unnamed.
 	DisplayNames map[string]string
+}
+
+// Exposure records which turns read third-party content and answers whether a call's conversation
+// or run has read text from outside the household.
+type Exposure interface {
+	tools.TurnExposureRecorder
+	External(ctx context.Context, principalID string) bool
 }

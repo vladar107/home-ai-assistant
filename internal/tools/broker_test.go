@@ -213,6 +213,85 @@ func TestSuccessfulThirdPartyCallMarksThePrincipalExposed(t *testing.T) {
 	}
 }
 
+type turnMark struct {
+	turn     string
+	external bool
+}
+
+type recordedTurns struct{ marks []turnMark }
+
+func (r *recordedTurns) MarkTurnExposed(_ context.Context, _, turn string, external bool) {
+	r.marks = append(r.marks, turnMark{turn: turn, external: external})
+}
+
+// Household content marks the turn for memory alone and leaves the run clean; outside content
+// marks both, and the addresses it names become ones the run has seen, beside those in its
+// instruction. Calls then carry the run record to the provider.
+func TestHouseholdAndOutsideResultsMarkTheRun(t *testing.T) {
+	broker := testBroker(t)
+	turns := &recordedTurns{}
+	broker.SetTurnExposure(turns)
+	household := testDefinition("home_state", 0)
+	household.ThirdParty, household.Household = true, true
+	outside := testDefinition("read_page", 0)
+	outside.ThirdParty = true
+	var carried *Run
+	provider := &fakeProvider{
+		principal:   testPrincipal,
+		definitions: []Definition{household, outside},
+		respond: func(ctx context.Context, call Call) (Result, error) {
+			carried = RunFrom(ctx)
+			if call.Name == "read_page" {
+				return Result{Text: "See https://example.com/next?page=2. Or (https://example.org/a). Also https://en.wikipedia.org/wiki/Mercury_(planet)."}, nil
+			}
+			return Result{Text: "lamp on, see https://example.net/device"}, nil
+		},
+	}
+	if err := broker.Register(provider); err != nil {
+		t.Fatal(err)
+	}
+	run := NewRun("please read https://example.com/start")
+	set, err := broker.ToolsFor(WithRun(WithTurn(context.Background(), "turn-1"), run), testPrincipal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := set.Executor.Execute(context.Background(), agentruntime.ToolCall{Name: "home_state", Arguments: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if carried != run {
+		t.Fatal("the provider did not receive the run record")
+	}
+	if run.External() || run.Seen("https://example.net/device") {
+		t.Fatal("household content marked the run external")
+	}
+	if !run.Seen("https://example.com/start") || run.Seen("https://example.com/sta") || run.Seen("https://example.com/next?page=2") {
+		t.Fatal("seen addresses before outside content are wrong")
+	}
+	if _, err := set.Executor.Execute(context.Background(), agentruntime.ToolCall{Name: "read_page", Arguments: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if !run.External() || !run.Seen("https://example.com/next?page=2") || !run.Seen("https://example.org/a") ||
+		!run.Seen("https://en.wikipedia.org/wiki/Mercury_(planet)") || run.Seen("https://example.com/next?page=3") {
+		t.Fatal("outside content did not mark the run with the addresses it named")
+	}
+	want := []turnMark{{turn: "turn-1", external: false}, {turn: "turn-1", external: true}}
+	if fmt.Sprint(turns.marks) != fmt.Sprint(want) {
+		t.Fatalf("turn marks = %v, want %v", turns.marks, want)
+	}
+}
+
+func TestToolsForRejectsHouseholdWithoutThirdParty(t *testing.T) {
+	broker := testBroker(t)
+	definition := testDefinition("home_state", 0)
+	definition.Household = true
+	if err := broker.Register(&fakeProvider{principal: testPrincipal, definitions: []Definition{definition}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := broker.ToolsFor(context.Background(), testPrincipal); err == nil {
+		t.Fatal("a household tool that is not third-party was accepted")
+	}
+}
+
 func TestToolsForRejectsScreeningWithoutThirdParty(t *testing.T) {
 	broker := testBroker(t)
 	definition := testDefinition("read_page", 0)

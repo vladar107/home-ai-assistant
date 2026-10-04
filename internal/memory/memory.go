@@ -59,9 +59,8 @@ type Repository interface {
 	// MemoryEnabled is true for a principal who never changed the switch.
 	MemoryEnabled(ctx context.Context, principalID string) (bool, error)
 	SetMemoryEnabled(ctx context.Context, principalID string, enabled bool) error
-	// MarkConversationExposed flags the session the chat request belongs to as having read
-	// third-party content; ConversationExposed reads that flag.
-	MarkConversationExposed(ctx context.Context, principalID, requestID string) error
+	// ConversationExposed reports whether the session the chat request belongs to has read
+	// third-party content.
 	ConversationExposed(ctx context.Context, principalID, requestID string) (bool, error)
 }
 

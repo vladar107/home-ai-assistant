@@ -62,6 +62,10 @@ func (s *Service) fetchPage(ctx context.Context, principalID, address string, of
 	if err != nil {
 		return errorResult("url is not a valid address")
 	}
+	if s.exposure != nil && s.exposure.External(ctx, principalID) && !seenAddress(ctx, address, target) {
+		s.logger.InfoContext(ctx, "web.fetch.refused", "principal_id", principalID, "outcome", "unseen_address")
+		return errorResult("This conversation has read content from outside the household, so fetch_page can only open links the user sent or that appeared in what you read. If the user wants this address opened, ask them to send the link.")
+	}
 	target.Fragment = ""
 	result, err := s.readPage(ctx, target)
 	if err != nil {
@@ -73,6 +77,20 @@ func (s *Service) fetchPage(ctx context.Context, principalID, address string, of
 		return errorResult(failureText(err))
 	}
 	return renderWindow(result, offset)
+}
+
+// seenAddress reports whether the run named the address, as given or without its fragment.
+func seenAddress(ctx context.Context, address string, target *url.URL) bool {
+	run := tools.RunFrom(ctx)
+	if run == nil {
+		return false
+	}
+	if run.Seen(address) {
+		return true
+	}
+	bare := *target
+	bare.Fragment = ""
+	return run.Seen(bare.String())
 }
 
 // pageRefusal is a failure already worded for the model.

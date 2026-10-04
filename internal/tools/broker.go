@@ -63,6 +63,10 @@ type Definition struct {
 	// ThirdParty marks a tool whose result carries text written by someone outside the household,
 	// such as web pages or email; a successful call marks the principal exposed.
 	ThirdParty bool
+	// Household marks a third-party tool whose text comes from the household's own devices. It
+	// still marks the conversation exposed for memory, but not externally exposed, so the actions
+	// that need confirmation after outside content stay immediate after it.
+	Household bool
 	// Screen marks a result that may be sent, redacted, for injection screening; it requires
 	// ThirdParty.
 	Screen bool
@@ -103,10 +107,11 @@ type ExposureRecorder interface {
 	MarkExposed(principalID string)
 }
 
-// TurnExposureRecorder remembers which turn read third-party content, so what that turn's
-// conversation may do afterwards can depend on it.
+// TurnExposureRecorder remembers which turn read third-party content, and whether that content
+// came from outside the household, so what that turn's conversation may do afterwards can depend
+// on it.
 type TurnExposureRecorder interface {
-	MarkTurnExposed(ctx context.Context, principalID, turn string)
+	MarkTurnExposed(ctx context.Context, principalID, turn string, external bool)
 }
 
 // Screener judges whether third-party text addresses an AI assistant with instructions.
@@ -182,7 +187,7 @@ func (b *Broker) toolsFor(ctx context.Context, principalID string, readOnly bool
 	if principalID == "" {
 		return agentruntime.ToolSet{}, fmt.Errorf("tool broker requires a principal")
 	}
-	executor := &turnExecutor{broker: b, principalID: principalID, turn: TurnFrom(ctx), budget: callBudgetFrom(ctx), bindings: make(map[string]toolBinding)}
+	executor := &turnExecutor{broker: b, principalID: principalID, turn: TurnFrom(ctx), run: RunFrom(ctx), budget: callBudgetFrom(ctx), bindings: make(map[string]toolBinding)}
 	var guidance []string
 	var definitions []agentruntime.ToolDefinition
 	for _, provider := range b.providers {
@@ -202,7 +207,7 @@ func (b *Broker) toolsFor(ctx context.Context, principalID string, readOnly bool
 			if _, exists := executor.bindings[definition.Name]; exists {
 				return agentruntime.ToolSet{}, fmt.Errorf("tool %q is contributed twice", definition.Name)
 			}
-			executor.bindings[definition.Name] = toolBinding{provider: provider, deadline: definition.Timeout, thirdParty: definition.ThirdParty, screen: definition.Screen, outsideBudget: definition.OutsideBudget}
+			executor.bindings[definition.Name] = toolBinding{provider: provider, deadline: definition.Timeout, thirdParty: definition.ThirdParty, household: definition.Household, screen: definition.Screen, outsideBudget: definition.OutsideBudget}
 			if definition.OutsideBudget && executor.handoff == "" {
 				executor.handoff = definition.Name
 			}
@@ -245,6 +250,9 @@ func validateDefinition(definition Definition) error {
 	if definition.Screen && !definition.ThirdParty {
 		return fmt.Errorf("tool %q is screened but not marked third-party", definition.Name)
 	}
+	if definition.Household && !definition.ThirdParty {
+		return fmt.Errorf("tool %q is marked household but not third-party", definition.Name)
+	}
 	var schema map[string]json.RawMessage
 	if err := json.Unmarshal(definition.InputSchema, &schema); err != nil || schema == nil {
 		return fmt.Errorf("tool %q input schema must be a JSON object", definition.Name)
@@ -258,16 +266,19 @@ type toolBinding struct {
 	provider      Provider
 	deadline      time.Duration
 	thirdParty    bool
+	household     bool
 	screen        bool
 	outsideBudget bool
 }
 
 // turnExecutor binds one turn to its principal and the grant collected when the turn started. The
-// turn key is kept here rather than trusted to arrive on the contexts the runtime calls with.
+// turn key and run record are kept here rather than trusted to arrive on the contexts the runtime
+// calls with.
 type turnExecutor struct {
 	broker      *Broker
 	principalID string
 	turn        string
+	run         *Run
 	bindings    map[string]toolBinding
 	budget      int32
 	// handoff names a tool outside the budget that the exhausted-budget result points to.
@@ -332,7 +343,11 @@ func (e *turnExecutor) execute(ctx context.Context, call agentruntime.ToolCall) 
 	if deadline <= 0 {
 		deadline = callDeadline
 	}
-	callCtx, cancel := context.WithTimeout(WithTurn(ctx, e.turn), deadline)
+	callCtx := WithTurn(ctx, e.turn)
+	if e.run != nil {
+		callCtx = WithRun(callCtx, e.run)
+	}
+	callCtx, cancel := context.WithTimeout(callCtx, deadline)
 	defer cancel()
 	result, err := binding.provider.Execute(callCtx, e.principalID, Call{Name: call.Name, Arguments: call.Arguments})
 	switch {
@@ -348,8 +363,12 @@ func (e *turnExecutor) execute(ctx context.Context, call agentruntime.ToolCall) 
 		if binding.thirdParty && e.broker.exposure != nil {
 			e.broker.exposure.MarkExposed(e.principalID)
 		}
+		external := binding.thirdParty && !binding.household
+		if external && e.run != nil {
+			e.run.MarkExternal(result.Text)
+		}
 		if binding.thirdParty && e.broker.turns != nil {
-			e.broker.turns.MarkTurnExposed(ctx, e.principalID, e.turn)
+			e.broker.turns.MarkTurnExposed(ctx, e.principalID, e.turn, external)
 		}
 		text := untrustedResultPrefix
 		screened := ""

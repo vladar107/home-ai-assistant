@@ -60,6 +60,7 @@ plan that links back to the earlier record.
 | 0048 | [Background sub-agents that do not block the chat](0048-background-tasks.md) | in-progress |
 | 0049 | [Tell the model who the user is](0049-name-the-user.md) | done |
 | 0050 | [Scrub private data before making the repository public](0050-public-release-scrub.md) | in-progress |
+| 0051 | [Confirm actions after outside content](0051-confirm-actions-after-outside-content.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

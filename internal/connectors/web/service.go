@@ -135,6 +135,7 @@ type Service struct {
 	cards        Cards
 	trains       Trains
 	telemetry    Telemetry
+	exposure     ExposureChecker
 
 	running atomic.Bool
 }
@@ -144,6 +145,18 @@ var _ module.Module = (*Service)(nil)
 // Telemetry records day-card render metrics.
 type Telemetry interface {
 	RecordDayCardRender(ctx context.Context, outcome string, duration time.Duration)
+}
+
+// ExposureChecker reports whether the principal's conversation has read content from outside the
+// household.
+type ExposureChecker interface {
+	External(ctx context.Context, principalID string) bool
+}
+
+// SetExposure sets the check that limits fetch_page to addresses the run has seen, at wiring time
+// before turns start. Without one, fetch_page opens any public address.
+func (s *Service) SetExposure(exposure ExposureChecker) {
+	s.exposure = exposure
 }
 
 // SetTelemetry sets where render metrics are recorded, at wiring time before turns start.

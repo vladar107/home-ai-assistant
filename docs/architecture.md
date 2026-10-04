@@ -238,6 +238,20 @@ A restart resumes a running task in its session; a second interruption fails it.
   (labelled `assistant-confirm`, or locks, alarm panels, valves, sirens, cameras,
   firmware updates, and garage, gate, or door covers) are confirmed per action. If
   such a device is exposed, all immediate actions are withheld and reads remain.
+  Reminders, tasks, and everyday home actions need Confirm after outside content
+  (below).
+- **Outside content turns actions into proposals.** Once a conversation has read
+  text written outside the household, such as a web page, an email, a calendar
+  invite, log lines, or a background task's report, it stays marked until `/new`.
+  Text from the household's own devices through Home Assistant does not count.
+  In a marked conversation, or a run that has read such text:
+  - home actions, `reminder_set`, and `task_start` are proposed for Confirm;
+  - `fetch_page` opens only addresses from the user's message or from what the
+    run has read;
+  - chat turns run without web search, because the provider's search can open
+    an address the query names.
+  The extension's `urls` argument and URL context tool are removed, so the model
+  cannot hand an address to the search provider.
 - **Home Assistant scope.** One household token from a dedicated non-admin Home
   Assistant user. Only entities exposed to Assist are reachable by the MCP tools;
   the tool, exposure, and label snapshot is cached for 5 minutes.

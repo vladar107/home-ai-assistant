@@ -145,19 +145,42 @@ func (s *Store) SetMemoryEnabled(ctx context.Context, principalID string, enable
 	return nil
 }
 
-func (s *Store) MarkConversationExposed(ctx context.Context, principalID, requestID string) error {
+// MarkConversationExposed flags the session the chat request belongs to as having read
+// third-party content, and as externally exposed when that content came from outside the
+// household. Neither flag is ever cleared; /new starts a fresh session.
+func (s *Store) MarkConversationExposed(ctx context.Context, principalID, requestID string, external bool) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("mark conversation exposed: SQLite store is not open")
 	}
 	if _, err := s.db.ExecContext(ctx,
 		`UPDATE conversation_sessions
-		 SET exposed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-		 WHERE exposed_at IS NULL AND principal_id = ? AND id = (
+		 SET exposed_at = coalesce(exposed_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+		     external_at = CASE WHEN ? THEN coalesce(external_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) ELSE external_at END
+		 WHERE (exposed_at IS NULL OR (? AND external_at IS NULL)) AND principal_id = ? AND id = (
 		     SELECT session_id FROM conversation_requests WHERE id = ? AND principal_id = ?
-		 )`, principalID, requestID, principalID); err != nil {
+		 )`, external, external, principalID, requestID, principalID); err != nil {
 		return fmt.Errorf("mark conversation exposed: %w", err)
 	}
 	return nil
+}
+
+// ConversationExternal reports whether the session the chat request belongs to has read text
+// written outside the household.
+func (s *Store) ConversationExternal(ctx context.Context, principalID, requestID string) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("load conversation external exposure: SQLite store is not open")
+	}
+	var external int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT session.external_at IS NOT NULL
+		 FROM conversation_requests AS request
+		 JOIN conversation_sessions AS session
+		   ON session.id = request.session_id AND session.principal_id = request.principal_id
+		 WHERE request.id = ? AND request.principal_id = ?`, requestID, principalID).Scan(&external)
+	if err != nil {
+		return false, fmt.Errorf("query conversation external exposure: %w", err)
+	}
+	return external == 1, nil
 }
 
 func (s *Store) ConversationExposed(ctx context.Context, principalID, requestID string) (bool, error) {

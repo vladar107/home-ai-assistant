@@ -98,18 +98,6 @@ func (s *Service) Execute(ctx context.Context, principalID string, call tools.Ca
 	}
 }
 
-// MarkTurnExposed records that a turn read third-party content. Only a chat turn is recorded, on
-// its conversation session, because the content stays in that session's history until /new.
-func (s *Service) MarkTurnExposed(ctx context.Context, principalID, turn string) {
-	requestID, chat := outbox.ChatRequest(turn)
-	if !chat {
-		return
-	}
-	if err := s.repository.MarkConversationExposed(ctx, principalID, requestID); err != nil {
-		s.logger.WarnContext(ctx, "memory.exposure.mark_failed", "principal_id", principalID, "error", err)
-	}
-}
-
 // exposed reports whether the calling turn's conversation has read third-party content. A call
 // outside a chat turn, or a failed lookup, counts as exposed, so the write is confirmed.
 func (s *Service) exposed(ctx context.Context, principalID string) bool {

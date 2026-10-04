@@ -70,6 +70,7 @@ type Service struct {
 	now        func() time.Time
 	types      map[string]JobType
 	proposer   Proposer
+	exposure   ExposureChecker
 	telemetry  Telemetry
 	safety     SafetyChecks
 	startedAt  time.Time
@@ -111,6 +112,12 @@ type SafetyChecks interface {
 // SetTelemetry sets where run metrics are recorded, at wiring time before the scheduler starts.
 func (s *Service) SetTelemetry(telemetry Telemetry) {
 	s.telemetry = telemetry
+}
+
+// SetExposure sets the check that makes reminders wait for confirmation once the conversation has
+// read outside content, at wiring time; without it reminders are always set at once.
+func (s *Service) SetExposure(exposure ExposureChecker) {
+	s.exposure = exposure
 }
 
 // SetSafetyChecks sets the opt-in lookup that labels scheduled reply metrics; without it they

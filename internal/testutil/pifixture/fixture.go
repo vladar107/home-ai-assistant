@@ -283,7 +283,8 @@ func run() error {
 		delta("Searching.")
 		emit(map[string]any{"type": "message_update", "assistantMessageEvent": map[string]string{"type": "toolcall_start"}})
 		emit(map[string]any{"type": "tool_execution_start", "toolCallId": "call-1", "toolName": "web_search"})
-		emit(map[string]any{"type": "tool_execution_end", "toolCallId": "call-1", "toolName": "web_search", "isError": false})
+		emit(map[string]any{"type": "tool_execution_end", "toolCallId": "call-1", "toolName": "web_search", "isError": false,
+			"result": map[string]any{"content": []map[string]string{{"type": "text", "text": "Synthetic result: https://example.com/found?id=1"}}}})
 		emit(map[string]any{"type": "message_start", "message": map[string]string{"role": "assistant"}})
 		delta("found: synthetic search answer")
 		settle()

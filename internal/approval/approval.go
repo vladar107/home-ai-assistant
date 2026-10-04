@@ -836,7 +836,7 @@ func statusLine(record Record, limit int) string {
 	case StatusFailed:
 		switch record.Reason {
 		case ReasonInterrupted:
-			return "The assistant restarted while executing this; check Notion before trying again."
+			return "The assistant restarted while executing this; check whether it took effect before trying again."
 		case ReasonTimeout:
 			return "Execution timed out; check the target before trying again."
 		case ReasonNoExecutor, ReasonExecutorFailed:

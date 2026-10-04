@@ -30,6 +30,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/conversation/history"
 	"github.com/vladar107/home-ai-assistant/internal/daycard"
 	"github.com/vladar107/home-ai-assistant/internal/delivery"
+	"github.com/vladar107/home-ai-assistant/internal/exposure"
 	"github.com/vladar107/home-ai-assistant/internal/health"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/judgment"
@@ -354,7 +355,11 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			return fmt.Errorf("initialize memory: %w", err)
 		}
 		memoryService.SetTelemetry(a.telemetry)
-		broker.SetTurnExposure(memoryService)
+		exposures, err := exposure.NewService(a.store, a.logger)
+		if err != nil {
+			return fmt.Errorf("initialize exposure: %w", err)
+		}
+		broker.SetTurnExposure(exposures)
 		// Interface values stay nil without a key, so no user message is kept in memory for nothing.
 		var recent conversation.MessageRecorder
 		var toolHint conversation.ToolHinter
@@ -386,6 +391,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		}
 		scheduler.SetTelemetry(a.telemetry)
 		scheduler.SetSafetyChecks(safetyChecks)
+		scheduler.SetExposure(exposures)
 		var nsService *ns.Service
 		var trains web.Trains
 		if a.cfg.NS.Enabled() {
@@ -402,6 +408,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 				return fmt.Errorf("initialize web connector: %w", err)
 			}
 			webService.SetTelemetry(a.telemetry)
+			webService.SetExposure(exposures)
 			if err := a.registry.Register(webService); err != nil {
 				return err
 			}
@@ -461,7 +468,12 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 				return fmt.Errorf("initialize background tasks: %w", err)
 			}
 			tasks.SetTelemetry(a.telemetry)
+			tasks.SetExposure(exposures)
+			tasks.SetProposer(approvals)
 			if err := broker.Register(tasks); err != nil {
+				return err
+			}
+			if err := approvals.RegisterExecutor(tasks); err != nil {
 				return err
 			}
 			notices = append(notices, conversation.OutsideNotice{Notice: tasks})
@@ -485,7 +497,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 				Location:     location,
 				Locations:    turnLocations,
 				Memory:       memoryService,
-				Exposure:     memoryService,
+				Exposure:     exposures,
 				History:      conversationHistory,
 				DisplayNames: displayNames,
 			},
@@ -625,6 +637,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			if err != nil {
 				return fmt.Errorf("initialize Home Assistant connector: %w", err)
 			}
+			homeAssistantService.SetExposure(exposures)
 			if err := a.registry.Register(homeAssistantService); err != nil {
 				return err
 			}

@@ -1,6 +1,7 @@
 package telegram
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -11,6 +12,7 @@ import (
 
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
+	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
 // createReminder stores a reminder for the principal directly, as reminder_set does.
@@ -430,5 +432,69 @@ func TestJobsPagingStaysWithinTelegramLimitsAndKeepsPage(t *testing.T) {
 	deleted := h.pressJob(5, list.messageID, "jobs:delete:0000000000000099:3")
 	if !strings.Contains(deleted.text, "(page 3 of 3)") || strings.Contains(deleted.text, "Call mom") {
 		t.Fatalf("page 3 after deleting the reminder = %q", deleted.text)
+	}
+}
+
+// homeProvider stands in for a tool that reads the household's own devices.
+type homeProvider struct{}
+
+func (homeProvider) Contribute(context.Context, string) (tools.Contribution, error) {
+	return tools.Contribution{Definitions: []tools.Definition{{
+		Name: "read_home", Description: "Read the home's devices.", Risk: tools.RiskRead, ThirdParty: true, Household: true,
+		InputSchema: json.RawMessage(`{"type":"object"}`),
+	}}}, nil
+}
+
+func (homeProvider) Execute(context.Context, string, tools.Call) (tools.Result, error) {
+	return tools.Result{Text: "lamp off"}, nil
+}
+
+// Reading the home's own devices leaves a reminder immediate; once the conversation reads outside
+// content, a reminder needs Confirm in that turn and in the conversation's later turns.
+func TestReminderAfterOutsideContentNeedsConfirmation(t *testing.T) {
+	runtime := newControlledRuntime()
+	clock := newTestClock(t, mondayMorning)
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, providers: []tools.Provider{homeProvider{}, outsideProvider{}}})
+	h.provision("alice", "account-alice")
+	h.start()
+
+	turn := func(updateID int64, read string) agentruntime.ToolResult {
+		t.Helper()
+		h.push(textUpdate(updateID, 101, "remind me at 5pm to call mom"))
+		chat := receive(t, h.ctx, runtime.calls)
+		if read != "" {
+			if result, err := chat.request.Tools.Executor.Execute(chat.ctx, agentruntime.ToolCall{Name: read, Arguments: json.RawMessage(`{}`)}); err != nil || result.IsError {
+				t.Fatalf("%s = %+v %v", read, result, err)
+			}
+		}
+		result, err := chat.request.Tools.Executor.Execute(chat.ctx, agentruntime.ToolCall{
+			Name: "reminder_set", Arguments: json.RawMessage(`{"text":"Call mom","at":"2026-09-28 17:00"}`),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		chat.answer <- agentruntime.RunResult{Response: "ok"}
+		h.wantReply(101, updateID, "ok")
+		h.waitState(updateID, "delivered")
+		return result
+	}
+	jobs := func() int {
+		return h.countRows(`SELECT count(*) FROM scheduled_jobs WHERE principal_id = 'alice' AND job_type = ?`, schedule.TypeReminder)
+	}
+
+	if result := turn(1, "read_home"); result.IsError || !strings.Contains(result.Text, "Reminder set") || jobs() != 1 {
+		t.Fatalf("reminder after household content = %+v, jobs %d", result, jobs())
+	}
+	if result := turn(2, "read_outside"); result.IsError || strings.Contains(result.Text, "Reminder set") || jobs() != 1 {
+		t.Fatalf("reminder after outside content = %+v, jobs %d", result, jobs())
+	}
+	if proposal := h.nextMessage(); !strings.Contains(proposal.text, "Call mom") || !strings.Contains(proposal.text, "outside content") {
+		t.Fatalf("proposal = %+v", proposal)
+	}
+	if result := turn(3, ""); result.IsError || strings.Contains(result.Text, "Reminder set") || jobs() != 1 {
+		t.Fatalf("reminder in a later turn of the same conversation = %+v, jobs %d", result, jobs())
+	}
+	if count := h.countRows(`SELECT count(*) FROM approvals WHERE principal_id = 'alice' AND tool = 'reminder_set'`); count != 2 {
+		t.Fatalf("reminder proposals = %d, want 2", count)
 	}
 }

@@ -606,3 +606,55 @@ func TestWeatherForecastHourByHourForADay(t *testing.T) {
 		wantError(t, f.call("alice", "weather_forecast", tc.arguments), tc.want)
 	}
 }
+
+type exposureFlag bool
+
+func (e exposureFlag) External(context.Context, string) bool { return bool(e) }
+
+func TestFetchPageAfterOutsideContentOpensOnlySeenAddresses(t *testing.T) {
+	const address = "http://public.test/article"
+	setup := func(external bool, run *tools.Run) *fixture {
+		f := newFixture(t, "")
+		f.service.SetExposure(exposureFlag(external))
+		f.serve("public.test/article", "text/plain", []byte("hello"))
+		if run != nil {
+			f.ctx = tools.WithRun(f.ctx, run)
+		}
+		return f
+	}
+	const refusal = "ask them to send the link"
+
+	t.Run("not external", func(t *testing.T) {
+		wantText(t, setup(false, nil).fetch(map[string]any{"url": address}), "hello")
+	})
+	t.Run("seen in the instruction", func(t *testing.T) {
+		f := setup(true, tools.NewRun("please read "+address+" for me"))
+		wantText(t, f.fetch(map[string]any{"url": address}), "hello")
+	})
+	t.Run("seen with a fragment added", func(t *testing.T) {
+		f := setup(true, tools.NewRun("please read "+address))
+		wantText(t, f.fetch(map[string]any{"url": address + "#top"}), "hello")
+	})
+	t.Run("seen in earlier outside content", func(t *testing.T) {
+		run := tools.NewRun("search for the library")
+		run.MarkExternal("Result: see " + address + ".")
+		wantText(t, setup(true, run).fetch(map[string]any{"url": address}), "hello")
+	})
+	t.Run("unseen", func(t *testing.T) {
+		f := setup(true, tools.NewRun("search for the library"))
+		wantError(t, f.fetch(map[string]any{"url": address}), refusal)
+		if dialed := f.dialedAddresses(); len(dialed) != 0 {
+			t.Fatalf("a refused fetch dialed %v", dialed)
+		}
+		if strings.Contains(f.logs.String(), address) {
+			t.Fatalf("the log carries the address:\n%s", f.logs)
+		}
+	})
+	t.Run("no run", func(t *testing.T) {
+		f := setup(true, nil)
+		wantError(t, f.fetch(map[string]any{"url": address}), refusal)
+		if dialed := f.dialedAddresses(); len(dialed) != 0 {
+			t.Fatalf("a refused fetch dialed %v", dialed)
+		}
+	})
+}

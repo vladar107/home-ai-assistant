@@ -24,7 +24,7 @@ var (
 var _ approval.Executor = (*Service)(nil)
 
 func (s *Service) ActionTools() []string {
-	return []string{toolServiceCall}
+	return []string{toolServiceCall, toolAction}
 }
 
 type serviceCallArguments struct {
@@ -183,7 +183,11 @@ func (s *Service) propose(ctx context.Context, principalID string, snap *snapsho
 // ExecuteApproved re-checks that the entity still carries the label and the call still fits its
 // domain before running it once.
 func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (approval.Outcome, error) {
-	if record.Tool != toolServiceCall {
+	switch record.Tool {
+	case toolServiceCall:
+	case toolAction:
+		return s.executeApprovedAction(ctx, record)
+	default:
 		return approval.Outcome{}, &approval.ActionError{Reason: "unknown_tool", Text: "This action is not supported."}
 	}
 	status, err := s.Status(ctx, record.PrincipalID)
