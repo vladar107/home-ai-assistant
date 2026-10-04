@@ -94,6 +94,8 @@ type Message struct {
 	Document  *MediaFile  `json:"document"`
 	Location  *Location   `json:"location"`
 	Venue     *Venue      `json:"venue"`
+	// ReplyToMessage is the message this one replies to, as Telegram includes it.
+	ReplyToMessage *Message `json:"reply_to_message"`
 	// The kinds below cannot reach the model through the runtime; they are read only so the
 	// message can be answered instead of ignored.
 	Voice     *MediaFile `json:"voice"`
@@ -359,6 +361,16 @@ func (c *Client) SendMessage(ctx context.Context, chatID int64, text string) err
 // when that message was deleted, and a zero message ID sends without a quote.
 func (c *Client) SendReply(ctx context.Context, chatID, replyToMessageID int64, text string) error {
 	return c.send(ctx, chatID, replyToMessageID, text, nil)
+}
+
+// SendTrackedReply is SendReply returning the sent message's ID, for an answer the user may reply
+// to later.
+func (c *Client) SendTrackedReply(ctx context.Context, chatID, replyToMessageID int64, text string) (int64, error) {
+	message, err := c.sendMessage(ctx, chatID, replyToMessageID, text, nil)
+	if err != nil {
+		return 0, err
+	}
+	return message.MessageID, nil
 }
 
 // SendKeyboard sends a message with inline buttons, quoting the request like SendReply.

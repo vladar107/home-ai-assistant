@@ -75,6 +75,8 @@ type Telemetry struct {
 	hintFollowThrough            metric.Int64Counter
 	scheduleRuns                 metric.Int64Counter
 	memoryWrites                 metric.Int64Counter
+	conversationResumes          metric.Int64Counter
+	conversationSearches         metric.Int64Counter
 }
 
 func New(ctx context.Context, cfg config.ObservabilityConfig, logger *slog.Logger) (*Telemetry, error) {
@@ -376,6 +378,12 @@ func (t *Telemetry) createBusinessInstruments(meter metric.Meter) error {
 		return err
 	}
 	if t.memoryWrites, err = counter("home_agent.memory.writes", "Memory writes by kind and outcome.", "{write}"); err != nil {
+		return err
+	}
+	if t.conversationResumes, err = counter("home_agent.conversation.resumes", "Returns to an earlier conversation, by trigger.", "{resume}"); err != nil {
+		return err
+	}
+	if t.conversationSearches, err = counter("home_agent.conversation.searches", "Searches of earlier conversations, by outcome.", "{search}"); err != nil {
 		return err
 	}
 	return nil
@@ -689,6 +697,20 @@ func (t *Telemetry) RecordHintFollowThrough(ctx context.Context, principal, resu
 	t.hintFollowThrough.Add(ctx, 1, metric.WithAttributes(
 		principalAttr(principal),
 		labelAttr("home_agent.result", result, "unknown"),
+	))
+}
+
+func (t *Telemetry) RecordConversationResume(ctx context.Context, principal, trigger string) {
+	t.conversationResumes.Add(ctx, 1, metric.WithAttributes(
+		principalAttr(principal),
+		labelAttr("home_agent.trigger", trigger, "unknown"),
+	))
+}
+
+func (t *Telemetry) RecordConversationSearch(ctx context.Context, principal, outcome string) {
+	t.conversationSearches.Add(ctx, 1, metric.WithAttributes(
+		principalAttr(principal),
+		labelAttr("home_agent.outcome", outcome, "unknown"),
 	))
 }
 

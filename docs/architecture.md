@@ -184,7 +184,20 @@ it can write, the approval service (the executor for confirmed proposals).
 6. A write becomes a proposal; `approval` sends Confirm and Reject after the reply
    and executes a confirmed proposal once.
 7. The reply goes back through Telegram, as a day card photo with a caption when the
-   turn produced one. Message bodies are then cleared from SQLite.
+   turn produced one. Message bodies are then cleared from SQLite; the sent
+   message's ID is kept with its session, so replying to it later returns to
+   that conversation.
+
+### Earlier conversations
+
+Each principal has one active conversation session; `/new` closes it, and
+`/sessions` or a reply to an earlier answer reactivates a closed one, whose Pi
+session file the next turn resumes. Pi's session files are the only copy of the
+history: titles in `/sessions` and the model's `conversation_search` and
+`conversation_read` tools read the principal's own files on demand, user and
+assistant text only, and nothing is indexed or copied into SQLite. A restart
+during a turn keeps the session, since Pi resumes a file that ends in an
+unanswered message.
 
 ## Security model
 

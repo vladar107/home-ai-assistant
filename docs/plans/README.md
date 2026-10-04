@@ -56,6 +56,7 @@ plan that links back to the earlier record.
 | 0044 | [Movie night tools for the Notion movie table](0044-movie-night-tools.md) | in-progress |
 | 0045 | [Grafana metrics and logs in conversation](0045-grafana-metrics-and-logs.md) | in-progress |
 | 0046 | [Per-user memory the user can see and edit](0046-per-user-memory.md) | in-progress |
+| 0047 | [Return to earlier conversations](0047-earlier-conversations.md) | in-progress |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

@@ -15,8 +15,12 @@ borrowed between users.
 
 - **Conversation.** Natural-language chat with per-user context, backed by the
   [Pi](https://github.com/badlogic/pi-mono) agent runtime on the user's own model
-  subscription. `/status`, `/privacy`, `/cancel`, `/new`, and `/settings` are
-  deterministic shortcuts.
+  subscription. `/status`, `/privacy`, `/cancel`, `/new`, `/sessions`, and
+  `/settings` are deterministic shortcuts.
+- **Earlier conversations.** `/sessions` lists recent conversations to resume,
+  and replying to an earlier answer continues its conversation. The assistant
+  can search and read the user's own earlier conversations when asked about
+  something discussed before.
 - **Notion.** Search, read pages, and query data sources. Creates and updates are
   proposed and run only after Confirm.
 - **Gmail.** Read-only search and reading of the user's own mailbox.

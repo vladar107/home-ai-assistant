@@ -35,6 +35,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/ns"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/web"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/conversation/history"
 	"github.com/vladar107/home-ai-assistant/internal/delivery"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/location"
@@ -180,6 +181,8 @@ type harnessOptions struct {
 	// memory adds per-user memory with its tools, /memory, and its settings switch, with third-party
 	// exposure recorded on the conversation.
 	memory bool
+	// history reads Pi's session files from these directories for /sessions and the history tools.
+	history history.Directories
 }
 
 type fixedDescriber string
@@ -272,6 +275,8 @@ func (integrationTelemetry) RecordModelTurn(context.Context, string, string, int
 }
 func (integrationTelemetry) RecordToolCallsPerTurn(context.Context, string, string, int) {}
 func (integrationTelemetry) RecordHintFollowThrough(context.Context, string, string)     {}
+func (integrationTelemetry) RecordConversationResume(context.Context, string, string)    {}
+func (integrationTelemetry) RecordConversationSearch(context.Context, string, string)    {}
 
 func newConversationHarness(t *testing.T, runtime agentruntime.AgentRuntime) *conversationHarness {
 	t.Helper()
@@ -544,8 +549,19 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		}
 		memoryTurns = h.memory
 	}
+	var conversationHistory conversation.History
+	if options.history != nil {
+		reader, err := history.NewService(h.store, options.history, options.location, integrationTelemetry{turns: h.turns})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := broker.Register(reader); err != nil {
+			t.Fatal(err)
+		}
+		conversationHistory = reader
+	}
 	h.conversation, err = conversation.NewService(
-		conversation.Config{Memory: memoryTurns, Exposure: exposure, Locations: locationTurns, TurnTimeout: turnTimeout, FollowUp: h.approvals, Notice: notices, Attachments: h.attachments, WebSearch: webSearch, Cards: cards, Photos: photos, Location: options.location, Now: now},
+		conversation.Config{Memory: memoryTurns, Exposure: exposure, Locations: locationTurns, TurnTimeout: turnTimeout, FollowUp: h.approvals, Notice: notices, Attachments: h.attachments, WebSearch: webSearch, Cards: cards, Photos: photos, Location: options.location, Now: now, History: conversationHistory},
 		h.store, runtime, h.client, broker, h.connections, logger, integrationTelemetry{turns: h.turns},
 	)
 	if err != nil {
@@ -1238,8 +1254,8 @@ func TestConversationRestartRecovery(t *testing.T) {
 			if call.request.Message != "follow up" {
 				t.Fatalf("replayed model work after restart: %+v", call.request)
 			}
-			if (call.request.SessionID != recoveryRuntimeSessionID) != (state == "running") {
-				t.Fatalf("unexpected recovery session %q for %s", call.request.SessionID, state)
+			if call.request.SessionID != recoveryRuntimeSessionID {
+				t.Fatalf("recovery after %s continued in session %q, want %q", state, call.request.SessionID, recoveryRuntimeSessionID)
 			}
 			call.answer <- agentruntime.RunResult{Response: "follow up answer"}
 			h.wantReply(101, 2, "follow up answer")
@@ -1370,7 +1386,7 @@ func TestBusyWhileResponseIsBeingDelivered(t *testing.T) {
 func TestBotCommandsRegisteredOnceAtStartup(t *testing.T) {
 	h := newConversationHarness(t, newControlledRuntime())
 	h.start()
-	want := []string{"status", "privacy", "cancel", "new", "settings"}
+	want := []string{"status", "privacy", "cancel", "new", "sessions", "settings"}
 	for _, wantScope := range [][]string{nil, {`{"type":"all_private_chats"}`}} {
 		registration := receive(t, h.ctx, h.registrations)
 		if !slices.Equal(registration.scope, wantScope) {

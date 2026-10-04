@@ -254,6 +254,10 @@ func (s *Service) Enqueue(ctx context.Context, input EnqueueInput) error {
 	if result.Busy {
 		return ErrBusy
 	}
+	if result.Created && !result.Request.ResumedFrom.IsZero() {
+		s.leaveSession(ctx, input.PrincipalID, result.SwitchedFrom)
+		s.telemetry.RecordConversationResume(ctx, input.PrincipalID, "reply")
+	}
 	if result.Request.State == RequestStateQueued || result.Request.State == RequestStateReady {
 		s.notify(input.PrincipalID)
 	}
@@ -306,6 +310,83 @@ func (s *Service) NewSession(ctx context.Context, principalID string) (bool, err
 		cancel()
 	}
 	return reset, nil
+}
+
+// Sessions lists the principal's recent conversations, newest first. Earlier conversations of
+// which Pi recorded nothing the user wrote are left out.
+func (s *Service) Sessions(ctx context.Context, principalID string) ([]SessionSummary, error) {
+	records, err := s.repository.ConversationSessions(ctx, principalID, sessionCandidates)
+	if err != nil {
+		return nil, err
+	}
+	summaries := make([]SessionSummary, 0, min(len(records), ListedSessions))
+	for _, record := range records {
+		if len(summaries) == ListedSessions {
+			break
+		}
+		summary, err := s.summarize(ctx, principalID, record)
+		if err != nil {
+			return nil, err
+		}
+		if summary.Title == "" && !summary.Active && s.config.History != nil {
+			continue
+		}
+		summaries = append(summaries, summary)
+	}
+	return summaries, nil
+}
+
+// Resume makes one of the principal's earlier conversations the active one, so the next turn
+// continues its Pi session. A pending turn blocks it, like a new message.
+func (s *Service) Resume(ctx context.Context, principalID, sessionID string) (ResumeResult, error) {
+	switched, err := s.repository.SwitchConversation(ctx, principalID, sessionID)
+	if err != nil {
+		return ResumeResult{}, err
+	}
+	if switched.Busy || !switched.Found {
+		return ResumeResult{Found: switched.Found, Busy: switched.Busy}, nil
+	}
+	if switched.Switched {
+		s.leaveSession(ctx, principalID, switched.Previous)
+		s.telemetry.RecordConversationResume(ctx, principalID, "command")
+	}
+	summary, err := s.summarize(ctx, principalID, switched.Session)
+	if err != nil {
+		return ResumeResult{}, err
+	}
+	return ResumeResult{Found: true, Current: !switched.Switched, Session: summary}, nil
+}
+
+// leaveSession removes the files a conversation held once another one replaced it, as /new does.
+// The switch is already committed, and the start-up purge removes the files of every closed
+// session, so a failure here is only logged.
+func (s *Service) leaveSession(ctx context.Context, principalID, sessionID string) {
+	if sessionID == "" || s.config.Attachments == nil {
+		return
+	}
+	if err := s.config.Attachments.CloseSession(ctx, principalID, sessionID); err != nil {
+		s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "conversation.attachments.close_failed", "principal_id", principalID, "error", err)
+	}
+}
+
+func (s *Service) summarize(ctx context.Context, principalID string, record SessionRecord) (SessionSummary, error) {
+	summary := SessionSummary{ID: record.ID, Active: record.Active, LastActive: s.local(record.LastActive)}
+	if s.config.History == nil {
+		return summary, nil
+	}
+	title, err := s.config.History.Title(ctx, principalID, record.RuntimeSessionID)
+	if err != nil {
+		return SessionSummary{}, err
+	}
+	summary.Title = title
+	return summary, nil
+}
+
+func (s *Service) local(at time.Time) time.Time {
+	if s.config.Location == nil {
+		return at
+	}
+	return at.In(s.config.Location)
 }
 
 func (s *Service) running() bool {
@@ -659,7 +740,11 @@ func (s *Service) deliver(ctx context.Context, request Request) error {
 	}
 	deliveryStarted := time.Now()
 	replyTo := request.TelegramMessageID
-	chunks := SplitReply(request.ResponseText)
+	response := request.ResponseText
+	if !request.ResumedFrom.IsZero() {
+		response = ResumedLine(s.local(request.ResumedFrom)) + "\n\n" + response
+	}
+	chunks := SplitReply(response)
 	// A failed turn's text explains the failure, so a card it staged would illustrate nothing.
 	if s.config.Cards != nil && request.ErrorKind == "" {
 		chunks, replyTo, err = SendCard(deliveryCtx, s.telemetry.ContextLogger(deliveryCtx, s.logger), s.config.Cards, s.config.Photos, request.PrincipalID, outbox.ChatTurn(request.ID), request.ChatID, replyTo, chunks)
@@ -669,7 +754,8 @@ func (s *Service) deliver(ctx context.Context, request Request) error {
 		}
 	}
 	for _, chunk := range chunks {
-		if err := s.deliverer.SendReply(deliveryCtx, request.ChatID, replyTo, chunk); err != nil {
+		messageID, err := s.deliverer.SendTrackedReply(deliveryCtx, request.ChatID, replyTo, chunk)
+		if err != nil {
 			if isPermanentDeliveryError(err) {
 				s.removeCard(request)
 				s.mu.Lock()
@@ -686,6 +772,13 @@ func (s *Service) deliver(ctx context.Context, request Request) error {
 			return err
 		}
 		replyTo = 0
+		// The chunk is already in the chat, so a failure to remember it only costs the user the
+		// ability to return to this conversation by replying to it.
+		if messageID > 0 {
+			if err := s.repository.RecordConversationReply(deliveryCtx, request.PrincipalID, request.SessionID, messageID); err != nil && ctx.Err() == nil {
+				s.logWorkerError(ctx, request.PrincipalID, "record_reply")
+			}
+		}
 	}
 	if err := s.repository.MarkConversationDelivered(deliveryCtx, request.ID); err != nil {
 		_ = s.repository.ReleaseConversationDelivery(ctx, request.ID)

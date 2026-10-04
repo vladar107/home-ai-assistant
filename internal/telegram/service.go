@@ -49,6 +49,8 @@ type ConversationController interface {
 	Enqueue(context.Context, conversation.EnqueueInput) error
 	Cancel(context.Context, string) (bool, error)
 	NewSession(context.Context, string) (bool, error)
+	Sessions(context.Context, string) ([]conversation.SessionSummary, error)
+	Resume(context.Context, string, string) (conversation.ResumeResult, error)
 }
 
 // AttachmentStore reports what the principal's conversation may still hold; nil refuses photos
@@ -504,6 +506,7 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 		ChatID:            message.Chat.ID,
 		Message:           text,
 		Attachments:       attachments,
+		ReplyToMessageID:  repliedTo(message),
 	})
 	if errors.Is(err, conversation.ErrBusy) {
 		return s.sendCommandReply(ctx, message, authorization.Principal.ID, "busy", conversation.BusyReply, nil)
@@ -642,6 +645,9 @@ func (s *Service) processCallback(ctx context.Context, callback *CallbackQuery) 
 	}
 	if snooze, jobID, isSnooze := parseReminderCallback(callback.Data); isSnooze && s.schedules != nil {
 		return s.processSnoozePress(ctx, callback, principalID, snooze, jobID)
+	}
+	if sessionID, isSession := parseSessionCallback(callback.Data); isSession && s.conversation != nil {
+		return s.processSessionPress(ctx, callback, principalID, sessionID)
 	}
 
 	result := processingResult{event: "telegram.callback.handled", principalID: principalID, command: "settings"}
@@ -862,6 +868,11 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 			return NewSessionReply, nil, nil
 		}
 		return NoSessionReply, nil, nil
+	case "sessions":
+		if s.conversation == nil {
+			return HelpReply, nil, nil
+		}
+		return renderSessions(ctx, principalID, s.conversation)
 	case "jobs":
 		if s.schedules == nil {
 			return HelpReply, nil, nil

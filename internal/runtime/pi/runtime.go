@@ -393,6 +393,16 @@ func (r *Runtime) principalDirectories(principalID string) (string, string, stri
 	return agentDir, sessionDir, workDir, nil
 }
 
+// SessionDirectory is where Pi keeps the principal's session files, for reading their history. It
+// is not created here, so a principal who never had a turn has none.
+func (r *Runtime) SessionDirectory(principalID string) (string, error) {
+	name, err := agentruntime.ProfileDirectoryName(principalID)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(r.profilesDir, name, "sessions"), nil
+}
+
 func restrictedEnvironment(binary string) ([]string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(homeDir) == "" || strings.ContainsAny(homeDir, "\r\n") {

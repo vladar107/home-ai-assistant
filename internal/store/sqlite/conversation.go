@@ -41,6 +41,13 @@ func (s *Store) EnqueueConversation(
 		return conversation.EnqueueResult{Request: existing}, nil
 	}
 
+	var switched switchOutcome
+	if input.ReplyToMessageID > 0 {
+		switched, err = switchToRepliedSession(ctx, tx, input.PrincipalID, input.ReplyToMessageID)
+		if err != nil {
+			return conversation.EnqueueResult{}, err
+		}
+	}
 	session, found, err := loadActiveConversationSession(ctx, tx, input.PrincipalID)
 	if err != nil {
 		return conversation.EnqueueResult{}, err
@@ -84,11 +91,17 @@ func (s *Store) EnqueueConversation(
 		Message:           input.Message,
 		State:             conversation.RequestStateQueued,
 	}
+	var resumedFrom any
+	if switched.switched {
+		request.ResumedFrom = switched.session.LastActive
+		resumedFrom = request.ResumedFrom.Format(conversationTimeLayout)
+	}
 	if _, err := tx.ExecContext(
 		ctx,
 		`INSERT INTO conversation_requests (
-		    id, bot_user_id, telegram_update_id, telegram_message_id, principal_id, chat_id, session_id, message
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		    id, bot_user_id, telegram_update_id, telegram_message_id, principal_id, chat_id, session_id, message,
+		    resumed_from
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		request.ID,
 		input.BotUserID,
 		input.TelegramUpdateID,
@@ -97,6 +110,7 @@ func (s *Store) EnqueueConversation(
 		request.ChatID,
 		request.SessionID,
 		request.Message,
+		resumedFrom,
 	); err != nil {
 		return conversation.EnqueueResult{}, fmt.Errorf("create conversation request: %w", err)
 	}
@@ -109,7 +123,7 @@ func (s *Store) EnqueueConversation(
 	if err := tx.Commit(); err != nil {
 		return conversation.EnqueueResult{}, fmt.Errorf("commit conversation enqueue: %w", err)
 	}
-	return conversation.EnqueueResult{Request: request, Created: true}, nil
+	return conversation.EnqueueResult{Request: request, Created: true, SwitchedFrom: switched.previous}, nil
 }
 
 func (s *Store) RecoverConversations(ctx context.Context) ([]string, error) {
@@ -124,27 +138,6 @@ func (s *Store) RecoverConversations(ctx context.Context) ([]string, error) {
 		conversation.InterruptedReply,
 	); err != nil {
 		return nil, fmt.Errorf("recover interrupted conversations: %w", err)
-	}
-	if _, err := s.db.ExecContext(
-		ctx,
-		`UPDATE conversation_sessions
-		 SET runtime_session_id = (
-		     lower(hex(randomblob(4))) || '-' ||
-		     lower(hex(randomblob(2))) || '-' ||
-		     lower(hex(randomblob(2))) || '-' ||
-		     lower(hex(randomblob(2))) || '-' ||
-		     lower(hex(randomblob(6)))
-		 ), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-		 WHERE status = 'active' AND EXISTS (
-		     SELECT 1 FROM conversation_requests AS request
-		     WHERE request.session_id = conversation_sessions.id
-		       AND request.state = 'ready'
-		       AND request.error_kind = 'runtime'
-		       AND request.response_text = ?
-		 )`,
-		conversation.InterruptedReply,
-	); err != nil {
-		return nil, fmt.Errorf("rotate interrupted conversation sessions: %w", err)
 	}
 	if _, err := s.db.ExecContext(
 		ctx,
@@ -185,7 +178,8 @@ func (s *Store) NextConversationRequest(ctx context.Context, principalID string)
 		ctx,
 		`SELECT request.id, request.principal_id, request.chat_id, COALESCE(request.telegram_message_id, 0),
 		        request.session_id, session.runtime_session_id, request.message, request.state,
-		        COALESCE(request.response_text, ''), COALESCE(request.error_kind, ''), request.created_at
+		        COALESCE(request.response_text, ''), COALESCE(request.error_kind, ''), request.created_at,
+		        COALESCE(request.resumed_from, '')
 		 FROM conversation_requests AS request
 		 JOIN conversation_sessions AS session
 		   ON session.id = request.session_id AND session.principal_id = request.principal_id
@@ -361,7 +355,8 @@ func loadConversationByUpdate(ctx context.Context, db queryRower, botUserID, upd
 		ctx,
 		`SELECT request.id, request.principal_id, request.chat_id, COALESCE(request.telegram_message_id, 0),
 		        request.session_id, session.runtime_session_id, request.message, request.state,
-		        COALESCE(request.response_text, ''), COALESCE(request.error_kind, ''), request.created_at
+		        COALESCE(request.response_text, ''), COALESCE(request.error_kind, ''), request.created_at,
+		        COALESCE(request.resumed_from, '')
 		 FROM conversation_requests AS request
 		 JOIN conversation_sessions AS session
 		   ON session.id = request.session_id AND session.principal_id = request.principal_id
@@ -397,7 +392,7 @@ func loadActiveConversationSession(ctx context.Context, db queryRower, principal
 
 func scanConversationRequest(row *sql.Row) (conversation.Request, error) {
 	var request conversation.Request
-	var createdAt string
+	var createdAt, resumedFrom string
 	err := row.Scan(
 		&request.ID,
 		&request.PrincipalID,
@@ -410,13 +405,20 @@ func scanConversationRequest(row *sql.Row) (conversation.Request, error) {
 		&request.ResponseText,
 		&request.ErrorKind,
 		&createdAt,
+		&resumedFrom,
 	)
 	if err != nil {
 		return request, err
 	}
-	request.CreatedAt, err = time.Parse("2006-01-02T15:04:05.000Z", createdAt)
+	request.CreatedAt, err = time.Parse(conversationTimeLayout, createdAt)
 	if err != nil {
 		return request, fmt.Errorf("parse conversation request creation time: %w", err)
+	}
+	if resumedFrom != "" {
+		request.ResumedFrom, err = time.Parse(conversationTimeLayout, resumedFrom)
+		if err != nil {
+			return request, fmt.Errorf("parse conversation request resume time: %w", err)
+		}
 	}
 	return request, nil
 }

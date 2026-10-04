@@ -375,6 +375,9 @@ func run() error {
 				return err
 			}
 		}
+		if err := recordExchange(args["--session-dir"], args["--session-id"], directory, prompt.Message, answer); err != nil {
+			return err
+		}
 		ack()
 		middle := len(answer) / 2
 		delta(answer[:middle])
@@ -383,6 +386,66 @@ func run() error {
 	}
 	_, err = io.Copy(io.Discard, os.Stdin)
 	return err
+}
+
+// recordExchange appends the turn to the session file the way Pi 1.0.0 does: a JSONL file named
+// <timestamp>_<session id>.jsonl, resumed only when its header records the same working directory,
+// with the prompt and the answer as message entries chained by parentId.
+func recordExchange(sessionDir, sessionID, cwd, message, answer string) error {
+	matches, err := filepath.Glob(filepath.Join(sessionDir, "*_"+sessionID+".jsonl"))
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	var path, parent string
+	var lines []any
+	for _, match := range matches {
+		data, err := os.ReadFile(match)
+		if err != nil {
+			return err
+		}
+		entries := strings.Split(strings.TrimSpace(string(data)), "\n")
+		var header struct {
+			CWD string `json:"cwd"`
+		}
+		var last struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal([]byte(entries[0]), &header) != nil || header.CWD != cwd {
+			continue
+		}
+		_ = json.Unmarshal([]byte(entries[len(entries)-1]), &last)
+		path, parent = match, last.ID
+		break
+	}
+	if path == "" {
+		stamp := strings.NewReplacer(":", "-", ".", "-").Replace(now.Format("2006-01-02T15:04:05.000Z"))
+		path = filepath.Join(sessionDir, stamp+"_"+sessionID+".jsonl")
+		lines = append(lines, map[string]any{"type": "session", "version": 3, "id": sessionID, "timestamp": now.Format(time.RFC3339Nano), "cwd": cwd})
+	}
+	userID, assistantID := fmt.Sprintf("u%07d", now.UnixNano()%1e7), fmt.Sprintf("a%07d", now.UnixNano()%1e7)
+	var parentID any
+	if parent != "" {
+		parentID = parent
+	}
+	lines = append(lines,
+		map[string]any{"type": "message", "id": userID, "parentId": parentID, "timestamp": now.Format(time.RFC3339Nano),
+			"message": map[string]any{"role": "user", "content": message, "timestamp": now.UnixMilli()}},
+		map[string]any{"type": "message", "id": assistantID, "parentId": userID, "timestamp": now.Format(time.RFC3339Nano),
+			"message": map[string]any{"role": "assistant", "content": []map[string]string{{"type": "text", "text": answer}}, "stopReason": "stop", "timestamp": now.UnixMilli()}},
+	)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
+	if err != nil {
+		return err
+	}
+	encoder := json.NewEncoder(file)
+	for _, line := range lines {
+		if err := encoder.Encode(line); err != nil {
+			_ = file.Close()
+			return err
+		}
+	}
+	return file.Close()
 }
 
 // callBridge posts the call the way the real extension does and returns the text the model would

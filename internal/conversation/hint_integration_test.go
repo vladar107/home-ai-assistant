@@ -32,6 +32,9 @@ func (d hintDeliverer) SendReply(_ context.Context, _, _ int64, text string) err
 	d.replies <- text
 	return nil
 }
+func (d hintDeliverer) SendTrackedReply(ctx context.Context, chatID, replyTo int64, text string) (int64, error) {
+	return 0, d.SendReply(ctx, chatID, replyTo, text)
+}
 func (hintDeliverer) SendTyping(context.Context, int64) error { return nil }
 
 type hintTools struct{ names []string }
@@ -69,6 +72,7 @@ func (quietTelemetry) RecordReplyStage(context.Context, string, string, time.Dur
 func (quietTelemetry) RecordModelTurn(context.Context, string, string, int, int64, int64)         {}
 func (quietTelemetry) RecordToolCallsPerTurn(context.Context, string, string, int)                {}
 func (quietTelemetry) RecordHintFollowThrough(context.Context, string, string)                    {}
+func (quietTelemetry) RecordConversationResume(context.Context, string, string)                   {}
 
 // runHintTurn runs one chat turn against a fake TypeSafe answering with the given body after the
 // given delay and returns the message the runtime received.

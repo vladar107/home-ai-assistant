@@ -27,6 +27,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/places"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/web"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/conversation/history"
 	"github.com/vladar107/home-ai-assistant/internal/daycard"
 	"github.com/vladar107/home-ai-assistant/internal/delivery"
 	"github.com/vladar107/home-ai-assistant/internal/health"
@@ -443,6 +444,13 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			a.locations = locationService
 			turnLocations = locationService
 		}
+		conversationHistory, err := history.NewService(a.store, runtime, location, a.telemetry)
+		if err != nil {
+			return fmt.Errorf("initialize conversation history: %w", err)
+		}
+		if err := broker.Register(conversationHistory); err != nil {
+			return err
+		}
 		conversationService, err := conversation.NewService(
 			conversation.Config{
 				TurnTimeout:  a.cfg.Conversation.TurnTimeout,
@@ -459,6 +467,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 				Locations:    turnLocations,
 				Memory:       memoryService,
 				Exposure:     memoryService,
+				History:      conversationHistory,
 			},
 			a.store,
 			runtime,

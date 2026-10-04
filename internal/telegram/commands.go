@@ -13,14 +13,14 @@ const (
 	StatusReply              = "Home Agent is online. Telegram access is active. This command does not use a model."
 	ConversationStatusReply  = StatusReply + " Natural-language conversation is enabled."
 	PrivacyReply             = "Privacy mode is strict-local. Local file and photo content stays on the home system unless you explicitly approve a scoped disclosure. This command does not use a model."
-	ConversationPrivacyReply = "Privacy mode is strict-local for integrations. Conversation text is sent to the configured model and Pi stores its history locally in your isolated session. Use /new to start a fresh session. This command does not use a model."
+	ConversationPrivacyReply = "Privacy mode is strict-local for integrations. Conversation text is sent to the configured model and Pi stores its history locally in your isolated session. Use /new to start a fresh session. Earlier conversations stay on the home system until they are deleted, and only your own assistant can resume or search them: through /sessions, a reply to one of its earlier answers, or when you ask about something discussed before. This command does not use a model."
 	CancelledReply           = "Stopped the current response."
 	NothingToCancelReply     = "There is no response to cancel."
 	NewSessionReply          = "Started a fresh conversation."
 	NoSessionReply           = "There is no conversation to reset yet."
-	HelpReply                = "Available commands: /status, /privacy, /cancel, /new, /settings. You can otherwise talk to me normally."
+	HelpReply                = "Available commands: /status, /privacy, /cancel, /new, /sessions, /settings. You can otherwise talk to me normally, and reply to one of my earlier answers to continue that conversation."
 
-	AttachmentPrivacyLine = "Photos and files you send stay on the home system for the current conversation and are removed when you start a new one with /new."
+	AttachmentPrivacyLine = "Photos and files you send stay on the home system for the current conversation and are removed when you start a new one with /new or switch to another."
 	// Asking for a file uploads the whole file to Telegram, which reading one as text does not.
 	SentFilePrivacyLine = "A NAS file you ask for is uploaded to Telegram to reach you; nothing is sent to this chat unless you ask for it."
 	// Only the search stays with the provider the conversation already uses, so each other place a
@@ -53,6 +53,7 @@ func registeredCommands(conversationEnabled, settingsEnabled, jobsEnabled bool) 
 			commands,
 			BotCommand{Command: "cancel", Description: "Stop the current response"},
 			BotCommand{Command: "new", Description: "Start a fresh conversation"},
+			BotCommand{Command: "sessions", Description: "Return to a recent conversation"},
 		)
 	}
 	if jobsEnabled {

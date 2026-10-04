@@ -58,6 +58,9 @@ type EnqueueInput struct {
 	ChatID            int64
 	Message           string
 	Attachments       []attachment.Incoming
+	// ReplyToMessageID is the message the user replied to; a reply to an answer from a closed
+	// conversation returns to that conversation. Zero when the message is not a reply.
+	ReplyToMessageID int64
 }
 
 type Request struct {
@@ -72,12 +75,65 @@ type Request struct {
 	ResponseText      string
 	ErrorKind         string
 	CreatedAt         time.Time
+	// ResumedFrom is when the conversation this request returned to was last active; zero when the
+	// request did not switch conversations.
+	ResumedFrom time.Time
 }
 
 type EnqueueResult struct {
 	Request Request
 	Created bool
 	Busy    bool
+	// SwitchedFrom is the session the request closed by returning to an earlier one, if any.
+	SwitchedFrom string
+}
+
+// ListedSessions is how many conversations /sessions shows. More are read, because earlier
+// conversations without anything the user wrote are left out.
+const (
+	ListedSessions    = 10
+	sessionCandidates = 30
+)
+
+// SessionSummary is one conversation as the user sees it in the list; LastActive is local time.
+type SessionSummary struct {
+	ID         string
+	Title      string
+	Active     bool
+	LastActive time.Time
+}
+
+type ResumeResult struct {
+	Found bool
+	Busy  bool
+	// Current is true when the chosen conversation already was the active one.
+	Current bool
+	// Session is the conversation now active, as it was last active before the switch.
+	Session SessionSummary
+}
+
+// ResumedLine opens the first answer after a reply returned to an earlier conversation.
+func ResumedLine(lastActive time.Time) string {
+	return "Back in the conversation from " + lastActive.Format("2 January 2006") + "."
+}
+
+// SessionRecord is one of a principal's conversations as the store knows it.
+type SessionRecord struct {
+	ID               string
+	RuntimeSessionID string
+	Active           bool
+	LastActive       time.Time
+}
+
+type SwitchResult struct {
+	Found bool
+	Busy  bool
+	// Switched is false when the target already was the active session.
+	Switched bool
+	// Session is the conversation now active, with its last activity from before the switch.
+	Session SessionRecord
+	// Previous is the session the switch closed, or "" when none was active or the target already was.
+	Previous string
 }
 
 type Repository interface {
@@ -95,12 +151,27 @@ type Repository interface {
 	CancelPendingConversation(context.Context, string) (bool, error)
 	// ResetConversation closes the principal's active session and returns its ID.
 	ResetConversation(context.Context, string) (string, bool, error)
+	// ConversationSessions lists the principal's conversations, most recently active first.
+	ConversationSessions(ctx context.Context, principalID string, limit int) ([]SessionRecord, error)
+	// SwitchConversation makes the principal's own session the active one unless a turn is pending,
+	// closing the previously active session as switched.
+	SwitchConversation(ctx context.Context, principalID, sessionID string) (SwitchResult, error)
+	// RecordConversationReply remembers which session a delivered Telegram message belongs to.
+	RecordConversationReply(ctx context.Context, principalID, sessionID string, messageID int64) error
 }
 
 type Deliverer interface {
 	// SendReply quotes the request message with the given ID; a zero ID sends without a quote.
 	SendReply(context.Context, int64, int64, string) error
+	// SendTrackedReply is SendReply returning the sent message's ID.
+	SendTrackedReply(context.Context, int64, int64, string) (int64, error)
 	SendTyping(context.Context, int64) error
+}
+
+// History reads what Pi recorded of a principal's conversations.
+type History interface {
+	// Title is the first thing the user wrote in the session, shortened, or "" when there is none.
+	Title(ctx context.Context, principalID, runtimeSessionID string) (string, error)
 }
 
 // ConnectionGate reports whether a principal's own model connection is usable before a turn starts.
@@ -128,6 +199,8 @@ type Telemetry interface {
 	RecordModelTurn(ctx context.Context, principal, safetyChecks string, calls int, promptTokens, outputTokens int64)
 	RecordToolCallsPerTurn(ctx context.Context, principal, safetyChecks string, calls int)
 	RecordHintFollowThrough(ctx context.Context, principal, result string)
+	// RecordConversationResume counts a return to an earlier conversation by what triggered it.
+	RecordConversationResume(ctx context.Context, principal, trigger string)
 }
 
 // SafetyChecks reports whether a principal has opted in to the safety checks, for labelling the
@@ -248,4 +321,6 @@ type Config struct {
 	Location *time.Location
 	// Now is the clock that time is read from; nil means time.Now.
 	Now func() time.Time
+	// History titles the conversations /sessions lists; nil lists them without titles.
+	History History
 }
