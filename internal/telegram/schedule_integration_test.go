@@ -161,6 +161,7 @@ func TestScheduledJobIsProposedConfirmedRunAndDelivered(t *testing.T) {
 	if edit := h.nextEdit(); !strings.Contains(edit.text, "Scheduled. First run: Mon 28 Sep 09:00 CEST.") {
 		t.Fatalf("proposal after confirm = %+v", edit)
 	}
+	h.continueTurn(runtime, 2)
 	h.push(callbackUpdate(3, 101, proposal.messageID, confirm))
 	h.wantAnswer(3)
 	h.nextEdit()
@@ -271,6 +272,7 @@ func TestScheduledJobIsReadInFullAndChanged(t *testing.T) {
 	if edit := h.nextEdit(); !strings.Contains(edit.text, "Changed. It stays paused until you resume it in /jobs.") {
 		t.Fatalf("proposal after confirm = %+v", edit)
 	}
+	h.continueTurn(runtime, 2)
 	stored, err := h.scheduler.Jobs(h.ctx, "alice")
 	if err != nil || len(stored) != 1 {
 		t.Fatalf("jobs = %+v %v", stored, err)
@@ -301,6 +303,7 @@ func TestScheduledJobIsReadInFullAndChanged(t *testing.T) {
 	if edit := h.nextEdit(); !strings.Contains(edit.text, "That job changed after this was proposed; nothing was changed.") {
 		t.Fatalf("stale confirm = %+v", edit)
 	}
+	h.continueTurn(runtime, 4)
 	if stored, err := h.scheduler.Jobs(h.ctx, "alice"); err != nil || stored[0].Name != "Daily digest" {
 		t.Fatalf("a stale change was applied: %+v %v", stored, err)
 	}

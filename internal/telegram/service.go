@@ -85,9 +85,8 @@ type NASController interface {
 
 // ApprovalController resolves Confirm and Reject presses on proposal messages; nil ignores them.
 type ApprovalController interface {
-	// Press returns the text the proposal message should show, or false when the press is not
-	// the pressing principal's own proposal.
-	Press(ctx context.Context, principalID, action, approvalID string) (string, bool, error)
+	// Press resolves a Confirm or Reject press; a press on another principal's proposal is not owned.
+	Press(ctx context.Context, principalID, action, approvalID string) (approval.Pressed, error)
 }
 
 type identityResolver interface {
@@ -430,7 +429,7 @@ type processingResult struct {
 
 func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (processingResult, string, error) {
 	if update.CallbackQuery != nil {
-		return s.processCallback(ctx, update.CallbackQuery)
+		return s.processCallback(ctx, bot, update.UpdateID, update.CallbackQuery)
 	}
 	if update.EditedMessage != nil {
 		return s.processEdit(ctx, update.EditedMessage)
@@ -613,7 +612,7 @@ func (s *Service) resolvePrincipal(ctx context.Context, from *User) (identity.Au
 
 // processCallback handles a button press on a settings message: the press is answered first, the
 // section acts, and the message is refreshed from current state so stale buttons stay harmless.
-func (s *Service) processCallback(ctx context.Context, callback *CallbackQuery) (processingResult, string, error) {
+func (s *Service) processCallback(ctx context.Context, bot Bot, updateID int64, callback *CallbackQuery) (processingResult, string, error) {
 	if callback.ID == "" || callback.Message == nil {
 		return ignoredResult("malformed_callback"), "", nil
 	}
@@ -639,7 +638,7 @@ func (s *Service) processCallback(ctx context.Context, callback *CallbackQuery) 
 		return processingResult{event: "telegram.callback.handled", principalID: principalID, command: "label"}, "", nil
 	}
 	if action, approvalID, isApproval := approval.ParseCallback(callback.Data); isApproval {
-		return s.processApprovalPress(ctx, callback, principalID, action, approvalID)
+		return s.processApprovalPress(ctx, bot, updateID, callback, principalID, action, approvalID)
 	}
 	if action, jobID, page, isJob := parseJobCallback(callback.Data); isJob && s.schedules != nil {
 		return s.processJobPress(ctx, callback, principalID, action, jobID, page)
@@ -701,23 +700,27 @@ func (s *Service) processCallback(ctx context.Context, callback *CallbackQuery) 
 
 // processApprovalPress resolves a Confirm or Reject press and replaces the proposal message with
 // its outcome; a press on another principal's proposal or without an approval service is ignored.
-func (s *Service) processApprovalPress(ctx context.Context, callback *CallbackQuery, principalID, action, approvalID string) (processingResult, string, error) {
+// A press that ran the actions queues a turn that continues the request from their outcome.
+func (s *Service) processApprovalPress(ctx context.Context, bot Bot, updateID int64, callback *CallbackQuery, principalID, action, approvalID string) (processingResult, string, error) {
 	result := processingResult{event: "telegram.callback.handled", principalID: principalID, command: "approval." + action}
 	if s.approvals == nil {
 		result.event, result.reason = "telegram.update.ignored", "unknown_action"
 		return result, "", nil
 	}
-	text, owned, err := s.approvals.Press(ctx, principalID, action, approvalID)
+	pressed, err := s.approvals.Press(ctx, principalID, action, approvalID)
 	if err != nil {
 		return processingResult{}, "approval_press", err
 	}
-	if !owned {
+	if !pressed.Owned {
 		result.event, result.reason = "telegram.update.ignored", "foreign_approval"
 		return result, "", nil
 	}
-	err = s.client.EditKeyboard(ctx, callback.Message.Chat.ID, callback.Message.MessageID, text, nil)
+	if pressed.Ran {
+		s.continueConversation(ctx, bot, updateID, callback, principalID)
+	}
+	err = s.client.EditKeyboard(ctx, callback.Message.Chat.ID, callback.Message.MessageID, pressed.Text, nil)
 	if err != nil && isPermanentAPIError(err) {
-		err = s.client.SendReply(ctx, callback.Message.Chat.ID, 0, text)
+		err = s.client.SendReply(ctx, callback.Message.Chat.ID, 0, pressed.Text)
 	}
 	if err != nil {
 		if isPermanentAPIError(err) {
@@ -727,6 +730,32 @@ func (s *Service) processApprovalPress(ctx context.Context, callback *CallbackQu
 		return processingResult{}, "send_message", err
 	}
 	return result, "", nil
+}
+
+// continueConversation queues the turn after a confirmed proposal. It is queued before the message
+// edit, because a replayed press finds the bundle resolved and would not queue it again. Failing to
+// queue costs only the automatic step: the outcome still reaches the user's next turn as a notice.
+func (s *Service) continueConversation(ctx context.Context, bot Bot, updateID int64, callback *CallbackQuery, principalID string) {
+	if s.conversation == nil {
+		return
+	}
+	err := s.conversation.Enqueue(ctx, conversation.EnqueueInput{
+		BotUserID:         bot.ID,
+		TelegramUpdateID:  updateID,
+		TelegramMessageID: callback.Message.MessageID,
+		PrincipalID:       principalID,
+		ChatID:            callback.Message.Chat.ID,
+		Message:           conversation.ContinueMessage,
+	})
+	logger := s.telemetry.ContextLogger(ctx, s.logger)
+	switch {
+	case errors.Is(err, conversation.ErrBusy):
+		logger.InfoContext(ctx, "telegram.continuation.skipped", "principal_id", principalID, "reason", "busy")
+	case err != nil:
+		logger.WarnContext(ctx, "telegram.continuation.failed", "principal_id", principalID, "error", err)
+	default:
+		logger.InfoContext(ctx, "telegram.continuation.queued", "principal_id", principalID)
+	}
 }
 
 // processJobPress acts on one of the principal's jobs and refreshes the /jobs message from current

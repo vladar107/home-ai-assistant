@@ -38,6 +38,15 @@ const (
 	NotConnectedReply = "Your model subscription is not connected. Use /settings to connect it."
 )
 
+// NothingToAdd is the reply a continuation turn gives when the request is finished; it is never sent.
+const NothingToAdd = "[nothing-to-add]"
+
+// ContinueMessage starts the turn that follows a confirmed proposal, so a request with several
+// dependent steps moves on without the user asking again. The outcome arrives as the turn's notice.
+const ContinueMessage = "[system] The user pressed Confirm and the outcome is above. Continue the user's earlier request: " +
+	"if a step remains, do it, which may mean proposing the next change. If every step is done and the outcome " +
+	"already says everything, reply with exactly " + NothingToAdd + " and nothing else."
+
 type Service struct {
 	config       Config
 	repository   Repository
@@ -543,7 +552,9 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 			reply = UnavailableReply
 		}
 	} else {
-		if s.config.Recent != nil {
+		// A continuation's message is ours, so the user's own earlier request stays the one actions
+		// are judged against.
+		if s.config.Recent != nil && request.Message != ContinueMessage {
 			s.config.Recent.RecordMessage(request.PrincipalID, request.Message)
 		}
 		notice := s.takeNotice(turnCtx, request)
@@ -786,8 +797,14 @@ func (s *Service) deliver(ctx context.Context, request Request) error {
 		response = ResumedLine(s.local(request.ResumedFrom)) + "\n\n" + response
 	}
 	chunks := SplitReply(response)
+	if strings.Contains(response, NothingToAdd) {
+		chunks = nil
+		if rest := strings.TrimSpace(strings.ReplaceAll(response, NothingToAdd, "")); rest != "" {
+			chunks = SplitReply(rest)
+		}
+	}
 	// A failed turn's text explains the failure, so a card it staged would illustrate nothing.
-	if s.config.Cards != nil && request.ErrorKind == "" {
+	if s.config.Cards != nil && request.ErrorKind == "" && len(chunks) > 0 {
 		chunks, replyTo, err = SendCard(deliveryCtx, s.telemetry.ContextLogger(deliveryCtx, s.logger), s.config.Cards, s.config.Photos, request.PrincipalID, outbox.ChatTurn(request.ID), request.ChatID, replyTo, chunks)
 		if err != nil {
 			_ = s.repository.ReleaseConversationDelivery(ctx, request.ID)

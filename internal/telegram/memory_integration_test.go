@@ -144,6 +144,7 @@ func TestMemoryInstructionIsWrittenOnlyAfterConfirm(t *testing.T) {
 	if edit := h.nextEdit(); !strings.Contains(edit.text, "Remembered.") {
 		t.Fatalf("proposal after confirm = %+v", edit)
 	}
+	h.continueTurn(runtime, 2)
 	entries := h.memoryEntries("alice")
 	if len(entries) != 1 || entries[0].Kind != memory.KindInstruction || entries[0].Source != memory.SourceConfirmed {
 		t.Fatalf("entries after confirm = %+v", entries)

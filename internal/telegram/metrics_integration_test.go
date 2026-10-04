@@ -46,6 +46,7 @@ func TestApprovalLifecycleIsRecordedOncePerResolution(t *testing.T) {
 	h.push(callbackUpdate(4, 101, executed.messageID, confirm))
 	h.wantAnswer(4)
 	h.nextEdit()
+	h.continueTurn(runtime, 4)
 	h.push(callbackUpdate(5, 101, executed.messageID, confirm))
 	h.wantAnswer(5)
 	h.nextEdit()

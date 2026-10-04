@@ -273,6 +273,7 @@ func TestOneTimeJobIsProposedConfirmedRunOnceAndLeavesJobs(t *testing.T) {
 	if edit := h.nextEdit(); !strings.Contains(edit.text, "Scheduled for Mon 28 Sep 09:00 CEST.") {
 		t.Fatalf("proposal after confirm = %+v", edit)
 	}
+	h.continueTurn(runtime, 2)
 	if list := h.requestJobs(3); !strings.Contains(list.text, "Train check\nonce, Mon 28 Sep 09:00 CEST") {
 		t.Fatalf("jobs before the run = %q", list.text)
 	}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/notionsim"
 )
@@ -66,6 +67,22 @@ func (h *conversationHarness) proposeTurn(runtime *controlledRuntime, updateID i
 		}
 	}
 	return proposal
+}
+
+// continueTurn answers the turn a confirming press queues with the silent reply, and waits until
+// the turn is finished without anything sent.
+func (h *conversationHarness) continueTurn(runtime *controlledRuntime, updateID int64) runtimeCall {
+	h.t.Helper()
+	call := receive(h.t, h.ctx, runtime.calls)
+	if !strings.HasSuffix(call.request.Message, conversation.ContinueMessage) {
+		h.t.Fatalf("continuation message = %q", call.request.Message)
+	}
+	call.answer <- agentruntime.RunResult{Response: conversation.NothingToAdd}
+	h.waitState(updateID, "delivered")
+	if pending := len(h.messages); pending != 0 {
+		h.t.Fatalf("a silent continuation sent %d messages", pending)
+	}
+	return call
 }
 
 func approvalButtons(t *testing.T, keyboard InlineKeyboard) (string, string) {
@@ -183,6 +200,7 @@ func TestNotionWritesAreProposedConfirmedAndExecutedOnce(t *testing.T) {
 	if edit := h.nextEdit(); edit.messageID != proposal.messageID || !strings.Contains(edit.text, "Done. Created page: https://notion.so/page-created-1") || len(edit.keyboard) != 0 {
 		t.Fatalf("proposal after confirm = %+v", edit)
 	}
+	h.continueTurn(runtime, 6)
 	if countRequests(sim, "POST", "/v1/pages") != 1 {
 		t.Fatalf("create requests = %d, want 1", countRequests(sim, "POST", "/v1/pages"))
 	}
@@ -253,16 +271,12 @@ func TestNotionWritesAreProposedConfirmedAndExecutedOnce(t *testing.T) {
 		t.Fatalf("append requests = %d, want 1", countRequests(sim, "PATCH", "/v1/blocks/page-groceries/children"))
 	}
 
-	// The next turn starts from what became of the proposal, so the model never guesses at it.
-	h.push(textUpdate(14, 101, "did it go through?"))
-	informed := receive(t, h.ctx, runtime.calls)
-	if !strings.HasPrefix(informed.request.Message, "[system] The user confirmed your notion_append_blocks proposal and it was executed. Appended 1 paragraph(s) to page page-groceries.\n\n") ||
-		!strings.HasSuffix(informed.request.Message, "did it go through?") {
-		t.Fatalf("turn after a confirmed proposal = %q", informed.request.Message)
+	// The turn the confirmation queues starts from what became of the proposal, so the model never
+	// guesses at it.
+	continued := h.continueTurn(runtime, 13)
+	if !strings.HasPrefix(continued.request.Message, "[system] The user confirmed your notion_append_blocks proposal and it was executed. Appended 1 paragraph(s) to page page-groceries.\n\n") {
+		t.Fatalf("turn after a confirmed proposal = %q", continued.request.Message)
 	}
-	informed.answer <- agentruntime.RunResult{Response: "it was written"}
-	h.wantReply(101, 14, "it was written")
-	h.waitState(14, "delivered")
 
 	// The outcome is reported once, so a later turn carries no stale notice.
 	h.push(textUpdate(15, 101, "anything else?"))
@@ -346,6 +360,7 @@ func TestNotionProposalsExpireFailSafelyAndDoNotSurviveRestart(t *testing.T) {
 	if edit := h.nextEdit(); !strings.Contains(edit.text, "check Notion") || strings.Contains(edit.text, "synthetic-notion-error-text") {
 		t.Fatalf("ambiguous failure rendered %+v", edit)
 	}
+	h.continueTurn(runtime, 10)
 	if countRequests(sim, "POST", "/v1/pages") != 1 {
 		t.Fatalf("create requests after ambiguous failure = %d, want 1", countRequests(sim, "POST", "/v1/pages"))
 	}
@@ -362,6 +377,7 @@ func TestNotionProposalsExpireFailSafelyAndDoNotSurviveRestart(t *testing.T) {
 	if edit := h.nextEdit(); !strings.Contains(edit.text, "Done. Updated.") {
 		t.Fatalf("retried update rendered %+v", edit)
 	}
+	h.continueTurn(runtime, 12)
 	if countRequests(sim, "PATCH", "/v1/pages/page-groceries") != 2 {
 		t.Fatalf("update requests = %d, want 2", countRequests(sim, "PATCH", "/v1/pages/page-groceries"))
 	}
@@ -369,6 +385,57 @@ func TestNotionProposalsExpireFailSafelyAndDoNotSurviveRestart(t *testing.T) {
 		t.Fatalf("retried update approval = %s", status)
 	}
 	h.assertNotionSecretHidden(aliceNotionToken)
+}
+
+// A press that runs the actions continues the request on its own; a rejection, or a message the
+// user sent meanwhile, leaves the outcome for the user's next turn instead.
+func TestConfirmContinuesTheRequestUnlessRejectedOrBusy(t *testing.T) {
+	runtime := newControlledRuntime()
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{notion: writableNotionSimulator(t)})
+	h.provision("alice", "acct-alice-1111")
+	h.installNotionToken("alice", aliceNotionToken)
+	h.start()
+	h.enableNotionWrites(1, 2, 101)
+
+	rejected := h.proposeTurn(runtime, 3, "notion_append_blocks", `{"page_id":"page-groceries","paragraphs":["Bread"]}`)
+	_, reject := approvalButtons(t, rejected.keyboard)
+	h.push(callbackUpdate(4, 101, rejected.messageID, reject))
+	h.wantAnswer(4)
+	h.nextEdit()
+	expectNoRuntimeCall(t, runtime, 100*time.Millisecond)
+
+	confirmed := h.proposeTurn(runtime, 5, "notion_append_blocks", `{"page_id":"page-groceries","paragraphs":["Eggs"]}`)
+	confirm, _ := approvalButtons(t, confirmed.keyboard)
+	h.push(callbackUpdate(6, 101, confirmed.messageID, confirm))
+	h.wantAnswer(6)
+	h.nextEdit()
+	h.continueTurn(runtime, 6)
+
+	busy := h.proposeTurn(runtime, 7, "notion_append_blocks", `{"page_id":"page-groceries","paragraphs":["Milk"]}`)
+	confirm, _ = approvalButtons(t, busy.keyboard)
+	h.push(textUpdate(8, 101, "meanwhile"))
+	running := receive(t, h.ctx, runtime.calls)
+	h.push(callbackUpdate(9, 101, busy.messageID, confirm))
+	h.wantAnswer(9)
+	if edit := h.nextEdit(); !strings.Contains(edit.text, "Done.") {
+		t.Fatalf("proposal after confirm = %+v", edit)
+	}
+	running.answer <- agentruntime.RunResult{Response: "ok"}
+	h.wantReply(101, 8, "ok")
+	h.waitState(8, "delivered")
+	expectNoRuntimeCall(t, runtime, 100*time.Millisecond)
+	if count := h.countRows(`SELECT count(*) FROM conversation_requests WHERE telegram_update_id = 9`); count != 0 {
+		t.Fatalf("a busy principal queued %d continuations", count)
+	}
+
+	h.push(textUpdate(10, 101, "and?"))
+	informed := receive(t, h.ctx, runtime.calls)
+	if !strings.HasPrefix(informed.request.Message, "[system] The user confirmed your notion_append_blocks proposal and it was executed.") {
+		t.Fatalf("turn after a skipped continuation = %q", informed.request.Message)
+	}
+	informed.answer <- agentruntime.RunResult{Response: "done"}
+	h.wantReply(101, 10, "done")
+	h.waitState(10, "delivered")
 }
 
 func TestProposalsOfOneTurnAreConfirmedTogetherAndRunPastAFailure(t *testing.T) {
@@ -444,14 +511,16 @@ func TestProposalsOfOneTurnAreConfirmedTogetherAndRunPastAFailure(t *testing.T) 
 		t.Fatalf("update order = %v", order)
 	}
 
-	h.push(textUpdate(5, 101, "what happened?"))
+	// The turn the confirmation queues answers about the outcome, quoting the proposal.
 	informed := receive(t, h.ctx, runtime.calls)
 	if !strings.HasPrefix(informed.request.Message, "[system] Your 2 proposals were shown and resolved together. (1) Your notion_update_page proposal was confirmed but failed: ") ||
 		!strings.Contains(informed.request.Message, "(2) The user confirmed your notion_update_page proposal and it was executed. Updated.") ||
-		!strings.HasSuffix(informed.request.Message, "what happened?") {
+		!strings.HasSuffix(informed.request.Message, conversation.ContinueMessage) {
 		t.Fatalf("turn after a bundle = %q", informed.request.Message)
 	}
 	informed.answer <- agentruntime.RunResult{Response: "one failed"}
-	h.wantReply(101, 5, "one failed")
-	h.waitState(5, "delivered")
+	if message := h.nextMessage(); message.chatID != 101 || message.replyTo != proposal.messageID || message.text != "one failed" {
+		t.Fatalf("continuation reply = %+v", message)
+	}
+	h.waitState(4, "delivered")
 }

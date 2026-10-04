@@ -573,7 +573,8 @@ func TestLabelledDeviceIsProposedAndRunsOnlyAfterConfirmation(t *testing.T) {
 		t.Fatalf("posts before confirmation = %+v", posts)
 	}
 
-	text, handled, err := f.approval.Press(t.Context(), "alice", approval.ActionConfirm, record.ID)
+	pressed, err := f.approval.Press(t.Context(), "alice", approval.ActionConfirm, record.ID)
+	text, handled := pressed.Text, pressed.Owned
 	if err != nil || !handled {
 		t.Fatalf("press = %q %v %v", text, handled, err)
 	}
@@ -589,7 +590,7 @@ func TestLabelledDeviceIsProposedAndRunsOnlyAfterConfirmation(t *testing.T) {
 		t.Fatalf("outcome = %q", text)
 	}
 
-	if _, _, err := f.approval.Press(t.Context(), "alice", approval.ActionConfirm, record.ID); err != nil {
+	if _, err := f.approval.Press(t.Context(), "alice", approval.ActionConfirm, record.ID); err != nil {
 		t.Fatal(err)
 	}
 	if posts := f.sim.posts("/api/services/"); len(posts) != 1 {
@@ -606,7 +607,7 @@ func TestRejectedProposalPostsNothing(t *testing.T) {
 	if !found {
 		t.Fatal("no proposal")
 	}
-	if _, _, err := f.approval.Press(t.Context(), "alice", approval.ActionReject, record.ID); err != nil {
+	if _, err := f.approval.Press(t.Context(), "alice", approval.ActionReject, record.ID); err != nil {
 		t.Fatal(err)
 	}
 	if posts := f.sim.posts("/api/services/"); len(posts) != 0 {
@@ -622,7 +623,8 @@ func TestConfirmationFailsWhenTheLabelWasRemovedMeanwhile(t *testing.T) {
 	record, _ := f.pending()
 	sim.set(func(s *simulator) { s.registry = nil })
 
-	text, _, err := f.approval.Press(t.Context(), "alice", approval.ActionConfirm, record.ID)
+	pressed, err := f.approval.Press(t.Context(), "alice", approval.ActionConfirm, record.ID)
+	text := pressed.Text
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -727,7 +729,7 @@ func TestConfirmedActionIsRefusedWhileTheHomeIsOff(t *testing.T) {
 	if _, err := f.service.SetEnabled(t.Context(), "alice", false); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := f.approval.Press(t.Context(), "alice", approval.ActionConfirm, record.ID); err != nil {
+	if _, err := f.approval.Press(t.Context(), "alice", approval.ActionConfirm, record.ID); err != nil {
 		t.Fatal(err)
 	}
 	if posts := f.sim.posts("/api/services/"); len(posts) != 0 {
@@ -888,7 +890,8 @@ func TestActionAfterOutsideContentIsProposedAndRunsOnlyAfterConfirmation(t *test
 		t.Fatalf("model-written arguments broke the summary layout:\n%s", record.Summary)
 	}
 
-	text, handled, err := f.approval.Press(t.Context(), "alice", approval.ActionConfirm, record.ID)
+	pressed, err := f.approval.Press(t.Context(), "alice", approval.ActionConfirm, record.ID)
+	text, handled := pressed.Text, pressed.Owned
 	if err != nil || !handled {
 		t.Fatalf("press = %q %v %v", text, handled, err)
 	}

@@ -546,48 +546,58 @@ func (s *Service) resendUndelivered(ctx context.Context) {
 	}
 }
 
-// Press handles a button press by the pressing principal and returns the text the proposal
-// message should show now. A press on another principal's proposal is ignored.
-func (s *Service) Press(ctx context.Context, principalID, action, approvalID string) (string, bool, error) {
+// Pressed is what a button press did.
+type Pressed struct {
+	// Text is what the proposal message should show now.
+	Text string
+	// Owned is false for a press on another principal's proposal, which is ignored.
+	Owned bool
+	// Ran reports that this press confirmed the bundle and ran its actions, so the model has an
+	// outcome to continue from.
+	Ran bool
+}
+
+// Press handles a button press by the pressing principal.
+func (s *Service) Press(ctx context.Context, principalID, action, approvalID string) (Pressed, error) {
 	record, found, err := s.repository.LoadApproval(ctx, approvalID)
 	if err != nil {
-		return "", false, err
+		return Pressed{}, err
 	}
 	if !found || record.PrincipalID != principalID {
-		return "", false, nil
+		return Pressed{}, nil
 	}
 	bundle, err := s.repository.LoadBundle(ctx, record.BundleID)
 	if err != nil {
-		return "", false, err
+		return Pressed{}, err
 	}
 	s.dropIntents(bundle)
 	pending := slices.IndexFunc(bundle, func(item Record) bool { return item.Status == StatusPending })
 	if pending < 0 {
-		return bundleText(bundle), true, nil
+		return Pressed{Text: bundleText(bundle), Owned: true}, nil
 	}
 	if !s.now().Before(bundle[pending].ExpiresAt) {
 		if err := s.finishPending(ctx, bundle, StatusExpired, ReasonTimeout); err != nil {
-			return "", false, err
+			return Pressed{}, err
 		}
-		return bundleText(bundle), true, nil
+		return Pressed{Text: bundleText(bundle), Owned: true}, nil
 	}
 	switch action {
 	case ActionReject:
 		if err := s.finishPending(ctx, bundle, StatusRejected, ""); err != nil {
-			return "", false, err
+			return Pressed{}, err
 		}
-		return bundleText(bundle), true, nil
+		return Pressed{Text: bundleText(bundle), Owned: true}, nil
 	case ActionConfirm:
 		confirmed, err := s.repository.ConfirmBundle(ctx, record.BundleID, principalID, s.now())
 		if err != nil {
-			return "", false, err
+			return Pressed{}, err
 		}
 		if !confirmed {
 			current, err := s.repository.LoadBundle(ctx, record.BundleID)
 			if err != nil {
-				return "", false, err
+				return Pressed{}, err
 			}
-			return bundleText(current), true, nil
+			return Pressed{Text: bundleText(current), Owned: true}, nil
 		}
 		for index := range bundle {
 			if bundle[index].Status == StatusPending {
@@ -596,9 +606,9 @@ func (s *Service) Press(ctx context.Context, principalID, action, approvalID str
 			}
 		}
 		s.rememberNotice(bundle)
-		return bundleText(bundle), true, nil
+		return Pressed{Text: bundleText(bundle), Owned: true, Ran: true}, nil
 	default:
-		return "", false, nil
+		return Pressed{}, nil
 	}
 }
 
