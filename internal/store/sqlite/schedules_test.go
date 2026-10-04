@@ -305,3 +305,40 @@ func TestMigrationOneTimeJobsKeepsExistingRows(t *testing.T) {
 		t.Fatalf("foreign key check = %d %v", foreignKeyProblems, err)
 	}
 }
+
+// An update applies only to the owner's unfinished job as it was read, and keeps the pause state.
+func TestUpdateScheduledJobRefusesAStaleRead(t *testing.T) {
+	store, ctx := openTestStore(t)
+	read := time.Date(2026, 9, 28, 6, 0, 0, 0, time.UTC)
+	job := schedule.Job{
+		ID: "0123456789abcdef", PrincipalID: "alice", Name: "Digest", Type: schedule.TypeModelTurn,
+		Cron: "0 9 * * *", Zone: "Europe/Amsterdam", Config: json.RawMessage(`{"prompt":"x"}`), Enabled: false,
+		NextRunAt: read.Add(time.Hour), CreatedAt: read, UpdatedAt: read,
+	}
+	if created, err := store.CreateScheduledJob(ctx, job, 1); err != nil || !created {
+		t.Fatalf("create = %v %v", created, err)
+	}
+	changed := job
+	changed.Name, changed.Cron, changed.Config = "Evening digest", "0 18 * * *", json.RawMessage(`{"prompt":"y"}`)
+	changed.NextRunAt, changed.UpdatedAt = read.Add(10*time.Hour), read.Add(time.Minute)
+
+	stranger := changed
+	stranger.PrincipalID = "bob"
+	if updated, err := store.UpdateScheduledJob(ctx, stranger, read); err != nil || updated {
+		t.Fatalf("bob updated alice's job: %v %v", updated, err)
+	}
+	if updated, err := store.UpdateScheduledJob(ctx, changed, read.Add(time.Second)); err != nil || updated {
+		t.Fatalf("an update from a stale read = %v %v", updated, err)
+	}
+	if updated, err := store.UpdateScheduledJob(ctx, changed, read); err != nil || !updated {
+		t.Fatalf("update = %v %v", updated, err)
+	}
+	if updated, err := store.UpdateScheduledJob(ctx, changed, read); err != nil || updated {
+		t.Fatalf("the same update twice = %v %v", updated, err)
+	}
+	stored, _, err := store.LoadScheduledJob(ctx, "alice", job.ID)
+	if err != nil || stored.Name != "Evening digest" || stored.Cron != "0 18 * * *" || string(stored.Config) != `{"prompt":"y"}` ||
+		stored.Enabled || !stored.NextRunAt.Equal(changed.NextRunAt) || !stored.CreatedAt.Equal(read) {
+		t.Fatalf("stored = %+v %v", stored, err)
+	}
+}

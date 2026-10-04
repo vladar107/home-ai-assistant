@@ -214,6 +214,98 @@ func TestScheduledJobIsProposedConfirmedRunAndDelivered(t *testing.T) {
 	h.wantReply(101, 4, "details")
 }
 
+// The model reads a job's whole instructions before changing them, the user confirms the job as it
+// will be, and the change keeps the job's id and pause state; a job changed before the press is
+// left alone.
+func TestScheduledJobIsReadInFullAndChanged(t *testing.T) {
+	runtime := newControlledRuntime()
+	clock := newTestClock(t, mondayMorning)
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
+	h.provision("alice", "account-alice")
+	h.start()
+	prompt := strings.Repeat("Summarise my day. ", 30) + "End with the weather."
+	job := h.createJob("alice", "a1b2c3d4e5f60718", "Daily digest", "30 7 * * *", prompt)
+	if changed, err := h.scheduler.SetEnabled(h.ctx, "alice", job.ID, false); err != nil || !changed {
+		t.Fatalf("pause = %v %v", changed, err)
+	}
+
+	h.push(textUpdate(1, 101, "move my digest to 8 and drop the weather"))
+	chat := receive(t, h.ctx, runtime.calls)
+	call := func(name, arguments string) agentruntime.ToolResult {
+		t.Helper()
+		result, err := chat.request.Tools.Executor.Execute(chat.ctx, agentruntime.ToolCall{Name: name, Arguments: json.RawMessage(arguments)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	if listed := call("schedule_list", `{}`); strings.Contains(listed.Text, "End with the weather.") {
+		t.Fatalf("schedule_list showed the whole long prompt: %s", listed.Text)
+	}
+	if full := call("schedule_get", `{"job_id":"`+job.ID+`"}`); full.IsError || !strings.HasSuffix(full.Text, "Instructions: "+prompt) {
+		t.Fatalf("schedule_get = %+v", full)
+	}
+	if switched := call("schedule_update", `{"job_id":"`+job.ID+`","at":"2026-09-30 08:00"}`); !switched.IsError {
+		t.Fatalf("a recurring job became one-time: %+v", switched)
+	}
+	edited := strings.TrimSuffix(prompt, " End with the weather.")
+	if proposed := call("schedule_update", `{"job_id":"`+job.ID+`","cron":"0 8 * * *","prompt":"`+edited+`"}`); proposed.IsError {
+		t.Fatalf("schedule_update = %+v", proposed)
+	}
+	chat.answer <- agentruntime.RunResult{Response: "proposed"}
+	h.wantReply(101, 1, "proposed")
+	h.waitState(1, "delivered")
+	proposal := h.nextMessage()
+	for _, want := range []string{`Change "Daily digest"`, "Runs: 0 8 * * * (Europe/Amsterdam)", edited, "It stays paused"} {
+		if !strings.Contains(proposal.text, want) {
+			t.Fatalf("proposal lacks %q: %s", want, proposal.text)
+		}
+	}
+	if strings.Contains(proposal.text, "weather") {
+		t.Fatalf("proposal kept the dropped sentence: %s", proposal.text)
+	}
+
+	confirm, _ := approvalButtons(t, proposal.keyboard)
+	h.push(callbackUpdate(2, 101, proposal.messageID, confirm))
+	h.wantAnswer(2)
+	if edit := h.nextEdit(); !strings.Contains(edit.text, "Changed. It stays paused until you resume it in /jobs.") {
+		t.Fatalf("proposal after confirm = %+v", edit)
+	}
+	stored, err := h.scheduler.Jobs(h.ctx, "alice")
+	if err != nil || len(stored) != 1 {
+		t.Fatalf("jobs = %+v %v", stored, err)
+	}
+	if got := stored[0]; got.ID != job.ID || got.Cron != "0 8 * * *" || schedule.ModelTurnPrompt(got.Config) != edited || got.Enabled {
+		t.Fatalf("changed job = %+v", got)
+	}
+
+	h.push(textUpdate(3, 101, "rename it"))
+	chat = receive(t, h.ctx, runtime.calls)
+	if proposed := call("schedule_update", `{"job_id":"`+job.ID+`","name":"Morning digest"}`); proposed.IsError {
+		t.Fatalf("schedule_update = %+v", proposed)
+	}
+	chat.answer <- agentruntime.RunResult{Response: "proposed"}
+	h.wantReply(101, 3, "proposed")
+	h.waitState(3, "delivered")
+	proposal = h.nextMessage()
+	if !strings.Contains(proposal.text, `Change "Daily digest", renamed to "Morning digest"`) {
+		t.Fatalf("rename proposal = %s", proposal.text)
+	}
+	clock.Set(t, "2026-09-28T08:00:01+02:00")
+	if changed, err := h.scheduler.SetEnabled(h.ctx, "alice", job.ID, true); err != nil || !changed {
+		t.Fatalf("resume = %v %v", changed, err)
+	}
+	confirm, _ = approvalButtons(t, proposal.keyboard)
+	h.push(callbackUpdate(4, 101, proposal.messageID, confirm))
+	h.wantAnswer(4)
+	if edit := h.nextEdit(); !strings.Contains(edit.text, "That job changed after this was proposed; nothing was changed.") {
+		t.Fatalf("stale confirm = %+v", edit)
+	}
+	if stored, err := h.scheduler.Jobs(h.ctx, "alice"); err != nil || stored[0].Name != "Daily digest" {
+		t.Fatalf("a stale change was applied: %+v %v", stored, err)
+	}
+}
+
 func (h *conversationHarness) jobID(principalID string) string {
 	h.t.Helper()
 	var id string

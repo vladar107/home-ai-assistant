@@ -38,8 +38,9 @@ borrowed between users.
 - **Day cards.** A rendered image with the day's weather and trains, sent with
   the reply as its caption.
 - **Schedules.** Recurring or one-time model turns ("every weekday at 07:30, plan
-  my trip to work") that the user confirms and that survive restarts, and reminders
-  ("remind me at five to call mom") that are set at once and can be snoozed.
+  my trip to work") that the user confirms, can change later in conversation, and
+  that survive restarts, and reminders ("remind me at five to call mom") that are
+  set at once and can be snoozed.
 - **Memory.** Each user has a small memory of instructions and facts that the
   assistant keeps across `/new`, scheduled runs, and restarts. Facts are saved
   at once and shown in the reply; instructions and anything learned after

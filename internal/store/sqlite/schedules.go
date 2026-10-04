@@ -106,6 +106,23 @@ func (s *Store) SetScheduledJobEnabled(ctx context.Context, principalID, jobID s
 	return affectedOne(result, "changed scheduled job")
 }
 
+func (s *Store) UpdateScheduledJob(ctx context.Context, job schedule.Job, expectedUpdatedAt time.Time) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("update scheduled job: SQLite store is not open")
+	}
+	result, err := s.db.ExecContext(
+		ctx,
+		`UPDATE scheduled_jobs SET name = ?, cron = NULLIF(?, ''), run_at = NULLIF(?, ''), zone = ?, config = ?, next_run_at = ?, updated_at = ?
+		 WHERE id = ? AND principal_id = ? AND job_type = ? AND finished_at IS NULL AND updated_at = ?`,
+		job.Name, job.Cron, optionalTime(job.RunAt), job.Zone, string(job.Config), formatTime(job.NextRunAt), formatTime(job.UpdatedAt),
+		job.ID, job.PrincipalID, job.Type, formatTime(expectedUpdatedAt),
+	)
+	if err != nil {
+		return false, fmt.Errorf("update scheduled job: %w", err)
+	}
+	return affectedOne(result, "updated scheduled job")
+}
+
 func (s *Store) DeleteScheduledJob(ctx context.Context, principalID, jobID string) (bool, error) {
 	if s == nil || s.db == nil {
 		return false, fmt.Errorf("delete scheduled job: SQLite store is not open")

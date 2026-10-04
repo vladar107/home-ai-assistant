@@ -15,7 +15,9 @@ import (
 
 const (
 	toolList           = "schedule_list"
+	toolGet            = "schedule_get"
 	toolPropose        = "schedule_propose"
+	toolUpdate         = "schedule_update"
 	toolRemove         = "schedule_remove"
 	toolReminderSet    = "reminder_set"
 	toolReminderCancel = "reminder_cancel"
@@ -36,7 +38,7 @@ type ExposureChecker interface {
 	External(ctx context.Context, principalID string) bool
 }
 
-const listGuidance = "Scheduled jobs: schedule_list shows the user's pending reminders and scheduled jobs, each with its id, schedule, next run, and instructions. The user manages them with /jobs as well."
+const listGuidance = "Scheduled jobs: schedule_list shows the user's pending reminders and scheduled jobs, each with its id, schedule, next run, and instructions, shortening long instructions; schedule_get shows one of them in full. The user manages them with /jobs as well."
 
 func proposeGuidance(zone string) string {
 	return "The user can ask for something to happen on a schedule, such as every Monday at 9 checking their Notion tasks and reporting what is overdue, or once, such as tomorrow at 7:30 checking whether their train is delayed. " +
@@ -45,6 +47,9 @@ func proposeGuidance(zone string) string {
 		"for example 0 9 * * 1 is Mondays at 09:00 and 30 7 * * 1-5 is weekdays at 07:30. A recurring job may run at most once an hour. " +
 		"A one-time job takes at instead, a local date and time such as 2026-10-04 07:30 that you work out from the current time. " +
 		"Each run is a separate turn the user does not watch, with only read-only tools, so the prompt must say exactly what to look at and what to report, on its own, without relying on this conversation. " +
+		"schedule_update proposes changing a job by its id from schedule_list, given only the fields that change, and the user confirms the job as it will be. " +
+		"To change its instructions, first read them with schedule_get, then pass the complete new prompt: the stored text with only the change the user asked for, never a rewrite from memory. " +
+		"A recurring job stays recurring and a one-time job stays one-time; to switch, remove it and propose a new one. " +
 		"schedule_remove proposes deleting a job by its id from schedule_list. Every proposal you make in this turn is shown to the user together and confirmed or rejected as one batch, so propose every job change the request needs in this turn, once each, since a proposal cannot be withdrawn; a proposal in a later turn replaces a batch still waiting."
 }
 
@@ -61,6 +66,15 @@ var listDefinition = tools.Definition{
 	Description: "List the user's scheduled jobs with their ids, schedules, next runs, and instructions.",
 	Risk:        tools.RiskRead,
 	InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+}
+
+var getDefinition = tools.Definition{
+	Name:        toolGet,
+	Description: "Show one of the user's scheduled jobs or reminders in full, with its complete instructions.",
+	Risk:        tools.RiskRead,
+	InputSchema: json.RawMessage(`{"type":"object","properties":{` +
+		`"job_id":{"type":"string","description":"The id from schedule_list."}},` +
+		`"required":["job_id"],"additionalProperties":false}`),
 }
 
 var reminderDefinitions = []tools.Definition{
@@ -98,6 +112,19 @@ var writeDefinitions = []tools.Definition{
 			`"required":["name","prompt"],"additionalProperties":false}`),
 	},
 	{
+		Name:        toolUpdate,
+		Description: "Propose changing one of the user's scheduled jobs; omitted fields keep their current values. The user must confirm.",
+		Risk:        tools.RiskWrite,
+		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
+			`"job_id":{"type":"string","description":"The id from schedule_list."},` +
+			`"name":{"type":"string","description":"A new short name."},` +
+			`"cron":{"type":"string","description":"For a recurring job: a new five-field cron expression."},` +
+			`"at":{"type":"string","description":"For a one-time job: a new local date and time, YYYY-MM-DD HH:MM."},` +
+			`"prompt":{"type":"string","description":"The complete new instructions, replacing the old ones, at most 1000 characters."},` +
+			`"timezone":{"type":"string","description":"A new IANA time zone such as Europe/Amsterdam."}},` +
+			`"required":["job_id"],"additionalProperties":false}`),
+	},
+	{
 		Name:        toolRemove,
 		Description: "Propose deleting one of the user's scheduled jobs. The user must confirm.",
 		Risk:        tools.RiskWrite,
@@ -110,11 +137,12 @@ var writeDefinitions = []tools.Definition{
 var _ tools.Provider = (*Service)(nil)
 var _ approval.Executor = (*Service)(nil)
 
-// Contribute offers the list tool, the reminder tools when the reminder type is registered, and
-// the proposal tools when there is an approval service and the model.turn type is registered. A
-// scheduled run itself receives only the list tool, because the broker offers it read tools alone.
+// Contribute offers the list and get tools, the reminder tools when the reminder type is
+// registered, and the proposal tools when there is an approval service and the model.turn type is
+// registered. A scheduled run itself receives only the read tools, because the broker offers it
+// read tools alone.
 func (s *Service) Contribute(context.Context, string) (tools.Contribution, error) {
-	contribution := tools.Contribution{Guidance: listGuidance, Definitions: []tools.Definition{listDefinition}}
+	contribution := tools.Contribution{Guidance: listGuidance, Definitions: []tools.Definition{listDefinition, getDefinition}}
 	var guidance []string
 	if _, known := s.types[TypeReminder]; known {
 		guidance = append(guidance, reminderGuidance(s.zone))
@@ -136,8 +164,12 @@ func (s *Service) Execute(ctx context.Context, principalID string, call tools.Ca
 			return tools.Result{}, err
 		}
 		return tools.Result{Text: renderJobs(jobs, s.zone)}, nil
+	case toolGet:
+		return s.getJob(ctx, principalID, call)
 	case toolPropose:
 		return s.proposeJob(ctx, principalID, call)
+	case toolUpdate:
+		return s.proposeUpdate(ctx, principalID, call)
 	case toolRemove:
 		return s.proposeRemoval(ctx, principalID, call)
 	case toolReminderSet:
@@ -171,6 +203,23 @@ type confirmedJob struct {
 	At     string `json:"at,omitempty"`
 	Zone   string `json:"zone"`
 	Prompt string `json:"prompt"`
+}
+
+type updateArguments struct {
+	JobID    string `json:"job_id"`
+	Name     string `json:"name"`
+	Cron     string `json:"cron"`
+	At       string `json:"at"`
+	Prompt   string `json:"prompt"`
+	Timezone string `json:"timezone"`
+}
+
+// confirmedUpdate is the job as it will be after the change, with the job's last change as it was
+// proposed, so a job changed before the press is not overwritten.
+type confirmedUpdate struct {
+	JobID     string    `json:"job_id"`
+	UpdatedAt time.Time `json:"updated_at"`
+	confirmedJob
 }
 
 type removeArguments struct {
@@ -289,7 +338,7 @@ func (s *Service) proposeJob(ctx context.Context, principalID string, call tools
 	if err != nil {
 		return tools.Result{}, err
 	}
-	summary := proposalSummary(prepared)
+	summary := proposalSummary(fmt.Sprintf("Schedule %q", job.Name), prepared)
 	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: toolPropose, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "schedule", TargetKind: targetKind, TargetName: job.Name}}); err != nil {
 		if errors.Is(err, approval.ErrBundleFull) {
 			return tools.Result{Text: err.Error(), IsError: true}, nil
@@ -298,6 +347,113 @@ func (s *Service) proposeJob(ctx context.Context, principalID string, call tools
 		return tools.Result{Text: "the proposal could not be recorded", IsError: true}, nil
 	}
 	return tools.Result{Text: approval.ProposedText}, nil
+}
+
+func (s *Service) getJob(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
+	var arguments removeArguments
+	if err := decodeArguments(call.Arguments, &arguments); err != nil {
+		return tools.Result{Text: err.Error(), IsError: true}, nil
+	}
+	job, found, err := s.repository.LoadScheduledJob(ctx, principalID, strings.TrimSpace(arguments.JobID))
+	if err != nil {
+		return tools.Result{}, err
+	}
+	if !found || !job.FinishedAt.IsZero() {
+		return tools.Result{Text: "No pending job has that id. Use schedule_list to see the user's jobs.", IsError: true}, nil
+	}
+	return tools.Result{Text: renderJob(job, s.zone, maximumPromptRunes)}, nil
+}
+
+func (s *Service) proposeUpdate(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
+	if s.proposer == nil {
+		return tools.Result{Text: "Scheduling is not available.", IsError: true}, nil
+	}
+	var arguments updateArguments
+	if err := decodeArguments(call.Arguments, &arguments); err != nil {
+		return tools.Result{Text: err.Error(), IsError: true}, nil
+	}
+	job, found, err := s.repository.LoadScheduledJob(ctx, principalID, strings.TrimSpace(arguments.JobID))
+	if err != nil {
+		return tools.Result{}, err
+	}
+	if !found || !job.FinishedAt.IsZero() {
+		return tools.Result{Text: "No pending job has that id. Use schedule_list to see the user's jobs.", IsError: true}, nil
+	}
+	if job.Type != TypeModelTurn {
+		return tools.Result{Text: "Reminders cannot be changed; cancel it with reminder_cancel and set a new one with reminder_set.", IsError: true}, nil
+	}
+	current, err := currentJob(job)
+	if err != nil {
+		return tools.Result{Text: "That job's stored schedule can no longer be read; remove it and propose a new one.", IsError: true}, nil
+	}
+	switch {
+	case job.OneTime() && strings.TrimSpace(arguments.Cron) != "":
+		return tools.Result{Text: "This is a one-time job, so it takes at, not cron; to make it recurring, remove it and propose a new job.", IsError: true}, nil
+	case !job.OneTime() && strings.TrimSpace(arguments.At) != "":
+		return tools.Result{Text: "This is a recurring job, so it takes cron, not at; to make it run once, remove it and propose a new job.", IsError: true}, nil
+	}
+	next := current
+	override(&next.Name, arguments.Name)
+	override(&next.Cron, arguments.Cron)
+	override(&next.At, arguments.At)
+	override(&next.Prompt, arguments.Prompt)
+	override(&next.Zone, arguments.Timezone)
+	config, err := ModelTurnConfig(next.Prompt)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	prepared, err := s.Prepare(principalID, next.Name, TypeModelTurn, Timing{Cron: next.Cron, At: next.At, Zone: next.Zone}, config)
+	if err != nil {
+		return tools.Result{Text: err.Error(), IsError: true}, nil
+	}
+	changed := prepared.Job
+	confirmed := confirmedUpdate{JobID: job.ID, UpdatedAt: job.UpdatedAt, confirmedJob: confirmedJob{Name: changed.Name, Cron: changed.Cron, Zone: changed.Zone, Prompt: ModelTurnPrompt(changed.Config)}}
+	if changed.OneTime() {
+		confirmed.At = changed.RunAt.In(prepared.Schedule.Location).Format(localTimeLayouts[0])
+	}
+	if confirmed.confirmedJob == current {
+		return tools.Result{Text: "That changes nothing; the job already reads exactly like this.", IsError: true}, nil
+	}
+	canonical, err := json.Marshal(confirmed)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	heading := fmt.Sprintf("Change %q", job.Name)
+	if changed.Name != job.Name {
+		heading += fmt.Sprintf(", renamed to %q", changed.Name)
+	}
+	summary := proposalSummary(heading, prepared)
+	if !job.Enabled {
+		summary += "\nIt stays paused until you resume it in /jobs."
+	}
+	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: toolUpdate, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "change", TargetKind: "scheduled job", TargetName: job.Name}}); err != nil {
+		if errors.Is(err, approval.ErrBundleFull) {
+			return tools.Result{Text: err.Error(), IsError: true}, nil
+		}
+		s.logger.WarnContext(ctx, "schedule.proposal.failed", "principal_id", principalID, "tool", call.Name, "error", err)
+		return tools.Result{Text: "the proposal could not be recorded", IsError: true}, nil
+	}
+	return tools.Result{Text: approval.ProposedText}, nil
+}
+
+// currentJob is a stored model.turn job in the canonical form a proposal carries, with a one-time
+// job's instant as a local time in its own zone.
+func currentJob(job Job) (confirmedJob, error) {
+	current := confirmedJob{Name: job.Name, Cron: job.Cron, Zone: job.Zone, Prompt: ModelTurnPrompt(job.Config)}
+	if job.OneTime() {
+		location, err := LoadZone(job.Zone)
+		if err != nil {
+			return confirmedJob{}, err
+		}
+		current.At = job.RunAt.In(location).Format(localTimeLayouts[0])
+	}
+	return current, nil
+}
+
+func override(field *string, value string) {
+	if strings.TrimSpace(value) != "" {
+		*field = value
+	}
 }
 
 func (s *Service) proposeRemoval(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
@@ -331,7 +487,7 @@ func (s *Service) proposeRemoval(ctx context.Context, principalID string, call t
 }
 
 func (s *Service) ActionTools() []string {
-	return []string{toolPropose, toolRemove, toolReminderSet}
+	return []string{toolPropose, toolUpdate, toolRemove, toolReminderSet}
 }
 
 // ExecuteApproved stores or deletes the confirmed job. The schedule is validated again, because
@@ -384,6 +540,8 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 			return approval.Outcome{}, err
 		}
 		return approval.Outcome{Text: "Reminder set for " + FormatOccurrence(prepared.Job.RunAt, prepared.Schedule.Location) + "."}, nil
+	case toolUpdate:
+		return s.executeUpdate(ctx, record)
 	case toolRemove:
 		var confirmed removeArguments
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
@@ -400,6 +558,48 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 	default:
 		return approval.Outcome{}, &approval.ActionError{Reason: "unavailable", Text: "That action is no longer available."}
 	}
+}
+
+func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (approval.Outcome, error) {
+	var confirmed confirmedUpdate
+	if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
+		return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed change could not be read; nothing was changed."}
+	}
+	job, found, err := s.repository.LoadScheduledJob(ctx, record.PrincipalID, confirmed.JobID)
+	if err != nil {
+		return approval.Outcome{}, err
+	}
+	if !found || !job.FinishedAt.IsZero() || job.Type != TypeModelTurn {
+		return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That job no longer exists; nothing was changed."}
+	}
+	stale := &approval.ActionError{Reason: "stale", Text: "That job changed after this was proposed; nothing was changed. Ask again to change it."}
+	if !job.UpdatedAt.Equal(confirmed.UpdatedAt) {
+		return approval.Outcome{}, stale
+	}
+	config, err := ModelTurnConfig(confirmed.Prompt)
+	if err != nil {
+		return approval.Outcome{}, err
+	}
+	timing := Timing{Cron: confirmed.Cron, At: confirmed.At, Zone: confirmed.Zone}
+	prepared, err := s.Prepare(record.PrincipalID, confirmed.Name, TypeModelTurn, timing, config)
+	if err != nil {
+		return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "That schedule is no longer valid (" + err.Error() + "); nothing was changed."}
+	}
+	updated, err := s.Update(ctx, job, confirmed.UpdatedAt, prepared)
+	if err != nil {
+		return approval.Outcome{}, err
+	}
+	if !updated {
+		return approval.Outcome{}, stale
+	}
+	if !job.Enabled {
+		return approval.Outcome{Text: "Changed. It stays paused until you resume it in /jobs."}, nil
+	}
+	at := FormatOccurrence(prepared.Job.NextRunAt, prepared.Schedule.Location)
+	if prepared.Job.OneTime() {
+		return approval.Outcome{Text: "Changed. Runs once: " + at + "."}, nil
+	}
+	return approval.Outcome{Text: "Changed. Next run: " + at + "."}, nil
 }
 
 func tooManyText(oneTime bool) string {
@@ -421,10 +621,10 @@ func countKind(jobs []Job, oneTime bool) int {
 
 // proposalSummary is the confirmation the user reads. It is rendered from the parsed schedule, not
 // from the model's description of it, so the next run times are the ones that will happen.
-func proposalSummary(prepared Prepared) string {
+func proposalSummary(heading string, prepared Prepared) string {
 	job := prepared.Job
 	var builder strings.Builder
-	fmt.Fprintf(&builder, "Schedule %q\n", job.Name)
+	builder.WriteString(heading + "\n")
 	if job.OneTime() {
 		fmt.Fprintf(&builder, "Runs once: %s\n", FormatOccurrence(job.RunAt, prepared.Schedule.Location))
 		builder.WriteString("It asks your model, with read-only tools, and sends you the reply:\n")
@@ -447,29 +647,30 @@ func renderJobs(jobs []Job, zone string) string {
 	if len(jobs) == 0 {
 		return "The user has no pending reminders or scheduled jobs."
 	}
-	var builder strings.Builder
-	for index, job := range jobs {
-		if index > 0 {
-			builder.WriteString("\n\n")
-		}
-		if job.Type == TypeReminder {
-			fmt.Fprintf(&builder, "id %s: reminder, %s\nText: %s", job.ID, DescribeJob(job, zone), truncateRunes(ReminderText(job.Config), listedInstructionRunes))
-			continue
-		}
-		state := DescribeJob(job, zone)
-		if !job.OneTime() {
-			location, err := LoadZone(job.Zone)
-			if err != nil {
-				location, _ = LoadZone(zone)
-			}
-			state += ", next run " + FormatOccurrence(job.NextRunAt, location)
-		}
-		if !job.Enabled {
-			state += ", paused"
-		}
-		fmt.Fprintf(&builder, "id %s: %q, %s\nInstructions: %s", job.ID, job.Name, state, truncateRunes(ModelTurnPrompt(job.Config), listedInstructionRunes))
+	rendered := make([]string, 0, len(jobs))
+	for _, job := range jobs {
+		rendered = append(rendered, renderJob(job, zone, listedInstructionRunes))
 	}
-	return builder.String()
+	return strings.Join(rendered, "\n\n")
+}
+
+// renderJob is one job as the model reads it, with its instructions cut to limit runes.
+func renderJob(job Job, zone string, limit int) string {
+	if job.Type == TypeReminder {
+		return fmt.Sprintf("id %s: reminder, %s\nText: %s", job.ID, DescribeJob(job, zone), truncateRunes(ReminderText(job.Config), limit))
+	}
+	state := DescribeJob(job, zone)
+	if !job.OneTime() {
+		location, err := LoadZone(job.Zone)
+		if err != nil {
+			location, _ = LoadZone(zone)
+		}
+		state += ", next run " + FormatOccurrence(job.NextRunAt, location)
+	}
+	if !job.Enabled {
+		state += ", paused"
+	}
+	return fmt.Sprintf("id %s: %q, %s\nInstructions: %s", job.ID, job.Name, state, truncateRunes(ModelTurnPrompt(job.Config), limit))
 }
 
 // DescribeJob is a job's schedule as the user reads it, falling back to the default zone for a

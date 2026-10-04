@@ -746,6 +746,18 @@ func (s *Service) Create(ctx context.Context, id string, prepared Prepared) (boo
 	return created, err
 }
 
+// Update replaces one of the principal's jobs with a prepared one under the same ID, keeping its
+// pause state. A job changed since expectedUpdatedAt is reported as not updated.
+func (s *Service) Update(ctx context.Context, current Job, expectedUpdatedAt time.Time, prepared Prepared) (bool, error) {
+	job := prepared.Job
+	job.ID, job.Enabled, job.CreatedAt = current.ID, current.Enabled, current.CreatedAt
+	updated, err := s.repository.UpdateScheduledJob(ctx, job, expectedUpdatedAt)
+	if err == nil && updated {
+		s.logger.InfoContext(ctx, "schedule.job.updated", "principal_id", job.PrincipalID, "job_id", job.ID, "job_type", job.Type)
+	}
+	return updated, err
+}
+
 // Snooze is how far a delivered reminder is moved.
 type Snooze string
 

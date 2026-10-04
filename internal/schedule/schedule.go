@@ -86,6 +86,10 @@ type Repository interface {
 	LoadScheduledJob(ctx context.Context, principalID, jobID string) (Job, bool, error)
 	SetScheduledJobEnabled(ctx context.Context, principalID, jobID string, enabled bool, nextRunAt, now time.Time) (bool, error)
 	DeleteScheduledJob(ctx context.Context, principalID, jobID string) (bool, error)
+	// UpdateScheduledJob replaces an unfinished job's name, schedule, zone, configuration, and next
+	// run, keeping its type, owner, and pause state. A job changed since expectedUpdatedAt, including
+	// by a tick advancing it, is left alone and reported as not updated.
+	UpdateScheduledJob(ctx context.Context, job Job, expectedUpdatedAt time.Time) (bool, error)
 	DueScheduledJobs(ctx context.Context, now time.Time) ([]Job, error)
 	// AdvanceScheduledJob moves an enabled job from the occurrence it was due at to next, or
 	// finishes a one-time job when next is zero, and, when run is set, queues that run in the same
