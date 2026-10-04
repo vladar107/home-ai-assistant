@@ -1,6 +1,6 @@
 # 0049 — Tell the model who the user is
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
