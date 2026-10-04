@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM golang:1.27.1-alpine3.24 AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.1-alpine3.24@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414 AS build
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -18,7 +18,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     -o /out/home-agent \
     ./cmd/home-agent
 
-FROM --platform=$TARGETPLATFORM node:24.19.0-alpine3.24
+FROM --platform=$TARGETPLATFORM node:24.19.0-alpine3.24@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43
 
 RUN apk add --no-cache ca-certificates wget \
     && addgroup -S -g 10001 homeagent \
@@ -27,7 +27,11 @@ RUN apk add --no-cache ca-certificates wget \
     && mkdir -p /etc/home-agent \
     && chown 10001:10001 /var/lib/home-agent
 
-RUN npm install --global --omit=dev @earendil-works/pi-coding-agent@1.0.0 \
+COPY third_party/pi-runtime /usr/local/lib/home-agent/pi-runtime
+
+RUN cd /usr/local/lib/home-agent/pi-runtime \
+    && npm ci --omit=dev --ignore-scripts \
+    && ln -s /usr/local/lib/home-agent/pi-runtime/node_modules/.bin/pi /usr/local/bin/pi \
     && test "$(pi --version)" = "1.0.0" \
     && npm cache clean --force
 
