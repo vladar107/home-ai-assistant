@@ -31,7 +31,7 @@ type ScheduleController interface {
 	Jobs(context.Context, string) ([]schedule.Job, error)
 	SetEnabled(context.Context, string, string, bool) (bool, error)
 	Delete(context.Context, string, string) (bool, error)
-	RunNow(context.Context, string, string) (bool, error)
+	RunNow(context.Context, string, string, string) (bool, error)
 	Snooze(context.Context, string, string, schedule.Snooze) (schedule.Job, bool, error)
 	DefaultZone() string
 }
@@ -141,7 +141,8 @@ func parseJobCallback(data string) (string, string, int, bool) {
 
 // actOnJob performs one button's action on the principal's own job and returns a message for the
 // user when the refreshed list alone would not say what happened.
-func actOnJob(ctx context.Context, principalID, action, jobID string, schedules ScheduleController) (string, error) {
+// The trigger names the press, so a press the poller retries runs the job once.
+func actOnJob(ctx context.Context, principalID, action, jobID, trigger string, schedules ScheduleController) (string, error) {
 	var changed bool
 	var err error
 	switch action {
@@ -152,7 +153,7 @@ func actOnJob(ctx context.Context, principalID, action, jobID string, schedules 
 	case jobDeleteAction:
 		changed, err = schedules.Delete(ctx, principalID, jobID)
 	case jobRunAction:
-		changed, err = schedules.RunNow(ctx, principalID, jobID)
+		changed, err = schedules.RunNow(ctx, principalID, jobID, trigger)
 		if err == nil && changed {
 			return "Running it now; the report will arrive here.", nil
 		}

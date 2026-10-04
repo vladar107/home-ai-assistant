@@ -386,7 +386,7 @@ func TestScheduledRunDeliversItsCardUnderTheScheduledCaption(t *testing.T) {
 
 	// The report alone would fit a caption; with the scheduled prefix it no longer does.
 	report := strings.Repeat("r", 1010)
-	if queued, err := h.scheduler.RunNow(h.ctx, "alice", job.ID); err != nil || !queued {
+	if queued, err := h.scheduler.RunNow(h.ctx, "alice", job.ID, ""); err != nil || !queued {
 		t.Fatalf("run now: %v %v", queued, err)
 	}
 	run = receive(t, h.ctx, runtime.calls)

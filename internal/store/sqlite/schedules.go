@@ -208,14 +208,15 @@ type execer interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
 
-// insertScheduleRun ignores an occurrence that is already recorded, which is what makes a second
-// claim of the same occurrence harmless.
+// insertScheduleRun ignores an occurrence or a run ID that is already recorded, which is what makes
+// a second claim of the same occurrence, or a retried manual run, harmless.
 func insertScheduleRun(ctx context.Context, db execer, run schedule.Run, now string) error {
 	if _, err := db.ExecContext(
 		ctx,
 		`INSERT INTO schedule_runs (id, job_id, principal_id, scheduled_for, manual, status, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)
-		 ON CONFLICT (job_id, scheduled_for) DO NOTHING`,
+		 ON CONFLICT (job_id, scheduled_for) DO NOTHING
+		 ON CONFLICT (id) DO NOTHING`,
 		run.ID, run.JobID, run.PrincipalID, formatTime(run.ScheduledFor), run.Manual, now, now,
 	); err != nil {
 		return fmt.Errorf("insert scheduled run: %w", err)

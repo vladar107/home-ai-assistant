@@ -348,6 +348,16 @@ func TestJobsCommandControlsAndSharesTheTurnSlot(t *testing.T) {
 	chat.answer <- agentruntime.RunResult{Response: "hi"}
 	h.wantReply(101, 3, "hi")
 
+	// The poller retries a press whose reply failed; the retry finds the run already queued.
+	if queued, err := h.scheduler.RunNow(h.ctx, "alice", job.ID, pressTrigger(Bot{ID: 999}, 2)); err != nil || !queued {
+		t.Fatalf("retried Run now = %v %v", queued, err)
+	}
+	h.scheduler.Wake()
+	expectNoRuntimeCall(t, runtime, 100*time.Millisecond)
+	if count := h.countRows(`SELECT count(*) FROM schedule_runs WHERE manual = 1`); count != 1 {
+		t.Fatalf("manual runs after a retried press = %d, want 1", count)
+	}
+
 	var next string
 	if err := h.db.QueryRowContext(h.ctx, `SELECT next_run_at FROM scheduled_jobs WHERE id = ?`, job.ID).Scan(&next); err != nil || next != "2026-09-29T05:30:00.000Z" {
 		t.Fatalf("next run after Run now = %q %v", next, err)

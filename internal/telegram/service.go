@@ -641,7 +641,7 @@ func (s *Service) processCallback(ctx context.Context, bot Bot, updateID int64, 
 		return s.processApprovalPress(ctx, bot, updateID, callback, principalID, action, approvalID)
 	}
 	if action, jobID, page, isJob := parseJobCallback(callback.Data); isJob && s.schedules != nil {
-		return s.processJobPress(ctx, callback, principalID, action, jobID, page)
+		return s.processJobPress(ctx, pressTrigger(bot, updateID), callback, principalID, action, jobID, page)
 	}
 	if press, isMemory := parseMemoryCallback(callback.Data); isMemory && s.memory != nil {
 		return s.processMemoryPress(ctx, callback, principalID, press)
@@ -758,12 +758,17 @@ func (s *Service) continueConversation(ctx context.Context, bot Bot, updateID in
 	}
 }
 
+// pressTrigger names a button press uniquely across retries of its update.
+func pressTrigger(bot Bot, updateID int64) string {
+	return fmt.Sprintf("telegram:%d:%d", bot.ID, updateID)
+}
+
 // processJobPress acts on one of the principal's jobs and refreshes the /jobs message from current
 // state, so a button on an outdated list cannot act on anything but the principal's own job.
-func (s *Service) processJobPress(ctx context.Context, callback *CallbackQuery, principalID, action, jobID string, page int) (processingResult, string, error) {
+func (s *Service) processJobPress(ctx context.Context, trigger string, callback *CallbackQuery, principalID, action, jobID string, page int) (processingResult, string, error) {
 	result := processingResult{event: "telegram.callback.handled", principalID: principalID, command: "jobs." + action}
 	chatID, messageID := callback.Message.Chat.ID, callback.Message.MessageID
-	followUp, err := actOnJob(ctx, principalID, action, jobID, s.schedules)
+	followUp, err := actOnJob(ctx, principalID, action, jobID, trigger, s.schedules)
 	if errors.Is(err, errUnknownJobAction) {
 		result.command, result.reason, err = "jobs", "unknown_action", nil
 	}

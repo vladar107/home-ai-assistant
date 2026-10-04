@@ -3,6 +3,7 @@ package schedule
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -647,7 +648,9 @@ func (s *Service) Delete(ctx context.Context, principalID, jobID string) (bool, 
 }
 
 // RunNow queues one run of the principal's job outside its schedule, leaving the schedule alone.
-func (s *Service) RunNow(ctx context.Context, principalID, jobID string) (bool, error) {
+// A non-empty trigger names the request, such as a button press, so a retried request queues no
+// second run.
+func (s *Service) RunNow(ctx context.Context, principalID, jobID, trigger string) (bool, error) {
 	job, found, err := s.repository.LoadScheduledJob(ctx, principalID, jobID)
 	if err != nil || !found {
 		return false, err
@@ -655,6 +658,10 @@ func (s *Service) RunNow(ctx context.Context, principalID, jobID string) (bool, 
 	id, err := newRunID()
 	if err != nil {
 		return false, err
+	}
+	if trigger != "" {
+		digest := sha256.Sum256([]byte(job.ID + "\x00" + trigger))
+		id = hex.EncodeToString(digest[:8])
 	}
 	if err := s.repository.QueueScheduledRun(ctx, Run{
 		ID: id, JobID: job.ID, PrincipalID: principalID, ScheduledFor: s.now(), Manual: true, Status: StatusQueued,
