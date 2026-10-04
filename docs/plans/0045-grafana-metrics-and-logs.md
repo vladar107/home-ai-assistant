@@ -1,6 +1,6 @@
 # 0045 — Grafana metrics and logs in conversation
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 

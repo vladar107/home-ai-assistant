@@ -1,6 +1,6 @@
 # 0046 — Per-user memory the user can see and edit
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 

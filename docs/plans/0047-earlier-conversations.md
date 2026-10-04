@@ -1,6 +1,6 @@
 # 0047 — Return to earlier conversations
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 

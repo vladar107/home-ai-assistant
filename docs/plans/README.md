@@ -53,10 +53,10 @@ plan that links back to the earlier record.
 | 0041 | [Grouped /settings with an overview and pages](0041-grouped-settings.md) | done |
 | 0042 | [Batched approvals](0042-batched-approvals.md) | done |
 | 0043 | [Shared location in conversation and location-aware tools](0043-shared-location.md) | done |
-| 0044 | [Movie night tools for the Notion movie table](0044-movie-night-tools.md) | in-progress |
-| 0045 | [Grafana metrics and logs in conversation](0045-grafana-metrics-and-logs.md) | in-progress |
-| 0046 | [Per-user memory the user can see and edit](0046-per-user-memory.md) | in-progress |
-| 0047 | [Return to earlier conversations](0047-earlier-conversations.md) | in-progress |
+| 0044 | [Movie night tools for the Notion movie table](0044-movie-night-tools.md) | done |
+| 0045 | [Grafana metrics and logs in conversation](0045-grafana-metrics-and-logs.md) | done |
+| 0046 | [Per-user memory the user can see and edit](0046-per-user-memory.md) | done |
+| 0047 | [Return to earlier conversations](0047-earlier-conversations.md) | done |
 | 0048 | [Background sub-agents that do not block the chat](0048-background-tasks.md) | in-progress |
 | 0049 | [Tell the model who the user is](0049-name-the-user.md) | done |
 
