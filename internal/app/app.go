@@ -48,6 +48,8 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/turnstate"
 )
 
+const telemetryShutdownTimeout = 3 * time.Second
+
 type App struct {
 	cfg           config.Config
 	logger        *slog.Logger
@@ -118,7 +120,9 @@ func (a *App) Run(ctx context.Context) (runErr error) {
 	a.telemetry = telemetry
 	a.server.Handler = health.Handler(a, telemetry)
 	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), a.cfg.ShutdownTimeout)
+		// The services have already spent the shutdown budget, so the final flush gets a short one
+		// of its own: an unreachable collector must not hold the stop past the container's grace.
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), telemetryShutdownTimeout)
 		defer cancel()
 		if err := telemetry.Shutdown(shutdownCtx); err != nil {
 			a.logger.Warn("telemetry.shutdown.failed")

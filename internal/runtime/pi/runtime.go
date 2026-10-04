@@ -140,6 +140,7 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
+	removeStaleBridges(profilesDir, logger)
 
 	return &Runtime{
 		binary:             binary,
@@ -151,6 +152,20 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 		webSearchExtension: cfg.WebSearchExtension,
 		logger:             logger,
 	}, nil
+}
+
+// removeStaleBridges deletes the per-turn bridge directories a killed process left behind. It runs
+// before the runtime exists, when no turn can be using one.
+func removeStaleBridges(profilesDir string, logger *slog.Logger) {
+	directories, err := filepath.Glob(filepath.Join(profilesDir, "*", "bridge-*"))
+	if err != nil {
+		return
+	}
+	for _, directory := range directories {
+		if err := os.RemoveAll(directory); err != nil {
+			logger.Warn("pi.bridge.cleanup_failed", "error", err)
+		}
+	}
 }
 
 func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink agentruntime.EventSink) (agentruntime.RunResult, error) {

@@ -65,8 +65,9 @@ type Service struct {
 	cancel   context.CancelFunc
 	workers  map[string]chan struct{}
 	inflight map[string]context.CancelFunc
-	// turns holds one slot per principal: two model processes on one principal's profile would
-	// race on refreshing its credentials, so chat turns and scheduled runs take turns.
+	// turns holds one slot per principal, so chat turns and scheduled runs take turns. It guarded
+	// against a credential-refresh race that Pi 1.0.0 removed by locking auth.json, which is why
+	// background tasks run outside it; relaxing it for chat and scheduled runs is a separate decision.
 	turns map[string]chan struct{}
 	wg    sync.WaitGroup
 	// captures holds what a finished chat turn measured until its reply is delivered; a restart
@@ -144,7 +145,9 @@ func (s *Service) Start(ctx context.Context) error {
 		s.mu.Unlock()
 		return fmt.Errorf("conversation service is already running")
 	}
-	runCtx, cancel := context.WithCancel(ctx)
+	// Workers stop at Shutdown, not at the start context's cancellation, so a turn running at a
+	// signal gets the same shutdown order and budget as scheduled runs and tasks.
+	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	s.ctx = runCtx
 	s.cancel = cancel
 	s.mu.Unlock()
@@ -254,7 +257,7 @@ func (s *Service) Enqueue(ctx context.Context, input EnqueueInput) error {
 		RuntimeSessionID: runtimeSessionID,
 	}, requestID, staged)
 	// Only a created request owns the staged bytes; a busy or redelivered update leaves them behind.
-	if !result.Created {
+	if !result.Created && len(staged) > 0 {
 		s.config.Attachments.Discard(staged)
 	}
 	if err != nil {

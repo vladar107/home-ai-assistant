@@ -79,6 +79,9 @@ services:
           create_host_path: false
     networks:
       - home-observability
+    # Services stop one after another within HOME_AGENT_SHUTDOWN_TIMEOUT (10s), then telemetry
+    # flushes for up to 3s; Docker's default 10s grace would kill the process before that ends.
+    stop_grace_period: 30s
     mem_limit: 1g
     cpus: 1.0
     pids_limit: 256
