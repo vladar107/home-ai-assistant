@@ -704,7 +704,7 @@ func (s *Service) turnMessage(ctx context.Context, request Request, attachments,
 			s.config.Exposure.MarkTurnExposed(ctx, request.PrincipalID, outbox.ChatTurn(request.ID))
 		}
 	}
-	message = withPlace(place, message)
+	message = s.withUser(request.PrincipalID, withPlace(place, message))
 	if s.config.Location != nil {
 		// The time goes in the message rather than the system prompt, so the prompt stays
 		// cacheable and the session history keeps when each message was sent.

@@ -29,7 +29,8 @@ const (
 )
 
 const movieGuidance = " Movie nights live in a Notion table whose title column holds the evening's date as DD.MM.YYYY and whose Фильм column holds the film. " +
-	"For that table use movies_next to answer which film is next, never by reading the rows yourself."
+	"For that table use movies_next to answer which film is next, never by reading the rows yourself. " +
+	"Each single-letter column of numbers holds the scores of the household member whose name starts with that letter, a Latin and a Cyrillic form of a letter counting as the same, so the user's own scores are in the column of their initial."
 
 const movieWriteGuidance = " For the movie table, movies_set_score records the user's own score in their own column and movies_schedule gives films their evening dates; " +
 	"use them instead of notion_update_page, because they pick the column and compute the dates."

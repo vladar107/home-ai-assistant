@@ -61,7 +61,7 @@ func (s *Service) RunScheduled(ctx context.Context, principalID, turn, message s
 	result, runErr := s.runtime.Run(turnCtx, agentruntime.RunRequest{
 		PrincipalID: principalID,
 		SessionID:   sessionID,
-		Message:     withPlace(s.locationLine(turnCtx, principalID), message),
+		Message:     s.withUser(principalID, withPlace(s.locationLine(turnCtx, principalID), message)),
 		Tools:       tools,
 		Memory:      memory,
 		WebSearch:   webSearch,
@@ -84,4 +84,12 @@ func withPlace(place, message string) string {
 		return message
 	}
 	return "[system] " + place + "\n\n" + message
+}
+
+func (s *Service) withUser(principalID, message string) string {
+	name := s.config.DisplayNames[principalID]
+	if name == "" {
+		return message
+	}
+	return "[system] The user is " + name + ".\n\n" + message
 }

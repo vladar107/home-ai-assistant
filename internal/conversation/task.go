@@ -64,7 +64,7 @@ func (s *Service) RunTask(ctx context.Context, run TaskRun) (TaskReply, error) {
 		}
 		return TaskReply{Text: UnavailableReply, ErrorKind: ErrorKindToolProvider}, nil
 	}
-	message := withPlace(s.locationLine(runCtx, run.PrincipalID), run.Message)
+	message := s.withUser(run.PrincipalID, withPlace(s.locationLine(runCtx, run.PrincipalID), run.Message))
 	if s.config.Location != nil {
 		now := s.config.Now().In(s.config.Location).Format("Monday 2 January 2006, 15:04 MST")
 		message = "[system] Current local time: " + now + " (" + s.config.Location.String() + ").\n\n" + message

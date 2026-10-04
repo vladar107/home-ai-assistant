@@ -344,4 +344,7 @@ type Config struct {
 	Now func() time.Time
 	// History titles the conversations /sessions lists; nil lists them without titles.
 	History History
+	// DisplayNames tells each turn which household member its user is; a principal without a
+	// name goes unnamed.
+	DisplayNames map[string]string
 }

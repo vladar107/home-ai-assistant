@@ -466,6 +466,10 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			}
 			notices = append(notices, conversation.OutsideNotice{Notice: tasks})
 		}
+		displayNames := make(map[string]string, len(a.cfg.Telegram.Users))
+		for _, user := range a.cfg.Telegram.Users {
+			displayNames[user.PrincipalID] = user.DisplayName
+		}
 		conversationService, err := conversation.NewService(
 			conversation.Config{
 				TurnTimeout:  a.cfg.Conversation.TurnTimeout,
@@ -483,6 +487,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 				Memory:       memoryService,
 				Exposure:     memoryService,
 				History:      conversationHistory,
+				DisplayNames: displayNames,
 			},
 			a.store,
 			runtime,
@@ -525,10 +530,6 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		a.tools = broker
 		a.approvals = approvals
 		if a.cfg.Notion.Enabled {
-			displayNames := make(map[string]string, len(a.cfg.Telegram.Users))
-			for _, user := range a.cfg.Telegram.Users {
-				displayNames[user.PrincipalID] = user.DisplayName
-			}
 			notionService, err := notion.NewService(notion.Config{
 				CredentialsDir: filepath.Join(a.cfg.DataDir, "integrations"),
 				APIBaseURL:     a.cfg.Notion.APIBaseURL,
