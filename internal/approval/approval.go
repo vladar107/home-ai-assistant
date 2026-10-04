@@ -174,10 +174,10 @@ type Service struct {
 	sweepInterval time.Duration
 	now           func() time.Time
 
-	// proposing serializes proposals, so parallel tool calls in one turn join the same bundle.
-	proposing sync.Mutex
-
-	mu        sync.Mutex
+	mu sync.Mutex
+	// proposing serializes each principal's proposals, so parallel tool calls in one turn join the
+	// same bundle. Bundles never span principals, so one principal's slow send holds no one else up.
+	proposing map[string]*sync.Mutex
 	executors map[string]Executor
 	checker   IntentChecker
 	telemetry Telemetry
@@ -215,6 +215,7 @@ func NewService(cfg Config, repository Repository, deliverer Deliverer, logger *
 		executors:     make(map[string]Executor),
 		notices:       make(map[string]string),
 		intents:       make(map[string]Intent),
+		proposing:     make(map[string]*sync.Mutex),
 	}, nil
 }
 
@@ -359,9 +360,10 @@ func (s *Service) Propose(ctx context.Context, principalID string, proposal Prop
 		return Record{}, err
 	}
 	digest := sha256.Sum256(canonical)
-	s.proposing.Lock()
+	proposing := s.proposalLock(principalID)
+	proposing.Lock()
 	record, replaced, err := s.store(ctx, principalID, proposal.Tool, canonical, hex.EncodeToString(digest[:]), proposal.Summary, id)
-	s.proposing.Unlock()
+	proposing.Unlock()
 	if err != nil || record.ID != id {
 		return record, err
 	}
@@ -374,6 +376,17 @@ func (s *Service) Propose(ctx context.Context, principalID string, proposal Prop
 	s.recordStatus(ctx, Record{PrincipalID: principalID, Tool: proposal.Tool}, "proposed")
 	s.report(ctx, replaced)
 	return record, nil
+}
+
+func (s *Service) proposalLock(principalID string) *sync.Mutex {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lock, found := s.proposing[principalID]
+	if !found {
+		lock = &sync.Mutex{}
+		s.proposing[principalID] = lock
+	}
+	return lock
 }
 
 // store joins the record to the turn's bundle or starts a new one, returning the records it
@@ -460,8 +473,9 @@ func (s *Service) AfterDelivery(ctx context.Context, principalID string, chatID 
 	s.checkIntents(ctx, bundle)
 	// Holding proposals off until the message is recorded keeps a late proposal from joining a
 	// bundle the user has already been shown without it.
-	s.proposing.Lock()
-	defer s.proposing.Unlock()
+	proposing := s.proposalLock(principalID)
+	proposing.Lock()
+	defer proposing.Unlock()
 	current, err := s.repository.PendingApprovals(ctx, principalID)
 	if err != nil {
 		return err
