@@ -790,6 +790,11 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	if a.watches != nil {
 		service.SetWatches(a.watches)
 	}
+	if a.tools != nil {
+		if err := a.tools.Register(service.Help()); err != nil {
+			return err
+		}
+	}
 	a.telegram = service
 	return nil
 }

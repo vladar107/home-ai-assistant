@@ -72,10 +72,14 @@ func extensions(report pifixture.Report) []string {
 	return named
 }
 
-func assertToolLess(t *testing.T, report pifixture.Report) {
+// assertSearchless checks that a turn loaded no extension but the tool bridge, which carries
+// app_help on every turn.
+func assertSearchless(t *testing.T, report pifixture.Report) {
 	t.Helper()
-	if !slices.Contains(report.Args, "--no-tools") || len(extensions(report)) != 0 {
-		t.Fatalf("turn without web access started with %v", report.Args)
+	for _, extension := range extensions(report) {
+		if filepath.Base(extension) != "bridge.ts" {
+			t.Fatalf("turn without web access started with %v", report.Args)
+		}
 	}
 }
 
@@ -171,7 +175,7 @@ func TestWebAccessSwitchControlsSearchAndWebTools(t *testing.T) {
 	h.push(textUpdate(8, 101, "hello again"))
 	h.wantReply(101, 8, "reply: hello again")
 	h.waitState(8, "delivered")
-	assertToolLess(t, latestReport(t, profiles, "alice"))
+	assertSearchless(t, latestReport(t, profiles, "alice"))
 	h.push(textUpdate(9, 101, "/privacy"))
 	h.wantReply(101, 9, ConversationPrivacyReply+" "+AttachmentPrivacyLine)
 

@@ -1,6 +1,6 @@
 # 0056 — Answers grounded in tool data
 
-Status: `proposed`
+Status: `done`
 
 ## Context
 
@@ -81,6 +81,31 @@ answers that look checked but are not:
 - **The web search lock stays.** Its guidance and the `app_help` entry tell
   the model to say once, plainly, that search is off in this conversation
   because it has read outside content, and to offer `/new`.
+
+- **A shared Go API for later plans.** `internal/transit` holds the status
+  vocabulary, a `Departure` result, and one renderer. A seventh status,
+  `check failed`, covers a lookup that failed for one departure while the
+  others still answer. `ns.Service.CheckDepartures`,
+  `bus.Service.CheckDepartures`, and `ns.Service.Disruptions` (structured
+  disruptions with their affected stations) serve saved routes (0057) and
+  watches (0058) directly.
+- **Matching details.** NS trip plans from the exact minute include that
+  departure. A trip matches only when its first train leaves the origin at
+  that minute; one response covers later planned times it already includes.
+  The departures-board fallback is used only to report a train NS left out
+  of its plans as cancelled. Buses match by minute, line, and an optional
+  `towards`, because one line can leave a stop in two directions in the
+  same minute. Live data comes from OVapi within the next hour, and the
+  Transitous timetable is used otherwise.
+- **Where the rules live.** The scheduled-run rule is in the scheduled turn
+  message (`internal/schedule/modelturn.go`), and the chat rule is in the
+  Pi tool prompt.
+- **`app_help` is offered on every turn**, so a turn always has tools and
+  Pi always loads the bridge. The help text is rendered from the
+  principal's own settings pages, their buttons, the connect messages, and
+  the command list.
+- **Per-row Notion summaries already existed.** Each update proposal names
+  its row and shows "old → new" per property, so only the guidance changed.
 
 ## Approach
 

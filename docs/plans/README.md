@@ -65,7 +65,7 @@ plan that links back to the earlier record.
 | 0053 | [Edit scheduled jobs](0053-edit-scheduled-jobs.md) | done |
 | 0054 | [Continue after Confirm, and runtime hygiene](0054-continue-after-confirm-and-runtime-hygiene.md) | done |
 | 0055 | [Tool reliability: fewer wasted calls, retries, and clean scheduled replies](0055-tool-reliability.md) | done |
-| 0056 | [Answers grounded in tool data](0056-grounded-answers.md) | proposed |
+| 0056 | [Answers grounded in tool data](0056-grounded-answers.md) | done |
 | 0057 | [Saved routes and easier schedule editing](0057-routes-and-schedule-editing.md) | proposed |
 | 0058 | [Watches: tell me when my train or route goes wrong](0058-watches.md) | proposed |
 

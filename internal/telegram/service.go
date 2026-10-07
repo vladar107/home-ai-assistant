@@ -229,6 +229,17 @@ func (s *Service) SetTypeSafe(typeSafe TypeSafeController) {
 	s.sections = append(s.sections, typeSafeSection{typeSafe: typeSafe})
 }
 
+func (s *Service) botCommands() []BotCommand {
+	commands := registeredCommands(s.conversation != nil, len(s.sections) > 0, s.schedules != nil)
+	if s.memory != nil {
+		commands = append(commands, BotCommand{Command: "memory", Description: "Show and delete what I remember about you"})
+	}
+	if s.tasks != nil {
+		commands = append(commands, BotCommand{Command: "tasks", Description: "Show and cancel your background tasks"})
+	}
+	return commands
+}
+
 func (s *Service) Start(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -245,13 +256,7 @@ func (s *Service) Start(ctx context.Context) error {
 		return fmt.Errorf("Telegram getMe returned an invalid bot identity")
 	}
 
-	commands := registeredCommands(s.conversation != nil, len(s.sections) > 0, s.schedules != nil)
-	if s.memory != nil {
-		commands = append(commands, BotCommand{Command: "memory", Description: "Show and delete what I remember about you"})
-	}
-	if s.tasks != nil {
-		commands = append(commands, BotCommand{Command: "tasks", Description: "Show and cancel your background tasks"})
-	}
+	commands := s.botCommands()
 	// Private chats resolve the all-private-chats scope before the default one, so a stale list there would hide the default registration.
 	for _, scope := range []CommandScope{"", CommandScopeAllPrivateChats} {
 		if err := s.client.SetMyCommands(ctx, scope, commands); err != nil {

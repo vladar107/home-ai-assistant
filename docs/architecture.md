@@ -260,6 +260,15 @@ dropped once their window ends or the watch is paused or muted. Identical upstre
 queries within one cycle share one answer. No evaluator ships yet, so no kind is
 offered and stored watches are not checked.
 
+### App help
+
+`telegram` offers `app_help` on every turn: for a topic, the `/settings` page of an
+integration rendered for that principal with its buttons and the messages they
+send, the command list, `/jobs`, or why web search is off. The text comes from
+the same rendering and strings as the pages themselves, so the model's setup
+instructions cannot drift from the app. Turns therefore always carry the tool
+bridge; web search is still offered only while the principal's web access is on.
+
 ### Departure checks
 
 `ns_trips` with `departures`, and `bus_stop_status` with `departure`, check the

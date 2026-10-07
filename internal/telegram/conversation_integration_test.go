@@ -625,6 +625,9 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := broker.Register(h.service.Help()); err != nil {
+		t.Fatal(err)
+	}
 	if h.locations != nil {
 		h.service.SetLocations(h.locations)
 	}
@@ -1157,7 +1160,7 @@ func TestConversationSessionsAndUserIsolation(t *testing.T) {
 	h.start()
 	h.push(textUpdate(1, 101, "remember amber"))
 	alice := receive(t, h.ctx, runtime.calls)
-	if alice.request.PrincipalID != "alice" || alice.request.Message != "remember amber" || !alice.request.Tools.Empty() {
+	if alice.request.PrincipalID != "alice" || alice.request.Message != "remember amber" || !onlyHelp(alice.request.Tools) {
 		t.Fatalf("unexpected runtime request: %+v", alice.request)
 	}
 	h.push(textUpdate(2, 202, "remember blue"))
