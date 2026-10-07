@@ -303,6 +303,10 @@ func (deliverer) SendProposal(context.Context, int64, string, approval.Buttons) 
 
 func (deliverer) EditText(context.Context, int64, int64, string) error { return nil }
 
+func (deliverer) EditProposal(context.Context, int64, int64, string, approval.Buttons) error {
+	return nil
+}
+
 func (deliverer) SendPreview(context.Context, int64, int64, string) error { return nil }
 
 type fixture struct {

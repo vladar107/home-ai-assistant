@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/approval/withdrawal"
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
 	"github.com/vladar107/home-ai-assistant/internal/config"
 	"github.com/vladar107/home-ai-assistant/internal/connection"
@@ -356,6 +357,9 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			return fmt.Errorf("initialize approvals: %w", err)
 		}
 		approvals.SetTelemetry(a.telemetry)
+		if err := broker.Register(withdrawal.Provider{Withdrawer: approvals}); err != nil {
+			return fmt.Errorf("register approval tools: %w", err)
+		}
 		memoryService, err := usermemory.NewService(usermemory.Config{}, a.store, approvals, a.logger)
 		if err != nil {
 			return fmt.Errorf("initialize memory: %w", err)

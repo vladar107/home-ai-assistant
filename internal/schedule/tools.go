@@ -56,7 +56,7 @@ func proposeGuidance(zone string) string {
 		"Never rewrite or reword the parts the user did not ask to change, and pass prompt, the complete new instructions, only when the user asks for a real rewrite. " +
 		"Never invent a value the user did not give, such as a time, a buffer, a walking time, or a threshold; ask for it instead. " +
 		"A recurring job stays recurring and a one-time job stays one-time; to switch, remove it and propose a new one. " +
-		"schedule_remove proposes deleting a job by its id from schedule_list. Every proposal you make in this turn is shown to the user together and confirmed or rejected as one batch, so propose every job change the request needs in this turn, once each, since a proposal cannot be withdrawn; a proposal in a later turn replaces a batch still waiting."
+		"schedule_remove proposes deleting a job by its id from schedule_list. Every proposal you make in this turn is shown to the user together and confirmed or rejected as one batch, so propose every job change the request needs in this turn, once each, and withdraw a wrong one with proposal_withdraw; a proposal in a later turn replaces a batch still waiting."
 }
 
 func reminderGuidance(zone string) string {

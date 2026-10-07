@@ -22,6 +22,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/approval/withdrawal"
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
 	"github.com/vladar107/home-ai-assistant/internal/connection"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/bus"
@@ -367,6 +368,12 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	h.approvals, err = approval.NewService(approval.Config{Lifetime: options.approvalLifetime, SweepInterval: options.approvalSweep}, h.store, h.client, logger)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// Tests that assert a turn's exact tools leave the withdraw tool out by not using the scheduler.
+	if options.schedules != nil {
+		if err := broker.Register(withdrawal.Provider{Withdrawer: h.approvals}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	h.credentialsDir = filepath.Join(t.TempDir(), "integrations")
 	var notionController NotionController

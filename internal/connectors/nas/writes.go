@@ -33,7 +33,7 @@ func writeGuidance(status Status) string {
 		"Give folder only when the user says where the file belongs, such as a folder for finances; " + destination + ". " +
 		"Only these folders can be saved to: " + strings.Join(writable, ", ") + ". Everything else on the NAS is read-only. " +
 		"After your reply the user sees the exact destination with Confirm and Reject buttons, so describe what you proposed and never claim it was saved. " +
-		"Every proposal you make in this turn is shown to the user together and confirmed or rejected as one batch, so propose every save the request needs in this turn, once each, since a proposal cannot be withdrawn; a proposal in a later turn replaces a batch still waiting. " +
+		"Every proposal you make in this turn is shown to the user together and confirmed or rejected as one batch, so propose every save the request needs in this turn, once each, and withdraw a wrong one with proposal_withdraw; a proposal in a later turn replaces a batch still waiting. " +
 		"A save can only add a new file: a name already in use is refused rather than replaced, and nothing already on the NAS can be changed or removed. " +
 		"Use list_attachments to find the id of the file the user sent."
 }

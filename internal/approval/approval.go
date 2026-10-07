@@ -36,6 +36,8 @@ const (
 	ReasonTimeout        = "timeout"
 	ReasonNoExecutor     = "no_executor"
 	ReasonExecutorFailed = "executor_failed"
+	// ReasonWithdrawn marks a rejected record the model withdrew itself.
+	ReasonWithdrawn = "withdrawn"
 
 	ActionConfirm = "confirm"
 	ActionReject  = "reject"
@@ -189,6 +191,8 @@ type Deliverer interface {
 	SendText(ctx context.Context, chatID int64, text string) (int64, error)
 	SendProposal(ctx context.Context, chatID int64, text string, buttons Buttons) (int64, error)
 	EditText(ctx context.Context, chatID, messageID int64, text string) error
+	// EditProposal replaces the text of the message with the buttons, keeping the given buttons.
+	EditProposal(ctx context.Context, chatID, messageID int64, text string, buttons Buttons) error
 	// SendPreview posts a preview's output as a reply to the proposal message.
 	SendPreview(ctx context.Context, chatID, replyTo int64, text string) error
 }
@@ -483,8 +487,14 @@ func (s *Service) store(ctx context.Context, principalID, tool string, canonical
 		if len(pending) >= maximumBundleItems {
 			return Record{}, nil, ErrBundleFull
 		}
-		first, last := pending[0], pending[len(pending)-1]
-		record.BundleID, record.Position = first.BundleID, last.Position+1
+		// The position follows every record of the bundle, withdrawn ones included, which pending
+		// leaves out.
+		first := pending[0]
+		bundle, err := s.repository.LoadBundle(ctx, first.BundleID)
+		if err != nil {
+			return Record{}, nil, fmt.Errorf("load approval bundle: %w", err)
+		}
+		record.BundleID, record.Position = first.BundleID, bundle[len(bundle)-1].Position+1
 		record.CreatedAt, record.ExpiresAt = first.CreatedAt, first.ExpiresAt
 	}
 	replaced, err := s.repository.CreateApproval(ctx, record)
@@ -630,6 +640,7 @@ func (s *Service) resendUndelivered(ctx context.Context) {
 	}
 	for _, group := range groupBundles(undelivered) {
 		bundle, err := s.repository.LoadBundle(ctx, group[0].BundleID)
+		bundle = shown(bundle)
 		if err != nil || len(bundle) == 0 {
 			continue
 		}
@@ -662,6 +673,10 @@ func (s *Service) Press(ctx context.Context, principalID, action, approvalID str
 		return Pressed{}, err
 	}
 	s.dropIntents(bundle)
+	bundle = shown(bundle)
+	if len(bundle) == 0 {
+		return Pressed{Owned: true}, nil
+	}
 	pending := slices.IndexFunc(bundle, func(item Record) bool { return item.Status == StatusPending })
 	if pending < 0 {
 		return Pressed{Text: bundleText(bundle), Owned: true}, nil
@@ -688,7 +703,7 @@ func (s *Service) Press(ctx context.Context, principalID, action, approvalID str
 			if err != nil {
 				return Pressed{}, err
 			}
-			return Pressed{Text: bundleText(current), Owned: true}, nil
+			return Pressed{Text: bundleText(shown(current)), Owned: true}, nil
 		}
 		for index := range bundle {
 			if bundle[index].Status == StatusPending {
@@ -775,6 +790,7 @@ func (s *Service) report(ctx context.Context, records []Record) {
 	}
 	for _, changed := range groupBundles(records) {
 		bundle, err := s.repository.LoadBundle(ctx, changed[0].BundleID)
+		bundle = shown(bundle)
 		if err != nil || len(bundle) == 0 {
 			bundle = changed
 		}
@@ -811,7 +827,7 @@ func groupBundles(records []Record) [][]Record {
 func (s *Service) rememberNotice(bundle []Record) {
 	var notices []string
 	for _, record := range bundle {
-		if record.Reason == ReasonReplaced {
+		if record.Reason == ReasonReplaced || record.Reason == ReasonWithdrawn {
 			continue
 		}
 		if notice := noticeText(record); notice != "" {
@@ -894,6 +910,18 @@ func messageRanges(bundle []Record, start int) [][2]int {
 	return append(ranges, [2]int{from, len(bundle)})
 }
 
+// shown leaves out the records withdrawn before any message showed them, so a bundle is numbered
+// and rendered as the user saw it, or will see it.
+func shown(bundle []Record) []Record {
+	visible := make([]Record, 0, len(bundle))
+	for _, record := range bundle {
+		if record.Reason != ReasonWithdrawn || record.MessageID != 0 {
+			visible = append(visible, record)
+		}
+	}
+	return visible
+}
+
 // bundleText renders the message that carries the bundle's buttons, which is the last one.
 func bundleText(bundle []Record) string {
 	last := bundle[len(bundle)-1]
@@ -958,6 +986,9 @@ func statusLine(record Record, limit int) string {
 	case StatusExecuted:
 		return "Done. " + outcome
 	case StatusRejected:
+		if record.Reason == ReasonWithdrawn {
+			return "Withdrawn by the assistant; nothing was written."
+		}
 		return "Rejected; nothing was written."
 	case StatusExpired:
 		switch record.Reason {

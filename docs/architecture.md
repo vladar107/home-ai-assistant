@@ -203,6 +203,9 @@ not_retryable), and each retry is logged at debug level.
    A bundle with a new or changed scheduled prompt also gets Preview, which runs
    each such prompt once through the scheduled-run path, one preview per bundle at
    a time, and posts the report under the proposal without storing a job or a run.
+   The model can withdraw items still waiting with `proposal_withdraw`; they end
+   rejected as withdrawn, the message shows them so, and it loses its buttons once
+   nothing is left.
    A Confirm that ran the actions queues a
    turn that continues the request from their outcome, so a dependent next step
    needs no nudge; it stays silent when nothing is left to do.

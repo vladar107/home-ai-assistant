@@ -450,6 +450,11 @@ func (c *Client) SendPreview(ctx context.Context, chatID, replyTo int64, text st
 	return nil
 }
 
+// EditProposal replaces the text of a proposal message and keeps its buttons as given.
+func (c *Client) EditProposal(ctx context.Context, chatID, messageID int64, text string, buttons approval.Buttons) error {
+	return c.EditKeyboard(ctx, chatID, messageID, text, proposalKeyboard(buttons))
+}
+
 // EditText replaces a bot message's text and removes its buttons.
 func (c *Client) EditText(ctx context.Context, chatID, messageID int64, text string) error {
 	return c.EditKeyboard(ctx, chatID, messageID, text, nil)

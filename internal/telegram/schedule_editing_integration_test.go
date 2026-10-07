@@ -193,3 +193,102 @@ func TestProposedJobIsPreviewedWithoutSavingAnything(t *testing.T) {
 		t.Fatalf("rename buttons = %v", buttonData(rename.keyboard))
 	}
 }
+
+// The model withdraws part of a waiting batch: the message shows the item as withdrawn and keeps
+// its buttons for the rest, Confirm runs only what is left, and a batch withdrawn before it was
+// sent shows only what remains. A batch with nothing left loses its buttons.
+func TestModelWithdrawsPartOfABatch(t *testing.T) {
+	runtime := newControlledRuntime()
+	clock := newTestClock(t, mondayMorning)
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
+	h.provision("alice", "account-alice")
+	h.start()
+
+	h.push(textUpdate(1, 101, "set up three weekly reports"))
+	chat := receive(t, h.ctx, runtime.calls)
+	call := toolCaller(t, chat)
+	for _, name := range []string{"Report A", "Report B", "Report C"} {
+		if proposed := call("schedule_propose", `{"name":"`+name+`","cron":"0 9 * * 1","prompt":"Summarise `+name+`."}`); proposed.IsError {
+			t.Fatalf("schedule_propose = %+v", proposed)
+		}
+	}
+	chat.answer <- agentruntime.RunResult{Response: "proposed"}
+	h.wantReply(101, 1, "proposed")
+	h.waitState(1, "delivered")
+	proposal := h.nextMessage()
+	h.waitMessageRecorded(proposal.messageID)
+
+	h.push(textUpdate(2, 101, "drop the second one"))
+	chat = receive(t, h.ctx, runtime.calls)
+	call = toolCaller(t, chat)
+	withdrawn := call("proposal_withdraw", `{"items":[2]}`)
+	if withdrawn.IsError || !strings.Contains(withdrawn.Text, `Withdrew item 2 (schedule_propose: Schedule "Report B")`) ||
+		!strings.Contains(withdrawn.Text, `1. schedule_propose: Schedule "Report A"; 3. schedule_propose: Schedule "Report C"`) {
+		t.Fatalf("proposal_withdraw = %+v", withdrawn)
+	}
+	edit := h.nextEdit()
+	if edit.messageID != proposal.messageID || !strings.Contains(edit.text, "Report B.\nWithdrawn by the assistant; nothing was written.") {
+		t.Fatalf("message after withdrawal = %+v", edit)
+	}
+	confirm, _ := approvalButtons(t, edit.keyboard)
+	if again := call("proposal_withdraw", `{"items":[2]}`); !again.IsError || !strings.Contains(again.Text, "Item 2 is no longer waiting") {
+		t.Fatalf("second withdrawal = %+v", again)
+	}
+	if invalid := call("proposal_withdraw", `{"items":[4]}`); !invalid.IsError || !strings.Contains(invalid.Text, "There is no item 4; the batch has 3.") {
+		t.Fatalf("withdrawal of a missing item = %+v", invalid)
+	}
+	chat.answer <- agentruntime.RunResult{Response: "withdrawn"}
+	h.wantReply(101, 2, "withdrawn")
+	h.waitState(2, "delivered")
+
+	h.push(callbackUpdate(3, 101, proposal.messageID, confirm))
+	h.wantAnswer(3)
+	if edit := h.nextEdit(); len(edit.keyboard) != 0 || strings.Count(edit.text, "Done. Scheduled.") != 2 || !strings.Contains(edit.text, "Withdrawn by the assistant") {
+		t.Fatalf("message after confirm = %+v", edit)
+	}
+	h.continueTurn(runtime, 3)
+	if count := h.countRows(`SELECT count(*) FROM scheduled_jobs`); count != 2 {
+		t.Fatalf("jobs after confirm = %d, want 2", count)
+	}
+	if count := h.countRows(`SELECT count(*) FROM approvals WHERE status = 'rejected' AND reason = 'withdrawn'`); count != 1 {
+		t.Fatalf("withdrawn approvals = %d, want 1", count)
+	}
+
+	// Withdrawn before the batch is sent, an item never reaches the user.
+	h.push(textUpdate(4, 101, "two more"))
+	chat = receive(t, h.ctx, runtime.calls)
+	call = toolCaller(t, chat)
+	for _, name := range []string{"Report D", "Report E"} {
+		if proposed := call("schedule_propose", `{"name":"`+name+`","cron":"0 10 * * 1","prompt":"Summarise `+name+`."}`); proposed.IsError {
+			t.Fatalf("schedule_propose = %+v", proposed)
+		}
+	}
+	if withdrawn := call("proposal_withdraw", `{"items":[1]}`); withdrawn.IsError || !strings.Contains(withdrawn.Text, `numbered as the user sees them: 1. schedule_propose: Schedule "Report E"`) {
+		t.Fatalf("withdrawal before sending = %+v", withdrawn)
+	}
+	if proposed := call("schedule_propose", `{"name":"Report F","cron":"0 11 * * 1","prompt":"Summarise Report F."}`); proposed.IsError {
+		t.Fatalf("schedule_propose after a withdrawal = %+v", proposed)
+	}
+	chat.answer <- agentruntime.RunResult{Response: "proposed"}
+	h.wantReply(101, 4, "proposed")
+	h.waitState(4, "delivered")
+	second := h.nextMessage()
+	if strings.Contains(second.text, "Report D") || !strings.HasPrefix(second.text, "2 changes") || !strings.Contains(second.text, "Report E") || !strings.Contains(second.text, "Report F") {
+		t.Fatalf("batch after a withdrawal before sending = %s", second.text)
+	}
+	h.waitMessageRecorded(second.messageID)
+
+	h.push(textUpdate(5, 101, "forget all of it"))
+	chat = receive(t, h.ctx, runtime.calls)
+	if withdrawn := toolCaller(t, chat)("proposal_withdraw", `{"all":true}`); withdrawn.IsError || !strings.Contains(withdrawn.Text, "Nothing is waiting for the user's confirmation any more.") {
+		t.Fatalf("withdraw all = %+v", withdrawn)
+	}
+	if edit := h.nextEdit(); edit.messageID != second.messageID || len(edit.keyboard) != 0 || !strings.Contains(edit.text, "Withdrawn by the assistant; nothing was written.") {
+		t.Fatalf("message after withdrawing all = %+v", edit)
+	}
+	chat.answer <- agentruntime.RunResult{Response: "done"}
+	h.wantReply(101, 5, "done")
+	if count := h.countRows(`SELECT count(*) FROM scheduled_jobs`); count != 2 {
+		t.Fatalf("jobs after withdrawing all = %d, want 2", count)
+	}
+}
