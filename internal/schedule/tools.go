@@ -83,7 +83,7 @@ var reminderDefinitions = []tools.Definition{
 		Description: "Set a reminder: the text is sent to the user once, at the given local time, without confirmation unless outside content was read in this conversation.",
 		Risk:        tools.RiskWrite,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
-			`"text":{"type":"string","description":"The reminder as the user should read it, at most 500 characters."},` +
+			`"text":{"type":"string","maxLength":500,"description":"The reminder as the user should read it, at most 500 characters."},` +
 			`"at":{"type":"string","description":"Local date and time, YYYY-MM-DD HH:MM, such as 2026-10-04 17:00."},` +
 			`"timezone":{"type":"string","description":"IANA time zone such as Europe/Amsterdam; omit to use the user's own."}},` +
 			`"required":["text","at"],"additionalProperties":false}`),
@@ -104,10 +104,10 @@ var writeDefinitions = []tools.Definition{
 		Description: "Propose a job that runs a prompt on a cron schedule, or once at a local time, with read-only tools and sends the result to the user. The user must confirm.",
 		Risk:        tools.RiskWrite,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
-			`"name":{"type":"string","description":"A short name the user will recognise, such as Overdue Notion tasks."},` +
+			`"name":{"type":"string","maxLength":60,"description":"A short name the user will recognise, such as Overdue Notion tasks."},` +
 			`"cron":{"type":"string","description":"For a recurring job: a five-field cron expression, such as 0 9 * * 1 for Mondays at 09:00."},` +
 			`"at":{"type":"string","description":"For a one-time job instead of cron: local date and time, YYYY-MM-DD HH:MM."},` +
-			`"prompt":{"type":"string","description":"The complete instructions for each run, at most 1000 characters."},` +
+			`"prompt":{"type":"string","maxLength":1000,"description":"The complete instructions for each run, at most 1000 characters."},` +
 			`"timezone":{"type":"string","description":"IANA time zone such as Europe/Amsterdam; omit to use the user's own."}},` +
 			`"required":["name","prompt"],"additionalProperties":false}`),
 	},
@@ -117,10 +117,10 @@ var writeDefinitions = []tools.Definition{
 		Risk:        tools.RiskWrite,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"job_id":{"type":"string","description":"The id from schedule_list."},` +
-			`"name":{"type":"string","description":"A new short name."},` +
+			`"name":{"type":"string","maxLength":60,"description":"A new short name."},` +
 			`"cron":{"type":"string","description":"For a recurring job: a new five-field cron expression."},` +
 			`"at":{"type":"string","description":"For a one-time job: a new local date and time, YYYY-MM-DD HH:MM."},` +
-			`"prompt":{"type":"string","description":"The complete new instructions, replacing the old ones, at most 1000 characters."},` +
+			`"prompt":{"type":"string","maxLength":1000,"description":"The complete new instructions, replacing the old ones, at most 1000 characters."},` +
 			`"timezone":{"type":"string","description":"A new IANA time zone such as Europe/Amsterdam."}},` +
 			`"required":["job_id"],"additionalProperties":false}`),
 	},
