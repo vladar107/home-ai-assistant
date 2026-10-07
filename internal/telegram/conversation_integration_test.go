@@ -548,6 +548,12 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		if err := h.watches.Register(watch.KindDeparture, options.watches); err != nil {
 			t.Fatal(err)
 		}
+		if err := broker.Register(h.watches); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.approvals.RegisterExecutor(h.watches); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if options.tasks != nil {
 		taskConfig := *options.tasks

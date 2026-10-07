@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
+	"github.com/vladar107/home-ai-assistant/internal/watch"
 )
 
 const (
@@ -22,6 +23,10 @@ const (
 	jobRunAction    = "run"
 	jobDeleteAction = "delete"
 	jobsPageAction  = "page"
+	// Watches share the /jobs list under their own actions, since a watch ID is not a job ID.
+	watchPauseJobAction  = "wpause"
+	watchResumeJobAction = "wresume"
+	watchDeleteJobAction = "wdelete"
 
 	jobsPerPage = 8
 )
@@ -38,19 +43,26 @@ type ScheduleController interface {
 
 var errUnknownJobAction = errors.New("unknown job action")
 
-// renderJobs lists one page of the principal's jobs with one row of buttons each. Buttons are
-// numbered like the list, because Telegram shows only the button text, and a page keeps the
-// message within Telegram's limits of 100 buttons and 4,096 characters. A page past the end shows
-// the last one.
-func renderJobs(ctx context.Context, principalID string, schedules ScheduleController, page int) (string, InlineKeyboard, error) {
+// renderJobs lists one page of the principal's jobs, then their watches, with one row of buttons
+// each. Buttons are numbered like the list, because Telegram shows only the button text, and a page
+// keeps the message within Telegram's limits of 100 buttons and 4,096 characters. A page past the
+// end shows the last one.
+func renderJobs(ctx context.Context, principalID string, schedules ScheduleController, watches WatchController, page int) (string, InlineKeyboard, error) {
 	jobs, err := schedules.Jobs(ctx, principalID)
 	if err != nil {
 		return "", nil, err
 	}
-	if len(jobs) == 0 {
+	var watchList []watch.Watch
+	if watches != nil {
+		if watchList, err = watches.Watches(ctx, principalID); err != nil {
+			return "", nil, err
+		}
+	}
+	total := len(jobs) + len(watchList)
+	if total == 0 {
 		return NoJobsReply, nil, nil
 	}
-	pages := (len(jobs) + jobsPerPage - 1) / jobsPerPage
+	pages := (total + jobsPerPage - 1) / jobsPerPage
 	page = min(max(page, 1), pages)
 	title := JobsTitle
 	if pages > 1 {
@@ -59,8 +71,15 @@ func renderJobs(ctx context.Context, principalID string, schedules ScheduleContr
 	lines := []string{title, ""}
 	var keyboard InlineKeyboard
 	first := (page - 1) * jobsPerPage
-	for index, job := range jobs[first:min(first+jobsPerPage, len(jobs))] {
-		number := strconv.Itoa(first + index + 1)
+	for index := first; index < min(first+jobsPerPage, total); index++ {
+		number := strconv.Itoa(index + 1)
+		if index >= len(jobs) {
+			line, row := renderWatchEntry(watchList[index-len(jobs)], watches, number, page)
+			lines = append(lines, line)
+			keyboard = append(keyboard, row)
+			continue
+		}
+		job := jobs[index]
 		state := schedule.DescribeJob(job, schedules.DefaultZone())
 		var row []InlineButton
 		if !job.OneTime() {
@@ -97,6 +116,18 @@ func renderJobs(ctx context.Context, principalID string, schedules ScheduleContr
 		keyboard = append(keyboard, navigation)
 	}
 	return strings.Join(lines, "\n"), keyboard, nil
+}
+
+// renderWatchEntry is one watch in /jobs, with pause or resume and delete.
+func renderWatchEntry(w watch.Watch, watches WatchController, number string, page int) (string, []InlineButton) {
+	toggle := InlineButton{Text: "Pause " + number, CallbackData: jobCallback(watchPauseJobAction, w.ID, page)}
+	if !w.Enabled {
+		toggle = InlineButton{Text: "Resume " + number, CallbackData: jobCallback(watchResumeJobAction, w.ID, page)}
+	}
+	return fmt.Sprintf("%s. 👁 %s\n%s", number, w.Label(), watches.DescribeState(w)), []InlineButton{
+		toggle,
+		{Text: "Delete " + number, CallbackData: jobCallback(watchDeleteJobAction, w.ID, page)},
+	}
 }
 
 func jobCallback(action, jobID string, page int) string {
@@ -142,7 +173,7 @@ func parseJobCallback(data string) (string, string, int, bool) {
 // actOnJob performs one button's action on the principal's own job and returns a message for the
 // user when the refreshed list alone would not say what happened.
 // The trigger names the press, so a press the poller retries runs the job once.
-func actOnJob(ctx context.Context, principalID, action, jobID, trigger string, schedules ScheduleController) (string, error) {
+func actOnJob(ctx context.Context, principalID, action, jobID, trigger string, schedules ScheduleController, watches WatchController) (string, error) {
 	var changed bool
 	var err error
 	switch action {
@@ -152,6 +183,18 @@ func actOnJob(ctx context.Context, principalID, action, jobID, trigger string, s
 		changed, err = schedules.SetEnabled(ctx, principalID, jobID, action == jobResumeAction)
 	case jobDeleteAction:
 		changed, err = schedules.Delete(ctx, principalID, jobID)
+	case watchPauseJobAction, watchResumeJobAction, watchDeleteJobAction:
+		if watches == nil {
+			return "", errUnknownJobAction
+		}
+		if action == watchDeleteJobAction {
+			changed, err = watches.Delete(ctx, principalID, jobID)
+		} else {
+			changed, err = watches.SetEnabled(ctx, principalID, jobID, action == watchResumeJobAction)
+		}
+		if err == nil && !changed {
+			return WatchGoneReply, nil
+		}
 	case jobRunAction:
 		changed, err = schedules.RunNow(ctx, principalID, jobID, trigger)
 		if err == nil && changed {

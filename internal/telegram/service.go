@@ -804,7 +804,7 @@ func pressTrigger(bot Bot, updateID int64) string {
 func (s *Service) processJobPress(ctx context.Context, trigger string, callback *CallbackQuery, principalID, action, jobID string, page int) (processingResult, string, error) {
 	result := processingResult{event: "telegram.callback.handled", principalID: principalID, command: "jobs." + action}
 	chatID, messageID := callback.Message.Chat.ID, callback.Message.MessageID
-	followUp, err := actOnJob(ctx, principalID, action, jobID, trigger, s.schedules)
+	followUp, err := actOnJob(ctx, principalID, action, jobID, trigger, s.schedules, s.watches)
 	if errors.Is(err, errUnknownJobAction) {
 		result.command, result.reason, err = "jobs", "unknown_action", nil
 	}
@@ -812,7 +812,7 @@ func (s *Service) processJobPress(ctx context.Context, trigger string, callback 
 		return processingResult{}, "jobs_action", err
 	}
 
-	text, keyboard, err := renderJobs(ctx, principalID, s.schedules, page)
+	text, keyboard, err := renderJobs(ctx, principalID, s.schedules, s.watches, page)
 	if err != nil {
 		return processingResult{}, "render_jobs", err
 	}
@@ -957,7 +957,7 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		if s.schedules == nil {
 			return HelpReply, nil, nil
 		}
-		return renderJobs(ctx, principalID, s.schedules, 1)
+		return renderJobs(ctx, principalID, s.schedules, s.watches, 1)
 	case "memory":
 		if s.memory == nil {
 			return HelpReply, nil, nil
