@@ -32,6 +32,7 @@ const writeGuidance = "Notion writes are on, and every write needs the user's co
 	"Property values are Notion API property value objects keyed by property name, for example {\"Status\": {\"status\": {\"name\": \"Done\"}}}. " +
 	"Read the target's structure before proposing property values: notion_get_page shows a row's Structure line, and a data source lists every property with the options it accepts. " +
 	"Spell an option exactly as the table spells it, because Notion cannot add one. " +
+	"A change to several rows is one notion_update_page proposal per row, each naming its row and the value it writes, so the user can check the mapping; build that mapping from rows you read in a defined order, never from an order you assume. " +
 	"Every proposal is checked against that structure before the user sees it, so a wrong property or option comes back to you as a tool failure naming the valid alternatives; correct it and propose again in the same turn."
 
 var writeDefinitions = []tools.Definition{

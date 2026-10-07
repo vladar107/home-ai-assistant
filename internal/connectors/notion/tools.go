@@ -23,6 +23,9 @@ const (
 const readGuidance = "Notion: notion_search finds pages and data sources the user shared with their Notion connection. " +
 	"notion_get_page reads one page's properties and, when include_content is true, its text content. " +
 	"notion_query_data_source lists the entries of one data source; filter and sorts follow Notion's API format and are validated by Notion. " +
+	"Query results state their order: sorted as the request asked, or in API order, which is not the order the user sees in their view. " +
+	"Never claim a row, value, or order you have not read, such as the next entry in a series; read the rows first. " +
+	"Before anything that depends on order, such as numbering rows or setting dates in sequence, query with sorts on a real property, such as a date or a number, or ask the user which order they mean. " +
 	"A table inside a page appears in its content as a [database] line with an ID; pass that ID to notion_query_data_source to read the table's rows. " +
 	"A block that holds nested content prints its own block ID; pass that ID to notion_get_block_children to read one level deeper. " +
 	"A simple table drawn inside a page is a [table] block whose rows are its nested content, so read it that way rather than asking the user. " +
@@ -185,7 +188,7 @@ func (s *Service) run(ctx context.Context, token string, call tools.Call) (strin
 		if err != nil {
 			return s.queryThroughDatabase(ctx, token, arguments.DataSourceID, request, err)
 		}
-		return renderList("Data source entries", result), nil
+		return renderList(entriesHeading(request.Sorts), result), nil
 	case toolGetBlockChildren:
 		var arguments struct {
 			BlockID string `json:"block_id"`
@@ -226,7 +229,7 @@ func (s *Service) queryThroughDatabase(ctx context.Context, token, id string, re
 	if err != nil {
 		return "", err
 	}
-	return renderList("Data source entries", result), nil
+	return renderList(entriesHeading(request.Sorts), result), nil
 }
 
 // parentSchema renders the schema of the data source a page belongs to, so the model sees the

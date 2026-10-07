@@ -639,3 +639,25 @@ func TestARejectedWriteNamesTheOptionThatNoLongerMatches(t *testing.T) {
 		t.Fatalf("logs carry provider text or content: %s", logs)
 	}
 }
+
+func TestQueryResultsStateTheirOrder(t *testing.T) {
+	f := newFixture(t)
+	f.sim.ShareDataSource(token, notionsim.DataSource{
+		ID: "ds-movies", Title: "Movie nights", URL: "https://notion.so/ds-movies",
+		Properties: map[string]any{"Name": notionsim.SchemaProperty("title")},
+	})
+	f.sim.SharePage(token, notionsim.Page{
+		ID: "row-dune", Title: "Dune", URL: "https://notion.so/row-dune", LastEdited: "2026-09-01T00:00:00.000Z",
+		DataSourceID: "ds-movies", Properties: map[string]any{"Name": notionsim.TitleProperty("Dune")},
+	})
+	f.contribute()
+
+	unsorted := f.execute("notion_query_data_source", `{"data_source_id":"ds-movies"}`)
+	if unsorted.IsError || !strings.HasPrefix(unsorted.Text, "Data source entries (API order, not the view's order; query with sorts for a defined order): 1 result(s)") {
+		t.Fatalf("unsorted query = %+v", unsorted)
+	}
+	sorted := f.execute("notion_query_data_source", `{"data_source_id":"ds-movies","sorts":[{"property":"Date","direction":"ascending"},{"timestamp":"created_time","direction":"descending"}]}`)
+	if sorted.IsError || !strings.HasPrefix(sorted.Text, "Data source entries (sorted by Date ascending, then created time descending): 1 result(s)") {
+		t.Fatalf("sorted query = %+v", sorted)
+	}
+}

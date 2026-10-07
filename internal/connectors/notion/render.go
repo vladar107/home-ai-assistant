@@ -35,6 +35,35 @@ func plainText(parts []RichText) string {
 	return builder.String()
 }
 
+// entriesHeading names the order of a data source query's entries, since without sorts Notion
+// returns them in an order of its own rather than the one the user's view shows.
+func entriesHeading(sorts json.RawMessage) string {
+	var parsed []struct {
+		Property  string `json:"property"`
+		Timestamp string `json:"timestamp"`
+		Direction string `json:"direction"`
+	}
+	_ = json.Unmarshal(sorts, &parsed)
+	var keys []string
+	for _, entry := range parsed {
+		key := strings.TrimSpace(entry.Property)
+		if key == "" {
+			key = strings.ReplaceAll(strings.TrimSpace(entry.Timestamp), "_", " ")
+		}
+		if key == "" {
+			continue
+		}
+		if direction := strings.TrimSpace(entry.Direction); direction != "" {
+			key += " " + direction
+		}
+		keys = append(keys, truncateText(key, 100))
+	}
+	if len(keys) == 0 {
+		return "Data source entries (API order, not the view's order; query with sorts for a defined order)"
+	}
+	return "Data source entries (sorted by " + strings.Join(keys, ", then ") + ")"
+}
+
 // renderList renders search or query results as compact lines the model can quote IDs from.
 func renderList(heading string, list List[Object]) string {
 	var builder strings.Builder
