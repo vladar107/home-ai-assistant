@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/vladar107/home-ai-assistant/internal/httpretry"
 )
 
 const maximumAPIBytes = 4 << 20
@@ -34,7 +36,7 @@ func newHTTPClient() *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
 	return &http.Client{
-		Transport: transport,
+		Transport: httpretry.New(transport, httpretry.Options{Service: "places"}),
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
@@ -54,7 +56,7 @@ func (s *Service) getJSON(ctx context.Context, base *url.URL, path string, query
 
 // postForm sends the form to the base address itself, as Overpass expects its query.
 func (s *Service) postForm(ctx context.Context, base *url.URL, form url.Values, into any) error {
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, base.String(), strings.NewReader(form.Encode()))
+	request, err := http.NewRequestWithContext(httpretry.Idempotent(ctx), http.MethodPost, base.String(), strings.NewReader(form.Encode()))
 	if err != nil {
 		return errMalformed
 	}

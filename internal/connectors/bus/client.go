@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/vladar107/home-ai-assistant/internal/httpretry"
 )
 
 const (
@@ -52,7 +54,7 @@ func newClient(base *url.URL, agent string) *client {
 		base:  base,
 		agent: agent,
 		http: &http.Client{
-			Transport: transport,
+			Transport: httpretry.New(transport, httpretry.Options{Service: "bus"}),
 			Timeout:   requestTimeout,
 			CheckRedirect: func(*http.Request, []*http.Request) error {
 				return http.ErrUseLastResponse

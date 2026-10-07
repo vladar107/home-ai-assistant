@@ -14,6 +14,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/vladar107/home-ai-assistant/internal/httpretry"
 )
 
 const (
@@ -103,7 +105,7 @@ func NewClient(cfg Config) (*Client, error) {
 		client.model = defaultModel
 	}
 	if client.httpClient == nil {
-		client.httpClient = &http.Client{Timeout: defaultTimeout}
+		client.httpClient = &http.Client{Timeout: defaultTimeout, Transport: httpretry.New(nil, httpretry.Options{Service: "typesafe"})}
 	}
 	return client, nil
 }
@@ -183,7 +185,7 @@ func (c *Client) ask(ctx context.Context, state map[string]Redacted, questions m
 	if err != nil {
 		return Answers{}, fmt.Errorf("encode judgment request: %w", err)
 	}
-	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(body))
+	httpRequest, err := http.NewRequestWithContext(httpretry.Idempotent(ctx), http.MethodPost, c.endpoint, bytes.NewReader(body))
 	if err != nil {
 		return Answers{}, fmt.Errorf("build judgment request: %w", err)
 	}

@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/vladar107/home-ai-assistant/internal/httpretry"
 )
 
 const (
@@ -121,7 +123,7 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		*endpoint.target = value
 	}
 	if client.httpClient == nil {
-		client.httpClient = &http.Client{Timeout: requestTimeout + time.Second}
+		client.httpClient = &http.Client{Timeout: requestTimeout + time.Second, Transport: httpretry.New(nil, httpretry.Options{Service: "google"})}
 	}
 	return client, nil
 }
@@ -181,7 +183,7 @@ func (c *Client) Exchange(ctx context.Context, code, verifier string) (Tokens, e
 }
 
 func (c *Client) Refresh(ctx context.Context, refresh string) (Tokens, error) {
-	return c.token(ctx, url.Values{
+	return c.token(httpretry.Idempotent(ctx), url.Values{
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {refresh},
 	})

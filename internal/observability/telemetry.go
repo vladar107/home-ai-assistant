@@ -67,6 +67,7 @@ type Telemetry struct {
 	modelCallsPerTurn            metric.Int64Histogram
 	modelTurnTokens              metric.Int64Histogram
 	toolCalls                    metric.Int64Counter
+	httpRetries                  metric.Int64Counter
 	toolDuration                 metric.Float64Histogram
 	toolCallsPerTurn             metric.Int64Histogram
 	dayCardRenderDuration        metric.Float64Histogram
@@ -357,6 +358,9 @@ func (t *Telemetry) createBusinessInstruments(meter metric.Meter) error {
 	if t.toolCalls, err = counter("home_agent.tool.calls", "Tool calls completed.", "{call}"); err != nil {
 		return err
 	}
+	if t.httpRetries, err = counter("home_agent.http.retries", "Requests to external services that were retried, by service and final outcome.", "{request}"); err != nil {
+		return err
+	}
 	if t.toolDuration, err = seconds("home_agent.tool.duration", "Tool call duration.", requestDurationBoundaries); err != nil {
 		return err
 	}
@@ -499,6 +503,10 @@ func (t *Telemetry) StartTelegramUpdate(ctx context.Context) (context.Context, f
 
 func (t *Telemetry) RecordTelegramRetry(ctx context.Context, reason string) {
 	t.telegramRetries.Add(ctx, 1, metric.WithAttributes(attribute.String("home_agent.reason", reason)))
+}
+
+func (t *Telemetry) RecordHTTPRetry(ctx context.Context, service, outcome string) {
+	t.httpRetries.Add(ctx, 1, metric.WithAttributes(attribute.String("home_agent.service", service), attribute.String("home_agent.outcome", outcome)))
 }
 
 func (t *Telemetry) StartConversationTurn(ctx context.Context, principal, safetyChecks string) (context.Context, func(string, string)) {

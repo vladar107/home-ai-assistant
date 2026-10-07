@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/vladar107/home-ai-assistant/internal/httpretry"
 )
 
 const (
@@ -80,7 +82,7 @@ func NewClient(apiBaseURL string, httpClient *http.Client) (*Client, error) {
 		return nil, fmt.Errorf("Calendar endpoint must use HTTPS, or HTTP for a loopback address")
 	}
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: requestTimeout + time.Second}
+		httpClient = &http.Client{Timeout: requestTimeout + time.Second, Transport: httpretry.New(nil, httpretry.Options{Service: "calendar"})}
 	}
 	return &Client{apiBaseURL: value, httpClient: httpClient}, nil
 }

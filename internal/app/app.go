@@ -32,6 +32,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/delivery"
 	"github.com/vladar107/home-ai-assistant/internal/exposure"
 	"github.com/vladar107/home-ai-assistant/internal/health"
+	"github.com/vladar107/home-ai-assistant/internal/httpretry"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/judgment"
 	userlocation "github.com/vladar107/home-ai-assistant/internal/location"
@@ -118,6 +119,7 @@ func (a *App) Run(ctx context.Context) (runErr error) {
 		return fmt.Errorf("initialize observability: %w", err)
 	}
 	a.telemetry = telemetry
+	httpretry.SetDefaults(telemetry, a.logger)
 	a.server.Handler = health.Handler(a, telemetry)
 	defer func() {
 		// The services have already spent the shutdown budget, so the final flush gets a short one

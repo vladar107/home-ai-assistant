@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/vladar107/home-ai-assistant/internal/httpretry"
 )
 
 const (
@@ -119,7 +121,7 @@ func newGuard(resolver Resolver, dial DialFunc) *guard {
 		IdleConnTimeout:       30 * time.Second,
 	}
 	g.client = &http.Client{
-		Transport: transport,
+		Transport: httpretry.New(transport, httpretry.Options{Service: "web"}),
 		Timeout:   requestTimeout,
 		CheckRedirect: func(request *http.Request, via []*http.Request) error {
 			if len(via) > maximumRedirect {

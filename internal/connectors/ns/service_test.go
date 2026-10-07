@@ -14,10 +14,12 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/connectors/ns"
+	"github.com/vladar107/home-ai-assistant/internal/httpretry"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
@@ -150,6 +152,7 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
+	httpretry.WithoutWaits(t)
 	ctx := t.Context()
 	state, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
 	if err != nil {
@@ -375,8 +378,8 @@ func TestStationNamesResolveOnceFetched(t *testing.T) {
 	f.server.fail("v2/stations", http.StatusServiceUnavailable, "{}")
 	wantText(t, f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal"}), "from Amersfoort Schothorst to Utrecht Centraal")
 	wantText(t, f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Dordrecht"}), "from Amersfoort Schothorst to Dordrecht")
-	if got := len(f.server.seen("v2/stations")); got != 2 {
-		t.Fatalf("station list fetched %d times after a failed daily refresh, want one retry only", got)
+	if got := len(f.server.seen("v2/stations")); got != 1+httpretry.MaximumAttempts {
+		t.Fatalf("station list fetched %d times after a failed daily refresh, want one failed refresh of %d attempts", got, httpretry.MaximumAttempts)
 	}
 	if !strings.Contains(f.logs.String(), "ns.stations.refresh_failed") {
 		t.Fatalf("the failed refresh was not logged:\n%s", f.logs.String())
@@ -657,6 +660,26 @@ func TestStationListRefreshWaitsHonourTheCallersContext(t *testing.T) {
 	}
 }
 
+func TestATransientFailureIsRetriedBeforeAnswering(t *testing.T) {
+	f := newFixture(t)
+	trips := fixtureBytes(t, "trips.json")
+	var calls atomic.Int32
+	f.server.route("v3/trips", func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			http.Error(w, "busy", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(trips)
+	})
+
+	result := f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal", "date_time": "2026-10-05T08:00"})
+	wantText(t, result, "NS trips from Amersfoort Schothorst to Utrecht Centraal")
+	if result.IsError || calls.Load() != 2 {
+		t.Fatalf("result %+v after %d upstream calls, want an answer on the second", result, calls.Load())
+	}
+}
+
 func TestFailuresBecomeOneSentenceWithoutTheKey(t *testing.T) {
 	for _, test := range []struct {
 		name   string
@@ -678,8 +701,12 @@ func TestFailuresBecomeOneSentenceWithoutTheKey(t *testing.T) {
 			if !result.IsError || result.Text != test.want {
 				t.Fatalf("result = %+v, want the error %q", result, test.want)
 			}
-			if got := len(f.server.seen("v3/trips")); got != 1 {
-				t.Fatalf("NS was asked %d times, want once", got)
+			want := 1
+			if test.status == http.StatusTooManyRequests || test.status >= http.StatusInternalServerError {
+				want = httpretry.MaximumAttempts
+			}
+			if got := len(f.server.seen("v3/trips")); got != want {
+				t.Fatalf("NS was asked %d times, want %d", got, want)
 			}
 			logs := f.logs.String()
 			if strings.Contains(logs, apiKey) || !strings.Contains(logs, "ns.request.failed") {

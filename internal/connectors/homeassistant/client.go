@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"golang.org/x/net/websocket"
+
+	"github.com/vladar107/home-ai-assistant/internal/httpretry"
 )
 
 const (
@@ -56,7 +58,7 @@ func newClient(base *url.URL, token string) *client {
 		base:  base,
 		token: token,
 		http: &http.Client{
-			Transport: transport,
+			Transport: httpretry.New(transport, httpretry.Options{Service: "homeassistant"}),
 			Timeout:   requestTimeout,
 			CheckRedirect: func(*http.Request, []*http.Request) error {
 				return http.ErrUseLastResponse
@@ -135,6 +137,9 @@ func (c *client) mcp(ctx context.Context, method string, params any, into any) e
 	request := map[string]any{"jsonrpc": "2.0", "id": 1, "method": method}
 	if params != nil {
 		request["params"] = params
+	}
+	if method != "tools/call" {
+		ctx = httpretry.Idempotent(ctx)
 	}
 	payload, contentType, err := c.do(ctx, http.MethodPost, mcpPath, request, "application/json, text/event-stream")
 	if err != nil {

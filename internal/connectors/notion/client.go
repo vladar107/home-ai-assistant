@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/httpretry"
 	"github.com/vladar107/home-ai-assistant/internal/integration"
 )
 
@@ -49,7 +50,7 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	parsed.Path = strings.TrimRight(parsed.Path, "/")
 	httpClient := cfg.HTTPClient
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: requestTimeout + time.Second}
+		httpClient = &http.Client{Timeout: requestTimeout + time.Second, Transport: httpretry.New(nil, httpretry.Options{Service: "notion"})}
 	}
 	return &Client{baseURL: parsed.String(), httpClient: httpClient}, nil
 }
@@ -203,7 +204,7 @@ func (c *Client) Search(ctx context.Context, token string, request SearchRequest
 		body["start_cursor"] = request.Cursor
 	}
 	var result List[Object]
-	err := c.do(ctx, token, http.MethodPost, "/v1/search", body, &result)
+	err := c.do(httpretry.Idempotent(ctx), token, http.MethodPost, "/v1/search", body, &result)
 	return result, err
 }
 
@@ -252,7 +253,7 @@ func (c *Client) QueryDataSource(ctx context.Context, token, dataSourceID string
 		body["start_cursor"] = request.Cursor
 	}
 	var result List[Object]
-	err := c.do(ctx, token, http.MethodPost, "/v1/data_sources/"+url.PathEscape(dataSourceID)+"/query", body, &result)
+	err := c.do(httpretry.Idempotent(ctx), token, http.MethodPost, "/v1/data_sources/"+url.PathEscape(dataSourceID)+"/query", body, &result)
 	return result, err
 }
 

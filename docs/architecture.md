@@ -174,6 +174,16 @@ flowchart TB
 registry (lifecycle and readiness), the tool broker (the tools it offers), and, if
 it can write, the approval service (the executor for confirmed proposals).
 
+Every external HTTP client except Telegram and the model-connection flow wraps its
+transport in `internal/httpretry`, which retries transient failures: at most 4
+attempts within 5 s of the first, full-jitter exponential backoff, never past the
+request's deadline, and `Retry-After` honored when it fits. Reads are retried; a
+POST is retried only when its call site marks it idempotent (read-only queries) or
+the connection never opened. The web connector's transport sits inside its address
+guard, so each attempt is checked again. The `home_agent.http.retries` counter
+records retried requests by service and outcome (recovered, exhausted,
+not_retryable), and each retry is logged at debug level.
+
 ### A conversation turn
 
 1. `telegram` receives an update, `identity` resolves the sender to a principal, and

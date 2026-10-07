@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/vladar107/home-ai-assistant/internal/httpretry"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -197,7 +198,7 @@ func (s stateObject) unit() string {
 // liveContext asks the MCP server for every exposed entity. A non-admin token cannot read the
 // exposure settings, but this tool lists exactly what Assist exposes.
 func (s *Service) liveContext(ctx context.Context) ([]exposedEntity, error) {
-	text, isError, err := s.callTool(ctx, liveContextTool, map[string]any{})
+	text, isError, err := s.callTool(httpretry.Idempotent(ctx), liveContextTool, map[string]any{})
 	if err != nil {
 		return nil, err
 	}

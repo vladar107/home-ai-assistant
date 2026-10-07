@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/connectors/google"
+	"github.com/vladar107/home-ai-assistant/internal/httpretry"
 )
 
 const (
@@ -78,7 +79,7 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	}
 	client := &Client{apiBaseURL: base, httpClient: cfg.HTTPClient}
 	if client.httpClient == nil {
-		client.httpClient = &http.Client{Timeout: requestTimeout + time.Second}
+		client.httpClient = &http.Client{Timeout: requestTimeout + time.Second, Transport: httpretry.New(nil, httpretry.Options{Service: "gmail"})}
 	}
 	return client, nil
 }

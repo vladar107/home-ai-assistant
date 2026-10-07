@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/httpretry"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -155,7 +156,11 @@ func (s *Service) Execute(ctx context.Context, principalID string, call tools.Ca
 	if tool.definition.Risk == tools.RiskWrite && s.exposure != nil && s.exposure.External(ctx, principalID) {
 		return s.proposeAction(ctx, principalID, call.Name, tool, arguments), nil
 	}
-	text, isError, err := s.callTool(ctx, tool.remote, arguments)
+	callCtx := ctx
+	if tool.definition.Risk != tools.RiskWrite {
+		callCtx = httpretry.Idempotent(ctx)
+	}
+	text, isError, err := s.callTool(callCtx, tool.remote, arguments)
 	if err != nil {
 		return failure(err), nil
 	}
