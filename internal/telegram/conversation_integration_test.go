@@ -43,6 +43,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/location"
 	"github.com/vladar107/home-ai-assistant/internal/memory"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
+	"github.com/vladar107/home-ai-assistant/internal/routes"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
@@ -192,6 +193,9 @@ type harnessOptions struct {
 	// watches adds the watch service, on the schedules clock, checking departures with this
 	// evaluator; tests run its cycles themselves.
 	watches watch.Evaluator
+	// routes adds saved routes with their tools and /jobs entries, checked through the ns and bus
+	// connectors where those are set.
+	routes bool
 }
 
 type fixedDescriber string
@@ -233,6 +237,7 @@ type conversationHarness struct {
 	scheduler      *schedule.Service
 	tasks          *task.Service
 	watches        *watch.Service
+	routes         *routes.Service
 	auth           *codexauth.Simulator
 	profilesDir    string
 	credentialsDir string
@@ -555,6 +560,29 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 			t.Fatal(err)
 		}
 	}
+	if options.routes {
+		amsterdam, err := time.LoadLocation("Europe/Amsterdam")
+		if err != nil {
+			t.Fatal(err)
+		}
+		routeConfig := routes.Config{Location: amsterdam, Now: options.schedules.Now}
+		if h.ns != nil {
+			routeConfig.Trains = h.ns
+		}
+		if h.bus != nil {
+			routeConfig.Buses = h.bus
+		}
+		h.routes, err = routes.NewService(routeConfig, h.store, h.approvals, logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := broker.Register(h.routes); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.approvals.RegisterExecutor(h.routes); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if options.tasks != nil {
 		taskConfig := *options.tasks
 		taskConfig.Cards, taskConfig.Photos = cards, photos
@@ -643,6 +671,9 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	}
 	if h.watches != nil {
 		h.service.SetWatches(h.watches)
+	}
+	if h.routes != nil {
+		h.service.SetRoutes(h.routes)
 	}
 	t.Cleanup(h.stop)
 	return h

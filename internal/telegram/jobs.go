@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/vladar107/home-ai-assistant/internal/routes"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/watch"
 )
@@ -27,6 +28,7 @@ const (
 	watchPauseJobAction  = "wpause"
 	watchResumeJobAction = "wresume"
 	watchDeleteJobAction = "wdelete"
+	routeDeleteJobAction = "rdelete"
 
 	jobsPerPage = 8
 )
@@ -43,11 +45,11 @@ type ScheduleController interface {
 
 var errUnknownJobAction = errors.New("unknown job action")
 
-// renderJobs lists one page of the principal's jobs, then their watches, with one row of buttons
-// each. Buttons are numbered like the list, because Telegram shows only the button text, and a page
-// keeps the message within Telegram's limits of 100 buttons and 4,096 characters. A page past the
-// end shows the last one.
-func renderJobs(ctx context.Context, principalID string, schedules ScheduleController, watches WatchController, page int) (string, InlineKeyboard, error) {
+// renderJobs lists one page of the principal's jobs, then their watches and saved routes, with one
+// row of buttons each. Buttons are numbered like the list, because Telegram shows only the button
+// text, and a page keeps the message within Telegram's limits of 100 buttons and 4,096 characters.
+// A page past the end shows the last one.
+func renderJobs(ctx context.Context, principalID string, schedules ScheduleController, watches WatchController, routeList RouteController, page int) (string, InlineKeyboard, error) {
 	jobs, err := schedules.Jobs(ctx, principalID)
 	if err != nil {
 		return "", nil, err
@@ -58,7 +60,13 @@ func renderJobs(ctx context.Context, principalID string, schedules ScheduleContr
 			return "", nil, err
 		}
 	}
-	total := len(jobs) + len(watchList)
+	var saved []routes.Route
+	if routeList != nil {
+		if saved, err = routeList.Routes(ctx, principalID); err != nil {
+			return "", nil, err
+		}
+	}
+	total := len(jobs) + len(watchList) + len(saved)
 	if total == 0 {
 		return NoJobsReply, nil, nil
 	}
@@ -73,6 +81,12 @@ func renderJobs(ctx context.Context, principalID string, schedules ScheduleContr
 	first := (page - 1) * jobsPerPage
 	for index := first; index < min(first+jobsPerPage, total); index++ {
 		number := strconv.Itoa(index + 1)
+		if index >= len(jobs)+len(watchList) {
+			route := saved[index-len(jobs)-len(watchList)]
+			lines = append(lines, fmt.Sprintf("%s. 🧭 %s\n%s", number, route.Heading(), route.Outline()))
+			keyboard = append(keyboard, []InlineButton{{Text: "Delete " + number, CallbackData: jobCallback(routeDeleteJobAction, route.ID, page)}})
+			continue
+		}
 		if index >= len(jobs) {
 			line, row := renderWatchEntry(watchList[index-len(jobs)], watches, number, page)
 			lines = append(lines, line)
@@ -173,7 +187,7 @@ func parseJobCallback(data string) (string, string, int, bool) {
 // actOnJob performs one button's action on the principal's own job and returns a message for the
 // user when the refreshed list alone would not say what happened.
 // The trigger names the press, so a press the poller retries runs the job once.
-func actOnJob(ctx context.Context, principalID, action, jobID, trigger string, schedules ScheduleController, watches WatchController) (string, error) {
+func actOnJob(ctx context.Context, principalID, action, jobID, trigger string, schedules ScheduleController, watches WatchController, routeList RouteController) (string, error) {
 	var changed bool
 	var err error
 	switch action {
@@ -194,6 +208,14 @@ func actOnJob(ctx context.Context, principalID, action, jobID, trigger string, s
 		}
 		if err == nil && !changed {
 			return WatchGoneReply, nil
+		}
+	case routeDeleteJobAction:
+		if routeList == nil {
+			return "", errUnknownJobAction
+		}
+		changed, err = routeList.Delete(ctx, principalID, jobID)
+		if err == nil && !changed {
+			return RouteGoneReply, nil
 		}
 	case jobRunAction:
 		changed, err = schedules.RunNow(ctx, principalID, jobID, trigger)

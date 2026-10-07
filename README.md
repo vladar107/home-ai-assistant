@@ -62,7 +62,7 @@ borrowed between users.
   weekdays, arrival target, and legs (walking or cycling minutes, fixed trains
   and buses), changed one leg at a time, and checked in one call: each leg's
   live status and whether the arrival target still holds, so a scheduled report
-  can be as short as "report today's route".
+  can be as short as "report today's route". `/jobs` lists and deletes them.
 - **Safety checks.** Optional, per-user TypeSafe screening of outside content,
   approvals, and tool choice.
 

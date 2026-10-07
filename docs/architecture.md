@@ -172,6 +172,7 @@ flowchart TB
     watch --> store
     watch --> nsc
     watch --> busc
+    tg --> routes
     broker --> routes
     approval --> routes
     routes --> nsc & busc & store
@@ -320,7 +321,8 @@ checks for each train and bus leg, takes the first departure that runs and leave
 no earlier than the previous leg ends, adds the walk and bike minutes without any
 buffer, and returns one block per leg with its status, then whether the arrival
 target is met and which legs failed to check. It is one tool call, and
-`routes.Service.Check` returns the same result to Go callers.
+`routes.Service.Check` returns the same result to Go callers. `/jobs` lists the
+routes after jobs and watches, read-only, with a Delete button each.
 
 ## Security model
 

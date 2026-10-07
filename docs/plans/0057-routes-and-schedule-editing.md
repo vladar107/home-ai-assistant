@@ -1,6 +1,6 @@
 # 0057 — Saved routes and easier schedule editing
 
-Status: `proposed`
+Status: `done`
 
 ## Context
 
@@ -80,9 +80,33 @@ annoyance.
   made in the current bundle. The bundle message is edited to show what was
   withdrawn. Confirmed or running items cannot be withdrawn.
 
+- **As built: routes.** Each user may save 20 routes of up to 8 legs. A bus
+  leg may carry the user's stated ride minutes; without them its end time,
+  and the route's arrival, are unknown. A leg uses its first departure that
+  runs and leaves no earlier than the previous leg ends, with no buffer
+  added. Leading walk or bike legs are timed back from the first train or
+  bus to give a "leave by" time. A leg whose service is off for the user, or
+  whose check failed, is reported as `check failed`, and the arrival becomes
+  unknown with the reason. Names are unique per user, ignoring case. Every
+  route needs at least one train or bus leg. Routes are listed in `/jobs`,
+  read-only, with a delete button. Weather for the route's places is left
+  out. `routes.Service.Check` returns the structured result that route
+  watches use.
+- **As built: schedule editing.** Prompt edits apply in order, each `find`
+  must occur exactly once, and an empty `replace` deletes the passage.
+  Preview runs every previewable item of the batch, one after another, as
+  replies to the button message. A press Telegram delivers again is
+  answered from memory, so a retried press does not start a second preview.
+  A withdrawn item ends as `rejected` with the reason `withdrawn`, so no
+  migration is needed. Items withdrawn before delivery are hidden
+  everywhere, so later items move up a number. The tool lives in
+  `internal/approval/withdrawal` to avoid an import cycle. A proposal
+  joining a batch takes the batch's last position, so it cannot collide
+  with a withdrawn item.
+
 ## Approach
 
-1. Store: migration `018_routes.sql` and repository methods.
+1. Store: migration `019_routes.sql` and repository methods.
 2. A routes package with validation, route tools, and `route_check` built
    on the NS and bus departure checks.
 3. `/jobs` (or a routes page in `/settings`) lists routes read-only, with
@@ -98,7 +122,7 @@ annoyance.
 
 ## Files affected
 
-- `internal/store/sqlite/migrations/018_routes.sql`, a new routes store
+- `internal/store/sqlite/migrations/019_routes.sql`, a new routes store
 - a new `internal/routes` package (tools and the check)
 - `internal/connectors/ns`, `internal/connectors/bus` (shared departure checks)
 - `internal/schedule/tools.go`, `internal/approval/approval.go`
