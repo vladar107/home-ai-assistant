@@ -37,6 +37,7 @@ type cardRequest struct {
 	Title    string             `json:"title"`
 	Summary  string             `json:"summary"`
 	Language string             `json:"language"`
+	WindUnit string             `json:"wind_unit"`
 	Legs     []cardLegRequest   `json:"legs"`
 	Trains   []cardTrainRequest `json:"trains"`
 }
@@ -60,16 +61,18 @@ type cardLegRequest struct {
 // cardWords are the fixed words on a card; everything else on it is a number or the model's text.
 type cardWords struct {
 	feelsLike, millimetres, gusts, dry string
+	wind                               map[windUnit]string
 	// minutesLate is a format for a train's minutes late, such as "+%d min". disruption is the
 	// milder word for a slower train, disrupted the one for a red row.
 	onTime, minutesLate, cancelled, bus, noConnection, disruption, disrupted, noTrain string
 }
 
 var cardLanguages = map[string]cardWords{
-	"en": {feelsLike: "feels like", millimetres: "mm", gusts: "gusts", dry: "dry",
+	"en": {feelsLike: "feels like", millimetres: "mm", gusts: "gusts", dry: "dry", wind: windSymbols,
 		onTime: "on time", minutesLate: "+%d min", cancelled: "cancelled", bus: "bus", noConnection: "no connection",
 		disruption: "disruption", disrupted: "disrupted", noTrain: "no train"},
 	"ru": {feelsLike: "ощущается", millimetres: "мм", gusts: "порывы", dry: "сухо",
+		wind:   map[windUnit]string{windKilometres: "км/ч", windMetres: "м/с", windKnots: "уз", windBeaufort: "Бфт"},
 		onTime: "вовремя", minutesLate: "+%d мин", cancelled: "отменён", bus: "автобус", noConnection: "нет пересадки",
 		disruption: "помехи", disrupted: "сбой", noTrain: "нет поезда"},
 }
@@ -141,6 +144,10 @@ func (s *Service) weatherCard(ctx context.Context, principalID string, request c
 	}
 	if len([]rune(summary)) > maximumSummaryRunes {
 		return errorResult(fmt.Sprintf("summary must be at most %d characters", maximumSummaryRunes)), nil
+	}
+	unit, err := parseWindUnit(request.WindUnit)
+	if err != nil {
+		return errorResult(err.Error()), nil
 	}
 	if len(request.Legs) == 0 || len(request.Legs) > daycard.MaximumLegs {
 		return errorResult(fmt.Sprintf("A card needs 1 to %d legs.", daycard.MaximumLegs)), nil
@@ -222,7 +229,7 @@ func (s *Service) weatherCard(ctx context.Context, principalID string, request c
 		if label == "" {
 			label = fmt.Sprintf("%s · %02d–%02d", strings.TrimSpace(found.Name), leg.window.from, leg.window.to)
 		}
-		detail := reading.detail(words)
+		detail := reading.detail(words, unit)
 		card.Legs = append(card.Legs, daycard.Leg{
 			Label:       label,
 			Icon:        reading.condition,
@@ -243,7 +250,7 @@ func (s *Service) weatherCard(ctx context.Context, principalID string, request c
 			label, leg.window.date.Format("Mon 2 Jan"), leg.window.from, leg.window.to, placeName(found),
 			reading.condition, reading.temperature, reading.precipitation)
 		if reading.hasGust {
-			fmt.Fprintf(&report, ", gusts up to %.0f km/h", reading.gust)
+			fmt.Fprintf(&report, ", gusts up to %s", unit.format(reading.gust))
 		}
 		fmt.Fprintf(&report, "; the tile reads %q.\n", detail)
 	}
@@ -420,14 +427,14 @@ func daylightOn(result forecast, date time.Time) (time.Time, time.Time, bool) {
 	return time.Time{}, time.Time{}, false
 }
 
-func (r legReading) detail(words cardWords) string {
+func (r legReading) detail(words cardWords, unit windUnit) string {
 	rain := math.Round(r.precipitation*10) / 10
 	text := words.dry
 	if rain > 0 {
 		text = fmt.Sprintf("%.1f %s", rain, words.millimetres)
 	}
 	if r.hasGust && math.Round(r.gust) >= notableGust {
-		text += fmt.Sprintf(" · %s %.0f", words.gusts, r.gust)
+		text += fmt.Sprintf(" · %s %s", words.gusts, unit.formatWith(r.gust, words.wind))
 	}
 	return text
 }

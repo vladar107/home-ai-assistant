@@ -686,3 +686,22 @@ func TestFetchPageAfterOutsideContentOpensOnlySeenAddresses(t *testing.T) {
 		}
 	})
 }
+
+func TestWeatherForecastConvertsWindToTheAskedUnit(t *testing.T) {
+	f := newFixture(t, "")
+	f.openMeteo(forecastAmsterdam)
+
+	for _, test := range []struct {
+		unit, now, day string
+	}{
+		{"kmh", "wind 18 km/h gusting 35 km/h", "wind up to 25 km/h"},
+		{"ms", "wind 5 m/s gusting 10 m/s", "wind up to 7 m/s"},
+		{"kn", "wind 10 kn gusting 19 kn", "wind up to 13 kn"},
+		{"bft", "wind Bft 3 gusting Bft 5", "wind up to Bft 4"},
+	} {
+		wantText(t, f.call("alice", "weather_forecast", map[string]any{"location": "Amsterdam", "days": 2, "wind_unit": test.unit}), test.now, test.day)
+	}
+	wantText(t, f.call("alice", "weather_forecast", map[string]any{"location": "Amsterdam", "date": "2026-09-28", "from_hour": 11, "to_hour": 11, "wind_unit": "kn"}),
+		"wind 11 kn gusting 23 kn")
+	wantError(t, f.call("alice", "weather_forecast", map[string]any{"location": "Amsterdam", "wind_unit": "mph"}), `wind_unit must be "kmh", "ms", "kn", or "bft"`)
+}

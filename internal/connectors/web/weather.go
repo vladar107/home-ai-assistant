@@ -41,6 +41,7 @@ type weatherRequest struct {
 	Date      string   `json:"date"`
 	FromHour  *int     `json:"from_hour"`
 	ToHour    *int     `json:"to_hour"`
+	WindUnit  string   `json:"wind_unit"`
 }
 
 type place struct {
@@ -124,6 +125,10 @@ func (s *Service) weatherForecast(ctx context.Context, principalID string, reque
 	if err != nil {
 		return errorResult(err.Error())
 	}
+	unit, err := parseWindUnit(request.WindUnit)
+	if err != nil {
+		return errorResult(err.Error())
+	}
 
 	var found place
 	if byCoordinates {
@@ -161,9 +166,9 @@ func (s *Service) weatherForecast(ctx context.Context, principalID string, reque
 	}
 	var text string
 	if hourly {
-		text, err = renderHourly(found, result, window)
+		text, err = renderHourly(found, result, window, unit)
 	} else {
-		text, err = renderForecast(found, result)
+		text, err = renderForecast(found, result, unit)
 	}
 	if err != nil {
 		return s.weatherFailure(ctx, principalID, err)
@@ -325,7 +330,7 @@ func (s *Service) weatherFailure(ctx context.Context, principalID string, err er
 	return errorResult(weatherUnavailableText)
 }
 
-func renderForecast(found place, result forecast) (string, error) {
+func renderForecast(found place, result forecast, unit windUnit) (string, error) {
 	if result.Current == nil || result.Daily == nil || len(result.Daily.Time) == 0 {
 		return "", errWeatherMalformed
 	}
@@ -359,9 +364,9 @@ func renderForecast(found place, result forecast) (string, error) {
 		fmt.Fprintf(&builder, ", precipitation %.1f mm", *current.Rain)
 	}
 	if current.Wind != nil {
-		fmt.Fprintf(&builder, ", wind %.0f km/h", *current.Wind)
+		fmt.Fprintf(&builder, ", wind %s", unit.format(*current.Wind))
 		if current.Gusts != nil {
-			fmt.Fprintf(&builder, " gusting %.0f km/h", *current.Gusts)
+			fmt.Fprintf(&builder, " gusting %s", unit.format(*current.Gusts))
 		}
 	}
 	builder.WriteString("\n")
@@ -379,7 +384,7 @@ func renderForecast(found place, result forecast) (string, error) {
 			fmt.Fprintf(&builder, ", %.1f mm", *rain)
 		}
 		if wind := daily.Wind[index]; wind != nil {
-			fmt.Fprintf(&builder, ", wind up to %.0f km/h", *wind)
+			fmt.Fprintf(&builder, ", wind up to %s", unit.format(*wind))
 		}
 		if sunrise, sunset := daily.Sunrise[index], daily.Sunset[index]; sunrise != nil && sunset != nil {
 			fmt.Fprintf(&builder, ", sunrise %s, sunset %s", clockTime(*sunrise), clockTime(*sunset))
@@ -389,7 +394,7 @@ func renderForecast(found place, result forecast) (string, error) {
 	return strings.TrimRight(builder.String(), "\n"), nil
 }
 
-func renderHourly(found place, result forecast, window hourWindow) (string, error) {
+func renderHourly(found place, result forecast, window hourWindow, unit windUnit) (string, error) {
 	if err := checkHourly(result); err != nil {
 		return "", err
 	}
@@ -424,9 +429,9 @@ func renderHourly(found place, result forecast, window hourWindow) (string, erro
 			fmt.Fprintf(&builder, ", %.1f mm", *rain)
 		}
 		if wind := hourly.Wind[index]; wind != nil {
-			fmt.Fprintf(&builder, ", wind %.0f km/h", *wind)
+			fmt.Fprintf(&builder, ", wind %s", unit.format(*wind))
 			if gusts := hourly.Gusts[index]; gusts != nil {
-				fmt.Fprintf(&builder, " gusting %.0f km/h", *gusts)
+				fmt.Fprintf(&builder, " gusting %s", unit.format(*gusts))
 			}
 		}
 		builder.WriteString("\n")

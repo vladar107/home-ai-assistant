@@ -206,7 +206,7 @@ func TestWeatherCardAggregatesLegsInRussian(t *testing.T) {
 	})
 	wantText(t, result,
 		`- "Утро", Mon 28 Sep, 06:00 to 09:00 in Amsterdam, North Holland, Netherlands: partly cloudy, average 11.5 °C, 0.0 mm precipitation, gusts up to 38 km/h; the tile reads "сухо".`,
-		`- "День", Mon 28 Sep, 10:00 to 16:00 in Amsterdam, North Holland, Netherlands: rain, average 13.3 °C, 6.0 mm precipitation, gusts up to 52 km/h; the tile reads "6.0 мм · порывы 52".`,
+		`- "День", Mon 28 Sep, 10:00 to 16:00 in Amsterdam, North Holland, Netherlands: rain, average 13.3 °C, 6.0 mm precipitation, gusts up to 52 km/h; the tile reads "6.0 мм · порывы 52 км/ч".`,
 	)
 	stagedCard(t, box, turn)
 	if len(simulator.geocoded) != 1 || simulator.forecasts != 1 {
@@ -528,4 +528,19 @@ func TestWeatherCardTrainRefusals(t *testing.T) {
 	if _, found, err := box.Card("alice", turn); err != nil || found {
 		t.Fatalf("a refused call staged a card: %v %v", found, err)
 	}
+}
+
+func TestWeatherCardPrintsWindInTheAskedUnit(t *testing.T) {
+	f, box := newCardFixture(t)
+	f.openMeteoDay()
+	turn := outbox.ScheduledTurn(turnID)
+
+	result := f.callInTurn(turn, map[string]any{
+		"title":     "Mon 28.09 · Amsterdam",
+		"summary":   "Rain and gusts in the afternoon.",
+		"wind_unit": "kn",
+		"legs":      []map[string]any{{"label": "Day", "place": "Amsterdam", "date": "2026-09-28", "from_hour": 10, "to_hour": 16}},
+	})
+	wantText(t, result, `6.0 mm precipitation, gusts up to 28 kn; the tile reads "6.0 mm · gusts 28 kn".`)
+	stagedCard(t, box, turn)
 }
