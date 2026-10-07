@@ -41,6 +41,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/module"
 	"github.com/vladar107/home-ai-assistant/internal/observability"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
+	"github.com/vladar107/home-ai-assistant/internal/routes"
 	piruntime "github.com/vladar107/home-ai-assistant/internal/runtime/pi"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
@@ -76,6 +77,7 @@ type App struct {
 	homeAssistant *homeassistant.Service
 	grafana       *grafana.Service
 	bus           *bus.Service
+	routes        *routes.Service
 	locations     *userlocation.Service
 	memory        *usermemory.Service
 	typeSafe      *judgment.OptInService
@@ -714,6 +716,25 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			}
 			a.bus = busService
 		}
+		// Typed nils would hide a missing connector, so only the configured ones are passed.
+		routeConfig := routes.Config{Location: location}
+		if a.ns != nil {
+			routeConfig.Trains = a.ns
+		}
+		if a.bus != nil {
+			routeConfig.Buses = a.bus
+		}
+		routeService, err := routes.NewService(routeConfig, a.store, approvals, a.logger)
+		if err != nil {
+			return fmt.Errorf("initialize routes: %w", err)
+		}
+		if err := broker.Register(routeService); err != nil {
+			return err
+		}
+		if err := approvals.RegisterExecutor(routeService); err != nil {
+			return err
+		}
+		a.routes = routeService
 		if a.watches != nil {
 			if err := registerWatchKinds(a.watches, a.ns, a.bus); err != nil {
 				return err

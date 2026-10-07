@@ -58,6 +58,11 @@ borrowed between users.
   window, and the user hears only when something changes, with Mute today and
   Pause buttons; `/jobs` lists them. Train and bus departures and NS disruptions
   at stations are checked now; watches on saved routes come next.
+- **Routes.** Named journeys such as "work", saved in conversation with their
+  weekdays, arrival target, and legs (walking or cycling minutes, fixed trains
+  and buses), changed one leg at a time, and checked in one call: each leg's
+  live status and whether the arrival target still holds, so a scheduled report
+  can be as short as "report today's route".
 - **Safety checks.** Optional, per-user TypeSafe screening of outside content,
   approvals, and tool choice.
 

@@ -110,6 +110,7 @@ flowchart TB
     schedule["<b>schedule</b><br/>durable jobs, reminders,<br/>scheduled model turns"]
     task["<b>task</b><br/>background sub-agents<br/>beside the chat"]
     watch["<b>watch</b><br/>windowed checks in code,<br/>alerts on change"]
+    routes["<b>routes</b><br/>saved journeys,<br/>checked leg by leg in code"]
     judgment["<b>judgment</b><br/>TypeSafe screening, intent checks,<br/>tool hints (opt-in)"]
     integration["<b>integration</b><br/>per-user enable / disable"]
     loc["<b>location</b><br/>latest shared position, expiry"]
@@ -171,6 +172,9 @@ flowchart TB
     watch --> store
     watch --> nsc
     watch --> busc
+    broker --> routes
+    approval --> routes
+    routes --> nsc & busc & store
     nasc --> delivery
     web --> pdf
     connectors --> integration
@@ -298,6 +302,25 @@ partly cancelled, changed platform N, not in the timetable, or check failed),
 which replies copy word for word. `ns.Service.CheckDepartures`,
 `bus.Service.CheckDepartures`, and `ns.Service.Disruptions` expose the same
 checks to Go callers.
+
+### A saved route
+
+A route is a confirmed, per-user record in `routes`: a name, the weekdays it
+applies to, an optional arrival target, and up to eight legs stored as checked
+JSON. A walk or bike leg has the minutes the user stated; a train leg has from,
+to, an optional via, and fixed planned departures; a bus leg has a stop, a line,
+an optional direction, fixed departures, and optional ride minutes. The tools
+refuse a missing number instead of choosing one, and station and stop names are
+looked up through the NS and bus connectors when a leg is proposed, so the stored
+names are the ones the checks find again. `route_save`, `route_update` (named
+fields or one leg by number), and `route_remove` are confirmed like other writes,
+and an update's summary shows only what changes. `route_check` is code: for a day,
+the named route or the one whose weekdays include that day, it runs the departure
+checks for each train and bus leg, takes the first departure that runs and leaves
+no earlier than the previous leg ends, adds the walk and bike minutes without any
+buffer, and returns one block per leg with its status, then whether the arrival
+target is met and which legs failed to check. It is one tool call, and
+`routes.Service.Check` returns the same result to Go callers.
 
 ## Security model
 
