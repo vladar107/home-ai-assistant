@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
@@ -23,6 +24,7 @@ import (
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
+	"github.com/vladar107/home-ai-assistant/internal/transit"
 )
 
 const (
@@ -833,5 +835,83 @@ func TestBadArgumentsAreRefused(t *testing.T) {
 		if result := f.call("bus_trip", arguments); !result.IsError {
 			t.Fatalf("bus_trip(%v) answered: %s", arguments, result.Text)
 		}
+	}
+}
+
+func TestStopStatusChecksOnePlannedDeparture(t *testing.T) {
+	f := newFixture(t, options{})
+
+	delayed := f.text("bus_stop_status", map[string]any{"departure": "18:18", "line": "Bus 3"})
+	wantContains(t, delayed,
+		"Check of planned departures from Amersfoort, Stadhuis on Sun 4 Oct (Dutch local time). Each line starts with the departure's status; copy it word for word:",
+		"1. delayed +1 min — the 18:18 from Amersfoort, Stadhuis to Centraal Station\n   - Bus 3 towards Centraal Station",
+		"Disruption notices",
+	)
+	wantContains(t, f.text("bus_stop_status", map[string]any{"departure": "2026-10-04T18:17", "line": "376"}), "1. on time — the 18:17 from Amersfoort, Stadhuis to Centraal Station")
+
+	// Line 2 leaves both platforms in the same minute, one way cancelled; only the direction tells.
+	both := f.text("bus_stop_status", map[string]any{"departure": "18:17", "line": "2"})
+	wantContains(t, both, "1. check failed — the 18:17 from Amersfoort, Stadhuis", "Several departures leave at 18:17: Bus 2 towards", "name the line and its direction")
+	wantContains(t, f.text("bus_stop_status", map[string]any{"departure": "18:17", "line": "2", "towards": "centraal"}), "1. cancelled — the 18:17 from Amersfoort, Stadhuis to Centraal Station")
+
+	missing := f.text("bus_stop_status", map[string]any{"departure": "18:19", "line": "3"})
+	wantContains(t, missing, "1. not in the timetable — the 18:19 from Amersfoort, Stadhuis\n   No departure of line 3 leaves Amersfoort, Stadhuis at exactly 18:19; no other departure is put in its place.")
+	wantLacks(t, missing, "18:18", "18:20")
+
+	if result := f.call("bus_stop_status", map[string]any{"line": "3"}); !result.IsError || !strings.Contains(result.Text, "give departure too") {
+		t.Fatalf("a line without a departure = %+v", result)
+	}
+	if result := f.call("bus_stop_status", map[string]any{"departure": "tomorrow"}); !result.IsError || !strings.Contains(result.Text, "HH:MM") {
+		t.Fatalf("an unreadable departure = %+v", result)
+	}
+}
+
+func TestDepartureChecksUseTheTimetableBeyondLiveData(t *testing.T) {
+	f := newFixture(t, options{contact: contact})
+	clock := func(value string) transit.Clock {
+		parsed, err := transit.ParseClock(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return parsed
+	}
+	day := time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC)
+	departures, err := f.service.CheckDepartures(t.Context(), "alice", bus.DepartureQuery{
+		Stop: "Hoevelaken, Centrum", Line: "102", Date: day, Times: []transit.Clock{clock("18:21"), clock("20:20"), clock("20:21")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(departures) != 3 {
+		t.Fatalf("departures = %+v", departures)
+	}
+	if got := departures[0]; got.Status != transit.StatusOnTime || !got.Live || got.To != "Apeldoorn" || got.Planned.Format("15:04 MST") != "18:21 CEST" {
+		t.Fatalf("live timetable departure = %+v", got)
+	}
+	if got := departures[1]; got.Status != transit.StatusOnTime || got.Live || got.Legs[0].Name != "Bus 102 towards Apeldoorn (RRReis)" {
+		t.Fatalf("planned departure = %+v", got)
+	}
+	if got := departures[2]; got.Status != transit.StatusNotInTimetable || len(got.Legs) != 0 {
+		t.Fatalf("missing departure = %+v", got)
+	}
+	if got := len(f.server.seen("/ovapi/tpc/")); got != 0 {
+		t.Fatalf("OVapi asked %d times for a stop it has no codes for", got)
+	}
+
+	f.clock.advance(time.Minute)
+	f.server.mu.Lock()
+	f.server.planCode = http.StatusBadGateway
+	f.server.mu.Unlock()
+	departures, err = f.service.CheckDepartures(t.Context(), "alice", bus.DepartureQuery{Stop: "Hoevelaken, Centrum", Line: "102", Date: day, Times: []transit.Clock{clock("20:20")}})
+	if err != nil || departures[0].Status != transit.StatusCheckFailed || departures[0].Note == "" {
+		t.Fatalf("departures with Transitous down = %+v %v", departures, err)
+	}
+
+	if _, err := f.service.SetEnabled(t.Context(), "alice", false); err != nil {
+		t.Fatal(err)
+	}
+	var refused *bus.RefusalError
+	if _, err := f.service.CheckDepartures(t.Context(), "alice", bus.DepartureQuery{Line: "3", Date: day, Times: []transit.Clock{clock("18:18")}}); !errors.As(err, &refused) || !refused.Unavailable {
+		t.Fatalf("check with buses off = %v", err)
 	}
 }

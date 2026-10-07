@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/vladar107/home-ai-assistant/internal/transit"
 )
 
 const (
@@ -131,6 +133,7 @@ type timespan struct {
 }
 
 type disruption struct {
+	ID               string `json:"id"`
 	Type             string `json:"type"`
 	Title            string `json:"title"`
 	Description      string `json:"description"`
@@ -140,7 +143,15 @@ type disruption struct {
 	ExpectedDuration *struct {
 		Description string `json:"description"`
 	} `json:"expectedDuration"`
-	Timespans []timespan `json:"timespans"`
+	Timespans           []timespan `json:"timespans"`
+	PublicationSections []struct {
+		Section struct {
+			Stations []struct {
+				Name        string `json:"name"`
+				StationCode string `json:"stationCode"`
+			} `json:"stations"`
+		} `json:"section"`
+	} `json:"publicationSections"`
 }
 
 // view prints times in Dutch local time, naming the day whenever it is not the day asked about.
@@ -232,7 +243,13 @@ func renderTrip(builder *strings.Builder, v view, number int, item trip) {
 		return
 	}
 	first, last := item.Legs[0], item.Legs[len(item.Legs)-1]
-	fmt.Fprintf(builder, "%d. Depart %s %s", number, v.timed(first.Origin.PlannedDateTime, first.Origin.ActualDateTime), track(first.Origin.PlannedTrack, first.Origin.ActualTrack))
+	status := ""
+	if ride, ok := firstRide(item); ok {
+		if planned, ok := parseTime(ride.Origin.PlannedDateTime); ok {
+			status = departureFrom(transit.Departure{Planned: planned.In(v.location)}, item, v.location).StatusText() + " — "
+		}
+	}
+	fmt.Fprintf(builder, "%d. %sDepart %s %s", number, status, v.timed(first.Origin.PlannedDateTime, first.Origin.ActualDateTime), track(first.Origin.PlannedTrack, first.Origin.ActualTrack))
 	fmt.Fprintf(builder, ", arrive %s %s", v.timed(last.Destination.PlannedDateTime, last.Destination.ActualDateTime), track(last.Destination.PlannedTrack, last.Destination.ActualTrack))
 
 	var facts []string

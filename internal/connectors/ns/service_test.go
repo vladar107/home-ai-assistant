@@ -24,6 +24,7 @@ import (
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
+	"github.com/vladar107/home-ai-assistant/internal/transit"
 )
 
 const (
@@ -393,12 +394,12 @@ func TestTripsRenderANormalMorning(t *testing.T) {
 	result := f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal", "date_time": "2026-10-05T08:00"})
 	wantText(t, result,
 		"NS trips from Amersfoort Schothorst to Utrecht Centraal, departing from Mon 5 Oct 08:00 (Dutch local time):",
-		"1. Depart 07:56 track 1, arrive 08:23 track 8; 27 min, 1 transfer, status NORMAL, crowding high, punctuality 91%, fare €6.60",
+		"1. on time — Depart 07:56 track 1, arrive 08:23 track 8; 27 min, 1 transfer, status NORMAL, crowding high, punctuality 91%, fare €6.60",
 		"   - SPR 5822 (Sprinter, direction Amsterdam Muiderpoort): Amersfoort Schothorst 07:56 track 1 → Amersfoort Centraal 08:00 track 7; crowding low\n     change at Amersfoort Centraal: Transfer at same platform\n   - IC 1722",
 		"Amersfoort Schothorst 08:04 track 2 → Amersfoort Centraal 08:08 track 7a (changed from 7)",
 		"ICD 1822 (Intercity direct, direction Breda): Amersfoort Schothorst 08:04 track 2 → Amersfoort Centraal 08:08 track 7a (changed from 7); crowding low, notes: Supplement",
 		"Messages: € 3.20 supplement",
-		"5. Depart 08:34",
+		"5. on time — Depart 08:34",
 	)
 	if strings.Contains(result.Text, "late") || strings.Contains(result.Text, "CANCELLED") {
 		t.Fatalf("a normal morning reports trouble:\n%s", result.Text)
@@ -421,13 +422,13 @@ func TestTripsReportDelaysTrackChangesAndCancellations(t *testing.T) {
 
 	result := f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal"})
 	wantText(t, result,
-		"1. Depart 07:59 (planned 07:56, 3 min late) track 2 (changed from 1), arrive 08:23 track 8; 33 min (planned 27), 1 transfer, status DISRUPTION",
+		"1. partly cancelled — Depart 07:59 (planned 07:56, 3 min late) track 2 (changed from 1), arrive 08:23 track 8; 33 min (planned 27), 1 transfer, status DISRUPTION",
 		"Messages: Disruption: fewer trains",
 		"Amersfoort Centraal 08:04 (planned 08:00, 4 min late)",
 		"notes: Extra stop at Amersfoort Vathorst",
 		"IC 1722 (Intercity, direction Den Haag Centraal)",
 		"CANCELLED, alternative transport instead of a train",
-		"2. Depart 08:04 track 2, arrive",
+		"2. on time — Depart 08:04 track 2, arrive",
 		"no live data",
 	)
 	if sent := f.server.seen("v3/trips")[0]; sent.Get("dateTime") != "2026-10-05T08:00:00+02:00" {
@@ -920,4 +921,144 @@ func TestTripStatusSharesTheTripsCacheAndRefuses(t *testing.T) {
 	f.clock.advance(time.Minute)
 	f.server.fail("v3/trips", http.StatusBadRequest, `{"errors":[{"type":"INVALID_TRAVELADVICE_DATE"}]}`)
 	refusal("bob", query, "NS has no travel plan for that date.", true)
+}
+
+func TestDepartureChecksReportExactlyTheTrainsAsked(t *testing.T) {
+	f := newFixture(t)
+	f.server.serve("v3/trips", fixtureBytes(t, "trips.json"))
+	f.server.serve("v2/departures", fixtureBytes(t, "departures.json"))
+
+	result := f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal", "date_time": "2026-10-05T07:00", "departures": []string{"08:04", "08:12"}})
+	wantText(t, result,
+		"NS check of planned departures from Amersfoort Schothorst to Utrecht Centraal on Mon 5 Oct (Dutch local time). Each line starts with the departure's status; copy it word for word:",
+		"1. on time — the 08:04 from Amersfoort Schothorst to Utrecht Centraal\n   - ICD 1822: Amersfoort Schothorst 08:04 platform 2 → Amersfoort Centraal 08:08 platform 7a (changed from 7)\n   - IC 1722: Amersfoort Centraal 08:10 platform 6 → Utrecht Centraal 08:23 platform 8",
+		"2. on time — the 08:12 from Amersfoort Schothorst to Utrecht Centraal\n   - SPR 5622: Amersfoort Schothorst 08:12 platform 1 → Utrecht Centraal 08:39 platform 4",
+	)
+	sent := f.server.seen("v3/trips")
+	if len(sent) != 1 || sent[0].Get("dateTime") != "2026-10-05T08:04:00+02:00" {
+		t.Fatalf("trip queries = %v, want one from the first planned departure, which also answers the second", sent)
+	}
+
+	// The IC 1722 leaves at 08:10 from Amersfoort Centraal; from Schothorst only feeders reach it,
+	// and neither may stand in for a train that does not exist.
+	f.clock.advance(time.Minute)
+	missing := f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal", "date_time": "2026-10-05T07:00", "departures": []string{"08:10"}})
+	wantText(t, missing, "1. not in the timetable — the 08:10 from Amersfoort Schothorst to Utrecht Centraal\n   NS plans no trip whose first train leaves Amersfoort Schothorst at exactly 08:10; no other departure is put in its place.")
+	for _, substitute := range []string{"SPR 5822", "ICD 1822", "IC 1722", "SPR 5622"} {
+		if strings.Contains(missing.Text, substitute) {
+			t.Fatalf("a missing departure was answered with %s:\n%s", substitute, missing.Text)
+		}
+	}
+
+	wantError(t, f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal", "departures": []string{"08:04"}, "arrive_by": true}), "cannot be combined with arrive_by")
+	wantError(t, f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal", "departures": []string{"25:04"}}), "must be written as HH:MM")
+}
+
+func TestDepartureChecksNormalizeTheStatus(t *testing.T) {
+	f := newFixture(t)
+	day := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	clock := func(value string) transit.Clock {
+		parsed, err := transit.ParseClock(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return parsed
+	}
+	for _, test := range []struct {
+		name   string
+		body   []byte
+		status transit.Status
+		text   string
+		delay  int
+	}{
+		{name: "on time", body: fixtureBytes(t, "trips.json"), status: transit.StatusOnTime, text: "on time"},
+		{name: "delayed", body: tripsVariant(t, func(_ map[string]any, legs []map[string]any) {
+			late(t, legs[0]["origin"], 4)
+			late(t, legs[1]["destination"], 6)
+		}), status: transit.StatusDelayed, text: "delayed +6 min", delay: 6},
+		{name: "changed platform", body: tripsVariant(t, func(_ map[string]any, legs []map[string]any) {
+			legs[0]["origin"].(map[string]any)["actualTrack"] = "3"
+		}), status: transit.StatusChangedPlatform, text: "changed platform 3"},
+		{name: "cancelled", body: tripsVariant(t, func(trip map[string]any, legs []map[string]any) {
+			trip["status"] = "CANCELLED"
+			legs[0]["cancelled"] = true
+		}), status: transit.StatusCancelled, text: "cancelled"},
+		{name: "connection cancelled", body: tripsVariant(t, func(_ map[string]any, legs []map[string]any) {
+			legs[1]["cancelled"] = true
+		}), status: transit.StatusPartlyCancelled, text: "partly cancelled"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f.clock.advance(time.Minute)
+			f.server.serve("v3/trips", test.body)
+			departures, err := f.service.CheckDepartures(t.Context(), "alice", ns.DepartureQuery{From: "AMFS", To: "Utrecht", Date: day, Times: []transit.Clock{clock("07:56")}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := departures[0]
+			if len(departures) != 1 || got.Status != test.status || got.StatusText() != test.text || got.DelayMinutes != test.delay || len(got.Legs) != 2 || got.Legs[0].Name != "SPR 5822" {
+				t.Fatalf("departures = %+v", departures)
+			}
+			if got.From != "Amersfoort Schothorst" || got.To != "Utrecht Centraal" || got.Planned.Format("2006-01-02 15:04 MST") != "2026-10-05 07:56 CEST" {
+				t.Fatalf("departure = %+v", got)
+			}
+		})
+	}
+
+	// A train NS leaves out of its trip plans but shows as cancelled on the board is cancelled.
+	f.clock.advance(time.Minute)
+	f.server.serve("v3/trips", fixtureBytes(t, "trips.json"))
+	f.server.serve("v2/departures", fixtureBytes(t, "departures.json"))
+	departures, err := f.service.CheckDepartures(t.Context(), "alice", ns.DepartureQuery{From: "Amersfoort", To: "Amsterdam Centraal", Date: day, Times: []transit.Clock{clock("08:19"), clock("08:21")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if departures[0].Status != transit.StatusCancelled || departures[0].Legs[0].Name != "SPR 5822 towards Amsterdam Muiderpoort" || departures[1].Status != transit.StatusNotInTimetable {
+		t.Fatalf("departures = %+v", departures)
+	}
+
+	// A failed request is a failed check for that departure, never a status.
+	f.clock.advance(time.Minute)
+	f.server.fail("v3/trips", http.StatusServiceUnavailable, "{}")
+	departures, err = f.service.CheckDepartures(t.Context(), "alice", ns.DepartureQuery{From: "AMFS", To: "UT", Date: day, Times: []transit.Clock{clock("07:56")}})
+	if err != nil || departures[0].Status != transit.StatusCheckFailed || departures[0].Note != "NS travel information is unavailable right now." {
+		t.Fatalf("departures = %+v %v", departures, err)
+	}
+	result := f.call("ns_trips", map[string]any{"from": "AMFS", "to": "UT", "date_time": "2026-10-05T07:00", "departures": []string{"07:56"}})
+	wantText(t, result, "1. check failed — the 07:56 from Amersfoort Schothorst to Utrecht Centraal\n   NS travel information is unavailable right now.")
+
+	if _, err := f.service.SetEnabled(t.Context(), "alice", false); err != nil {
+		t.Fatal(err)
+	}
+	var refused *ns.RefusalError
+	if _, err := f.service.CheckDepartures(t.Context(), "alice", ns.DepartureQuery{From: "AMFS", To: "UT", Date: day, Times: []transit.Clock{clock("07:56")}}); !errors.As(err, &refused) || !refused.Unavailable {
+		t.Fatalf("check with trains off = %v", err)
+	}
+}
+
+func TestDisruptionsAreStructuredWithTheirStations(t *testing.T) {
+	f := newFixture(t)
+	f.server.serve("v3/disruptions", fixtureBytes(t, "disruptions.json"))
+
+	entries, err := f.service.Disruptions(t.Context(), "alice", "", time.Date(2026, 10, 4, 16, 15, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 6 {
+		t.Fatalf("got %d disruptions, want 6", len(entries))
+	}
+	first := entries[0]
+	if first.Kind != "disruption" || first.ID != "7008343" || first.Title != "Roosendaal - Vlissingen." || first.Cause != "defect spoor" ||
+		first.End.Format(time.RFC3339) != "2026-10-05T00:00:00+02:00" || len(first.Stations) != 11 ||
+		first.Stations[0] != (ns.AffectedStation{Code: "RSD", Name: "Roosendaal"}) {
+		t.Fatalf("first disruption = %+v", first)
+	}
+	if sent := f.server.seen("v3/disruptions"); len(sent) != 0 && sent[0].Get("isActive") != "" {
+		t.Fatalf("a moment far from now asked for active entries only: %v", sent[0])
+	}
+	if got := f.call("ns_disruptions", map[string]any{"date_time": "2026-10-04T18:15"}); !strings.Contains(got.Text, "6 in total") {
+		t.Fatalf("the tool disagrees with the structured list:\n%s", got.Text)
+	}
+	if got := len(f.server.seen("v3/disruptions")); got != 1 {
+		t.Fatalf("NS asked %d times for the same disruptions, want once", got)
+	}
 }

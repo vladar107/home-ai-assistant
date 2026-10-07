@@ -260,6 +260,22 @@ dropped once their window ends or the watch is paused or muted. Identical upstre
 queries within one cycle share one answer. No evaluator ships yet, so no kind is
 offered and stored watches are not checked.
 
+### Departure checks
+
+`ns_trips` with `departures`, and `bus_stop_status` with `departure`, check the
+exact planned departures a user names. NS is asked for trips from each planned
+minute, and only a trip whose first train leaves the origin at exactly that
+minute counts; a cancelled train NS leaves out of its plans is looked up on the
+station's departure board. A bus is matched by stop, minute, line, and optionally
+direction, live from OVapi within the next hour and otherwise from the
+Transitous timetable. A departure that is not found is reported as not in the
+timetable, and nearby trains or buses are never put in its place. Each result
+carries one status from `internal/transit` (on time, delayed +N min, cancelled,
+partly cancelled, changed platform N, not in the timetable, or check failed),
+which replies copy word for word. `ns.Service.CheckDepartures`,
+`bus.Service.CheckDepartures`, and `ns.Service.Disruptions` expose the same
+checks to Go callers.
+
 ## Security model
 
 - **Identity before anything.** Only allowlisted numeric Telegram IDs in private

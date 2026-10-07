@@ -27,11 +27,13 @@ borrowed between users.
 - **NAS files.** Browse and read the user's own folders, receive files in the
   chat, and file photos into an inbox after confirmation.
 - **Web.** Search, page reading, PDF text, and weather.
-- **Trains.** NS trips, departures, and disruptions.
+- **Trains.** NS trips, departures, and disruptions, and checks of the exact
+  planned departures a user names, one normalized status each.
 - **Home.** Reads and controls the devices exposed to Home Assistant's Assist.
   Everyday actions run immediately; sensitive devices are confirmed.
 - **Buses.** Live departures, direct buses, and operator disruption notices from
-  OVapi, and trips at any time or with changes planned by Transitous.
+  OVapi, trips at any time or with changes planned by Transitous, and checks of
+  one planned departure of a line.
 - **Shared location.** Share a pin or a live location in the chat and ask about
   "here": buses and weather at that point, and nearby pharmacies, shops, or cafés
   from OpenStreetMap. Only the latest position is kept, briefly.
