@@ -39,6 +39,7 @@ const (
 
 	ActionConfirm = "confirm"
 	ActionReject  = "reject"
+	ActionPreview = "preview"
 
 	DefaultLifetime      = 10 * time.Minute
 	DefaultSweepInterval = 30 * time.Second
@@ -134,6 +135,22 @@ type Executor interface {
 	ExecuteApproved(context.Context, Record) (Outcome, error)
 }
 
+// Previewer is implemented by an executor whose proposals can be tried once before the user
+// confirms them, without any of their effects.
+type Previewer interface {
+	// Previewable reports whether the pending record has something to preview.
+	Previewable(context.Context, Record) bool
+	// Preview runs the record's proposed action once without saving anything. An error means the
+	// preview was interrupted and nothing should be shown.
+	Preview(context.Context, Record) (Preview, error)
+}
+
+// Preview is what one previewed proposal produced, under the name the user knows it by.
+type Preview struct {
+	Name string
+	Text string
+}
+
 type Repository interface {
 	// CreateApproval stores a pending record. A record whose bundle is its own starts a new bundle
 	// after expiring every pending record of the principal with ReasonReplaced, and those are
@@ -170,8 +187,17 @@ type Repository interface {
 type Deliverer interface {
 	// SendText sends a message without buttons, for the parts of a bundle before the last.
 	SendText(ctx context.Context, chatID int64, text string) (int64, error)
-	SendProposal(ctx context.Context, chatID int64, text, confirmData, rejectData string) (int64, error)
+	SendProposal(ctx context.Context, chatID int64, text string, buttons Buttons) (int64, error)
 	EditText(ctx context.Context, chatID, messageID int64, text string) error
+	// SendPreview posts a preview's output as a reply to the proposal message.
+	SendPreview(ctx context.Context, chatID, replyTo int64, text string) error
+}
+
+// Buttons is the callback data of a bundle's buttons; an empty Preview leaves that button out.
+type Buttons struct {
+	Confirm string
+	Reject  string
+	Preview string
 }
 
 type Config struct {
@@ -198,6 +224,18 @@ type Service struct {
 	notices   map[string]string
 	cancel    context.CancelFunc
 	done      chan struct{}
+	// runCtx is the context previews run in while the service is started.
+	runCtx context.Context
+	// previewing holds the bundles with a preview running, and pressed the answer given to each
+	// Preview press, so a press Telegram delivers again starts nothing new.
+	previewing map[string]bool
+	pressed    map[string]previewAnswer
+	previews   sync.WaitGroup
+}
+
+type previewAnswer struct {
+	text string
+	at   time.Time
 }
 
 func NewService(cfg Config, repository Repository, deliverer Deliverer, logger *slog.Logger) (*Service, error) {
@@ -229,6 +267,8 @@ func NewService(cfg Config, repository Repository, deliverer Deliverer, logger *
 		notices:       make(map[string]string),
 		intents:       make(map[string]Intent),
 		proposing:     make(map[string]*sync.Mutex),
+		previewing:    make(map[string]bool),
+		pressed:       make(map[string]previewAnswer),
 	}, nil
 }
 
@@ -297,14 +337,14 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
-	s.cancel, s.done = cancel, done
+	s.cancel, s.done, s.runCtx = cancel, done, runCtx
 	s.mu.Unlock()
 
 	expired, err := s.repository.ExpireApprovals(ctx, s.now(), true)
 	if err != nil {
 		cancel()
 		s.mu.Lock()
-		s.cancel, s.done = nil, nil
+		s.cancel, s.done, s.runCtx = nil, nil, nil
 		s.mu.Unlock()
 		return fmt.Errorf("expire approvals after restart: %w", err)
 	}
@@ -316,14 +356,20 @@ func (s *Service) Start(ctx context.Context) error {
 func (s *Service) Shutdown(ctx context.Context) error {
 	s.mu.Lock()
 	cancel, done := s.cancel, s.done
-	s.cancel, s.done = nil, nil
+	s.cancel, s.done, s.runCtx = nil, nil, nil
 	s.mu.Unlock()
 	if cancel == nil {
 		return nil
 	}
 	cancel()
+	finished := make(chan struct{})
+	go func() {
+		<-done
+		s.previews.Wait()
+		close(finished)
+	}()
 	select {
-	case <-done:
+	case <-finished:
 		return nil
 	case <-ctx.Done():
 		return fmt.Errorf("shutdown approval service: %w", ctx.Err())
@@ -551,7 +597,7 @@ func (s *Service) send(ctx context.Context, bundle []Record, chatID int64) error
 		var messageID int64
 		var err error
 		if index == len(ranges)-1 {
-			messageID, err = s.deliverer.SendProposal(ctx, chatID, text, callbackData(ActionConfirm, first.BundleID), callbackData(ActionReject, first.BundleID))
+			messageID, err = s.deliverer.SendProposal(ctx, chatID, text, s.buttons(ctx, bundle))
 		} else {
 			messageID, err = s.deliverer.SendText(ctx, chatID, text)
 		}
@@ -602,7 +648,7 @@ type Pressed struct {
 	Ran bool
 }
 
-// Press handles a button press by the pressing principal.
+// Press handles a Confirm or Reject press by the pressing principal.
 func (s *Service) Press(ctx context.Context, principalID, action, approvalID string) (Pressed, error) {
 	record, found, err := s.repository.LoadApproval(ctx, approvalID)
 	if err != nil {
@@ -822,7 +868,7 @@ func ParseCallback(data string) (action, id string, ok bool) {
 		return "", "", false
 	}
 	action, id, found = strings.Cut(rest, ":")
-	if !found || (action != ActionConfirm && action != ActionReject) || len(id) != idBytes*2 {
+	if !found || (action != ActionConfirm && action != ActionReject && action != ActionPreview) || len(id) != idBytes*2 {
 		return "", "", false
 	}
 	return action, id, true

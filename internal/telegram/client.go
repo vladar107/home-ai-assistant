@@ -19,6 +19,9 @@ import (
 	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
+
+	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/conversation"
 )
 
 const (
@@ -412,13 +415,10 @@ func (c *Client) SendText(ctx context.Context, chatID int64, text string) (int64
 	return message.MessageID, nil
 }
 
-// SendProposal posts a confirmation request with Confirm and Reject buttons and returns the
-// message ID so the outcome can replace the buttons later.
-func (c *Client) SendProposal(ctx context.Context, chatID int64, text, confirmData, rejectData string) (int64, error) {
-	message, err := c.sendMessage(ctx, chatID, 0, text, InlineKeyboard{{
-		{Text: "Confirm", CallbackData: confirmData},
-		{Text: "Reject", CallbackData: rejectData},
-	}})
+// SendProposal posts a confirmation request with Confirm and Reject buttons, and Preview when the
+// bundle offers it, and returns the message ID so the outcome can replace the buttons later.
+func (c *Client) SendProposal(ctx context.Context, chatID int64, text string, buttons approval.Buttons) (int64, error) {
+	message, err := c.sendMessage(ctx, chatID, 0, text, proposalKeyboard(buttons))
 	if err != nil {
 		return 0, err
 	}
@@ -426,6 +426,28 @@ func (c *Client) SendProposal(ctx context.Context, chatID int64, text, confirmDa
 		return 0, fmt.Errorf("Telegram sendMessage returned no message ID")
 	}
 	return message.MessageID, nil
+}
+
+func proposalKeyboard(buttons approval.Buttons) InlineKeyboard {
+	row := []InlineButton{
+		{Text: "Confirm", CallbackData: buttons.Confirm},
+		{Text: "Reject", CallbackData: buttons.Reject},
+	}
+	if buttons.Preview != "" {
+		row = append(row, InlineButton{Text: "Preview", CallbackData: buttons.Preview})
+	}
+	return InlineKeyboard{row}
+}
+
+// SendPreview posts a preview's output as a reply to the proposal message, in as many messages as
+// it needs.
+func (c *Client) SendPreview(ctx context.Context, chatID, replyTo int64, text string) error {
+	for _, chunk := range conversation.SplitReply(text) {
+		if err := c.SendReply(ctx, chatID, replyTo, chunk); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // EditText replaces a bot message's text and removes its buttons.

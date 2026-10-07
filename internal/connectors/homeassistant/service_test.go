@@ -297,11 +297,13 @@ type deliverer struct{}
 
 func (deliverer) SendText(context.Context, int64, string) (int64, error) { return 1, nil }
 
-func (deliverer) SendProposal(context.Context, int64, string, string, string) (int64, error) {
+func (deliverer) SendProposal(context.Context, int64, string, approval.Buttons) (int64, error) {
 	return 1, nil
 }
 
 func (deliverer) EditText(context.Context, int64, int64, string) error { return nil }
+
+func (deliverer) SendPreview(context.Context, int64, int64, string) error { return nil }
 
 type fixture struct {
 	t        *testing.T

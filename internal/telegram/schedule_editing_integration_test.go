@@ -2,8 +2,10 @@ package telegram
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
@@ -81,5 +83,113 @@ func TestScheduledJobInstructionsArePatched(t *testing.T) {
 	want := "Check the trains from Utrecht Centraal to Den Haag Centraal. Report delays over 10 minutes. Report cancellations."
 	if got := schedule.ModelTurnPrompt(stored[0].Config); got != want {
 		t.Fatalf("patched prompt = %q, want %q", got, want)
+	}
+}
+
+func (h *conversationHarness) nextAnswer(updateID int64) string {
+	h.t.Helper()
+	answer := receive(h.t, h.ctx, h.answers)
+	if answer.id != callbackID(updateID) {
+		h.t.Fatalf("answered callback %+v, want %s", answer, callbackID(updateID))
+	}
+	return answer.text
+}
+
+// A proposed job can be previewed before it is confirmed: the preview runs its prompt once as a
+// scheduled run would, posts the report under the proposal, and saves nothing. One preview runs per
+// bundle at a time, a retried press starts no second one, and another user's press does nothing.
+func TestProposedJobIsPreviewedWithoutSavingAnything(t *testing.T) {
+	runtime := newControlledRuntime()
+	clock := newTestClock(t, mondayMorning)
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
+	h.provision("alice", "account-alice")
+	h.provision("bob", "account-bob")
+	h.start()
+
+	h.push(textUpdate(1, 101, "every monday at 9 tell me what is overdue"))
+	chat := receive(t, h.ctx, runtime.calls)
+	if proposed := toolCaller(t, chat)("schedule_propose", `{"name":"Weekly tasks","cron":"0 9 * * 1","prompt":"List my overdue Notion tasks."}`); proposed.IsError {
+		t.Fatalf("schedule_propose = %+v", proposed)
+	}
+	chat.answer <- agentruntime.RunResult{Response: "proposed"}
+	h.wantReply(101, 1, "proposed")
+	h.waitState(1, "delivered")
+	proposal := h.nextMessage()
+	h.waitMessageRecorded(proposal.messageID)
+	data := buttonData(proposal.keyboard)
+	if len(data) != 3 || !strings.HasPrefix(data[2], "approval:preview:") {
+		t.Fatalf("proposal buttons = %v", data)
+	}
+	preview := data[2]
+
+	h.push(callbackUpdate(2, 101, proposal.messageID, preview))
+	if answer := h.nextAnswer(2); answer != "Running a preview; its report will follow here. Nothing is saved." {
+		t.Fatalf("preview press answer = %q", answer)
+	}
+	run := receive(t, h.ctx, runtime.calls)
+	if !strings.Contains(run.request.Message, `scheduled job "Weekly tasks"`) || !strings.HasSuffix(run.request.Message, "List my overdue Notion tasks.") {
+		t.Fatalf("preview message = %q", run.request.Message)
+	}
+	if names := toolNames(run.request.Tools); slices.Contains(names, "schedule_propose") || !slices.Contains(names, "schedule_list") {
+		t.Fatalf("preview tools = %v", names)
+	}
+
+	h.push(callbackUpdate(3, 101, proposal.messageID, preview))
+	if answer := h.nextAnswer(3); answer != "A preview of this batch is already running; its report will follow here." {
+		t.Fatalf("second preview press answer = %q", answer)
+	}
+	if again, err := h.approvals.Preview(h.ctx, "alice", approvalID(preview), pressTrigger(Bot{ID: 999}, 2), 101, proposal.messageID); err != nil || again.Text != "Running a preview; its report will follow here. Nothing is saved." {
+		t.Fatalf("retried preview press = %+v %v", again, err)
+	}
+	h.push(callbackUpdate(4, 202, proposal.messageID, preview))
+	if answer := h.nextAnswer(4); answer != "" {
+		t.Fatalf("another user's preview press answer = %q", answer)
+	}
+	expectNoRuntimeCall(t, runtime, 100*time.Millisecond)
+
+	run.answer <- agentruntime.RunResult{Response: "Two tasks are overdue.", Final: "Two tasks are overdue."}
+	report := h.nextMessage()
+	if report.chatID != 101 || report.replyTo != proposal.messageID ||
+		report.text != "<b>Preview: Weekly tasks</b>\n\nTwo tasks are overdue.\n\nPreview only: nothing is scheduled or changed until you confirm." {
+		t.Fatalf("preview report = %+v", report)
+	}
+	h.expectNoEdit(50 * time.Millisecond)
+	if count := h.countRows(`SELECT count(*) FROM scheduled_jobs`); count != 0 {
+		t.Fatalf("a preview created %d jobs", count)
+	}
+	if count := h.countRows(`SELECT count(*) FROM schedule_runs`); count != 0 {
+		t.Fatalf("a preview recorded %d runs", count)
+	}
+	if status, _ := h.approvalStatus(approvalID(preview)); status != "pending" {
+		t.Fatalf("proposal after preview = %s", status)
+	}
+
+	confirm, _ := approvalButtons(t, proposal.keyboard)
+	h.push(callbackUpdate(5, 101, proposal.messageID, confirm))
+	h.wantAnswer(5)
+	if edit := h.nextEdit(); !strings.Contains(edit.text, "Scheduled. First run:") || len(edit.keyboard) != 0 {
+		t.Fatalf("proposal after confirm = %+v", edit)
+	}
+	h.continueTurn(runtime, 5)
+	h.push(callbackUpdate(6, 101, proposal.messageID, preview))
+	if answer := h.nextAnswer(6); answer != "This batch is no longer waiting for confirmation, so there is nothing to preview." {
+		t.Fatalf("preview press after confirm = %q", answer)
+	}
+	expectNoRuntimeCall(t, runtime, 50*time.Millisecond)
+	if count := h.countRows(`SELECT count(*) FROM schedule_runs`); count != 0 {
+		t.Fatalf("runs after confirm = %d, want 0", count)
+	}
+
+	// A change that leaves the instructions alone has nothing to preview.
+	h.push(textUpdate(7, 101, "rename it"))
+	chat = receive(t, h.ctx, runtime.calls)
+	if proposed := toolCaller(t, chat)("schedule_update", `{"job_id":"`+approvalID(confirm)+`","name":"Overdue tasks"}`); proposed.IsError {
+		t.Fatalf("schedule_update = %+v", proposed)
+	}
+	chat.answer <- agentruntime.RunResult{Response: "proposed"}
+	h.wantReply(101, 7, "proposed")
+	h.waitState(7, "delivered")
+	if rename := h.nextMessage(); len(buttonData(rename.keyboard)) != 2 {
+		t.Fatalf("rename buttons = %v", buttonData(rename.keyboard))
 	}
 }

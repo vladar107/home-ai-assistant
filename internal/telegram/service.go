@@ -87,6 +87,9 @@ type NASController interface {
 type ApprovalController interface {
 	// Press resolves a Confirm or Reject press; a press on another principal's proposal is not owned.
 	Press(ctx context.Context, principalID, action, approvalID string) (approval.Pressed, error)
+	// Preview starts previews of a bundle's items, posted under its proposal message; the trigger
+	// names the press so a retried update starts nothing new.
+	Preview(ctx context.Context, principalID, approvalID, trigger string, chatID, messageID int64) (approval.PreviewPressed, error)
 }
 
 type identityResolver interface {
@@ -630,6 +633,9 @@ func (s *Service) processCallback(ctx context.Context, bot Bot, updateID int64, 
 	principalID := authorization.Principal.ID
 	chatID := message.Chat.ID
 
+	if action, approvalID, isApproval := approval.ParseCallback(callback.Data); isApproval && action == approval.ActionPreview {
+		return s.processPreviewPress(ctx, pressTrigger(bot, updateID), callback, principalID, approvalID)
+	}
 	if err := s.client.AnswerCallback(ctx, callback.ID, ""); err != nil && !isPermanentAPIError(err) {
 		return processingResult{}, "answer_callback", err
 	}
@@ -728,6 +734,32 @@ func (s *Service) processApprovalPress(ctx context.Context, bot Bot, updateID in
 			return result, "", nil
 		}
 		return processingResult{}, "send_message", err
+	}
+	return result, "", nil
+}
+
+// processPreviewPress starts a preview of the pressed bundle and answers the press with what it
+// did, leaving the proposal message and its buttons as they are. The press is answered after the
+// preview starts, so the answer can say whether one was already running; a retried update gets the
+// same answer and starts nothing.
+func (s *Service) processPreviewPress(ctx context.Context, trigger string, callback *CallbackQuery, principalID, approvalID string) (processingResult, string, error) {
+	result := processingResult{event: "telegram.callback.handled", principalID: principalID, command: "approval." + approval.ActionPreview}
+	var pressed approval.PreviewPressed
+	if s.approvals != nil {
+		var err error
+		pressed, err = s.approvals.Preview(ctx, principalID, approvalID, trigger, callback.Message.Chat.ID, callback.Message.MessageID)
+		if err != nil {
+			return processingResult{}, "approval_preview", err
+		}
+	}
+	if err := s.client.AnswerCallback(ctx, callback.ID, pressed.Text); err != nil && !isPermanentAPIError(err) {
+		return processingResult{}, "answer_callback", err
+	}
+	switch {
+	case s.approvals == nil:
+		result.event, result.reason = "telegram.update.ignored", "unknown_action"
+	case !pressed.Owned:
+		result.event, result.reason = "telegram.update.ignored", "foreign_approval"
 	}
 	return result, "", nil
 }

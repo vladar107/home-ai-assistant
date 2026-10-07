@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -45,6 +46,7 @@ const listGuidance = "Scheduled jobs: schedule_list shows the user's pending rem
 func proposeGuidance(zone string) string {
 	return "The user can ask for something to happen on a schedule, such as every Monday at 9 checking their Notion tasks and reporting what is overdue, or once, such as tomorrow at 7:30 checking whether their train is delayed. " +
 		"schedule_propose only proposes the job: after your reply the user sees its exact schedule, next runs, and instructions with Confirm and Reject buttons, so never claim it was scheduled. " +
+		"A proposal with new or changed instructions also gets a Preview button, which runs them once now and shows the report without saving anything, so the user can try a job before confirming it. " +
 		"A recurring job takes cron, a standard five-field cron expression (minute hour day-of-month month day-of-week) in the user's time zone, " + zone + " unless they name another; " +
 		"for example 0 9 * * 1 is Mondays at 09:00 and 30 7 * * 1-5 is weekdays at 07:30. A recurring job may run at most once an hour. " +
 		"A one-time job takes at instead, a local date and time such as 2026-10-04 07:30 that you work out from the current time. " +
@@ -144,6 +146,7 @@ var writeDefinitions = []tools.Definition{
 
 var _ tools.Provider = (*Service)(nil)
 var _ approval.Executor = (*Service)(nil)
+var _ approval.Previewer = (*Service)(nil)
 
 // Contribute offers the list and get tools, the reminder tools when the reminder type is
 // registered, and the proposal tools when there is an approval service and the model.turn type is
@@ -647,6 +650,76 @@ func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (ap
 		return approval.Outcome{Text: "Changed. Runs once: " + at + "."}, nil
 	}
 	return approval.Outcome{Text: "Changed. Next run: " + at + "."}, nil
+}
+
+// Previewable reports whether a proposal runs instructions that are new or changed: a proposed job,
+// or a change to a job's prompt.
+func (s *Service) Previewable(ctx context.Context, record approval.Record) bool {
+	switch record.Tool {
+	case toolPropose:
+		return true
+	case toolUpdate:
+		var confirmed confirmedUpdate
+		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
+			return false
+		}
+		job, found, err := s.repository.LoadScheduledJob(ctx, record.PrincipalID, confirmed.JobID)
+		return err == nil && found && ModelTurnPrompt(job.Config) != confirmed.Prompt
+	default:
+		return false
+	}
+}
+
+// Preview runs a proposed job's instructions once, now, through the same handler as a scheduled
+// run. Nothing is stored: no job and no run record, and a card the turn staged is dropped.
+func (s *Service) Preview(ctx context.Context, record approval.Record) (approval.Preview, error) {
+	var confirmed confirmedJob
+	switch record.Tool {
+	case toolPropose:
+		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
+			return approval.Preview{}, err
+		}
+	case toolUpdate:
+		var update confirmedUpdate
+		if err := json.Unmarshal(record.Arguments, &update); err != nil {
+			return approval.Preview{}, err
+		}
+		confirmed = update.confirmedJob
+	default:
+		return approval.Preview{}, fmt.Errorf("preview %s: not a model turn", record.Tool)
+	}
+	jobType, known := s.types[TypeModelTurn]
+	if !known {
+		return approval.Preview{}, fmt.Errorf("preview: the model turn type is not registered")
+	}
+	config, err := ModelTurnConfig(confirmed.Prompt)
+	if err != nil {
+		return approval.Preview{}, err
+	}
+	location, err := LoadZone(confirmed.Zone)
+	if err != nil {
+		location, _ = LoadZone(s.zone)
+	}
+	runID := "preview-" + record.ID
+	result, err := jobType.Handler.Run(ctx, Occurrence{
+		RunID:        runID,
+		PrincipalID:  record.PrincipalID,
+		JobName:      confirmed.Name,
+		Config:       config,
+		ScheduledFor: s.now(),
+		Location:     location,
+	})
+	if s.cards != nil {
+		s.cards.Remove(record.PrincipalID, outbox.ScheduledTurn(runID))
+	}
+	if err != nil {
+		return approval.Preview{}, err
+	}
+	text := result.Text
+	if strings.TrimSpace(text) == "" {
+		text = FailedText
+	}
+	return approval.Preview{Name: confirmed.Name, Text: text}, nil
 }
 
 func tooManyText(oneTime bool) string {

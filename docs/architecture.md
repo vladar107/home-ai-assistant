@@ -200,6 +200,9 @@ not_retryable), and each retry is logged at debug level.
    and executes a confirmed proposal once. A turn's proposals (up to ten) form one
    bundle; a long one is sent as several messages, each item whole in one of them
    and the buttons on the last, which is the only one edited with the outcome.
+   A bundle with a new or changed scheduled prompt also gets Preview, which runs
+   each such prompt once through the scheduled-run path, one preview per bundle at
+   a time, and posts the report under the proposal without storing a job or a run.
    A Confirm that ran the actions queues a
    turn that continues the request from their outcome, so a dependent next step
    needs no nudge; it stays silent when nothing is left to do.

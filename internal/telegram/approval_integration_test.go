@@ -88,6 +88,9 @@ func (h *conversationHarness) continueTurn(runtime *controlledRuntime, updateID 
 func approvalButtons(t *testing.T, keyboard InlineKeyboard) (string, string) {
 	t.Helper()
 	data := buttonData(keyboard)
+	if len(data) == 3 && strings.HasPrefix(data[2], "approval:preview:") {
+		data = data[:2]
+	}
 	if len(data) != 2 || !strings.HasPrefix(data[0], "approval:confirm:") || !strings.HasPrefix(data[1], "approval:reject:") {
 		t.Fatalf("proposal buttons = %v", data)
 	}
