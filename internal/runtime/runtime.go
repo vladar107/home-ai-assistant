@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 )
@@ -114,6 +115,9 @@ const (
 	FailureQuota FailureCategory = "provider_quota"
 	FailureAuth  FailureCategory = "provider_auth"
 )
+
+// ErrStalled means the runtime heard nothing from the model for too long and gave up on the turn.
+var ErrStalled = errors.New("model produced no output")
 
 // ProviderError carries only the category so provider text never reaches an error, a log, or a reply.
 type ProviderError struct {

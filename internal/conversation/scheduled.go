@@ -70,7 +70,7 @@ func (s *Service) RunScheduled(ctx context.Context, principalID, turn, message s
 	switch {
 	case ctx.Err() != nil:
 		return ScheduledReply{}, ctx.Err()
-	case errors.Is(turnCtx.Err(), context.DeadlineExceeded):
+	case errors.Is(turnCtx.Err(), context.DeadlineExceeded) || errors.Is(runErr, agentruntime.ErrStalled):
 		return ScheduledReply{Text: TimeoutReply, ErrorKind: "timeout"}, nil
 	case runErr != nil || strings.TrimSpace(result.Final) == "":
 		reply, kind := failureReply(runErr)

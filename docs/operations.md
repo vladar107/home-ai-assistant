@@ -237,6 +237,11 @@ while the model call was still open. Each turn's trace shows
 `home_agent.model.call` spans (with `pi.auto_retry` events) and
 `home_agent.tool.call` spans. A model call that Pi had to retry logs one
 `pi.model_call.retried` warning with its `category`, `retries`, and `outcome`.
+A turn that hears nothing from Pi for 45 seconds before any tool call or
+reply text is stopped, its model call ending as `stalled`, and run once more
+on its restored session. A silence after that point waits for the turn's own
+deadline. Both are counted in `home_agent_model_stalls` by outcome
+(`retried_ok`, `retried_failed`, `not_retried`) and log `pi.turn.stalled`.
 
 Add a Telegram contact point `Hearthwatch` with the alert bot token and chat ID
 from Keychain. Start with an alert on an absent `home_agent_application_running`

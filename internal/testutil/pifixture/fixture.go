@@ -288,6 +288,42 @@ func run() error {
 		emit(map[string]any{"type": "message_start", "message": map[string]string{"role": "assistant"}})
 		delta("found: synthetic search answer")
 		settle()
+	case "fixture:stall-once":
+		// The first run records the user's message as Pi does and then goes silent; the run after
+		// it answers.
+		marker := filepath.Join(args["--session-dir"], args["--session-id"]+".stalled")
+		if _, statErr := os.Stat(marker); statErr != nil {
+			if err := os.WriteFile(marker, nil, 0o600); err != nil {
+				return err
+			}
+			if err := recordExchange(args["--session-dir"], args["--session-id"], directory, prompt.Message, ""); err != nil {
+				return err
+			}
+			ack()
+			for {
+				time.Sleep(time.Hour)
+			}
+		}
+		if err := recordExchange(args["--session-dir"], args["--session-id"], directory, prompt.Message, "recovered"); err != nil {
+			return err
+		}
+		ack()
+		delta("recovered")
+		settle()
+	case "fixture:stall-after-tool":
+		// Counts its starts in a file beside the session so a test can tell a retry happened.
+		starts, err := os.OpenFile(filepath.Join(args["--session-dir"], args["--session-id"]+".starts"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
+		if err != nil {
+			return err
+		}
+		_, _ = starts.WriteString("x")
+		_ = starts.Close()
+		ack()
+		emit(map[string]any{"type": "message_start", "message": map[string]string{"role": "assistant"}})
+		emit(map[string]any{"type": "tool_execution_start", "toolCallId": "call-1", "toolName": "web_search"})
+		for {
+			time.Sleep(time.Hour)
+		}
 	case "fixture:hold", "fixture:stubborn":
 		for {
 			time.Sleep(time.Hour)
@@ -431,10 +467,18 @@ func recordExchange(sessionDir, sessionID, cwd, message, answer string) error {
 	}
 	lines = append(lines,
 		map[string]any{"type": "message", "id": userID, "parentId": parentID, "timestamp": now.Format(time.RFC3339Nano),
-			"message": map[string]any{"role": "user", "content": message, "timestamp": now.UnixMilli()}},
+			"message": map[string]any{"role": "user", "content": message, "timestamp": now.UnixMilli()}})
+	if answer == "" {
+		return appendLines(path, lines)
+	}
+	lines = append(lines,
 		map[string]any{"type": "message", "id": assistantID, "parentId": userID, "timestamp": now.Format(time.RFC3339Nano),
 			"message": map[string]any{"role": "assistant", "content": []map[string]string{{"type": "text", "text": answer}}, "stopReason": "stop", "timestamp": now.UnixMilli()}},
 	)
+	return appendLines(path, lines)
+}
+
+func appendLines(path string, lines []any) error {
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
 	if err != nil {
 		return err

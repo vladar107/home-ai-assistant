@@ -64,6 +64,7 @@ plan that links back to the earlier record.
 | 0052 | [Supply-chain pins and public-repository hygiene](0052-supply-chain-pins-and-public-hygiene.md) | done |
 | 0053 | [Edit scheduled jobs](0053-edit-scheduled-jobs.md) | done |
 | 0054 | [Continue after Confirm, and runtime hygiene](0054-continue-after-confirm-and-runtime-hygiene.md) | done |
+| 0055 | [Tool reliability: fewer wasted calls, retries, and clean scheduled replies](0055-tool-reliability.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

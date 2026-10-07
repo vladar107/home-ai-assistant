@@ -582,7 +582,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 			s.recordTurnMetrics(turnCtx, request.PrincipalID, safetyChecks, sink, result.Usage, !tools.Empty() || webSearch, hint)
 		}
 		switch {
-		case errors.Is(turnCtx.Err(), context.DeadlineExceeded):
+		case errors.Is(turnCtx.Err(), context.DeadlineExceeded) || errors.Is(runErr, agentruntime.ErrStalled):
 			errorKind = ErrorKindTimeout
 			reply = TimeoutReply
 		case errors.Is(turnCtx.Err(), context.Canceled):
@@ -934,6 +934,9 @@ func isPermanentDeliveryError(err error) bool {
 
 // failureReply maps a failed run to the reply the user sees and the category telemetry reports.
 func failureReply(err error) (string, string) {
+	if errors.Is(err, agentruntime.ErrStalled) {
+		return TimeoutReply, ErrorKindTimeout
+	}
 	var providerErr *agentruntime.ProviderError
 	if errors.As(err, &providerErr) {
 		switch providerErr.Category {

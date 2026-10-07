@@ -23,6 +23,9 @@ const (
 	maximumResponseBytes = 256 << 10
 	processStopGrace     = 2 * time.Second
 	versionTimeout       = 30 * time.Second
+	// defaultStallTimeout is how long a turn may hear nothing from Pi before it counts as stalled.
+	// Pi's own retry events count as activity, so its backoff does not trip it.
+	defaultStallTimeout = 45 * time.Second
 )
 
 const (
@@ -45,6 +48,8 @@ type Config struct {
 	// WebSearchExtension is the entry file of the vendored search extension; empty disables web
 	// search.
 	WebSearchExtension string
+	// StallTimeout overrides the silence that marks a turn as stalled; zero keeps the default.
+	StallTimeout time.Duration
 	// Logger receives the per-call warning about Pi's own retries; nil discards it.
 	Logger *slog.Logger
 }
@@ -59,6 +64,7 @@ type Runtime struct {
 	webSearchExtension string
 	logger             *slog.Logger
 	telemetry          Telemetry
+	stallTimeout       time.Duration
 }
 
 // Telemetry receives one record per assistant message, timed from its message_start, and one span
@@ -70,6 +76,9 @@ type Telemetry interface {
 	// category, and one that ends the call with its outcome.
 	StartModelCall(ctx context.Context, principal string) (context.Context, func(string), func(string))
 	ContextLogger(ctx context.Context, logger *slog.Logger) *slog.Logger
+	// RecordModelStall counts a turn that went silent, by outcome: retried_ok, retried_failed, or
+	// not_retried.
+	RecordModelStall(ctx context.Context, principal, outcome string)
 }
 
 // SetTelemetry must be called before the first turn.
@@ -141,6 +150,10 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 		logger = slog.New(slog.DiscardHandler)
 	}
 	removeStaleBridges(profilesDir, logger)
+	stallTimeout := cfg.StallTimeout
+	if stallTimeout <= 0 {
+		stallTimeout = defaultStallTimeout
+	}
 
 	return &Runtime{
 		binary:             binary,
@@ -151,6 +164,7 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 		profilesDir:        profilesDir,
 		webSearchExtension: cfg.WebSearchExtension,
 		logger:             logger,
+		stallTimeout:       stallTimeout,
 	}, nil
 }
 
@@ -227,6 +241,54 @@ func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink
 		args = append(args, "--model", r.model)
 	}
 
+	snapshot, err := snapshotSession(sessionDir, request.SessionID)
+	if err != nil {
+		return agentruntime.RunResult{}, err
+	}
+	result, err := r.attempt(ctx, request, sink, args, environment, workDir, toolsEnabled)
+	var stall *stallError
+	if !errors.As(err, &stall) {
+		return result, err
+	}
+	logger := r.logger
+	if r.telemetry != nil {
+		logger = r.telemetry.ContextLogger(ctx, logger)
+	}
+	if restoreErr := snapshot.restore(sessionDir, request.SessionID); restoreErr != nil {
+		r.recordStall(ctx, request.PrincipalID, "not_retried")
+		logger.Warn("pi.turn.stalled", "principal_id", request.PrincipalID, "retried", false, "restore_error", restoreErr)
+		return agentruntime.RunResult{}, err
+	}
+	logger.Warn("pi.turn.stalled", "principal_id", request.PrincipalID, "retried", true)
+	result, err = r.attempt(ctx, request, sink, args, environment, workDir, toolsEnabled)
+	if err != nil {
+		r.recordStall(ctx, request.PrincipalID, "retried_failed")
+		return agentruntime.RunResult{}, err
+	}
+	r.recordStall(ctx, request.PrincipalID, "retried_ok")
+	return result, nil
+}
+
+func (r *Runtime) recordStall(ctx context.Context, principal, outcome string) {
+	if r.telemetry != nil {
+		r.telemetry.RecordModelStall(ctx, principal, outcome)
+	}
+}
+
+// stallError reports a turn that heard nothing from Pi before it did anything a second run would
+// repeat: no tool call started and no text reached the sink.
+type stallError struct{}
+
+func (e *stallError) Error() string {
+	return "Pi runtime produced no output"
+}
+
+func (e *stallError) Unwrap() error {
+	return agentruntime.ErrStalled
+}
+
+// attempt runs one Pi process for the turn.
+func (r *Runtime) attempt(ctx context.Context, request agentruntime.RunRequest, sink agentruntime.EventSink, args, environment []string, workDir string, toolsEnabled bool) (agentruntime.RunResult, error) {
 	cmd := exec.CommandContext(ctx, r.binary, args...)
 	cmd.Dir = workDir
 	cmd.Env = environment
@@ -283,9 +345,13 @@ func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink
 		state.closeModelCall(unfinishedOutcome(ctx))
 	}()
 
+	silence := time.NewTimer(r.stallTimeout)
+	defer silence.Stop()
+	stallNoted := false
 	for {
 		select {
 		case event, ok := <-events:
+			silence.Reset(r.stallTimeout)
 			if !ok {
 				stopProcess(cmd, stdin, waitResult)
 				return agentruntime.RunResult{}, fmt.Errorf("read Pi output: event stream ended early")
@@ -325,6 +391,25 @@ func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink
 		case <-waitResult:
 			_ = stdin.Close()
 			return agentruntime.RunResult{}, fmt.Errorf("Pi runtime exited before completing the turn")
+		case <-silence.C:
+			if state.toolStarted || state.response.Len() > 0 {
+				// A second run would repeat a tool call or text the user already has, and a long
+				// silence after a tool call may still be the model working, so the turn waits for
+				// its own deadline as before.
+				if !stallNoted {
+					stallNoted = true
+					r.recordStall(ctx, request.PrincipalID, "not_retried")
+					logger := r.logger
+					if r.telemetry != nil {
+						logger = r.telemetry.ContextLogger(ctx, logger)
+					}
+					logger.Warn("pi.turn.stalled", "principal_id", request.PrincipalID, "retried", false)
+				}
+				continue
+			}
+			state.closeModelCall("stalled")
+			stopProcess(cmd, stdin, waitResult)
+			return agentruntime.RunResult{}, &stallError{}
 		case <-ctx.Done():
 			stopProcess(cmd, stdin, waitResult)
 			return agentruntime.RunResult{}, ctx.Err()
@@ -650,6 +735,7 @@ type turnState struct {
 	response           strings.Builder
 	message            strings.Builder
 	promptAcknowledged bool
+	toolStarted        bool
 	separatorPending   bool
 	telemetry          Telemetry
 	logger             *slog.Logger
@@ -779,6 +865,7 @@ func (s *turnState) consume(ctx context.Context, event rpcEvent) (bool, error) {
 		if !s.toolsEnabled {
 			return false, fmt.Errorf("Pi runtime emitted a tool event while tools are disabled")
 		}
+		s.toolStarted = true
 		if err := s.sink.Emit(ctx, agentruntime.Event{Type: "tool_call", Text: event.ToolName}); err != nil {
 			return false, fmt.Errorf("emit Pi runtime event: %w", err)
 		}
@@ -846,6 +933,53 @@ func (s *turnState) appendText(ctx context.Context, delta string) error {
 	s.message.WriteString(delta)
 	if err := s.sink.Emit(ctx, agentruntime.Event{Type: "text_delta", Text: delta}); err != nil {
 		return fmt.Errorf("emit Pi runtime event: %w", err)
+	}
+	return nil
+}
+
+// sessionSnapshot records the size of each of a session's files before a turn, so a stalled turn
+// can be undone: Pi appends the user's message to the file during the turn, and its RPC has no
+// command that removes it.
+type sessionSnapshot map[string]int64
+
+func sessionFiles(sessionDir, sessionID string) ([]string, error) {
+	return filepath.Glob(filepath.Join(sessionDir, "*_"+sessionID+".jsonl"))
+}
+
+func snapshotSession(sessionDir, sessionID string) (sessionSnapshot, error) {
+	paths, err := sessionFiles(sessionDir, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("find Pi session files: %w", err)
+	}
+	snapshot := sessionSnapshot{}
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, fmt.Errorf("inspect Pi session file: %w", err)
+		}
+		snapshot[path] = info.Size()
+	}
+	return snapshot, nil
+}
+
+// restore cuts the session back to its pre-turn state: files the turn created are removed and
+// files that existed are truncated to their old size. Pi must have stopped.
+func (s sessionSnapshot) restore(sessionDir, sessionID string) error {
+	paths, err := sessionFiles(sessionDir, sessionID)
+	if err != nil {
+		return err
+	}
+	for _, path := range paths {
+		size, existed := s[path]
+		if !existed {
+			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			continue
+		}
+		if err := os.Truncate(path, size); err != nil {
+			return err
+		}
 	}
 	return nil
 }

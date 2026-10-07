@@ -63,6 +63,7 @@ type Telemetry struct {
 	replyStageDuration           metric.Float64Histogram
 	modelCallDuration            metric.Float64Histogram
 	modelCalls                   metric.Int64Counter
+	modelStalls                  metric.Int64Counter
 	modelTokens                  metric.Int64Counter
 	modelCallsPerTurn            metric.Int64Histogram
 	modelTurnTokens              metric.Int64Histogram
@@ -346,6 +347,9 @@ func (t *Telemetry) createBusinessInstruments(meter metric.Meter) error {
 	if t.modelCalls, err = counter("home_agent.model.calls", "Model calls ended, by outcome.", "{call}"); err != nil {
 		return err
 	}
+	if t.modelStalls, err = counter("home_agent.model.stalls", "Model turns that produced no output for too long, by outcome.", "{stall}"); err != nil {
+		return err
+	}
 	if t.modelTokens, err = counter("home_agent.model.tokens", "Model tokens reported by the runtime.", "{token}"); err != nil {
 		return err
 	}
@@ -627,7 +631,15 @@ func (t *Telemetry) ZeroRareOutcomes(ctx context.Context, principals, turnErrorK
 		for _, outcome := range []string{"timeout", "cancelled", "failed"} {
 			t.modelCalls.Add(ctx, 0, metric.WithAttributes(principalAttr(principal), labelAttr("home_agent.outcome", outcome, "unknown")))
 		}
+		for _, outcome := range []string{"retried_ok", "retried_failed", "not_retried"} {
+			t.modelStalls.Add(ctx, 0, metric.WithAttributes(principalAttr(principal), labelAttr("home_agent.outcome", outcome, "unknown")))
+		}
 	}
+}
+
+// RecordModelStall counts a turn whose model went silent: retried_ok, retried_failed, or not_retried.
+func (t *Telemetry) RecordModelStall(ctx context.Context, principal, outcome string) {
+	t.modelStalls.Add(ctx, 1, metric.WithAttributes(principalAttr(principal), labelAttr("home_agent.outcome", outcome, "unknown")))
 }
 
 func (t *Telemetry) RecordModelTokens(ctx context.Context, principal, provider, model string, input, output, cacheRead, cacheWrite int64) {
