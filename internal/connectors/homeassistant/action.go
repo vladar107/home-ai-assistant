@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -41,7 +40,7 @@ func (s *Service) proposeAction(ctx context.Context, principalID, name string, t
 	}
 	intent := approval.Intent{Verb: "run", TargetKind: "home action", TargetName: truncateRunes(target, maximumIntentRunes)}
 	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: toolAction, Arguments: encoded, Summary: summary, Intent: intent}); err != nil {
-		if errors.Is(err, approval.ErrBundleFull) {
+		if approval.Refused(err) {
 			return failure(err)
 		}
 		s.logger.WarnContext(ctx, "homeassistant.proposal.failed", "principal_id", principalID, "error", err)

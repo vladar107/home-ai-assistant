@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
@@ -166,16 +167,21 @@ func (s *Store) SetApprovalSummary(ctx context.Context, id, summary string) erro
 	return nil
 }
 
-func (s *Store) SetApprovalMessage(ctx context.Context, bundleID string, chatID, messageID int64) error {
+func (s *Store) SetApprovalMessage(ctx context.Context, ids []string, chatID, messageID int64) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("record approval message: SQLite store is not open")
 	}
+	if len(ids) == 0 {
+		return nil
+	}
+	arguments := []any{chatID, messageID}
+	for _, id := range ids {
+		arguments = append(arguments, id)
+	}
 	if _, err := s.db.ExecContext(
 		ctx,
-		`UPDATE approvals SET chat_id = ?, message_id = NULLIF(?, 0) WHERE bundle_id = ?`,
-		chatID,
-		messageID,
-		bundleID,
+		`UPDATE approvals SET chat_id = ?, message_id = NULLIF(?, 0) WHERE id IN (?`+strings.Repeat(", ?", len(ids)-1)+`)`,
+		arguments...,
 	); err != nil {
 		return fmt.Errorf("record approval message: %w", err)
 	}

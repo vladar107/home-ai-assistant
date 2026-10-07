@@ -187,7 +187,10 @@ it can write, the approval service (the executor for confirmed proposals).
 5. Every tool call returns over loopback to `tools`, which rechecks the grant and
    bounds it to 15 seconds, 16 KiB, and 8 calls per turn.
 6. A write becomes a proposal; `approval` sends Confirm and Reject after the reply
-   and executes a confirmed proposal once. A Confirm that ran the actions queues a
+   and executes a confirmed proposal once. A turn's proposals (up to ten) form one
+   bundle; a long one is sent as several messages, each item whole in one of them
+   and the buttons on the last, which is the only one edited with the outcome.
+   A Confirm that ran the actions queues a
    turn that continues the request from their outcome, so a dependent next step
    needs no nudge; it stays silent when nothing is left to do.
 7. The reply goes back through Telegram, as a day card photo with a caption when the

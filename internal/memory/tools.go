@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -275,7 +274,7 @@ func (s *Service) propose(ctx context.Context, principalID string, exposed bool,
 		}
 	}
 	if _, err := s.proposer.Propose(ctx, principalID, proposal); err != nil {
-		if errors.Is(err, approval.ErrBundleFull) {
+		if approval.Refused(err) {
 			return tools.Result{Text: err.Error(), IsError: true}, nil
 		}
 		s.logger.WarnContext(ctx, "memory.proposal.failed", "principal_id", principalID, "tool", proposal.Tool, "error", err)

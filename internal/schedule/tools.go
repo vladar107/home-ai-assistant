@@ -275,7 +275,7 @@ func (s *Service) proposeReminder(ctx context.Context, principalID string, call 
 	}
 	summary := fmt.Sprintf("Set a reminder for %s:\n%s\nI read outside content in this conversation, so I need your confirmation.", FormatOccurrence(job.RunAt, prepared.Schedule.Location), text)
 	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: toolReminderSet, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "set", TargetKind: "reminder", TargetName: job.Name}}); err != nil {
-		if errors.Is(err, approval.ErrBundleFull) {
+		if approval.Refused(err) {
 			return tools.Result{Text: err.Error(), IsError: true}, nil
 		}
 		s.logger.WarnContext(ctx, "schedule.proposal.failed", "principal_id", principalID, "tool", call.Name, "error", err)
@@ -340,7 +340,7 @@ func (s *Service) proposeJob(ctx context.Context, principalID string, call tools
 	}
 	summary := proposalSummary(fmt.Sprintf("Schedule %q", job.Name), prepared)
 	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: toolPropose, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "schedule", TargetKind: targetKind, TargetName: job.Name}}); err != nil {
-		if errors.Is(err, approval.ErrBundleFull) {
+		if approval.Refused(err) {
 			return tools.Result{Text: err.Error(), IsError: true}, nil
 		}
 		s.logger.WarnContext(ctx, "schedule.proposal.failed", "principal_id", principalID, "tool", call.Name, "error", err)
@@ -427,7 +427,7 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 		summary += "\nIt stays paused until you resume it in /jobs."
 	}
 	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: toolUpdate, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "change", TargetKind: "scheduled job", TargetName: job.Name}}); err != nil {
-		if errors.Is(err, approval.ErrBundleFull) {
+		if approval.Refused(err) {
 			return tools.Result{Text: err.Error(), IsError: true}, nil
 		}
 		s.logger.WarnContext(ctx, "schedule.proposal.failed", "principal_id", principalID, "tool", call.Name, "error", err)
@@ -477,7 +477,7 @@ func (s *Service) proposeRemoval(ctx context.Context, principalID string, call t
 	}
 	summary := fmt.Sprintf("Delete the scheduled job %q (%s). It will not run again.", job.Name, DescribeJob(job, s.zone))
 	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: toolRemove, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "remove", TargetKind: "scheduled job", TargetName: job.Name}}); err != nil {
-		if errors.Is(err, approval.ErrBundleFull) {
+		if approval.Refused(err) {
 			return tools.Result{Text: err.Error(), IsError: true}, nil
 		}
 		s.logger.WarnContext(ctx, "schedule.proposal.failed", "principal_id", principalID, "tool", call.Name, "error", err)

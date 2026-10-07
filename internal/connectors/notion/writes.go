@@ -125,7 +125,7 @@ func (s *Service) record(ctx context.Context, principalID, token, tool string, a
 		return err
 	}
 	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: tool, Arguments: arguments, Summary: summary, Intent: intent}); err != nil {
-		if errors.Is(err, approval.ErrBundleFull) {
+		if approval.Refused(err) {
 			return err
 		}
 		s.logger.WarnContext(ctx, "notion.proposal.failed", "principal_id", principalID, "tool", tool, "error", err)

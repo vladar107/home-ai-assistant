@@ -295,6 +295,8 @@ func (s *simulator) labelFrontDoor() {
 
 type deliverer struct{}
 
+func (deliverer) SendText(context.Context, int64, string) (int64, error) { return 1, nil }
+
 func (deliverer) SendProposal(context.Context, int64, string, string, string) (int64, error) {
 	return 1, nil
 }

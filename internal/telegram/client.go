@@ -400,6 +400,18 @@ func (c *Client) sendMessage(ctx context.Context, chatID, replyToMessageID int64
 	return message, err
 }
 
+// SendText posts a message without buttons and returns its message ID.
+func (c *Client) SendText(ctx context.Context, chatID int64, text string) (int64, error) {
+	message, err := c.sendMessage(ctx, chatID, 0, text, nil)
+	if err != nil {
+		return 0, err
+	}
+	if message.MessageID <= 0 {
+		return 0, fmt.Errorf("Telegram sendMessage returned no message ID")
+	}
+	return message.MessageID, nil
+}
+
 // SendProposal posts a confirmation request with Confirm and Reject buttons and returns the
 // message ID so the outcome can replace the buttons later.
 func (c *Client) SendProposal(ctx context.Context, chatID int64, text, confirmData, rejectData string) (int64, error) {

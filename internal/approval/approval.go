@@ -49,8 +49,8 @@ const (
 	idBytes              = 8
 
 	maximumBundleItems = 10
-	// bundleSummaryUnits leaves room in Telegram's 4096-unit message for the header, the expiry
-	// line, and a cut outcome line per item.
+	// bundleSummaryUnits is the summary budget of one bundle message; it leaves room in Telegram's
+	// 4096-unit message for the header, the expiry line, and a cut outcome line per item.
 	bundleSummaryUnits = 2500
 	bundleOutcomeRunes = 120
 
@@ -59,6 +59,15 @@ const (
 
 // ErrBundleFull is returned for a proposal that no longer fits the bundle waiting for confirmation.
 var ErrBundleFull = errors.New("the batch of changes waiting for the user's confirmation is full; nothing was added. Tell the user to confirm or reject it first, then propose the rest")
+
+// ErrSummaryTooLong is returned for a proposal whose rendering cannot fit one message. It is
+// refused instead of cut, because the confirmation must show the exact action.
+var ErrSummaryTooLong = errors.New("the proposal is too long to show the user in full for confirmation; nothing was added. Propose a shorter one")
+
+// Refused reports whether the error is a proposal refusal whose text tells the model what to do next.
+func Refused(err error) bool {
+	return errors.Is(err, ErrBundleFull) || errors.Is(err, ErrSummaryTooLong)
+}
 
 // Proposal is what a connector asks the user to confirm: the exact tool call and its rendering.
 type Proposal struct {
@@ -143,7 +152,9 @@ type Repository interface {
 	StartApproval(ctx context.Context, id string, now time.Time) error
 	// FinishApproval moves a record to a terminal status with a reason and outcome.
 	FinishApproval(ctx context.Context, id, from, status, reason, outcome string) (bool, error)
-	SetApprovalMessage(ctx context.Context, bundleID string, chatID, messageID int64) error
+	// SetApprovalMessage records the chat and the message that shows the records; a zero message ID
+	// marks them as not delivered yet.
+	SetApprovalMessage(ctx context.Context, ids []string, chatID, messageID int64) error
 	// SetApprovalSummary replaces the summary of a pending record.
 	SetApprovalSummary(ctx context.Context, id, summary string) error
 	// ExpireApprovals moves every pending record past its expiry, or every pending and confirmed
@@ -155,8 +166,10 @@ type Repository interface {
 	UndeliveredApprovals(context.Context) ([]Record, error)
 }
 
-// Deliverer sends and updates the proposal message in the user's chat.
+// Deliverer sends and updates the proposal messages in the user's chat.
 type Deliverer interface {
+	// SendText sends a message without buttons, for the parts of a bundle before the last.
+	SendText(ctx context.Context, chatID int64, text string) (int64, error)
 	SendProposal(ctx context.Context, chatID int64, text, confirmData, rejectData string) (int64, error)
 	EditText(ctx context.Context, chatID, messageID int64, text string) error
 }
@@ -392,6 +405,9 @@ func (s *Service) proposalLock(principalID string) *sync.Mutex {
 // store joins the record to the turn's bundle or starts a new one, returning the records it
 // replaced. An identical proposal already in the bundle is returned instead of a new record.
 func (s *Service) store(ctx context.Context, principalID, tool string, canonical json.RawMessage, hash, summary, id string) (Record, []Record, error) {
+	if utf16Units(strings.TrimSpace(summary))+utf16Units(IntentWarning)+2 > bundleSummaryUnits {
+		return Record{}, nil, ErrSummaryTooLong
+	}
 	pending, err := s.repository.PendingApprovals(ctx, principalID)
 	if err != nil {
 		return Record{}, nil, fmt.Errorf("load pending approvals: %w", err)
@@ -407,7 +423,7 @@ func (s *Service) store(ctx context.Context, principalID, tool string, canonical
 		Tool:        tool,
 		Arguments:   canonical,
 		Hash:        hash,
-		Summary:     truncateRunes(strings.TrimSpace(summary), maximumSummaryRunes),
+		Summary:     strings.TrimSpace(summary),
 		Status:      StatusPending,
 		CreatedAt:   now,
 		ExpiresAt:   now.Add(lifetime),
@@ -418,7 +434,7 @@ func (s *Service) store(ctx context.Context, principalID, tool string, canonical
 				return item, nil, nil
 			}
 		}
-		if !fits(pending, record) {
+		if len(pending) >= maximumBundleItems {
 			return Record{}, nil, ErrBundleFull
 		}
 		first, last := pending[0], pending[len(pending)-1]
@@ -448,26 +464,13 @@ func joinable(pending []Record, now time.Time, lifetime time.Duration) bool {
 	return now.Sub(first.CreatedAt) < lifetime/2 && now.Before(first.ExpiresAt)
 }
 
-// fits reports whether the record can join the bundle within the item limit and a summary budget
-// that leaves room for an intent warning on every item.
-func fits(bundle []Record, record Record) bool {
-	if len(bundle) >= maximumBundleItems {
-		return false
-	}
-	units := 0
-	for _, item := range append(slices.Clone(bundle), record) {
-		units += utf16Units(item.Summary) + utf16Units(IntentWarning) + 2
-	}
-	return units <= bundleSummaryUnits
-}
-
 // AfterDelivery sends the principal's undelivered bundle to the chat once the turn's reply is out.
 func (s *Service) AfterDelivery(ctx context.Context, principalID string, chatID int64) error {
 	bundle, err := s.repository.PendingApprovals(ctx, principalID)
 	if err != nil {
 		return err
 	}
-	if len(bundle) == 0 || bundle[0].MessageID != 0 {
+	if len(bundle) == 0 || bundle[len(bundle)-1].MessageID != 0 {
 		return nil
 	}
 	s.checkIntents(ctx, bundle)
@@ -480,7 +483,7 @@ func (s *Service) AfterDelivery(ctx context.Context, principalID string, chatID 
 	if err != nil {
 		return err
 	}
-	if len(current) == 0 || current[0].BundleID != bundle[0].BundleID || current[0].MessageID != 0 {
+	if len(current) == 0 || current[0].BundleID != bundle[0].BundleID || current[len(current)-1].MessageID != 0 {
 		return nil
 	}
 	return s.send(ctx, current, chatID)
@@ -534,20 +537,44 @@ func (s *Service) dropIntents(bundle []Record) {
 	}
 }
 
+// send delivers the records of the bundle that no message shows yet, in as many messages as their
+// summaries need. Only the last message has the buttons, and each record is in exactly one message.
 func (s *Service) send(ctx context.Context, bundle []Record, chatID int64) error {
 	first := bundle[0]
-	messageID, err := s.deliverer.SendProposal(ctx, chatID, bundleText(bundle), callbackData(ActionConfirm, first.BundleID), callbackData(ActionReject, first.BundleID))
-	if err != nil {
-		// The chat is remembered so the sweep can retry until the proposal expires.
-		_ = s.repository.SetApprovalMessage(ctx, first.BundleID, chatID, 0)
-		s.logger.WarnContext(ctx, "approval.proposal.undeliverable", "principal_id", first.PrincipalID, "bundle_id", first.BundleID, "error", err)
-		return err
+	start := slices.IndexFunc(bundle, func(record Record) bool { return record.MessageID == 0 })
+	if start < 0 {
+		return nil
 	}
-	if err := s.repository.SetApprovalMessage(ctx, first.BundleID, chatID, messageID); err != nil {
-		return err
+	ranges := messageRanges(bundle, start)
+	for index, span := range ranges {
+		text := messageText(bundle, span[0], span[1])
+		var messageID int64
+		var err error
+		if index == len(ranges)-1 {
+			messageID, err = s.deliverer.SendProposal(ctx, chatID, text, callbackData(ActionConfirm, first.BundleID), callbackData(ActionReject, first.BundleID))
+		} else {
+			messageID, err = s.deliverer.SendText(ctx, chatID, text)
+		}
+		if err != nil {
+			// The chat is remembered so the sweep can retry the rest until the proposal expires.
+			_ = s.repository.SetApprovalMessage(ctx, recordIDs(bundle[span[0]:]), chatID, 0)
+			s.logger.WarnContext(ctx, "approval.proposal.undeliverable", "principal_id", first.PrincipalID, "bundle_id", first.BundleID, "error", err)
+			return err
+		}
+		if err := s.repository.SetApprovalMessage(ctx, recordIDs(bundle[span[0]:span[1]]), chatID, messageID); err != nil {
+			return err
+		}
 	}
-	s.logger.InfoContext(ctx, "approval.proposal.sent", "principal_id", first.PrincipalID, "bundle_id", first.BundleID, "items", len(bundle))
+	s.logger.InfoContext(ctx, "approval.proposal.sent", "principal_id", first.PrincipalID, "bundle_id", first.BundleID, "items", len(bundle), "messages", len(ranges))
 	return nil
+}
+
+func recordIDs(records []Record) []string {
+	ids := make([]string, len(records))
+	for index, record := range records {
+		ids[index] = record.ID
+	}
+	return ids
 }
 
 func (s *Service) resendUndelivered(ctx context.Context) {
@@ -555,8 +582,12 @@ func (s *Service) resendUndelivered(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	for _, bundle := range groupBundles(undelivered) {
-		_ = s.send(ctx, bundle, bundle[0].ChatID)
+	for _, group := range groupBundles(undelivered) {
+		bundle, err := s.repository.LoadBundle(ctx, group[0].BundleID)
+		if err != nil || len(bundle) == 0 {
+			continue
+		}
+		_ = s.send(ctx, bundle, group[0].ChatID)
 	}
 }
 
@@ -702,12 +733,12 @@ func (s *Service) report(ctx context.Context, records []Record) {
 			bundle = changed
 		}
 		s.rememberNotice(bundle)
-		first := bundle[0]
-		if first.ChatID == 0 || first.MessageID == 0 {
+		last := bundle[len(bundle)-1]
+		if last.ChatID == 0 || last.MessageID == 0 {
 			continue
 		}
-		if err := s.deliverer.EditText(ctx, first.ChatID, first.MessageID, bundleText(bundle)); err != nil {
-			s.logger.WarnContext(ctx, "approval.report.failed", "principal_id", first.PrincipalID, "bundle_id", first.BundleID, "error", err)
+		if err := s.deliverer.EditText(ctx, last.ChatID, last.MessageID, bundleText(bundle)); err != nil {
+			s.logger.WarnContext(ctx, "approval.report.failed", "principal_id", last.PrincipalID, "bundle_id", last.BundleID, "error", err)
 		}
 	}
 }
@@ -801,9 +832,36 @@ func callbackData(action, id string) string {
 	return "approval:" + action + ":" + id
 }
 
-// bundleText renders a bundle: a single proposal as itself, and more as a numbered list with each
-// item's result under it, or one shared result when they all ended the same way.
+// messageRanges splits the records from start on into the messages that carry them: runs of
+// records whose summaries fit the per-message budget, each record whole in one message.
+func messageRanges(bundle []Record, start int) [][2]int {
+	var ranges [][2]int
+	from, units := start, 0
+	for index := start; index < len(bundle); index++ {
+		cost := utf16Units(bundle[index].Summary) + 2
+		if index > from && units+cost > bundleSummaryUnits {
+			ranges = append(ranges, [2]int{from, index})
+			from, units = index, 0
+		}
+		units += cost
+	}
+	return append(ranges, [2]int{from, len(bundle)})
+}
+
+// bundleText renders the message that carries the bundle's buttons, which is the last one.
 func bundleText(bundle []Record) string {
+	last := bundle[len(bundle)-1]
+	from := len(bundle) - 1
+	for last.MessageID != 0 && from > 0 && bundle[from-1].MessageID == last.MessageID {
+		from--
+	}
+	return messageText(bundle, from, len(bundle))
+}
+
+// messageText renders the records from to to of a bundle: a single proposal as itself, and more as
+// a numbered list with each item's result under it, or one shared result at the end of the last
+// message when they all ended the same way.
+func messageText(bundle []Record, from, to int) string {
 	if len(bundle) == 1 {
 		return finalText(bundle[0])
 	}
@@ -815,14 +873,21 @@ func bundleText(bundle []Record) string {
 		}
 	}
 	var builder strings.Builder
-	fmt.Fprintf(&builder, "%d changes, confirmed or rejected together:", len(bundle))
-	for index, record := range bundle {
-		fmt.Fprintf(&builder, "\n\n%d. %s", index+1, record.Summary)
+	switch {
+	case from == 0:
+		fmt.Fprintf(&builder, "%d changes, confirmed or rejected together:", len(bundle))
+	case to-from == 1:
+		fmt.Fprintf(&builder, "Change %d of %d, confirmed or rejected together:", to, len(bundle))
+	default:
+		fmt.Fprintf(&builder, "Changes %d-%d of %d, confirmed or rejected together:", from+1, to, len(bundle))
+	}
+	for index := from; index < to; index++ {
+		fmt.Fprintf(&builder, "\n\n%d. %s", index+1, bundle[index].Summary)
 		if shared == "" {
-			builder.WriteString("\n" + statusLine(record, bundleOutcomeRunes))
+			builder.WriteString("\n" + statusLine(bundle[index], bundleOutcomeRunes))
 		}
 	}
-	if shared != "" {
+	if shared != "" && to == len(bundle) {
 		builder.WriteString("\n\n" + shared)
 	}
 	return builder.String()

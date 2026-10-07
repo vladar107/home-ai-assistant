@@ -140,7 +140,7 @@ func (s *Service) executeSave(ctx context.Context, principalID string, call tool
 	}
 	proposal := approval.Proposal{Tool: toolSaveAttachment, Arguments: canonical, Summary: saveSummary(record, location, missing), Intent: approval.Intent{Verb: "save", TargetKind: "file", TargetName: path.Base(location.Path)}}
 	if _, err := s.proposer.Propose(ctx, principalID, proposal); err != nil {
-		if errors.Is(err, approval.ErrBundleFull) {
+		if approval.Refused(err) {
 			return tools.Result{Text: err.Error(), IsError: true}, nil
 		}
 		s.logger.WarnContext(ctx, "nas.proposal.failed", "principal_id", principalID, "tool", call.Name, "error", err)

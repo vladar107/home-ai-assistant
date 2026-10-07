@@ -142,7 +142,7 @@ func (s *Service) proposeStart(ctx context.Context, principalID, requestID, titl
 	}
 	summary := fmt.Sprintf("Start the background task %q with this brief:\n%s\nI read outside content in this conversation, so I need your confirmation.", title, brief)
 	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: toolStart, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "start", TargetKind: "background task", TargetName: title}}); err != nil {
-		if errors.Is(err, approval.ErrBundleFull) {
+		if approval.Refused(err) {
 			return tools.Result{Text: err.Error(), IsError: true}, nil
 		}
 		s.logger.WarnContext(ctx, "task.proposal.failed", "principal_id", principalID, "error", err)
