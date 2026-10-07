@@ -173,9 +173,25 @@ type confirmedUpdate struct {
 	Spec      Spec      `json:"spec"`
 }
 
-// Prepare turns a kind and the model's arguments into a normalized spec, refusing a kind that
-// cannot be checked yet.
-func (s *Service) prepare(kind string, arguments specArguments) (Spec, error) {
+// prepare turns a kind and the model's arguments into a normalized spec, refusing a kind that
+// cannot be checked yet and a target its evaluator cannot check for the principal.
+func (s *Service) prepare(ctx context.Context, principalID, kind string, arguments specArguments) (Spec, error) {
+	spec, err := s.specOf(kind, arguments)
+	if err != nil {
+		return Spec{}, err
+	}
+	resolver, ok := s.evaluators[kind].(Resolver)
+	if !ok {
+		return spec, nil
+	}
+	resolved, err := resolver.Resolve(ctx, principalID, spec)
+	if err != nil {
+		return Spec{}, err
+	}
+	return normalize(resolved, s.now())
+}
+
+func (s *Service) specOf(kind string, arguments specArguments) (Spec, error) {
 	if _, known := s.evaluators[kind]; !known {
 		if _, exists := kindTriggers[kind]; exists {
 			return Spec{}, fmt.Errorf("%s watches are not available yet", kind)
@@ -293,7 +309,7 @@ func (s *Service) proposeWatch(ctx context.Context, principalID string, call too
 	if err := decodeArguments(call.Arguments, &arguments); err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
-	spec, err := s.prepare(strings.TrimSpace(arguments.Kind), arguments.specArguments)
+	spec, err := s.prepare(ctx, principalID, strings.TrimSpace(arguments.Kind), arguments.specArguments)
 	if err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
@@ -327,7 +343,7 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 	if !found {
 		return tools.Result{Text: "No watch has that id. Use watch_list to see the user's watches.", IsError: true}, nil
 	}
-	spec, err := s.prepare(watch.Kind, overlay(argumentsOf(watch.Spec), arguments.specArguments))
+	spec, err := s.prepare(ctx, principalID, watch.Kind, overlay(argumentsOf(watch.Spec), arguments.specArguments))
 	if err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}

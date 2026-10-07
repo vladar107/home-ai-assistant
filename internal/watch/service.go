@@ -296,7 +296,7 @@ func (s *Service) check(ctx context.Context, watch Watch, now time.Time, cache *
 		state = State{WatchID: watch.ID, PrincipalID: watch.PrincipalID, Occurrence: occurrence.Date}
 	}
 
-	occurrence.Cache = cache
+	occurrence.Cache, occurrence.Previous = cache, state.Key
 	checkCtx, cancel := context.WithTimeout(ctx, s.timeout)
 	observation, err := evaluator.Evaluate(checkCtx, watch.PrincipalID, watch, occurrence)
 	cancel()
@@ -333,6 +333,7 @@ func (s *Service) check(ctx context.Context, watch Watch, now time.Time, cache *
 		}
 		if observation.State != state.Key {
 			switch {
+			case observation.Silent:
 			case observation.Triggered:
 				alert = queue(&state, watch, occurrence, alertTypeAlert, alertText(watch, observation))
 				state.Alerted = true

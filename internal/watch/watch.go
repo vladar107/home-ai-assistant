@@ -142,12 +142,21 @@ type Occurrence struct {
 	End time.Time
 	// Cache answers identical upstream queries once within one check cycle.
 	Cache *Cache
+	// Previous is the State of the window's last successful check, empty before the first.
+	Previous string
 }
 
 // Evaluator checks the watches of one kind. It must be safe to call from one goroutine at a time
 // and should route its upstream queries through Cached with the occurrence's cache.
 type Evaluator interface {
 	Evaluate(ctx context.Context, principalID string, watch Watch, occurrence Occurrence) (Observation, error)
+}
+
+// Resolver is an evaluator that checks a watch's target for its owner before the watch is
+// proposed, such as that the owner's integration is on and its names mean one station or stop. It
+// returns the spec with the names as the service knows them.
+type Resolver interface {
+	Resolve(ctx context.Context, principalID string, spec Spec) (Spec, error)
 }
 
 // Observation is what one check saw. The service compares State with the previous check's State
@@ -165,6 +174,9 @@ type Observation struct {
 	Headline string
 	// Details are further lines of the alert, such as the reason or an alternative.
 	Details []string
+	// Silent stores a changed State without any message, for a change the watch's triggers leave
+	// out, such as one of several disruptions ending, while what was alerted on still holds.
+	Silent bool
 }
 
 // UpstreamError marks a check that failed because an outside service did, for metrics.
