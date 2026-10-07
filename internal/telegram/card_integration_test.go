@@ -372,7 +372,7 @@ func TestScheduledRunDeliversItsCardUnderTheScheduledCaption(t *testing.T) {
 	h.scheduler.Wake()
 	run := receive(t, h.ctx, runtime.calls)
 	h.stageCard(run)
-	run.answer <- agentruntime.RunResult{Response: "Dry all day."}
+	run.answer <- agentruntime.RunResult{Response: "Dry all day.", Final: "Dry all day."}
 	photo := h.nextPhoto()
 	if photo.chatID != 101 || photo.replyTo != 0 || photo.parseMode != "HTML" ||
 		photo.caption != "<b>Scheduled: Weekly tasks</b>\n\nDry all day." || string(photo.data) != string(cardBytes("alice")) {
@@ -391,7 +391,7 @@ func TestScheduledRunDeliversItsCardUnderTheScheduledCaption(t *testing.T) {
 	}
 	run = receive(t, h.ctx, runtime.calls)
 	h.stageCard(run)
-	run.answer <- agentruntime.RunResult{Response: report}
+	run.answer <- agentruntime.RunResult{Response: report, Final: report}
 	if photo := h.nextPhoto(); photo.caption != "" || photo.replyTo != 0 {
 		t.Fatalf("photo = %+v, want no caption", photo)
 	}
@@ -478,7 +478,7 @@ func TestScheduledCardSurvivesANewConversation(t *testing.T) {
 	h.stageCard(run)
 	h.push(textUpdate(1, 101, "/new"))
 	h.wantReply(101, 1, NoSessionReply)
-	run.answer <- agentruntime.RunResult{Response: "Dry all day."}
+	run.answer <- agentruntime.RunResult{Response: "Dry all day.", Final: "Dry all day."}
 	if photo := h.nextPhoto(); photo.caption != "<b>Scheduled: Weekly tasks</b>\n\nDry all day." || string(photo.data) != string(cardBytes("alice")) {
 		t.Fatalf("scheduled photo = %+v", photo)
 	}

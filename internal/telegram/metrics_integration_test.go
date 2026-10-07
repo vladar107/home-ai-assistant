@@ -107,7 +107,7 @@ func TestScheduledRunRecordsItsOutcomeAndReplyTime(t *testing.T) {
 	clock.Set(t, "2026-09-28T09:00:20+02:00")
 	h.scheduler.Wake()
 	run := receive(t, h.ctx, runtime.calls)
-	run.answer <- agentruntime.RunResult{Response: "Two tasks are overdue."}
+	run.answer <- agentruntime.RunResult{Response: "Two tasks are overdue.", Final: "Two tasks are overdue."}
 	h.wantMessage(101, "<b>Scheduled: Weekly tasks</b>\n\nTwo tasks are overdue.")
 	h.waitRun(job.ID, schedule.StatusDelivered)
 

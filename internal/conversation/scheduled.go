@@ -72,11 +72,11 @@ func (s *Service) RunScheduled(ctx context.Context, principalID, turn, message s
 		return ScheduledReply{}, ctx.Err()
 	case errors.Is(turnCtx.Err(), context.DeadlineExceeded):
 		return ScheduledReply{Text: TimeoutReply, ErrorKind: "timeout"}, nil
-	case runErr != nil || strings.TrimSpace(result.Response) == "":
+	case runErr != nil || strings.TrimSpace(result.Final) == "":
 		reply, kind := failureReply(runErr)
 		return ScheduledReply{Text: reply, ErrorKind: kind}, nil
 	default:
-		return ScheduledReply{Text: result.Response}, nil
+		return ScheduledReply{Text: result.Final}, nil
 	}
 }
 

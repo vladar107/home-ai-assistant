@@ -95,11 +95,11 @@ func (s *Service) RunTask(ctx context.Context, run TaskRun) (TaskReply, error) {
 	switch {
 	case ctx.Err() != nil:
 		return TaskReply{}, ctx.Err()
-	case runErr != nil || strings.TrimSpace(result.Response) == "":
+	case runErr != nil || strings.TrimSpace(result.Final) == "":
 		reply, kind := failureReply(runErr)
 		return TaskReply{Text: reply, ErrorKind: kind}, nil
 	default:
-		return TaskReply{Text: result.Response}, nil
+		return TaskReply{Text: result.Final}, nil
 	}
 }
 

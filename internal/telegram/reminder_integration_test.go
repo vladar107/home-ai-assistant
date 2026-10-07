@@ -284,7 +284,7 @@ func TestOneTimeJobIsProposedConfirmedRunOnceAndLeavesJobs(t *testing.T) {
 	if !strings.HasSuffix(run.request.Message, "Is my 9:30 train delayed?") {
 		t.Fatalf("scheduled message = %q", run.request.Message)
 	}
-	run.answer <- agentruntime.RunResult{Response: "No delay."}
+	run.answer <- agentruntime.RunResult{Response: "No delay.", Final: "No delay."}
 	h.wantMessage(101, "<b>Scheduled: Train check</b>\n\nNo delay.")
 	h.waitRun(h.jobID("alice"), schedule.StatusDelivered)
 
@@ -364,7 +364,7 @@ func TestScheduledTurnIsNotOfferedReminderTools(t *testing.T) {
 	if count := h.countRows(`SELECT count(*) FROM scheduled_jobs WHERE job_type = ?`, schedule.TypeReminder); count != 0 {
 		t.Fatalf("reminders created by a scheduled run = %d", count)
 	}
-	run.answer <- agentruntime.RunResult{Response: "Quiet day."}
+	run.answer <- agentruntime.RunResult{Response: "Quiet day.", Final: "Quiet day."}
 	h.wantMessage(101, "<b>Scheduled: Daily digest</b>\n\nQuiet day.")
 }
 

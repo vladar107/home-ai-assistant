@@ -121,6 +121,9 @@ func TestToolTurnBridgesCallsThroughTheBroker(t *testing.T) {
 	if len(parts) != 2 || parts[0] != "Checking." || !strings.HasSuffix(parts[1], "echoed: amber") || !strings.Contains(parts[1], "untrusted") {
 		t.Fatalf("response = %q, want the two assistant messages joined and the result marked untrusted", result.Response)
 	}
+	if result.Final != parts[1] {
+		t.Errorf("final = %q, want only the last assistant message %q", result.Final, parts[1])
+	}
 	if calls := provider.recorded(); len(calls) != 1 || calls[0].principal != testPrincipal || calls[0].call.Name != "echo_tool" || string(calls[0].call.Arguments) != `{"text":"amber"}` {
 		t.Fatalf("provider calls = %+v", calls)
 	}

@@ -218,7 +218,7 @@ func TestScheduledTurnCarriesWebAccess(t *testing.T) {
 	if names := toolNames(run.request.Tools); !run.request.WebSearch || !slices.Contains(names, "fetch_page") || !slices.Contains(names, "weather_forecast") {
 		t.Fatalf("scheduled turn: web search %v, tools %v", run.request.WebSearch, names)
 	}
-	run.answer <- agentruntime.RunResult{Response: "Sunny."}
+	run.answer <- agentruntime.RunResult{Response: "Sunny.", Final: "Sunny."}
 	h.wantMessage(101, "<b>Scheduled: Weather</b>\n\nSunny.")
 	h.waitRun(job.ID, schedule.StatusDelivered)
 }

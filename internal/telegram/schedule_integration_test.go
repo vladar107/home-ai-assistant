@@ -192,7 +192,7 @@ func TestScheduledJobIsProposedConfirmedRunAndDelivered(t *testing.T) {
 	if err != nil || !written.IsError {
 		t.Fatalf("a scheduled run could call a write tool: %+v %v", written, err)
 	}
-	run.answer <- agentruntime.RunResult{Response: "Two tasks are overdue."}
+	run.answer <- agentruntime.RunResult{Response: "Two tasks are overdue.", Final: "Two tasks are overdue."}
 	h.wantMessage(101, "<b>Scheduled: Weekly tasks</b>\n\nTwo tasks are overdue.")
 	h.waitRun(h.jobID("alice"), schedule.StatusDelivered)
 	if retained := h.countRows(`SELECT count(*) FROM schedule_runs WHERE reply IS NOT NULL`); retained != 0 {
@@ -342,7 +342,7 @@ func TestJobsCommandControlsAndSharesTheTurnSlot(t *testing.T) {
 
 	h.push(textUpdate(3, 101, "hello"))
 	expectNoRuntimeCall(t, runtime, 100*time.Millisecond)
-	run.answer <- agentruntime.RunResult{Response: "Quiet day."}
+	run.answer <- agentruntime.RunResult{Response: "Quiet day.", Final: "Quiet day."}
 	h.wantMessage(101, "<b>Scheduled: Daily digest</b>\n\nQuiet day.")
 	chat := receive(t, h.ctx, runtime.calls)
 	chat.answer <- agentruntime.RunResult{Response: "hi"}
@@ -441,7 +441,7 @@ func TestScheduledRunCatchUpAfterDowntime(t *testing.T) {
 	if !strings.HasSuffix(run.request.Message, "Morning report.") {
 		t.Fatalf("caught-up run = %q", run.request.Message)
 	}
-	run.answer <- agentruntime.RunResult{Response: "done"}
+	run.answer <- agentruntime.RunResult{Response: "done", Final: "done"}
 	h.wantMessage(101, "<b>Scheduled: Recent</b>\n\ndone")
 	expectNoRuntimeCall(t, runtime, 100*time.Millisecond)
 	if count := h.countRows(`SELECT count(*) FROM schedule_runs WHERE job_id = ?`, late.ID); count != 0 {

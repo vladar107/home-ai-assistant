@@ -481,9 +481,41 @@ func TestScheduledRunReadsMemoryButCannotWriteIt(t *testing.T) {
 	if slices.ContainsFunc(toolNames(call.request.Tools), func(name string) bool { return strings.HasPrefix(name, "memory_") }) {
 		t.Fatalf("scheduled tools = %v", toolNames(call.request.Tools))
 	}
-	call.answer <- agentruntime.RunResult{Response: "sunny"}
+	call.answer <- agentruntime.RunResult{Response: "sunny", Final: "sunny"}
 	if reply := receive(t, h.ctx, replies); reply.Text != "sunny" {
 		t.Fatalf("scheduled reply = %+v", reply)
+	}
+}
+
+func TestScheduledRunDeliversOnlyTheFinalMessage(t *testing.T) {
+	runtime := newControlledRuntime()
+	h := newMemoryHarness(t, runtime)
+
+	replies := make(chan conversation.ScheduledReply, 1)
+	go func() {
+		reply, err := h.conversation.RunScheduled(h.ctx, "alice", "schedule/bbbb", "check the weather")
+		if err != nil {
+			t.Error(err)
+		}
+		replies <- reply
+	}()
+	call := receive(t, h.ctx, runtime.calls)
+	call.answer <- agentruntime.RunResult{Response: "Checking the forecast.\n\nSunny all day.", Final: "Sunny all day."}
+	if reply := receive(t, h.ctx, replies); reply.Text != "Sunny all day." {
+		t.Fatalf("scheduled reply = %+v, want only the final message", reply)
+	}
+
+	go func() {
+		reply, err := h.conversation.RunScheduled(h.ctx, "alice", "schedule/cccc", "check the weather")
+		if err != nil {
+			t.Error(err)
+		}
+		replies <- reply
+	}()
+	call = receive(t, h.ctx, runtime.calls)
+	call.answer <- agentruntime.RunResult{Response: "Checking the forecast.", Final: ""}
+	if reply := receive(t, h.ctx, replies); reply.ErrorKind == "" || strings.Contains(reply.Text, "Checking") {
+		t.Fatalf("scheduled reply = %+v, want the failure reply when the final message is empty", reply)
 	}
 }
 

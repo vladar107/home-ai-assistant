@@ -314,7 +314,7 @@ func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink
 				if result == "" {
 					return agentruntime.RunResult{}, fmt.Errorf("Pi runtime returned an empty response")
 				}
-				return agentruntime.RunResult{Response: result, Usage: state.usage}, nil
+				return agentruntime.RunResult{Response: result, Final: strings.TrimSpace(state.message.String()), Usage: state.usage}, nil
 			}
 		case err := <-scanErrors:
 			stopProcess(cmd, stdin, waitResult)
@@ -648,6 +648,7 @@ type turnState struct {
 	toolsEnabled       bool
 	sink               agentruntime.EventSink
 	response           strings.Builder
+	message            strings.Builder
 	promptAcknowledged bool
 	separatorPending   bool
 	telemetry          Telemetry
@@ -753,6 +754,7 @@ func (s *turnState) consume(ctx context.Context, event rpcEvent) (bool, error) {
 		}
 		if event.Message != nil && event.Message.Role == "assistant" {
 			s.messageStarted = time.Now()
+			s.message.Reset()
 		}
 	case "message_end":
 		if event.Message != nil && event.Message.Role == "assistant" {
@@ -841,6 +843,7 @@ func (s *turnState) appendText(ctx context.Context, delta string) error {
 		return fmt.Errorf("Pi runtime response exceeded the size limit")
 	}
 	s.response.WriteString(delta)
+	s.message.WriteString(delta)
 	if err := s.sink.Emit(ctx, agentruntime.Event{Type: "text_delta", Text: delta}); err != nil {
 		return fmt.Errorf("emit Pi runtime event: %w", err)
 	}

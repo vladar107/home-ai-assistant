@@ -79,8 +79,11 @@ type EventSink interface {
 }
 
 type RunResult struct {
+	// Response joins the text of every assistant message in the turn.
 	Response string
-	Usage    Usage
+	// Final is the text of the last assistant message alone, empty when that message had none.
+	Final string
+	Usage Usage
 }
 
 // Usage is what the model reported for one turn; zero values mean the runtime did not report it.
