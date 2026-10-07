@@ -939,7 +939,17 @@ func registerWatchKinds(watches *watch.Service, trains *ns.Service, buses *bus.S
 	if err != nil {
 		return fmt.Errorf("initialize departure watches: %w", err)
 	}
-	return watches.Register(watch.KindDeparture, departures)
+	if err := watches.Register(watch.KindDeparture, departures); err != nil {
+		return err
+	}
+	if trains == nil {
+		return nil
+	}
+	disruptions, err := watch.NewDisruptionsEvaluator(trains)
+	if err != nil {
+		return fmt.Errorf("initialize disruption watches: %w", err)
+	}
+	return watches.Register(watch.KindDisruptions, disruptions)
 }
 
 // nsTrains lets the web connector's day card ask the NS connector for train statuses, so neither

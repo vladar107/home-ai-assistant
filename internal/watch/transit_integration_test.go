@@ -170,6 +170,13 @@ func newTransitEngine(t *testing.T) *transitEngine {
 	if err := e.service.Register(watch.KindDeparture, departures); err != nil {
 		t.Fatal(err)
 	}
+	disruptions, err := watch.NewDisruptionsEvaluator(e.trains)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.service.Register(watch.KindDisruptions, disruptions); err != nil {
+		t.Fatal(err)
+	}
 	e.service.SetTelemetry(e.telemetry)
 	return e
 }
@@ -244,6 +251,19 @@ func (e *transitEngine) create(principalID, id string, spec watch.Spec) {
 	if err != nil || !created {
 		e.t.Fatalf("create watch: %v %v", created, err)
 	}
+}
+
+func (e *transitEngine) propose(principalID string, arguments map[string]any) tools.Result {
+	e.t.Helper()
+	raw, err := json.Marshal(arguments)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	result, err := e.service.Execute(e.ctx, principalID, tools.Call{Name: "watch_propose", Arguments: raw})
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return result
 }
 
 // wantSent checks what was sent since the last call, in order, each to its owner's chat.
@@ -390,29 +410,17 @@ func TestDepartureWatchRespectsEachUsersSwitches(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	propose := func(principalID string, arguments map[string]any) tools.Result {
-		t.Helper()
-		raw, err := json.Marshal(arguments)
-		if err != nil {
-			t.Fatal(err)
-		}
-		result, err := e.service.Execute(e.ctx, principalID, tools.Call{Name: "watch_propose", Arguments: raw})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return result
-	}
 	train := map[string]any{"kind": "departure", "mode": "train", "from": "Schothorst", "to": "Utrecht", "departure": "07:56", "days": []string{"mon"}}
-	if result := propose("bob", train); !result.IsError || result.Text != ns.DisabledText {
+	if result := e.propose("bob", train); !result.IsError || result.Text != ns.DisabledText {
 		t.Fatalf("bob's train proposal = %+v", result)
 	}
-	if result := propose("alice", map[string]any{"kind": "departure", "mode": "bus", "stop": "Amersfoort, Stadhuis", "line": "3", "departure": "18:18", "days": []string{"sun"}}); !result.IsError || result.Text != bus.DisabledText {
+	if result := e.propose("alice", map[string]any{"kind": "departure", "mode": "bus", "stop": "Amersfoort, Stadhuis", "line": "3", "departure": "18:18", "days": []string{"sun"}}); !result.IsError || result.Text != bus.DisabledText {
 		t.Fatalf("alice's bus proposal = %+v", result)
 	}
-	if result := propose("alice", map[string]any{"kind": "departure", "mode": "train", "from": "Nowhere Junction", "to": "Utrecht", "departure": "07:56", "days": []string{"mon"}}); !result.IsError || !strings.Contains(result.Text, "Nowhere Junction") {
+	if result := e.propose("alice", map[string]any{"kind": "departure", "mode": "train", "from": "Nowhere Junction", "to": "Utrecht", "departure": "07:56", "days": []string{"mon"}}); !result.IsError || !strings.Contains(result.Text, "Nowhere Junction") {
 		t.Fatalf("an unknown station = %+v", result)
 	}
-	if result := propose("alice", train); result.IsError {
+	if result := e.propose("alice", train); result.IsError {
 		t.Fatalf("alice's train proposal = %+v", result)
 	}
 	if len(e.proposer.proposals) != 1 || e.proposer.proposals[0].principalID != "alice" ||
@@ -435,5 +443,136 @@ func TestDepartureWatchRespectsEachUsersSwitches(t *testing.T) {
 	sent := e.sender.take()
 	if len(sent) != 2 || sent[0].chatID != 101 || !strings.Contains(sent[0].text, "delayed +6 min") || sent[1].chatID != 202 || !strings.Contains(sent[1].text, "I can't check this right now") {
 		t.Fatalf("sent = %+v", sent)
+	}
+}
+
+// disruptions is a station's answer made of recorded NS entries by ID, each changed by change when
+// it is given.
+func disruptions(t *testing.T, change func(entry map[string]any), ids ...string) []byte {
+	t.Helper()
+	var recordedEntries []map[string]any
+	if err := json.Unmarshal(recorded(t, "ns", "disruptions.json"), &recordedEntries); err != nil {
+		t.Fatal(err)
+	}
+	answer := []map[string]any{}
+	for _, id := range ids {
+		for _, entry := range recordedEntries {
+			if entry["id"] == id {
+				if change != nil {
+					change(entry)
+				}
+				answer = append(answer, entry)
+			}
+		}
+	}
+	data, err := json.Marshal(answer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+const (
+	bredaPath      = "/ns/v3/disruptions/station/BD"
+	sloterdijkPath = "/ns/v3/disruptions/station/ASS"
+	signalFailure  = "7008222"
+	brusselsLine   = "7008228"
+)
+
+// A disruption watch alerts on a new disruption at its stations once, however often NS repeats
+// it or reflows its text; a new expected end alerts as a change; one of two ending is silent; and
+// when none is left it says so once. Three failed checks send one notice.
+func TestDisruptionWatchAlertsOnNewAndChangedDisruptions(t *testing.T) {
+	e := newTransitEngine(t)
+	e.create("alice", watchID, watch.Spec{
+		Kind:     watch.KindDisruptions,
+		Target:   watch.Target{Stations: []string{"Breda", "Amsterdam Sloterdijk"}},
+		Triggers: []string{watch.TriggerNew, watch.TriggerChanged},
+		Days:     []string{"sun"},
+		Start:    "18:00",
+		End:      "19:30",
+		Zone:     "Europe/Amsterdam",
+	})
+	e.gateway.serve(bredaPath, disruptions(t, nil))
+	e.gateway.serve(sloterdijkPath, disruptions(t, nil))
+
+	e.at("2026-10-04 18:00")
+	e.wantSent(101)
+
+	e.gateway.serve(bredaPath, disruptions(t, nil, signalFailure))
+	e.at("2026-10-04 18:05")
+	e.wantSent(101, "**⚠️ Disruptions at Breda, Amsterdam Sloterdijk**\n\nNew disruption: Rotterdam - Breda; Rotterdam - Breda - Brussel.\n"+
+		"Door een seinstoring: tussen Rotterdam Centraal en Breda rijden minder treinen.\nExpected end: Dit duurt tot ongeveer maandag 5 oktober 0:00.")
+
+	e.gateway.serve(bredaPath, disruptions(t, func(entry map[string]any) {
+		entry["title"] = "  Rotterdam -  Breda; Rotterdam - Breda - Brussel. "
+		entry["phase"] = map[string]any{"id": "3", "label": "Update"}
+	}, signalFailure))
+	e.at("2026-10-04 18:10")
+	e.wantSent(101)
+
+	shorter := func(entry map[string]any) {
+		if entry["id"] == signalFailure {
+			entry["expectedDuration"] = map[string]any{"description": "Dit duurt tot ongeveer 21:00."}
+		}
+	}
+	e.gateway.serve(bredaPath, disruptions(t, shorter, signalFailure))
+	e.at("2026-10-04 18:15")
+	e.wantSent(101, "Changed disruption: Rotterdam - Breda; Rotterdam - Breda - Brussel.\nDoor een seinstoring: tussen Rotterdam Centraal en Breda rijden minder treinen.\nExpected end: Dit duurt tot ongeveer 21:00.")
+
+	e.gateway.serve(bredaPath, disruptions(t, shorter, brusselsLine, signalFailure))
+	e.gateway.serve(sloterdijkPath, disruptions(t, nil, brusselsLine))
+	e.at("2026-10-04 18:20")
+	e.wantSent(101, "Expected end: Dit duurt tot ongeveer woensdag 7 oktober 1:00.\nStill in effect: Rotterdam - Breda; Rotterdam - Breda - Brussel.")
+	e.at("2026-10-04 18:25")
+	e.wantSent(101)
+
+	e.gateway.serve(bredaPath, disruptions(t, nil, brusselsLine))
+	e.at("2026-10-04 18:30")
+	e.wantSent(101)
+
+	e.gateway.serve(bredaPath, disruptions(t, nil))
+	e.gateway.serve(sloterdijkPath, disruptions(t, nil))
+	e.at("2026-10-04 18:35")
+	e.wantSent(101, "Back to normal. NS reports no disruptions or engineering works at Breda, Amsterdam Sloterdijk.")
+
+	e.gateway.fail(bredaPath, http.StatusServiceUnavailable)
+	e.at("2026-10-04 18:40")
+	e.at("2026-10-04 18:45")
+	e.at("2026-10-04 18:50")
+	e.wantSent(101, "I can't check this right now")
+	if e.telemetry.count("upstream disruptions ns") != 3 {
+		t.Fatalf("upstream errors = %v", e.telemetry.events)
+	}
+}
+
+// A disruption watch is proposed with full station names, and refused for a user with trains off,
+// whose stored watch is then never checked against NS.
+func TestDisruptionWatchRespectsEachUsersTrainsSwitch(t *testing.T) {
+	e := newTransitEngine(t)
+	e.clock.Set(t, "2026-10-04 12:00")
+	if _, err := e.trains.SetEnabled(e.ctx, "bob", false); err != nil {
+		t.Fatal(err)
+	}
+	stations := map[string]any{"kind": "disruptions", "stations": []string{"Sloterdijk", "Breda", "BD"}, "window_from": "18:00", "window_until": "19:30", "days": []string{"sun"}}
+	if result := e.propose("bob", stations); !result.IsError || result.Text != ns.DisabledText {
+		t.Fatalf("bob's proposal = %+v", result)
+	}
+	if result := e.propose("alice", stations); result.IsError {
+		t.Fatalf("alice's proposal = %+v", result)
+	}
+	if len(e.proposer.proposals) != 1 || !strings.Contains(e.proposer.proposals[0].proposal.Summary, "Disruptions at Amsterdam Sloterdijk, Breda\n") {
+		t.Fatalf("proposals = %+v", e.proposer.proposals)
+	}
+
+	spec := watch.Spec{Kind: watch.KindDisruptions, Target: watch.Target{Stations: []string{"Breda"}}, Triggers: []string{watch.TriggerNew, watch.TriggerChanged},
+		Days: []string{"sun"}, Start: "18:00", End: "19:30", Zone: "Europe/Amsterdam"}
+	e.create("alice", watchID, spec)
+	e.create("bob", "0000000000000002", spec)
+	e.gateway.serve(bredaPath, disruptions(t, nil, signalFailure))
+	e.at("2026-10-04 18:05")
+	e.wantSent(101, "New disruption: Rotterdam - Breda")
+	if e.telemetry.count("check bob disruptions failed") != 1 || e.telemetry.count("check alice disruptions triggered") != 1 {
+		t.Fatalf("checks = %v", e.telemetry.events)
 	}
 }
