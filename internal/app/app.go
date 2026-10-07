@@ -48,6 +48,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/telegram"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 	"github.com/vladar107/home-ai-assistant/internal/turnstate"
+	"github.com/vladar107/home-ai-assistant/internal/watch"
 )
 
 const telemetryShutdownTimeout = 3 * time.Second
@@ -66,6 +67,7 @@ type App struct {
 	approvals     *approval.Service
 	scheduler     *schedule.Service
 	tasks         *task.Service
+	watches       *watch.Service
 	notion        *notion.Service
 	nas           *nas.Service
 	google        *google.Service
@@ -488,6 +490,28 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			}
 			notices = append(notices, conversation.OutsideNotice{Notice: tasks})
 		}
+		if a.cfg.Watches.Enabled {
+			// Alerts reach only the owner's own chat, resolved from the allowlist at delivery.
+			watches, err := watch.NewService(watch.Config{Zone: a.cfg.Timezone}, a.store, a.store, telegram.WatchAlertSender{Client: client}, approvals, a.logger)
+			if err != nil {
+				return fmt.Errorf("initialize watches: %w", err)
+			}
+			watches.SetTelemetry(a.telemetry)
+			a.telemetry.ZeroWatchOutcomes(ctx, principals, []string{watch.KindDeparture, watch.KindRoute, watch.KindDisruptions})
+			if err := a.registry.Register(watches); err != nil {
+				return err
+			}
+			if err := broker.Register(watches); err != nil {
+				return err
+			}
+			if err := approvals.RegisterExecutor(watches); err != nil {
+				return err
+			}
+			// Alerts are written by code from transit data, which no tool marks as outside content,
+			// so retelling one does not withhold search or make home actions wait.
+			notices = append(notices, watches)
+			a.watches = watches
+		}
 		displayNames := make(map[string]string, len(a.cfg.Telegram.Users))
 		for _, user := range a.cfg.Telegram.Users {
 			displayNames[user.PrincipalID] = user.DisplayName
@@ -762,6 +786,9 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	}
 	if a.tasks != nil {
 		service.SetTasks(a.tasks)
+	}
+	if a.watches != nil {
+		service.SetWatches(a.watches)
 	}
 	a.telegram = service
 	return nil

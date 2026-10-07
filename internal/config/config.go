@@ -38,6 +38,7 @@ type Config struct {
 	Bus           BusConfig
 	Location      LocationConfig
 	Tasks         TasksConfig
+	Watches       WatchesConfig
 	TypeSafe      TypeSafeConfig
 	Observability ObservabilityConfig
 }
@@ -123,6 +124,9 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if err := loadTasksConfig(&cfg.Tasks); err != nil {
+		return Config{}, err
+	}
+	if err := loadWatchesConfig(&cfg.Watches); err != nil {
 		return Config{}, err
 	}
 	if err := loadNSConfig(&cfg.NS); err != nil {
@@ -245,6 +249,9 @@ func (c Config) Validate() error {
 	}
 	if c.Tasks.Enabled && !c.Conversation.Enabled {
 		return fmt.Errorf("HOME_AGENT_TASKS_ENABLED: requires HOME_AGENT_CONVERSATION_ENABLED=true")
+	}
+	if c.Watches.Enabled && !c.Conversation.Enabled {
+		return fmt.Errorf("HOME_AGENT_WATCHES_ENABLED: requires HOME_AGENT_CONVERSATION_ENABLED=true")
 	}
 	if err := c.TypeSafe.validate(); err != nil {
 		return err

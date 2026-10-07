@@ -33,6 +33,10 @@ func TestBusinessMetricsAreRecordedWithNormalizedLabels(t *testing.T) {
 	telemetry.RecordJudgmentDecision(ctx, "alice", "hint", "hinted")
 	telemetry.RecordHintFollowThrough(ctx, "alice", "followed")
 	telemetry.RecordScheduleRun(ctx, "alice", "success")
+	telemetry.ZeroWatchOutcomes(ctx, []string{"alice"}, []string{"departure"})
+	telemetry.RecordWatchCheck(ctx, "alice", "departure", "triggered")
+	telemetry.RecordWatchAlert(ctx, "alice", "departure", "alert", "delivered")
+	telemetry.RecordWatchUpstreamError(ctx, "departure", "")
 
 	var collected metricdata.ResourceMetrics
 	if err := reader.Collect(ctx, &collected); err != nil {
@@ -78,6 +82,9 @@ func TestBusinessMetricsAreRecordedWithNormalizedLabels(t *testing.T) {
 		{"home_agent.judgment.decisions", map[string]string{"home_agent.purpose": "hint", "home_agent.result": "hinted"}, 1},
 		{"home_agent.hint.follow_through", map[string]string{"home_agent.result": "followed"}, 1},
 		{"home_agent.schedule.runs", map[string]string{"home_agent.outcome": "success"}, 1},
+		{"home_agent.watch.checks", map[string]string{"home_agent.kind": "departure", "home_agent.outcome": "triggered"}, 2},
+		{"home_agent.watch.alerts", map[string]string{"home_agent.type": "alert", "home_agent.outcome": "delivered"}, 2},
+		{"home_agent.watch.upstream_errors", map[string]string{"home_agent.kind": "departure", "home_agent.service": "unknown"}, 1},
 	}
 	for _, tt := range tests {
 		sets := points[tt.metric]

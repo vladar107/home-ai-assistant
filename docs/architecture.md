@@ -109,6 +109,7 @@ flowchart TB
     approval["<b>approval</b><br/>Confirm / Reject proposals,<br/>exactly-once execution"]
     schedule["<b>schedule</b><br/>durable jobs, reminders,<br/>scheduled model turns"]
     task["<b>task</b><br/>background sub-agents<br/>beside the chat"]
+    watch["<b>watch</b><br/>windowed checks in code,<br/>alerts on change"]
     judgment["<b>judgment</b><br/>TypeSafe screening, intent checks,<br/>tool hints (opt-in)"]
     integration["<b>integration</b><br/>per-user enable / disable"]
     loc["<b>location</b><br/>latest shared position, expiry"]
@@ -164,6 +165,10 @@ flowchart TB
     broker --> task
     task --> conv
     task --> store
+    tg --> watch
+    broker --> watch
+    approval --> watch
+    watch --> store
     nasc --> delivery
     web --> pdf
     connectors --> integration
@@ -237,6 +242,23 @@ principal's turn slot, with read tools only and its own time, tool, and model-ca
 budgets. A task that reaches a limit is asked once, briefly, to report what it has.
 The report goes out as a reply to the request, and the next chat turn learns of it.
 A restart resumes a running task in its session; a second interruption fails it.
+
+### A watch
+
+A watch is a confirmed, per-user definition: a train or bus departure, a saved
+route, or a set of stations, with weekdays or one date, a daily window (by default
+90 minutes before the departure until it), the triggers, and a delay threshold.
+The `watch` module runs its own loop, apart from the scheduler, because a check is
+code rather than a model turn. Inside the window it checks every 5 minutes, every 2
+in the last 30, through the evaluator registered for the watch's kind, and compares
+the normalized state with the one stored for that day's window. A change into a
+triggering state queues an alert; a later change out of it queues "back to normal";
+three failed checks in a row queue one notice; a window sends at most five
+messages. State and alert are written in one transaction. Alerts go from `ready` to
+`delivered` like scheduled runs, are retried on transient Telegram failures, and are
+dropped once their window ends or the watch is paused or muted. Identical upstream
+queries within one cycle share one answer. No evaluator ships yet, so no kind is
+offered and stored watches are not checked.
 
 ## Security model
 
