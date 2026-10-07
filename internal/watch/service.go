@@ -552,6 +552,18 @@ func (s *Service) Delete(ctx context.Context, principalID, watchID string) (bool
 	return deleted, err
 }
 
+// DescribeState is a watch's days and window with its pause and mute state, for /jobs.
+func (s *Service) DescribeState(watch Watch) string {
+	state := fmt.Sprintf("%s, %s–%s", watch.DescribeDays(), watch.Start, watch.End)
+	if !watch.Enabled {
+		return state + ", paused"
+	}
+	if occurrence, active := watch.OccurrenceAt(s.now()); active && watch.MutedOn == occurrence.Date {
+		state += ", muted today"
+	}
+	return state
+}
+
 // Available reports whether any kind of watch can be checked, so it can be offered.
 func (s *Service) Available() bool { return len(s.evaluators) > 0 }
 

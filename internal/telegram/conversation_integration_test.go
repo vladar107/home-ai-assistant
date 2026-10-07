@@ -52,6 +52,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/testutil/googlesim"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/notionsim"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
+	"github.com/vladar107/home-ai-assistant/internal/watch"
 )
 
 // integrationTimeout bounds a whole test, not one exchange, and the longest tests here run more
@@ -188,6 +189,9 @@ type harnessOptions struct {
 	history history.Directories
 	// tasks adds background tasks with this configuration, as HOME_AGENT_TASKS_ENABLED does.
 	tasks *task.Config
+	// watches adds the watch service, on the schedules clock, checking departures with this
+	// evaluator; tests run its cycles themselves.
+	watches watch.Evaluator
 }
 
 type fixedDescriber string
@@ -228,6 +232,7 @@ type conversationHarness struct {
 	approvals      *approval.Service
 	scheduler      *schedule.Service
 	tasks          *task.Service
+	watches        *watch.Service
 	auth           *codexauth.Simulator
 	profilesDir    string
 	credentialsDir string
@@ -535,6 +540,15 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		notices = append(notices, conversation.OutsideNotice{Notice: h.scheduler})
 		scheduleController = h.scheduler
 	}
+	if options.watches != nil {
+		h.watches, err = watch.NewService(watch.Config{Zone: "Europe/Amsterdam", Now: options.schedules.Now}, h.store, h.store, WatchAlertSender{Client: h.client}, h.approvals, logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := h.watches.Register(watch.KindDeparture, options.watches); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if options.tasks != nil {
 		taskConfig := *options.tasks
 		taskConfig.Cards, taskConfig.Photos = cards, photos
@@ -617,6 +631,9 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	if h.tasks != nil {
 		h.tasks.SetRunner(h.conversation)
 		h.service.SetTasks(h.tasks)
+	}
+	if h.watches != nil {
+		h.service.SetWatches(h.watches)
 	}
 	t.Cleanup(h.stop)
 	return h

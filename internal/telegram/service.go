@@ -123,6 +123,7 @@ type Service struct {
 	grafana       GrafanaController
 	memory        MemoryController
 	tasks         TaskController
+	watches       WatchController
 	sections      []settingsSection
 	interceptors  []messageInterceptor
 	logger        *slog.Logger
@@ -654,6 +655,9 @@ func (s *Service) processCallback(ctx context.Context, bot Bot, updateID int64, 
 	}
 	if snooze, jobID, isSnooze := parseReminderCallback(callback.Data); isSnooze && s.schedules != nil {
 		return s.processSnoozePress(ctx, callback, principalID, snooze, jobID)
+	}
+	if action, watchID, isWatch := parseWatchCallback(callback.Data); isWatch && s.watches != nil {
+		return s.processWatchPress(ctx, callback, principalID, action, watchID)
 	}
 	if sessionID, isSession := parseSessionCallback(callback.Data); isSession && s.conversation != nil {
 		return s.processSessionPress(ctx, callback, principalID, sessionID)
