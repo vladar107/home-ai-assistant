@@ -98,6 +98,8 @@ func scheduledMessage(occurrence Occurrence, prompt string) string {
 	return fmt.Sprintf(
 		"[system] This is the user's scheduled job %q, running for %s. The user is not watching this turn and cannot answer questions, "+
 			"and only read-only tools are available, so nothing can be created, changed, or saved. "+
+			"Never show a status, time, or count that no tool returned in this run, and never carry one over from an earlier run; "+
+			"if a check failed, say which one, and leave a leg out rather than guess its status. "+
 			"Do the task below and reply with the report the user should receive.\n\n%s",
 		occurrence.JobName, at, prompt,
 	)

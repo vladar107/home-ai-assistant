@@ -747,7 +747,7 @@ func (s *Service) takeNotice(ctx context.Context, request Request) turnNotice {
 func (s *Service) turnMessage(request Request, notice, attachments, hint, place string, searchWithheld bool) string {
 	message := request.Message
 	if searchWithheld {
-		message = "[system] " + searchWithheldNotice + "\n\n" + message
+		message = "[system] " + SearchWithheldNotice + "\n\n" + message
 	}
 	if hint != "" {
 		message = "[system] Likely relevant tool: " + hint + ". Ignore this if it does not fit the request.\n\n" + message
@@ -1011,9 +1011,10 @@ func (s *Service) logWorkerError(ctx context.Context, principalID, errorKind str
 // broker audit line; the turn's sink records each by name instead.
 const webSearchTool = "web_search"
 
-// searchWithheldNotice tells the model why a turn has no web search, so it can tell the user how
+// SearchWithheldNotice tells the model why a turn has no web search, so it can tell the user how
 // to get it back.
-const searchWithheldNotice = "Web search is off in this conversation because it has read content from outside the household, such as a web page or an email. If the user needs a search, tell them that /new starts a fresh conversation with search back on. fetch_page still opens links the user sends."
+const SearchWithheldNotice = "Web search is off in this conversation because it has read content from outside the household, such as a web page or an email; this is deliberate and cannot be changed within the conversation. " +
+	"If the user needs a search, say so once, plainly, and offer /new, which starts a fresh conversation with search back on; do not try other tools in its place. fetch_page still opens links the user sends."
 
 // countingSink remembers which tools a turn called, by name only, and logs each web search call.
 // A web search also marks the turn as having read third-party content, which the broker cannot do
