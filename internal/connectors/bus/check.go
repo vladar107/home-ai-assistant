@@ -69,6 +69,27 @@ func (s *Service) CheckDepartures(ctx context.Context, principalID string, query
 	return s.checkDepartures(ctx, principalID, group, query.Line, query.Towards, query.Date, query.Times), nil
 }
 
+// ResolveStop checks that a name means one stop, under the principal's own buses switch, and
+// returns the stop's name.
+func (s *Service) ResolveStop(ctx context.Context, principalID, query string) (string, error) {
+	status, err := s.Status(ctx, principalID)
+	if err != nil {
+		return "", err
+	}
+	if !status.Enabled {
+		return "", &RefusalError{Text: DisabledText, Unavailable: true}
+	}
+	index, failure := s.index(ctx, principalID)
+	if failure != nil {
+		return "", &RefusalError{Text: failure.Text, Unavailable: true}
+	}
+	group, failure := s.findStop(index, "stop", query, false)
+	if failure != nil {
+		return "", &RefusalError{Text: failure.Text}
+	}
+	return group.name, nil
+}
+
 func (s *Service) checkDepartures(ctx context.Context, principalID string, group *stopGroup, line, towards string, day time.Time, times []transit.Clock) []transit.Departure {
 	now := s.now().In(s.location)
 	var points map[string]timingPoint

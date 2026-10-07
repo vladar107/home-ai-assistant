@@ -71,6 +71,27 @@ func (s *Service) CheckDepartures(ctx context.Context, principalID string, query
 	return s.checkDepartures(ctx, principalID, from, to, via, hasVia, query.Date, query.Times), nil
 }
 
+// ResolveStation finds the one station a name means, under the principal's own trains switch, and
+// returns its full name; role names the field in a refusal, such as "from".
+func (s *Service) ResolveStation(ctx context.Context, principalID, role, query string) (string, error) {
+	status, err := s.Status(ctx, principalID)
+	if err != nil {
+		return "", err
+	}
+	if !status.Enabled {
+		return "", &RefusalError{Text: DisabledText, Unavailable: true}
+	}
+	list, failure := s.stationList(ctx, principalID)
+	if failure != nil {
+		return "", &RefusalError{Text: failure.Text, Unavailable: true}
+	}
+	found, failure := pickStation(list, role, query)
+	if failure != nil {
+		return "", &RefusalError{Text: failure.Text}
+	}
+	return found.name, nil
+}
+
 func (s *Service) checkDepartures(ctx context.Context, principalID string, from, to, via station, hasVia bool, day time.Time, times []transit.Clock) []transit.Departure {
 	var responses []tripsResponse
 	results := make([]transit.Departure, 0, len(times))

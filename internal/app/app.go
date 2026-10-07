@@ -714,6 +714,11 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			}
 			a.bus = busService
 		}
+		if a.watches != nil {
+			if err := registerWatchKinds(a.watches, a.ns, a.bus); err != nil {
+				return err
+			}
+		}
 	}
 
 	identities, err := identity.NewService(a.store, configured)
@@ -922,6 +927,19 @@ func nasRoots(configured config.NASRoots) []nas.PrincipalRoots {
 		})
 	}
 	return roots
+}
+
+// registerWatchKinds offers the kinds of watch the configured connectors can check; each check
+// still runs under its owner's own trains or buses switch.
+func registerWatchKinds(watches *watch.Service, trains *ns.Service, buses *bus.Service) error {
+	if trains == nil && buses == nil {
+		return nil
+	}
+	departures, err := watch.NewDepartureEvaluator(trains, buses)
+	if err != nil {
+		return fmt.Errorf("initialize departure watches: %w", err)
+	}
+	return watches.Register(watch.KindDeparture, departures)
 }
 
 // nsTrains lets the web connector's day card ask the NS connector for train statuses, so neither
