@@ -169,6 +169,8 @@ flowchart TB
     broker --> watch
     approval --> watch
     watch --> store
+    watch --> nsc
+    watch --> busc
     nasc --> delivery
     web --> pdf
     connectors --> integration
@@ -257,8 +259,20 @@ three failed checks in a row queue one notice; a window sends at most five
 messages. State and alert are written in one transaction. Alerts go from `ready` to
 `delivered` like scheduled runs, are retried on transient Telegram failures, and are
 dropped once their window ends or the watch is paused or muted. Identical upstream
-queries within one cycle share one answer. No evaluator ships yet, so no kind is
-offered and stored watches are not checked.
+queries within one cycle share one answer.
+
+Departure and disruption watches are checked; a kind is offered only when its
+connector is configured, and every check runs under the owner's own trains or
+buses switch, so a user with that switch off can neither propose nor run one.
+Proposing resolves the stations or stop for the owner and stores full station
+names. A departure watch checks its one planned departure through the NS or bus
+departure check and alerts with the same status phrase: a delay under the
+threshold counts as on time, and above it changes state only every 5 more
+minutes; a departure no longer in the timetable always alerts, and a failed check
+counts as an upstream failure. A disruption watch asks NS per station for what is
+in effect now and at the end of its window, and alerts on an entry that is new or
+whose title, situation, advice, or expected end changed; one of several ending is
+silent. Route watches come with saved routes; until then that kind is not offered.
 
 ### App help
 

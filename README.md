@@ -56,8 +56,8 @@ borrowed between users.
 - **Watches.** "Tell me if my 07:42 is cancelled or more than 5 minutes late":
   a departure, saved route, or set of stations is checked in code during a daily
   window, and the user hears only when something changes, with Mute today and
-  Pause buttons; `/jobs` lists them. The engine is in place but no kind can be
-  checked yet, so watches stay inert until their checks land.
+  Pause buttons; `/jobs` lists them. Train and bus departures and NS disruptions
+  at stations are checked now; watches on saved routes come next.
 - **Safety checks.** Optional, per-user TypeSafe screening of outside content,
   approvals, and tool choice.
 
