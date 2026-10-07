@@ -20,6 +20,8 @@ const (
 	maximumAPIBytes     = 1 << 20
 	// maximumHourlyDaysAhead is how far past today Open-Meteo's hourly forecast reaches.
 	maximumHourlyDaysAhead = 15
+	// geocodingCandidates leaves room to pick the right country or region among same-named places.
+	geocodingCandidates = 10
 
 	currentFields = "temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m,wind_gusts_10m"
 	dailyFields   = "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,sunrise,sunset"
@@ -42,12 +44,13 @@ type weatherRequest struct {
 }
 
 type place struct {
-	Name      string  `json:"name"`
-	Timezone  string  `json:"timezone"`
-	Latitude  float64 `json:"latitude"`
-	Longitude float64 `json:"longitude"`
-	Country   string  `json:"country"`
-	Admin1    string  `json:"admin1"`
+	Name        string  `json:"name"`
+	Timezone    string  `json:"timezone"`
+	Latitude    float64 `json:"latitude"`
+	Longitude   float64 `json:"longitude"`
+	Country     string  `json:"country"`
+	CountryCode string  `json:"country_code"`
+	Admin1      string  `json:"admin1"`
 }
 
 type forecast struct {
@@ -227,22 +230,66 @@ func placeQuery(found place) url.Values {
 	}
 }
 
-func (s *Service) geocode(ctx context.Context, name string) (place, bool, error) {
-	var response struct {
-		Results []place `json:"results"`
+// geocode finds a place by name. Open-Meteo matches the place name alone, so a qualifier after the
+// first comma ("Zwolle, Netherlands", "Bergen, Limburg") is matched against the candidates' country
+// and region instead of being sent along.
+func (s *Service) geocode(ctx context.Context, query string) (place, bool, error) {
+	name, qualifier, _ := strings.Cut(query, ",")
+	name = strings.TrimSpace(name)
+	candidates, err := s.geocodeName(ctx, name)
+	if err == nil && len(candidates) == 0 {
+		if base := baseName(name); base != "" && base != name {
+			candidates, err = s.geocodeName(ctx, base)
+		}
 	}
-	query := url.Values{"name": {name}, "count": {"1"}, "language": {"en"}, "format": {"json"}}
-	if err := s.getJSON(ctx, s.geocodingURL, query, &response); err != nil {
+	if err != nil || len(candidates) == 0 {
 		return place{}, false, err
 	}
-	if len(response.Results) == 0 {
-		return place{}, false, nil
-	}
-	found := response.Results[0]
+	found := pickPlace(candidates, qualifier)
 	if strings.TrimSpace(found.Name) == "" || math.Abs(found.Latitude) > 90 || math.Abs(found.Longitude) > 180 {
 		return place{}, false, errWeatherMalformed
 	}
 	return found, true, nil
+}
+
+func (s *Service) geocodeName(ctx context.Context, name string) ([]place, error) {
+	var response struct {
+		Results []place `json:"results"`
+	}
+	query := url.Values{"name": {name}, "count": {strconv.Itoa(geocodingCandidates)}, "language": {"en"}, "format": {"json"}}
+	if err := s.getJSON(ctx, s.geocodingURL, query, &response); err != nil {
+		return nil, err
+	}
+	return response.Results, nil
+}
+
+// baseName drops a parenthesised or dashed suffix, as in "Zwolle (Overijssel)" or "Zwolle - Centrum".
+func baseName(name string) string {
+	if before, _, found := strings.Cut(name, "("); found {
+		name = before
+	}
+	if before, _, found := strings.Cut(name, " - "); found {
+		name = before
+	}
+	return strings.TrimSpace(name)
+}
+
+// pickPlace returns the first candidate whose country, country code, or region matches a part of
+// the qualifier, and otherwise the first candidate, which is Open-Meteo's best match.
+func pickPlace(candidates []place, qualifier string) place {
+	for _, part := range strings.Split(qualifier, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		for _, candidate := range candidates {
+			if strings.EqualFold(part, candidate.Country) || strings.EqualFold(part, candidate.CountryCode) ||
+				strings.EqualFold(part, candidate.Admin1) {
+				return candidate
+			}
+		}
+	}
+	return candidates[0]
 }
 
 func (s *Service) getJSON(ctx context.Context, endpoint *url.URL, query url.Values, into any) error {

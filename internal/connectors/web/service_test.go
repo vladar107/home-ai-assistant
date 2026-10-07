@@ -500,6 +500,34 @@ func TestWeatherForecastSummarisesAPlace(t *testing.T) {
 	wantError(t, f.call("alice", "weather_forecast", map[string]any{}), "ask the user which place")
 }
 
+func TestWeatherForecastFindsAPlaceNamedWithItsCountryOrRegion(t *testing.T) {
+	f := newFixture(t, "")
+	queries := f.openMeteo(forecastAmsterdam)
+
+	for _, location := range []string{"Amsterdam, Netherlands", "Amsterdam, North Holland", "Amsterdam, NL", "Amsterdam, Atlantis", "Amsterdam (North Holland)"} {
+		wantText(t, f.call("alice", "weather_forecast", map[string]any{"location": location, "days": 2}),
+			"Weather for Amsterdam, North Holland, Netherlands")
+	}
+	want := []string{"Amsterdam", "Amsterdam", "Amsterdam", "Amsterdam", "Amsterdam (North Holland)", "Amsterdam"}
+	if !slices.Equal(*queries, want) {
+		t.Fatalf("geocoding queries = %v, want %v", *queries, want)
+	}
+}
+
+func TestWeatherForecastPicksTheQualifiedPlaceAmongNamesakes(t *testing.T) {
+	f := newFixture(t, "")
+	f.openMeteo(forecastAmsterdam)
+	f.route("geocoding.test/v1/search", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"results":[`+
+			`{"name":"Amsterdam","latitude":40.0,"longitude":-74.0,"country_code":"US","timezone":"America/New_York","country":"United States","admin1":"New York"},`+
+			`{"name":"Amsterdam","latitude":52.37403,"longitude":4.88969,"country_code":"NL","timezone":"Europe/Amsterdam","country":"Netherlands","admin1":"North Holland"}]}`)
+	})
+
+	wantText(t, f.call("alice", "weather_forecast", map[string]any{"location": "Amsterdam, Netherlands", "days": 2}),
+		"Weather for Amsterdam, North Holland, Netherlands")
+}
+
 func TestWeatherForecastUsesTheConfiguredHome(t *testing.T) {
 	f := newFixture(t, "Amsterdam")
 	queries := f.openMeteo(forecastAmsterdam)
