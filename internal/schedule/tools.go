@@ -25,6 +25,8 @@ const (
 	upcomingShown = 3
 	// listedInstructionRunes keeps a long list of jobs small in the model's context.
 	listedInstructionRunes = 200
+	// editQuoteRunes is how much of a failing edit's find text its error repeats.
+	editQuoteRunes = 80
 )
 
 // Proposer is the core approval service as the scheduler sees it.
@@ -48,7 +50,9 @@ func proposeGuidance(zone string) string {
 		"A one-time job takes at instead, a local date and time such as 2026-10-04 07:30 that you work out from the current time. " +
 		"Each run is a separate turn the user does not watch, with only read-only tools, so the prompt must say exactly what to look at and what to report, on its own, without relying on this conversation. " +
 		"schedule_update proposes changing a job by its id from schedule_list, given only the fields that change, and the user confirms the job as it will be. " +
-		"To change its instructions, first read them with schedule_get, then pass the complete new prompt: the stored text with only the change the user asked for, never a rewrite from memory. " +
+		"To change its instructions, first read them with schedule_get, then pass prompt_edits: small find and replace pairs, each find copied exactly from the stored prompt and occurring in it once, that change only what the user asked for; the user sees just those passages, old and new. " +
+		"Never rewrite or reword the parts the user did not ask to change, and pass prompt, the complete new instructions, only when the user asks for a real rewrite. " +
+		"Never invent a value the user did not give, such as a time, a buffer, a walking time, or a threshold; ask for it instead. " +
 		"A recurring job stays recurring and a one-time job stays one-time; to switch, remove it and propose a new one. " +
 		"schedule_remove proposes deleting a job by its id from schedule_list. Every proposal you make in this turn is shown to the user together and confirmed or rejected as one batch, so propose every job change the request needs in this turn, once each, since a proposal cannot be withdrawn; a proposal in a later turn replaces a batch still waiting."
 }
@@ -120,7 +124,11 @@ var writeDefinitions = []tools.Definition{
 			`"name":{"type":"string","maxLength":60,"description":"A new short name."},` +
 			`"cron":{"type":"string","description":"For a recurring job: a new five-field cron expression."},` +
 			`"at":{"type":"string","description":"For a one-time job: a new local date and time, YYYY-MM-DD HH:MM."},` +
-			`"prompt":{"type":"string","maxLength":1000,"description":"The complete new instructions, replacing the old ones, at most 1000 characters."},` +
+			`"prompt":{"type":"string","maxLength":1000,"description":"The complete new instructions, replacing the old ones, at most 1000 characters. Only for a real rewrite; not together with prompt_edits."},` +
+			`"prompt_edits":{"type":"array","minItems":1,"maxItems":10,"description":"Changes to the current instructions, applied in order. Prefer these to prompt.","items":{"type":"object","properties":{` +
+			`"find":{"type":"string","minLength":1,"maxLength":1000,"description":"A passage copied exactly from the current instructions; it must occur there exactly once."},` +
+			`"replace":{"type":"string","maxLength":1000,"description":"The text that replaces it; empty to delete the passage."}},` +
+			`"required":["find","replace"],"additionalProperties":false}},` +
 			`"timezone":{"type":"string","description":"A new IANA time zone such as Europe/Amsterdam."}},` +
 			`"required":["job_id"],"additionalProperties":false}`),
 	},
@@ -206,12 +214,19 @@ type confirmedJob struct {
 }
 
 type updateArguments struct {
-	JobID    string `json:"job_id"`
-	Name     string `json:"name"`
-	Cron     string `json:"cron"`
-	At       string `json:"at"`
-	Prompt   string `json:"prompt"`
-	Timezone string `json:"timezone"`
+	JobID       string       `json:"job_id"`
+	Name        string       `json:"name"`
+	Cron        string       `json:"cron"`
+	At          string       `json:"at"`
+	Prompt      string       `json:"prompt"`
+	PromptEdits []promptEdit `json:"prompt_edits"`
+	Timezone    string       `json:"timezone"`
+}
+
+// promptEdit replaces the one occurrence of Find in a job's instructions with Replace.
+type promptEdit struct {
+	Find    string `json:"find"`
+	Replace string `json:"replace"`
 }
 
 // confirmedUpdate is the job as it will be after the change, with the job's last change as it was
@@ -392,12 +407,22 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 	case !job.OneTime() && strings.TrimSpace(arguments.At) != "":
 		return tools.Result{Text: "This is a recurring job, so it takes cron, not at; to make it run once, remove it and propose a new job.", IsError: true}, nil
 	}
+	if strings.TrimSpace(arguments.Prompt) != "" && len(arguments.PromptEdits) > 0 {
+		return tools.Result{Text: "Give either prompt, the complete new instructions, or prompt_edits, not both; nothing was proposed.", IsError: true}, nil
+	}
 	next := current
 	override(&next.Name, arguments.Name)
 	override(&next.Cron, arguments.Cron)
 	override(&next.At, arguments.At)
 	override(&next.Prompt, arguments.Prompt)
 	override(&next.Zone, arguments.Timezone)
+	if len(arguments.PromptEdits) > 0 {
+		edited, err := applyPromptEdits(current.Prompt, arguments.PromptEdits)
+		if err != nil {
+			return tools.Result{Text: err.Error(), IsError: true}, nil
+		}
+		next.Prompt = edited
+	}
 	config, err := ModelTurnConfig(next.Prompt)
 	if err != nil {
 		return tools.Result{}, err
@@ -423,6 +448,9 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 		heading += fmt.Sprintf(", renamed to %q", changed.Name)
 	}
 	summary := proposalSummary(heading, prepared)
+	if len(arguments.PromptEdits) > 0 {
+		summary = patchSummary(heading, prepared, arguments.PromptEdits)
+	}
 	if !job.Enabled {
 		summary += "\nIt stays paused until you resume it in /jobs."
 	}
@@ -448,6 +476,25 @@ func currentJob(job Job) (confirmedJob, error) {
 		current.At = job.RunAt.In(location).Format(localTimeLayouts[0])
 	}
 	return current, nil
+}
+
+// applyPromptEdits applies the edits in order, each to the result of the ones before it. Every find
+// must occur exactly once, so an edit never lands somewhere the model did not mean.
+func applyPromptEdits(prompt string, edits []promptEdit) (string, error) {
+	for index, edit := range edits {
+		if edit.Find == "" {
+			return "", fmt.Errorf("Edit %d has an empty find; nothing was proposed.", index+1)
+		}
+		switch count := strings.Count(prompt, edit.Find); count {
+		case 1:
+			prompt = strings.Replace(prompt, edit.Find, edit.Replace, 1)
+		case 0:
+			return "", fmt.Errorf("Edit %d: its find text %q does not occur in the instructions as they are after the edits before it; nothing was proposed. Copy the passage exactly from schedule_get.", index+1, truncateRunes(edit.Find, editQuoteRunes))
+		default:
+			return "", fmt.Errorf("Edit %d: its find text %q occurs %d times in the instructions; nothing was proposed. Include more of the surrounding text so it occurs once.", index+1, truncateRunes(edit.Find, editQuoteRunes), count)
+		}
+	}
+	return prompt, nil
 }
 
 func override(field *string, value string) {
@@ -622,13 +669,36 @@ func countKind(jobs []Job, oneTime bool) int {
 // proposalSummary is the confirmation the user reads. It is rendered from the parsed schedule, not
 // from the model's description of it, so the next run times are the ones that will happen.
 func proposalSummary(heading string, prepared Prepared) string {
+	return scheduleSummary(heading, prepared) + ":\n" + ModelTurnPrompt(prepared.Job.Config)
+}
+
+// patchSummary is the confirmation of a change made by prompt edits: the schedule as it will be and
+// only the passages that change, so the user reads the change instead of the whole prompt again.
+func patchSummary(heading string, prepared Prepared, edits []promptEdit) string {
+	var builder strings.Builder
+	builder.WriteString(scheduleSummary(heading, prepared) + ". Its instructions change only here:")
+	for index, edit := range edits {
+		replacement := edit.Replace
+		if strings.TrimSpace(replacement) == "" {
+			replacement = "(removed)"
+		}
+		if len(edits) > 1 {
+			fmt.Fprintf(&builder, "\n%d.", index+1)
+		}
+		builder.WriteString("\nWas: " + edit.Find + "\nNow: " + replacement)
+	}
+	return builder.String()
+}
+
+// scheduleSummary is the heading and the parsed schedule of a proposal, ending with the sentence
+// that introduces its instructions.
+func scheduleSummary(heading string, prepared Prepared) string {
 	job := prepared.Job
 	var builder strings.Builder
 	builder.WriteString(heading + "\n")
 	if job.OneTime() {
 		fmt.Fprintf(&builder, "Runs once: %s\n", FormatOccurrence(job.RunAt, prepared.Schedule.Location))
-		builder.WriteString("It asks your model, with read-only tools, and sends you the reply:\n")
-		builder.WriteString(ModelTurnPrompt(job.Config))
+		builder.WriteString("It asks your model, with read-only tools, and sends you the reply")
 		return builder.String()
 	}
 	upcoming := prepared.Schedule.Upcoming(job.CreatedAt, upcomingShown)
@@ -638,8 +708,7 @@ func proposalSummary(heading string, prepared Prepared) string {
 	}
 	fmt.Fprintf(&builder, "Runs: %s (%s)\n", job.Cron, job.Zone)
 	fmt.Fprintf(&builder, "Next: %s\n", strings.Join(times, "; "))
-	builder.WriteString("Each run asks your model, with read-only tools, and sends you the reply:\n")
-	builder.WriteString(ModelTurnPrompt(job.Config))
+	builder.WriteString("Each run asks your model, with read-only tools, and sends you the reply")
 	return builder.String()
 }
 
