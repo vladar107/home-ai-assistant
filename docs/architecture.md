@@ -230,7 +230,9 @@ A restart resumes a running task in its session; a second interruption fails it.
   each integration independently.
 - **Authority stays in Go.** Grants, budgets, approvals, and credentials are
   enforced by the application, never by prompt instructions. Pi inherits a minimal
-  environment without the Telegram token.
+  environment without the Telegram token. A call that ends in an error gives its
+  budget slot back, and a ceiling of twice the budget, failed calls included,
+  still bounds a turn.
 - **Read first, confirm writes.** Writes to Notion, the NAS, and schedules are
   off until the user turns them on and are always confirmed per action. A
   reminder is set and cancelled without confirmation, since it only sends its

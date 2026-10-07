@@ -417,3 +417,59 @@ func TestUnscreenedToolsSendNothingToTypeSafe(t *testing.T) {
 		t.Fatalf("requests = %d, want 0", got)
 	}
 }
+
+func TestFailedCallsGiveTheirBudgetBackUpToTheCeiling(t *testing.T) {
+	broker := testBroker(t)
+	provider := &fakeProvider{
+		principal:   testPrincipal,
+		definitions: []Definition{testDefinition("ok_tool", 0), testDefinition("bad_tool", 0)},
+		respond: func(_ context.Context, call Call) (Result, error) {
+			return Result{Text: "text", IsError: call.Name == "bad_tool"}, nil
+		},
+	}
+	if err := broker.Register(provider); err != nil {
+		t.Fatal(err)
+	}
+	set, err := broker.ToolsFor(context.Background(), testPrincipal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := func(name string) agentruntime.ToolResult {
+		t.Helper()
+		result, err := set.Executor.Execute(context.Background(), agentruntime.ToolCall{Name: name, Arguments: json.RawMessage(`{}`)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	exhausted := func(result agentruntime.ToolResult) bool {
+		return result.IsError && strings.Contains(result.Text, "budget for this turn is exhausted")
+	}
+
+	for range 3 {
+		if result := call("bad_tool"); exhausted(result) {
+			t.Fatal("a failed call was refused before the budget was spent")
+		}
+	}
+	for index := range maximumCallsPerTurn {
+		if result := call("ok_tool"); result.IsError {
+			t.Fatalf("successful call %d after failures = %+v, want the full budget left", index+1, result)
+		}
+	}
+	if result := call("ok_tool"); !exhausted(result) {
+		t.Fatalf("call past the budget = %+v, want exhausted", result)
+	}
+
+	set, err = broker.ToolsFor(context.Background(), testPrincipal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := range budgetCeilingFactor * maximumCallsPerTurn {
+		if result := call("bad_tool"); exhausted(result) {
+			t.Fatalf("failed call %d was refused below the ceiling", index+1)
+		}
+	}
+	if result := call("bad_tool"); !exhausted(result) {
+		t.Fatalf("failed call past the ceiling = %+v, want exhausted", result)
+	}
+}

@@ -19,6 +19,7 @@ import (
 
 const (
 	maximumCallsPerTurn = 8
+	budgetCeilingFactor = 2
 	maximumResultBytes  = 16 << 10
 	callDeadline        = 15 * time.Second
 	maximumCallDeadline = 2 * time.Minute
@@ -283,7 +284,10 @@ type turnExecutor struct {
 	budget      int32
 	// handoff names a tool outside the budget that the exhausted-budget result points to.
 	handoff string
-	calls   atomic.Int32
+	// calls counts the calls charged to the budget; attempts counts every budgeted call, failed
+	// ones included, against the hard ceiling.
+	calls    atomic.Int32
+	attempts atomic.Int32
 }
 
 var _ agentruntime.ToolExecutor = (*turnExecutor)(nil)
@@ -318,15 +322,27 @@ func (e *turnExecutor) Execute(ctx context.Context, call agentruntime.ToolCall) 
 	return result, nil
 }
 
+// execute charges the call to the turn's budget. A call that ends in an error gives its slot back,
+// so a mistyped place or a failing service does not cost the rest of the turn; the ceiling of
+// budgetCeilingFactor times the budget, failed calls included, still bounds a looping model.
 func (e *turnExecutor) execute(ctx context.Context, call agentruntime.ToolCall) (string, string, agentruntime.ToolResult) {
 	binding, known := e.bindings[call.Name]
-	if !binding.outsideBudget && e.calls.Add(1) > e.budget {
+	charged := !binding.outsideBudget
+	if charged && (e.attempts.Add(1) > budgetCeilingFactor*e.budget || e.calls.Add(1) > e.budget) {
 		text := budgetExhaustedText
 		if e.handoff != "" {
 			text += fmt.Sprintf(budgetHandoffText, e.handoff)
 		}
 		return "budget_exhausted", "", agentruntime.ToolResult{Text: text, IsError: true}
 	}
+	outcome, screened, result := e.perform(ctx, call, binding, known)
+	if charged && result.IsError {
+		e.calls.Add(-1)
+	}
+	return outcome, screened, result
+}
+
+func (e *turnExecutor) perform(ctx context.Context, call agentruntime.ToolCall, binding toolBinding, known bool) (string, string, agentruntime.ToolResult) {
 	if !known {
 		return "unknown_tool", "", agentruntime.ToolResult{Text: unavailableText, IsError: true}
 	}

@@ -260,16 +260,16 @@ func TestToolBridgeRejectsCallsOutsideTheGrant(t *testing.T) {
 	if _, result := post(token, call(`{"text":"fail"}`)); !result.IsError || strings.Contains(result.Text, "synthetic-private-text") {
 		t.Errorf("failed call = %+v", result)
 	}
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 8; i++ {
 		if _, result := post(token, call(`{"text":"fine"}`)); result.IsError || !strings.HasSuffix(result.Text, "ok") {
-			t.Fatalf("call %d = %+v", i, result)
+			t.Fatalf("call %d = %+v, want the failed calls to have given their budget back", i, result)
 		}
 	}
 	if _, result := post(token, call(`{"text":"ninth"}`)); !result.IsError || !strings.Contains(result.Text, "budget") {
 		t.Errorf("call past the budget = %+v", result)
 	}
-	if calls := provider.recorded(); len(calls) != 7 {
-		t.Errorf("provider received %d calls, want 7 (1 unknown and 1 past budget rejected first)", len(calls))
+	if calls := provider.recorded(); len(calls) != 10 {
+		t.Errorf("provider received %d calls, want 10 (1 unknown and 1 past budget rejected first)", len(calls))
 	}
 
 	cancel()
