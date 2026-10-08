@@ -1,6 +1,6 @@
 # 0059 — Check each search instead of locking the conversation
 
-Status: `proposed`
+Status: `done`
 
 ## Context
 
@@ -73,6 +73,27 @@ before it reaches the provider.
   text.
 - **Metrics:** search checks by decision (`allow`, `confirm`, `deny`) and
   by reason (`clean`, `pattern`, `suspicious`, `off_request`, `no_bridge`).
+
+- **As built.**
+  - The check has its own address, `HOME_AGENT_SEARCH_CHECK_URL`, set per
+    turn beside the bridge token, because the tool address ends in `/call`.
+  - The extension waits 5 s, and the Jev call is capped at 3 s inside that.
+  - A turn without a check gets `deny`, because the runtime cannot see
+    exposure.
+  - A confirmed search is held in memory per principal: up to 16 entries for
+    30 minutes, each used once, matched on the trimmed, whitespace-collapsed,
+    lower-cased query. A restart between Confirm and the continuation
+    therefore makes the model propose again.
+  - The proposal shows the query as code, so a link in it cannot hide the
+    address.
+  - A search's results mark the conversation as outside content when they
+    arrive, not when the call starts, so a call made alongside it is not
+    judged by results the model has not seen yet.
+  - The metric reasons are `clean`, `confirmed`, `suspicious`, `pattern`,
+    `off_request`, `checked`, and `unrecorded`. An unreachable bridge is
+    seen only by the extension, so no `no_bridge` reason is recorded.
+  - Known false positives come from the redactor's own rules, for example
+    "password manager" and "node.js".
 
 ## Approach
 

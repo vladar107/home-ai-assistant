@@ -112,6 +112,7 @@ flowchart TB
     watch["<b>watch</b><br/>windowed checks in code,<br/>alerts on change"]
     routes["<b>routes</b><br/>saved journeys,<br/>checked leg by leg in code"]
     judgment["<b>judgment</b><br/>TypeSafe screening, intent checks,<br/>tool hints (opt-in)"]
+    searchcheck["<b>searchcheck</b><br/>per-query web search checks"]
     integration["<b>integration</b><br/>per-user enable / disable"]
     loc["<b>location</b><br/>latest shared position, expiry"]
     mem["<b>memory</b><br/>per-user instructions and facts"]
@@ -154,6 +155,9 @@ flowchart TB
     conv --> broker
     conv --> card
     conv --> judgment
+    conv --> searchcheck
+    searchcheck --> approval
+    searchcheck --> judgment
     runtime --> connection
     broker --> connectors
     broker --> attach
@@ -290,10 +294,10 @@ route has been deleted; either ends in the usual failure notice.
 
 `telegram` offers `app_help` on every turn: for a topic, the `/settings` page of an
 integration rendered for that principal with its buttons and the messages they
-send, the command list, `/jobs`, or why web search is off. The text comes from
+send, the command list, `/jobs`, or how web search is checked. The text comes from
 the same rendering and strings as the pages themselves, so the model's setup
 instructions cannot drift from the app. Turns therefore always carry the tool
-bridge; web search is still offered only while the principal's web access is on.
+bridge; web search is still offered only while the principal's web access is on, and its extension asks the bridge to check each query.
 
 ### Departure checks
 
@@ -366,10 +370,39 @@ routes after jobs and watches, read-only, with a Delete button each.
   - home actions, `reminder_set`, and `task_start` are proposed for Confirm;
   - `fetch_page` opens only addresses from the user's message or from what the
     run has read;
-  - chat turns run without web search, because the provider's search can open
-    an address the query names.
+  - each web search query is checked before it is sent (below).
   The extension's `urls` argument and URL context tool are removed, so the model
   cannot hand an address to the search provider.
+- **Web search is checked per query.** The provider's search can open an address
+  the query names, and a search cannot be stopped once it starts, so after
+  outside content a query could carry data out. The vendored extension therefore
+  asks the application before every search: it posts the query to a
+  `/search-check` endpoint on the turn's tool bridge, under the turn's bearer
+  token, and searches only when the answer is `allow`. A missing endpoint, a
+  failed or slow request, or a malformed answer means no search, and a turn
+  without a check refuses every query. The `searchcheck` package decides, in
+  order:
+  1. a run or conversation that has read no outside content: `allow`;
+  2. a query the user confirmed in the last 30 minutes, once: `allow`;
+  3. a principal marked suspicious by screening, who opted in to safety checks:
+     `confirm`;
+  4. a query holding what the TypeSafe redactor would change (an address, email
+     address, phone, card, or IBAN number, IP address, path, token, or encoded
+     blob), a bare host name, a site-naming search operator, or more than 500
+     characters: `confirm`. These detectors need no TypeSafe key;
+  5. for principals who opted in, a Jev question over the redacted query and the
+     user's recent messages, whether the search serves the request, below 0.3:
+     `confirm`. A TypeSafe failure falls through to the next step;
+  6. otherwise `allow`.
+  `confirm` proposes a `web_search` approval, "Search the web for: ...", with the
+  reason; the model is told the search did not run and waits. After Confirm the
+  continuation turn searches again with the same query. Scheduled runs and
+  background tasks have nobody to ask, so `confirm` becomes `deny` there. Plain
+  words can still describe private facts; without an address the query has
+  nowhere to go but the provider's own search, which is accepted. Pages the
+  provider's search opens by itself are chosen by the search engine and are not
+  covered. The `home_agent.search.checks` counter records each decision by
+  verdict and reason.
 - **Home Assistant scope.** One household token from a dedicated non-admin Home
   Assistant user. Only entities exposed to Assist are reachable by the MCP tools;
   the tool, exposure, and label snapshot is cached for 5 minutes.

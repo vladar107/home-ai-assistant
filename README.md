@@ -28,7 +28,9 @@ borrowed between users.
 - **Gmail.** Read-only search and reading of the user's own mailbox.
 - **NAS files.** Browse and read the user's own folders, receive files in the
   chat, and file photos into an inbox after confirmation.
-- **Web.** Search, page reading, PDF text, and weather.
+- **Web.** Search, page reading, PDF text, and weather. After the conversation has read
+  outside content, each search query is checked, and one that could carry data out waits
+  for Confirm.
 - **Trains.** NS trips, departures, and disruptions, and checks of the exact
   planned departures a user names, one normalized status each.
 - **Home.** Reads and controls the devices exposed to Home Assistant's Assist.
