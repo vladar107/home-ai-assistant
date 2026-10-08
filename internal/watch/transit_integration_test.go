@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -20,6 +21,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/ns"
 	"github.com/vladar107/home-ai-assistant/internal/httpretry"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
+	"github.com/vladar107/home-ai-assistant/internal/routes"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 	"github.com/vladar107/home-ai-assistant/internal/watch"
@@ -115,6 +117,7 @@ type transitEngine struct {
 	gateway   *gateway
 	trains    *ns.Service
 	buses     *bus.Service
+	routes    *routes.Service
 	sender    *fakeSender
 	telemetry *fakeTelemetry
 	proposer  *fakeProposer
@@ -175,6 +178,21 @@ func newTransitEngine(t *testing.T) *transitEngine {
 		t.Fatal(err)
 	}
 	if err := e.service.Register(watch.KindDisruptions, disruptions); err != nil {
+		t.Fatal(err)
+	}
+	zone, err := time.LoadLocation("Europe/Amsterdam")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.routes, err = routes.NewService(routes.Config{Location: zone, Trains: e.trains, Buses: e.buses, Now: e.clock.Now}, store, e.proposer, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	routeKind, err := watch.NewRouteEvaluator(e.routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.service.Register(watch.KindRoute, routeKind); err != nil {
 		t.Fatal(err)
 	}
 	e.service.SetTelemetry(e.telemetry)
@@ -574,5 +592,135 @@ func TestDisruptionWatchRespectsEachUsersTrainsSwitch(t *testing.T) {
 	e.wantSent(101, "New disruption: Rotterdam - Breda")
 	if e.telemetry.count("check bob disruptions failed") != 1 || e.telemetry.count("check alice disruptions triggered") != 1 {
 		t.Fatalf("checks = %v", e.telemetry.events)
+	}
+}
+
+// saveRoute stores a route for principalID: a bike ride, the recorded train, and a walk, arriving
+// by 08:45 on weekdays.
+func (e *transitEngine) saveRoute(principalID, id, name string, departures ...string) {
+	e.t.Helper()
+	now := e.clock.Now()
+	spec := routes.Spec{
+		Name:     name,
+		Days:     []string{"mon", "tue", "wed", "thu", "fri"},
+		ArriveBy: "08:45",
+		Legs: []routes.Leg{
+			{Mode: routes.ModeBike, Minutes: 6},
+			{Mode: routes.ModeTrain, From: "Amersfoort Schothorst", To: "Utrecht Centraal", Departures: departures},
+			{Mode: routes.ModeWalk, Minutes: 10},
+		},
+	}
+	created, err := e.store.CreateRoute(e.ctx, routes.Route{ID: id, PrincipalID: principalID, Spec: spec, CreatedAt: now, UpdatedAt: now}, routes.MaximumRoutesPerPrincipal)
+	if err != nil || !created {
+		e.t.Fatalf("save route: %v %v", created, err)
+	}
+}
+
+func routeSpec(name string) watch.Spec {
+	return watch.Spec{
+		Kind:         watch.KindRoute,
+		Target:       watch.Target{Route: name},
+		Triggers:     []string{watch.TriggerLeg, watch.TriggerArrival},
+		DelayMinutes: 5,
+		Days:         []string{"mon", "tue", "wed", "thu", "fri"},
+		Start:        "06:20",
+		End:          "07:50",
+		Zone:         "Europe/Amsterdam",
+	}
+}
+
+// A route on time stays silent. A cancelled only train alerts once with the route check's own
+// leg lines and its recovery says back to normal; a later departure that still runs leaves the
+// leg alone and alerts only on the arrival target, and a delay alerts.
+// wantSentAnyOrder is wantSent for watches checked in the same cycle, whose messages come in no
+// particular order.
+func (e *transitEngine) wantSentAnyOrder(chatID int64, contains ...string) {
+	e.t.Helper()
+	sent := e.sender.take()
+	if len(sent) != len(contains) {
+		e.t.Fatalf("sent %d messages, want %d: %+v", len(sent), len(contains), sent)
+	}
+	for _, want := range contains {
+		if !slices.ContainsFunc(sent, func(message sentAlert) bool { return message.chatID == chatID && strings.Contains(message.text, want) }) {
+			e.t.Fatalf("no message to chat %d containing %q in %+v", chatID, want, sent)
+		}
+	}
+}
+
+func TestRouteWatchAlertsOnLegsAndTheArrivalTarget(t *testing.T) {
+	e := newTransitEngine(t)
+	e.saveRoute("alice", "0000000000000001", "short", "07:56")
+	e.saveRoute("alice", "0000000000000002", "work", "07:56", "08:12")
+	e.create("alice", watchID, routeSpec("short"))
+	e.create("alice", "0000000000000003", routeSpec("work"))
+
+	e.at("2026-10-05 06:30")
+	e.wantSent(101)
+
+	e.gateway.serve("/ns/v3/trips", trips(t, func(trip map[string]any, legs []map[string]any) {
+		trip["status"] = "CANCELLED"
+		legs[0]["cancelled"] = true
+	}))
+	e.at("2026-10-05 06:35")
+	e.wantSentAnyOrder(101,
+		"Route \"work\": arrival target missed\nLeg 1, bike 6 min: as stated",
+		"Route \"short\": leg 2 cancelled; arrival target missed\nLeg 1, bike 6 min: as stated",
+	)
+	e.at("2026-10-05 06:40")
+	e.wantSent(101)
+
+	e.gateway.serve("/ns/v3/trips", recorded(t, "ns", "trips.json"))
+	e.at("2026-10-05 06:45")
+	e.wantSentAnyOrder(101, "Back to normal. Route \"work\": on track", "Back to normal. Route \"short\": on track")
+
+	e.gateway.serve("/ns/v3/trips", departingLate(t, 6))
+	e.at("2026-10-05 06:50")
+	e.wantSentAnyOrder(101, "Route \"work\": leg 2 delayed +6 min", "Route \"short\": leg 2 delayed +6 min")
+}
+
+// Route names are looked up among the owner's own routes when a watch is proposed, whatever the
+// case, and the saved name is kept; no one can watch another user's route.
+func TestRouteWatchProposalNeedsTheOwnersRoute(t *testing.T) {
+	e := newTransitEngine(t)
+	e.clock.Set(t, "2026-10-05 05:00")
+	e.saveRoute("alice", "0000000000000001", "work", "07:56")
+	e.saveRoute("alice", "0000000000000002", "gym", "07:56")
+
+	arguments := func(name string) map[string]any {
+		return map[string]any{"kind": "route", "route": name, "departure": "07:50", "days": []string{"mon"}}
+	}
+	if result := e.propose("alice", arguments("school")); !result.IsError || !strings.Contains(result.Text, `No route is called "school"`) || !strings.Contains(result.Text, `"work"`) || !strings.Contains(result.Text, `"gym"`) {
+		t.Fatalf("unknown route = %+v", result)
+	}
+	if result := e.propose("bob", arguments("work")); !result.IsError || result.Text != "The user has no saved routes." {
+		t.Fatalf("another user's route = %+v", result)
+	}
+	if len(e.proposer.proposals) != 0 {
+		t.Fatalf("proposals = %+v", e.proposer.proposals)
+	}
+	if result := e.propose("alice", arguments(" WORK ")); result.IsError {
+		t.Fatalf("alice's route = %+v", result)
+	}
+	if len(e.proposer.proposals) != 1 || !strings.Contains(e.proposer.proposals[0].proposal.Summary, `Route "work", leaving 07:50`) {
+		t.Fatalf("proposals = %+v", e.proposer.proposals)
+	}
+}
+
+// A watch whose route has been deleted fails its checks as a plain error, so the owner gets the
+// failure notice and NS is never asked.
+func TestRouteWatchTellsWhenTheRouteIsGone(t *testing.T) {
+	e := newTransitEngine(t)
+	e.saveRoute("alice", "0000000000000001", "work", "07:56")
+	e.create("alice", watchID, routeSpec("work"))
+	if deleted, err := e.store.DeleteRoute(e.ctx, "alice", "0000000000000001"); err != nil || !deleted {
+		t.Fatalf("delete route: %v %v", deleted, err)
+	}
+
+	for _, local := range []string{"2026-10-05 06:30", "2026-10-05 06:35", "2026-10-05 06:40"} {
+		e.at(local)
+	}
+	e.wantSent(101, "I can't check this right now")
+	if requests := e.gateway.count("/ns/v3/trips"); requests != 0 || e.telemetry.count("check alice route failed") != 3 {
+		t.Fatalf("NS asked %d times, metrics = %v", requests, e.telemetry.events)
 	}
 }

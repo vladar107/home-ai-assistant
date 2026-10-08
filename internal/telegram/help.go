@@ -119,7 +119,7 @@ func (s *Service) helpText(ctx context.Context, principalID, topic string) (stri
 			fmt.Fprintf(&builder, "\n/%s: %s", command.Command, command.Description)
 		}
 	case helpTopicJobs:
-		fmt.Fprintf(&builder, "/jobs: %s. Each job and reminder has buttons there to pause, resume, run now, or delete it.\n%s\n%s", jobsDescription(s.botCommands()), NoJobsReply, SchedulePrivacyLine)
+		fmt.Fprintf(&builder, "/jobs: %s. It lists reminders, scheduled jobs, watches, and saved routes. Each job and reminder has buttons there to pause, resume, run now, or delete it; a watch has pause, resume, and delete, and a saved route has delete.\n%s\n%s", jobsDescription(s.botCommands()), NoJobsReply, SchedulePrivacyLine)
 	case helpTopicWebSearch:
 		fmt.Fprintf(&builder, "Web search is offered while web access is on for the user in /settings › Everyday tools. %s", conversation.SearchWithheldNotice)
 	default:

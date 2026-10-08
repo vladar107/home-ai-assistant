@@ -104,6 +104,19 @@ func (s *Service) Delete(ctx context.Context, principalID, routeID string) (bool
 	return deleted, err
 }
 
+// Find returns the principal's route called name, ignoring case; a name that matches none is a
+// *SelectionError that lists the principal's routes.
+func (s *Service) Find(ctx context.Context, principalID, name string) (Route, error) {
+	route, refusal, err := s.named(ctx, principalID, name)
+	if err != nil {
+		return Route{}, err
+	}
+	if refusal != "" {
+		return Route{}, &SelectionError{Text: refusal}
+	}
+	return route, nil
+}
+
 // SelectionError is a route that could not be chosen, worded for the model or the user.
 type SelectionError struct {
 	Text string
@@ -136,6 +149,10 @@ type LegResult struct {
 	Status string
 	Note   string
 }
+
+// Unusable reports that no departure of a train or bus leg can be taken: all are cancelled or
+// gone, or the ones that run leave before the route gets there.
+func (l LegResult) Unusable() bool { return l.Status == statusNoUsable || l.Status == statusMissed }
 
 // Result is one route checked for one day.
 type Result struct {

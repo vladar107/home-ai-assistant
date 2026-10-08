@@ -277,7 +277,14 @@ minutes; a departure no longer in the timetable always alerts, and a failed chec
 counts as an upstream failure. A disruption watch asks NS per station for what is
 in effect now and at the end of its window, and alerts on an entry that is new or
 whose title, situation, advice, or expected end changed; one of several ending is
-silent. Route watches come with saved routes; until then that kind is not offered.
+silent. A route watch resolves the route name against the owner's saved routes
+(case-insensitive, stored under the saved name) and checks it with
+`routes.Service.Check`, once per cycle per route and day. Its state is each
+train or bus leg's departure in the route (a delay in steps as above, a platform
+change, or no departure left to take) plus whether the arrival target is missed,
+and its alert carries the route check's own leg lines. The check fails as an upstream
+failure only when every train and bus leg failed, and as a plain error when the
+route has been deleted; either ends in the usual failure notice.
 
 ### App help
 

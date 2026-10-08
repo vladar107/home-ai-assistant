@@ -175,8 +175,7 @@ func departureObservation(spec Spec, departure transit.Departure, location *time
 			parts = append(parts, "partly_cancelled")
 		}
 		if watched(TriggerDelay) && departure.DelayMinutes >= spec.DelayMinutes {
-			step := spec.DelayMinutes + (departure.DelayMinutes-spec.DelayMinutes)/delayStep*delayStep
-			parts = append(parts, fmt.Sprintf("delay>=%d", step))
+			parts = append(parts, fmt.Sprintf("delay>=%d", delayBucket(spec.DelayMinutes, departure.DelayMinutes)))
 		}
 		if watched(TriggerPlatform) && departure.PlatformChanged {
 			parts = append(parts, "platform="+departure.Platform)
@@ -189,6 +188,11 @@ func departureObservation(spec Spec, departure transit.Departure, location *time
 	observation.State = strings.Join(parts, "|")
 	observation.Triggered = true
 	return observation
+}
+
+// delayBucket is the delay rounded down to a step of delayStep minutes past the threshold.
+func delayBucket(threshold, delay int) int {
+	return threshold + (delay-threshold)/delayStep*delayStep
 }
 
 // departureHeadline is the departure with its status phrase word for word, such as

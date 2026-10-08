@@ -736,7 +736,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		}
 		a.routes = routeService
 		if a.watches != nil {
-			if err := registerWatchKinds(a.watches, a.ns, a.bus); err != nil {
+			if err := registerWatchKinds(a.watches, a.ns, a.bus, a.routes); err != nil {
 				return err
 			}
 		}
@@ -955,7 +955,7 @@ func nasRoots(configured config.NASRoots) []nas.PrincipalRoots {
 
 // registerWatchKinds offers the kinds of watch the configured connectors can check; each check
 // still runs under its owner's own trains or buses switch.
-func registerWatchKinds(watches *watch.Service, trains *ns.Service, buses *bus.Service) error {
+func registerWatchKinds(watches *watch.Service, trains *ns.Service, buses *bus.Service, saved *routes.Service) error {
 	if trains == nil && buses == nil {
 		return nil
 	}
@@ -965,6 +965,15 @@ func registerWatchKinds(watches *watch.Service, trains *ns.Service, buses *bus.S
 	}
 	if err := watches.Register(watch.KindDeparture, departures); err != nil {
 		return err
+	}
+	if saved != nil {
+		route, err := watch.NewRouteEvaluator(saved)
+		if err != nil {
+			return fmt.Errorf("initialize route watches: %w", err)
+		}
+		if err := watches.Register(watch.KindRoute, route); err != nil {
+			return err
+		}
 	}
 	if trains == nil {
 		return nil

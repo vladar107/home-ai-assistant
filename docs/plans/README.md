@@ -67,7 +67,7 @@ plan that links back to the earlier record.
 | 0055 | [Tool reliability: fewer wasted calls, retries, and clean scheduled replies](0055-tool-reliability.md) | done |
 | 0056 | [Answers grounded in tool data](0056-grounded-answers.md) | done |
 | 0057 | [Saved routes and easier schedule editing](0057-routes-and-schedule-editing.md) | done |
-| 0058 | [Watches: tell me when my train or route goes wrong](0058-watches.md) | proposed |
+| 0058 | [Watches: tell me when my train or route goes wrong](0058-watches.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

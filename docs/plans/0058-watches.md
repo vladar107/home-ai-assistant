@@ -1,6 +1,6 @@
 # 0058 — Watches: tell me when my train or route goes wrong
 
-Status: `proposed`
+Status: `done`
 
 ## Context
 
@@ -81,9 +81,35 @@ watch can build on both without a model in the loop.
   state, deduplication, and delivery design is meant to carry them, but
   they are separate plans.
 
+- **As built: the engine.** A watch's definition is one JSON column. Its
+  window is local times within one day, so a window that would cross
+  midnight is refused. The lead time is 10–240 minutes, the delay threshold
+  1–120 minutes, and a disruption watch takes 1–10 stations. A label is
+  generated, so there is no name field. A change from one triggering state
+  to another alerts again, within the cap of five. An edit resets the
+  watch's window state, and a one-off watch is deleted once its window ends.
+  Kinds are offered only once an evaluator is registered. Evaluators get
+  the window's last state (`Previous`), can store a change silently
+  (`Silent`), and resolve station and stop names when a watch is proposed
+  (`Resolver`). Alerts are passed to the next turn as ordinary notices, not
+  outside content, because code writes them from transit data.
+- **As built: checks.** A departure watch makes one exact-departure check
+  per cycle. A delay below the threshold counts as on time. Above it, the
+  delay is put in 5-minute buckets, and "not in the timetable" always
+  alerts. A disruption watch asks NS per station both now and at the end
+  of the window, so engineering works that start before the user leaves
+  are reported in advance. Its state is each disruption's ID with a
+  fingerprint of its content, so a changed expected end alerts as
+  "changed" while wording churn does not. A route watch uses
+  `routes.Service.Check` and judges each leg by the departure the route
+  actually takes. A cancelled departure that a later one replaces does not
+  trigger the leg trigger by itself; the arrival trigger reports it when it
+  makes the target late. When only some legs fail to check, an active alert
+  is held, so no false "back to normal" is sent.
+
 ## Approach
 
-1. Store: migration `019_watches.sql` with `watches`, `watch_states`, and
+1. Store: migration `018_watches.sql` with `watches`, `watch_states`, and
    `watch_alerts`, and the repository.
 2. `internal/watch`: the model and validation, windows and check timing,
    evaluators for the three kinds on top of the plan 0056 departure checks
@@ -101,7 +127,7 @@ watch can build on both without a model in the loop.
 
 ## Files affected
 
-- `internal/store/sqlite/migrations/019_watches.sql`, a watches store
+- `internal/store/sqlite/migrations/018_watches.sql`, a watches store
 - a new `internal/watch` package
 - `internal/routes`, `internal/connectors/ns`, `internal/connectors/bus`
   (shared checks)

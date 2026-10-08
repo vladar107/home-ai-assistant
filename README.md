@@ -56,8 +56,8 @@ borrowed between users.
 - **Watches.** "Tell me if my 07:42 is cancelled or more than 5 minutes late":
   a departure, saved route, or set of stations is checked in code during a daily
   window, and the user hears only when something changes, with Mute today and
-  Pause buttons; `/jobs` lists them. Train and bus departures and NS disruptions
-  at stations are checked now; watches on saved routes come next.
+  Pause buttons; `/jobs` lists them. Train and bus departures, saved routes, and NS
+  disruptions at stations are checked.
 - **Routes.** Named journeys such as "work", saved in conversation with their
   weekdays, arrival target, and legs (walking or cycling minutes, fixed trains
   and buses), changed one leg at a time, and checked in one call: each leg's
