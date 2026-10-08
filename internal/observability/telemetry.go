@@ -74,6 +74,7 @@ type Telemetry struct {
 	dayCardRenderDuration        metric.Float64Histogram
 	approvals                    metric.Int64Counter
 	judgmentDecisions            metric.Int64Counter
+	searchChecks                 metric.Int64Counter
 	hintFollowThrough            metric.Int64Counter
 	scheduleRuns                 metric.Int64Counter
 	memoryWrites                 metric.Int64Counter
@@ -379,6 +380,9 @@ func (t *Telemetry) createBusinessInstruments(meter metric.Meter) error {
 		return err
 	}
 	if t.judgmentDecisions, err = counter("home_agent.judgment.decisions", "TypeSafe judgment decisions made.", "{decision}"); err != nil {
+		return err
+	}
+	if t.searchChecks, err = counter("home_agent.search.checks", "Web search checks by verdict and reason.", "{check}"); err != nil {
 		return err
 	}
 	if t.hintFollowThrough, err = counter("home_agent.hint.follow_through", "Hint follow-through results.", "{hint}"); err != nil {
@@ -715,6 +719,14 @@ func (t *Telemetry) RecordJudgmentDecision(ctx context.Context, principal, purpo
 		principalAttr(principal),
 		labelAttr("home_agent.purpose", purpose, "unknown"),
 		labelAttr("home_agent.result", result, "unknown"),
+	))
+}
+
+func (t *Telemetry) RecordSearchCheck(ctx context.Context, principal, verdict, reason string) {
+	t.searchChecks.Add(ctx, 1, metric.WithAttributes(
+		principalAttr(principal),
+		labelAttr("home_agent.verdict", verdict, "unknown"),
+		labelAttr("home_agent.reason", reason, "unknown"),
 	))
 }
 

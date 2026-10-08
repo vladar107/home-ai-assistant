@@ -31,6 +31,7 @@ func TestBusinessMetricsAreRecordedWithNormalizedLabels(t *testing.T) {
 	telemetry.RecordDayCardRender(ctx, "success", time.Millisecond)
 	telemetry.RecordApproval(ctx, "alice", "notion_create_page", "executed", true)
 	telemetry.RecordJudgmentDecision(ctx, "alice", "hint", "hinted")
+	telemetry.RecordSearchCheck(ctx, "alice", "confirm", "pattern")
 	telemetry.RecordHintFollowThrough(ctx, "alice", "followed")
 	telemetry.RecordScheduleRun(ctx, "alice", "success")
 	telemetry.ZeroWatchOutcomes(ctx, []string{"alice"}, []string{"departure"})
@@ -80,6 +81,7 @@ func TestBusinessMetricsAreRecordedWithNormalizedLabels(t *testing.T) {
 		{"home_agent.daycard.render.duration", map[string]string{"home_agent.outcome": "success"}, 1},
 		{"home_agent.approvals", map[string]string{"home_agent.status": "executed", "home_agent.warned": "true"}, 1},
 		{"home_agent.judgment.decisions", map[string]string{"home_agent.purpose": "hint", "home_agent.result": "hinted"}, 1},
+		{"home_agent.search.checks", map[string]string{"home_agent.verdict": "confirm", "home_agent.reason": "pattern"}, 1},
 		{"home_agent.hint.follow_through", map[string]string{"home_agent.result": "followed"}, 1},
 		{"home_agent.schedule.runs", map[string]string{"home_agent.outcome": "success"}, 1},
 		{"home_agent.watch.checks", map[string]string{"home_agent.kind": "departure", "home_agent.outcome": "triggered"}, 2},
