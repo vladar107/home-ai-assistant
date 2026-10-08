@@ -1,6 +1,6 @@
 # 0029 — TypeSafe judgments for approvals, outside content, and tool hints
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
