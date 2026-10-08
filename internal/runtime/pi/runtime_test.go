@@ -584,10 +584,8 @@ func TestWebSearchTurnLoadsOnlyTheSearchExtension(t *testing.T) {
 	if extensions := extensionArgs(report.Args); !slices.Equal(extensions, []string{cfg.WebSearchExtension}) {
 		t.Errorf("extensions = %v, want only the search extension", extensions)
 	}
-	for _, entry := range report.Environment {
-		if strings.HasPrefix(entry, "HOME_AGENT_TOOL_BRIDGE_") {
-			t.Errorf("web search turn received bridge environment %q", entry)
-		}
+	if environmentValue(report, "HOME_AGENT_SEARCH_CHECK_URL") == "" || environmentValue(report, "HOME_AGENT_TOOL_BRIDGE_TOKEN") == "" {
+		t.Errorf("web search turn lost the search check environment: %v", report.Environment)
 	}
 	if len(report.BridgeFiles) != 0 || len(report.Files) != 0 {
 		t.Errorf("web search turn wrote files: bridge=%v workspace=%v", report.BridgeFiles, report.Files)

@@ -189,6 +189,27 @@ func run() error {
 		_, err = io.Copy(io.Discard, os.Stdin)
 		return err
 	}
+	if strings.HasPrefix(prompt.Message, "fixture:search ") {
+		// web_search asks the application's search check first, as the vendored extension does, and
+		// runs only on "allow".
+		query := strings.TrimPrefix(prompt.Message, "fixture:search ")
+		ack()
+		emit(map[string]any{"type": "message_start", "message": map[string]string{"role": "assistant"}})
+		delta("Searching.")
+		emit(map[string]any{"type": "message_update", "assistantMessageEvent": map[string]string{"type": "toolcall_start"}})
+		emit(map[string]any{"type": "tool_execution_start", "toolCallId": "call-1", "toolName": "web_search"})
+		text, err := checkSearch(query)
+		if err != nil {
+			text = "Web search is unavailable right now; the search was not run."
+		}
+		emit(map[string]any{"type": "tool_execution_end", "toolCallId": "call-1", "toolName": "web_search", "isError": false,
+			"result": map[string]any{"content": []map[string]string{{"type": "text", "text": text}}}})
+		emit(map[string]any{"type": "message_start", "message": map[string]string{"role": "assistant"}})
+		delta("saw: " + text)
+		settle()
+		_, err = io.Copy(io.Discard, os.Stdin)
+		return err
+	}
 	switch prompt.Message {
 	case "fixture:usage", "fixture:usage-missing":
 		// Two assistant messages around a web_search call, as Pi reports model usage per message.
@@ -522,6 +543,42 @@ func callBridge(name, arguments string) (string, bool, error) {
 		return "", false, err
 	}
 	return result.Text, result.IsError, nil
+}
+
+// checkSearch posts the query to the application's search check and returns what the model would
+// read: synthetic results on "allow", otherwise the decision's text.
+func checkSearch(query string) (string, error) {
+	body, err := json.Marshal(struct {
+		Query string `json:"query"`
+	}{query})
+	if err != nil {
+		return "", err
+	}
+	request, err := http.NewRequest(http.MethodPost, os.Getenv("HOME_AGENT_SEARCH_CHECK_URL"), bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("Authorization", "Bearer "+os.Getenv("HOME_AGENT_TOOL_BRIDGE_TOKEN"))
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("search check rejected: %d", response.StatusCode)
+	}
+	var decision struct {
+		Verdict string `json:"verdict"`
+		Text    string `json:"text"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&decision); err != nil {
+		return "", err
+	}
+	if decision.Verdict == "allow" {
+		return "found: synthetic search answer", nil
+	}
+	return decision.Text, nil
 }
 
 func awaitAbort(commands *json.Decoder, timeout time.Duration) bool {

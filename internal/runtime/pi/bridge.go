@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
@@ -22,11 +23,14 @@ const (
 	bridgeExtensionFile   = "bridge.ts"
 	bridgeToolsFile       = "tools.json"
 	bridgePath            = "/call"
+	searchCheckPath       = "/search-check"
 	maximumArgumentBytes  = 64 << 10
 	bridgeCallFailedText  = "The tool call could not be executed."
+	searchUnavailableText = "Web search is unavailable right now; the search was not run."
 	bridgeURLVariable     = "HOME_AGENT_TOOL_BRIDGE_URL"
 	bridgeTokenVariable   = "HOME_AGENT_TOOL_BRIDGE_TOKEN"
 	bridgeToolsVariable   = "HOME_AGENT_TOOL_BRIDGE_TOOLS"
+	searchCheckVariable   = "HOME_AGENT_SEARCH_CHECK_URL"
 	bridgeShutdownTimeout = time.Second
 )
 
@@ -41,7 +45,9 @@ type bridge struct {
 	toolsPath string
 	token     string
 	url       string
+	checkURL  string
 	executor  agentruntime.ToolExecutor
+	check     agentruntime.SearchCheck
 	server    *http.Server
 	cancel    context.CancelFunc
 	closed    chan struct{}
@@ -53,7 +59,7 @@ type bridgeTool struct {
 	Parameters  json.RawMessage `json:"parameters"`
 }
 
-func startBridge(ctx context.Context, agentDir string, tools agentruntime.ToolSet) (*bridge, error) {
+func startBridge(ctx context.Context, agentDir string, tools agentruntime.ToolSet, check agentruntime.SearchCheck) (*bridge, error) {
 	directory, err := os.MkdirTemp(agentDir, "bridge-")
 	if err != nil {
 		return nil, fmt.Errorf("create Pi tool bridge directory: %w", err)
@@ -63,6 +69,7 @@ func startBridge(ctx context.Context, agentDir string, tools agentruntime.ToolSe
 		extension: filepath.Join(directory, bridgeExtensionFile),
 		toolsPath: filepath.Join(directory, bridgeToolsFile),
 		executor:  tools.Executor,
+		check:     check,
 		closed:    make(chan struct{}),
 	}
 	if err := b.writeFiles(tools.Definitions); err != nil {
@@ -82,6 +89,7 @@ func startBridge(ctx context.Context, agentDir string, tools agentruntime.ToolSe
 		return nil, fmt.Errorf("listen for Pi tool bridge: %w", err)
 	}
 	b.url = "http://" + listener.Addr().String() + bridgePath
+	b.checkURL = "http://" + listener.Addr().String() + searchCheckPath
 	bridgeCtx, cancel := context.WithCancel(ctx)
 	b.cancel = cancel
 	b.server = &http.Server{
@@ -123,6 +131,7 @@ func (b *bridge) environment() []string {
 		bridgeURLVariable + "=" + b.url,
 		bridgeTokenVariable + "=" + b.token,
 		bridgeToolsVariable + "=" + b.toolsPath,
+		searchCheckVariable + "=" + b.checkURL,
 	}
 }
 
@@ -138,7 +147,7 @@ func (b *bridge) close() {
 }
 
 func (b *bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost || r.URL.Path != bridgePath {
+	if r.Method != http.MethodPost || (r.URL.Path != bridgePath && r.URL.Path != searchCheckPath) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
@@ -153,6 +162,14 @@ func (b *bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(body) > maximumArgumentBytes {
 		http.Error(w, "arguments exceed the size limit", http.StatusRequestEntityTooLarge)
+		return
+	}
+	if r.URL.Path == searchCheckPath {
+		b.serveSearchCheck(w, r, body)
+		return
+	}
+	if b.executor == nil {
+		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
 	var call struct {
@@ -176,6 +193,24 @@ func (b *bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Text    string `json:"text"`
 		IsError bool   `json:"isError"`
 	}{result.Text, result.IsError})
+}
+
+// serveSearchCheck answers whether the search extension may send a query out. A turn without a
+// check refuses every query.
+func (b *bridge) serveSearchCheck(w http.ResponseWriter, r *http.Request, body []byte) {
+	var search struct {
+		Query string `json:"query"`
+	}
+	if err := json.Unmarshal(body, &search); err != nil || strings.TrimSpace(search.Query) == "" {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	decision := agentruntime.SearchDecision{Verdict: agentruntime.SearchDeny, Reason: "no_check", Text: searchUnavailableText}
+	if b.check != nil {
+		decision = b.check(r.Context(), search.Query)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(decision)
 }
 
 func newBridgeToken() (string, error) {

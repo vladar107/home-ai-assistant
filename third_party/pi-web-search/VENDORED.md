@@ -21,6 +21,14 @@
   exposure gate, is the one way to read a given address. The README still
   describes the removed `urls` argument and `url_context`; it is left as
   upstream. `format.ts` keeps its now-unused URL-context helpers.
+- `src/` is modified again (2026-10-08, plan
+  [0059](../../docs/plans/0059-search-after-outside-content.md)): the new
+  `src/search_check.ts` posts each query to the application's search check
+  (`HOME_AGENT_SEARCH_CHECK_URL`, with the turn's bearer token) and
+  `webSearch` in `web_search.ts` returns the decision's text instead of
+  searching unless the application answers `allow`. A missing endpoint, a
+  failed or slow request (5 s), or a malformed answer also means no search.
+  The hook is that one call at the top of `webSearch`.
 
 The image copies this directory to `/usr/local/lib/home-agent/pi-web-search`.
 The application loads `src/index.ts` with `--extension` only for principals

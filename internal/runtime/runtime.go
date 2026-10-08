@@ -20,8 +20,32 @@ type RunRequest struct {
 	// WebSearch means the principal has web access turned on, so the runtime offers its own web
 	// search alongside the broker's tools.
 	WebSearch bool
-	Metadata  map[string]string
+	// SearchCheck decides each web search of the turn before the runtime runs it; a nil check
+	// refuses every search.
+	SearchCheck SearchCheck
+	Metadata    map[string]string
 }
+
+// SearchVerdict is what a search check decided about one query.
+type SearchVerdict string
+
+const (
+	SearchAllow   SearchVerdict = "allow"
+	SearchConfirm SearchVerdict = "confirm"
+	SearchDeny    SearchVerdict = "deny"
+)
+
+// SearchDecision is the answer to one query. Text is what the model reads in place of results when
+// the search does not run; Reason is a short word for metrics.
+type SearchDecision struct {
+	Verdict SearchVerdict `json:"verdict"`
+	Reason  string        `json:"reason"`
+	Text    string        `json:"text"`
+}
+
+// SearchCheck is called under the turn's context for each query the runtime's web search is about
+// to send out.
+type SearchCheck func(ctx context.Context, query string) SearchDecision
 
 // Image is a picture the turn's message carried. It is the only non-text input a runtime accepts.
 type Image struct {

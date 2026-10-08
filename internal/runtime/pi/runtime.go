@@ -217,13 +217,15 @@ func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink
 		// register tools.
 		args = append(args, "--no-builtin-tools")
 	}
-	if !request.Tools.Empty() {
-		turnBridge, err := startBridge(ctx, agentDir, request.Tools)
+	if !request.Tools.Empty() || request.WebSearch {
+		turnBridge, err := startBridge(ctx, agentDir, request.Tools, request.SearchCheck)
 		if err != nil {
 			return agentruntime.RunResult{}, err
 		}
 		defer turnBridge.close()
-		args = append(args, "--extension", turnBridge.extension)
+		if !request.Tools.Empty() {
+			args = append(args, "--extension", turnBridge.extension)
+		}
 		environment = append(environment, turnBridge.environment()...)
 	}
 	if request.WebSearch {

@@ -3,6 +3,7 @@ import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
 import { callApiStream, getConfig } from "./api.ts";
 import { formatWebSearchResult } from "./format.ts";
+import { searchRefusal } from "./search_check.ts";
 import { getWebSearchModel, missingWebSearchConfigResult, errorResult } from "./utils.ts";
 
 export const WebSearchSchema = Type.Object({
@@ -18,6 +19,9 @@ export async function webSearch(
     ctx: ExtensionContext,
     thinkingLevel?: ModelThinkingLevel
 ) {
+    const refusal = await searchRefusal(params.query, signal);
+    if (refusal) return { content: [{ type: "text", text: refusal }], details: {} };
+
     const model = await getWebSearchModel(ctx);
     if (!model) return missingWebSearchConfigResult(ctx);
 
