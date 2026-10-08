@@ -66,6 +66,7 @@ func (s *Service) RunScheduled(ctx context.Context, principalID, turn, message s
 		Tools:       tools,
 		Memory:      memory,
 		WebSearch:   webSearch,
+		SearchCheck: s.searchCheck(principalID, webSearch, false),
 	}, s.newCountingSink(principalID, turn, run))
 	switch {
 	case ctx.Err() != nil:

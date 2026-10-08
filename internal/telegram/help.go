@@ -7,7 +7,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -19,9 +18,16 @@ const (
 	helpTopicJobs      = "jobs"
 	helpTopicWebSearch = "web_search"
 
-	helpGuidance = "App help: for any question about this assistant itself, such as how to connect or turn on an integration, what a /settings page or button does, how /jobs or /memory work, or why web search is off, call app_help with the topic and answer from what it returns, naming the exact buttons; never describe setup steps from general knowledge. " +
-		"When web search is off because the conversation has read outside content, say so once, plainly, and offer /new instead of trying other tools."
+	helpGuidance = "App help: for any question about this assistant itself, such as how to connect or turn on an integration, what a /settings page or button does, how /jobs or /memory work, or how web search works, call app_help with the topic and answer from what it returns, naming the exact buttons; never describe setup steps from general knowledge. " +
+		"When a web search is waiting for the user's confirmation, say so once, plainly; do not reword the query to get around it."
 )
+
+const webSearchHelp = "Web search is offered while web access is on for the user in /settings › Everyday tools. " +
+	"Once the conversation has read content from outside the household, such as a web page or an email, each query is checked before it is sent out. " +
+	"An ordinary question searches as usual. A query that contains a web address, a host name, an email address, a number or token, or a file path, or that does not look like part of the user's request, " +
+	"is shown to the user as \"Search the web for: ...\" with Confirm and Reject buttons and runs only after Confirm, once; searching again afterwards with exactly the same query is allowed. " +
+	"If that content looked like an attempt to instruct the assistant, every search needs confirmation. " +
+	"Scheduled jobs and background tasks have no one to ask, so such a search is skipped there. /new starts a fresh conversation that has read nothing yet, so its searches run freely until it does."
 
 // helpTopics names a settings section for the model; the pages themselves supply the help text.
 var helpTopics = map[string]string{
@@ -64,10 +70,10 @@ func (h helpProvider) Contribute(_ context.Context, principalID string) (tools.C
 	}
 	return tools.Contribution{Guidance: helpGuidance, Definitions: []tools.Definition{{
 		Name:        toolAppHelp,
-		Description: "Read this app's own help on one topic: what the user's /settings page for it shows right now and the buttons on it, the chat commands, scheduled jobs, or why web search is off.",
+		Description: "Read this app's own help on one topic: what the user's /settings page for it shows right now and the buttons on it, the chat commands, scheduled jobs, or how web search works.",
 		Risk:        tools.RiskRead,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
-			`"topic":{"type":"string","enum":` + string(encoded) + `,"description":"settings for the overview, commands for the chat commands, jobs for reminders and scheduled jobs, web_search for search being off, or an integration or settings section by name."}},` +
+			`"topic":{"type":"string","enum":` + string(encoded) + `,"description":"settings for the overview, commands for the chat commands, jobs for reminders and scheduled jobs, web_search for how web search is checked, or an integration or settings section by name."}},` +
 			`"required":["topic"],"additionalProperties":false}`),
 	}}}, nil
 }
@@ -121,7 +127,7 @@ func (s *Service) helpText(ctx context.Context, principalID, topic string) (stri
 	case helpTopicJobs:
 		fmt.Fprintf(&builder, "/jobs: %s. It lists reminders, scheduled jobs, watches, and saved routes. Each job and reminder has buttons there to pause, resume, run now, or delete it; a watch has pause, resume, and delete, and a saved route has delete.\n%s\n%s", jobsDescription(s.botCommands()), NoJobsReply, SchedulePrivacyLine)
 	case helpTopicWebSearch:
-		fmt.Fprintf(&builder, "Web search is offered while web access is on for the user in /settings › Everyday tools. %s", conversation.SearchWithheldNotice)
+		builder.WriteString(webSearchHelp)
 	default:
 		for _, section := range sections {
 			if helpTopics[section.prefix()] != topic {

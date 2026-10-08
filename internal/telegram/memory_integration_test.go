@@ -48,8 +48,10 @@ func (h *conversationHarness) memoryTurn(runtime *controlledRuntime, updateID, u
 	for _, toolCall := range calls {
 		// web_search runs inside the runtime, which reports it only as an event.
 		if toolCall.Name == "web_search" {
-			if err := call.sink.Emit(call.ctx, agentruntime.Event{Type: "tool_call", Text: "web_search"}); err != nil {
-				h.t.Fatal(err)
+			for _, event := range []agentruntime.Event{{Type: "tool_call", Text: "web_search"}, {Type: "tool_result", Tool: "web_search", Text: "a result"}} {
+				if err := call.sink.Emit(call.ctx, event); err != nil {
+					h.t.Fatal(err)
+				}
 			}
 			results = append(results, agentruntime.ToolResult{})
 			continue

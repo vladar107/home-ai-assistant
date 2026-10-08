@@ -514,7 +514,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 	reply := ""
 	connected, runErr := s.gate.Ready(turnCtx, request.PrincipalID)
 	var tools agentruntime.ToolSet
-	var webSearch, searchWithheld bool
+	var webSearch bool
 	var memory string
 	var attachments attachment.Turn
 	var hint string
@@ -525,9 +525,6 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		if runErr == nil {
 			hinted = s.startToolHint(turnCtx, request, tools)
 			webSearch, runErr = s.webSearchEnabled(turnCtx, request.PrincipalID)
-		}
-		if runErr == nil && webSearch && s.searchWithheld(turnCtx, request.PrincipalID) {
-			webSearch, searchWithheld = false, true
 		}
 		if runErr == nil {
 			memory, runErr = s.memoryText(turnCtx, request.PrincipalID)
@@ -561,19 +558,17 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 			s.config.Recent.RecordMessage(request.PrincipalID, request.Message)
 		}
 		notice := s.takeNotice(turnCtx, request)
-		if notice.outside && webSearch {
-			webSearch, searchWithheld = false, true
-		}
 		sink := s.newCountingSink(request.PrincipalID, outbox.ChatTurn(request.ID), run)
 		runStarted = time.Now()
 		result, err := s.runtime.Run(turnCtx, agentruntime.RunRequest{
 			PrincipalID: request.PrincipalID,
 			SessionID:   request.RuntimeSessionID,
-			Message:     s.turnMessage(request, notice.text, attachments.Summary, hint, s.locationLine(turnCtx, request.PrincipalID), searchWithheld),
+			Message:     s.turnMessage(request, notice.text, attachments.Summary, hint, s.locationLine(turnCtx, request.PrincipalID)),
 			Images:      attachments.Images,
 			Tools:       tools,
 			Memory:      memory,
 			WebSearch:   webSearch,
+			SearchCheck: s.searchCheck(request.PrincipalID, webSearch, true),
 		}, sink)
 		modelTime = time.Since(runStarted)
 		runErr = err
@@ -657,11 +652,16 @@ func (s *Service) webSearchEnabled(ctx context.Context, principalID string) (boo
 	return s.config.WebSearch.WebSearchEnabled(ctx, principalID)
 }
 
-// searchWithheld reports whether a chat turn's conversation has read text from outside the
-// household. Such a turn runs without web search, because the provider's search can open an
-// address the query names and so carry data out, and a search cannot be stopped once it starts.
-func (s *Service) searchWithheld(ctx context.Context, principalID string) bool {
-	return s.config.Exposure != nil && s.config.Exposure.External(ctx, principalID)
+// searchCheck binds the search check to the principal for one run, or returns nil when the run
+// has no web search. Chat turns can ask the user to confirm a search; scheduled runs and tasks
+// cannot.
+func (s *Service) searchCheck(principalID string, webSearch, interactive bool) agentruntime.SearchCheck {
+	if !webSearch || s.config.SearchChecks == nil {
+		return nil
+	}
+	return func(ctx context.Context, query string) agentruntime.SearchDecision {
+		return s.config.SearchChecks.Check(ctx, principalID, query, interactive)
+	}
 }
 
 // memoryText reads the principal's memory at turn start; an error fails the turn instead of
@@ -744,11 +744,8 @@ func (s *Service) takeNotice(ctx context.Context, request Request) turnNotice {
 	return turnNotice{text: text, outside: outside}
 }
 
-func (s *Service) turnMessage(request Request, notice, attachments, hint, place string, searchWithheld bool) string {
+func (s *Service) turnMessage(request Request, notice, attachments, hint, place string) string {
 	message := request.Message
-	if searchWithheld {
-		message = "[system] " + SearchWithheldNotice + "\n\n" + message
-	}
 	if hint != "" {
 		message = "[system] Likely relevant tool: " + hint + ". Ignore this if it does not fit the request.\n\n" + message
 	}
@@ -1011,14 +1008,10 @@ func (s *Service) logWorkerError(ctx context.Context, principalID, errorKind str
 // broker audit line; the turn's sink records each by name instead.
 const webSearchTool = "web_search"
 
-// SearchWithheldNotice tells the model why a turn has no web search, so it can tell the user how
-// to get it back.
-const SearchWithheldNotice = "Web search is off in this conversation because it has read content from outside the household, such as a web page or an email; this is deliberate and cannot be changed within the conversation. " +
-	"If the user needs a search, say so once, plainly, and offer /new, which starts a fresh conversation with search back on; do not try other tools in its place. fetch_page still opens links the user sends."
-
 // countingSink remembers which tools a turn called, by name only, and logs each web search call.
-// A web search also marks the turn as having read third-party content, which the broker cannot do
-// for a tool that runs inside the runtime.
+// A web search result also marks the turn as having read third-party content, which the broker
+// cannot do for a tool that runs inside the runtime. The mark waits for the result, so the search
+// check of a call still in flight never sees that call's own exposure.
 type countingSink struct {
 	principalID string
 	turn        string
@@ -1037,8 +1030,13 @@ func (s *Service) newCountingSink(principalID, turn string, run *tools.Run) *cou
 }
 
 func (c *countingSink) Emit(ctx context.Context, event agentruntime.Event) error {
-	if event.Type == "tool_result" && event.Tool == webSearchTool && c.run != nil {
-		c.run.MarkExternal(event.Text)
+	if event.Type == "tool_result" && event.Tool == webSearchTool {
+		if c.run != nil {
+			c.run.MarkExternal(event.Text)
+		}
+		if c.exposure != nil {
+			c.exposure.MarkTurnExposed(ctx, c.principalID, c.turn, true)
+		}
 		return nil
 	}
 	if event.Type != "tool_call" {
@@ -1050,12 +1048,6 @@ func (c *countingSink) Emit(ctx context.Context, event agentruntime.Event) error
 	c.mu.Unlock()
 	if event.Text == webSearchTool {
 		c.telemetry.ContextLogger(ctx, c.logger).InfoContext(ctx, "conversation.web_search.called", "principal_id", c.principalID, "tool", webSearchTool)
-		if c.run != nil {
-			c.run.MarkExternal("")
-		}
-		if c.exposure != nil {
-			c.exposure.MarkTurnExposed(ctx, c.principalID, c.turn, true)
-		}
 	}
 	return nil
 }

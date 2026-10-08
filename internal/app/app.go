@@ -44,6 +44,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/routes"
 	piruntime "github.com/vladar107/home-ai-assistant/internal/runtime/pi"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
+	"github.com/vladar107/home-ai-assistant/internal/searchcheck"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/task"
 	"github.com/vladar107/home-ai-assistant/internal/telegram"
@@ -374,6 +375,14 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			return fmt.Errorf("initialize exposure: %w", err)
 		}
 		broker.SetTurnExposure(exposures)
+		searchChecks, err := searchcheck.NewService(exposures, approvals, a.logger, nil)
+		if err != nil {
+			return fmt.Errorf("initialize search checks: %w", err)
+		}
+		searchChecks.SetTelemetry(a.telemetry)
+		if err := approvals.RegisterExecutor(searchChecks); err != nil {
+			return err
+		}
 		// Interface values stay nil without a key, so no user message is kept in memory for nothing.
 		var recent conversation.MessageRecorder
 		var toolHint conversation.ToolHinter
@@ -394,6 +403,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			broker.SetScreener(screener)
 			memoryService.SetScreener(screener)
 			approvals.SetIntentChecker(judgment.NewIntentChecker(judge, typeSafe, registry, registry))
+			searchChecks.SetJudge(judgment.NewSearchJudge(judge, typeSafe, registry, registry))
 			toolHint = judgment.NewToolHinter(judge, typeSafe)
 			safetyChecks = typeSafe
 			a.typeSafe = typeSafe
@@ -534,6 +544,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 				Locations:    turnLocations,
 				Memory:       memoryService,
 				Exposure:     exposures,
+				SearchChecks: searchChecks,
 				History:      conversationHistory,
 				DisplayNames: displayNames,
 			},

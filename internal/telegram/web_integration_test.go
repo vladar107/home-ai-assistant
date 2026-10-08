@@ -190,16 +190,12 @@ func TestWebAccessSwitchControlsSearchAndWebTools(t *testing.T) {
 	if edit := h.press(13, 101, settingsMessageID(12), "web:on"); !strings.Contains(edit.text, WebOnLine) || !slices.Contains(buttonData(edit.keyboard), "web:off") {
 		t.Fatalf("settings after turning web access back on = %+v", edit)
 	}
-	// The search earlier in this conversation read outside content, so search stays off until /new.
+	// The search earlier in this conversation read outside content, and search stays available:
+	// each query is checked instead.
 	h.push(textUpdate(14, 101, "hello once more"))
-	withheld := h.nextMessage()
-	if withheld.chatID != 101 || !strings.Contains(withheld.text, "Web search is off in this conversation") || !strings.HasSuffix(withheld.text, "hello once more") {
-		t.Fatalf("turn after a search = %+v", withheld)
-	}
+	h.wantReply(101, 14, "reply: hello once more")
 	h.waitState(14, "delivered")
-	if named := extensions(latestReport(t, profiles, "alice")); len(named) != 1 || filepath.Base(named[0]) != "bridge.ts" {
-		t.Fatalf("extensions after a search = %v, want the bridge alone", named)
-	}
+	assertWebTurn(t, latestReport(t, profiles, "alice"), extension)
 	h.push(textUpdate(15, 101, "/new"))
 	h.wantReply(101, 15, NewSessionReply)
 	h.push(textUpdate(16, 101, "hello after new"))

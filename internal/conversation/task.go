@@ -91,6 +91,7 @@ func (s *Service) RunTask(ctx context.Context, run TaskRun) (TaskReply, error) {
 		Tools:       toolSet,
 		Memory:      memory,
 		WebSearch:   webSearch,
+		SearchCheck: s.searchCheck(run.PrincipalID, webSearch, false),
 	}, sink)
 	switch {
 	case ctx.Err() != nil:

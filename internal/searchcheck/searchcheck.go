@@ -139,7 +139,7 @@ func (s *Service) decide(ctx context.Context, principalID, query string, interac
 		_, err = s.proposer.Propose(ctx, principalID, approval.Proposal{
 			Tool:      Tool,
 			Arguments: arguments,
-			Summary:   "Search the web for: " + query + "\nNeeds your confirmation because " + phrase + ".",
+			Summary:   "Search the web for: " + codeSpan(query) + "\nNeeds your confirmation because " + phrase + ".",
 			Intent:    approval.Intent{Verb: "search", TargetKind: "web query", TargetName: query},
 		})
 	}
@@ -189,6 +189,26 @@ func allowed(reason string) agentruntime.SearchDecision {
 
 type searchArguments struct {
 	Query string `json:"query"`
+}
+
+// codeSpan shows the query as code, so the chat prints it verbatim instead of turning a link or
+// emphasis in it into formatting that hides the address. A fence longer than any backtick run in
+// the query keeps the query from ending the span early.
+func codeSpan(query string) string {
+	longest, run := 0, 0
+	for _, r := range query {
+		if r == '`' {
+			run++
+			longest = max(longest, run)
+		} else {
+			run = 0
+		}
+	}
+	if longest == 0 {
+		return "`" + query + "`"
+	}
+	fence := strings.Repeat("`", longest+1)
+	return fence + " " + query + " " + fence
 }
 
 // normalize trims the query and collapses its whitespace, which is how a confirmed query is

@@ -335,9 +335,10 @@ type Config struct {
 	// turn made; nil leaves memory out.
 	Memory Memory
 	// Exposure records a turn that searched the web or carried an outside notice as having read
-	// text from outside the household, and turns web search off in a conversation that has; nil
-	// records nothing and leaves search as the switch says.
+	// text from outside the household; nil records nothing.
 	Exposure Exposure
+	// SearchChecks decides each query of a turn's web search; nil refuses every search.
+	SearchChecks SearchChecks
 	// Location is the household's time zone; each chat turn then tells the model the current
 	// local time. Nil leaves the time out.
 	Location *time.Location
@@ -348,6 +349,12 @@ type Config struct {
 	// DisplayNames tells each turn which household member its user is; a principal without a
 	// name goes unnamed.
 	DisplayNames map[string]string
+}
+
+// SearchChecks decides one web search query of a run. A run with nobody to confirm a search, such
+// as a scheduled job or a background task, is not interactive.
+type SearchChecks interface {
+	Check(ctx context.Context, principalID, query string, interactive bool) agentruntime.SearchDecision
 }
 
 // Exposure records which turns read third-party content and answers whether a call's conversation

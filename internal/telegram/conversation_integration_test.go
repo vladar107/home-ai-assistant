@@ -46,6 +46,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/routes"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
+	"github.com/vladar107/home-ai-assistant/internal/searchcheck"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/task"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/calendarsim"
@@ -196,6 +197,9 @@ type harnessOptions struct {
 	// routes adds saved routes with their tools and /jobs entries, checked through the ns and bus
 	// connectors where those are set.
 	routes bool
+	// search adds the web search check, as the application does, so a query after outside content
+	// is allowed, held for confirmation, or denied.
+	search bool
 }
 
 type fixedDescriber string
@@ -233,6 +237,7 @@ type conversationHarness struct {
 	bus            *bus.Service
 	locations      *location.Service
 	memory         *memory.Service
+	searches       *searchcheck.Service
 	approvals      *approval.Service
 	scheduler      *schedule.Service
 	tasks          *task.Service
@@ -623,6 +628,17 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		}
 		memoryTurns = h.memory
 	}
+	var searchChecks conversation.SearchChecks
+	if options.search {
+		h.searches, err = searchcheck.NewService(exposures, h.approvals, logger, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := h.approvals.RegisterExecutor(h.searches); err != nil {
+			t.Fatal(err)
+		}
+		searchChecks = h.searches
+	}
 	var conversationHistory conversation.History
 	if options.history != nil {
 		reader, err := history.NewService(h.store, options.history, options.location, integrationTelemetry{turns: h.turns})
@@ -635,7 +651,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		conversationHistory = reader
 	}
 	h.conversation, err = conversation.NewService(
-		conversation.Config{Memory: memoryTurns, Exposure: exposures, Locations: locationTurns, TurnTimeout: turnTimeout, FollowUp: h.approvals, Notice: notices, Attachments: h.attachments, WebSearch: webSearch, Cards: cards, Photos: photos, Location: options.location, Now: now, History: conversationHistory},
+		conversation.Config{Memory: memoryTurns, Exposure: exposures, SearchChecks: searchChecks, Locations: locationTurns, TurnTimeout: turnTimeout, FollowUp: h.approvals, Notice: notices, Attachments: h.attachments, WebSearch: webSearch, Cards: cards, Photos: photos, Location: options.location, Now: now, History: conversationHistory},
 		h.store, runtime, h.client, broker, h.connections, logger, integrationTelemetry{turns: h.turns},
 	)
 	if err != nil {

@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/notionsim"
 )
@@ -53,7 +52,7 @@ func TestAppHelpShowsTheSettingsPagesTheUserSees(t *testing.T) {
 	if jobs := help("jobs"); jobs.IsError || !strings.Contains(jobs.Text, NoJobsReply) {
 		t.Fatalf("jobs help = %+v", jobs)
 	}
-	if search := help("web_search"); search.IsError || !strings.Contains(search.Text, conversation.SearchWithheldNotice) {
+	if search := help("web_search"); search.IsError || !strings.Contains(search.Text, "each query is checked") || !strings.Contains(search.Text, "Confirm and Reject") {
 		t.Fatalf("web search help = %+v", search)
 	}
 	if missing := help("buses"); !missing.IsError || !strings.Contains(missing.Text, "topic must be one of") {
