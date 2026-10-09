@@ -457,7 +457,7 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 	if !job.Enabled {
 		summary += "\nIt stays paused until you resume it in /jobs."
 	}
-	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: toolUpdate, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "change", TargetKind: "scheduled job", TargetName: job.Name}}); err != nil {
+	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: toolUpdate, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "change", TargetKind: "scheduled job", TargetName: job.Name, NewName: changed.Name}}); err != nil {
 		if approval.Refused(err) {
 			return tools.Result{Text: err.Error(), IsError: true}, nil
 		}

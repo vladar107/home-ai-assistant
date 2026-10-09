@@ -82,11 +82,13 @@ type Proposal struct {
 
 // Intent is a short description of a proposed action for the intent check, which sends it to an
 // external service after redaction. It must never carry bodies, IDs, URLs or paths: only a verb,
-// the kind of target, and its human-readable name.
+// the kind of target, and its human-readable name. A change that renames its target also carries
+// the new name, so a request that names only the new values still reads as requested.
 type Intent struct {
 	Verb       string
 	TargetKind string
 	TargetName string
+	NewName    string
 }
 
 // IntentChecker judges whether a proposed action looks like something the user asked for.

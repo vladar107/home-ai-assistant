@@ -358,7 +358,7 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 	if !watch.Enabled {
 		summary += "\nIt stays paused until you resume it in /jobs."
 	}
-	return s.propose(ctx, principalID, call, approval.Proposal{Tool: toolUpdate, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "change", TargetKind: watch.Kind + " watch", TargetName: watch.Label()}})
+	return s.propose(ctx, principalID, call, approval.Proposal{Tool: toolUpdate, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "change", TargetKind: watch.Kind + " watch", TargetName: watch.Label(), NewName: spec.Label()}})
 }
 
 func (s *Service) proposeRemoval(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {

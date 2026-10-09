@@ -437,7 +437,7 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 		return tools.Result{}, err
 	}
 	summary := "Change the route " + route.Name + ":\n" + strings.Join(changes, "\n")
-	return s.propose(ctx, principalID, call, approval.Proposal{Tool: toolUpdate, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "change", TargetKind: "route", TargetName: route.Name}})
+	return s.propose(ctx, principalID, call, approval.Proposal{Tool: toolUpdate, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "change", TargetKind: "route", TargetName: route.Name, NewName: next.Name}})
 }
 
 func (s *Service) proposeRemoval(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {

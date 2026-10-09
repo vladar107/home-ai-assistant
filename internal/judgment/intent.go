@@ -62,7 +62,11 @@ func (c *IntentChecker) Mismatch(ctx context.Context, principalID, tool string, 
 	for index, message := range messages {
 		redacted[index] = Redact(message).String()
 	}
-	action := fmt.Sprintf("%s %s %q using tool %s", intent.Verb, intent.TargetKind, intent.TargetName, tool)
+	action := fmt.Sprintf("%s %s %q", intent.Verb, intent.TargetKind, intent.TargetName)
+	if intent.NewName != "" && intent.NewName != intent.TargetName {
+		action += fmt.Sprintf(" to %q", intent.NewName)
+	}
+	action += " using tool " + tool
 	answers, err := c.client.Ask(ctx, "intent",
 		map[string]Redacted{
 			"recent_messages": Redact(strings.Join(redacted, "\n---\n")),
