@@ -154,6 +154,10 @@ func (f *fakeTelemetry) RecordWatchUpstreamError(_ context.Context, kind, servic
 	f.record("upstream " + kind + " " + service)
 }
 
+func (f *fakeTelemetry) RecordWatchRewrite(_ context.Context, principal, outcome string) {
+	f.record("rewrite " + principal + " " + outcome)
+}
+
 func (f *fakeTelemetry) count(event string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -570,5 +574,94 @@ func TestWatchSkipsUnservedKindsExpiresOneOffsAndSharesQueries(t *testing.T) {
 	watches, err := e.service.Watches(e.ctx, "alice")
 	if err != nil || len(watches) != 2 || watches[0].ID != watchID || watches[1].ID != "0000000000000004" {
 		t.Fatalf("alice's watches after the one-off ended = %+v %v", watches, err)
+	}
+}
+
+// fakeRewriter stands in for the model call that rewrites a message into the watch's language.
+type fakeRewriter struct {
+	mu    sync.Mutex
+	calls []string
+	reply func(text string) (string, error)
+}
+
+func (f *fakeRewriter) RewriteAlert(_ context.Context, principalID, language, text string) (string, error) {
+	f.mu.Lock()
+	f.calls = append(f.calls, principalID+" "+language)
+	reply := f.reply
+	f.mu.Unlock()
+	return reply(text)
+}
+
+func (f *fakeRewriter) answer(reply func(text string) (string, error)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reply = reply
+}
+
+// byWatch keys alerts sent in one cycle by their watch, since their order follows the alert ids.
+func byWatch(sent []sentAlert) map[string]string {
+	texts := make(map[string]string, len(sent))
+	for _, alert := range sent {
+		texts[alert.watchID] = alert.text
+	}
+	return texts
+}
+
+// A watch with a language sends the rewrite when it keeps every number, and its English text when
+// the rewrite changes a number or fails; a watch without one never reaches the model.
+func TestWatchSendsMessagesInItsLanguageAndFallsBackToEnglish(t *testing.T) {
+	e := newEngine(t)
+	rewriter := &fakeRewriter{}
+	e.service.SetRewriter(rewriter)
+	russian := departureSpec()
+	russian.Language = "Russian"
+	e.create("alice", watchID, russian)
+	const englishID = "0000000000000002"
+	e.create("alice", englishID, departureSpec())
+
+	rewriter.answer(func(string) (string, error) {
+		return "**⚠️ 07:42 поезд Den Haag Centraal → Zwolle**\n\nОпаздывает на 8 минут.\nОжидается в 07:50.", nil
+	})
+	e.evaluator.set(late, nil)
+	e.at("2026-09-28 06:25")
+	sent := byWatch(e.wantSent(2))
+	if sent[watchID] != "**⚠️ 07:42 поезд Den Haag Centraal → Zwolle**\n\nОпаздывает на 8 минут.\nОжидается в 07:50." {
+		t.Fatalf("russian alert = %q", sent[watchID])
+	}
+	if !strings.Contains(sent[englishID], "It is 8 minutes late.") {
+		t.Fatalf("english alert = %q", sent[englishID])
+	}
+	if notice := e.service.PendingNotice("alice"); !strings.Contains(notice, "Опаздывает на 8 минут.") {
+		t.Fatalf("notice = %q, want the text that was sent", notice)
+	}
+
+	rewriter.answer(func(string) (string, error) {
+		return "**✅ 07:43 поезд Den Haag Centraal → Zwolle**\n\nВсё в порядке.", nil
+	})
+	e.evaluator.set(onTime, nil)
+	e.at("2026-09-28 06:40")
+	sent = byWatch(e.wantSent(2))
+	if !strings.Contains(sent[watchID], "07:42 train Den Haag Centraal → Zwolle") || !strings.Contains(sent[watchID], "Back to normal.") {
+		t.Fatalf("a rewrite that changed the time was sent: %q", sent[watchID])
+	}
+
+	rewriter.answer(func(string) (string, error) { return "", errors.New("model unavailable") })
+	e.evaluator.set(cancelled, nil)
+	e.at("2026-09-28 06:45")
+	sent = byWatch(e.wantSent(2))
+	if !strings.Contains(sent[watchID], "It is cancelled.") {
+		t.Fatalf("a failed rewrite did not fall back to English: %q", sent[watchID])
+	}
+
+	rewriter.mu.Lock()
+	calls := strings.Join(rewriter.calls, ", ")
+	rewriter.mu.Unlock()
+	if calls != "alice Russian, alice Russian, alice Russian" {
+		t.Fatalf("rewrites = %q, want three for the Russian watch only", calls)
+	}
+	for _, outcome := range []string{"rewritten", "rejected", "failed"} {
+		if e.telemetry.count("rewrite alice "+outcome) != 1 {
+			t.Fatalf("rewrite metrics = %v", e.telemetry.events)
+		}
 	}
 }

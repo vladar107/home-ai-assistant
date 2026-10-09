@@ -28,6 +28,7 @@ func proposeGuidance(zone string, kinds []string) string {
 		"A departure watch is one train (mode train, from, to, optional via) or bus (mode bus, stop, line) with its planned departure time; checking starts minutes_before the departure, 90 by default, and ends at it. Its triggers are cancelled, partly_cancelled, delay (delay_minutes or more, 5 by default), and platform. " +
 		"A route watch names a saved route and the time the user leaves; its triggers are leg and arrival. A disruptions watch takes one or more stations and a fixed window, window_from to window_until; its triggers are new and changed. Omitting triggers means all of the kind's triggers. " +
 		"A watch runs on days, such as mon to fri, or once on a date (YYYY-MM-DD) and then ends; times are local HH:MM in " + zone + " unless the user names another time zone. " +
+		"Set language to the language the user writes to you in, such as Russian, so the watch's messages are written in it; leave it out for English, and pass English to switch a watch back. " +
 		"Never invent a departure time, station, stop, or line: ask the user for one they did not give. Checks run every 5 minutes in the window and every 2 in its last 30, so tell the user it may take that long to notice a change. " +
 		"watch_propose only proposes: after your reply the user sees the watch with Confirm and Reject buttons, so never claim it is set. watch_update proposes changing a watch by its id from watch_list, given only the fields that change; watch_remove proposes deleting one. Each user may have " + fmt.Sprint(MaximumWatchesPerPrincipal) + " watches."
 }
@@ -55,7 +56,8 @@ const specProperties = `"mode":{"type":"string","enum":["train","bus"],"descript
 	`"date":{"type":"string","description":"Instead of days: the one date, YYYY-MM-DD, of a one-off watch."},` +
 	`"triggers":{"type":"array","items":{"type":"string","enum":["cancelled","partly_cancelled","delay","platform","leg","arrival","new","changed"]},"description":"What to alert on; omit for all of the kind's triggers."},` +
 	`"delay_minutes":{"type":"integer","minimum":1,"maximum":120,"description":"The delay that counts, in minutes; 5 by default."},` +
-	`"timezone":{"type":"string","description":"IANA time zone such as Europe/Amsterdam; omit to use the user's own."}`
+	`"timezone":{"type":"string","description":"IANA time zone such as Europe/Amsterdam; omit to use the user's own."},` +
+	`"language":{"type":"string","description":"The language the watch's messages are written in, such as Russian: the one the user writes to you in. Omit for English."}`
 
 var writeDefinitions = []tools.Definition{
 	{
@@ -149,6 +151,7 @@ type specArguments struct {
 	Triggers      []string `json:"triggers"`
 	DelayMinutes  int      `json:"delay_minutes"`
 	Timezone      string   `json:"timezone"`
+	Language      string   `json:"language"`
 }
 
 type proposeArguments struct {
@@ -209,6 +212,7 @@ func (s *Service) specOf(kind string, arguments specArguments) (Spec, error) {
 		Days:         arguments.Days,
 		Date:         strings.TrimSpace(arguments.Date),
 		Zone:         strings.TrimSpace(arguments.Timezone),
+		Language:     arguments.Language,
 	}
 	if spec.Zone == "" {
 		spec.Zone = s.zone
@@ -245,6 +249,7 @@ func argumentsOf(spec Spec) specArguments {
 		Mode: spec.Target.Mode, From: spec.Target.From, To: spec.Target.To, Via: spec.Target.Via,
 		Stop: spec.Target.Stop, Line: spec.Target.Line, Stations: spec.Target.Stations, Route: spec.Target.Route,
 		Days: spec.Days, Date: spec.Date, Triggers: spec.Triggers, DelayMinutes: spec.DelayMinutes, Timezone: spec.Zone,
+		Language: spec.Language,
 	}
 	if spec.Kind == KindDisruptions {
 		arguments.WindowFrom, arguments.WindowUntil = spec.Start, spec.End
@@ -280,6 +285,7 @@ func overlay(current, change specArguments) specArguments {
 	set(&next.WindowFrom, change.WindowFrom)
 	set(&next.WindowUntil, change.WindowUntil)
 	set(&next.Timezone, change.Timezone)
+	set(&next.Language, change.Language)
 	if len(change.Stations) > 0 {
 		next.Stations = change.Stations
 	}
@@ -325,7 +331,7 @@ func (s *Service) proposeWatch(ctx context.Context, principalID string, call too
 		return tools.Result{}, err
 	}
 	summary := "Watch " + spec.Label() + "\n" + spec.Describe() + "\nYou get a message only when something changes, and once more when it is back to normal."
-	return s.propose(ctx, principalID, call, approval.Proposal{Tool: toolPropose, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "watch", TargetKind: spec.Kind + " watch", TargetName: spec.Label()}})
+	return s.propose(ctx, principalID, call, approval.Proposal{Tool: toolPropose, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "watch", TargetKind: spec.Kind + " watch", TargetName: intentName(spec)}})
 }
 
 func (s *Service) proposeUpdate(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
@@ -358,7 +364,7 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 	if !watch.Enabled {
 		summary += "\nIt stays paused until you resume it in /jobs."
 	}
-	return s.propose(ctx, principalID, call, approval.Proposal{Tool: toolUpdate, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "change", TargetKind: watch.Kind + " watch", TargetName: watch.Label(), NewName: spec.Label()}})
+	return s.propose(ctx, principalID, call, approval.Proposal{Tool: toolUpdate, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "change", TargetKind: watch.Kind + " watch", TargetName: intentName(watch.Spec), NewName: intentName(spec)}})
 }
 
 func (s *Service) proposeRemoval(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
@@ -496,6 +502,15 @@ func (s *Service) nextWindow(spec Spec) string {
 		}
 	}
 	return ""
+}
+
+// intentName is the watch as the intent check reads it: its label and, when it has one, its
+// language, so a request to change only the language still reads as requested.
+func intentName(spec Spec) string {
+	if spec.Language == "" {
+		return spec.Label()
+	}
+	return spec.Label() + ", messages in " + spec.Language
 }
 
 func sameSpec(a, b Spec) bool {

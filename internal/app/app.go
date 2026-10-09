@@ -583,6 +583,9 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			tasks.SetRunner(conversationService)
 			a.tasks = tasks
 		}
+		if a.watches != nil {
+			a.watches.SetRewriter(conversationService)
+		}
 		a.attachments = attachments
 		a.connections = connections
 		a.conversation = conversationService

@@ -11,6 +11,7 @@ type watchInstruments struct {
 	checks         metric.Int64Counter
 	alerts         metric.Int64Counter
 	upstreamErrors metric.Int64Counter
+	rewrites       metric.Int64Counter
 }
 
 func (t *Telemetry) createWatchInstruments(meter metric.Meter) error {
@@ -26,6 +27,10 @@ func (t *Telemetry) createWatchInstruments(meter metric.Meter) error {
 	if t.watches.upstreamErrors, err = meter.Int64Counter("home_agent.watch.upstream_errors",
 		metric.WithDescription("Watch checks that failed because an outside service did, by kind and service."), metric.WithUnit("{error}")); err != nil {
 		return fmt.Errorf("create home_agent.watch.upstream_errors counter: %w", err)
+	}
+	if t.watches.rewrites, err = meter.Int64Counter("home_agent.watch.rewrites",
+		metric.WithDescription("Watch messages rewritten into the watch's language, by outcome (rewritten, rejected, failed, or timeout)."), metric.WithUnit("{message}")); err != nil {
+		return fmt.Errorf("create home_agent.watch.rewrites counter: %w", err)
 	}
 	return nil
 }
@@ -58,4 +63,9 @@ func (t *Telemetry) RecordWatchAlert(ctx context.Context, principal, kind, alert
 func (t *Telemetry) RecordWatchUpstreamError(ctx context.Context, kind, service string) {
 	t.watches.upstreamErrors.Add(ctx, 1, metric.WithAttributes(
 		labelAttr("home_agent.kind", kind, "unknown"), labelAttr("home_agent.service", service, "unknown")))
+}
+
+func (t *Telemetry) RecordWatchRewrite(ctx context.Context, principal, outcome string) {
+	t.watches.rewrites.Add(ctx, 1, metric.WithAttributes(principalAttr(principal),
+		labelAttr("home_agent.outcome", outcome, "unknown")))
 }

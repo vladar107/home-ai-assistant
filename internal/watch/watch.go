@@ -55,6 +55,7 @@ const (
 	maximumFixedWindow   = 12 * time.Hour
 	maximumDelayMinutes  = 120
 	maximumNameRunes     = 80
+	maximumLanguageRunes = 40
 	maximumStations      = 10
 	dateLayout           = "2006-01-02"
 	clockLayout          = "15:04"
@@ -109,7 +110,8 @@ type Target struct {
 
 // Spec is a watch as the user confirms it. Start and End bound its daily window as local HH:MM
 // times; for a departure or a route End is the planned departure. A watch runs on Days, or once on
-// Date and then expires.
+// Date and then expires. Language, such as Russian, is what its messages are rewritten into before
+// they are sent; empty means the English text as is.
 type Spec struct {
 	Kind         string   `json:"kind"`
 	Target       Target   `json:"target"`
@@ -120,6 +122,7 @@ type Spec struct {
 	Start        string   `json:"start"`
 	End          string   `json:"end"`
 	Zone         string   `json:"zone"`
+	Language     string   `json:"language,omitempty"`
 }
 
 // Watch is one principal's stored watch. MutedOn is the local date "Mute today" silenced.
@@ -202,7 +205,7 @@ type State struct {
 	CheckedAt      time.Time
 }
 
-// Alert is one message a watch owes its owner. Kind, Label, Enabled, and MutedOn are read from
+// Alert is one message a watch owes its owner. Kind, Enabled, MutedOn, and Language are read from
 // the watch with it.
 type Alert struct {
 	ID          string
@@ -216,6 +219,7 @@ type Alert struct {
 	Kind        string
 	Enabled     bool
 	MutedOn     string
+	Language    string
 }
 
 type Repository interface {
@@ -311,6 +315,9 @@ func (s Spec) Describe() string {
 			s.Start, s.End, s.Zone, int(CheckInterval.Minutes()), int(FinalCheckInterval.Minutes()), int(FinalStretch.Minutes())),
 		"Tells you about: " + s.DescribeTriggers(),
 	}
+	if s.Language != "" {
+		lines = append(lines, "Messages in: "+s.Language)
+	}
 	return strings.Join(lines, "\n")
 }
 
@@ -366,6 +373,9 @@ func normalize(spec Spec, now time.Time) (Spec, error) {
 		return Spec{}, err
 	}
 	spec.Target = target
+	if spec.Language, err = normalizeLanguage(spec.Language); err != nil {
+		return Spec{}, err
+	}
 
 	given := uniqueStrings(spec.Triggers)
 	if len(given) == 0 {
@@ -498,6 +508,21 @@ func cleanName(value, name string, required bool) (string, error) {
 		return "", fmt.Errorf("%s must be a single line of at most %d characters", name, maximumNameRunes)
 	}
 	return value, nil
+}
+
+// normalizeLanguage keeps a language name such as Russian, capitalized; English means none, since
+// the messages are written in it.
+func normalizeLanguage(value string) (string, error) {
+	value = strings.Join(strings.Fields(value), " ")
+	if value == "" || strings.EqualFold(value, "english") || strings.EqualFold(value, "en") {
+		return "", nil
+	}
+	valid := func(r rune) bool { return unicode.IsLetter(r) || r == ' ' || r == '-' }
+	if utf8.RuneCountInString(value) > maximumLanguageRunes || strings.IndexFunc(value, func(r rune) bool { return !valid(r) }) >= 0 {
+		return "", fmt.Errorf("language must be a language's name, such as Russian")
+	}
+	first, size := utf8.DecodeRuneInString(value)
+	return string(unicode.ToUpper(first)) + value[size:], nil
 }
 
 func uniqueStrings(values []string) []string {

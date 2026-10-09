@@ -69,6 +69,7 @@ plan that links back to the earlier record.
 | 0057 | [Saved routes and easier schedule editing](0057-routes-and-schedule-editing.md) | done |
 | 0058 | [Watches: tell me when my train or route goes wrong](0058-watches.md) | done |
 | 0059 | [Check each search instead of locking the conversation](0059-search-after-outside-content.md) | done |
+| 0060 | [Watch alerts in the user's language](0060-watch-alerts-in-the-users-language.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

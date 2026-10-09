@@ -229,7 +229,8 @@ func (s *Store) ReadyWatchAlerts(ctx context.Context) ([]watch.Alert, error) {
 	}
 	rows, err := s.db.QueryContext(
 		ctx,
-		`SELECT a.id, a.watch_id, a.principal_id, a.occurrence, a.sequence, a.type, a.text, a.expires_at, w.kind, w.enabled, COALESCE(w.muted_on, '')
+		`SELECT a.id, a.watch_id, a.principal_id, a.occurrence, a.sequence, a.type, a.text, a.expires_at, w.kind, w.enabled, COALESCE(w.muted_on, ''),
+		        COALESCE(json_extract(w.config, '$.language'), '')
 		 FROM watch_alerts a JOIN watches w ON w.id = a.watch_id
 		 WHERE a.status = 'ready' ORDER BY a.created_at, a.sequence, a.id`,
 	)
@@ -243,7 +244,7 @@ func (s *Store) ReadyWatchAlerts(ctx context.Context) ([]watch.Alert, error) {
 		var expiresAt string
 		if err := rows.Scan(
 			&alert.ID, &alert.WatchID, &alert.PrincipalID, &alert.Occurrence, &alert.Sequence, &alert.Type, &alert.Text,
-			&expiresAt, &alert.Kind, &alert.Enabled, &alert.MutedOn,
+			&expiresAt, &alert.Kind, &alert.Enabled, &alert.MutedOn, &alert.Language,
 		); err != nil {
 			return nil, fmt.Errorf("scan watch alert: %w", err)
 		}

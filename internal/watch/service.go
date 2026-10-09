@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/module"
@@ -24,6 +26,10 @@ const (
 	historyRetention   = 30 * 24 * time.Hour
 	pruneInterval      = time.Hour
 	maximumNoticeRunes = 1000
+
+	rewriteTimeout = 30 * time.Second
+	// maximumMessageRunes is what one Telegram message holds.
+	maximumMessageRunes = 4096
 )
 
 // Check outcomes and alert outcomes recorded in metrics.
@@ -35,6 +41,11 @@ const (
 	alertDelivered     = "delivered"
 	alertDropped       = "dropped"
 	alertUndeliverable = "undeliverable"
+
+	rewriteRewritten = "rewritten"
+	rewriteRejected  = "rejected"
+	rewriteFailed    = "failed"
+	rewriteTimedOut  = "timeout"
 )
 
 // Chats resolves the principal's own private chat, the only place a watch sends to.
@@ -52,11 +63,18 @@ type Sender interface {
 	SendAlert(ctx context.Context, chatID int64, watchID, text string) error
 }
 
+// Rewriter rewrites a message the code wrote into the owner's language, with the owner's own model
+// subscription.
+type Rewriter interface {
+	RewriteAlert(ctx context.Context, principalID, language, text string) (string, error)
+}
+
 // Telemetry records watch metrics.
 type Telemetry interface {
 	RecordWatchCheck(ctx context.Context, principal, kind, outcome string)
 	RecordWatchAlert(ctx context.Context, principal, kind, alertType, outcome string)
 	RecordWatchUpstreamError(ctx context.Context, kind, service string)
+	RecordWatchRewrite(ctx context.Context, principal, outcome string)
 }
 
 type Config struct {
@@ -73,6 +91,7 @@ type Service struct {
 	chats      Chats
 	sender     Sender
 	proposer   Proposer
+	rewriter   Rewriter
 	telemetry  Telemetry
 	logger     *slog.Logger
 	zone       string
@@ -152,6 +171,12 @@ func (s *Service) Register(kind string, evaluator Evaluator) error {
 	}
 	s.evaluators[kind] = evaluator
 	return nil
+}
+
+// SetRewriter lets watches with a language send their messages in it, at wiring time before the
+// service starts; without one they go out in English.
+func (s *Service) SetRewriter(rewriter Rewriter) {
+	s.rewriter = rewriter
 }
 
 // SetTelemetry sets where watch metrics are recorded, at wiring time before the service starts.
@@ -445,7 +470,11 @@ func (s *Service) deliver(ctx context.Context) {
 			s.finish(ctx, alert, statusDropped, "no_chat", alertDropped)
 			continue
 		}
-		if err := s.sender.SendAlert(ctx, chatID, alert.WatchID, alert.Text); err != nil {
+		text := s.localize(ctx, alert)
+		if ctx.Err() != nil {
+			return
+		}
+		if err := s.sender.SendAlert(ctx, chatID, alert.WatchID, text); err != nil {
 			if isPermanent(err) {
 				s.finish(ctx, alert, statusFailed, "undeliverable", alertUndeliverable)
 			} else if ctx.Err() == nil {
@@ -454,9 +483,69 @@ func (s *Service) deliver(ctx context.Context) {
 			continue
 		}
 		if s.finish(ctx, alert, statusDelivered, "", alertDelivered) {
-			s.remember(alert)
+			s.remember(alert.PrincipalID, alert.WatchID, text)
 		}
 	}
+}
+
+// localize returns the alert in its watch's language, or its English text when it has none or the
+// rewrite fails, is late, or loses one of the text's numbers, so a message is never lost or held
+// back by its translation.
+func (s *Service) localize(ctx context.Context, alert Alert) string {
+	if alert.Language == "" || s.rewriter == nil {
+		return alert.Text
+	}
+	started := s.now()
+	rewriteCtx, cancel := context.WithTimeout(ctx, rewriteTimeout)
+	rewritten, err := s.rewriter.RewriteAlert(rewriteCtx, alert.PrincipalID, alert.Language, alert.Text)
+	cancel()
+	outcome := rewriteRewritten
+	switch {
+	case ctx.Err() != nil:
+		return alert.Text
+	case errors.Is(rewriteCtx.Err(), context.DeadlineExceeded):
+		outcome = rewriteTimedOut
+	case err != nil:
+		outcome = rewriteFailed
+	case !faithful(alert.Text, rewritten):
+		outcome = rewriteRejected
+	}
+	if s.telemetry != nil {
+		s.telemetry.RecordWatchRewrite(ctx, alert.PrincipalID, outcome)
+	}
+	attributes := []any{"principal_id", alert.PrincipalID, "watch_id", alert.WatchID, "outcome", outcome,
+		"duration_ms", s.now().Sub(started).Milliseconds()}
+	if outcome != rewriteRewritten {
+		if err != nil {
+			attributes = append(attributes, "error", err)
+		}
+		s.logger.WarnContext(ctx, "watch.alert.rewrite", attributes...)
+		return alert.Text
+	}
+	s.logger.InfoContext(ctx, "watch.alert.rewrite", attributes...)
+	return strings.TrimSpace(rewritten)
+}
+
+var numberPattern = regexp.MustCompile(`\d+`)
+
+// faithful reports whether a rewrite can stand in for the original: it fits one message and keeps
+// every number, which carry the times, delays, lines, and platforms.
+func faithful(original, rewritten string) bool {
+	rewritten = strings.TrimSpace(rewritten)
+	if rewritten == "" || utf8.RuneCountInString(rewritten) > maximumMessageRunes {
+		return false
+	}
+	kept := make(map[string]int)
+	for _, number := range numberPattern.FindAllString(rewritten, -1) {
+		kept[number]++
+	}
+	for _, number := range numberPattern.FindAllString(original, -1) {
+		if kept[number] == 0 {
+			return false
+		}
+		kept[number]--
+	}
+	return true
 }
 
 func (s *Service) finish(ctx context.Context, alert Alert, status, reason, outcome string) bool {
@@ -486,21 +575,21 @@ func (s *Service) logAlertError(ctx context.Context, alert Alert, stage string, 
 	s.logger.WarnContext(ctx, "watch.alert.retry", "principal_id", alert.PrincipalID, "watch_id", alert.WatchID, "stage", stage, "error", err)
 }
 
-// remember keeps the delivered alert for the owner's next conversation turn, so a reply to it has
+// remember keeps the delivered message for the owner's next conversation turn, so a reply to it has
 // something to refer to.
-func (s *Service) remember(alert Alert) {
-	text := []rune(strings.TrimSpace(alert.Text))
+func (s *Service) remember(principalID, watchID, sent string) {
+	text := []rune(strings.TrimSpace(sent))
 	if len(text) > maximumNoticeRunes {
 		text = append(text[:maximumNoticeRunes], '…')
 	}
-	notice := fmt.Sprintf("One of the user's watches (id %s) just sent them this message:\n%s", alert.WatchID, string(text))
+	notice := fmt.Sprintf("One of the user's watches (id %s) just sent them this message:\n%s", watchID, string(text))
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	notices := append(s.notices[alert.PrincipalID], notice)
+	notices := append(s.notices[principalID], notice)
 	if len(notices) > 2 {
 		notices = notices[len(notices)-2:]
 	}
-	s.notices[alert.PrincipalID] = notices
+	s.notices[principalID] = notices
 }
 
 // PendingNotice returns and forgets the alerts delivered since the principal's last turn.

@@ -270,6 +270,14 @@ messages. State and alert are written in one transaction. Alerts go from `ready`
 dropped once their window ends or the watch is paused or muted. Identical upstream
 queries within one cycle share one answer.
 
+A watch may carry a language, which the model proposing it fills with the language
+of the conversation. Its messages are still written by code in English; at delivery
+one model call on the owner's own subscription, with no tools, memory, or web
+search, a fresh session, and no turn slot, rewrites the message into that language.
+The rewrite is sent only when it fits one message and keeps every number of the
+English text; otherwise, or when the call fails or takes over 30 seconds, the
+English text is sent. The next conversation turn hears the text that was sent.
+
 Departure and disruption watches are checked; a kind is offered only when its
 connector is configured, and every check runs under the owner's own trains or
 buses switch, so a user with that switch off can neither propose nor run one.

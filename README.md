@@ -59,7 +59,8 @@ borrowed between users.
   a departure, saved route, or set of stations is checked in code during a daily
   window, and the user hears only when something changes, with Mute today and
   Pause buttons; `/jobs` lists them. Train and bus departures, saved routes, and NS
-  disruptions at stations are checked.
+  disruptions at stations are checked. A watch set up in another language sends its
+  messages in that language.
 - **Routes.** Named journeys such as "work", saved in conversation with their
   weekdays, arrival target, and legs (walking or cycling minutes, fixed trains
   and buses), changed one leg at a time, and checked in one call: each leg's
