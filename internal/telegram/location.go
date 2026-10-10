@@ -26,7 +26,7 @@ const (
 	LocationNotSharedLine = "Share a location or a live location in this chat to ask about places, buses, and weather near you."
 	LocationForgottenNote = "Location forgotten."
 	// LocationPrivacyLine is added to /privacy while location sharing is enabled.
-	LocationPrivacyLine = "A location you share is kept only until it expires, as the latest one alone; while it is fresh, its coordinates and nearest address go to the configured model provider with your messages, and are sent to Transitous for the address and to OpenStreetMap's Overpass service when you ask for places nearby."
+	LocationPrivacyLine = "Location: only the latest is kept, until it expires; it goes to your model, Transitous, and OpenStreetMap."
 )
 
 // LocationController is implemented by the location service; nil turns shared locations away.

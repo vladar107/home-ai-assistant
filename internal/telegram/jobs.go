@@ -16,7 +16,7 @@ const (
 	JobsTitle           = "Scheduled jobs"
 	NoJobsReply         = "You have no reminders or scheduled jobs. Ask me for one in conversation, for example: remind me at 5 to call mom, or every Monday at 9, tell me which of my Notion tasks are overdue."
 	JobGoneReply        = "That job no longer exists."
-	SchedulePrivacyLine = "A reminder's text and a scheduled job's instructions are kept until you delete them in /jobs, or for 30 days after a one-time job has run, and each run's report is removed from the home system once it reaches you."
+	SchedulePrivacyLine = "Reminders and jobs are kept until you delete them in /jobs; one-time jobs, 30 days after they run."
 
 	jobsPrefix      = "jobs"
 	jobPauseAction  = "pause"

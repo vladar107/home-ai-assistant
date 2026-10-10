@@ -159,7 +159,7 @@ func TestNotionOperatorTokenIsAdoptedAndDisconnected(t *testing.T) {
 	}
 	h.wantMessage(101, NotionTokenGuardReply)
 	h.push(textUpdate(7, 101, "/privacy"))
-	h.wantReply(101, 7, ConversationPrivacyReply+" "+AttachmentPrivacyLine+" "+NotionPrivacyLine)
+	h.wantReply(101, 7, ConversationPrivacyReply+privacyItem+AttachmentPrivacyLine+privacyItem+NotionPrivacyLine)
 	select {
 	case call := <-runtime.calls:
 		t.Fatalf("a token-looking message reached the model: %+v", call.request)

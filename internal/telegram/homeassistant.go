@@ -16,7 +16,7 @@ const (
 	HomeAssistantOnLine        = "Home (Home Assistant): on (the default). I can read and control the devices the household exposed to Assist, and propose confirmed actions for devices labelled for confirmation."
 	HomeAssistantUncheckedLine = "Home actions are paused: I could not reach Home Assistant to check which devices are exposed."
 	HomeAssistantConflictLine  = "Home actions are paused while these devices that need your confirmation are exposed to Assist; unexpose them in Home Assistant: "
-	HomeAssistantPrivacyLine   = "Home is on: the names, areas, and states of the devices the household exposed in Home Assistant reach your model subscription when you ask about the home. It is on by default; you can turn it off in /settings."
+	HomeAssistantPrivacyLine   = "Home: device names, areas, and states go to your model when you ask about the home."
 	HomeAssistantOffLine       = "Home (Home Assistant): off. Turn it back on to let me read and control the devices the household exposed to Assist, and propose confirmed actions for devices labelled for confirmation."
 )
 

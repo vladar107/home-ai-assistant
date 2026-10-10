@@ -13,22 +13,25 @@ const (
 	StatusReply              = "Home Agent is online. Telegram access is active. This command does not use a model."
 	ConversationStatusReply  = StatusReply + " Natural-language conversation is enabled."
 	PrivacyReply             = "Privacy mode is strict-local. Local file and photo content stays on the home system unless you explicitly approve a scoped disclosure. This command does not use a model."
-	ConversationPrivacyReply = "Privacy mode is strict-local for integrations. Conversation text is sent to the configured model and Pi stores its history locally in your isolated session. Use /new to start a fresh session. Earlier conversations stay on the home system until they are deleted, and only your own assistant can resume or search them: through /sessions, a reply to one of its earlier answers, or when you ask about something discussed before. This command does not use a model."
+	ConversationPrivacyReply = "Your messages go to your own model subscription. Conversation history stays on the home system, readable only by your assistant; /new starts fresh. Integrations can be turned off in /settings."
 	CancelledReply           = "Stopped the current response."
 	NothingToCancelReply     = "There is no response to cancel."
 	NewSessionReply          = "Started a fresh conversation."
 	NoSessionReply           = "There is no conversation to reset yet."
 	HelpReply                = "Available commands: /status, /privacy, /cancel, /new, /sessions, /settings. You can otherwise talk to me normally, and reply to one of my earlier answers to continue that conversation."
 
-	AttachmentPrivacyLine = "Photos and files you send stay on the home system for the current conversation and are removed when you start a new one with /new or switch to another."
+	// privacyItem starts each line /privacy adds below its opening paragraph.
+	privacyItem = "\n• "
+
+	AttachmentPrivacyLine = "Photos and files you send are kept until /new."
 	// Asking for a file uploads the whole file to Telegram, which reading one as text does not.
-	SentFilePrivacyLine = "A NAS file you ask for is uploaded to Telegram to reach you; nothing is sent to this chat unless you ask for it."
+	SentFilePrivacyLine = "A NAS file reaches Telegram only when you ask for it."
 	// Only the search stays with the provider the conversation already uses, so each other place a
 	// web request goes is named.
-	WebPrivacyLine         = "Web access is on: web searches go to the configured model provider under your own subscription, pages you ask about are fetched from the home connection, and place names are sent to Open-Meteo for weather. It is on by default; you can turn it off in /settings."
-	NSPrivacyLine          = "Trains are on: the stations, routes, and times you ask about are sent to NS (Nederlandse Spoorwegen) to look up live train information. It is on by default; you can turn it off in /settings."
-	BusPrivacyLine         = "Buses are on: the stops you ask about are sent to OVapi, over plain HTTP, to look up live departures and disruptions. It is on by default; you can turn it off in /settings."
-	BusPlanningPrivacyLine = "Places and times for planned trips are sent to Transitous, a volunteer-run journey planner (transitous.org/sources), using open transit data and © OpenStreetMap contributors."
+	WebPrivacyLine         = "Web: searches go to your model provider, pages are fetched from home, and places go to Open-Meteo for weather."
+	NSPrivacyLine          = "Trains: stations and times go to NS."
+	BusPrivacyLine         = "Buses: stops go to OVapi over plain HTTP."
+	BusPlanningPrivacyLine = "Planned trips go to Transitous."
 
 	UnsupportedAudioReply      = "I cannot listen to voice messages or audio yet. Send text, a photo, or a file and I will work with that."
 	UnsupportedVideoReply      = "I cannot watch video yet. Send text, a photo, or a file and I will work with that."

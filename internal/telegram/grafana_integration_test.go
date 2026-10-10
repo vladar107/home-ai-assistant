@@ -60,7 +60,7 @@ func TestMonitoringSwitchControlsToolsAndPrivacyForTheAllowedUser(t *testing.T) 
 
 	wantMonitoring(offered(1), true)
 	h.push(textUpdate(2, 101, "/privacy"))
-	h.wantReply(101, 2, ConversationPrivacyReply+" "+AttachmentPrivacyLine+" "+GrafanaPrivacyLine)
+	h.wantReply(101, 2, ConversationPrivacyReply+privacyItem+AttachmentPrivacyLine+privacyItem+GrafanaPrivacyLine)
 
 	overview := h.requestSettings(3, 101)
 	if !strings.Contains(overview.text, "Monitoring: on") || !slices.Contains(buttonData(overview.keyboard), "nav:monitoring") {
@@ -77,7 +77,7 @@ func TestMonitoringSwitchControlsToolsAndPrivacyForTheAllowedUser(t *testing.T) 
 	}
 	wantMonitoring(offered(6), false)
 	h.push(textUpdate(7, 101, "/privacy"))
-	h.wantReply(101, 7, ConversationPrivacyReply+" "+AttachmentPrivacyLine)
+	h.wantReply(101, 7, ConversationPrivacyReply+privacyItem+AttachmentPrivacyLine)
 
 	h.requestSettings(8, 101)
 	if edit := h.press(9, 101, settingsMessageID(8), "grafana:on"); !strings.Contains(edit.text, GrafanaOnLine) || !slices.Contains(buttonData(edit.keyboard), "grafana:off") {
@@ -108,7 +108,7 @@ func TestMonitoringIsInvisibleToUsersTheOperatorDidNotName(t *testing.T) {
 	h.waitState(2, "delivered")
 
 	h.push(textUpdate(3, 202, "/privacy"))
-	h.wantReply(202, 3, ConversationPrivacyReply+" "+AttachmentPrivacyLine)
+	h.wantReply(202, 3, ConversationPrivacyReply+privacyItem+AttachmentPrivacyLine)
 
 	forged := h.press(4, 202, settingsMessageID(1), "grafana:off")
 	if strings.Contains(forged.text, "Monitoring") || hasGrafanaButton(buttonData(forged.keyboard)) {

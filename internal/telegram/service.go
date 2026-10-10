@@ -965,22 +965,22 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		}
 		reply := ConversationPrivacyReply
 		if s.attachments != nil {
-			reply += " " + AttachmentPrivacyLine
+			reply += privacyItem + AttachmentPrivacyLine
 		}
 		if s.nas != nil {
-			reply += " " + SentFilePrivacyLine
+			reply += privacyItem + SentFilePrivacyLine
 		}
 		if s.notion != nil {
-			reply += " " + NotionPrivacyLine
+			reply += privacyItem + NotionPrivacyLine
 		}
 		if s.google != nil {
-			reply += " " + GooglePrivacyLine
+			reply += privacyItem + GooglePrivacyLine
 		}
 		if s.schedules != nil {
-			reply += " " + SchedulePrivacyLine
+			reply += privacyItem + SchedulePrivacyLine
 		}
 		if s.tasks != nil {
-			reply += " " + TaskPrivacyLine
+			reply += privacyItem + TaskPrivacyLine
 		}
 		if s.web != nil {
 			status, err := s.web.Status(ctx, principalID)
@@ -988,7 +988,7 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 				return "", nil, err
 			}
 			if status.Enabled {
-				reply += " " + WebPrivacyLine
+				reply += privacyItem + WebPrivacyLine
 			}
 		}
 		if s.ns != nil {
@@ -997,7 +997,7 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 				return "", nil, err
 			}
 			if status.Enabled {
-				reply += " " + NSPrivacyLine
+				reply += privacyItem + NSPrivacyLine
 			}
 		}
 		if s.homeAssistant != nil {
@@ -1006,7 +1006,7 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 				return "", nil, err
 			}
 			if status.Enabled {
-				reply += " " + HomeAssistantPrivacyLine
+				reply += privacyItem + HomeAssistantPrivacyLine
 			}
 		}
 		if s.bus != nil {
@@ -1015,11 +1015,11 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 				return "", nil, err
 			}
 			if status.Enabled {
-				reply += " " + BusPrivacyLine + " " + BusPlanningPrivacyLine
+				reply += privacyItem + BusPrivacyLine + " " + BusPlanningPrivacyLine
 			}
 		}
 		if s.locations != nil {
-			reply += " " + LocationPrivacyLine
+			reply += privacyItem + LocationPrivacyLine
 		}
 		if s.grafana != nil {
 			status, err := s.grafana.Status(ctx, principalID)
@@ -1027,11 +1027,11 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 				return "", nil, err
 			}
 			if status.Enabled {
-				reply += " " + GrafanaPrivacyLine
+				reply += privacyItem + GrafanaPrivacyLine
 			}
 		}
 		if s.memory != nil {
-			reply += " " + MemoryPrivacyLine
+			reply += privacyItem + MemoryPrivacyLine
 		}
 		if s.typeSafe != nil {
 			enabled, err := s.typeSafe.Status(ctx, principalID)
@@ -1039,7 +1039,7 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 				return "", nil, err
 			}
 			if enabled {
-				reply += " " + TypeSafePrivacyLine
+				reply += privacyItem + TypeSafePrivacyLine
 			}
 		}
 		return reply, nil, nil

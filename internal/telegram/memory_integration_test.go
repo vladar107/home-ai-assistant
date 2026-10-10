@@ -526,7 +526,7 @@ func TestMemoryPrivacyLineAndCommandRegistration(t *testing.T) {
 	h := newMemoryHarness(t, runtime)
 
 	h.push(textUpdate(1, 101, "/privacy"))
-	h.wantReply(101, 1, ConversationPrivacyReply+" "+AttachmentPrivacyLine+" "+MemoryPrivacyLine)
+	h.wantReply(101, 1, ConversationPrivacyReply+privacyItem+AttachmentPrivacyLine+privacyItem+MemoryPrivacyLine)
 
 	registration := receive(t, h.ctx, h.registrations)
 	if !slices.ContainsFunc(registration.commands, func(command BotCommand) bool { return command.Command == "memory" }) {

@@ -12,7 +12,7 @@ const (
 	TypeSafeOnLine  = "Safety checks (TypeSafe): on.\n" + typeSafeDescription
 	TypeSafeOffLine = "Safety checks (TypeSafe): off.\n" + typeSafeDescription
 	// TypeSafePrivacyLine is added to /privacy while the principal's safety checks are on.
-	TypeSafePrivacyLine = "Safety checks are on: a scrubbed copy of your recent messages, of my latest reply, of web pages and emails I read, and of proposed actions is sent to TypeSafe; no reply is sent from a conversation that has read Notion or NAS content. It is off by default; you can turn it off in /settings."
+	TypeSafePrivacyLine = "Safety checks: a scrubbed copy of messages, replies, outside content, and proposed actions goes to TypeSafe, never after Notion or NAS content."
 )
 
 // TypeSafeController is implemented by the judgment opt-in service; nil disables the safety checks section.

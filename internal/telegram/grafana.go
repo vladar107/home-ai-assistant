@@ -14,7 +14,7 @@ const (
 
 	GrafanaOnLine      = "Monitoring (Grafana): on (the default). I can read the household's dashboards, query metrics, and search container logs."
 	GrafanaOffLine     = "Monitoring (Grafana): off. Turn it back on to let me read the household's dashboards, query metrics, and search container logs."
-	GrafanaPrivacyLine = "Monitoring is on: metrics and container logs you ask about, which can include other household members' activity, reach your model subscription. You can turn it off in /settings."
+	GrafanaPrivacyLine = "Monitoring: metrics and logs you ask about go to your model and can show other household members' activity."
 )
 
 // GrafanaController is implemented by the Grafana connector; nil leaves monitoring out of /settings

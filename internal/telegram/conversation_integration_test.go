@@ -1428,7 +1428,7 @@ func TestCommandsRemainResponsiveAndCancelSuppressesLateAnswer(t *testing.T) {
 	h.push(textUpdate(2, 101, "second request"), textUpdate(3, 101, "/status"), textUpdate(4, 101, "/privacy"), textUpdate(5, 101, "/cancel"))
 	h.wantReply(101, 2, conversation.BusyReply)
 	h.wantReply(101, 3, ConversationStatusReply)
-	h.wantReply(101, 4, ConversationPrivacyReply+" "+AttachmentPrivacyLine)
+	h.wantReply(101, 4, ConversationPrivacyReply+privacyItem+AttachmentPrivacyLine)
 	h.wantReply(101, 5, CancelledReply)
 	receive(t, h.ctx, call.ctx.Done())
 	h.waitState(1, "cancelled")
@@ -1686,7 +1686,7 @@ func TestBotCommandsRegisteredOnceAtStartup(t *testing.T) {
 	}
 	h.push(textUpdate(1, 101, "/status"), textUpdate(2, 101, "/privacy"))
 	h.wantReply(101, 1, ConversationStatusReply)
-	h.wantReply(101, 2, ConversationPrivacyReply+" "+AttachmentPrivacyLine)
+	h.wantReply(101, 2, ConversationPrivacyReply+privacyItem+AttachmentPrivacyLine)
 	h.waitOffset(3)
 	select {
 	case extra := <-h.registrations:

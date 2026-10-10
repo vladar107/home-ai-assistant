@@ -141,7 +141,7 @@ func TestWebAccessSwitchControlsSearchAndWebTools(t *testing.T) {
 	h.waitState(1, "delivered")
 	assertWebTurn(t, latestReport(t, profiles, "alice"), extension)
 	h.push(textUpdate(2, 101, "/privacy"))
-	h.wantReply(101, 2, ConversationPrivacyReply+" "+AttachmentPrivacyLine+" "+WebPrivacyLine)
+	h.wantReply(101, 2, ConversationPrivacyReply+privacyItem+AttachmentPrivacyLine+privacyItem+WebPrivacyLine)
 
 	overview := h.requestSettings(3, 101)
 	if !strings.Contains(overview.text, "Everyday tools: Web on") || !slices.Contains(buttonData(overview.keyboard), "nav:tools") {
@@ -177,14 +177,14 @@ func TestWebAccessSwitchControlsSearchAndWebTools(t *testing.T) {
 	h.waitState(8, "delivered")
 	assertSearchless(t, latestReport(t, profiles, "alice"))
 	h.push(textUpdate(9, 101, "/privacy"))
-	h.wantReply(101, 9, ConversationPrivacyReply+" "+AttachmentPrivacyLine)
+	h.wantReply(101, 9, ConversationPrivacyReply+privacyItem+AttachmentPrivacyLine)
 
 	h.push(textUpdate(10, 202, "hello"))
 	h.wantReply(202, 10, "reply: hello")
 	h.waitState(10, "delivered")
 	assertWebTurn(t, latestReport(t, profiles, "bob"), extension)
 	h.push(textUpdate(11, 202, "/privacy"))
-	h.wantReply(202, 11, ConversationPrivacyReply+" "+AttachmentPrivacyLine+" "+WebPrivacyLine)
+	h.wantReply(202, 11, ConversationPrivacyReply+privacyItem+AttachmentPrivacyLine+privacyItem+WebPrivacyLine)
 
 	h.requestSettings(12, 101)
 	if edit := h.press(13, 101, settingsMessageID(12), "web:on"); !strings.Contains(edit.text, WebOnLine) || !slices.Contains(buttonData(edit.keyboard), "web:off") {

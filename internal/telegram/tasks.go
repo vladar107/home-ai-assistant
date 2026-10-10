@@ -15,7 +15,7 @@ const (
 	NoTasksReply     = "You have no background tasks from the last week. Ask me for something long, such as going through a month of mail, and I will work on it in the background while we keep talking."
 	TaskGoneReply    = "That task has already finished or was cancelled."
 	TasksHelpLine    = " /tasks shows your background tasks."
-	TaskPrivacyLine  = "A background task's instructions and report are kept on the home system for 30 days after it finishes, so you can ask about the report later; its working history, including what it read, stays in your local session history like other conversations."
+	TaskPrivacyLine  = "Background task reports are kept for 30 days."
 	tasksPrefix      = "tasks"
 	taskCancelAction = "cancel"
 )

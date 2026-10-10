@@ -407,7 +407,7 @@ const (
 	NotionOperatorLine        = "Notion: not connected. Ask the operator to install your token with scripts/notion-set-token."
 	NotionInvalidTokenLine    = "Notion: the installed token could not be used. Install a fresh token or disconnect."
 	NotionUnavailableLine     = "Notion: the installed token could not be verified because Notion is unavailable. Try again later."
-	NotionPrivacyLine         = "Notion content read through your own connection is sent to your model subscription as well."
+	NotionPrivacyLine         = "Notion pages I read go to your model."
 	NotionConnectInstructions = "Send your Notion token as your next message within 10 minutes. I will delete that message right away and never show the token again. " +
 		"Recommended: an internal connection with read, update, and insert content capabilities, shared only with the pages and data sources you want me to see. " +
 		"A personal access token also works, but it grants everything you can access and expires. " +

@@ -17,7 +17,7 @@ const (
 
 	GoogleNotConnectedLine   = "Google: no accounts connected."
 	GoogleAccountsLine       = "Google accounts:"
-	GooglePrivacyLine        = "Email and calendar events the model reads through your Google accounts are sent to your model subscription as well."
+	GooglePrivacyLine        = "Mail and calendar events I read go to your model."
 	GoogleSignInInstructions = "To connect a Google account read-only:\n" +
 		"1. Open the link below and sign in with the Google account to connect. Google will say the app is unverified; it is the household's own app, so continue.\n" +
 		"2. Allow reading your email, your calendar, or both. Nothing can send, change, or delete anything.\n" +
