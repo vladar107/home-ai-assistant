@@ -318,10 +318,19 @@ func mapTool(remote, description string, schema json.RawMessage) (mappedTool, bo
 	var object map[string]json.RawMessage
 	if json.Unmarshal(schema, &object) != nil || object == nil {
 		schema = json.RawMessage(`{"type":"object","properties":{}}`)
-	} else if _, typed := object["type"]; !typed {
-		object["type"] = json.RawMessage(`"object"`)
-		if encoded, err := json.Marshal(object); err == nil {
-			schema = encoded
+	} else {
+		changed := false
+		if _, typed := object["type"]; !typed {
+			object["type"] = json.RawMessage(`"object"`)
+			changed = true
+		}
+		if remote == liveContextTool && withoutFilters(object, liveContextFilters) {
+			changed = true
+		}
+		if changed {
+			if encoded, err := json.Marshal(object); err == nil {
+				schema = encoded
+			}
 		}
 	}
 	intent := intentOf(remote)
@@ -350,6 +359,42 @@ func mapTool(remote, description string, schema json.RawMessage) (mappedTool, bo
 			Household:   true,
 		},
 	}, true
+}
+
+// liveContextFilters are the live-context filters that drop a device's sensors: a domain keeps only
+// the device's own entity, and a name matches only an exact entity name. An area keeps them, so it
+// stays.
+var liveContextFilters = []string{"name", "domain"}
+
+// withoutFilters removes the filters from a tool schema's properties and required list, reporting
+// whether anything was removed.
+func withoutFilters(object map[string]json.RawMessage, filters []string) bool {
+	removed := false
+	var properties map[string]json.RawMessage
+	if json.Unmarshal(object["properties"], &properties) == nil && properties != nil {
+		for _, filter := range filters {
+			if _, found := properties[filter]; found {
+				delete(properties, filter)
+				removed = true
+			}
+		}
+		if encoded, err := json.Marshal(properties); err == nil {
+			object["properties"] = encoded
+		}
+	}
+	var required []string
+	if json.Unmarshal(object["required"], &required) == nil && len(required) > 0 {
+		kept := slices.DeleteFunc(slices.Clone(required), func(name string) bool { return slices.Contains(filters, name) })
+		if len(kept) < len(required) {
+			if len(kept) == 0 {
+				delete(object, "required")
+			} else if encoded, err := json.Marshal(kept); err == nil {
+				object["required"] = encoded
+			}
+			removed = true
+		}
+	}
+	return removed
 }
 
 func domainOf(remote string) string {

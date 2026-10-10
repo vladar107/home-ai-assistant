@@ -156,6 +156,11 @@ func (s *Service) Execute(ctx context.Context, principalID string, call tools.Ca
 	if err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
+	if tool.remote == liveContextTool {
+		for _, filter := range liveContextFilters {
+			delete(arguments, filter)
+		}
+	}
 	if tool.definition.Risk == tools.RiskWrite && s.exposure != nil && s.exposure.External(ctx, principalID) {
 		return s.proposeAction(ctx, principalID, call.Name, tool, arguments), nil
 	}

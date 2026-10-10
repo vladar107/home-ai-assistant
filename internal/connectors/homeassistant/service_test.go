@@ -183,7 +183,11 @@ func mcpTools() []map[string]any {
 	}
 	name := map[string]any{"name": map[string]any{"type": "string"}}
 	return []map[string]any{
-		{"name": "homeassistant__GetLiveContext", "description": "Provides real-time information about the exposed entities.", "inputSchema": schema(map[string]any{})},
+		{"name": "homeassistant__GetLiveContext", "description": "Provides real-time information about the exposed entities.", "inputSchema": schema(map[string]any{
+			"name":   map[string]any{"type": "string"},
+			"domain": map[string]any{"type": []string{"string", "array"}},
+			"area":   map[string]any{"type": "string"},
+		})},
 		{"name": "llm__GetDateTime", "description": "Provides the current date and time.", "inputSchema": schema(map[string]any{})},
 		{"name": "intent__HassTurnOn", "description": "Turns on a device or entity.", "inputSchema": schema(name)},
 		{"name": "media_player__HassMediaPause", "description": "Pauses a media player.", "inputSchema": schema(name)},
@@ -489,6 +493,39 @@ func TestActionToolForwardsArgumentsToTheMCPTool(t *testing.T) {
 	items := f.call(set, "ha_get_items", map[string]any{"todo_list": "Groceries"})
 	if items.IsError || !strings.HasPrefix(items.Text, untrustedPrefix) || !strings.Contains(items.Text, "Done.") {
 		t.Fatalf("items = %+v", items)
+	}
+}
+
+func TestLiveContextOffersOnlyTheAreaFilter(t *testing.T) {
+	f := newFixture(t, newSimulator(livingTV))
+	set := f.toolSet()
+
+	var schema struct {
+		Properties map[string]any `json:"properties"`
+	}
+	for _, definition := range set.Definitions {
+		if definition.Name == "ha_get_live_context" {
+			if err := json.Unmarshal(definition.InputSchema, &schema); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if _, name := schema.Properties["name"]; name || schema.Properties["domain"] != nil || schema.Properties["area"] == nil {
+		t.Fatalf("live context properties = %v, want only area", schema.Properties)
+	}
+
+	result := f.call(set, "ha_get_live_context", map[string]any{"name": "Robot", "domain": "vacuum", "area": "Hall"})
+	if result.IsError {
+		t.Fatalf("live context = %+v", result)
+	}
+	var forwarded map[string]any
+	for _, call := range f.sim.calls() {
+		if call.name == "homeassistant__GetLiveContext" && len(call.arguments) > 0 {
+			forwarded = call.arguments
+		}
+	}
+	if len(forwarded) != 1 || forwarded["area"] != "Hall" {
+		t.Fatalf("forwarded arguments = %v, want only the area", forwarded)
 	}
 }
 
