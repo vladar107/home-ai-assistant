@@ -1,6 +1,6 @@
 # 0050 — Scrub private data before making the repository public
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
