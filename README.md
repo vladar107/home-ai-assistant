@@ -114,3 +114,13 @@ deploy/                Compose files and configuration examples
 scripts/               operator scripts (deploy, secrets, checks)
 third_party/           vendored code and assets with their licenses
 ```
+
+## License
+
+Copyright (C) 2026 Vladislav Ramazaev
+
+Home Agent is free software: you can redistribute it and/or modify it under the
+terms of the GNU Affero General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option) any
+later version (`AGPL-3.0-or-later`). See [LICENSE](LICENSE). Vendored code and
+assets keep their own licenses, listed under `third_party/`.
