@@ -375,7 +375,9 @@ routes after jobs and watches, read-only, with a Delete button each.
 - **Identity before anything.** Only allowlisted numeric Telegram IDs in private
   chats reach the application; every request resolves to a principal first.
 - **Per-user model subscriptions.** Each user connects their own subscription
-  through `/settings`. There is no shared or fallback credential.
+  through `/settings`. There is no shared or fallback credential. Voice
+  transcription and image generation reach the ChatGPT backend from Go with
+  the same per-user login, refreshed under Pi's lock on `auth.json`.
 - **Per-user integrations.** Credentials live under
   `data/integrations/<principal>/` with mode `0600`. Each user enables and disables
   each integration independently.

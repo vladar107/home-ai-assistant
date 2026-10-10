@@ -32,6 +32,7 @@ var activityLabels = map[string]string{
 	tools.ActivityNotion:   "Looking in Notion…",
 	tools.ActivityGrafana:  "Checking the dashboards…",
 	tools.ActivityPlaces:   "Looking up places nearby…",
+	tools.ActivityImage:    "Drawing…",
 }
 
 // turnActivity shows a chat that its request is being worked on: typing every TypingInterval and,

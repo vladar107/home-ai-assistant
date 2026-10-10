@@ -161,12 +161,26 @@ func (c *deviceClient) exchange(ctx context.Context, code deviceCode) (oauthCred
 		"code_verifier": {code.codeVerifier},
 		"redirect_uri":  {c.baseURL + "/deviceauth/callback"},
 	}
+	return c.token(ctx, "exchange", form)
+}
+
+// refresh trades a refresh token for a new record, as Pi does when an access token expires.
+func (c *deviceClient) refresh(ctx context.Context, refreshToken string) (oauthCredential, error) {
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {refreshToken},
+		"client_id":     {c.clientID},
+	}
+	return c.token(ctx, "refresh", form)
+}
+
+func (c *deviceClient) token(ctx context.Context, operation string, form url.Values) (oauthCredential, error) {
 	status, body, err := c.post(ctx, "/oauth/token", "application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
 	if err != nil {
 		return oauthCredential{}, err
 	}
 	if status < 200 || status >= 300 {
-		return oauthCredential{}, fmt.Errorf("token exchange failed with status %d", status)
+		return oauthCredential{}, fmt.Errorf("token %s failed with status %d", operation, status)
 	}
 	var response struct {
 		AccessToken  string  `json:"access_token"`
@@ -174,7 +188,7 @@ func (c *deviceClient) exchange(ctx context.Context, code deviceCode) (oauthCred
 		ExpiresIn    float64 `json:"expires_in"`
 	}
 	if err := json.Unmarshal(body, &response); err != nil || response.AccessToken == "" || response.RefreshToken == "" || response.ExpiresIn <= 0 {
-		return oauthCredential{}, fmt.Errorf("token exchange response is invalid")
+		return oauthCredential{}, fmt.Errorf("token %s response is invalid", operation)
 	}
 	accountID, err := accountIDFromJWT(response.AccessToken)
 	if err != nil {

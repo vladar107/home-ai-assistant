@@ -58,7 +58,11 @@ func readCredential(profileDir, provider string) (oauthCredential, bool, error) 
 }
 
 func writeCredential(profileDir, provider string, credential oauthCredential) error {
-	contents, err := json.Marshal(map[string]oauthCredential{provider: credential})
+	return writeProviders(profileDir, map[string]oauthCredential{provider: credential})
+}
+
+func writeProviders[T any](profileDir string, providers map[string]T) error {
+	contents, err := json.Marshal(providers)
 	if err != nil {
 		return fmt.Errorf("encode model credentials: %w", err)
 	}

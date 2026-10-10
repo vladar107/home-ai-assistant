@@ -125,10 +125,11 @@ type Message struct {
 	Venue     *Venue      `json:"venue"`
 	// ReplyToMessage is the message this one replies to, as Telegram includes it.
 	ReplyToMessage *Message `json:"reply_to_message"`
+	// Voice and Audio reach the model as a transcript when a transcriber is set.
+	Voice *MediaFile `json:"voice"`
+	Audio *MediaFile `json:"audio"`
 	// The kinds below cannot reach the model through the runtime; they are read only so the
 	// message can be answered instead of ignored.
-	Voice     *MediaFile `json:"voice"`
-	Audio     *MediaFile `json:"audio"`
 	Video     *MediaFile `json:"video"`
 	VideoNote *MediaFile `json:"video_note"`
 	Sticker   *MediaFile `json:"sticker"`

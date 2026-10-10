@@ -130,6 +130,7 @@ type Service struct {
 	tasks         TaskController
 	watches       WatchController
 	routes        RouteController
+	transcriber   Transcriber
 	sections      []settingsSection
 	interceptors  []messageInterceptor
 	logger        *slog.Logger
@@ -487,8 +488,23 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 		return s.processLocation(ctx, message, authorization.Principal.ID)
 	}
 
-	carried, unsupported := classifyMedia(message)
 	text := cmp.Or(message.Text, message.Caption)
+	transcribed := false
+	if item, found := voiceRecording(message); found && s.transcriber != nil && s.conversation != nil {
+		transcript, reply, reason, err := s.transcribe(ctx, authorization.Principal.ID, item, message.Caption)
+		if err != nil {
+			return processingResult{}, "transcribe_voice", err
+		}
+		if reply != "" {
+			return s.sendMediaReply(ctx, message, authorization.Principal.ID, reason, reply)
+		}
+		text, transcribed = transcript, true
+	}
+	var carried []media
+	var unsupported string
+	if !transcribed {
+		carried, unsupported = classifyMedia(message)
+	}
 	if s.conversation == nil || (unsupported == "" && len(carried) == 0 && strings.TrimSpace(text) == "") {
 		return processingResult{
 			event:       "telegram.update.ignored",
@@ -510,7 +526,7 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 			return s.sendMediaReply(ctx, message, authorization.Principal.ID, "refused", refusal)
 		}
 		attachments = files
-	} else {
+	} else if !transcribed {
 		for _, interceptor := range s.interceptors {
 			result, err := interceptor.intercept(ctx, authorization.Principal.ID, text)
 			if err != nil {
@@ -1020,6 +1036,9 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		}
 		if s.locations != nil {
 			reply += privacyItem + LocationPrivacyLine
+		}
+		if s.transcriber != nil {
+			reply += privacyItem + VoicePrivacyLine
 		}
 		if s.grafana != nil {
 			status, err := s.grafana.Status(ctx, principalID)

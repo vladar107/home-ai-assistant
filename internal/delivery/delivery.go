@@ -5,6 +5,7 @@
 package delivery
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -23,7 +24,11 @@ type Chats interface {
 // Documents is the Telegram client as delivery sees it.
 type Documents interface {
 	SendDocument(ctx context.Context, chatID int64, name string, body io.Reader, size int64) error
+	SendPhoto(ctx context.Context, chatID, replyToMessageID int64, image []byte, caption string) error
 }
+
+// maximumPhotoBytes is Telegram's limit for a photo; a larger picture is sent as a document.
+const maximumPhotoBytes = 10 << 20
 
 // File is one outbound file. Body is always closed by SendFile.
 type File struct {
@@ -75,5 +80,29 @@ func (s *Service) SendFile(ctx context.Context, principalID string, file File) e
 	}
 
 	s.logger.InfoContext(ctx, "delivery.file.sent", "principal_id", principalID, "size_bytes", file.Size)
+	return nil
+}
+
+// SendImage shows a picture in the principal's own chat as a photo.
+func (s *Service) SendImage(ctx context.Context, principalID, name string, image []byte) error {
+	if principalID == "" || name == "" || len(image) == 0 {
+		return fmt.Errorf("delivered image is incomplete")
+	}
+	chatID, found, err := s.chats.ResolveActiveChat(ctx, principalID)
+	if err != nil {
+		return fmt.Errorf("resolve chat for delivery: %w", err)
+	}
+	if !found {
+		return ErrNoChat
+	}
+	if len(image) > maximumPhotoBytes {
+		if err := s.documents.SendDocument(ctx, chatID, name, bytes.NewReader(image), int64(len(image))); err != nil {
+			return fmt.Errorf("upload image document to Telegram: %w", err)
+		}
+	} else if err := s.documents.SendPhoto(ctx, chatID, 0, image, ""); err != nil {
+		return fmt.Errorf("upload photo to Telegram: %w", err)
+	}
+
+	s.logger.InfoContext(ctx, "delivery.image.sent", "principal_id", principalID, "size_bytes", len(image))
 	return nil
 }

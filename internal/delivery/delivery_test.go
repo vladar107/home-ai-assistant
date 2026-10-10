@@ -48,6 +48,14 @@ func (t *telegram) SendDocument(_ context.Context, chatID int64, name string, bo
 	return nil
 }
 
+func (t *telegram) SendPhoto(_ context.Context, chatID, _ int64, image []byte, _ string) error {
+	if t.err != nil {
+		return t.err
+	}
+	t.uploads = append(t.uploads, upload{chatID: chatID, name: "photo", size: int64(len(image)), content: image})
+	return nil
+}
+
 type body struct {
 	io.Reader
 	closes int

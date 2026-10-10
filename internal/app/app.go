@@ -14,6 +14,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/approval/withdrawal"
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
+	"github.com/vladar107/home-ai-assistant/internal/chatgpt"
 	"github.com/vladar107/home-ai-assistant/internal/config"
 	"github.com/vladar107/home-ai-assistant/internal/connection"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/bus"
@@ -35,6 +36,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/health"
 	"github.com/vladar107/home-ai-assistant/internal/httpretry"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
+	"github.com/vladar107/home-ai-assistant/internal/imagegen"
 	"github.com/vladar107/home-ai-assistant/internal/judgment"
 	userlocation "github.com/vladar107/home-ai-assistant/internal/location"
 	usermemory "github.com/vladar107/home-ai-assistant/internal/memory"
@@ -64,6 +66,7 @@ type App struct {
 	server        *http.Server
 	store         *sqlite.Store
 	connections   *connection.Service
+	chatGPT       *chatgpt.Client
 	attachments   *attachment.Service
 	conversation  *conversation.Service
 	tools         *tools.Broker
@@ -354,6 +357,25 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		if err := broker.Register(attachments); err != nil {
 			return err
 		}
+		// Pictures and voice use the principal's own subscription, the same one Pi holds.
+		chatGPT, err := chatgpt.New(chatgpt.Config{}, connections)
+		if err != nil {
+			return fmt.Errorf("initialize ChatGPT client: %w", err)
+		}
+		a.chatGPT = chatGPT
+		// Files reach the user through their own private chat, which is the Telegram identity
+		// the allowlist already binds to the principal running the turn.
+		files, err := delivery.NewService(a.store, client, a.logger)
+		if err != nil {
+			return fmt.Errorf("initialize file delivery: %w", err)
+		}
+		images, err := imagegen.NewService(imagegen.Config{Model: a.cfg.Conversation.PiModel}, chatGPT, files, attachments, a.logger)
+		if err != nil {
+			return fmt.Errorf("initialize image generation: %w", err)
+		}
+		if err := broker.Register(images); err != nil {
+			return fmt.Errorf("register image generation: %w", err)
+		}
 		cards, err := outbox.New(filepath.Join(a.cfg.DataDir, "outbox"))
 		if err != nil {
 			return fmt.Errorf("initialize outbox: %w", err)
@@ -623,12 +645,6 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			a.notion = notionService
 		}
 		if a.cfg.NAS.Enabled {
-			// Files reach the user through their own private chat, which is the Telegram identity
-			// the allowlist already binds to the principal running the turn.
-			files, err := delivery.NewService(a.store, client, a.logger)
-			if err != nil {
-				return fmt.Errorf("initialize file delivery: %w", err)
-			}
 			nasService, err := nas.NewService(nas.Config{
 				Roots: nasRoots(a.cfg.NAS.Roots),
 			}, a.store, approvals, attachments, files, a.logger)
@@ -841,6 +857,9 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	}
 	if a.routes != nil {
 		service.SetRoutes(a.routes)
+	}
+	if a.chatGPT != nil {
+		service.SetTranscriber(a.chatGPT)
 	}
 	if a.tools != nil {
 		if err := a.tools.Register(service.Help()); err != nil {

@@ -41,6 +41,9 @@ borrowed between users.
 - **Shared location.** Share a pin or a live location in the chat and ask about
   "here": buses and weather at that point, and nearby pharmacies, shops, or cafés
   from OpenStreetMap. Only the latest position is kept, briefly.
+- **Voice and pictures.** Voice notes and audio files are transcribed and
+  answered like typed messages, and the assistant draws pictures, or edits a
+  photo the user sent, on the user's own ChatGPT subscription.
 - **Day cards.** A rendered image with the day's weather and trains, sent with
   the reply as its caption.
 - **Schedules.** Recurring or one-time model turns ("every weekday at 07:30, plan

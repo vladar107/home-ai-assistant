@@ -97,6 +97,9 @@ func AccessToken(accountID string) string {
 
 func RefreshToken(accountID string) string { return "refresh-token-" + accountID }
 
+// RotatedRefreshToken is the refresh token a refresh grant issues in place of the one it consumed.
+func RotatedRefreshToken(accountID string) string { return RefreshToken(accountID) + "-rotated" }
+
 func (s *Simulator) update(userCode string, apply func(*device)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -140,6 +143,15 @@ func (s *Simulator) serve(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusForbidden, map[string]any{})
 		}
 	case "/oauth/token":
+		if fields["grant_type"] == "refresh_token" {
+			accountID, valid := strings.CutPrefix(strings.TrimSuffix(fields["refresh_token"], "-rotated"), "refresh-token-")
+			if !valid || accountID == "" || fields["client_id"] == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_grant"})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"access_token": AccessToken(accountID), "refresh_token": RotatedRefreshToken(accountID), "expires_in": 3600})
+			return
+		}
 		d := s.findByCode(fields["code"])
 		if d == nil || fields["grant_type"] != "authorization_code" || fields["code_verifier"] != d.verifier ||
 			fields["client_id"] == "" || fields["redirect_uri"] != s.server.URL+"/deviceauth/callback" {

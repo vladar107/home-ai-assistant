@@ -24,6 +24,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/approval/withdrawal"
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
+	"github.com/vladar107/home-ai-assistant/internal/chatgpt"
 	"github.com/vladar107/home-ai-assistant/internal/connection"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/bus"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/calendar"
@@ -40,6 +41,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/delivery"
 	"github.com/vladar107/home-ai-assistant/internal/exposure"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
+	"github.com/vladar107/home-ai-assistant/internal/imagegen"
 	"github.com/vladar107/home-ai-assistant/internal/location"
 	"github.com/vladar107/home-ai-assistant/internal/memory"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
@@ -51,6 +53,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/task"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/calendarsim"
+	"github.com/vladar107/home-ai-assistant/internal/testutil/chatgptsim"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/codexauth"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/googlesim"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/notionsim"
@@ -150,6 +153,8 @@ func (b *lockedBuffer) String() string {
 }
 
 type harnessOptions struct {
+	// chatGPT adds voice transcription and the image tool against the given backend.
+	chatGPT             *chatgptsim.Simulator
 	profilesDir         string
 	codeTimeout         time.Duration
 	providers           []tools.Provider
@@ -432,6 +437,25 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	}
 	if err := broker.Register(h.attachments); err != nil {
 		t.Fatal(err)
+	}
+	var transcriber Transcriber
+	if sim := options.chatGPT; sim != nil {
+		client, err := chatgpt.New(chatgpt.Config{BaseURL: sim.URL(), HTTPClient: sim.Client()}, h.connections)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files, err := delivery.NewService(h.store, h.client, logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		images, err := imagegen.NewService(imagegen.Config{Model: "gpt-test:medium"}, client, files, h.attachments, logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := broker.Register(images); err != nil {
+			t.Fatal(err)
+		}
+		transcriber = client
 	}
 	h.approvals, err = approval.NewService(approval.Config{Lifetime: options.approvalLifetime, SweepInterval: options.approvalSweep}, h.store, h.client, logger)
 	if err != nil {
@@ -757,6 +781,9 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	}
 	if h.routes != nil {
 		h.service.SetRoutes(h.routes)
+	}
+	if transcriber != nil {
+		h.service.SetTranscriber(transcriber)
 	}
 	t.Cleanup(h.stop)
 	return h

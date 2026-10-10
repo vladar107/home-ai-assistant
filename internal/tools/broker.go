@@ -96,6 +96,7 @@ const (
 	ActivityNotion   = "notion"
 	ActivityGrafana  = "grafana"
 	ActivityPlaces   = "places"
+	ActivityImage    = "image"
 )
 
 // Contribution is what a provider grants one principal at one moment. WriteGuidance describes the

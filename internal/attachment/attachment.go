@@ -222,7 +222,7 @@ func (s *Service) Turn(ctx context.Context, principalID, requestID string) (Turn
 				MimeType: record.MimeType,
 				Data:     data,
 			})
-			lines = append(lines, fmt.Sprintf("- %s (image, attached to this message)", record.FileName))
+			lines = append(lines, fmt.Sprintf("- %s (image, id %s, attached to this message)", record.FileName, record.ID))
 			continue
 		}
 		lines = append(lines, "- "+describe(record))
