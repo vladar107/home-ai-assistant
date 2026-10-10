@@ -71,6 +71,7 @@ plan that links back to the earlier record.
 | 0059 | [Check each search instead of locking the conversation](0059-search-after-outside-content.md) | done |
 | 0060 | [Watch alerts in the user's language](0060-watch-alerts-in-the-users-language.md) | done |
 | 0061 | [Judgments with conversation context](0061-judgments-with-conversation-context.md) | done |
+| 0062 | [History search keeps privacy by source](0062-history-privacy-by-source.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

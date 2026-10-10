@@ -13,10 +13,11 @@ import (
 const conversationTimeLayout = "2006-01-02T15:04:05.000Z"
 
 // sessionColumns reads a session with its last activity: the newest request it took, or its
-// creation when it took none.
+// creation when it took none. Queries order by the activity, the fourth column.
 const sessionColumns = `session.id, session.runtime_session_id, session.status = 'active',
 	COALESCE((SELECT MAX(request.created_at) FROM conversation_requests AS request
-	          WHERE request.session_id = session.id), session.created_at)`
+	          WHERE request.session_id = session.id), session.created_at),
+	session.private_at IS NOT NULL`
 
 // ReferencedSessions returns the runtime session IDs of every conversation and every task kept.
 func (s *Store) ReferencedSessions(ctx context.Context) (map[string]struct{}, error) {
@@ -213,7 +214,7 @@ func switchActiveSession(ctx context.Context, tx *sql.Tx, principalID, sessionID
 func scanSessionRecord(row rowScanner) (conversation.SessionRecord, error) {
 	var record conversation.SessionRecord
 	var lastActive string
-	if err := row.Scan(&record.ID, &record.RuntimeSessionID, &record.Active, &lastActive); err != nil {
+	if err := row.Scan(&record.ID, &record.RuntimeSessionID, &record.Active, &lastActive, &record.Private); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return record, err
 		}

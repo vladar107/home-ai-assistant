@@ -95,10 +95,12 @@ type Call struct {
 }
 
 // Result is what the model may read. IsError marks a failure the model should adapt to; the text
-// must already be free of credentials and raw provider errors.
+// must already be free of credentials and raw provider errors. Private marks a result that may
+// carry Notion page content or NAS file contents from a tool whose results are not always private.
 type Result struct {
 	Text    string
 	IsError bool
+	Private bool
 }
 
 // Provider is the narrow interface a connector module implements. It never receives the
@@ -395,7 +397,7 @@ func (e *turnExecutor) perform(ctx context.Context, call agentruntime.ToolCall, 
 	case result.IsError:
 		// A private tool's error can still quote what it read, such as a Notion table's property
 		// names and options.
-		e.markPrivate(ctx, binding)
+		e.markPrivate(ctx, binding, result)
 		return "tool_error", "", agentruntime.ToolResult{Text: result.Text, IsError: true}
 	default:
 		_, chat := outbox.ChatRequest(e.turn)
@@ -409,7 +411,7 @@ func (e *turnExecutor) perform(ctx context.Context, call agentruntime.ToolCall, 
 		if binding.thirdParty && e.broker.turns != nil {
 			e.broker.turns.MarkTurnExposed(ctx, e.principalID, e.turn, external)
 		}
-		e.markPrivate(ctx, binding)
+		e.markPrivate(ctx, binding, result)
 		text := untrustedResultPrefix
 		screened := ""
 		if binding.screen && e.broker.screener != nil {
@@ -424,8 +426,8 @@ func (e *turnExecutor) perform(ctx context.Context, call agentruntime.ToolCall, 
 
 // markPrivate records a private call on the turn's conversation and on the run, whose report
 // carries what the call read into a later chat turn.
-func (e *turnExecutor) markPrivate(ctx context.Context, binding toolBinding) {
-	if !binding.private {
+func (e *turnExecutor) markPrivate(ctx context.Context, binding toolBinding, result Result) {
+	if !binding.private && !result.Private {
 		return
 	}
 	if e.broker.privacy != nil {

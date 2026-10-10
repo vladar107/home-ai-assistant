@@ -124,6 +124,8 @@ type SessionRecord struct {
 	RuntimeSessionID string
 	Active           bool
 	LastActive       time.Time
+	// Private is true once the conversation has read Notion page content or NAS file contents.
+	Private bool
 }
 
 type SwitchResult struct {

@@ -213,14 +213,53 @@ func TestConversationSearchFindsOnlyTheUsersOwnEarlierConversations(t *testing.T
 		!strings.Contains(read.text, "the boiler service code is 4417") || !strings.Contains(read.text, "[2] you") {
 		t.Fatalf("Alice's read = %q", read.text)
 	}
+	// Neither the search nor the read of a conversation that read no private content makes this one
+	// private.
+	h.wantPrivate("alice", 6, false)
 
 	missing := h.talk(7, 202, `fixture:call conversation_search {"query":"4417"}`)
 	if !strings.Contains(missing.text, "No message in the user's earlier conversations contains all of: 4417.") {
 		t.Fatalf("Bob's search for Alice's code = %q", missing.text)
 	}
+	h.wantPrivate("bob", 7, false)
 	foreign := h.talk(8, 202, `fixture:call conversation_read {"session_id":"`+earlierID+`","position":1}`)
 	if !strings.Contains(foreign.text, "error:") || strings.Contains(foreign.text, "4417") {
 		t.Fatalf("Bob's read of Alice's conversation = %q", foreign.text)
+	}
+
+	// A conversation that read private content is found without its excerpt, and only reading it
+	// makes the current conversation private.
+	h.push(textUpdate(9, 101, "/new"))
+	h.wantReply(101, 9, NewSessionReply)
+	h.talk(10, 101, "the alarm panel code is 2580")
+	privateID, _ := h.activeSession("alice")
+	if err := h.store.MarkConversationPrivate(h.ctx, "alice", h.requestID(10)); err != nil {
+		t.Fatal(err)
+	}
+	h.push(textUpdate(11, 101, "/new"))
+	h.wantReply(101, 11, NewSessionReply)
+	withheld := h.talk(12, 101, `fixture:call conversation_search {"query":"alarm panel"}`)
+	if !strings.Contains(withheld.text, "conversation "+privateID) || !strings.Contains(withheld.text, "message 1 by the user: (excerpt withheld:") ||
+		strings.Contains(withheld.text, "2580") {
+		t.Fatalf("Alice's search of a private conversation = %q", withheld.text)
+	}
+	h.wantPrivate("alice", 12, false)
+	revealed := h.talk(13, 101, `fixture:call conversation_read {"session_id":"`+privateID+`","position":1}`)
+	if !strings.Contains(revealed.text, "the alarm panel code is 2580") {
+		t.Fatalf("Alice's read of a private conversation = %q", revealed.text)
+	}
+	h.wantPrivate("alice", 13, true)
+	shown := h.talk(14, 101, `fixture:call conversation_search {"query":"alarm panel"}`)
+	if !strings.Contains(shown.text, "conversation "+privateID) || !strings.Contains(shown.text, "the alarm panel code is 2580") {
+		t.Fatalf("Alice's search from a private conversation = %q", shown.text)
+	}
+}
+
+func (h *conversationHarness) wantPrivate(principal string, updateID int64, want bool) {
+	h.t.Helper()
+	private, err := h.store.ConversationPrivate(h.ctx, principal, h.requestID(updateID))
+	if err != nil || private != want {
+		h.t.Fatalf("conversation of update %d private = %v (%v), want %v", updateID, private, err, want)
 	}
 }
 

@@ -236,8 +236,9 @@ func (r *recordedPrivate) MarkTurnPrivate(_ context.Context, _, turn string) {
 	r.turns = append(r.turns, turn)
 }
 
-// A private result, or a private tool's error text, is recorded with its turn and its run; a failed
-// private call and an ordinary one are not.
+// A private result, or a private tool's error text, is recorded with its turn and its run, whether
+// the tool is always private or the result says so; a failed private call and an ordinary one are
+// not.
 func TestSuccessfulPrivateCallRecordsItsTurn(t *testing.T) {
 	broker := testBroker(t)
 	privacy := &recordedPrivate{}
@@ -249,11 +250,17 @@ func TestSuccessfulPrivateCallRecordsItsTurn(t *testing.T) {
 	refusing := testDefinition("update_table", 0)
 	refusing.Private = true
 	provider := &fakeProvider{
-		principal:   testPrincipal,
-		definitions: []Definition{testDefinition("own_note", 0), private, failing, refusing},
+		principal: testPrincipal,
+		definitions: []Definition{testDefinition("own_note", 0), private, failing, refusing,
+			testDefinition("read_history", 0), testDefinition("quote_history", 0)},
 		respond: func(_ context.Context, call Call) (Result, error) {
-			if call.Name == "read_page" {
+			switch call.Name {
+			case "read_page":
 				return Result{}, errors.New("unavailable")
+			case "read_history":
+				return Result{Text: "text", Private: true}, nil
+			case "quote_history":
+				return Result{Text: "text", IsError: true, Private: true}, nil
 			}
 			return Result{Text: "text", IsError: call.Name == "update_table"}, nil
 		},
@@ -261,22 +268,33 @@ func TestSuccessfulPrivateCallRecordsItsTurn(t *testing.T) {
 	if err := broker.Register(provider); err != nil {
 		t.Fatal(err)
 	}
-	turn := outbox.ChatTurn(chatRequest)
-	run := NewRun("read my notes")
-	set, err := broker.ToolsFor(WithRun(WithTurn(context.Background(), turn), run), testPrincipal)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"own_note", "read_page", "update_table", "read_file"} {
-		if _, err := set.Executor.Execute(context.Background(), agentruntime.ToolCall{Name: name, Arguments: json.RawMessage(`{}`)}); err != nil {
+	for _, names := range [][]string{
+		{"own_note", "read_page", "update_table", "read_file"},
+		{"own_note", "read_history"},
+		{"own_note", "quote_history"},
+	} {
+		privacy.turns = nil
+		turn := outbox.ChatTurn(chatRequest)
+		run := NewRun("read my notes")
+		set, err := broker.ToolsFor(WithRun(WithTurn(context.Background(), turn), run), testPrincipal)
+		if err != nil {
 			t.Fatal(err)
 		}
-		if want := name == "update_table" || name == "read_file"; run.Private() != want {
-			t.Fatalf("run private after %s = %v, want %v", name, run.Private(), want)
+		var marked []string
+		for _, name := range names {
+			if _, err := set.Executor.Execute(context.Background(), agentruntime.ToolCall{Name: name, Arguments: json.RawMessage(`{}`)}); err != nil {
+				t.Fatal(err)
+			}
+			if name != "own_note" && name != "read_page" {
+				marked = append(marked, turn)
+			}
+			if want := len(marked) > 0; run.Private() != want {
+				t.Fatalf("run private after %s = %v, want %v", name, run.Private(), want)
+			}
 		}
-	}
-	if fmt.Sprint(privacy.turns) != fmt.Sprint([]string{turn, turn}) {
-		t.Fatalf("private turns = %v, want %s for update_table and read_file", privacy.turns, turn)
+		if fmt.Sprint(privacy.turns) != fmt.Sprint(marked) {
+			t.Fatalf("private turns after %v = %v, want %v", names, privacy.turns, marked)
+		}
 	}
 }
 
