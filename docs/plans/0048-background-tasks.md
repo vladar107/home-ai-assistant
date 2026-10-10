@@ -1,6 +1,6 @@
 # 0048 — Background sub-agents that do not block the chat
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 

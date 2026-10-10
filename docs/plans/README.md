@@ -57,7 +57,7 @@ plan that links back to the earlier record.
 | 0045 | [Grafana metrics and logs in conversation](0045-grafana-metrics-and-logs.md) | done |
 | 0046 | [Per-user memory the user can see and edit](0046-per-user-memory.md) | done |
 | 0047 | [Return to earlier conversations](0047-earlier-conversations.md) | done |
-| 0048 | [Background sub-agents that do not block the chat](0048-background-tasks.md) | in-progress |
+| 0048 | [Background sub-agents that do not block the chat](0048-background-tasks.md) | done |
 | 0049 | [Tell the model who the user is](0049-name-the-user.md) | done |
 | 0050 | [Scrub private data before making the repository public](0050-public-release-scrub.md) | done |
 | 0051 | [Confirm actions after outside content](0051-confirm-actions-after-outside-content.md) | done |
