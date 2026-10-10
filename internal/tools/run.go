@@ -20,7 +20,9 @@ type Run struct {
 	mu       sync.Mutex
 	external bool
 	private  bool
-	seen     map[string]struct{}
+	// userMessage marks a run that answers a message the user wrote, rather than one of ours.
+	userMessage bool
+	seen        map[string]struct{}
 }
 
 // NewRun starts the record of a run whose trusted instruction is the given text: the user's own
@@ -82,6 +84,21 @@ func (r *Run) Private() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.private
+}
+
+// MarkUserMessage records that the run answers a message the user wrote, so tools that act on that
+// message are offered. It is set before the run's tools are collected.
+func (r *Run) MarkUserMessage() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.userMessage = true
+}
+
+// UserMessage reports whether the run answers a message the user wrote.
+func (r *Run) UserMessage() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.userMessage
 }
 
 // Seen reports whether the address appeared whole in the run's instruction or in outside text the

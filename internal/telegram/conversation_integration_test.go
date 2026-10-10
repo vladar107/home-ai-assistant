@@ -43,6 +43,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/location"
 	"github.com/vladar107/home-ai-assistant/internal/memory"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
+	"github.com/vladar107/home-ai-assistant/internal/reaction"
 	"github.com/vladar107/home-ai-assistant/internal/routes"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
@@ -205,6 +206,8 @@ type harnessOptions struct {
 	recent *turnstate.Registry
 	// typingInterval, draftDelay, and draftInterval replace the turn indicator's timings.
 	typingInterval, draftDelay, draftInterval time.Duration
+	// reactions adds the react tool, as the application always does.
+	reactions bool
 }
 
 type fixedDescriber string
@@ -282,6 +285,14 @@ type conversationHarness struct {
 	draftStatus    int
 	// indicatorFailures counts the typing and draft failures the conversation reported, by method.
 	indicatorFailures map[string]int
+	reactions         []setReaction
+	// reactionCounts counts the reactions the react tool reported to telemetry, by emoji.
+	reactionCounts map[string]int
+}
+
+type setReaction struct {
+	chatID, messageID int64
+	emoji             string
 }
 
 type draftRequest struct {
@@ -338,6 +349,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		t: t, ctx: ctx, updates: make(chan []Update, 20), messages: make(chan sentMessage, 100), documents: make(chan sentDocument, 20), photos: make(chan sentPhoto, 20), edits: make(chan editedMessage, 100),
 		answers: make(chan callbackAnswer, 100), deletes: make(chan deletedMessage, 100), offsets: make(chan int64, 100), registrations: make(chan commandRegistration, 10),
 		turns: make(chan turnOutcome, 20), logs: &lockedBuffer{}, files: make(map[string]testFile), indicatorFailures: make(map[string]int),
+		reactionCounts: make(map[string]int),
 	}
 	server := httptest.NewServer(http.HandlerFunc(h.serveHTTP))
 	t.Cleanup(server.Close)
@@ -414,6 +426,15 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	// Tests that assert a turn's exact tools leave the withdraw tool out by not using the scheduler.
 	if options.schedules != nil {
 		if err := broker.Register(withdrawal.Provider{Withdrawer: h.approvals}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if options.reactions {
+		reactions, err := reaction.NewProvider(h.store, h.client, reactionTelemetry{h})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := broker.Register(reactions); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -851,6 +872,28 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		result = true
+	case "setMessageReaction":
+		chatID, chatErr := strconv.ParseInt(r.Form.Get("chat_id"), 10, 64)
+		messageID, messageErr := strconv.ParseInt(r.Form.Get("message_id"), 10, 64)
+		var reactions []struct {
+			Type  string `json:"type"`
+			Emoji string `json:"emoji"`
+		}
+		if chatErr != nil || messageErr != nil || json.Unmarshal([]byte(r.Form.Get("reaction")), &reactions) != nil || len(reactions) > 1 {
+			h.t.Errorf("setMessageReaction needs a chat, a message, and at most one reaction: %q %q %q", r.Form.Get("chat_id"), r.Form.Get("message_id"), r.Form.Get("reaction"))
+			return
+		}
+		set := setReaction{chatID: chatID, messageID: messageID}
+		if len(reactions) == 1 {
+			if reactions[0].Type != "emoji" {
+				h.t.Errorf("setMessageReaction reaction type = %q", reactions[0].Type)
+			}
+			set.emoji = reactions[0].Emoji
+		}
+		h.mu.Lock()
+		h.reactions = append(h.reactions, set)
+		h.mu.Unlock()
+		result = true
 	case "deleteMessage":
 		chatID, err := strconv.ParseInt(r.Form.Get("chat_id"), 10, 64)
 		if err != nil {
@@ -1135,6 +1178,27 @@ func (h *conversationHarness) draftRequests() []draftRequest {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return append([]draftRequest(nil), h.drafts...)
+}
+
+func (h *conversationHarness) setReactions() []setReaction {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.reactions)
+}
+
+func (h *conversationHarness) reactionCount(emoji string) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.reactionCounts[emoji]
+}
+
+// reactionTelemetry counts what the react tool reports on the harness.
+type reactionTelemetry struct{ h *conversationHarness }
+
+func (r reactionTelemetry) RecordReaction(_ context.Context, _, emoji string) {
+	r.h.mu.Lock()
+	defer r.h.mu.Unlock()
+	r.h.reactionCounts[emoji]++
 }
 
 func (h *conversationHarness) sentTexts() []string {

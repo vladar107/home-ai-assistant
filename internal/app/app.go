@@ -41,6 +41,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/module"
 	"github.com/vladar107/home-ai-assistant/internal/observability"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
+	"github.com/vladar107/home-ai-assistant/internal/reaction"
 	"github.com/vladar107/home-ai-assistant/internal/routes"
 	piruntime "github.com/vladar107/home-ai-assistant/internal/runtime/pi"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
@@ -338,7 +339,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			return fmt.Errorf("initialize Pi runtime: %w", err)
 		}
 		runtime.SetTelemetry(a.telemetry)
-		a.telemetry.ZeroRareOutcomes(ctx, principals, conversation.TurnErrorKinds())
+		a.telemetry.ZeroRareOutcomes(ctx, principals, conversation.TurnErrorKinds(), reaction.Emojis())
 		broker, err := tools.NewBroker(a.logger)
 		if err != nil {
 			return fmt.Errorf("initialize tool broker: %w", err)
@@ -364,6 +365,13 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		approvals.SetTelemetry(a.telemetry)
 		if err := broker.Register(withdrawal.Provider{Withdrawer: approvals}); err != nil {
 			return fmt.Errorf("register approval tools: %w", err)
+		}
+		reactions, err := reaction.NewProvider(a.store, client, a.telemetry)
+		if err != nil {
+			return fmt.Errorf("initialize reactions: %w", err)
+		}
+		if err := broker.Register(reactions); err != nil {
+			return fmt.Errorf("register reaction tools: %w", err)
 		}
 		memoryService, err := usermemory.NewService(usermemory.Config{}, a.store, approvals, a.logger)
 		if err != nil {

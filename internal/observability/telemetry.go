@@ -81,6 +81,7 @@ type Telemetry struct {
 	conversationResumes          metric.Int64Counter
 	conversationSearches         metric.Int64Counter
 	turnIndicatorFailures        metric.Int64Counter
+	reactionsSent                metric.Int64Counter
 	tasks                        taskInstruments
 	watches                      watchInstruments
 }
@@ -404,6 +405,9 @@ func (t *Telemetry) createBusinessInstruments(meter metric.Meter) error {
 	if t.turnIndicatorFailures, err = counter("home_agent.turn.indicator.failures", "Telegram typing and draft calls that failed while a turn ran, by method.", "{failure}"); err != nil {
 		return err
 	}
+	if t.reactionsSent, err = counter("home_agent.reactions.sent", "Reactions the bot set on users' messages, by emoji.", "{reaction}"); err != nil {
+		return err
+	}
 	if err := t.createTaskInstruments(meter); err != nil {
 		return err
 	}
@@ -625,10 +629,10 @@ func (t *Telemetry) StartToolCall(ctx context.Context, principal, tool string) (
 	}
 }
 
-// ZeroRareOutcomes creates each principal's rare failure series at zero, so increase() sees their
-// first occurrence. The label tuples must match the ones StartConversationTurn and StartModelCall
-// record.
-func (t *Telemetry) ZeroRareOutcomes(ctx context.Context, principals, turnErrorKinds []string) {
+// ZeroRareOutcomes creates each principal's rare failure series, and its series for each reaction
+// the bot may set, at zero, so increase() sees their first occurrence. The label tuples must match
+// the ones StartConversationTurn, StartModelCall, and RecordReaction record.
+func (t *Telemetry) ZeroRareOutcomes(ctx context.Context, principals, turnErrorKinds, reactions []string) {
 	for _, principal := range principals {
 		for _, errorKind := range turnErrorKinds {
 			for _, safetyChecks := range []string{"on", "off", "unavailable"} {
@@ -648,6 +652,9 @@ func (t *Telemetry) ZeroRareOutcomes(ctx context.Context, principals, turnErrorK
 		}
 		for _, outcome := range []string{"retried_ok", "retried_failed", "not_retried"} {
 			t.modelStalls.Add(ctx, 0, metric.WithAttributes(principalAttr(principal), labelAttr("home_agent.outcome", outcome, "unknown")))
+		}
+		for _, emoji := range reactions {
+			t.reactionsSent.Add(ctx, 0, metric.WithAttributes(principalAttr(principal), labelAttr("home_agent.emoji", emoji, "unknown")))
 		}
 	}
 }
@@ -763,6 +770,14 @@ func (t *Telemetry) RecordTurnIndicatorFailure(ctx context.Context, principal, m
 	t.turnIndicatorFailures.Add(ctx, 1, metric.WithAttributes(
 		principalAttr(principal),
 		labelAttr("home_agent.method", method, "unknown"),
+	))
+}
+
+// RecordReaction counts a reaction the bot set on a user's message.
+func (t *Telemetry) RecordReaction(ctx context.Context, principal, emoji string) {
+	t.reactionsSent.Add(ctx, 1, metric.WithAttributes(
+		principalAttr(principal),
+		labelAttr("home_agent.emoji", emoji, "unknown"),
 	))
 }
 

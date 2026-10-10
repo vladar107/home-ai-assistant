@@ -236,7 +236,12 @@ not_retryable), and each retry is logged at debug level.
 7. The reply goes back through Telegram, as a day card photo with a caption when the
    turn produced one. Message bodies are then cleared from SQLite; the sent
    message's ID is kept with its session, so replying to it later returns to
-   that conversation.
+   that conversation. A turn answering a message the user wrote, not the
+   continuation after Confirm, can also set one emoji reaction on that message
+   with `react`; when the reaction is the whole answer the turn replies
+   `[nothing-to-add]`, and delivery sends no text, not even the line marking a
+   resumed conversation, but still sends the turn's proposals.
+   `home_agent.reactions.sent` counts the reactions by emoji.
 
 ### Earlier conversations
 

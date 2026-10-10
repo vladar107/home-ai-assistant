@@ -39,7 +39,8 @@ const (
 	NotConnectedReply = "Your model subscription is not connected. Use /settings to connect it."
 )
 
-// NothingToAdd is the reply a continuation turn gives when the request is finished; it is never sent.
+// NothingToAdd is the reply a continuation turn gives when the request is finished, or a turn whose
+// reaction is the whole answer; it is never sent.
 const NothingToAdd = "[nothing-to-add]"
 
 // ContinueMessage starts the turn that follows a confirmed proposal, so a request with several
@@ -538,6 +539,11 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 	defer release()
 
 	run := tools.NewRun(request.Message)
+	// A continuation's Telegram message is the bot's own proposal, so nothing may act on it as the
+	// user's.
+	if request.Message != ContinueMessage {
+		run.MarkUserMessage()
+	}
 	turnCtx, cancel := context.WithTimeout(tools.WithRun(tools.WithTurn(ctx, outbox.ChatTurn(request.ID)), run), s.config.TurnTimeout)
 	s.mu.Lock()
 	s.inflight[request.PrincipalID] = cancel
@@ -893,15 +899,18 @@ func (s *Service) deliver(ctx context.Context, request Request) error {
 	deliveryStarted := time.Now()
 	replyTo := request.TelegramMessageID
 	response := request.ResponseText
-	if !request.ResumedFrom.IsZero() {
-		response = ResumedLine(s.local(request.ResumedFrom)) + "\n\n" + response
-	}
-	chunks := SplitReply(response)
+	silent := false
 	if strings.Contains(response, NothingToAdd) {
-		chunks = nil
-		if rest := strings.TrimSpace(strings.ReplaceAll(response, NothingToAdd, "")); rest != "" {
-			chunks = SplitReply(rest)
+		response = strings.TrimSpace(strings.ReplaceAll(response, NothingToAdd, ""))
+		silent = response == ""
+	}
+	// A turn with nothing left to say sends nothing, not even the line marking a resumed conversation.
+	var chunks []string
+	if !silent {
+		if !request.ResumedFrom.IsZero() {
+			response = ResumedLine(s.local(request.ResumedFrom)) + "\n\n" + response
 		}
+		chunks = SplitReply(response)
 	}
 	// A failed turn's text explains the failure, so a card it staged would illustrate nothing.
 	if s.config.Cards != nil && request.ErrorKind == "" && len(chunks) > 0 {

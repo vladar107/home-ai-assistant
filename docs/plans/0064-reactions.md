@@ -134,5 +134,7 @@ lists, but no message text.
 - If private chats never deliver `message_reaction`, the user-side half is dropped.
 - The model may over-react; guidance and a look at how often `react` is called
   will tell.
+- A silent acknowledgement turn that runs past the draft delay sends nothing that
+  clears its draft, so the draft stays until it expires.
 - A 👎 pressed while a turn is pending does nothing visible; if that confuses, the bot
   could later answer it once the turn ends.

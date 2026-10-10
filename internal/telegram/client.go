@@ -587,6 +587,30 @@ func (c *Client) SendMessageDraft(ctx context.Context, chatID, draftID int64, te
 	return err
 }
 
+// SetMessageReaction sets the bot's emoji reaction on a message, replacing any earlier one; an
+// empty emoji clears it.
+func (c *Client) SetMessageReaction(ctx context.Context, chatID, messageID int64, emoji string) error {
+	type reaction struct {
+		Type  string `json:"type"`
+		Emoji string `json:"emoji"`
+	}
+	reactions := []reaction{}
+	if emoji != "" {
+		reactions = append(reactions, reaction{Type: "emoji", Emoji: emoji})
+	}
+	encoded, err := json.Marshal(reactions)
+	if err != nil {
+		return fmt.Errorf("Telegram setMessageReaction reaction could not be encoded")
+	}
+	params := url.Values{
+		"chat_id":    {strconv.FormatInt(chatID, 10)},
+		"message_id": {strconv.FormatInt(messageID, 10)},
+		"reaction":   {string(encoded)},
+	}
+	_, err = execute[bool](c, ctx, "setMessageReaction", params)
+	return err
+}
+
 // SendDocument uploads a file to the chat as a Telegram document. The caller bounds the size; the
 // body is streamed into the multipart request between its prologue and closing boundary so a file
 // never has to be held in memory, which is also why the length is set rather than left to chunked
