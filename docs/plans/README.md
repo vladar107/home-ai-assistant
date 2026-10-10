@@ -72,7 +72,7 @@ plan that links back to the earlier record.
 | 0060 | [Watch alerts in the user's language](0060-watch-alerts-in-the-users-language.md) | done |
 | 0061 | [Judgments with conversation context](0061-judgments-with-conversation-context.md) | done |
 | 0062 | [History search keeps privacy by source](0062-history-privacy-by-source.md) | done |
-| 0063 | [Show that a turn is still working](0063-show-the-turn-is-working.md) | in-progress |
+| 0063 | [Show that a turn is still working](0063-show-the-turn-is-working.md) | done |
 | 0064 | [Reactions both ways](0064-reactions.md) | in-progress |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
