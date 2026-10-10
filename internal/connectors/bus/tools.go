@@ -63,6 +63,7 @@ var definitions = []tools.Definition{
 		Name:        toolTrip,
 		Description: "Trips between two Dutch stops or places by bus, tram, or metro, and by train where a trip needs one: live direct buses for the next hour (line, platform, departure with delay, arrival, cancellations), or planned itineraries with changes for a later time or an arrival deadline, plus disruption notices for the stops and lines involved.",
 		Risk:        tools.RiskRead,
+		Activity:    tools.ActivityTransit,
 		Timeout:     toolTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"to":{"type":"string","description":"Destination stop or place, such as \"Utrecht Centraal\" or \"Utrecht, Centraal Station\"; also accepts coordinates as lat,lon, such as the user's shared location."},` +
@@ -76,6 +77,7 @@ var definitions = []tools.Definition{
 		Name:        toolStopStatus,
 		Description: "The live departure board of one Dutch bus, tram, or metro stop: each departure's line, destination, platform, planned and expected time, delay, and cancellation, a count of delayed and cancelled departures, and the disruption notices for the stop.",
 		Risk:        tools.RiskRead,
+		Activity:    tools.ActivityTransit,
 		Timeout:     toolTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"stop":{"type":"string","description":"Stop name or timing point code; also accepts coordinates as lat,lon, such as the user's shared location, for the nearest stop within 1 km; default the household's home stop."},` +

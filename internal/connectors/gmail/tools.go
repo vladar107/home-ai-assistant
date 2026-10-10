@@ -39,6 +39,7 @@ var definitions = []tools.Definition{
 		ThirdParty:  true,
 		Description: "Search this user's Gmail mailboxes with Gmail search syntax and list the matching messages, newest first, with account, sender, subject, date, labels, and snippet.",
 		Risk:        tools.RiskRead,
+		Activity:    tools.ActivityMail,
 		Timeout:     searchTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"query":{"type":"string","description":"Gmail search syntax, such as is:unread newer_than:1d."},` +
@@ -52,6 +53,7 @@ var definitions = []tools.Definition{
 		Screen:      true,
 		Description: "Read the text of one Gmail message by its account and id, with its headers and the names of its attachments.",
 		Risk:        tools.RiskRead,
+		Activity:    tools.ActivityMail,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"account":{"type":"string","description":"The message's account address from gmail_search."},` +
 			`"id":{"type":"string","description":"The message id from gmail_search."},` +

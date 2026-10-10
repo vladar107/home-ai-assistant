@@ -80,6 +80,7 @@ type Telemetry struct {
 	memoryWrites                 metric.Int64Counter
 	conversationResumes          metric.Int64Counter
 	conversationSearches         metric.Int64Counter
+	turnIndicatorFailures        metric.Int64Counter
 	tasks                        taskInstruments
 	watches                      watchInstruments
 }
@@ -400,6 +401,9 @@ func (t *Telemetry) createBusinessInstruments(meter metric.Meter) error {
 	if t.conversationSearches, err = counter("home_agent.conversation.searches", "Searches of earlier conversations, by outcome.", "{search}"); err != nil {
 		return err
 	}
+	if t.turnIndicatorFailures, err = counter("home_agent.turn.indicator.failures", "Telegram typing and draft calls that failed while a turn ran, by method.", "{failure}"); err != nil {
+		return err
+	}
 	if err := t.createTaskInstruments(meter); err != nil {
 		return err
 	}
@@ -639,6 +643,9 @@ func (t *Telemetry) ZeroRareOutcomes(ctx context.Context, principals, turnErrorK
 		for _, outcome := range []string{"timeout", "cancelled", "failed"} {
 			t.modelCalls.Add(ctx, 0, metric.WithAttributes(principalAttr(principal), labelAttr("home_agent.outcome", outcome, "unknown")))
 		}
+		for _, method := range []string{"typing", "draft"} {
+			t.turnIndicatorFailures.Add(ctx, 0, metric.WithAttributes(principalAttr(principal), labelAttr("home_agent.method", method, "unknown")))
+		}
 		for _, outcome := range []string{"retried_ok", "retried_failed", "not_retried"} {
 			t.modelStalls.Add(ctx, 0, metric.WithAttributes(principalAttr(principal), labelAttr("home_agent.outcome", outcome, "unknown")))
 		}
@@ -748,6 +755,14 @@ func (t *Telemetry) RecordConversationSearch(ctx context.Context, principal, out
 	t.conversationSearches.Add(ctx, 1, metric.WithAttributes(
 		principalAttr(principal),
 		labelAttr("home_agent.outcome", outcome, "unknown"),
+	))
+}
+
+// RecordTurnIndicatorFailure counts a failed typing or draft call; the method is "typing" or "draft".
+func (t *Telemetry) RecordTurnIndicatorFailure(ctx context.Context, principal, method string) {
+	t.turnIndicatorFailures.Add(ctx, 1, metric.WithAttributes(
+		principalAttr(principal),
+		labelAttr("home_agent.method", method, "unknown"),
 	))
 }
 

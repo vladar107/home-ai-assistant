@@ -46,6 +46,7 @@ var historyDefinition = tools.Definition{
 	Name:        toolHistory,
 	Description: "Home Assistant: total change, or mean, minimum, and maximum, of one sensor over a calendar period from Home Assistant's long-term statistics, such as energy produced yesterday or this month.",
 	Risk:        tools.RiskRead,
+	Activity:    tools.ActivityHome,
 	Timeout:     toolTimeout,
 	ThirdParty:  true,
 	Household:   true,
@@ -59,6 +60,7 @@ var confirmedDevicesDefinition = tools.Definition{
 	Name:        toolConfirmedDevices,
 	Description: "Home Assistant: list the devices whose actions always need the user's confirmation, with entity ID, name, current state, and the services and fields each accepts.",
 	Risk:        tools.RiskRead,
+	Activity:    tools.ActivityHome,
 	Timeout:     toolTimeout,
 	ThirdParty:  true,
 	Household:   true,
@@ -69,6 +71,7 @@ var serviceCallDefinition = tools.Definition{
 	Name:        toolServiceCall,
 	Description: "Home Assistant: propose calling a service on a device from " + toolConfirmedDevices + ". The user must confirm before anything happens.",
 	Risk:        tools.RiskWrite,
+	Activity:    tools.ActivityHome,
 	Timeout:     toolTimeout,
 	InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 		`"entity_id":{"type":"string","description":"The entity ID from ` + toolConfirmedDevices + `."},` +

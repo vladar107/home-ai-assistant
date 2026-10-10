@@ -60,6 +60,7 @@ var definitions = []tools.Definition{
 		Name:        toolTrips,
 		Description: "Plan NS train trips between two Dutch stations: up to five options with planned and live departure and arrival times, delays, tracks and track changes, each leg and transfer, duration, crowding, status, cancellations, and messages.",
 		Risk:        tools.RiskRead,
+		Activity:    tools.ActivityTransit,
 		Timeout:     toolTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"from":{"type":"string","description":"Departure station name or code, such as Den Haag or GVC."},` +
@@ -74,6 +75,7 @@ var definitions = []tools.Definition{
 		Name:        toolDepartures,
 		Description: "List the next NS departures from one Dutch station with live times, delays, tracks and track changes, cancellations, and messages.",
 		Risk:        tools.RiskRead,
+		Activity:    tools.ActivityTransit,
 		Timeout:     toolTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"station":{"type":"string","description":"Station name or code."},` +
@@ -85,6 +87,7 @@ var definitions = []tools.Definition{
 		Name:        toolDisruptions,
 		Description: "List NS calamities, disruptions, and engineering works in effect at a moment, nationally or touching one station, with the situation, cause, advice, and expected end.",
 		Risk:        tools.RiskRead,
+		Activity:    tools.ActivityTransit,
 		Timeout:     toolTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"station":{"type":"string","description":"Optional station name or code; leave it out for the whole country."},` +

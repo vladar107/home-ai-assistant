@@ -67,6 +67,7 @@ func cardDefinition(trains bool) tools.Definition {
 		Name:        toolCard,
 		Description: "Draw a day card, a weather picture sent as a photo with your reply: a header with the first leg's first hour and one tile per leg with its worst weather, average temperature, total precipitation, and strong gusts, all taken from the forecast.",
 		Risk:        tools.RiskRead,
+		Activity:    tools.ActivityWeather,
 		Timeout:     cardTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"title":{"type":"string","maxLength":100,"description":"The card's top line, such as the day and route: Mon 28.09 · Den Haag → Zwolle."},` +
@@ -85,6 +86,7 @@ var definitions = []tools.Definition{
 		Screen:      true,
 		Description: "Fetch a public web page, text file, or PDF by its http or https address, which must be one the user gave or one that appeared in content you read when this conversation already holds outside content, and return its readable text in windows of about 12 KB, with the title and the address it finally came from.",
 		Risk:        tools.RiskRead,
+		Activity:    tools.ActivityWeb,
 		Timeout:     toolTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"url":{"type":"string","description":"The full http or https address."},` +
@@ -95,6 +97,7 @@ var definitions = []tools.Definition{
 		Name:        toolWeather,
 		Description: "Get current weather and a daily forecast for a place name or coordinates, such as the user's shared location from the turn's [system] User's location line, or an hourly forecast for one day and a range of hours, in metric units and the place's local time.",
 		Risk:        tools.RiskRead,
+		Activity:    tools.ActivityWeather,
 		Timeout:     toolTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"location":{"type":"string","description":"A town or city name, optionally with its country, such as Zwolle, Netherlands."},` +

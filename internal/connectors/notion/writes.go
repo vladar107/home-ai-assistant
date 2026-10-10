@@ -40,6 +40,7 @@ var writeDefinitions = []tools.Definition{
 		Name:        toolCreatePage,
 		Description: "Propose creating a Notion page under a shared page or in a data source, with a title, optional property values, and optional body paragraphs. The user must confirm before anything is created.",
 		Risk:        tools.RiskWrite,
+		Activity:    tools.ActivityNotion,
 		Private:     true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"parent_type":{"type":"string","enum":["page","data_source"],"description":"Whether parent_id names a page or a data source."},` +
@@ -53,6 +54,7 @@ var writeDefinitions = []tools.Definition{
 		Name:        toolUpdatePage,
 		Description: "Propose setting property values on a shared Notion page. The user must confirm before anything changes.",
 		Risk:        tools.RiskWrite,
+		Activity:    tools.ActivityNotion,
 		Private:     true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"page_id":{"type":"string","description":"The page ID from an earlier result."},` +
@@ -63,6 +65,7 @@ var writeDefinitions = []tools.Definition{
 		Name:        toolAppendBlocks,
 		Description: "Propose appending paragraphs to the end of a shared Notion page. The user must confirm before anything is added.",
 		Risk:        tools.RiskWrite,
+		Activity:    tools.ActivityNotion,
 		Private:     true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"page_id":{"type":"string","description":"The page ID from an earlier result."},` +

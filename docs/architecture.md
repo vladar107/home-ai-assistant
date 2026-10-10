@@ -207,7 +207,15 @@ not_retryable), and each retry is logged at debug level.
 2. The request is persisted before the polling cursor advances, so a restart never
    loses or replays an accepted message.
 3. `conversation` claims it, resolves the principal's own model connection, and
-   collects only the tools that principal has granted and enabled.
+   collects only the tools that principal has granted and enabled. From the wait
+   for the principal's turn slot until the turn ends, typing is resent every 4
+   seconds; a turn running longer than 8 seconds also shows a Telegram draft such
+   as "Searching the web… · 40s", refreshed every 20 seconds, named from the
+   activity key of the connector whose tool is running and never from arguments
+   or results. The keys stay out of what the model sees. The draft's stop button
+   cancels that turn like `/cancel`; a press for an older draft changes nothing.
+   Both are best effort: a failed call is counted and skipped, and both stop
+   before the turn ends, so neither lands after the reply.
 4. `runtime/pi` starts Pi with a private per-turn directory containing the bridge
    extension and those tool definitions.
 5. Every tool call returns over loopback to `tools`, which rechecks the grant and

@@ -39,6 +39,7 @@ var definitions = []tools.Definition{
 		ThirdParty:  true,
 		Description: "List this user's calendar events between two moments, across their calendars and Google accounts, with account, calendar, event id, title, times, location, and their own response.",
 		Risk:        tools.RiskRead,
+		Activity:    tools.ActivityCalendar,
 		Timeout:     eventsTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"start":{"type":"string","description":"Start of the range: an RFC 3339 date-time, or a date YYYY-MM-DD meaning the start of that day in the user's time zone."},` +
@@ -53,6 +54,7 @@ var definitions = []tools.Definition{
 		Screen:      true,
 		Description: "Read one calendar event by its account, calendar id, and event id, with organizer, attendees and their responses, conference link, recurrence, and description text.",
 		Risk:        tools.RiskRead,
+		Activity:    tools.ActivityCalendar,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"account":{"type":"string","description":"The Google account address, as shown by calendar_events."},` +
 			`"calendar_id":{"type":"string","description":"The calendar id from calendar_events."},` +

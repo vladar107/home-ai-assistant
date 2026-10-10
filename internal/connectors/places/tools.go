@@ -85,6 +85,7 @@ var definitions = []tools.Definition{{
 	Name:        ToolNearbyPlaces,
 	Description: "Find the nearest places of one kind around a point from OpenStreetMap: name, distance, compass direction, address, opening hours, phone, and website. Use it for \"where is the nearest pharmacy\" and similar questions about a shared location. Opening hours are raw OpenStreetMap strings; judge \"open now\" yourself against the current local time given in the turn. The data comes from OpenStreetMap and may be incomplete.",
 	Risk:        tools.RiskRead,
+	Activity:    tools.ActivityPlaces,
 	Timeout:     toolTimeout,
 	InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 		`"latitude":{"type":"number","minimum":-90,"maximum":90,"description":"Latitude of the point to search around, such as the user's shared location."},` +

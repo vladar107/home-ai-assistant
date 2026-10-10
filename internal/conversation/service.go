@@ -70,10 +70,19 @@ type Service struct {
 	// against a credential-refresh race that Pi 1.0.0 removed by locking auth.json, which is why
 	// background tasks run outside it; relaxing it for chat and scheduled runs is a separate decision.
 	turns map[string]chan struct{}
-	wg    sync.WaitGroup
+	// drafts holds the draft of each principal's running chat turn, so a stop press counts only
+	// while that turn is still running.
+	drafts map[string]*runningDraft
+	wg     sync.WaitGroup
 	// captures holds what a finished chat turn measured until its reply is delivered; a restart
 	// in between loses it, and that reply is then counted as recovered.
 	captures map[string]replyCapture
+}
+
+type runningDraft struct {
+	id      int64
+	cancel  context.CancelFunc
+	stopped bool
 }
 
 type replyCapture struct {
@@ -121,6 +130,15 @@ func NewService(
 	if config.Now == nil {
 		config.Now = time.Now
 	}
+	if config.TypingInterval <= 0 {
+		config.TypingInterval = defaultTypingInterval
+	}
+	if config.DraftDelay <= 0 {
+		config.DraftDelay = defaultDraftDelay
+	}
+	if config.DraftInterval <= 0 {
+		config.DraftInterval = defaultDraftInterval
+	}
 	if (config.Cards == nil) != (config.Photos == nil) {
 		return nil, fmt.Errorf("conversation cards and photos must be configured together")
 	}
@@ -139,6 +157,7 @@ func NewService(
 		workers:      make(map[string]chan struct{}),
 		inflight:     make(map[string]context.CancelFunc),
 		turns:        make(map[string]chan struct{}),
+		drafts:       make(map[string]*runningDraft),
 	}, nil
 }
 
@@ -292,6 +311,44 @@ func (s *Service) Cancel(ctx context.Context, principalID string) (bool, error) 
 		cancel()
 	}
 	return cancelled, nil
+}
+
+// StopDraft cancels the principal's running turn when draftID is the draft that turn shows. Like
+// /cancel it cancels the request in the store before the context, so a failed store call leaves the
+// turn running and a retried press still finds it. A turn that finds itself stopped when it
+// unregisters saves nothing; one that saved first finds its request no longer running.
+func (s *Service) StopDraft(ctx context.Context, principalID string, draftID int64) (bool, error) {
+	if !s.showsDraft(principalID, draftID) {
+		return false, nil
+	}
+	if _, err := s.repository.CancelPendingConversation(ctx, principalID); err != nil {
+		return false, err
+	}
+	s.mu.Lock()
+	if draft := s.drafts[principalID]; draft != nil && draft.id == draftID {
+		draft.stopped = true
+		draft.cancel()
+	}
+	s.dropCaptures(principalID)
+	s.mu.Unlock()
+	return true, nil
+}
+
+func (s *Service) showsDraft(principalID string, draftID int64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	draft := s.drafts[principalID]
+	return draft != nil && draft.id == draftID
+}
+
+// endDraft unregisters the principal's running turn from StopDraft and reports whether a stop
+// press already cancelled it.
+func (s *Service) endDraft(principalID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	draft := s.drafts[principalID]
+	delete(s.drafts, principalID)
+	return draft != nil && draft.stopped
 }
 
 // dropCaptures forgets the measurements of the principal's cancelled requests, which never reach
@@ -521,8 +578,17 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 	var memory string
 	var attachments attachment.Turn
 	var hint toolHint
+	var activity *turnActivity
+	defer func() {
+		activity.stop()
+		s.endDraft(request.PrincipalID)
+	}()
 	if runErr == nil && connected {
-		_ = s.deliverer.SendTyping(turnCtx, request.ChatID)
+		draft := draftID(request.ID)
+		s.mu.Lock()
+		s.drafts[request.PrincipalID] = &runningDraft{id: draft, cancel: cancel}
+		s.mu.Unlock()
+		activity = s.startActivity(turnCtx, request.PrincipalID, request.ChatID, draft)
 		tools, runErr = s.toolProvider.ToolsFor(turnCtx, request.PrincipalID)
 		var hinted <-chan toolHint
 		if runErr == nil {
@@ -562,6 +628,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		}
 		notice := s.takeNotice(turnCtx, request)
 		sink := s.newCountingSink(request.PrincipalID, outbox.ChatTurn(request.ID), run)
+		sink.activity, sink.activities = activity, tools.Activities
 		runStarted = time.Now()
 		result, err := s.runtime.Run(turnCtx, agentruntime.RunRequest{
 			PrincipalID: request.PrincipalID,
@@ -575,6 +642,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		}, sink)
 		modelTime = time.Since(runStarted)
 		runErr = err
+		activity.stop()
 		notes := s.memoryNotes(request.PrincipalID, outbox.ChatTurn(request.ID))
 		if err == nil && !errors.Is(turnCtx.Err(), context.Canceled) {
 			s.recordTurnMetrics(turnCtx, request.PrincipalID, safetyChecks, sink, result.Usage, !tools.Empty() || webSearch, hint)
@@ -600,6 +668,12 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 	}
 	if reportedKind == "" {
 		reportedKind = errorKind
+	}
+	activity.stop()
+	if s.endDraft(request.PrincipalID) {
+		s.removeCard(request)
+		endTurn("cancelled", "cancelled")
+		return
 	}
 
 	outcome := "success"
@@ -1014,7 +1088,8 @@ func (s *Service) awaitTurn(ctx context.Context, request Request) (func(), bool)
 		delete(s.inflight, request.PrincipalID)
 		s.mu.Unlock()
 	}()
-	_ = s.deliverer.SendTyping(waitCtx, request.ChatID)
+	typing := s.startActivity(waitCtx, request.PrincipalID, request.ChatID, 0)
+	defer typing.stop()
 	select {
 	case slot <- struct{}{}:
 		return func() { <-slot }, true
@@ -1068,6 +1143,11 @@ type countingSink struct {
 	exposure    tools.TurnExposureRecorder
 	run         *tools.Run
 
+	// activity and activities follow a chat turn's tool calls on its draft; both are nil for a turn
+	// nobody is watching.
+	activity   *turnActivity
+	activities map[string]string
+
 	mu     sync.Mutex
 	calls  int
 	called map[string]bool
@@ -1078,6 +1158,12 @@ func (s *Service) newCountingSink(principalID, turn string, run *tools.Run) *cou
 }
 
 func (c *countingSink) Emit(ctx context.Context, event agentruntime.Event) error {
+	switch event.Type {
+	case "tool_call":
+		c.activity.show(activityKey(event.Text, c.activities))
+	case "tool_result":
+		c.activity.show("")
+	}
 	if event.Type == "tool_result" && event.Tool == webSearchTool {
 		if c.run != nil {
 			c.run.MarkExternal(event.Text)

@@ -43,6 +43,7 @@ var writeDefinitions = []tools.Definition{
 		Name:        toolSaveAttachment,
 		Description: "Propose saving a file or photo the user sent in this conversation to a folder on the NAS. The user must confirm, and an existing name is refused rather than replaced.",
 		Risk:        tools.RiskWrite,
+		Activity:    tools.ActivityFiles,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"attachment_id":{"type":"string","description":"The id of the file the user sent, as listed by list_attachments."},` +
 			`"folder":{"type":"string","description":"Where the user asked for it, such as home/Documents/Finance. Omit to use this user's default folder. Missing folders are created."},` +

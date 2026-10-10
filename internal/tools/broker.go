@@ -79,7 +79,24 @@ type Definition struct {
 	// OutsideBudget keeps the tool's calls out of the turn's call budget, so a turn that has spent
 	// its budget can still hand the rest of the work to it.
 	OutsideBudget bool
+	// Activity names what a call of the tool is doing, for showing the user while the turn runs; it
+	// is one of the Activity keys or empty, and never reaches the model.
+	Activity string
 }
+
+// Activity keys a connector's tools carry. A label belongs to a connector rather than to each tool.
+const (
+	ActivityWeb      = "web"
+	ActivityWeather  = "weather"
+	ActivityMail     = "mail"
+	ActivityCalendar = "calendar"
+	ActivityFiles    = "files"
+	ActivityHome     = "home"
+	ActivityTransit  = "transit"
+	ActivityNotion   = "notion"
+	ActivityGrafana  = "grafana"
+	ActivityPlaces   = "places"
+)
 
 // Contribution is what a provider grants one principal at one moment. WriteGuidance describes the
 // write tools alone, so a read-only turn can leave it out with them.
@@ -211,6 +228,7 @@ func (b *Broker) toolsFor(ctx context.Context, principalID string, readOnly bool
 	executor := &turnExecutor{broker: b, principalID: principalID, turn: TurnFrom(ctx), run: RunFrom(ctx), budget: callBudgetFrom(ctx), bindings: make(map[string]toolBinding)}
 	var guidance []string
 	var definitions []agentruntime.ToolDefinition
+	activities := make(map[string]string)
 	for _, provider := range b.providers {
 		contribution, err := provider.Contribute(ctx, principalID)
 		if err != nil {
@@ -237,6 +255,9 @@ func (b *Broker) toolsFor(ctx context.Context, principalID string, readOnly bool
 				Description: definition.Description,
 				InputSchema: definition.InputSchema,
 			})
+			if definition.Activity != "" {
+				activities[definition.Name] = definition.Activity
+			}
 		}
 		if text := strings.TrimSpace(contribution.Guidance); text != "" && offered > 0 {
 			guidance = append(guidance, text)
@@ -252,6 +273,7 @@ func (b *Broker) toolsFor(ctx context.Context, principalID string, readOnly bool
 		Definitions: definitions,
 		Guidance:    strings.Join(guidance, "\n"),
 		Executor:    executor,
+		Activities:  activities,
 	}, nil
 }
 

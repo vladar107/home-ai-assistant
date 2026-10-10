@@ -61,6 +61,9 @@ type ToolSet struct {
 	Definitions []ToolDefinition
 	Guidance    string
 	Executor    ToolExecutor
+	// Activities maps an offered tool's name to its activity key, for showing the user what the
+	// turn is doing. A runtime never sends it to the model.
+	Activities map[string]string
 }
 
 func (t ToolSet) Empty() bool {

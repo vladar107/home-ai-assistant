@@ -33,6 +33,7 @@ var readDefinitions = []tools.Definition{
 		Name:        toolListFiles,
 		Description: "List the folders on the NAS this user can reach, or the folders and files inside one of them.",
 		Risk:        tools.RiskRead,
+		Activity:    tools.ActivityFiles,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"path":{"type":"string","description":"A folder such as home/Documents; omit to list the folders this user can reach."}},` +
 			`"additionalProperties":false}`),
@@ -41,6 +42,7 @@ var readDefinitions = []tools.Definition{
 		Name:        toolSearchFiles,
 		Description: "Find files and folders on the NAS whose name contains the query, searching inside one folder.",
 		Risk:        tools.RiskRead,
+		Activity:    tools.ActivityFiles,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"query":{"type":"string","description":"Text matched against file and folder names, ignoring case."},` +
 			`"path":{"type":"string","description":"The folder to search inside, such as home/Documents."},` +
@@ -51,6 +53,7 @@ var readDefinitions = []tools.Definition{
 		Name:        toolReadFile,
 		Description: "Read the text content of one file on the NAS, or the text of a PDF. Call this only when the user has asked what the file says, never to find, identify, or send it.",
 		Risk:        tools.RiskRead,
+		Activity:    tools.ActivityFiles,
 		Private:     true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"path":{"type":"string","description":"The full path from a listing, such as home/Documents/notes.md."},` +

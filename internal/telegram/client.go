@@ -66,6 +66,15 @@ type Update struct {
 	Message       *Message       `json:"message"`
 	EditedMessage *Message       `json:"edited_message"`
 	CallbackQuery *CallbackQuery `json:"callback_query"`
+	// StoppedMessageGeneration is a press of a draft's stop button. Telegram names no user in it.
+	StoppedMessageGeneration *MessageGenerationStopped `json:"stopped_message_generation"`
+}
+
+// MessageGenerationStopped identifies the chat and the draft whose stop button was pressed.
+type MessageGenerationStopped struct {
+	Chat            Chat  `json:"chat"`
+	MessageThreadID int64 `json:"message_thread_id"`
+	DraftID         int64 `json:"draft_id"`
 }
 
 // CallbackQuery is a button press. Message is the bot message that carried the button; Telegram
@@ -281,7 +290,7 @@ func (c *Client) GetMe(ctx context.Context) (Bot, error) {
 
 func (c *Client) GetUpdates(ctx context.Context, offset int64) ([]Update, error) {
 	params := url.Values{
-		"allowed_updates": {`["message","edited_message","callback_query"]`},
+		"allowed_updates": {`["message","edited_message","callback_query","stopped_message_generation"]`},
 		"offset":          {strconv.FormatInt(offset, 10)},
 		"timeout":         {strconv.FormatInt(c.pollSeconds, 10)},
 	}
@@ -542,6 +551,22 @@ func (c *Client) SendTyping(ctx context.Context, chatID int64) error {
 		"chat_id": {strconv.FormatInt(chatID, 10)},
 	}
 	_, err := execute[bool](c, ctx, "sendChatAction", params)
+	return err
+}
+
+// SendMessageDraft shows the chat an ephemeral draft that Telegram clears after about 30 seconds or
+// when the bot sends a message. An empty text shows Telegram's thinking placeholder; canStop adds a
+// button that sends the bot a stopped_message_generation update.
+func (c *Client) SendMessageDraft(ctx context.Context, chatID, draftID int64, text string, canStop bool) error {
+	params := url.Values{
+		"chat_id":  {strconv.FormatInt(chatID, 10)},
+		"draft_id": {strconv.FormatInt(draftID, 10)},
+		"text":     {text},
+	}
+	if canStop {
+		params.Set("can_stop", "true")
+	}
+	_, err := execute[bool](c, ctx, "sendMessageDraft", params)
 	return err
 }
 

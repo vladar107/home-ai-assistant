@@ -169,6 +169,8 @@ type Deliverer interface {
 	// SendTrackedReply is SendReply returning the sent message's ID.
 	SendTrackedReply(context.Context, int64, int64, string) (int64, error)
 	SendTyping(context.Context, int64) error
+	// SendMessageDraft shows an ephemeral draft; an empty text shows Telegram's thinking placeholder.
+	SendMessageDraft(ctx context.Context, chatID, draftID int64, text string, canStop bool) error
 }
 
 // History reads what Pi recorded of a principal's conversations.
@@ -204,6 +206,8 @@ type Telemetry interface {
 	RecordHintFollowThrough(ctx context.Context, principal, result string)
 	// RecordConversationResume counts a return to an earlier conversation by what triggered it.
 	RecordConversationResume(ctx context.Context, principal, trigger string)
+	// RecordTurnIndicatorFailure counts a failed Telegram typing or draft call; method is "typing" or "draft".
+	RecordTurnIndicatorFailure(ctx context.Context, principal, method string)
 }
 
 // SafetyChecks reports whether a principal has opted in to the safety checks, for labelling the
@@ -368,8 +372,15 @@ type Config struct {
 	// Location is the household's time zone; each chat turn then tells the model the current
 	// local time. Nil leaves the time out.
 	Location *time.Location
-	// Now is the clock that time is read from; nil means time.Now.
+	// Now is the clock that time is read from, including a turn's elapsed time on its draft; nil
+	// means time.Now.
 	Now func() time.Time
+	// TypingInterval is how often typing is resent while a chat turn waits or runs; zero means 4s.
+	TypingInterval time.Duration
+	// DraftDelay is how long a chat turn runs before it shows a draft; zero means 8s.
+	DraftDelay time.Duration
+	// DraftInterval is how often a shown draft is refreshed; zero means 20s.
+	DraftInterval time.Duration
 	// History titles the conversations /sessions lists; nil lists them without titles.
 	History History
 	// DisplayNames tells each turn which household member its user is; a principal without a

@@ -41,6 +41,9 @@ func (d hintDeliverer) SendTrackedReply(ctx context.Context, chatID, replyTo int
 	return 0, d.SendReply(ctx, chatID, replyTo, text)
 }
 func (hintDeliverer) SendTyping(context.Context, int64) error { return nil }
+func (hintDeliverer) SendMessageDraft(context.Context, int64, int64, string, bool) error {
+	return nil
+}
 
 type hintTools struct{ names []string }
 
@@ -81,6 +84,7 @@ func (quietTelemetry) RecordModelTurn(context.Context, string, string, int, int6
 func (quietTelemetry) RecordToolCallsPerTurn(context.Context, string, string, int)                {}
 func (quietTelemetry) RecordHintFollowThrough(context.Context, string, string)                    {}
 func (quietTelemetry) RecordConversationResume(context.Context, string, string)                   {}
+func (quietTelemetry) RecordTurnIndicatorFailure(context.Context, string, string)                 {}
 
 type hintEnv struct {
 	ctx       context.Context

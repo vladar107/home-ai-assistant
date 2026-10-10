@@ -203,6 +203,8 @@ type harnessOptions struct {
 	search bool
 	// recent keeps each chat turn's message and plain reply for the guards, as a TypeSafe key does.
 	recent *turnstate.Registry
+	// typingInterval, draftDelay, and draftInterval replace the turn indicator's timings.
+	typingInterval, draftDelay, draftInterval time.Duration
 }
 
 type fixedDescriber string
@@ -274,11 +276,27 @@ type conversationHarness struct {
 	editStatus     int
 	editReason     string
 	deleteStatus   int
+	drafts         []draftRequest
+	chatActions    []time.Time
+	actionStatus   int
+	draftStatus    int
+	// indicatorFailures counts the typing and draft failures the conversation reported, by method.
+	indicatorFailures map[string]int
+}
+
+type draftRequest struct {
+	chatID, draftID int64
+	text            string
+	canStop         bool
 }
 
 type turnOutcome struct{ outcome, errorKind string }
 
-type integrationTelemetry struct{ turns chan turnOutcome }
+type integrationTelemetry struct {
+	turns chan turnOutcome
+	// indicatorFailure, when set, receives each failed typing or draft call by method.
+	indicatorFailure func(method string)
+}
 
 func (integrationTelemetry) ContextLogger(_ context.Context, logger *slog.Logger) *slog.Logger {
 	return logger
@@ -300,7 +318,12 @@ func (integrationTelemetry) RecordModelTurn(context.Context, string, string, int
 func (integrationTelemetry) RecordToolCallsPerTurn(context.Context, string, string, int) {}
 func (integrationTelemetry) RecordHintFollowThrough(context.Context, string, string)     {}
 func (integrationTelemetry) RecordConversationResume(context.Context, string, string)    {}
-func (integrationTelemetry) RecordConversationSearch(context.Context, string, string)    {}
+func (i integrationTelemetry) RecordTurnIndicatorFailure(_ context.Context, _, method string) {
+	if i.indicatorFailure != nil {
+		i.indicatorFailure(method)
+	}
+}
+func (integrationTelemetry) RecordConversationSearch(context.Context, string, string) {}
 
 func newConversationHarness(t *testing.T, runtime agentruntime.AgentRuntime) *conversationHarness {
 	t.Helper()
@@ -314,7 +337,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	h := &conversationHarness{
 		t: t, ctx: ctx, updates: make(chan []Update, 20), messages: make(chan sentMessage, 100), documents: make(chan sentDocument, 20), photos: make(chan sentPhoto, 20), edits: make(chan editedMessage, 100),
 		answers: make(chan callbackAnswer, 100), deletes: make(chan deletedMessage, 100), offsets: make(chan int64, 100), registrations: make(chan commandRegistration, 10),
-		turns: make(chan turnOutcome, 20), logs: &lockedBuffer{}, files: make(map[string]testFile),
+		turns: make(chan turnOutcome, 20), logs: &lockedBuffer{}, files: make(map[string]testFile), indicatorFailures: make(map[string]int),
 	}
 	server := httptest.NewServer(http.HandlerFunc(h.serveHTTP))
 	t.Cleanup(server.Close)
@@ -659,8 +682,9 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		recent = options.recent
 	}
 	h.conversation, err = conversation.NewService(
-		conversation.Config{Recent: recent, Memory: memoryTurns, Exposure: exposures, SearchChecks: searchChecks, Locations: locationTurns, TurnTimeout: turnTimeout, FollowUp: h.approvals, Notice: notices, Attachments: h.attachments, WebSearch: webSearch, Cards: cards, Photos: photos, Location: options.location, Now: now, History: conversationHistory},
-		h.store, runtime, h.client, broker, h.connections, logger, integrationTelemetry{turns: h.turns},
+		conversation.Config{Recent: recent, Memory: memoryTurns, Exposure: exposures, SearchChecks: searchChecks, Locations: locationTurns, TurnTimeout: turnTimeout, FollowUp: h.approvals, Notice: notices, Attachments: h.attachments, WebSearch: webSearch, Cards: cards, Photos: photos, Location: options.location, Now: now, History: conversationHistory,
+			TypingInterval: options.typingInterval, DraftDelay: options.draftDelay, DraftInterval: options.draftInterval},
+		h.store, runtime, h.client, broker, h.connections, logger, integrationTelemetry{turns: h.turns, indicatorFailure: h.recordIndicatorFailure},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -796,6 +820,36 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 		}
 		result = FileReference{FileID: r.Form.Get("file_id"), FilePath: file.path, FileSize: int64(len(file.data))}
 	case "sendChatAction":
+		if r.Form.Get("chat_id") == "" || r.Form.Get("action") != "typing" {
+			h.t.Errorf("sendChatAction needs a chat and the typing action: %q %q", r.Form.Get("chat_id"), r.Form.Get("action"))
+			return
+		}
+		h.mu.Lock()
+		h.chatActions = append(h.chatActions, time.Now())
+		status := h.actionStatus
+		h.mu.Unlock()
+		if status != 0 {
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_code": status, "description": "Too Many Requests: retry after 5"})
+			return
+		}
+		result = true
+	case "sendMessageDraft":
+		chatID, chatErr := strconv.ParseInt(r.Form.Get("chat_id"), 10, 64)
+		draftID, draftErr := strconv.ParseInt(r.Form.Get("draft_id"), 10, 64)
+		if chatErr != nil || draftErr != nil || draftID == 0 {
+			h.t.Errorf("sendMessageDraft needs a chat and a non-zero draft: %q %q", r.Form.Get("chat_id"), r.Form.Get("draft_id"))
+			return
+		}
+		h.mu.Lock()
+		h.drafts = append(h.drafts, draftRequest{chatID: chatID, draftID: draftID, text: r.Form.Get("text"), canStop: r.Form.Get("can_stop") == "true"})
+		status := h.draftStatus
+		h.mu.Unlock()
+		if status != 0 {
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_code": status, "description": "Too Many Requests: retry after 5"})
+			return
+		}
 		result = true
 	case "deleteMessage":
 		chatID, err := strconv.ParseInt(r.Form.Get("chat_id"), 10, 64)
@@ -1063,6 +1117,24 @@ func (h *conversationHarness) provision(principal, accountID string) {
 	if bound, err := h.store.BindModelConnection(h.ctx, principal, "openai-codex", accountID); err != nil || !bound {
 		h.t.Fatalf("bind %s: bound=%v err=%v", principal, bound, err)
 	}
+}
+
+func (h *conversationHarness) recordIndicatorFailure(method string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.indicatorFailures[method]++
+}
+
+func (h *conversationHarness) chatActionTimes() []time.Time {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.chatActions)
+}
+
+func (h *conversationHarness) draftRequests() []draftRequest {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]draftRequest(nil), h.drafts...)
 }
 
 func (h *conversationHarness) sentTexts() []string {

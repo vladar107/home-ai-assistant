@@ -40,6 +40,7 @@ var movieReadDefinitions = []tools.Definition{
 		Name:        toolMoviesNext,
 		Description: "Find the next movie night in the movie table: the evening with the earliest date on or after today, its film, and who picked it.",
 		Risk:        tools.RiskRead,
+		Activity:    tools.ActivityNotion,
 		Private:     true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"data_source_id":{"type":"string","description":"The movie table's data source or database ID from an earlier result."}},` +
@@ -52,6 +53,7 @@ var movieWriteDefinitions = []tools.Definition{
 		Name:        toolMoviesSetScore,
 		Description: "Propose recording the current user's score for a film in their own score column of the movie table. The user must confirm before anything changes.",
 		Risk:        tools.RiskWrite,
+		Activity:    tools.ActivityNotion,
 		Private:     true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"data_source_id":{"type":"string","description":"The movie table's data source or database ID from an earlier result."},` +
@@ -63,8 +65,9 @@ var movieWriteDefinitions = []tools.Definition{
 		Name: toolMoviesSchedule,
 		Description: "Propose evening dates in the movie table. Without film, every film without a date gets one, in table order, each a week after the latest date in the table. " +
 			"With film, only that film is scheduled: on date when given, otherwise a week after the latest other date. The user must confirm before anything changes.",
-		Risk:    tools.RiskWrite,
-		Private: true,
+		Risk:     tools.RiskWrite,
+		Activity: tools.ActivityNotion,
+		Private:  true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"data_source_id":{"type":"string","description":"The movie table's data source or database ID from an earlier result."},` +
 			`"film":{"type":"string","description":"Schedule only this film, as the Фильм column spells it."},` +

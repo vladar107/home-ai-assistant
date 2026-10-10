@@ -344,6 +344,7 @@ func mapTool(remote, description string, schema json.RawMessage) (mappedTool, bo
 			Description: "Home Assistant: " + description,
 			InputSchema: schema,
 			Risk:        risk,
+			Activity:    tools.ActivityHome,
 			Timeout:     toolTimeout,
 			ThirdParty:  true,
 			Household:   true,

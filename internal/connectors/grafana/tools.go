@@ -53,6 +53,7 @@ var definitions = []tools.Definition{
 		Name:        toolDashboards,
 		Description: "Grafana: without uid, list the dashboards; with uid, list that dashboard's variables and panels with their units and PromQL or LogQL queries.",
 		Risk:        tools.RiskRead,
+		Activity:    tools.ActivityGrafana,
 		Timeout:     toolTimeout,
 		ThirdParty:  true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
@@ -63,6 +64,7 @@ var definitions = []tools.Definition{
 		Name:        toolMetrics,
 		Description: "Grafana: run a PromQL query against Prometheus, either for its current value or over a range, summarised per series.",
 		Risk:        tools.RiskRead,
+		Activity:    tools.ActivityGrafana,
 		Timeout:     toolTimeout,
 		ThirdParty:  true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
@@ -76,6 +78,7 @@ var definitions = []tools.Definition{
 		Name:        toolLogs,
 		Description: "Grafana: run a LogQL query against Loki. A log query returns matching lines; a metric query such as count_over_time returns series.",
 		Risk:        tools.RiskRead,
+		Activity:    tools.ActivityGrafana,
 		Timeout:     toolTimeout,
 		ThirdParty:  true,
 		Screen:      true,

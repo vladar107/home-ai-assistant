@@ -48,6 +48,8 @@ type botAPI interface {
 type ConversationController interface {
 	Enqueue(context.Context, conversation.EnqueueInput) error
 	Cancel(context.Context, string) (bool, error)
+	// StopDraft cancels the running turn when draftID is the one it shows and reports whether it did.
+	StopDraft(ctx context.Context, principalID string, draftID int64) (bool, error)
 	NewSession(context.Context, string) (bool, error)
 	Sessions(context.Context, string) ([]conversation.SessionSummary, error)
 	Resume(context.Context, string, string) (conversation.ResumeResult, error)
@@ -441,6 +443,9 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 	if update.CallbackQuery != nil {
 		return s.processCallback(ctx, bot, update.UpdateID, update.CallbackQuery)
 	}
+	if update.StoppedMessageGeneration != nil {
+		return s.processDraftStop(ctx, update.StoppedMessageGeneration)
+	}
 	if update.EditedMessage != nil {
 		return s.processEdit(ctx, update.EditedMessage)
 	}
@@ -531,6 +536,41 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 		event:       "telegram.conversation.queued",
 		principalID: authorization.Principal.ID,
 	}, "", nil
+}
+
+// processDraftStop cancels the turn whose draft the user stopped. The update names no user, and a
+// private chat's ID is its user's ID, so the chat authorizes like a sender would.
+func (s *Service) processDraftStop(ctx context.Context, stopped *MessageGenerationStopped) (processingResult, string, error) {
+	if stopped.Chat.Type != ChatTypePrivate || stopped.Chat.ID <= 0 || stopped.DraftID == 0 {
+		return ignoredResult("non_private_chat"), "", nil
+	}
+	if s.conversation == nil {
+		return ignoredResult("unhandled_stop"), "", nil
+	}
+	authorizeCtx, endAuthorize := s.telemetry.StartStore(ctx, "identity_authorize")
+	authorization, err := s.identities.Authorize(authorizeCtx, stopped.Chat.ID)
+	endAuthorize(err)
+	if err != nil {
+		return processingResult{}, "authorize_identity", err
+	}
+	if !authorization.Authorized() {
+		return ignoredResult(string(authorization.Status)), "", nil
+	}
+	principalID := authorization.Principal.ID
+	cancelled, err := s.conversation.StopDraft(ctx, principalID, stopped.DraftID)
+	if err != nil {
+		return processingResult{}, "stop_draft", err
+	}
+	if !cancelled {
+		return processingResult{event: "telegram.draft.stale", principalID: principalID}, "", nil
+	}
+	result := processingResult{event: "telegram.draft.stopped", principalID: principalID}
+	// The turn is already cancelled and a retried update would find its draft gone, so a failed
+	// confirmation is only reported.
+	if err := s.client.SendReply(ctx, stopped.Chat.ID, 0, CancelledReply); err != nil {
+		result.event, result.err = "telegram.command.undeliverable", err
+	}
+	return result, "", nil
 }
 
 // sendMediaReply answers a message carrying something that cannot become a turn, quoting it so
