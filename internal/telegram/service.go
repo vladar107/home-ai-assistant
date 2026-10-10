@@ -446,6 +446,9 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 	if update.StoppedMessageGeneration != nil {
 		return s.processDraftStop(ctx, update.StoppedMessageGeneration)
 	}
+	if update.MessageReaction != nil {
+		return ignoredResult("reaction"), "", nil
+	}
 	if update.EditedMessage != nil {
 		return s.processEdit(ctx, update.EditedMessage)
 	}

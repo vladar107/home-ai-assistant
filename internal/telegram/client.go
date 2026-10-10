@@ -68,6 +68,23 @@ type Update struct {
 	CallbackQuery *CallbackQuery `json:"callback_query"`
 	// StoppedMessageGeneration is a press of a draft's stop button. Telegram names no user in it.
 	StoppedMessageGeneration *MessageGenerationStopped `json:"stopped_message_generation"`
+	MessageReaction          *MessageReactionUpdated   `json:"message_reaction"`
+}
+
+// MessageReactionUpdated is a user's change of their reactions to a message. It carries no message
+// text, and no user when the reaction came from a chat identity.
+type MessageReactionUpdated struct {
+	Chat        Chat           `json:"chat"`
+	MessageID   int64          `json:"message_id"`
+	User        *User          `json:"user"`
+	ActorChat   *Chat          `json:"actor_chat"`
+	OldReaction []ReactionType `json:"old_reaction"`
+	NewReaction []ReactionType `json:"new_reaction"`
+}
+
+type ReactionType struct {
+	Type  string `json:"type"`
+	Emoji string `json:"emoji"`
 }
 
 // MessageGenerationStopped identifies the chat and the draft whose stop button was pressed.
@@ -290,7 +307,7 @@ func (c *Client) GetMe(ctx context.Context) (Bot, error) {
 
 func (c *Client) GetUpdates(ctx context.Context, offset int64) ([]Update, error) {
 	params := url.Values{
-		"allowed_updates": {`["message","edited_message","callback_query","stopped_message_generation"]`},
+		"allowed_updates": {`["message","edited_message","callback_query","stopped_message_generation","message_reaction"]`},
 		"offset":          {strconv.FormatInt(offset, 10)},
 		"timeout":         {strconv.FormatInt(c.pollSeconds, 10)},
 	}
