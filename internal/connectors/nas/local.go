@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -79,14 +80,21 @@ func (s *localSession) Roots() []Root {
 }
 
 func (s *localSession) List(_ context.Context, location Location) ([]Entry, error) {
-	path, err := s.resolve(location, false)
+	root, name, err := s.resolve(location, false)
 	if err != nil {
 		return nil, err
 	}
-	found, err := os.ReadDir(path)
+	defer root.Close()
+	directory, err := root.Open(name)
 	if err != nil {
 		return nil, classify(err)
 	}
+	defer directory.Close()
+	found, err := directory.ReadDir(-1)
+	if err != nil {
+		return nil, classify(err)
+	}
+	slices.SortFunc(found, func(a, b os.DirEntry) int { return strings.Compare(a.Name(), b.Name()) })
 	entries := make([]Entry, 0, len(found))
 	for _, item := range found {
 		// A symlink can point outside the mounted root, so the grant cannot be enforced after
@@ -109,11 +117,12 @@ func (s *localSession) List(_ context.Context, location Location) ([]Entry, erro
 }
 
 func (s *localSession) Read(_ context.Context, location Location, offset int64, limit int) ([]byte, int64, error) {
-	path, err := s.resolve(location, false)
+	root, name, err := s.resolve(location, false)
 	if err != nil {
 		return nil, 0, err
 	}
-	info, err := os.Lstat(path)
+	defer root.Close()
+	info, err := root.Lstat(name)
 	if err != nil {
 		return nil, 0, classify(err)
 	}
@@ -123,7 +132,7 @@ func (s *localSession) Read(_ context.Context, location Location, offset int64, 
 	if !info.Mode().IsRegular() {
 		return nil, 0, &Error{Class: ErrorNotFound}
 	}
-	file, err := os.Open(path)
+	file, err := root.Open(name)
 	if err != nil {
 		return nil, 0, classify(err)
 	}
@@ -145,11 +154,12 @@ func (s *localSession) Read(_ context.Context, location Location, offset int64, 
 // Open hands the caller an open file rather than its bytes, so a file on its way to Telegram is
 // never held in memory here. Every refusal Read makes is made here for the same reasons.
 func (s *localSession) Open(_ context.Context, location Location) (io.ReadCloser, int64, error) {
-	path, err := s.resolve(location, false)
+	root, name, err := s.resolve(location, false)
 	if err != nil {
 		return nil, 0, err
 	}
-	info, err := os.Lstat(path)
+	defer root.Close()
+	info, err := root.Lstat(name)
 	if err != nil {
 		return nil, 0, classify(err)
 	}
@@ -159,7 +169,7 @@ func (s *localSession) Open(_ context.Context, location Location) (io.ReadCloser
 	if !info.Mode().IsRegular() {
 		return nil, 0, &Error{Class: ErrorNotFound}
 	}
-	file, err := os.Open(path)
+	file, err := root.Open(name)
 	if err != nil {
 		return nil, 0, classify(err)
 	}
@@ -167,24 +177,26 @@ func (s *localSession) Open(_ context.Context, location Location) (io.ReadCloser
 }
 
 func (s *localSession) MakeDirectory(_ context.Context, location Location) error {
-	path, err := s.resolve(location, true)
+	root, name, err := s.resolve(location, true)
 	if err != nil {
 		return err
 	}
-	if err := os.Mkdir(path, 0o755); err != nil {
+	defer root.Close()
+	if err := root.Mkdir(name, 0o755); err != nil {
 		return classify(err)
 	}
 	return nil
 }
 
 func (s *localSession) Create(_ context.Context, location Location, data []byte) error {
-	path, err := s.resolve(location, true)
+	root, name, err := s.resolve(location, true)
 	if err != nil {
 		return err
 	}
+	defer root.Close()
 	// O_EXCL is this package's own guarantee: an existing name fails here rather than being
 	// opened for truncation. A read-only mount refuses the call regardless.
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	file, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		return classify(err)
 	}
@@ -197,25 +209,34 @@ func (s *localSession) Create(_ context.Context, location Location, data []byte)
 
 func (s *localSession) Close() error { return nil }
 
-// resolve turns a location into a real path, applying the root grant twice: once on the joined
-// path, and once on what the filesystem says that path really is, so a symlink planted inside a
-// root cannot reach outside it.
-func (s *localSession) resolve(location Location, writing bool) (string, error) {
+// resolve opens a location's root and names the location inside it. The root grant is checked on
+// the joined path and on what the filesystem says that path really is, so a symlink planted inside
+// a root cannot reach outside it. The caller then works through the opened root, which keeps the
+// lookup inside it even when a directory on the path is swapped for a symlink after these checks.
+func (s *localSession) resolve(location Location, writing bool) (*os.Root, string, error) {
 	root, known := s.root(location.Root)
 	if !known {
-		return "", &Error{Class: ErrorNotFound}
+		return nil, "", &Error{Class: ErrorNotFound}
 	}
 	if writing && !root.writable {
-		return "", &Error{Class: ErrorDenied}
+		return nil, "", &Error{Class: ErrorDenied}
 	}
 	full, err := location.Resolve(root.path)
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
 	if err := confinedToRoot(full, root.path); err != nil {
-		return "", err
+		return nil, "", err
 	}
-	return full, nil
+	opened, err := os.OpenRoot(root.path)
+	if err != nil {
+		return nil, "", classify(err)
+	}
+	name := filepath.FromSlash(location.Path)
+	if name == "" {
+		name = "."
+	}
+	return opened, name, nil
 }
 
 func (s *localSession) root(name string) (resolvedRoot, bool) {

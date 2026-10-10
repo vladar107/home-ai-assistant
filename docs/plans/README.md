@@ -74,6 +74,7 @@ plan that links back to the earlier record.
 | 0062 | [History search keeps privacy by source](0062-history-privacy-by-source.md) | done |
 | 0063 | [Show that a turn is still working](0063-show-the-turn-is-working.md) | done |
 | 0064 | [Reactions both ways](0064-reactions.md) | done |
+| 0065 | [Confine NAS file access with os.Root](0065-nas-root-confinement.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.
