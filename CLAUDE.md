@@ -22,7 +22,7 @@
 
 ## Development Workflow
 
-- Work directly on `main`; this private project does not use pull requests.
+- The operator works directly on `main` through the ruleset bypass; outside contributions arrive as squash-merged pull requests.
 - Keep history linear with no merge commits.
 - Use signed conventional commits, with one coherent change per commit.
 - Amend the relevant commit when correcting work that is already committed instead of adding a follow-up repair commit.
