@@ -242,6 +242,20 @@ not_retryable), and each retry is logged at debug level.
    `[nothing-to-add]`, and delivery sends no text, not even the line marking a
    resumed conversation, but still sends the turn's proposals.
    `home_agent.reactions.sent` counts the reactions by emoji.
+   The user's own reactions to their recorded replies, in their private chat,
+   are kept as feedback: only the latest class (positive, negative, or other) and
+   emoji per message, never the text, and removing the reaction removes it. The
+   first 👎 on a reply, whichever of its messages it lands on, queues one turn in
+   that reply's conversation, returning to it if it was closed, with a fixed
+   message naming when the reply was sent and asking the model to look at it
+   again, quoting the reply in Telegram; like the turn after
+   Confirm, its message is ours, so it offers no `react`, starts no tool hint, and
+   is not the request actions are judged against. The turn is queued under the
+   reaction's Telegram update before the reply is marked as reconsidered, so a
+   redelivered update cannot queue two; a 👎 while a turn is pending is kept
+   without marking it and sends nothing. `home_agent.reactions.received` counts
+   reactions by class and `home_agent.reactions.reconsiders` the reconsider turns
+   by outcome.
 
 ### Earlier conversations
 

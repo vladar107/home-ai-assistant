@@ -288,6 +288,8 @@ type conversationHarness struct {
 	reactions         []setReaction
 	// reactionCounts counts the reactions the react tool reported to telemetry, by emoji.
 	reactionCounts map[string]int
+	// feedbackCounts counts the user reactions and reconsider outcomes the conversation reported.
+	feedbackCounts map[string]int
 }
 
 type setReaction struct {
@@ -307,6 +309,8 @@ type integrationTelemetry struct {
 	turns chan turnOutcome
 	// indicatorFailure, when set, receives each failed typing or draft call by method.
 	indicatorFailure func(method string)
+	// feedback, when set, receives each user reaction class and reconsider outcome as "kind:value".
+	feedback func(counted string)
 }
 
 func (integrationTelemetry) ContextLogger(_ context.Context, logger *slog.Logger) *slog.Logger {
@@ -335,6 +339,16 @@ func (i integrationTelemetry) RecordTurnIndicatorFailure(_ context.Context, _, m
 	}
 }
 func (integrationTelemetry) RecordConversationSearch(context.Context, string, string) {}
+func (i integrationTelemetry) RecordReplyFeedback(_ context.Context, _, class string) {
+	if i.feedback != nil {
+		i.feedback("class:" + class)
+	}
+}
+func (i integrationTelemetry) RecordReconsider(_ context.Context, _, outcome string) {
+	if i.feedback != nil {
+		i.feedback("reconsider:" + outcome)
+	}
+}
 
 func newConversationHarness(t *testing.T, runtime agentruntime.AgentRuntime) *conversationHarness {
 	t.Helper()
@@ -349,7 +363,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		t: t, ctx: ctx, updates: make(chan []Update, 20), messages: make(chan sentMessage, 100), documents: make(chan sentDocument, 20), photos: make(chan sentPhoto, 20), edits: make(chan editedMessage, 100),
 		answers: make(chan callbackAnswer, 100), deletes: make(chan deletedMessage, 100), offsets: make(chan int64, 100), registrations: make(chan commandRegistration, 10),
 		turns: make(chan turnOutcome, 20), logs: &lockedBuffer{}, files: make(map[string]testFile), indicatorFailures: make(map[string]int),
-		reactionCounts: make(map[string]int),
+		reactionCounts: make(map[string]int), feedbackCounts: make(map[string]int),
 	}
 	server := httptest.NewServer(http.HandlerFunc(h.serveHTTP))
 	t.Cleanup(server.Close)
@@ -705,7 +719,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	h.conversation, err = conversation.NewService(
 		conversation.Config{Recent: recent, Memory: memoryTurns, Exposure: exposures, SearchChecks: searchChecks, Locations: locationTurns, TurnTimeout: turnTimeout, FollowUp: h.approvals, Notice: notices, Attachments: h.attachments, WebSearch: webSearch, Cards: cards, Photos: photos, Location: options.location, Now: now, History: conversationHistory,
 			TypingInterval: options.typingInterval, DraftDelay: options.draftDelay, DraftInterval: options.draftInterval},
-		h.store, runtime, h.client, broker, h.connections, logger, integrationTelemetry{turns: h.turns, indicatorFailure: h.recordIndicatorFailure},
+		h.store, runtime, h.client, broker, h.connections, logger, integrationTelemetry{turns: h.turns, indicatorFailure: h.recordIndicatorFailure, feedback: h.recordFeedback},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -1190,6 +1204,18 @@ func (h *conversationHarness) reactionCount(emoji string) int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.reactionCounts[emoji]
+}
+
+func (h *conversationHarness) recordFeedback(counted string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.feedbackCounts[counted]++
+}
+
+func (h *conversationHarness) feedbackCount(counted string) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.feedbackCounts[counted]
 }
 
 // reactionTelemetry counts what the react tool reports on the harness.

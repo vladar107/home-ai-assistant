@@ -135,27 +135,32 @@ func (s *Store) RecordConversationReply(ctx context.Context, principalID, sessio
 	return nil
 }
 
-// ReplyOrigin returns the session and request a delivered Telegram message came from. The request
+// ReplyOrigin returns the session and request a delivered Telegram message came from, and when it
+// was sent. The request
 // is empty for a message delivered before requests were recorded, and nothing is found for a
 // message that is not one of the principal's recorded replies.
-func (s *Store) ReplyOrigin(ctx context.Context, principalID string, messageID int64) (string, string, bool, error) {
+func (s *Store) ReplyOrigin(ctx context.Context, principalID string, messageID int64) (string, string, time.Time, bool, error) {
 	if s == nil || s.db == nil {
-		return "", "", false, fmt.Errorf("query reply origin: SQLite store is not open")
+		return "", "", time.Time{}, false, fmt.Errorf("query reply origin: SQLite store is not open")
 	}
-	var sessionID, requestID string
+	var sessionID, requestID, sent string
 	err := s.db.QueryRowContext(
 		ctx,
-		`SELECT session_id, request_id FROM conversation_reply_messages WHERE principal_id = ? AND telegram_message_id = ?`,
+		`SELECT session_id, request_id, created_at FROM conversation_reply_messages WHERE principal_id = ? AND telegram_message_id = ?`,
 		principalID,
 		messageID,
-	).Scan(&sessionID, &requestID)
+	).Scan(&sessionID, &requestID, &sent)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", "", false, nil
+		return "", "", time.Time{}, false, nil
 	}
 	if err != nil {
-		return "", "", false, fmt.Errorf("query reply origin: %w", err)
+		return "", "", time.Time{}, false, fmt.Errorf("query reply origin: %w", err)
 	}
-	return sessionID, requestID, true, nil
+	sentAt, err := time.Parse(conversationTimeLayout, sent)
+	if err != nil {
+		return "", "", time.Time{}, false, fmt.Errorf("query reply origin: invalid send time")
+	}
+	return sessionID, requestID, sentAt, true, nil
 }
 
 // SetReplyFeedback keeps the latest reaction class and emoji for a recorded reply. A message that
@@ -218,6 +223,23 @@ func (s *Store) ClaimReplyReconsider(ctx context.Context, principalID, key strin
 		return false, fmt.Errorf("claim reply reconsider: %w", err)
 	}
 	return affected > 0, nil
+}
+
+// ReplyReconsidered reports whether a reconsider turn was already started for the key.
+func (s *Store) ReplyReconsidered(ctx context.Context, principalID, key string) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("query reply reconsider: SQLite store is not open")
+	}
+	var exists int
+	if err := s.db.QueryRowContext(
+		ctx,
+		`SELECT EXISTS(SELECT 1 FROM reply_reconsiders WHERE principal_id = ? AND reconsider_key = ?)`,
+		principalID,
+		key,
+	).Scan(&exists); err != nil {
+		return false, fmt.Errorf("query reply reconsider: %w", err)
+	}
+	return exists != 0, nil
 }
 
 type switchOutcome struct {

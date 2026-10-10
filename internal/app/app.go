@@ -339,7 +339,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			return fmt.Errorf("initialize Pi runtime: %w", err)
 		}
 		runtime.SetTelemetry(a.telemetry)
-		a.telemetry.ZeroRareOutcomes(ctx, principals, conversation.TurnErrorKinds(), reaction.Emojis())
+		a.telemetry.ZeroRareOutcomes(ctx, principals, conversation.TurnErrorKinds(), reaction.Emojis(), conversation.FeedbackClasses())
 		broker, err := tools.NewBroker(a.logger)
 		if err != nil {
 			return fmt.Errorf("initialize tool broker: %w", err)

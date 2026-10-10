@@ -161,6 +161,16 @@ type Repository interface {
 	SwitchConversation(ctx context.Context, principalID, sessionID string) (SwitchResult, error)
 	// RecordConversationReply remembers which session and request a delivered Telegram message belongs to.
 	RecordConversationReply(ctx context.Context, principalID, sessionID, requestID string, messageID int64) error
+	// ReplyOrigin returns the session and request a recorded reply came from; the request is empty
+	// for a reply recorded before requests were.
+	ReplyOrigin(ctx context.Context, principalID string, messageID int64) (sessionID, requestID string, sentAt time.Time, found bool, err error)
+	SetReplyFeedback(ctx context.Context, principalID string, messageID int64, class, emoji string) error
+	DeleteReplyFeedback(ctx context.Context, principalID string, messageID int64) error
+	// ReplyReconsidered reports whether a reconsider turn was already started for the key.
+	ReplyReconsidered(ctx context.Context, principalID, key string) (bool, error)
+	// ClaimReplyReconsider records that a reconsider turn was started for the key and reports
+	// whether this call was the first.
+	ClaimReplyReconsider(ctx context.Context, principalID, key string) (bool, error)
 }
 
 type Deliverer interface {
@@ -208,6 +218,10 @@ type Telemetry interface {
 	RecordConversationResume(ctx context.Context, principal, trigger string)
 	// RecordTurnIndicatorFailure counts a failed Telegram typing or draft call; method is "typing" or "draft".
 	RecordTurnIndicatorFailure(ctx context.Context, principal, method string)
+	// RecordReplyFeedback counts a user's reaction to a reply by class.
+	RecordReplyFeedback(ctx context.Context, principal, class string)
+	// RecordReconsider counts a negative reaction's reconsider turn: "started" or "busy".
+	RecordReconsider(ctx context.Context, principal, outcome string)
 }
 
 // SafetyChecks reports whether a principal has opted in to the safety checks, for labelling the

@@ -1,14 +1,18 @@
 package telegram
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
+	"github.com/vladar107/home-ai-assistant/internal/turnstate"
 )
 
 // react calls the turn's react tool and fails the test unless the reaction was set.
@@ -171,4 +175,253 @@ func TestContinuationAndScheduledRunsAreNotOfferedReact(t *testing.T) {
 	if got := h.setReactions(); len(got) != 0 {
 		t.Fatalf("reactions = %+v", got)
 	}
+}
+
+func reactionUpdate(id, userID, messageID int64, emojis ...string) Update {
+	reactions := make([]ReactionType, 0, len(emojis))
+	for _, emoji := range emojis {
+		reactions = append(reactions, ReactionType{Type: "emoji", Emoji: emoji})
+	}
+	return Update{UpdateID: id, MessageReaction: &MessageReactionUpdated{
+		Chat: Chat{ID: userID, Type: ChatTypePrivate}, MessageID: messageID, User: &User{ID: userID, FirstName: "Test"}, NewReaction: reactions,
+	}}
+}
+
+// feedback returns the reaction kept for one of the principal's replies.
+func (h *conversationHarness) feedback(principalID string, messageID int64) (class, emoji string, found bool) {
+	h.t.Helper()
+	err := h.db.QueryRowContext(h.ctx, `SELECT class, emoji FROM reply_feedback WHERE principal_id = ? AND telegram_message_id = ?`, principalID, messageID).Scan(&class, &emoji)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", false
+	}
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return class, emoji, true
+}
+
+func (h *conversationHarness) count(query string, args ...any) int {
+	h.t.Helper()
+	var count int
+	if err := h.db.QueryRowContext(h.ctx, query, args...).Scan(&count); err != nil {
+		h.t.Fatal(err)
+	}
+	return count
+}
+
+// A reaction to a delivered reply keeps its latest class and first emoji, and removing it removes
+// the feedback; none of it starts a turn or sends anything.
+func TestReactionsToRepliesAreKeptAsFeedback(t *testing.T) {
+	runtime := newControlledRuntime()
+	h := newConversationHarness(t, runtime)
+	h.provision("alice", "account-alice")
+	h.start()
+
+	h.push(textUpdate(1, 101, "which plants need water on Sundays"))
+	call := receive(t, h.ctx, runtime.calls)
+	call.answer <- agentruntime.RunResult{Response: "The ferns."}
+	reply := h.nextMessage()
+	h.waitState(1, "delivered")
+
+	for _, step := range []struct {
+		id           int64
+		emojis       []string
+		class, emoji string
+	}{
+		{2, []string{"👍"}, "positive", "👍"},
+		{3, []string{"❤️"}, "positive", "❤️"},
+		{4, []string{"🤔"}, "other", "🤔"},
+		{5, []string{"🤔", "🔥"}, "positive", "🤔"},
+		{6, nil, "", ""},
+	} {
+		h.push(reactionUpdate(step.id, 101, reply.messageID, step.emojis...))
+		h.waitOffset(step.id + 1)
+		class, emoji, found := h.feedback("alice", reply.messageID)
+		if class != step.class || emoji != step.emoji || found != (step.class != "") {
+			t.Fatalf("after %v feedback = %q %q %v, want %q %q", step.emojis, class, emoji, found, step.class, step.emoji)
+		}
+	}
+	if positive, other := h.feedbackCount("class:positive"), h.feedbackCount("class:other"); positive != 3 || other != 1 {
+		t.Fatalf("counted %d positive and %d other reactions", positive, other)
+	}
+	if requests := h.count(`SELECT count(*) FROM conversation_requests`); requests != 1 || len(h.messages) != 0 {
+		t.Fatalf("reactions made %d requests and sent %d messages", requests-1, len(h.messages))
+	}
+}
+
+// The first 👎 on any message of a long reply starts one reconsider turn in its conversation that
+// quotes the reacted message; neither another 👎, a redelivered update, nor a later 👎 starts a
+// second, and the reconsider's message is never taken as the user's.
+func TestFirstThumbsDownStartsOneReconsiderTurn(t *testing.T) {
+	runtime := newControlledRuntime()
+	registry := turnstate.New(time.Now)
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{reactions: true, recent: registry})
+	h.provision("alice", "account-alice")
+	h.start()
+
+	h.push(textUpdate(1, 101, "explain the lease"))
+	first := receive(t, h.ctx, runtime.calls)
+	first.answer <- agentruntime.RunResult{Response: strings.Repeat("word ", 1000)}
+	head, tail := h.nextMessage(), h.nextMessage()
+	h.waitState(1, "delivered")
+
+	h.push(reactionUpdate(2, 101, tail.messageID, "👎"))
+	reconsider := receive(t, h.ctx, runtime.calls)
+	if !strings.HasPrefix(reconsider.request.Message, conversation.ReconsiderMessage) || reconsider.request.SessionID != first.request.SessionID {
+		t.Fatalf("reconsider turn = %q in %s, want the reconsider message in %s", reconsider.request.Message, reconsider.request.SessionID, first.request.SessionID)
+	}
+	if names := toolNames(reconsider.request.Tools); slices.Contains(names, "react") {
+		t.Fatalf("reconsider tools = %v", names)
+	}
+	h.push(reactionUpdate(3, 101, head.messageID, "👎"))
+	h.waitOffset(4)
+
+	// An update redelivered after its turn was queued but before the claim was kept finds its own
+	// request again.
+	if _, err := h.db.ExecContext(h.ctx, `DELETE FROM reply_reconsiders`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.conversation.React(h.ctx, conversation.ReactionInput{
+		BotUserID: 999, TelegramUpdateID: 2, PrincipalID: "alice", ChatID: 101, MessageID: tail.messageID, Emojis: []string{"👎"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if requests, claims := h.count(`SELECT count(*) FROM conversation_requests`), h.count(`SELECT count(*) FROM reply_reconsiders`); requests != 2 || claims != 1 {
+		t.Fatalf("requests = %d, claims = %d, want 2 and 1", requests, claims)
+	}
+
+	reconsider.answer <- agentruntime.RunResult{Response: "I misread the notice period; it is two months."}
+	if answer := h.nextMessage(); answer.replyTo != tail.messageID || answer.text != "I misread the notice period; it is two months." {
+		t.Fatalf("reconsider answer = %+v, want it quoting %d", answer, tail.messageID)
+	}
+	h.waitState(2, "delivered")
+	if messages := registry.RecentMessages("alice"); !slices.Equal(messages, []string{"explain the lease"}) {
+		t.Fatalf("recent messages = %q", messages)
+	}
+
+	h.push(reactionUpdate(4, 101, head.messageID), reactionUpdate(5, 101, head.messageID, "👎"))
+	h.waitOffset(6)
+	if requests := h.count(`SELECT count(*) FROM conversation_requests`); requests != 2 || len(runtime.calls) != 0 || len(h.messages) != 0 {
+		t.Fatalf("a later 👎 made %d requests", requests-2)
+	}
+	if class, _, _ := h.feedback("alice", head.messageID); class != "negative" {
+		t.Fatalf("feedback = %q", class)
+	}
+}
+
+// A 👎 while a turn is pending is kept as feedback without a reconsider and sends nothing, so a 👎
+// after the turn finished still starts one.
+func TestThumbsDownWhileATurnIsPendingStartsNoReconsider(t *testing.T) {
+	runtime := newControlledRuntime()
+	h := newConversationHarness(t, runtime)
+	h.provision("alice", "account-alice")
+	h.start()
+
+	h.push(textUpdate(1, 101, "which plants need water on Sundays"))
+	first := receive(t, h.ctx, runtime.calls)
+	first.answer <- agentruntime.RunResult{Response: "The ferns."}
+	reply := h.nextMessage()
+	h.waitState(1, "delivered")
+
+	h.push(textUpdate(2, 101, "and the cactus?"))
+	second := receive(t, h.ctx, runtime.calls)
+	h.push(reactionUpdate(3, 101, reply.messageID, "👎"))
+	h.waitOffset(4)
+	if class, _, _ := h.feedback("alice", reply.messageID); class != "negative" {
+		t.Fatalf("feedback = %q", class)
+	}
+	if claims, requests := h.count(`SELECT count(*) FROM reply_reconsiders`), h.count(`SELECT count(*) FROM conversation_requests WHERE telegram_update_id = 3`); claims != 0 || requests != 0 || len(h.messages) != 0 {
+		t.Fatalf("a busy 👎 claimed %d, queued %d, sent %d", claims, requests, len(h.messages))
+	}
+	second.answer <- agentruntime.RunResult{Response: "Rarely."}
+	h.wantReply(101, 2, "Rarely.")
+	h.waitState(2, "delivered")
+
+	h.push(reactionUpdate(4, 101, reply.messageID, "👎"))
+	reconsider := receive(t, h.ctx, runtime.calls)
+	if !strings.HasPrefix(reconsider.request.Message, conversation.ReconsiderMessage) {
+		t.Fatalf("reconsider message = %q", reconsider.request.Message)
+	}
+	reconsider.answer <- agentruntime.RunResult{Response: "The orchid too."}
+	if answer := h.nextMessage(); answer.replyTo != reply.messageID || answer.text != "The orchid too." {
+		t.Fatalf("reconsider answer = %+v", answer)
+	}
+	h.waitState(4, "delivered")
+	if busy, started := h.feedbackCount("reconsider:busy"), h.feedbackCount("reconsider:started"); busy != 1 || started != 1 {
+		t.Fatalf("counted %d busy and %d started reconsiders", busy, started)
+	}
+	if negative := h.feedbackCount("class:negative"); negative != 2 {
+		t.Fatalf("counted %d negative reactions", negative)
+	}
+}
+
+// Only the principal's own reaction in their private chat to one of their replies counts.
+func TestReactionsFromElsewhereOrOnOtherMessagesDoNothing(t *testing.T) {
+	runtime := newControlledRuntime()
+	h := newConversationHarness(t, runtime)
+	h.provision("alice", "account-alice")
+	h.start()
+
+	h.push(textUpdate(1, 101, "which plants need water on Sundays"))
+	first := receive(t, h.ctx, runtime.calls)
+	first.answer <- agentruntime.RunResult{Response: "The ferns."}
+	reply := h.nextMessage()
+	h.waitState(1, "delivered")
+
+	foreign := reactionUpdate(2, 202, reply.messageID, "👎")
+	group := reactionUpdate(3, 101, reply.messageID, "👎")
+	group.MessageReaction.Chat = Chat{ID: -100, Type: "group"}
+	anonymous := reactionUpdate(4, 101, reply.messageID, "👎")
+	anonymous.MessageReaction.User, anonymous.MessageReaction.ActorChat = nil, &Chat{ID: -200, Type: "channel"}
+	own := reactionUpdate(5, 101, requestMessageID(1), "👎")
+	stranger := reactionUpdate(6, 303, reply.messageID, "👎")
+	h.push(foreign, group, anonymous, own, stranger)
+	h.waitOffset(7)
+	if feedback, claims, requests := h.count(`SELECT count(*) FROM reply_feedback`), h.count(`SELECT count(*) FROM reply_reconsiders`), h.count(`SELECT count(*) FROM conversation_requests`); feedback != 0 || claims != 0 || requests != 1 {
+		t.Fatalf("feedback = %d, claims = %d, requests = %d", feedback, claims, requests)
+	}
+	if len(runtime.calls) != 0 || len(h.messages) != 0 {
+		t.Fatalf("ignored reactions started %d turns and sent %d messages", len(runtime.calls), len(h.messages))
+	}
+}
+
+// A 👎 on a reply from an earlier conversation returns to it, as replying to that reply does.
+func TestThumbsDownOnAnEarlierConversationReturnsToIt(t *testing.T) {
+	runtime := newControlledRuntime()
+	h := newConversationHarness(t, runtime)
+	h.provision("alice", "account-alice")
+	h.start()
+
+	h.push(textUpdate(1, 101, "which plants need water on Sundays"))
+	first := receive(t, h.ctx, runtime.calls)
+	first.answer <- agentruntime.RunResult{Response: "The ferns."}
+	earlier := h.nextMessage()
+	h.waitState(1, "delivered")
+	h.push(textUpdate(2, 101, "/new"))
+	h.wantReply(101, 2, NewSessionReply)
+	h.push(textUpdate(3, 101, "book a table for Friday"))
+	later := receive(t, h.ctx, runtime.calls)
+	later.answer <- agentruntime.RunResult{Response: "Booked."}
+	h.wantReply(101, 3, "Booked.")
+	h.waitState(3, "delivered")
+
+	h.push(reactionUpdate(4, 101, earlier.messageID, "👎"))
+	reconsider := receive(t, h.ctx, runtime.calls)
+	if reconsider.request.SessionID != first.request.SessionID || reconsider.request.SessionID == later.request.SessionID {
+		t.Fatalf("reconsider ran in %s, want the earlier %s", reconsider.request.SessionID, first.request.SessionID)
+	}
+	reconsider.answer <- agentruntime.RunResult{Response: "The orchid too."}
+	answer := h.nextMessage()
+	if answer.replyTo != earlier.messageID || !strings.HasPrefix(answer.text, "Back in the conversation from ") || !strings.HasSuffix(answer.text, "The orchid too.") {
+		t.Fatalf("reconsider answer = %+v", answer)
+	}
+	h.waitState(4, "delivered")
+
+	h.push(textUpdate(5, 101, "thanks"))
+	next := receive(t, h.ctx, runtime.calls)
+	if next.request.SessionID != first.request.SessionID {
+		t.Fatalf("next turn ran in %s, want %s", next.request.SessionID, first.request.SessionID)
+	}
+	next.answer <- agentruntime.RunResult{Response: "You're welcome."}
+	h.wantReply(101, 5, "You're welcome.")
 }

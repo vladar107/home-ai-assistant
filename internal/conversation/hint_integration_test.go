@@ -85,6 +85,8 @@ func (quietTelemetry) RecordToolCallsPerTurn(context.Context, string, string, in
 func (quietTelemetry) RecordHintFollowThrough(context.Context, string, string)                    {}
 func (quietTelemetry) RecordConversationResume(context.Context, string, string)                   {}
 func (quietTelemetry) RecordTurnIndicatorFailure(context.Context, string, string)                 {}
+func (quietTelemetry) RecordReplyFeedback(context.Context, string, string)                        {}
+func (quietTelemetry) RecordReconsider(context.Context, string, string)                           {}
 
 type hintEnv struct {
 	ctx       context.Context
@@ -265,15 +267,16 @@ func TestToolHintIgnoresNamesTheTurnDoesNotOffer(t *testing.T) {
 	}
 }
 
-func TestToolHintSeesTheEarlierExchangeButNotAContinuation(t *testing.T) {
+func TestToolHintSeesTheEarlierExchangeButNotOurOwnMessages(t *testing.T) {
 	env := newHintEnv(t, choice("nas_search", 0.9), 0, []string{"nas_search", "gmail_search"}, true, "Shall I mail the lease to bob@example.com?")
 	env.turn(t, 1, hintMessage)
 	env.turn(t, 2, "yes, do it")
 	env.turn(t, 3, conversation.ContinueMessage)
+	env.turn(t, 4, conversation.ReconsiderMessage)
 
 	requests := env.requests()
 	if len(requests) != 2 {
-		t.Fatalf("hint requests = %d, want 2 (none for the continuation)", len(requests))
+		t.Fatalf("hint requests = %d, want 2 (none for the continuation or the reconsider)", len(requests))
 	}
 	if earlier, ok := requests[0]["earlier"]; ok {
 		t.Errorf("first message sent earlier = %q", earlier)

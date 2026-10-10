@@ -110,7 +110,7 @@ func TestRareOutcomeSeriesStartAtZero(t *testing.T) {
 	ctx := context.Background()
 	principals := []string{"alice", "bob"}
 	errorKinds := []string{"timeout", "runtime", "tool_provider", "attachments", "not_connected", "provider_quota", "provider_auth"}
-	telemetry.ZeroRareOutcomes(ctx, principals, errorKinds, nil)
+	telemetry.ZeroRareOutcomes(ctx, principals, errorKinds, nil, nil)
 
 	type series struct{ metric, labels string }
 	collect := func() map[series]int64 {

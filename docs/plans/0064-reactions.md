@@ -1,6 +1,6 @@
 # 0064 — Reactions both ways
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
@@ -59,11 +59,11 @@ lists, but no message text.
   once-only flag belongs to the reply's request, so a reply delivered in several
   chunks starts at most one, whatever reactions follow. Replies recorded before this
   change have no request; their reconsider is keyed by the message instead.
-- The reconsider message is ours and fixed: it says the user marked the reply quoted
-  above as wrong and asks the model to look at it again. It quotes no reply text,
-  because none is stored and the turn's message is trusted as the user's instruction.
-  The turn quotes the 👎'd message in Telegram, and its Pi session already holds the
-  reply.
+- The reconsider message is ours and fixed: it says the user marked one of the
+  model's replies as wrong, names when that reply was sent so the model can find it
+  in its session, and asks it to look again. It quotes no reply text, because none is
+  stored and the turn's message is trusted as the user's instruction. The turn quotes
+  the 👎'd message in Telegram.
 - Turns whose message is ours are recognised by one helper, used where the code now
   compares with `ContinueMessage`, so neither is recorded as the user's request for
   safety judgments or used for a tool hint.

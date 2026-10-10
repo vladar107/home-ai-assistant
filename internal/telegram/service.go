@@ -53,6 +53,9 @@ type ConversationController interface {
 	NewSession(context.Context, string) (bool, error)
 	Sessions(context.Context, string) ([]conversation.SessionSummary, error)
 	Resume(context.Context, string, string) (conversation.ResumeResult, error)
+	// React records a reaction to one of the principal's replies and starts a reconsider turn for a
+	// first 👎.
+	React(context.Context, conversation.ReactionInput) (conversation.ReactionResult, error)
 }
 
 // AttachmentStore reports what the principal's conversation may still hold; nil refuses photos
@@ -447,7 +450,7 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 		return s.processDraftStop(ctx, update.StoppedMessageGeneration)
 	}
 	if update.MessageReaction != nil {
-		return ignoredResult("reaction"), "", nil
+		return s.processReaction(ctx, bot, update.UpdateID, update.MessageReaction)
 	}
 	if update.EditedMessage != nil {
 		return s.processEdit(ctx, update.EditedMessage)
@@ -574,6 +577,73 @@ func (s *Service) processDraftStop(ctx context.Context, stopped *MessageGenerati
 		result.event, result.err = "telegram.command.undeliverable", err
 	}
 	return result, "", nil
+}
+
+// processReaction passes a user's reaction in their own private chat on to the conversation, which
+// keeps it only for one of the principal's replies. A reaction from a chat identity names no user and
+// is ignored. Only the class of the reaction is reported, never what it reacted to.
+func (s *Service) processReaction(ctx context.Context, bot Bot, updateID int64, reaction *MessageReactionUpdated) (processingResult, string, error) {
+	if reaction.User == nil {
+		return ignoredResult("reaction_without_user"), "", nil
+	}
+	if reason := validatePrivateMessage(reaction.User, reaction.Chat, reaction.MessageID); reason != "" {
+		return ignoredResult(reason), "", nil
+	}
+	emojis, valid := reactionEmojis(reaction.NewReaction)
+	if !valid {
+		return ignoredResult("malformed_reaction"), "", nil
+	}
+	authorization, reason, failure, err := s.resolvePrincipal(ctx, reaction.User)
+	if err != nil {
+		return processingResult{}, failure, err
+	}
+	if reason != "" {
+		return ignoredResult(reason), "", nil
+	}
+	principalID := authorization.Principal.ID
+	if s.conversation == nil {
+		return processingResult{event: "telegram.update.ignored", reason: "unhandled_reaction", principalID: principalID}, "", nil
+	}
+	reacted, err := s.conversation.React(ctx, conversation.ReactionInput{
+		BotUserID:        bot.ID,
+		TelegramUpdateID: updateID,
+		PrincipalID:      principalID,
+		ChatID:           reaction.Chat.ID,
+		MessageID:        reaction.MessageID,
+		Emojis:           emojis,
+	})
+	if err != nil {
+		return processingResult{}, "record_reaction", err
+	}
+	result := processingResult{event: "telegram.reaction.recorded", reason: reacted.Class, principalID: principalID, command: "reaction"}
+	switch {
+	case !reacted.Recorded:
+		result.event, result.reason = "telegram.update.ignored", "unknown_message"
+	case reacted.Class == "":
+		result.event, result.reason = "telegram.reaction.removed", ""
+	case reacted.Reconsider == conversation.ReconsiderStarted:
+		result.event = "telegram.reaction.reconsider_queued"
+	case reacted.Reconsider == conversation.ReconsiderBusy:
+		result.event = "telegram.reaction.reconsider_skipped"
+	}
+	return result, "", nil
+}
+
+// reactionEmojis lists a reaction's emoji. A custom or paid reaction has none, so it stands as its
+// type, which still counts as a reaction.
+func reactionEmojis(reactions []ReactionType) ([]string, bool) {
+	emojis := make([]string, 0, len(reactions))
+	for _, reaction := range reactions {
+		emoji := reaction.Emoji
+		if reaction.Type != "emoji" {
+			emoji = reaction.Type
+		}
+		if emoji == "" || !utf8.ValidString(emoji) || utf8.RuneCountInString(emoji) > 32 {
+			return nil, false
+		}
+		emojis = append(emojis, emoji)
+	}
+	return emojis, true
 }
 
 // sendMediaReply answers a message carrying something that cannot become a turn, quoting it so

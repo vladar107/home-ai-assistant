@@ -539,9 +539,9 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 	defer release()
 
 	run := tools.NewRun(request.Message)
-	// A continuation's Telegram message is the bot's own proposal, so nothing may act on it as the
-	// user's.
-	if request.Message != ContinueMessage {
+	// A continuation's or a reconsider's Telegram message is one of the bot's own, so nothing may act
+	// on it as the user's.
+	if !ownMessage(request.Message) {
 		run.MarkUserMessage()
 	}
 	turnCtx, cancel := context.WithTimeout(tools.WithRun(tools.WithTurn(ctx, outbox.ChatTurn(request.ID)), run), s.config.TurnTimeout)
@@ -627,9 +627,9 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 			reply = UnavailableReply
 		}
 	} else {
-		// A continuation's message is ours, so the user's own earlier request stays the one actions
-		// are judged against.
-		if s.config.Recent != nil && request.Message != ContinueMessage {
+		// A continuation's or a reconsider's message is ours, so the user's own earlier request stays
+		// the one actions are judged against.
+		if s.config.Recent != nil && !ownMessage(request.Message) {
 			s.config.Recent.RecordMessage(request.PrincipalID, request.Message)
 		}
 		notice := s.takeNotice(turnCtx, request)
@@ -786,9 +786,9 @@ type toolHint struct {
 // startToolHint asks for the tool the message most likely needs while the rest of the turn is
 // set up. The answer is advisory: any failure or a late answer yields no answer, and a name the
 // turn does not offer yields an answered hint without a name. A nil result means no hint was
-// started; a continuation's message is ours, so it starts none.
+// started; a continuation's or a reconsider's message is ours, so it starts none.
 func (s *Service) startToolHint(ctx context.Context, request Request, tools agentruntime.ToolSet) <-chan toolHint {
-	if s.config.ToolHint == nil || tools.Empty() || strings.TrimSpace(request.Message) == "" || request.Message == ContinueMessage {
+	if s.config.ToolHint == nil || tools.Empty() || strings.TrimSpace(request.Message) == "" || ownMessage(request.Message) {
 		return nil
 	}
 	// Read before this turn's message is recorded, so earlier holds only what came before it.
