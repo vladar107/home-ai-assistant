@@ -7,12 +7,12 @@ const (
 	typeSafeOnAction      = "on"
 	typeSafeOffAction     = "off"
 
-	typeSafeDescription = "When on, a scrubbed copy of your recent messages, of web pages and emails the assistant reads, and of proposed actions is sent to TypeSafe to warn you about actions you did not ask for and content that tries to instruct the assistant. File paths, links, email addresses, phone numbers, bank and card numbers, and keys are removed first; names and other free text may remain. Notion page contents and NAS file contents are never sent; page titles, file names, and job names may be."
+	typeSafeDescription = "When on, a scrubbed copy of your recent messages, of the assistant's latest reply, of web pages and emails the assistant reads, and of proposed actions is sent to TypeSafe to warn you about actions you did not ask for and content that tries to instruct the assistant. File paths, links, email addresses, phone numbers, bank and card numbers, and keys are removed first; names and other free text may remain. Notion page contents and NAS file contents are never sent, and no reply is sent from a conversation that has read them, until /new; page titles, file names, and job names may be."
 
 	TypeSafeOnLine  = "Safety checks (TypeSafe): on.\n" + typeSafeDescription
 	TypeSafeOffLine = "Safety checks (TypeSafe): off.\n" + typeSafeDescription
 	// TypeSafePrivacyLine is added to /privacy while the principal's safety checks are on.
-	TypeSafePrivacyLine = "Safety checks are on: a scrubbed copy of your recent messages, of web pages and emails I read, and of proposed actions is sent to TypeSafe. It is off by default; you can turn it off in /settings."
+	TypeSafePrivacyLine = "Safety checks are on: a scrubbed copy of your recent messages, of my latest reply, of web pages and emails I read, and of proposed actions is sent to TypeSafe; no reply is sent from a conversation that has read Notion or NAS content. It is off by default; you can turn it off in /settings."
 )
 
 // TypeSafeController is implemented by the judgment opt-in service; nil disables the safety checks section.

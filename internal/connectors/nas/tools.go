@@ -51,6 +51,7 @@ var readDefinitions = []tools.Definition{
 		Name:        toolReadFile,
 		Description: "Read the text content of one file on the NAS, or the text of a PDF. Call this only when the user has asked what the file says, never to find, identify, or send it.",
 		Risk:        tools.RiskRead,
+		Private:     true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"path":{"type":"string","description":"The full path from a listing, such as home/Documents/notes.md."},` +
 			`"offset_bytes":{"type":"integer","minimum":0,"description":"Where to continue reading a file that was truncated."}},` +

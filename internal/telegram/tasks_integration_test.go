@@ -144,6 +144,10 @@ func TestBackgroundTaskRunsBesideChatAndReportsAsReply(t *testing.T) {
 	meanwhile.answer <- agentruntime.RunResult{Response: "Paris."}
 	h.wantReply(101, 2, "Paris.")
 	h.waitState(2, "delivered")
+	privateSessions := `SELECT count(*) FROM conversation_sessions WHERE principal_id = 'alice' AND private_at IS NOT NULL`
+	if count := h.countRows(privateSessions); count != 0 {
+		t.Fatalf("private sessions before the report = %d", count)
+	}
 
 	run.answer <- agentruntime.RunResult{Response: "Two mails need action:\n- the plumber's invoice\n- the school trip form", Final: "Two mails need action:\n- the plumber's invoice\n- the school trip form"}
 	report := h.nextMessage()
@@ -158,6 +162,11 @@ func TestBackgroundTaskRunsBesideChatAndReportsAsReply(t *testing.T) {
 	if !strings.Contains(followUp.request.Message, fmt.Sprintf(`Background task "September mail" (id %s) finished`, id)) ||
 		!strings.Contains(followUp.request.Message, "the plumber's invoice") {
 		t.Fatalf("follow-up message = %q", followUp.request.Message)
+	}
+	// A task's report may retell private content, so the conversation it reaches turns private
+	// before the turn replies.
+	if count := h.countRows(privateSessions); count != 1 {
+		t.Fatalf("private sessions after the report's notice = %d, want 1", count)
 	}
 	if result := h.callTool(followUp, "task_result", fmt.Sprintf(`{"task_id":%q}`, id)); result.IsError || !strings.Contains(result.Text, "the school trip form") {
 		t.Fatalf("task_result = %+v", result)

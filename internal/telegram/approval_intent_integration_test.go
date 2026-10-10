@@ -14,7 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/judgment"
+	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
+	"github.com/vladar107/home-ai-assistant/internal/tools"
 	"github.com/vladar107/home-ai-assistant/internal/turnstate"
 )
 
@@ -173,10 +176,77 @@ func TestIntentCheckSeesConfirmationWithThePriorRequest(t *testing.T) {
 	if len(requests) != 1 {
 		t.Fatalf("requests = %d, want 1", len(requests))
 	}
-	recent := requests[0]["recent_messages"]
-	if !strings.Contains(recent, "add milk to my shopping page") || !strings.HasSuffix(recent, "yes") {
-		t.Fatalf("recent_messages = %q", recent)
+	if recent := requests[0]["recent_exchange"]; recent != "user: add milk to my shopping page\nuser: yes" {
+		t.Fatalf("recent_exchange = %q", recent)
 	}
+}
+
+func TestIntentCheckSeesTheAssistantQuestionButNeverTheTurnsOwnReply(t *testing.T) {
+	stub := newTypeSafeStub(t, 0.9, http.StatusOK)
+	checker, registry := newIntentChecker(t, stub, true)
+	runtime := newControlledRuntime()
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{notion: writableNotionSimulator(t), memory: true, providers: []tools.Provider{outsideProvider{}}, recent: registry})
+	h.provision("alice", "acct-alice-1111")
+	h.installNotionToken("alice", aliceNotionToken)
+	h.start()
+	h.enableNotionWrites(1, 2, 101)
+	h.approvals.SetIntentChecker(checker)
+
+	h.push(textUpdate(3, 101, "hello"))
+	receive(t, h.ctx, runtime.calls).answer <- agentruntime.RunResult{}
+	h.wantReply(101, 3, conversation.UnavailableReply)
+	h.waitState(3, "delivered")
+
+	h.push(textUpdate(4, 101, "what about tea"))
+	call := receive(t, h.ctx, runtime.calls)
+	if result, err := call.request.Tools.Executor.Execute(call.ctx, addCall("fact", "likes tea")); err != nil || result.IsError {
+		t.Fatalf("memory_add = %+v %v", result, err)
+	}
+	call.answer <- agentruntime.RunResult{Response: "Shall I remember that you take it without sugar?"}
+	h.wantReply(101, 4, "Shall I remember that you take it without sugar?\n\nRemembered: likes tea")
+	h.waitState(4, "delivered")
+
+	// After outside content the write becomes a proposal, judged before this turn's reply is kept.
+	h.push(textUpdate(5, 101, "yes"))
+	call = receive(t, h.ctx, runtime.calls)
+	for _, toolCall := range []agentruntime.ToolCall{memoryCall("read_outside", `{}`), addCall("fact", "takes tea without sugar")} {
+		if result, err := call.request.Tools.Executor.Execute(call.ctx, toolCall); err != nil || result.IsError {
+			t.Fatalf("%s = %+v %v", toolCall.Name, result, err)
+		}
+	}
+	call.answer <- agentruntime.RunResult{Response: "Noted once you confirm."}
+	h.wantReply(101, 5, "Noted once you confirm.")
+	h.waitState(5, "delivered")
+	proposal := h.nextMessage()
+	confirmData, _ := approvalButtons(t, proposal.keyboard)
+	h.push(callbackUpdate(6, 101, proposal.messageID, confirmData))
+	h.wantAnswer(6)
+	h.nextEdit()
+	h.continueTurn(runtime, 6)
+
+	// A Notion write is a private tool, so its conversation keeps its replies from TypeSafe.
+	h.proposeTurn(runtime, 7, "notion_append_blocks", `{"page_id":"page-groceries","paragraphs":["Remember bread"]}`)
+	h.push(textUpdate(8, 101, "thanks"))
+	receive(t, h.ctx, runtime.calls).answer <- agentruntime.RunResult{Response: "You're welcome."}
+	h.wantReply(101, 8, "You're welcome.")
+	h.waitState(8, "delivered")
+	h.proposeTurn(runtime, 9, "notion_append_blocks", `{"page_id":"page-groceries","paragraphs":["Remember butter"]}`)
+
+	want := []string{
+		"user: what about tea\nassistant: Shall I remember that you take it without sugar?\nuser: yes",
+		"user: yes\nassistant: Noted once you confirm.\nuser: please write to notion",
+		"assistant: Noted once you confirm.\nuser: thanks\nuser: please write to notion",
+	}
+	requests := stub.requests()
+	if len(requests) != len(want) {
+		t.Fatalf("requests = %d, want %d", len(requests), len(want))
+	}
+	for index, request := range requests {
+		if got := request["recent_exchange"]; got != want[index] {
+			t.Fatalf("request %d recent_exchange = %q, want %q", index, got, want[index])
+		}
+	}
+	stub.assertNoLeaks(t)
 }
 
 func TestIntentCheckSendsNothingWithoutOptIn(t *testing.T) {

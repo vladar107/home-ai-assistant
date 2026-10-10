@@ -40,6 +40,7 @@ var writeDefinitions = []tools.Definition{
 		Name:        toolCreatePage,
 		Description: "Propose creating a Notion page under a shared page or in a data source, with a title, optional property values, and optional body paragraphs. The user must confirm before anything is created.",
 		Risk:        tools.RiskWrite,
+		Private:     true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"parent_type":{"type":"string","enum":["page","data_source"],"description":"Whether parent_id names a page or a data source."},` +
 			`"parent_id":{"type":"string","description":"The ID of the parent page or data source from an earlier result."},` +
@@ -52,6 +53,7 @@ var writeDefinitions = []tools.Definition{
 		Name:        toolUpdatePage,
 		Description: "Propose setting property values on a shared Notion page. The user must confirm before anything changes.",
 		Risk:        tools.RiskWrite,
+		Private:     true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"page_id":{"type":"string","description":"The page ID from an earlier result."},` +
 			`"properties":{"type":"object","description":"Property values to set, keyed by property name."}},` +
@@ -61,6 +63,7 @@ var writeDefinitions = []tools.Definition{
 		Name:        toolAppendBlocks,
 		Description: "Propose appending paragraphs to the end of a shared Notion page. The user must confirm before anything is added.",
 		Risk:        tools.RiskWrite,
+		Private:     true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"page_id":{"type":"string","description":"The page ID from an earlier result."},` +
 			`"paragraphs":{"type":"array","items":{"type":"string"},"minItems":1,"description":"Paragraphs to append, in order."}},` +
@@ -72,7 +75,10 @@ type Proposer interface {
 	Propose(context.Context, string, approval.Proposal) (approval.Record, error)
 }
 
-var _ approval.Executor = (*Service)(nil)
+var (
+	_ approval.Executor        = (*Service)(nil)
+	_ approval.PrivateExecutor = (*Service)(nil)
+)
 
 func (s *Service) ActionTools() []string {
 	return []string{toolCreatePage, toolUpdatePage, toolAppendBlocks}
@@ -548,6 +554,10 @@ func sortedKeys(values map[string]json.RawMessage) []string {
 
 // ExecuteApproved performs a confirmed proposal with the principal's own token. Creates and
 // appends are never retried after an ambiguous failure; an update is retried once.
+// PrivateOutcomes reports that a write's outcome may quote the page's table, such as the property
+// names and options of a rejected write.
+func (s *Service) PrivateOutcomes() bool { return true }
+
 func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (approval.Outcome, error) {
 	token, connected, err := s.token(ctx, record.PrincipalID)
 	if err != nil {

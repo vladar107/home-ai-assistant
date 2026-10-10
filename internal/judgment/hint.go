@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
+	"github.com/vladar107/home-ai-assistant/internal/turnstate"
 )
 
 const (
@@ -28,11 +29,13 @@ func NewToolHinter(client *Client, optIn OptIn) *ToolHinter {
 }
 
 // Hint returns the name of the most likely tool, or "" when the principal has not opted in, no
-// tool clearly fits, or the answer is not confident enough.
-func (h *ToolHinter) Hint(ctx context.Context, principalID, message string, tools []agentruntime.ToolDefinition) (string, error) {
+// tool clearly fits, or the answer is not confident enough. earlier is the conversation just before
+// message. answered reports whether TypeSafe was asked and gave an answer, so a turn can tell a
+// hint that saw no fitting tool from one that never ran.
+func (h *ToolHinter) Hint(ctx context.Context, principalID, message string, earlier []turnstate.Line, tools []agentruntime.ToolDefinition) (name string, answered bool, err error) {
 	enabled, err := h.optIn.JudgmentsEnabled(ctx, principalID)
 	if err != nil || !enabled || len(tools) == 0 {
-		return "", err
+		return "", false, err
 	}
 	sorted := append([]agentruntime.ToolDefinition(nil), tools...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
@@ -46,25 +49,29 @@ func (h *ToolHinter) Hint(ctx context.Context, principalID, message string, tool
 		}
 		options[tool.Name] = truncateRunes(tool.Description, hintDescriptionMax)
 	}
-	answers, err := h.client.Ask(ctx, "hint",
-		map[string]Redacted{"message": Redact(message)},
+	state := map[string]Redacted{"message": Redact(message)}
+	if exchange := redactExchange(earlier); !exchange.Empty() {
+		state["earlier"] = exchange
+	}
+	answers, err := h.client.Ask(ctx, "hint", state,
 		map[string]Question{"tool": Choice(
 			"Which one tool would the assistant most likely need to use to handle `message`? "+
+				"`earlier`, when present, is the conversation just before it: read a short follow-up such as 'yes' or 'do it' as answering the assistant's last line there. "+
 				"Pick none when the message is conversation, a follow-up that needs no lookup, or general knowledge.",
 			options)})
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	name, confidence, ok := answers.Choice("tool")
 	if !ok {
-		return "", nil
+		return "", false, nil
 	}
 	if name == hintNone || confidence < hintConfidence {
 		h.client.recordDecision(ctx, principalID, "hint", "none")
-		return "", nil
+		return "", true, nil
 	}
 	h.client.recordDecision(ctx, principalID, "hint", "hinted")
-	return name, nil
+	return name, true, nil
 }
 
 func truncateRunes(text string, limit int) string {

@@ -348,6 +348,14 @@ func (s *Service) PendingNotice(principalID string) string {
 	return strings.Join(notices, "\n\n")
 }
 
+// TakeNotice is PendingNotice that also reports whether the notices may retell private content.
+// Every task notice counts as private, as task_result does, because a task's runs do not record
+// whether they read Notion page content or NAS file contents.
+func (s *Service) TakeNotice(principalID string) (string, bool) {
+	text := s.PendingNotice(principalID)
+	return text, text != ""
+}
+
 // Now is the clock task lists are rendered against.
 func (s *Service) Now() time.Time { return time.Now() }
 

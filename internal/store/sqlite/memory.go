@@ -183,6 +183,42 @@ func (s *Store) ConversationExternal(ctx context.Context, principalID, requestID
 	return external == 1, nil
 }
 
+// MarkConversationPrivate flags the session the chat request belongs to as having read Notion
+// page content or NAS file contents. The flag is set once and kept until /new starts a session.
+func (s *Store) MarkConversationPrivate(ctx context.Context, principalID, requestID string) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("mark conversation private: SQLite store is not open")
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE conversation_sessions
+		 SET private_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+		 WHERE private_at IS NULL AND principal_id = ? AND id = (
+		     SELECT session_id FROM conversation_requests WHERE id = ? AND principal_id = ?
+		 )`, principalID, requestID, principalID); err != nil {
+		return fmt.Errorf("mark conversation private: %w", err)
+	}
+	return nil
+}
+
+// ConversationPrivate reports whether the session the chat request belongs to has read Notion
+// page content or NAS file contents.
+func (s *Store) ConversationPrivate(ctx context.Context, principalID, requestID string) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("load conversation privacy: SQLite store is not open")
+	}
+	var private int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT session.private_at IS NOT NULL
+		 FROM conversation_requests AS request
+		 JOIN conversation_sessions AS session
+		   ON session.id = request.session_id AND session.principal_id = request.principal_id
+		 WHERE request.id = ? AND request.principal_id = ?`, requestID, principalID).Scan(&private)
+	if err != nil {
+		return false, fmt.Errorf("query conversation privacy: %w", err)
+	}
+	return private == 1, nil
+}
+
 func (s *Store) ConversationExposed(ctx context.Context, principalID, requestID string) (bool, error) {
 	if s == nil || s.db == nil {
 		return false, fmt.Errorf("load conversation exposure: SQLite store is not open")

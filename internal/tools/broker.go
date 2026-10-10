@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 )
 
@@ -71,6 +72,10 @@ type Definition struct {
 	// Screen marks a result that may be sent, redacted, for injection screening; it requires
 	// ThirdParty.
 	Screen bool
+	// Private marks a tool whose result carries Notion page content or NAS file contents, or can
+	// replay them; a successful chat call marks the conversation private, so nothing it says later
+	// reaches TypeSafe.
+	Private bool
 	// OutsideBudget keeps the tool's calls out of the turn's call budget, so a turn that has spent
 	// its budget can still hand the rest of the work to it.
 	OutsideBudget bool
@@ -115,6 +120,12 @@ type TurnExposureRecorder interface {
 	MarkTurnExposed(ctx context.Context, principalID, turn string, external bool)
 }
 
+// TurnPrivacyRecorder remembers which turn read private content, so what its conversation says
+// afterwards is kept from TypeSafe.
+type TurnPrivacyRecorder interface {
+	MarkTurnPrivate(ctx context.Context, principalID, turn string)
+}
+
 // Screener judges whether third-party text addresses an AI assistant with instructions.
 type Screener interface {
 	Screen(ctx context.Context, principalID, tool, text string) (bool, error)
@@ -125,6 +136,7 @@ type Broker struct {
 	logger    *slog.Logger
 	exposure  ExposureRecorder
 	turns     TurnExposureRecorder
+	privacy   TurnPrivacyRecorder
 	screener  Screener
 	telemetry Telemetry
 }
@@ -154,6 +166,12 @@ func (b *Broker) SetExposure(recorder ExposureRecorder) {
 // turns start.
 func (b *Broker) SetTurnExposure(recorder TurnExposureRecorder) {
 	b.turns = recorder
+}
+
+// SetTurnPrivacy sets where the turn of a private result is recorded, at wiring time before turns
+// start.
+func (b *Broker) SetTurnPrivacy(recorder TurnPrivacyRecorder) {
+	b.privacy = recorder
 }
 
 // Telemetry records per-call metrics and traces.
@@ -208,7 +226,7 @@ func (b *Broker) toolsFor(ctx context.Context, principalID string, readOnly bool
 			if _, exists := executor.bindings[definition.Name]; exists {
 				return agentruntime.ToolSet{}, fmt.Errorf("tool %q is contributed twice", definition.Name)
 			}
-			executor.bindings[definition.Name] = toolBinding{provider: provider, deadline: definition.Timeout, thirdParty: definition.ThirdParty, household: definition.Household, screen: definition.Screen, outsideBudget: definition.OutsideBudget}
+			executor.bindings[definition.Name] = toolBinding{provider: provider, deadline: definition.Timeout, thirdParty: definition.ThirdParty, household: definition.Household, screen: definition.Screen, private: definition.Private, outsideBudget: definition.OutsideBudget}
 			if definition.OutsideBudget && executor.handoff == "" {
 				executor.handoff = definition.Name
 			}
@@ -269,6 +287,7 @@ type toolBinding struct {
 	thirdParty    bool
 	household     bool
 	screen        bool
+	private       bool
 	outsideBudget bool
 }
 
@@ -374,9 +393,13 @@ func (e *turnExecutor) perform(ctx context.Context, call agentruntime.ToolCall, 
 	case len(result.Text) > maximumResultBytes:
 		return "oversized", "", agentruntime.ToolResult{Text: oversizedText, IsError: true}
 	case result.IsError:
+		// A private tool's error can still quote what it read, such as a Notion table's property
+		// names and options.
+		e.markPrivate(ctx, binding)
 		return "tool_error", "", agentruntime.ToolResult{Text: result.Text, IsError: true}
 	default:
-		if binding.thirdParty && e.broker.exposure != nil {
+		_, chat := outbox.ChatRequest(e.turn)
+		if binding.thirdParty && chat && e.broker.exposure != nil {
 			e.broker.exposure.MarkExposed(e.principalID)
 		}
 		external := binding.thirdParty && !binding.household
@@ -386,6 +409,7 @@ func (e *turnExecutor) perform(ctx context.Context, call agentruntime.ToolCall, 
 		if binding.thirdParty && e.broker.turns != nil {
 			e.broker.turns.MarkTurnExposed(ctx, e.principalID, e.turn, external)
 		}
+		e.markPrivate(ctx, binding)
 		text := untrustedResultPrefix
 		screened := ""
 		if binding.screen && e.broker.screener != nil {
@@ -395,6 +419,20 @@ func (e *turnExecutor) perform(ctx context.Context, call agentruntime.ToolCall, 
 			}
 		}
 		return "success", screened, agentruntime.ToolResult{Text: text + result.Text}
+	}
+}
+
+// markPrivate records a private call on the turn's conversation and on the run, whose report
+// carries what the call read into a later chat turn.
+func (e *turnExecutor) markPrivate(ctx context.Context, binding toolBinding) {
+	if !binding.private {
+		return
+	}
+	if e.broker.privacy != nil {
+		e.broker.privacy.MarkTurnPrivate(ctx, e.principalID, e.turn)
+	}
+	if e.run != nil {
+		e.run.MarkPrivate()
 	}
 }
 

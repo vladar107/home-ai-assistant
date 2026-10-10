@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,12 +15,14 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/judgment"
+	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/turnstate"
 )
 
 const testPrincipal = "principal-1"
 const testSchema = `{"type":"object"}`
+const chatRequest = "33333333-3333-4333-8333-333333333333"
 
 // fakeProvider grants one principal the definitions it is given and delegates every call to
 // respond, so a test can observe the context the broker built for it.
@@ -175,41 +178,105 @@ func TestExecuteCarriesTheTurnKeyToTheProvider(t *testing.T) {
 	}
 }
 
+// Only a chat turn marks the principal exposed: a scheduled run or a background task reads on
+// its own record, and its content never enters the chat.
 func TestSuccessfulThirdPartyCallMarksThePrincipalExposed(t *testing.T) {
-	registry := turnstate.New(nil)
+	for _, test := range []struct {
+		name string
+		turn string
+		want turnstate.Level
+	}{
+		{name: "chat turn", turn: outbox.ChatTurn(chatRequest), want: turnstate.LevelExposed},
+		{name: "scheduled turn", turn: outbox.ScheduledTurn("run-1"), want: turnstate.LevelNone},
+		{name: "task turn", turn: outbox.TaskTurn("task-1"), want: turnstate.LevelNone},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			registry := turnstate.New(nil)
+			broker := testBroker(t)
+			broker.SetExposure(registry)
+			thirdParty := testDefinition("read_page", 0)
+			thirdParty.ThirdParty = true
+			failing := testDefinition("read_mail", 0)
+			failing.ThirdParty = true
+			provider := &fakeProvider{
+				principal:   testPrincipal,
+				definitions: []Definition{testDefinition("own_note", 0), thirdParty, failing},
+				respond: func(_ context.Context, call Call) (Result, error) {
+					return Result{Text: "text", IsError: call.Name == "read_mail"}, nil
+				},
+			}
+			if err := broker.Register(provider); err != nil {
+				t.Fatal(err)
+			}
+			set, err := broker.ToolsFor(WithTurn(context.Background(), test.turn), testPrincipal)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{"own_note", "read_mail"} {
+				if _, err := set.Executor.Execute(context.Background(), agentruntime.ToolCall{Name: name, Arguments: json.RawMessage(`{}`)}); err != nil {
+					t.Fatal(err)
+				}
+				if got := registry.Exposure(testPrincipal); got != turnstate.LevelNone {
+					t.Fatalf("exposure after %s = %v", name, got)
+				}
+			}
+			if _, err := set.Executor.Execute(context.Background(), agentruntime.ToolCall{Name: "read_page", Arguments: json.RawMessage(`{}`)}); err != nil {
+				t.Fatal(err)
+			}
+			if got := registry.Exposure(testPrincipal); got != test.want {
+				t.Fatalf("exposure after read_page = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+type recordedPrivate struct{ turns []string }
+
+func (r *recordedPrivate) MarkTurnPrivate(_ context.Context, _, turn string) {
+	r.turns = append(r.turns, turn)
+}
+
+// A private result, or a private tool's error text, is recorded with its turn and its run; a failed
+// private call and an ordinary one are not.
+func TestSuccessfulPrivateCallRecordsItsTurn(t *testing.T) {
 	broker := testBroker(t)
-	broker.SetExposure(registry)
-	thirdParty := testDefinition("read_page", 0)
-	thirdParty.ThirdParty = true
-	failing := testDefinition("read_mail", 0)
-	failing.ThirdParty = true
+	privacy := &recordedPrivate{}
+	broker.SetTurnPrivacy(privacy)
+	private := testDefinition("read_file", 0)
+	private.Private = true
+	failing := testDefinition("read_page", 0)
+	failing.Private = true
+	refusing := testDefinition("update_table", 0)
+	refusing.Private = true
 	provider := &fakeProvider{
 		principal:   testPrincipal,
-		definitions: []Definition{testDefinition("own_note", 0), thirdParty, failing},
+		definitions: []Definition{testDefinition("own_note", 0), private, failing, refusing},
 		respond: func(_ context.Context, call Call) (Result, error) {
-			return Result{Text: "text", IsError: call.Name == "read_mail"}, nil
+			if call.Name == "read_page" {
+				return Result{}, errors.New("unavailable")
+			}
+			return Result{Text: "text", IsError: call.Name == "update_table"}, nil
 		},
 	}
 	if err := broker.Register(provider); err != nil {
 		t.Fatal(err)
 	}
-	set, err := broker.ToolsFor(context.Background(), testPrincipal)
+	turn := outbox.ChatTurn(chatRequest)
+	run := NewRun("read my notes")
+	set, err := broker.ToolsFor(WithRun(WithTurn(context.Background(), turn), run), testPrincipal)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"own_note", "read_mail"} {
+	for _, name := range []string{"own_note", "read_page", "update_table", "read_file"} {
 		if _, err := set.Executor.Execute(context.Background(), agentruntime.ToolCall{Name: name, Arguments: json.RawMessage(`{}`)}); err != nil {
 			t.Fatal(err)
 		}
-		if got := registry.Exposure(testPrincipal); got != turnstate.LevelNone {
-			t.Fatalf("exposure after %s = %v", name, got)
+		if want := name == "update_table" || name == "read_file"; run.Private() != want {
+			t.Fatalf("run private after %s = %v, want %v", name, run.Private(), want)
 		}
 	}
-	if _, err := set.Executor.Execute(context.Background(), agentruntime.ToolCall{Name: "read_page", Arguments: json.RawMessage(`{}`)}); err != nil {
-		t.Fatal(err)
-	}
-	if got := registry.Exposure(testPrincipal); got != turnstate.LevelExposed {
-		t.Fatalf("exposure after read_page = %v", got)
+	if fmt.Sprint(privacy.turns) != fmt.Sprint([]string{turn, turn}) {
+		t.Fatalf("private turns = %v, want %s for update_table and read_file", privacy.turns, turn)
 	}
 }
 
@@ -360,7 +427,7 @@ func newScreeningFixture(t *testing.T, status int, answer float64) screeningFixt
 	if err := broker.Register(provider); err != nil {
 		t.Fatal(err)
 	}
-	set, err := broker.ToolsFor(context.Background(), testPrincipal)
+	set, err := broker.ToolsFor(WithTurn(context.Background(), outbox.ChatTurn(chatRequest)), testPrincipal)
 	if err != nil {
 		t.Fatal(err)
 	}

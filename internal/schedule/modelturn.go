@@ -88,7 +88,7 @@ func (m modelTurn) Run(ctx context.Context, occurrence Occurrence) (Result, erro
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Text: reply.Text, ErrorKind: reply.ErrorKind}, nil
+	return Result{Text: reply.Text, ErrorKind: reply.ErrorKind, Private: reply.Private}, nil
 }
 
 // scheduledMessage tells the model that nobody is waiting on this turn, so it does the task and

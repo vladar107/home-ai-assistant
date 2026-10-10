@@ -72,6 +72,9 @@ type Run struct {
 	JobZone      string
 	JobOneTime   bool
 	Config       json.RawMessage
+	// Private is true when the reply may retell Notion page content or NAS file contents. It is
+	// known only to the process that executed the run.
+	Private bool
 }
 
 type Repository interface {
@@ -129,6 +132,9 @@ type Occurrence struct {
 type Result struct {
 	Text      string
 	ErrorKind string
+	// Private is true when the text may retell Notion page content or NAS file contents the run
+	// read.
+	Private bool
 }
 
 type Handler interface {

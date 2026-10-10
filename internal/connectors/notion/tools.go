@@ -36,6 +36,7 @@ var readDefinitions = []tools.Definition{
 		Name:        toolSearch,
 		Description: "Search the pages and data sources shared with the user's Notion connection by title. Returns IDs, URLs, and key properties.",
 		Risk:        tools.RiskRead,
+		Private:     true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"query":{"type":"string","description":"Text matched against titles; omit to list everything shared."},` +
 			`"object_type":{"type":"string","enum":["page","data_source"],"description":"Restrict results to pages or data sources."},` +
@@ -47,6 +48,7 @@ var readDefinitions = []tools.Definition{
 		Name:        toolGetPage,
 		Description: "Read one Notion page by ID: its properties and, by default, its text content.",
 		Risk:        tools.RiskRead,
+		Private:     true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"page_id":{"type":"string","description":"The page ID from a search or query result."},` +
 			`"include_content":{"type":"boolean","description":"Include the page's text content; default true."}},` +
@@ -56,6 +58,7 @@ var readDefinitions = []tools.Definition{
 		Name:        toolQueryDataSource,
 		Description: "List entries of one Notion data source by ID, optionally filtered and sorted with Notion API filter and sorts objects.",
 		Risk:        tools.RiskRead,
+		Private:     true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"data_source_id":{"type":"string","description":"A data source ID from a search result, or the database ID printed by a [database] line in page content."},` +
 			`"filter":{"type":"object","description":"A Notion API filter object, validated by Notion."},` +
@@ -68,6 +71,7 @@ var readDefinitions = []tools.Definition{
 		Name:        toolGetBlockChildren,
 		Description: "Read the content nested inside one Notion block by ID, such as the rows of a table drawn in a page or the blocks inside a toggle or column.",
 		Risk:        tools.RiskRead,
+		Private:     true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"block_id":{"type":"string","description":"The block ID printed beside a nested-content note in page content."}},` +
 			`"required":["block_id"],"additionalProperties":false}`),

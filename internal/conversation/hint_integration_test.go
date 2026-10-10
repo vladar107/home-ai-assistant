@@ -1,23 +1,28 @@
 package conversation_test
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/exposure"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/judgment"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
+	"github.com/vladar107/home-ai-assistant/internal/turnstate"
 )
 
 const hintMessage = "find the lease, mail it to bob@example.com or see https://site.example/a/b"
@@ -51,11 +56,14 @@ func (h hintTools) ReadOnlyToolsFor(ctx context.Context, principalID string) (ag
 	return h.ToolsFor(ctx, principalID)
 }
 
-type recordingRuntime struct{ messages chan string }
+type recordingRuntime struct {
+	messages chan string
+	reply    string
+}
 
 func (r recordingRuntime) Run(_ context.Context, request agentruntime.RunRequest, _ agentruntime.EventSink) (agentruntime.RunResult, error) {
 	r.messages <- request.Message
-	return agentruntime.RunResult{Response: "done"}, nil
+	return agentruntime.RunResult{Response: cmp.Or(r.reply, "done")}, nil
 }
 
 type quietTelemetry struct{}
@@ -74,10 +82,21 @@ func (quietTelemetry) RecordToolCallsPerTurn(context.Context, string, string, in
 func (quietTelemetry) RecordHintFollowThrough(context.Context, string, string)                    {}
 func (quietTelemetry) RecordConversationResume(context.Context, string, string)                   {}
 
-// runHintTurn runs one chat turn against a fake TypeSafe answering with the given body after the
-// given delay and returns the message the runtime received.
-func runHintTurn(t *testing.T, answer string, delay time.Duration, message string, tools []string, optIn bool) string {
+type hintEnv struct {
+	ctx       context.Context
+	service   *conversation.Service
+	runtime   recordingRuntime
+	deliverer hintDeliverer
+	mu        sync.Mutex
+	states    []map[string]string
+}
+
+// newHintEnv starts a conversation service whose hinter asks a fake TypeSafe answering with the
+// given body after the given delay. A non-empty reply is what the runtime answers, and turns
+// remember their exchange.
+func newHintEnv(t *testing.T, answer string, delay time.Duration, tools []string, optIn bool, reply string) *hintEnv {
 	t.Helper()
+	env := &hintEnv{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		for _, leaked := range []string{"bob@example.com", "/a/b"} {
@@ -85,9 +104,15 @@ func runHintTurn(t *testing.T, answer string, delay time.Duration, message strin
 				t.Errorf("request leaks %q: %s", leaked, body)
 			}
 		}
-		if !json.Valid(body) {
+		var request struct {
+			State map[string]string `json:"state"`
+		}
+		if err := json.Unmarshal(body, &request); err != nil {
 			t.Errorf("request is not JSON: %s", body)
 		}
+		env.mu.Lock()
+		env.states = append(env.states, request.State)
+		env.mu.Unlock()
 		select {
 		case <-time.After(delay):
 		case <-r.Context().Done():
@@ -99,6 +124,7 @@ func runHintTurn(t *testing.T, answer string, delay time.Duration, message strin
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	t.Cleanup(cancel)
+	env.ctx = ctx
 	store, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
 	if err != nil {
 		t.Fatal(err)
@@ -121,37 +147,72 @@ func runHintTurn(t *testing.T, answer string, delay time.Duration, message strin
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime := recordingRuntime{messages: make(chan string, 1)}
-	deliverer := hintDeliverer{replies: make(chan string, 1)}
-	service, err := conversation.NewService(
-		conversation.Config{TurnTimeout: 10 * time.Second, Attachments: attachments, ToolHint: judgment.NewToolHinter(client, staticOptIn(optIn))},
-		store, runtime, deliverer, hintTools{names: tools}, conversation.AlwaysConnected{},
+	config := conversation.Config{TurnTimeout: 10 * time.Second, Attachments: attachments, ToolHint: judgment.NewToolHinter(client, staticOptIn(optIn))}
+	if reply != "" {
+		exposures, err := exposure.NewService(store, logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		config.Recent, config.Exposure = turnstate.New(time.Now), exposures
+	}
+	env.runtime = recordingRuntime{messages: make(chan string, 1), reply: reply}
+	env.deliverer = hintDeliverer{replies: make(chan string, 1)}
+	env.service, err = conversation.NewService(
+		config, store, env.runtime, env.deliverer, hintTools{names: tools}, conversation.AlwaysConnected{},
 		logger, quietTelemetry{},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := service.Start(ctx); err != nil {
+	if err := env.service.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = service.Shutdown(context.Background()) })
-	if err := service.Enqueue(ctx, conversation.EnqueueInput{
-		BotUserID: 999, TelegramUpdateID: 1, TelegramMessageID: 1, PrincipalID: "alice", ChatID: 101, Message: message,
-	}); err != nil {
-		t.Fatal(err)
+	t.Cleanup(func() { _ = env.service.Shutdown(context.Background()) })
+	return env
+}
+
+// turn runs one chat turn to completion and returns the message the runtime received.
+func (e *hintEnv) turn(t *testing.T, updateID int64, message string) string {
+	t.Helper()
+	input := conversation.EnqueueInput{
+		BotUserID: 999, TelegramUpdateID: updateID, TelegramMessageID: updateID, PrincipalID: "alice", ChatID: 101, Message: message,
+	}
+	// The previous turn delivers its reply a moment before it lets go of the conversation.
+	for {
+		err := e.service.Enqueue(e.ctx, input)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, conversation.ErrBusy) || e.ctx.Err() != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	var got string
 	select {
-	case got = <-runtime.messages:
-	case <-ctx.Done():
+	case got = <-e.runtime.messages:
+	case <-e.ctx.Done():
 		t.Fatal("runtime was never called")
 	}
 	select {
-	case <-deliverer.replies:
-	case <-ctx.Done():
+	case <-e.deliverer.replies:
+	case <-e.ctx.Done():
 		t.Fatal("turn did not complete")
 	}
 	return got
+}
+
+func (e *hintEnv) requests() []map[string]string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return append([]map[string]string(nil), e.states...)
+}
+
+// runHintTurn runs one chat turn against a fake TypeSafe answering with the given body after the
+// given delay and returns the message the runtime received.
+func runHintTurn(t *testing.T, answer string, delay time.Duration, message string, tools []string, optIn bool) string {
+	t.Helper()
+	return newHintEnv(t, answer, delay, tools, optIn, "").turn(t, 1, message)
 }
 
 func choice(name string, confidence float64) string {
@@ -197,5 +258,27 @@ func TestToolHintIgnoresNamesTheTurnDoesNotOffer(t *testing.T) {
 	got := runHintTurn(t, choice("nas_search", 0.9), 0, hintMessage, []string{"gmail_search"}, true)
 	if strings.Contains(got, "Likely relevant tool") {
 		t.Errorf("message = %q", got)
+	}
+}
+
+func TestToolHintSeesTheEarlierExchangeButNotAContinuation(t *testing.T) {
+	env := newHintEnv(t, choice("nas_search", 0.9), 0, []string{"nas_search", "gmail_search"}, true, "Shall I mail the lease to bob@example.com?")
+	env.turn(t, 1, hintMessage)
+	env.turn(t, 2, "yes, do it")
+	env.turn(t, 3, conversation.ContinueMessage)
+
+	requests := env.requests()
+	if len(requests) != 2 {
+		t.Fatalf("hint requests = %d, want 2 (none for the continuation)", len(requests))
+	}
+	if earlier, ok := requests[0]["earlier"]; ok {
+		t.Errorf("first message sent earlier = %q", earlier)
+	}
+	earlier := requests[1]["earlier"]
+	if !strings.HasPrefix(earlier, "user: find the lease") || !strings.Contains(earlier, "\nassistant: Shall I mail the lease to ") {
+		t.Errorf("earlier = %q", earlier)
+	}
+	if strings.Contains(earlier, "yes, do it") || requests[1]["message"] != "yes, do it" {
+		t.Errorf("earlier = %q, message = %q", earlier, requests[1]["message"])
 	}
 }

@@ -18,9 +18,19 @@ const (
 
 const intentQuestionID = "requested"
 
+// replyRunes is how much of the end of the assistant's reply is sent; the question the user
+// answers is almost always there.
+const replyRunes = 600
+
 // RecentMessages returns a principal's latest user messages, oldest first.
 type RecentMessages interface {
 	RecentMessages(principalID string) []string
+}
+
+// RecentExchange returns a principal's latest user messages and the assistant's latest chat reply,
+// oldest first.
+type RecentExchange interface {
+	RecentExchange(principalID string) []turnstate.Line
 }
 
 // ExposureLevels reports how much untrusted content a principal's turn has seen.
@@ -32,13 +42,13 @@ type ExposureLevels interface {
 type IntentChecker struct {
 	client   *Client
 	optIn    OptIn
-	recent   RecentMessages
+	recent   RecentExchange
 	exposure ExposureLevels
 }
 
 var _ approval.IntentChecker = (*IntentChecker)(nil)
 
-func NewIntentChecker(client *Client, optIn OptIn, recent RecentMessages, exposure ExposureLevels) *IntentChecker {
+func NewIntentChecker(client *Client, optIn OptIn, recent RecentExchange, exposure ExposureLevels) *IntentChecker {
 	return &IntentChecker{client: client, optIn: optIn, recent: recent, exposure: exposure}
 }
 
@@ -54,13 +64,9 @@ func (c *IntentChecker) Mismatch(ctx context.Context, principalID, tool string, 
 		c.client.recordDecision(ctx, principalID, "intent", "suspicious")
 		return true, nil
 	}
-	messages := c.recent.RecentMessages(principalID)
-	if len(messages) == 0 {
+	exchange := redactExchange(c.recent.RecentExchange(principalID))
+	if exchange.Empty() {
 		return false, nil
-	}
-	redacted := make([]string, len(messages))
-	for index, message := range messages {
-		redacted[index] = Redact(message).String()
 	}
 	action := fmt.Sprintf("%s %s %q", intent.Verb, intent.TargetKind, intent.TargetName)
 	if intent.NewName != "" && intent.NewName != intent.TargetName {
@@ -69,11 +75,11 @@ func (c *IntentChecker) Mismatch(ctx context.Context, principalID, tool string, 
 	action += " using tool " + tool
 	answers, err := c.client.Ask(ctx, "intent",
 		map[string]Redacted{
-			"recent_messages": Redact(strings.Join(redacted, "\n---\n")),
+			"recent_exchange": exchange,
 			"action":          Redact(action),
 		},
 		map[string]Question{intentQuestionID: Noul(
-			"Did the user, in `recent_messages`, ask for or clearly agree to the action in `action`? A short confirmation such as 'yes' or 'do it' counts as agreeing to an action the assistant proposed.",
+			"Did the user, in `recent_exchange`, ask for or clearly agree to the action in `action`? Lines starting with `user:` are the user's messages; lines starting with `assistant:` are only the assistant's own words, given as context. The action counts as requested only if the user asked for it or agreed to the assistant's offer of it. A short confirmation such as 'yes' or 'do it' after the assistant offered this action counts as agreeing.",
 			"The user asked for or agreed to this action.",
 			"The user did not ask for this action, or asked for something different.",
 		)},
@@ -96,4 +102,25 @@ func (c *IntentChecker) Mismatch(ctx context.Context, principalID, tool string, 
 	}
 	c.client.recordDecision(ctx, principalID, "intent", result)
 	return warn, nil
+}
+
+// redactExchange renders an exchange as one `role: text` line per message, oldest first. The reply
+// is scrubbed before it is cut to its end, so the cut never splits a path or token the scrubber
+// would have matched. Line breaks within a message are flattened so that a message cannot pass
+// for a line of another role.
+func redactExchange(exchange []turnstate.Line) Redacted {
+	lines := make([]string, 0, len(exchange))
+	for _, line := range exchange {
+		text := Redact(line.Text).String()
+		if line.Role == turnstate.RoleAssistant {
+			if runes := []rune(text); len(runes) > replyRunes {
+				text = string(runes[len(runes)-replyRunes:])
+			}
+		}
+		text = strings.Join(strings.Fields(text), " ")
+		if text != "" {
+			lines = append(lines, line.Role+": "+text)
+		}
+	}
+	return Redacted{text: strings.Join(lines, "\n")}
 }

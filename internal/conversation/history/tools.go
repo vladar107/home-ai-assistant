@@ -92,6 +92,7 @@ func (s *Service) Contribute(ctx context.Context, principalID string) (tools.Con
 				Risk:        tools.RiskRead,
 				// An earlier conversation may retell mail or pages it read.
 				ThirdParty: true,
+				Private:    true,
 			},
 			{
 				Name:        readTool,
@@ -99,6 +100,7 @@ func (s *Service) Contribute(ctx context.Context, principalID string) (tools.Con
 				InputSchema: readSchema,
 				Risk:        tools.RiskRead,
 				ThirdParty:  true,
+				Private:     true,
 			},
 		},
 	}, nil

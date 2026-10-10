@@ -121,7 +121,7 @@ func TestHintDecisionsAreRecorded(t *testing.T) {
 	definitions := []agentruntime.ToolDefinition{{Name: "nas_search", Description: "Search files."}}
 	hint := func(f decisionFixture, optedIn bool) {
 		t.Helper()
-		if _, err := NewToolHinter(f.client, stubOptIn(optedIn)).Hint(context.Background(), "alice", "find my tax file", definitions); err != nil {
+		if _, _, err := NewToolHinter(f.client, stubOptIn(optedIn)).Hint(context.Background(), "alice", "find my tax file", nil, definitions); err != nil {
 			t.Fatal(err)
 		}
 	}

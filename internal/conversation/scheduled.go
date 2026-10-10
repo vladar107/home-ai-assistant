@@ -14,6 +14,9 @@ import (
 type ScheduledReply struct {
 	Text      string
 	ErrorKind string
+	// Private is true when the text may retell Notion page content or NAS file contents the turn
+	// read.
+	Private bool
 }
 
 // RunScheduled runs one turn nobody is watching: on the principal's own subscription, in a fresh
@@ -77,7 +80,7 @@ func (s *Service) RunScheduled(ctx context.Context, principalID, turn, message s
 		reply, kind := failureReply(runErr)
 		return ScheduledReply{Text: reply, ErrorKind: kind}, nil
 	default:
-		return ScheduledReply{Text: result.Final}, nil
+		return ScheduledReply{Text: result.Final, Private: run.Private()}, nil
 	}
 }
 

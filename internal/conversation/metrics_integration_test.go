@@ -18,6 +18,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/observability"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
+	"github.com/vladar107/home-ai-assistant/internal/turnstate"
 )
 
 type scriptedRuntime struct {
@@ -28,10 +29,13 @@ func (r scriptedRuntime) Run(ctx context.Context, request agentruntime.RunReques
 	return r.run(ctx, request, sink)
 }
 
-type fixedHint string
+type fixedHint struct {
+	name     string
+	answered bool
+}
 
-func (f fixedHint) Hint(context.Context, string, string, []agentruntime.ToolDefinition) (string, error) {
-	return string(f), nil
+func (f fixedHint) Hint(context.Context, string, string, []turnstate.Line, []agentruntime.ToolDefinition) (string, bool, error) {
+	return f.name, f.answered, nil
 }
 
 type safetyStatus struct {
@@ -293,15 +297,17 @@ func TestRequestCreatedBeforeStartIsRecovered(t *testing.T) {
 func TestToolCallsAndHintFollowThroughAreCountedFromRuntimeEvents(t *testing.T) {
 	cases := []struct {
 		name   string
-		hint   string
+		hint   fixedHint
 		called []string
 		calls  float64
 		result string
 	}{
-		{"followed", "nas_search", []string{"gmail_search", "nas_search"}, 2, "followed"},
-		{"other tool", "nas_search", []string{"gmail_search"}, 1, "other_tool"},
-		{"no tool", "nas_search", nil, 0, "no_tool"},
-		{"no hint", "", []string{"nas_search", "web_search", "nas_search"}, 3, ""},
+		{"followed", fixedHint{"nas_search", true}, []string{"gmail_search", "nas_search"}, 2, "followed"},
+		{"other tool", fixedHint{"nas_search", true}, []string{"gmail_search"}, 1, "other_tool"},
+		{"no tool", fixedHint{"nas_search", true}, nil, 0, "no_tool"},
+		{"missed", fixedHint{"", true}, []string{"gmail_search"}, 1, "missed"},
+		{"answered none without a tool call", fixedHint{"", true}, nil, 0, ""},
+		{"no answer", fixedHint{}, []string{"nas_search", "web_search", "nas_search"}, 3, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -317,7 +323,7 @@ func TestToolCallsAndHintFollowThroughAreCountedFromRuntimeEvents(t *testing.T) 
 				}
 				return agentruntime.RunResult{Response: "done"}, nil
 			}}
-			service := env.service(t, runtime, conversation.Config{ToolHint: fixedHint(tc.hint)})
+			service := env.service(t, runtime, conversation.Config{ToolHint: tc.hint})
 			env.enqueue(t, service, 1)
 			env.awaitReply(t)
 
@@ -325,7 +331,7 @@ func TestToolCallsAndHintFollowThroughAreCountedFromRuntimeEvents(t *testing.T) 
 			if got.count != 1 || got.sum != tc.calls {
 				t.Errorf("tool calls per turn = %+v, want %v", got, tc.calls)
 			}
-			for _, result := range []string{"followed", "other_tool", "no_tool"} {
+			for _, result := range []string{"followed", "other_tool", "no_tool", "missed"} {
 				follow := env.observed(t, "home_agent.hint.follow_through", map[string]string{"home_agent.principal": "alice", "home_agent.result": result})
 				want := 0.0
 				if result == tc.result {

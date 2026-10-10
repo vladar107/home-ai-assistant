@@ -13,12 +13,13 @@ const maximumSeenURLs = 512
 
 var urlPattern = regexp.MustCompile(`https?://[^\s<>"'\x60]+`)
 
-// Run is what one model run has read: whether text from outside the household reached it, and the
-// addresses that text and the run's own instruction named. It is created when the run starts and
-// shared by every tool call of that run.
+// Run is what one model run has read: whether text from outside the household or private content
+// reached it, and the addresses that text and the run's own instruction named. It is created when
+// the run starts and shared by every tool call of that run.
 type Run struct {
 	mu       sync.Mutex
 	external bool
+	private  bool
 	seen     map[string]struct{}
 }
 
@@ -66,6 +67,21 @@ func (r *Run) External() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.external
+}
+
+// MarkPrivate records that Notion page content or NAS file contents reached the run.
+func (r *Run) MarkPrivate() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.private = true
+}
+
+// Private reports whether Notion page content or NAS file contents have reached the run, so what
+// the run reports carries them on.
+func (r *Run) Private() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.private
 }
 
 // Seen reports whether the address appeared whole in the run's instruction or in outside text the

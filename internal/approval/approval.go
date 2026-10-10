@@ -139,6 +139,13 @@ type Executor interface {
 	ExecuteApproved(context.Context, Record) (Outcome, error)
 }
 
+// PrivateExecutor is implemented by an executor whose outcome text may retell Notion page content
+// or NAS file contents, such as a table's property names in a rejected write. A notice carrying
+// such an outcome makes the conversation that receives it private.
+type PrivateExecutor interface {
+	PrivateOutcomes() bool
+}
+
 // Previewer is implemented by an executor whose proposals can be tried once before the user
 // confirms them, without any of their effects.
 type Previewer interface {
@@ -227,7 +234,7 @@ type Service struct {
 	checker   IntentChecker
 	telemetry Telemetry
 	intents   map[string]Intent
-	notices   map[string]string
+	notices   map[string]notice
 	cancel    context.CancelFunc
 	done      chan struct{}
 	// runCtx is the context previews run in while the service is started.
@@ -270,7 +277,7 @@ func NewService(cfg Config, repository Repository, deliverer Deliverer, logger *
 		sweepInterval: sweepInterval,
 		now:           time.Now,
 		executors:     make(map[string]Executor),
-		notices:       make(map[string]string),
+		notices:       make(map[string]notice),
 		intents:       make(map[string]Intent),
 		proposing:     make(map[string]*sync.Mutex),
 		previewing:    make(map[string]bool),
@@ -832,33 +839,50 @@ func (s *Service) rememberNotice(bundle []Record) {
 		if record.Reason == ReasonReplaced || record.Reason == ReasonWithdrawn {
 			continue
 		}
-		if notice := noticeText(record); notice != "" {
-			notices = append(notices, notice)
+		if entry := noticeText(record); entry != "" {
+			notices = append(notices, entry)
 		}
 	}
 	if len(notices) == 0 {
 		return
 	}
-	notice := notices[0]
+	text := notices[0]
 	if len(notices) > 1 {
-		notice = fmt.Sprintf("Your %d proposals were shown and resolved together. ", len(notices))
-		for index, text := range notices {
-			notice += fmt.Sprintf("(%d) %s ", index+1, text)
+		text = fmt.Sprintf("Your %d proposals were shown and resolved together. ", len(notices))
+		for index, entry := range notices {
+			text += fmt.Sprintf("(%d) %s ", index+1, entry)
 		}
-		notice = strings.TrimSpace(notice)
+		text = strings.TrimSpace(text)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.notices[bundle[0].PrincipalID] = notice
+	private := false
+	for _, record := range bundle {
+		executor, ok := s.executors[record.Tool].(PrivateExecutor)
+		private = private || record.Outcome != "" && ok && executor.PrivateOutcomes()
+	}
+	s.notices[bundle[0].PrincipalID] = notice{text: text, private: private}
+}
+
+type notice struct {
+	text    string
+	private bool
 }
 
 // PendingNotice takes the principal's unreported proposal resolution, if there is one.
 func (s *Service) PendingNotice(principalID string) string {
+	text, _ := s.TakeNotice(principalID)
+	return text
+}
+
+// TakeNotice is PendingNotice that also reports whether an outcome in it may retell private
+// content.
+func (s *Service) TakeNotice(principalID string) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	notice := s.notices[principalID]
+	pending := s.notices[principalID]
 	delete(s.notices, principalID)
-	return notice
+	return pending.text, pending.private
 }
 
 func noticeText(record Record) string {

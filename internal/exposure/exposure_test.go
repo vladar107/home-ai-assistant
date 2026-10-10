@@ -15,8 +15,10 @@ const requestID = "33333333-3333-4333-8333-333333333333"
 
 type repository struct {
 	external bool
+	private  bool
 	err      error
 	marked   []bool
+	privates []string
 }
 
 func (r *repository) MarkConversationExposed(_ context.Context, _, _ string, external bool) error {
@@ -26,6 +28,15 @@ func (r *repository) MarkConversationExposed(_ context.Context, _, _ string, ext
 
 func (r *repository) ConversationExternal(context.Context, string, string) (bool, error) {
 	return r.external, r.err
+}
+
+func (r *repository) MarkConversationPrivate(_ context.Context, _, requestID string) error {
+	r.privates = append(r.privates, requestID)
+	return nil
+}
+
+func (r *repository) ConversationPrivate(context.Context, string, string) (bool, error) {
+	return r.private, r.err
 }
 
 func newTestService(t *testing.T, repo *repository) *Service {
@@ -72,5 +83,34 @@ func TestMarkTurnExposedRecordsChatTurnsOnly(t *testing.T) {
 	service.MarkTurnExposed(context.Background(), "alice", outbox.ChatTurn(requestID), true)
 	if len(repo.marked) != 2 || repo.marked[0] || !repo.marked[1] {
 		t.Fatalf("marks = %v, want the two chat marks with their level", repo.marked)
+	}
+}
+
+func TestMarkTurnPrivateRecordsChatTurnsOnly(t *testing.T) {
+	repo := &repository{}
+	service := newTestService(t, repo)
+	service.MarkTurnPrivate(context.Background(), "alice", outbox.TaskTurn("task-1"))
+	service.MarkTurnPrivate(context.Background(), "alice", outbox.ScheduledTurn("run-1"))
+	service.MarkTurnPrivate(context.Background(), "alice", outbox.ChatTurn(requestID))
+	if len(repo.privates) != 1 || repo.privates[0] != requestID {
+		t.Fatalf("private marks = %v, want the chat request alone", repo.privates)
+	}
+}
+
+func TestPrivate(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		repo repository
+		want bool
+	}{
+		{name: "clean conversation", want: false},
+		{name: "private conversation", repo: repository{private: true}, want: true},
+		{name: "failed lookup", repo: repository{err: errors.New("closed")}, want: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := newTestService(t, &test.repo).Private(context.Background(), "alice", requestID); got != test.want {
+				t.Fatalf("Private = %v, want %v", got, test.want)
+			}
+		})
 	}
 }

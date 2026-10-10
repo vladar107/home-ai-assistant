@@ -1,7 +1,7 @@
-// Package turnstate holds, per principal, the last few user messages and whether outside content
-// has recently reached the model. Guards read it to judge an action against what the user asked
-// and how much the turn can be trusted. It is memory-only by design: a restart forgets it, and
-// pending approvals expire on restart anyway.
+// Package turnstate holds, per principal, the last few user messages, the assistant's latest chat
+// reply, and whether outside content has recently reached the model. Guards read it to judge an
+// action against what the user asked and how much the turn can be trusted. It is memory-only by
+// design: a restart forgets it, and pending approvals expire on restart anyway.
 package turnstate
 
 import (
@@ -15,7 +15,23 @@ const (
 	Window = 30 * time.Minute
 	// MaxMessages is how many recent messages are kept per principal.
 	MaxMessages = 2
+	// MaxReplyRunes bounds a kept reply to its end, where the question a user answers usually is.
+	// A reader scrubs the reply and then keeps only a much shorter end of it, so a fragment this
+	// cut leaves at the start never leaves the process.
+	MaxReplyRunes = 4000
 )
+
+// Roles of the lines of an exchange.
+const (
+	RoleUser      = "user"
+	RoleAssistant = "assistant"
+)
+
+// Line is one message of a recent exchange.
+type Line struct {
+	Role string
+	Text string
+}
 
 // Level is how far a principal's recent turns have been exposed to content from outside the
 // household.
@@ -32,10 +48,13 @@ const (
 type message struct {
 	text string
 	at   time.Time
+	// seq orders messages and replies recorded within the same clock reading.
+	seq uint64
 }
 
 type entry struct {
 	messages   []message
+	reply      message
 	exposedAt  time.Time
 	suspicious time.Time
 }
@@ -46,6 +65,7 @@ type Registry struct {
 
 	mu         sync.Mutex
 	principals map[string]*entry
+	seq        uint64
 }
 
 // New returns an empty registry; a nil now means time.Now.
@@ -67,10 +87,32 @@ func (r *Registry) RecordMessage(principalID, text string) {
 	now := r.now()
 	r.pruneLocked(now)
 	e := r.entryLocked(principalID)
-	e.messages = append(e.messages, message{text: text, at: now})
+	r.seq++
+	e.messages = append(e.messages, message{text: text, at: now, seq: r.seq})
 	if len(e.messages) > MaxMessages {
 		e.messages = e.messages[len(e.messages)-MaxMessages:]
 	}
+}
+
+// RecordReply remembers the assistant's latest chat reply in place of the previous one, keeping
+// its last MaxReplyRunes runes from a line start, so the cut never splits a path or address for the
+// scrubber to miss. Blank text is ignored.
+func (r *Registry) RecordReply(principalID, text string) {
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	if runes := []rune(text); len(runes) > MaxReplyRunes {
+		text = string(runes[len(runes)-MaxReplyRunes:])
+		if _, rest, found := strings.Cut(text, "\n"); found {
+			text = rest
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := r.now()
+	r.pruneLocked(now)
+	r.seq++
+	r.entryLocked(principalID).reply = message{text: text, at: now, seq: r.seq}
 }
 
 // RecentMessages returns the principal's messages from the last Window, oldest first.
@@ -87,6 +129,31 @@ func (r *Registry) RecentMessages(principalID string) []string {
 		texts = append(texts, m.text)
 	}
 	return texts
+}
+
+// RecentExchange returns the principal's messages and the assistant's latest reply from the last
+// Window, oldest first.
+func (r *Registry) RecentExchange(principalID string) []Line {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pruneLocked(r.now())
+	e, ok := r.principals[principalID]
+	if !ok {
+		return nil
+	}
+	lines := make([]Line, 0, len(e.messages)+1)
+	pending := e.reply.text != ""
+	for _, m := range e.messages {
+		if pending && e.reply.seq < m.seq {
+			lines = append(lines, Line{Role: RoleAssistant, Text: e.reply.text})
+			pending = false
+		}
+		lines = append(lines, Line{Role: RoleUser, Text: m.text})
+	}
+	if pending {
+		lines = append(lines, Line{Role: RoleAssistant, Text: e.reply.text})
+	}
+	return lines
 }
 
 // MarkExposed records that a tool returned third-party content to the principal's turn.
@@ -147,13 +214,16 @@ func (r *Registry) pruneLocked(now time.Time) {
 			}
 		}
 		e.messages = kept
+		if !e.reply.at.After(cutoff) {
+			e.reply = message{}
+		}
 		if !e.exposedAt.After(cutoff) {
 			e.exposedAt = time.Time{}
 		}
 		if !e.suspicious.After(cutoff) {
 			e.suspicious = time.Time{}
 		}
-		if len(e.messages) == 0 && e.exposedAt.IsZero() && e.suspicious.IsZero() {
+		if len(e.messages) == 0 && e.reply.text == "" && e.exposedAt.IsZero() && e.suspicious.IsZero() {
 			delete(r.principals, id)
 		}
 	}

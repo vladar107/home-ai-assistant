@@ -411,6 +411,17 @@ routes after jobs and watches, read-only, with a Delete button each.
   provider's search opens by itself are chosen by the search engine and are not
   covered. The `home_agent.search.checks` counter records each decision by
   verdict and reason.
+- **Safety checks.** A user who opts in has scrubbed text sent to TypeSafe: web
+  pages and emails the assistant reads, proposed actions, and the recent
+  exchange. The exchange is the user's last two messages and the assistant's
+  latest chat reply within 30 minutes. The reply is recorded only after its own
+  turn's approval cards were checked, so a reply never vouches for the action it
+  proposes. Replies are not recorded from a conversation that has read Notion
+  content or NAS file contents (`tools.Definition.Private`), which stays marked
+  until `/new`. Exposure that makes the intent check stricter comes from chat
+  turns only; a scheduled run counts only when screening flags its content. The
+  tool hint reads the same exchange, and is skipped on the continuation after
+  Confirm.
 - **Home Assistant scope.** One household token from a dedicated non-admin Home
   Assistant user. Only entities exposed to Assist are reachable by the MCP tools;
   the tool, exposure, and label snapshot is cached for 5 minutes.

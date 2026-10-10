@@ -375,6 +375,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			return fmt.Errorf("initialize exposure: %w", err)
 		}
 		broker.SetTurnExposure(exposures)
+		broker.SetTurnPrivacy(exposures)
 		searchChecks, err := searchcheck.NewService(exposures, approvals, a.logger, nil)
 		if err != nil {
 			return fmt.Errorf("initialize search checks: %w", err)
@@ -383,8 +384,8 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		if err := approvals.RegisterExecutor(searchChecks); err != nil {
 			return err
 		}
-		// Interface values stay nil without a key, so no user message is kept in memory for nothing.
-		var recent conversation.MessageRecorder
+		// Interface values stay nil without a key, so no message or reply is kept in memory for nothing.
+		var recent conversation.Exchange
 		var toolHint conversation.ToolHinter
 		var safetyChecks conversation.SafetyChecks
 		if a.cfg.TypeSafe.Enabled() {

@@ -16,6 +16,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
+	"github.com/vladar107/home-ai-assistant/internal/turnstate"
 )
 
 const (
@@ -79,6 +80,8 @@ type replyCapture struct {
 	principalID         string
 	queue, setup, model time.Duration
 	safetyChecks        string
+	// plainReply is the model's successful chat reply without memory notes, or "" for any other.
+	plainReply string
 }
 
 func NewService(
@@ -511,17 +514,17 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 	errorKind := ""
 	// The stored kind stays within the schema's allowed set; telemetry and logs carry the finer category.
 	reportedKind := ""
-	reply := ""
+	reply, plainReply := "", ""
 	connected, runErr := s.gate.Ready(turnCtx, request.PrincipalID)
 	var tools agentruntime.ToolSet
 	var webSearch bool
 	var memory string
 	var attachments attachment.Turn
-	var hint string
+	var hint toolHint
 	if runErr == nil && connected {
 		_ = s.deliverer.SendTyping(turnCtx, request.ChatID)
 		tools, runErr = s.toolProvider.ToolsFor(turnCtx, request.PrincipalID)
-		var hinted <-chan string
+		var hinted <-chan toolHint
 		if runErr == nil {
 			hinted = s.startToolHint(turnCtx, request, tools)
 			webSearch, runErr = s.webSearchEnabled(turnCtx, request.PrincipalID)
@@ -563,7 +566,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		result, err := s.runtime.Run(turnCtx, agentruntime.RunRequest{
 			PrincipalID: request.PrincipalID,
 			SessionID:   request.RuntimeSessionID,
-			Message:     s.turnMessage(request, notice.text, attachments.Summary, hint, s.locationLine(turnCtx, request.PrincipalID)),
+			Message:     s.turnMessage(request, notice.text, attachments.Summary, hint.name, s.locationLine(turnCtx, request.PrincipalID)),
 			Images:      attachments.Images,
 			Tools:       tools,
 			Memory:      memory,
@@ -589,6 +592,9 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 			reply, reportedKind = failureReply(runErr)
 		default:
 			reply = result.Response
+			if !strings.Contains(reply, NothingToAdd) {
+				plainReply = reply
+			}
 		}
 		reply = withMemoryNotes(reply, notes)
 	}
@@ -631,6 +637,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		setup:        runStarted.Sub(claimedAt),
 		model:        modelTime,
 		safetyChecks: safetyChecks,
+		plainReply:   plainReply,
 	}
 	s.mu.Unlock()
 	endTurn(outcome, reportedKind)
@@ -689,29 +696,44 @@ func withMemoryNotes(reply string, notes []string) string {
 	return strings.TrimRight(reply, "\n") + "\n\n" + strings.Join(notes, "\n")
 }
 
+// toolHint is what a turn's tool hint came to. answered is false when no hint was asked or none
+// came back in time, so follow-through counts only hints that had their say.
+type toolHint struct {
+	name     string
+	answered bool
+}
+
 // startToolHint asks for the tool the message most likely needs while the rest of the turn is
-// set up. The answer is advisory: any failure, a late answer, or a name the turn does not offer
-// yields "". A nil result means no hint was started.
-func (s *Service) startToolHint(ctx context.Context, request Request, tools agentruntime.ToolSet) <-chan string {
-	if s.config.ToolHint == nil || tools.Empty() || strings.TrimSpace(request.Message) == "" {
+// set up. The answer is advisory: any failure or a late answer yields no answer, and a name the
+// turn does not offer yields an answered hint without a name. A nil result means no hint was
+// started; a continuation's message is ours, so it starts none.
+func (s *Service) startToolHint(ctx context.Context, request Request, tools agentruntime.ToolSet) <-chan toolHint {
+	if s.config.ToolHint == nil || tools.Empty() || strings.TrimSpace(request.Message) == "" || request.Message == ContinueMessage {
 		return nil
 	}
-	result := make(chan string, 1)
+	// Read before this turn's message is recorded, so earlier holds only what came before it.
+	var earlier []turnstate.Line
+	if s.config.Recent != nil {
+		earlier = s.config.Recent.RecentExchange(request.PrincipalID)
+	}
+	result := make(chan toolHint, 1)
 	go func() {
 		hintCtx, cancel := context.WithTimeout(ctx, toolHintBudget)
 		defer cancel()
-		name, err := s.config.ToolHint.Hint(hintCtx, request.PrincipalID, request.Message, tools.Definitions)
+		name, answered, err := s.config.ToolHint.Hint(hintCtx, request.PrincipalID, request.Message, earlier, tools.Definitions)
 		if err != nil {
 			s.telemetry.ContextLogger(ctx, s.logger).DebugContext(ctx, "conversation.tool_hint.failed")
-			name = ""
+			result <- toolHint{}
+			return
 		}
 		for _, definition := range tools.Definitions {
 			if definition.Name == name && name != "" {
-				result <- name
+				result <- toolHint{name: name, answered: true}
 				return
 			}
 		}
-		result <- ""
+		// A name the turn does not offer is no answer, not a hint that found nothing.
+		result <- toolHint{answered: answered && name == ""}
 	}()
 	return result
 }
@@ -727,12 +749,16 @@ type turnNotice struct {
 }
 
 // takeNotice collects the pending notices for a turn that is about to run. A notice from outside the
-// household marks the turn as having read it, before the turn decides whether it may search.
+// household marks the turn as having read it, before the turn decides whether it may search, and a
+// notice that may retell private content makes the conversation private before the turn replies.
 func (s *Service) takeNotice(ctx context.Context, request Request) turnNotice {
 	if s.config.Notice == nil {
 		return turnNotice{}
 	}
-	text, outside := pendingNotice(s.config.Notice, request.PrincipalID)
+	text, outside, private := pendingNotice(s.config.Notice, request.PrincipalID)
+	if private && s.config.Exposure != nil {
+		s.config.Exposure.MarkTurnPrivate(ctx, request.PrincipalID, outbox.ChatTurn(request.ID))
+	}
 	if outside {
 		if run := tools.RunFrom(ctx); run != nil {
 			run.MarkExternal(text)
@@ -842,19 +868,35 @@ func (s *Service) deliver(ctx context.Context, request Request) error {
 		_ = s.repository.ReleaseConversationDelivery(ctx, request.ID)
 		return err
 	}
-	s.recordReply(ctx, request, deliveryStarted)
+	plainReply := s.recordReply(ctx, request, deliveryStarted)
 	s.removeCard(request)
 	if s.config.FollowUp != nil {
 		if err := s.config.FollowUp.AfterDelivery(deliveryCtx, request.PrincipalID, request.ChatID); err != nil && ctx.Err() == nil {
 			s.logWorkerError(ctx, request.PrincipalID, "follow_up")
 		}
 	}
+	s.rememberReply(ctx, request, plainReply)
 	return nil
 }
 
-// recordReply counts a delivered reply. The stages are recorded only for a plain delivered
-// reply, because dashboards divide their sums by the delivered chat reply count.
-func (s *Service) recordReply(ctx context.Context, request Request, deliveryStarted time.Time) {
+// rememberReply keeps a plain reply for the guards of the principal's next turns. It runs after the
+// follow-up that judges this turn's proposals, so a reply never vouches for its own proposal. A
+// conversation that read private content, or whose privacy cannot be told, keeps its replies to
+// itself.
+func (s *Service) rememberReply(ctx context.Context, request Request, plainReply string) {
+	if plainReply == "" || s.config.Recent == nil || s.config.Exposure == nil {
+		return
+	}
+	if s.config.Exposure.Private(ctx, request.PrincipalID, request.ID) {
+		return
+	}
+	s.config.Recent.RecordReply(request.PrincipalID, plainReply)
+}
+
+// recordReply counts a delivered reply and returns its plain text, if the turn kept one. The stages
+// are recorded only for a plain delivered reply, because dashboards divide their sums by the
+// delivered chat reply count.
+func (s *Service) recordReply(ctx context.Context, request Request, deliveryStarted time.Time) string {
 	s.mu.Lock()
 	capture, captured := s.captures[request.ID]
 	delete(s.captures, request.ID)
@@ -873,12 +915,13 @@ func (s *Service) recordReply(ctx context.Context, request Request, deliveryStar
 	now := time.Now()
 	s.telemetry.RecordReply(ctx, request.PrincipalID, "chat", outcome, capture.safetyChecks, max(now.Sub(request.CreatedAt), 0))
 	if outcome != "delivered" {
-		return
+		return ""
 	}
 	s.telemetry.RecordReplyStage(ctx, request.PrincipalID, "queue", capture.queue)
 	s.telemetry.RecordReplyStage(ctx, request.PrincipalID, "setup", capture.setup)
 	s.telemetry.RecordReplyStage(ctx, request.PrincipalID, "model", capture.model)
 	s.telemetry.RecordReplyStage(ctx, request.PrincipalID, "delivery", now.Sub(deliveryStarted))
+	return capture.plainReply
 }
 
 // safetyChecksLabel reads the principal's opt-in once per turn; any failure to know is "unavailable".
@@ -897,18 +940,23 @@ func (s *Service) safetyChecksLabel(ctx context.Context, principalID string) str
 	}
 }
 
-func (s *Service) recordTurnMetrics(ctx context.Context, principalID, safetyChecks string, sink *countingSink, usage agentruntime.Usage, offeredTools bool, hint string) {
+func (s *Service) recordTurnMetrics(ctx context.Context, principalID, safetyChecks string, sink *countingSink, usage agentruntime.Usage, offeredTools bool, hint toolHint) {
 	s.telemetry.RecordModelTurn(ctx, principalID, safetyChecks, usage.ModelCalls, usage.PromptTokens, usage.OutputTokens)
 	calls, called := sink.snapshot()
 	if offeredTools {
 		s.telemetry.RecordToolCallsPerTurn(ctx, principalID, safetyChecks, calls)
 	}
-	if hint == "" {
+	if !hint.answered {
 		return
 	}
 	result := "no_tool"
 	switch {
-	case called[hint]:
+	case hint.name == "":
+		if calls == 0 {
+			return
+		}
+		result = "missed"
+	case called[hint.name]:
 		result = "followed"
 	case calls > 0:
 		result = "other_tool"

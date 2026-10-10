@@ -91,7 +91,7 @@ type Service struct {
 	wake     chan struct{}
 	inflight map[string]bool
 	running  int
-	notices  map[string][]string
+	notices  map[string][]notice
 	pruned   time.Time
 	workers  sync.WaitGroup
 }
@@ -218,7 +218,7 @@ func NewService(cfg Config, repository Repository, chats Chats, deliverer conver
 		proposer:   proposer,
 		wake:       make(chan struct{}, 1),
 		inflight:   make(map[string]bool),
-		notices:    make(map[string][]string),
+		notices:    make(map[string][]notice),
 	}, nil
 }
 
@@ -414,6 +414,11 @@ func (s *Service) dispatch(ctx context.Context, run Run) {
 		} else if !s.stillReady(ctx, run) {
 			return
 		}
+		if !executing {
+			// Whether a run executed before a restart or a failed delivery read private content
+			// is unknown; only a reminder's text is known not to retell any.
+			run.Private = run.JobType != TypeReminder
+		}
 		s.deliver(ctx, run)
 	}()
 }
@@ -499,7 +504,7 @@ func (s *Service) execute(ctx context.Context, run Run) (Run, bool) {
 		"manual", run.Manual, "outcome", outcome, "error_kind", result.ErrorKind,
 		"duration_ms", time.Since(began).Milliseconds(),
 	)
-	run.Status, run.Reply, run.ErrorKind = StatusReady, result.Text, result.ErrorKind
+	run.Status, run.Reply, run.ErrorKind, run.Private = StatusReady, result.Text, result.ErrorKind, result.Private
 	return run, true
 }
 
@@ -598,17 +603,24 @@ func (s *Service) logRunError(ctx context.Context, run Run, stage string, err er
 	s.logger.WarnContext(ctx, "schedule.run.retry", "principal_id", run.PrincipalID, "job_id", run.JobID, "stage", stage, "error", err)
 }
 
+// notice is a delivered report kept for the owner's next conversation turn, and whether it may
+// retell private content.
+type notice struct {
+	text    string
+	private bool
+}
+
 // remember keeps the delivered report for the owner's next conversation turn, so a follow-up
 // question about it has something to refer to.
 func (s *Service) remember(run Run) {
 	report := truncateRunes(strings.TrimSpace(run.Reply), maximumNoticeRunes)
-	notice := fmt.Sprintf("Your scheduled job %q just sent the user this report:\n%s", run.JobName, report)
+	text := fmt.Sprintf("Your scheduled job %q just sent the user this report:\n%s", run.JobName, report)
 	if run.JobType == TypeReminder {
-		notice = fmt.Sprintf("The user's reminder (job id %s) was just delivered to them:\n%s", run.JobID, report)
+		text = fmt.Sprintf("The user's reminder (job id %s) was just delivered to them:\n%s", run.JobID, report)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	notices := append(s.notices[run.PrincipalID], notice)
+	notices := append(s.notices[run.PrincipalID], notice{text: text, private: run.Private})
 	if len(notices) > 2 {
 		notices = notices[len(notices)-2:]
 	}
@@ -617,11 +629,24 @@ func (s *Service) remember(run Run) {
 
 // PendingNotice returns and forgets the reports delivered since the principal's last turn.
 func (s *Service) PendingNotice(principalID string) string {
+	text, _ := s.TakeNotice(principalID)
+	return text
+}
+
+// TakeNotice is PendingNotice that also reports whether any of the reports may retell Notion page
+// content or NAS file contents.
+func (s *Service) TakeNotice(principalID string) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	notices := s.notices[principalID]
 	delete(s.notices, principalID)
-	return strings.Join(notices, "\n\n")
+	texts := make([]string, 0, len(notices))
+	private := false
+	for _, notice := range notices {
+		texts = append(texts, notice.text)
+		private = private || notice.private
+	}
+	return strings.Join(texts, "\n\n"), private
 }
 
 // Jobs lists the principal's own jobs.

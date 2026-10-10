@@ -54,6 +54,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/testutil/googlesim"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/notionsim"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
+	"github.com/vladar107/home-ai-assistant/internal/turnstate"
 	"github.com/vladar107/home-ai-assistant/internal/watch"
 )
 
@@ -200,6 +201,8 @@ type harnessOptions struct {
 	// search adds the web search check, as the application does, so a query after outside content
 	// is allowed, held for confirmation, or denied.
 	search bool
+	// recent keeps each chat turn's message and plain reply for the guards, as a TypeSafe key does.
+	recent *turnstate.Registry
 }
 
 type fixedDescriber string
@@ -367,6 +370,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		t.Fatal(err)
 	}
 	broker.SetTurnExposure(exposures)
+	broker.SetTurnPrivacy(exposures)
 	for _, provider := range options.providers {
 		if err := broker.Register(provider); err != nil {
 			t.Fatal(err)
@@ -650,8 +654,12 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		}
 		conversationHistory = reader
 	}
+	var recent conversation.Exchange
+	if options.recent != nil {
+		recent = options.recent
+	}
 	h.conversation, err = conversation.NewService(
-		conversation.Config{Memory: memoryTurns, Exposure: exposures, SearchChecks: searchChecks, Locations: locationTurns, TurnTimeout: turnTimeout, FollowUp: h.approvals, Notice: notices, Attachments: h.attachments, WebSearch: webSearch, Cards: cards, Photos: photos, Location: options.location, Now: now, History: conversationHistory},
+		conversation.Config{Recent: recent, Memory: memoryTurns, Exposure: exposures, SearchChecks: searchChecks, Locations: locationTurns, TurnTimeout: turnTimeout, FollowUp: h.approvals, Notice: notices, Attachments: h.attachments, WebSearch: webSearch, Cards: cards, Photos: photos, Location: options.location, Now: now, History: conversationHistory},
 		h.store, runtime, h.client, broker, h.connections, logger, integrationTelemetry{turns: h.turns},
 	)
 	if err != nil {

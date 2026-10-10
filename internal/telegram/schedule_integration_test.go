@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -11,6 +12,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
+	"github.com/vladar107/home-ai-assistant/internal/turnstate"
 )
 
 // testClock is the scheduler's clock in these tests, so an occurrence is reached by moving time
@@ -213,6 +215,58 @@ func TestScheduledJobIsProposedConfirmedRunAndDelivered(t *testing.T) {
 	}
 	followUp.answer <- agentruntime.RunResult{Response: "details"}
 	h.wantReply(101, 4, "details")
+}
+
+// A report that may retell Notion page content makes the conversation it reaches private, so the
+// guards never keep that conversation's replies; a report that read none leaves it recordable.
+func TestScheduledReportOfPrivateContentMakesTheNextConversationPrivate(t *testing.T) {
+	for _, private := range []bool{true, false} {
+		t.Run(fmt.Sprintf("private=%v", private), func(t *testing.T) {
+			runtime := newControlledRuntime()
+			clock := newTestClock(t, mondayMorning)
+			registry := turnstate.New(time.Now)
+			h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, notion: writableNotionSimulator(t), recent: registry})
+			h.provision("alice", "acct-alice-1111")
+			h.installNotionToken("alice", aliceNotionToken)
+			h.start()
+			job := h.createJob("alice", "a1b2c3d4e5f60718", "Groceries", "0 9 * * *", "Summarise my grocery page.")
+
+			clock.Set(t, "2026-09-28T09:00:20+02:00")
+			h.scheduler.Wake()
+			run := receive(t, h.ctx, runtime.calls)
+			if private {
+				result, err := run.request.Tools.Executor.Execute(run.ctx, agentruntime.ToolCall{Name: "notion_get_page", Arguments: json.RawMessage(`{"page_id":"page-groceries"}`)})
+				if err != nil || result.IsError {
+					t.Fatalf("notion_get_page = %+v %v", result, err)
+				}
+			}
+			run.answer <- agentruntime.RunResult{Response: "Groceries is open.", Final: "Groceries is open."}
+			h.wantMessage(101, "<b>Scheduled: Groceries</b>\n\nGroceries is open.")
+			h.waitRun(job.ID, schedule.StatusDelivered)
+
+			h.push(textUpdate(1, 101, "what is still open?"))
+			followUp := receive(t, h.ctx, runtime.calls)
+			if !strings.Contains(followUp.request.Message, "Groceries is open.") {
+				t.Fatalf("follow-up turn message = %q", followUp.request.Message)
+			}
+			followUp.answer <- agentruntime.RunResult{Response: "Milk and eggs."}
+			h.wantReply(101, 1, "Milk and eggs.")
+			h.waitState(1, "delivered")
+
+			// The worker finishes delivering a reply before it starts the next turn, and that turn's
+			// own reply is not recorded until it is delivered.
+			h.push(textUpdate(2, 101, "thanks"))
+			next := receive(t, h.ctx, runtime.calls)
+			kept := slices.ContainsFunc(registry.RecentExchange("alice"), func(line turnstate.Line) bool {
+				return line.Role == turnstate.RoleAssistant && line.Text == "Milk and eggs."
+			})
+			next.answer <- agentruntime.RunResult{Response: "You're welcome."}
+			h.wantReply(101, 2, "You're welcome.")
+			if kept == private {
+				t.Fatalf("reply kept = %v after a report with private=%v", kept, private)
+			}
+		})
+	}
 }
 
 // The model reads a job's whole instructions before changing them, the user confirms the job as it

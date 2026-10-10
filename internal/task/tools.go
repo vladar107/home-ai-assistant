@@ -81,6 +81,7 @@ func (s *Service) Contribute(context.Context, string) (tools.Contribution, error
 				Risk:        tools.RiskRead,
 				// A report retells the mail and pages the task read.
 				ThirdParty: true,
+				Private:    true,
 			},
 		},
 	}, nil

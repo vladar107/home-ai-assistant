@@ -11,6 +11,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
+	"github.com/vladar107/home-ai-assistant/internal/turnstate"
 )
 
 var ErrBusy = errors.New("a conversation turn is already pending")
@@ -221,15 +222,28 @@ type Notice interface {
 	PendingNotice(principalID string) string
 }
 
-// MessageRecorder remembers the raw text of each user message a chat turn runs, for guards that
-// judge an action against what the user asked.
-type MessageRecorder interface {
+// Exchange remembers the raw text of each user message a chat turn runs and of the plain replies
+// delivered to them, for guards that judge an action against what the user asked or agreed to.
+type Exchange interface {
 	RecordMessage(principalID, text string)
+	RecordReply(principalID, text string)
+	RecentExchange(principalID string) []turnstate.Line
 }
 
 // ToolHinter names the offered tool a message most likely needs, or "" when none clearly fits.
+// earlier is the conversation before message; answered reports whether a hint was asked and
+// answered, whatever it named.
 type ToolHinter interface {
-	Hint(ctx context.Context, principalID, message string, tools []agentruntime.ToolDefinition) (string, error)
+	Hint(ctx context.Context, principalID, message string, earlier []turnstate.Line, tools []agentruntime.ToolDefinition) (name string, answered bool, err error)
+}
+
+// PrivateNotice is a notice source that knows whether what it returns may retell Notion page
+// content or NAS file contents; the turn that receives such a notice makes its conversation
+// private.
+type PrivateNotice interface {
+	Notice
+	// TakeNotice is PendingNotice that also reports whether the text may retell private content.
+	TakeNotice(principalID string) (text string, private bool)
 }
 
 // OutsideNotice is a source whose notices retell reports that may carry third-party content, such
@@ -241,29 +255,39 @@ type OutsideNotice struct{ Notice }
 type Notices []Notice
 
 func (n Notices) PendingNotice(principalID string) string {
-	text, _ := pendingNotice(n, principalID)
+	text, _, _ := pendingNotice(n, principalID)
 	return text
 }
 
-// pendingNotice returns the notice text and whether any part of it came from an OutsideNotice.
-func pendingNotice(source Notice, principalID string) (string, bool) {
+// pendingNotice returns the notice text, whether any part of it came from an OutsideNotice, and
+// whether any part of it may retell private content.
+func pendingNotice(source Notice, principalID string) (text string, outside, private bool) {
 	switch source := source.(type) {
 	case Notices:
 		var pending []string
-		outside := false
 		for _, notice := range source {
-			if text, fromOutside := pendingNotice(notice, principalID); text != "" {
+			if text, fromOutside, fromPrivate := pendingNotice(notice, principalID); text != "" {
 				pending = append(pending, text)
 				outside = outside || fromOutside
+				private = private || fromPrivate
 			}
 		}
-		return strings.Join(pending, "\n\n"), outside
+		return strings.Join(pending, "\n\n"), outside, private
 	case OutsideNotice:
-		text := source.PendingNotice(principalID)
-		return text, text != ""
+		text, private := noticeFrom(source.Notice, principalID)
+		return text, text != "", private
 	default:
-		return source.PendingNotice(principalID), false
+		text, private := noticeFrom(source, principalID)
+		return text, false, private
 	}
+}
+
+func noticeFrom(source Notice, principalID string) (string, bool) {
+	if source, ok := source.(PrivateNotice); ok {
+		text, private := source.TakeNotice(principalID)
+		return text, private && text != ""
+	}
+	return source.PendingNotice(principalID), false
 }
 
 // Attachments keeps the photos and files a principal sent, for as long as the session lives; nil
@@ -320,7 +344,7 @@ type Config struct {
 	TurnTimeout time.Duration
 	FollowUp    FollowUp
 	Notice      Notice
-	Recent      MessageRecorder
+	Recent      Exchange
 	Attachments Attachments
 	WebSearch   WebSearch
 	ToolHint    ToolHinter
@@ -357,9 +381,12 @@ type SearchChecks interface {
 	Check(ctx context.Context, principalID, query string, interactive bool) agentruntime.SearchDecision
 }
 
-// Exposure records which turns read third-party content and answers whether a call's conversation
-// or run has read text from outside the household.
+// Exposure records which turns read third-party content or private content and answers whether a
+// call's conversation or run has read text from outside the household, and whether a chat
+// request's conversation has read private content.
 type Exposure interface {
 	tools.TurnExposureRecorder
+	tools.TurnPrivacyRecorder
 	External(ctx context.Context, principalID string) bool
+	Private(ctx context.Context, principalID, requestID string) bool
 }
