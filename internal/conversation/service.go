@@ -933,7 +933,7 @@ func (s *Service) deliver(ctx context.Context, request Request) error {
 		// The chunk is already in the chat, so a failure to remember it only costs the user the
 		// ability to return to this conversation by replying to it.
 		if messageID > 0 {
-			if err := s.repository.RecordConversationReply(deliveryCtx, request.PrincipalID, request.SessionID, messageID); err != nil && ctx.Err() == nil {
+			if err := s.repository.RecordConversationReply(deliveryCtx, request.PrincipalID, request.SessionID, request.ID, messageID); err != nil && ctx.Err() == nil {
 				s.logWorkerError(ctx, request.PrincipalID, "record_reply")
 			}
 		}

@@ -159,8 +159,8 @@ type Repository interface {
 	// SwitchConversation makes the principal's own session the active one unless a turn is pending,
 	// closing the previously active session as switched.
 	SwitchConversation(ctx context.Context, principalID, sessionID string) (SwitchResult, error)
-	// RecordConversationReply remembers which session a delivered Telegram message belongs to.
-	RecordConversationReply(ctx context.Context, principalID, sessionID string, messageID int64) error
+	// RecordConversationReply remembers which session and request a delivered Telegram message belongs to.
+	RecordConversationReply(ctx context.Context, principalID, sessionID, requestID string, messageID int64) error
 }
 
 type Deliverer interface {

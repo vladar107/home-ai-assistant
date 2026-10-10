@@ -115,22 +115,109 @@ func (s *Store) SwitchConversation(ctx context.Context, principalID, sessionID s
 	}, nil
 }
 
-func (s *Store) RecordConversationReply(ctx context.Context, principalID, sessionID string, messageID int64) error {
+func (s *Store) RecordConversationReply(ctx context.Context, principalID, sessionID, requestID string, messageID int64) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("record conversation reply: SQLite store is not open")
 	}
 	if _, err := s.db.ExecContext(
 		ctx,
-		`INSERT INTO conversation_reply_messages (principal_id, telegram_message_id, session_id)
-		 VALUES (?, ?, ?)
-		 ON CONFLICT (principal_id, telegram_message_id) DO UPDATE SET session_id = excluded.session_id`,
+		`INSERT INTO conversation_reply_messages (principal_id, telegram_message_id, session_id, request_id)
+		 VALUES (?, ?, ?, ?)
+		 ON CONFLICT (principal_id, telegram_message_id)
+		 DO UPDATE SET session_id = excluded.session_id, request_id = excluded.request_id`,
 		principalID,
 		messageID,
 		sessionID,
+		requestID,
 	); err != nil {
 		return fmt.Errorf("record conversation reply: %w", err)
 	}
 	return nil
+}
+
+// ReplyOrigin returns the session and request a delivered Telegram message came from. The request
+// is empty for a message delivered before requests were recorded, and nothing is found for a
+// message that is not one of the principal's recorded replies.
+func (s *Store) ReplyOrigin(ctx context.Context, principalID string, messageID int64) (string, string, bool, error) {
+	if s == nil || s.db == nil {
+		return "", "", false, fmt.Errorf("query reply origin: SQLite store is not open")
+	}
+	var sessionID, requestID string
+	err := s.db.QueryRowContext(
+		ctx,
+		`SELECT session_id, request_id FROM conversation_reply_messages WHERE principal_id = ? AND telegram_message_id = ?`,
+		principalID,
+		messageID,
+	).Scan(&sessionID, &requestID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", false, nil
+	}
+	if err != nil {
+		return "", "", false, fmt.Errorf("query reply origin: %w", err)
+	}
+	return sessionID, requestID, true, nil
+}
+
+// SetReplyFeedback keeps the latest reaction class and emoji for a recorded reply. A message that
+// is not a recorded reply is rejected by the foreign key.
+func (s *Store) SetReplyFeedback(ctx context.Context, principalID string, messageID int64, class, emoji string) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("set reply feedback: SQLite store is not open")
+	}
+	if _, err := s.db.ExecContext(
+		ctx,
+		`INSERT INTO reply_feedback (principal_id, telegram_message_id, class, emoji)
+		 VALUES (?, ?, ?, ?)
+		 ON CONFLICT (principal_id, telegram_message_id)
+		 DO UPDATE SET class = excluded.class, emoji = excluded.emoji,
+		               updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
+		principalID,
+		messageID,
+		class,
+		emoji,
+	); err != nil {
+		return fmt.Errorf("set reply feedback: %w", err)
+	}
+	return nil
+}
+
+// DeleteReplyFeedback removes the reaction kept for a reply, if any.
+func (s *Store) DeleteReplyFeedback(ctx context.Context, principalID string, messageID int64) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("delete reply feedback: SQLite store is not open")
+	}
+	if _, err := s.db.ExecContext(
+		ctx,
+		`DELETE FROM reply_feedback WHERE principal_id = ? AND telegram_message_id = ?`,
+		principalID,
+		messageID,
+	); err != nil {
+		return fmt.Errorf("delete reply feedback: %w", err)
+	}
+	return nil
+}
+
+// ClaimReplyReconsider records that a reconsider turn was started for the key and reports whether
+// this call was the first to do so.
+func (s *Store) ClaimReplyReconsider(ctx context.Context, principalID, key string) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("claim reply reconsider: SQLite store is not open")
+	}
+	result, err := s.db.ExecContext(
+		ctx,
+		`INSERT INTO reply_reconsiders (principal_id, reconsider_key) VALUES (?, ?)
+		 ON CONFLICT (principal_id, reconsider_key) DO NOTHING`,
+		principalID,
+		key,
+	)
+	if err != nil {
+		return false, fmt.Errorf("claim reply reconsider: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("claim reply reconsider: %w", err)
+	}
+	return affected > 0, nil
 }
 
 type switchOutcome struct {
