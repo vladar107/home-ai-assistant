@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -80,6 +81,9 @@ type snapshot struct {
 	confirmed map[string]confirmedEntity
 	// entityIDs maps a lowercased friendly name to the entities that carry it.
 	entityIDs map[string][]string
+
+	visibleOnce sync.Once
+	visibleIDs  map[string]string
 }
 
 func (s *snapshot) actionsAllowed() bool {
@@ -180,9 +184,10 @@ func (s *Service) refresh(ctx context.Context, now time.Time) (*snapshot, error)
 }
 
 type stateObject struct {
-	EntityID   string         `json:"entity_id"`
-	State      string         `json:"state"`
-	Attributes map[string]any `json:"attributes"`
+	EntityID    string         `json:"entity_id"`
+	State       string         `json:"state"`
+	LastChanged string         `json:"last_changed"`
+	Attributes  map[string]any `json:"attributes"`
 }
 
 func (s stateObject) friendlyName() string {

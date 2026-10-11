@@ -176,6 +176,7 @@ flowchart TB
     watch --> store
     watch --> nsc
     watch --> busc
+    watch --> hac
     tg --> routes
     broker --> routes
     approval --> routes
@@ -305,7 +306,7 @@ The rewrite is sent only when it fits one message and keeps every number of the
 English text; otherwise, or when the call fails or takes over 30 seconds, the
 English text is sent. The next conversation turn hears the text that was sent.
 
-Departure and disruption watches are checked; a kind is offered only when its
+Departure, route, disruption, and home watches are checked; a kind is offered only when its
 connector is configured, and every check runs under the owner's own trains or
 buses switch, so a user with that switch off can neither propose nor run one.
 Proposing resolves the stations or stop for the owner and stores full station
@@ -324,6 +325,17 @@ change, or no departure left to take) plus whether the arrival target is missed,
 and its alert carries the route check's own leg lines. The check fails as an upstream
 failure only when every train and bus leg failed, and as a plain error when the
 route has been deleted; either ends in the usual failure notice.
+
+A home watch waits for a Home Assistant entity to be in a state, or above or below a
+number, optionally for some minutes, and checks every minute all day by default. Its
+evaluator lives in the `homeassistant` connector: proposing resolves a friendly name
+to exactly one entity ID among those the assistant can see (exposed to Assist or
+labelled `assistant-confirm`), and each check reads `/api/states` once per cycle for
+all home watches, fails when the entity is no longer visible in the 5-minute snapshot
+or reports `unavailable` or `unknown`, and skips quietly while the owner's Home
+switch is off. The service stores when the condition started holding; a state
+condition is seeded from the entity's `last_changed`, a numeric one from the first
+check that saw it hold.
 
 ### App help
 

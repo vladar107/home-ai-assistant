@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -20,17 +21,28 @@ const (
 	toolRemove  = "watch_remove"
 )
 
-const listGuidance = "Watches: watch_list shows the user's watches with their ids. A watch checks a train or bus departure, a saved route, or NS disruptions at some stations during a daily window, in code and without a model, and messages the user only when something changes. The user manages watches with /jobs as well, and each alert has Mute today and Pause buttons."
+const listGuidance = "Watches: watch_list shows the user's watches with their ids. A watch checks a train or bus departure, a saved route, NS disruptions at some stations, or the state of a device or sensor at home during a daily window, in code and without a model, and messages the user only when something changes. The user manages watches with /jobs as well, and each alert has Mute today and Pause buttons."
 
 func proposeGuidance(zone string, kinds []string) string {
-	return "Suggest a watch instead of a scheduled report when the user wants to hear only when something goes wrong, such as tell me if my 07:42 is cancelled or more than 5 minutes late, or warn me about disruptions before I leave: a watch stays silent while all is fine, costs no model turn, and alerts within minutes, while a scheduled report runs the model at a fixed time and always sends a message. A report remains right for a summary the user wants every time. " +
+	transit := slices.ContainsFunc(kinds, func(kind string) bool { return kind != KindHome })
+	guidance := "Suggest a watch instead of a scheduled report when the user wants to hear only when something goes wrong, such as tell me if my 07:42 is cancelled or more than 5 minutes late, or warn me about disruptions before I leave: a watch stays silent while all is fine, costs no model turn, and alerts within minutes, while a scheduled report runs the model at a fixed time and always sends a message. A report remains right for a summary the user wants every time. " +
 		"The kinds available now are: " + strings.Join(kinds, ", ") + ". " +
-		"A departure watch is one train (mode train, from, to, optional via) or bus (mode bus, stop, line) with its planned departure time; checking starts minutes_before the departure, 90 by default, and ends at it. Its triggers are cancelled, partly_cancelled, delay (delay_minutes or more, 5 by default), and platform. " +
-		"A route watch names a saved route and the time the user leaves; its triggers are leg and arrival. A disruptions watch takes one or more stations and a fixed window, window_from to window_until; its triggers are new and changed. Omitting triggers means all of the kind's triggers. " +
 		"A watch runs on days, such as mon to fri, or once on a date (YYYY-MM-DD) and then ends; times are local HH:MM in " + zone + " unless the user names another time zone. " +
 		"Set language to the language the user writes to you in, such as Russian, so the watch's messages are written in it; leave it out for English, and pass English to switch a watch back. " +
-		"Never invent a departure time, station, stop, or line: ask the user for one they did not give. Checks run every 5 minutes in the window and every 2 in its last 30, so tell the user it may take that long to notice a change. " +
 		"watch_propose only proposes: after your reply the user sees the watch with Confirm and Reject buttons, so never claim it is set. watch_update proposes changing a watch by its id from watch_list, given only the fields that change; watch_remove proposes deleting one. Each user may have " + fmt.Sprint(MaximumWatchesPerPrincipal) + " watches."
+	if transit {
+		guidance += " A departure watch is one train (mode train, from, to, optional via) or bus (mode bus, stop, line) with its planned departure time; checking starts minutes_before the departure, 90 by default, and ends at it. Its triggers are cancelled, partly_cancelled, delay (delay_minutes or more, 5 by default), and platform. " +
+			"A route watch names a saved route and the time the user leaves; its triggers are leg and arrival. A disruptions watch takes one or more stations and a fixed window, window_from to window_until; its triggers are new and changed. Omitting triggers means all of the kind's triggers. " +
+			"Never invent a departure time, station, stop, or line: ask the user for one they did not give. Transit watches are checked every 5 minutes in the window and every 2 in its last 30, so tell the user it may take that long to notice a change."
+	}
+	if slices.Contains(kinds, KindHome) {
+		guidance += " A home watch tells the user when a device or sensor at home enters a condition, such as the washing machine being done, the balcony door being open for more than 10 minutes, or the freezer going above -15. " +
+			"Give the device's name as the user says it in name (or its entity id in entity) and a condition with exactly one of state (the states that count, such as on, off, or idle; a door, window, motion, or leak sensor reports on when open, moving, or wet, and open or detected are mapped to on), above, or below (a number), and optionally for_minutes (1 to 240) for how long it must hold first. " +
+			"Its triggers are enter, when the condition starts to hold, and clear, when it ends after an alert; a numeric condition uses both by default and a state condition only enter, so ask for clear only when the user wants to hear it ends. " +
+			"A home watch checks all day by default, every minute, so a message can come up to a minute late; give window_from and window_until, which may be 24:00 for the end of the day, only to keep it quiet outside certain hours. " +
+			"Do not ask for a departure for it, and never guess a device: if the name is unknown or matches several devices, tell the user what the tool reports."
+	}
+	return guidance
 }
 
 var listDefinition = tools.Definition{
@@ -48,13 +60,20 @@ const specProperties = `"mode":{"type":"string","enum":["train","bus"],"descript
 	`"line":{"type":"string","description":"Bus: the line number."},` +
 	`"stations":{"type":"array","items":{"type":"string"},"maxItems":10,"description":"Disruptions: the stations to watch, such as a pair."},` +
 	`"route":{"type":"string","description":"Route: the saved route's name."},` +
+	`"name":{"type":"string","description":"Home: the name of the device or sensor as the user says it, such as Balcony door."},` +
+	`"entity":{"type":"string","description":"Home: the entity id, only when the user or a tool result gave it."},` +
+	`"condition":{"type":"object","description":"Home: what to wait for. Give exactly one of state, above, or below.","properties":{` +
+	`"state":{"type":"array","items":{"type":"string"},"maxItems":10,"description":"The states that count, such as on, off, or idle; open and detected mean on for a binary sensor."},` +
+	`"above":{"type":"number","description":"A numeric sensor going above this value."},` +
+	`"below":{"type":"number","description":"A numeric sensor going below this value."},` +
+	`"for_minutes":{"type":"integer","minimum":1,"maximum":240,"description":"How long the condition must hold before it counts."}},"additionalProperties":false},` +
 	`"departure":{"type":"string","description":"Departure or route: the planned departure, local HH:MM."},` +
 	`"minutes_before":{"type":"integer","minimum":10,"maximum":240,"description":"Departure or route: how long before the departure checking starts; 90 by default."},` +
-	`"window_from":{"type":"string","description":"Disruptions: when checking starts, local HH:MM."},` +
-	`"window_until":{"type":"string","description":"Disruptions: when checking ends, local HH:MM."},` +
+	`"window_from":{"type":"string","description":"Disruptions or home: when checking starts, local HH:MM; a home watch defaults to 00:00."},` +
+	`"window_until":{"type":"string","description":"Disruptions or home: when checking ends, local HH:MM; a home watch may use 24:00 for the end of the day and defaults to it."},` +
 	`"days":{"type":"array","items":{"type":"string","enum":["mon","tue","wed","thu","fri","sat","sun"]},"description":"The weekdays the watch runs on."},` +
 	`"date":{"type":"string","description":"Instead of days: the one date, YYYY-MM-DD, of a one-off watch."},` +
-	`"triggers":{"type":"array","items":{"type":"string","enum":["cancelled","partly_cancelled","delay","platform","leg","arrival","new","changed"]},"description":"What to alert on; omit for all of the kind's triggers."},` +
+	`"triggers":{"type":"array","items":{"type":"string","enum":["cancelled","partly_cancelled","delay","platform","leg","arrival","new","changed","enter","clear"]},"description":"What to alert on; omit for all of the kind's triggers."},` +
 	`"delay_minutes":{"type":"integer","minimum":1,"maximum":120,"description":"The delay that counts, in minutes; 5 by default."},` +
 	`"timezone":{"type":"string","description":"IANA time zone such as Europe/Amsterdam; omit to use the user's own."},` +
 	`"language":{"type":"string","description":"The language the watch's messages are written in, such as Russian: the one the user writes to you in. Omit for English."}`
@@ -62,10 +81,10 @@ const specProperties = `"mode":{"type":"string","enum":["train","bus"],"descript
 var writeDefinitions = []tools.Definition{
 	{
 		Name:        toolPropose,
-		Description: "Propose a watch that checks a departure, a saved route, or NS disruptions during a daily window and messages the user only when something changes. The user must confirm.",
+		Description: "Propose a watch that checks a departure, a saved route, NS disruptions, or a device or sensor at home during a daily window and messages the user only when something changes. The user must confirm.",
 		Risk:        tools.RiskWrite,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
-			`"kind":{"type":"string","enum":["departure","disruptions","route"],"description":"What to watch."},` +
+			`"kind":{"type":"string","enum":["departure","disruptions","route","home"],"description":"What to watch."},` +
 			specProperties + `},"required":["kind"],"additionalProperties":false}`),
 	},
 	{
@@ -105,7 +124,7 @@ func (s *Service) Contribute(context.Context, string) (tools.Contribution, error
 
 func (s *Service) kinds() []string {
 	var kinds []string
-	for _, kind := range []string{KindDeparture, KindRoute, KindDisruptions} {
+	for _, kind := range []string{KindDeparture, KindRoute, KindDisruptions, KindHome} {
 		if _, known := s.evaluators[kind]; known {
 			kinds = append(kinds, kind)
 		}
@@ -134,24 +153,27 @@ func (s *Service) Execute(ctx context.Context, principalID string, call tools.Ca
 
 // specArguments are the fields of a watch as the model gives them.
 type specArguments struct {
-	Mode          string   `json:"mode"`
-	From          string   `json:"from"`
-	To            string   `json:"to"`
-	Via           string   `json:"via"`
-	Stop          string   `json:"stop"`
-	Line          string   `json:"line"`
-	Stations      []string `json:"stations"`
-	Route         string   `json:"route"`
-	Departure     string   `json:"departure"`
-	MinutesBefore int      `json:"minutes_before"`
-	WindowFrom    string   `json:"window_from"`
-	WindowUntil   string   `json:"window_until"`
-	Days          []string `json:"days"`
-	Date          string   `json:"date"`
-	Triggers      []string `json:"triggers"`
-	DelayMinutes  int      `json:"delay_minutes"`
-	Timezone      string   `json:"timezone"`
-	Language      string   `json:"language"`
+	Mode          string     `json:"mode"`
+	From          string     `json:"from"`
+	To            string     `json:"to"`
+	Via           string     `json:"via"`
+	Stop          string     `json:"stop"`
+	Line          string     `json:"line"`
+	Stations      []string   `json:"stations"`
+	Route         string     `json:"route"`
+	Name          string     `json:"name"`
+	Entity        string     `json:"entity"`
+	Condition     *Condition `json:"condition"`
+	Departure     string     `json:"departure"`
+	MinutesBefore int        `json:"minutes_before"`
+	WindowFrom    string     `json:"window_from"`
+	WindowUntil   string     `json:"window_until"`
+	Days          []string   `json:"days"`
+	Date          string     `json:"date"`
+	Triggers      []string   `json:"triggers"`
+	DelayMinutes  int        `json:"delay_minutes"`
+	Timezone      string     `json:"timezone"`
+	Language      string     `json:"language"`
 }
 
 type proposeArguments struct {
@@ -183,15 +205,19 @@ func (s *Service) prepare(ctx context.Context, principalID, kind string, argumen
 	if err != nil {
 		return Spec{}, err
 	}
-	resolver, ok := s.evaluators[kind].(Resolver)
-	if !ok {
-		return spec, nil
+	if resolver, ok := s.evaluators[kind].(Resolver); ok {
+		resolved, err := resolver.Resolve(ctx, principalID, spec)
+		if err != nil {
+			return Spec{}, err
+		}
+		if spec, err = normalize(resolved, s.now()); err != nil {
+			return Spec{}, err
+		}
 	}
-	resolved, err := resolver.Resolve(ctx, principalID, spec)
-	if err != nil {
-		return Spec{}, err
+	if kind == KindHome && spec.Target.Entity == "" {
+		return Spec{}, fmt.Errorf("the device could not be matched to one entity")
 	}
-	return normalize(resolved, s.now())
+	return spec, nil
 }
 
 func (s *Service) specOf(kind string, arguments specArguments) (Spec, error) {
@@ -206,7 +232,9 @@ func (s *Service) specOf(kind string, arguments specArguments) (Spec, error) {
 		Target: Target{
 			Mode: arguments.Mode, From: arguments.From, To: arguments.To, Via: arguments.Via,
 			Stop: arguments.Stop, Line: arguments.Line, Stations: arguments.Stations, Route: arguments.Route,
+			Entity: arguments.Entity, Name: arguments.Name,
 		},
+		Condition:    arguments.Condition,
 		Triggers:     arguments.Triggers,
 		DelayMinutes: arguments.DelayMinutes,
 		Days:         arguments.Days,
@@ -217,9 +245,9 @@ func (s *Service) specOf(kind string, arguments specArguments) (Spec, error) {
 	if spec.Zone == "" {
 		spec.Zone = s.zone
 	}
-	if kind == KindDisruptions {
+	if kind == KindDisruptions || kind == KindHome {
 		if arguments.Departure != "" || arguments.MinutesBefore != 0 {
-			return Spec{}, fmt.Errorf("a disruptions watch takes window_from and window_until, not a departure")
+			return Spec{}, fmt.Errorf("a %s watch takes window_from and window_until, not a departure", kind)
 		}
 		spec.Start, spec.End = strings.TrimSpace(arguments.WindowFrom), strings.TrimSpace(arguments.WindowUntil)
 	} else {
@@ -248,10 +276,11 @@ func argumentsOf(spec Spec) specArguments {
 	arguments := specArguments{
 		Mode: spec.Target.Mode, From: spec.Target.From, To: spec.Target.To, Via: spec.Target.Via,
 		Stop: spec.Target.Stop, Line: spec.Target.Line, Stations: spec.Target.Stations, Route: spec.Target.Route,
+		Name: spec.Target.Name, Entity: spec.Target.Entity, Condition: spec.Condition,
 		Days: spec.Days, Date: spec.Date, Triggers: spec.Triggers, DelayMinutes: spec.DelayMinutes, Timezone: spec.Zone,
 		Language: spec.Language,
 	}
-	if spec.Kind == KindDisruptions {
+	if spec.Kind == KindDisruptions || spec.Kind == KindHome {
 		arguments.WindowFrom, arguments.WindowUntil = spec.Start, spec.End
 		return arguments
 	}
@@ -264,7 +293,8 @@ func argumentsOf(spec Spec) specArguments {
 }
 
 // overlay applies the fields the model gave to the current ones. Days and a date replace each
-// other, and a new mode drops the other mode's target fields.
+// other, a new mode drops the other mode's target fields, and a new device name or entity replaces
+// both of the device's.
 func overlay(current, change specArguments) specArguments {
 	next := current
 	if mode := strings.TrimSpace(change.Mode); mode != "" && !strings.EqualFold(mode, current.Mode) {
@@ -281,6 +311,16 @@ func overlay(current, change specArguments) specArguments {
 	set(&next.Stop, change.Stop)
 	set(&next.Line, change.Line)
 	set(&next.Route, change.Route)
+	if strings.TrimSpace(change.Name) != "" || strings.TrimSpace(change.Entity) != "" {
+		next.Name, next.Entity = change.Name, change.Entity
+	}
+	if change.Condition != nil {
+		numeric := func(c *Condition) bool { return c != nil && (c.Above != nil || c.Below != nil) }
+		if len(change.Triggers) == 0 && numeric(current.Condition) != numeric(change.Condition) {
+			next.Triggers = nil
+		}
+		next.Condition = change.Condition
+	}
 	set(&next.Departure, change.Departure)
 	set(&next.WindowFrom, change.WindowFrom)
 	set(&next.WindowUntil, change.WindowUntil)
@@ -331,6 +371,9 @@ func (s *Service) proposeWatch(ctx context.Context, principalID string, call too
 		return tools.Result{}, err
 	}
 	summary := "Watch " + spec.Label() + "\n" + spec.Describe() + "\nYou get a message only when something changes, and once more when it is back to normal."
+	if spec.Kind == KindHome {
+		summary = "Watch " + spec.Label() + "\n" + spec.Describe() + "\nYou get a message only when this changes."
+	}
 	return s.propose(ctx, principalID, call, approval.Proposal{Tool: toolPropose, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "watch", TargetKind: spec.Kind + " watch", TargetName: intentName(spec)}})
 }
 
@@ -386,7 +429,7 @@ func (s *Service) proposeRemoval(ctx context.Context, principalID string, call t
 	if err != nil {
 		return tools.Result{}, err
 	}
-	summary := "Stop watching " + watch.Label() + " (" + watch.DescribeDays() + ", " + watch.Start + "–" + watch.End + ")."
+	summary := "Stop watching " + watch.Label() + " (" + watch.DescribeDays() + ", " + watch.DescribeWindow() + ")."
 	return s.propose(ctx, principalID, call, approval.Proposal{Tool: toolRemove, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "remove", TargetKind: watch.Kind + " watch", TargetName: watch.Label()}})
 }
 
@@ -496,6 +539,9 @@ func (s *Service) nextWindow(spec Spec) string {
 		if active && occurrence.End.After(now) {
 			start := occurrence.Start
 			if start.Before(now) {
+				if spec.End == endOfDay {
+					return "Checking now until midnight."
+				}
 				return "Checking now until " + occurrence.End.Format("15:04") + "."
 			}
 			return "First check: " + start.Format("Mon 2 Jan 15:04 MST") + "."

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,6 +27,12 @@ const (
 	historyRetention   = 30 * 24 * time.Hour
 	pruneInterval      = time.Hour
 	maximumNoticeRunes = 1000
+
+	// checkSlack lets a check run when it is due within the jitter of the tick that finds it.
+	checkSlack = time.Second
+	// carryGap is how long before a window opens the previous day's last check may be for the
+	// watch to have been watching without a break: two intervals and the slack.
+	carryGap = 2*HomeCheckInterval + checkSlack
 
 	rewriteTimeout = 30 * time.Second
 	// maximumMessageRunes is what one Telegram message holds.
@@ -314,18 +321,37 @@ func (s *Service) check(ctx context.Context, watch Watch, now time.Time, cache *
 		s.logWatchError(ctx, watch, "load_state", err)
 		return
 	}
-	if found && now.Sub(state.CheckedAt) < interval(now, occurrence.End) {
+	if found && now.Sub(state.CheckedAt) < interval(watch.Kind, now, occurrence.End)-checkSlack {
 		return
 	}
 	if !found {
 		state = State{WatchID: watch.ID, PrincipalID: watch.PrincipalID, Occurrence: occurrence.Date}
+		sent, err := s.repository.LastWatchAlertSequence(ctx, watch.ID, occurrence.Date)
+		if err != nil {
+			s.logWatchError(ctx, watch, "load_state", err)
+			return
+		}
+		state.Messages = sent
+		if watch.Kind == KindHome && watch.Start == startOfDay && watch.End == endOfDay {
+			earlier, carried, err := s.repository.LatestWatchStateBefore(ctx, watch.ID, occurrence.Date)
+			if err != nil {
+				s.logWatchError(ctx, watch, "load_state", err)
+				return
+			}
+			if carried && followsDirectly(earlier.Occurrence, occurrence.Date) && occurrence.Start.Sub(earlier.CheckedAt) <= carryGap {
+				state.Key, state.Alerted, state.Since = earlier.Key, earlier.Alerted, earlier.Since
+			}
+		}
 	}
 
-	occurrence.Cache, occurrence.Previous = cache, state.Key
+	occurrence.Cache, occurrence.Previous, occurrence.Since = cache, state.Key, state.Since
 	checkCtx, cancel := context.WithTimeout(ctx, s.timeout)
 	observation, err := evaluator.Evaluate(checkCtx, watch.PrincipalID, watch, occurrence)
 	cancel()
 	if ctx.Err() != nil {
+		return
+	}
+	if errors.Is(err, ErrSkip) {
 		return
 	}
 	if err == nil && strings.TrimSpace(observation.State) == "" {
@@ -349,21 +375,26 @@ func (s *Service) check(ctx context.Context, watch Watch, now time.Time, cache *
 			"kind", watch.Kind, "failures", state.Failures, "service", service, "error", err)
 		if state.Failures >= FailureNoticeAfter && !state.FailureNoticed {
 			state.FailureNoticed = true
-			alert = queue(&state, watch, occurrence, alertTypeFailure, failureText(watch))
+			alert = queue(&state, watch, occurrence, now, alertTypeFailure, failureText(watch))
 		}
 	} else {
 		state.Failures = 0
 		if observation.Triggered {
 			outcome = checkTriggered
 		}
+		state.Since = observation.Since
 		if observation.State != state.Key {
 			switch {
 			case observation.Silent:
 			case observation.Triggered:
-				alert = queue(&state, watch, occurrence, alertTypeAlert, alertText(watch, observation))
+				if wanted(watch, TriggerEnter) {
+					alert = queue(&state, watch, occurrence, now, alertTypeAlert, alertText(watch, observation))
+				}
 				state.Alerted = true
 			case state.Alerted:
-				alert = queue(&state, watch, occurrence, alertTypeRecovered, recoveredText(watch, observation))
+				if wanted(watch, TriggerClear) {
+					alert = queue(&state, watch, occurrence, now, alertTypeRecovered, recoveredText(watch, observation))
+				}
 				state.Alerted = false
 			}
 			state.Key = observation.State
@@ -382,19 +413,46 @@ func (s *Service) check(ctx context.Context, watch Watch, now time.Time, cache *
 	}
 }
 
-// interval is how long after a check the next one is due: shorter near the end of the window.
-func interval(now, end time.Time) time.Duration {
+// followsDirectly reports whether date is the calendar day after earlier.
+func followsDirectly(earlier, date string) bool {
+	day, err := time.Parse(dateLayout, earlier)
+	return err == nil && day.AddDate(0, 0, 1).Format(dateLayout) == date
+}
+
+// wanted reports whether the watch messages on enter or clear. Only a home watch can leave one of
+// them out; the other kinds message on every change their evaluator reports.
+func wanted(watch Watch, trigger string) bool {
+	return watch.Kind != KindHome || slices.Contains(watch.Triggers, trigger)
+}
+
+// interval is how long after a check the next one is due: a home watch is checked at a fixed
+// pace, the others more often near the end of the window.
+func interval(kind string, now, end time.Time) time.Duration {
+	if kind == KindHome {
+		return HomeCheckInterval
+	}
 	if end.Sub(now) <= FinalStretch {
 		return FinalCheckInterval
 	}
 	return CheckInterval
 }
 
+func maximumMessages(kind string) int {
+	if kind == KindHome {
+		return MaximumHomeMessages
+	}
+	return MaximumMessages
+}
+
 // queue counts one more message for the window and returns it, or nil once the window has sent
-// its maximum.
-func queue(state *State, watch Watch, occurrence Occurrence, alertType, text string) *Alert {
-	if state.Messages >= MaximumMessages {
+// its maximum. A home alert expires HomeAlertLifetime after now; the others with their window.
+func queue(state *State, watch Watch, occurrence Occurrence, now time.Time, alertType, text string) *Alert {
+	if state.Messages >= maximumMessages(watch.Kind) {
 		return nil
+	}
+	expires := occurrence.End
+	if watch.Kind == KindHome {
+		expires = now.Add(HomeAlertLifetime)
 	}
 	state.Messages++
 	digest := sha256.Sum256([]byte(watch.ID + "\x00" + occurrence.Date + "\x00" + strconv.Itoa(state.Messages)))
@@ -406,7 +464,7 @@ func queue(state *State, watch Watch, occurrence Occurrence, alertType, text str
 		Sequence:    state.Messages,
 		Type:        alertType,
 		Text:        text,
-		ExpiresAt:   occurrence.End,
+		ExpiresAt:   expires,
 	}
 }
 
@@ -644,7 +702,7 @@ func (s *Service) Delete(ctx context.Context, principalID, watchID string) (bool
 
 // DescribeState is a watch's days and window with its pause and mute state, for /jobs.
 func (s *Service) DescribeState(watch Watch) string {
-	state := fmt.Sprintf("%s, %s–%s", watch.DescribeDays(), watch.Start, watch.End)
+	state := watch.DescribeDays() + ", " + watch.DescribeWindow()
 	if !watch.Enabled {
 		return state + ", paused"
 	}

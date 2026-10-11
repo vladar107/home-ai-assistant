@@ -164,14 +164,37 @@ func (s *Store) LoadWatchState(ctx context.Context, watchID, occurrence string) 
 	if s == nil || s.db == nil {
 		return watch.State{}, false, fmt.Errorf("load watch state: SQLite store is not open")
 	}
-	state := watch.State{WatchID: watchID, Occurrence: occurrence}
-	var checkedAt string
+	return s.queryWatchState(ctx, `occurrence = ?`, watchID, occurrence)
+}
+
+func (s *Store) LastWatchAlertSequence(ctx context.Context, watchID, occurrence string) (int, error) {
+	if s == nil || s.db == nil {
+		return 0, fmt.Errorf("load watch alert sequence: SQLite store is not open")
+	}
+	var sequence int
+	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence), 0) FROM watch_alerts WHERE watch_id = ? AND occurrence = ?`, watchID, occurrence).Scan(&sequence); err != nil {
+		return 0, fmt.Errorf("load watch alert sequence: %w", err)
+	}
+	return sequence, nil
+}
+
+func (s *Store) LatestWatchStateBefore(ctx context.Context, watchID, occurrence string) (watch.State, bool, error) {
+	if s == nil || s.db == nil {
+		return watch.State{}, false, fmt.Errorf("load watch state: SQLite store is not open")
+	}
+	return s.queryWatchState(ctx, `occurrence < ?`, watchID, occurrence)
+}
+
+// queryWatchState reads the newest state of a watch whose occurrence satisfies the condition.
+func (s *Store) queryWatchState(ctx context.Context, condition, watchID, occurrence string) (watch.State, bool, error) {
+	var state watch.State
+	var checkedAt, since string
 	err := s.db.QueryRowContext(
 		ctx,
-		`SELECT principal_id, COALESCE(state, ''), alerted, messages, failures, failure_noticed, checked_at
-		 FROM watch_states WHERE watch_id = ? AND occurrence = ?`,
+		`SELECT watch_id, principal_id, occurrence, COALESCE(state, ''), alerted, messages, failures, failure_noticed, COALESCE(since, ''), checked_at
+		 FROM watch_states WHERE watch_id = ? AND `+condition+` ORDER BY occurrence DESC LIMIT 1`,
 		watchID, occurrence,
-	).Scan(&state.PrincipalID, &state.Key, &state.Alerted, &state.Messages, &state.Failures, &state.FailureNoticed, &checkedAt)
+	).Scan(&state.WatchID, &state.PrincipalID, &state.Occurrence, &state.Key, &state.Alerted, &state.Messages, &state.Failures, &state.FailureNoticed, &since, &checkedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return watch.State{}, false, nil
 	}
@@ -181,12 +204,21 @@ func (s *Store) LoadWatchState(ctx context.Context, watchID, occurrence string) 
 	if state.CheckedAt, err = time.Parse(time.RFC3339Nano, checkedAt); err != nil {
 		return watch.State{}, false, fmt.Errorf("parse watch check time: %w", err)
 	}
+	if since != "" {
+		if state.Since, err = time.Parse(time.RFC3339Nano, since); err != nil {
+			return watch.State{}, false, fmt.Errorf("parse watch condition start: %w", err)
+		}
+	}
 	return state, true, nil
 }
 
 func (s *Store) SaveWatchCheck(ctx context.Context, state watch.State, alert *watch.Alert, now time.Time) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("save watch check: SQLite store is not open")
+	}
+	var since string
+	if !state.Since.IsZero() {
+		since = formatTime(state.Since)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -195,13 +227,13 @@ func (s *Store) SaveWatchCheck(ctx context.Context, state watch.State, alert *wa
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(
 		ctx,
-		`INSERT INTO watch_states (watch_id, principal_id, occurrence, state, alerted, messages, failures, failure_noticed, checked_at, updated_at)
-		 VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?)
+		`INSERT INTO watch_states (watch_id, principal_id, occurrence, state, alerted, messages, failures, failure_noticed, since, checked_at, updated_at)
+		 VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), ?, ?)
 		 ON CONFLICT (watch_id, occurrence) DO UPDATE SET
 		     state = excluded.state, alerted = excluded.alerted, messages = excluded.messages, failures = excluded.failures,
-		     failure_noticed = excluded.failure_noticed, checked_at = excluded.checked_at, updated_at = excluded.updated_at`,
+		     failure_noticed = excluded.failure_noticed, since = excluded.since, checked_at = excluded.checked_at, updated_at = excluded.updated_at`,
 		state.WatchID, state.PrincipalID, state.Occurrence, state.Key, state.Alerted, state.Messages, state.Failures,
-		state.FailureNoticed, formatTime(state.CheckedAt), formatTime(now),
+		state.FailureNoticed, since, formatTime(state.CheckedAt), formatTime(now),
 	); err != nil {
 		return fmt.Errorf("save watch state: %w", err)
 	}

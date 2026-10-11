@@ -550,8 +550,9 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			if err := approvals.RegisterExecutor(watches); err != nil {
 				return err
 			}
-			// Alerts are written by code from transit data, which no tool marks as outside content,
-			// so retelling one does not withhold search or make home actions wait.
+			// Alerts are written by code from transit data and Home Assistant names and states, which
+			// no tool marks as outside content, so retelling one does not withhold search or make
+			// home actions wait.
 			notices = append(notices, watches)
 			a.watches = watches
 		}
@@ -723,6 +724,12 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 				return err
 			}
 			a.homeAssistant = homeAssistantService
+			if a.watches != nil {
+				if err := a.watches.Register(watch.KindHome, homeAssistantService); err != nil {
+					return err
+				}
+				a.telemetry.ZeroWatchOutcomes(ctx, principals, []string{watch.KindHome})
+			}
 		}
 		if a.cfg.Grafana.Enabled() {
 			grafanaService, err := grafana.NewService(grafana.Config{

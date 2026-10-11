@@ -1,15 +1,17 @@
-// Package watch checks a user's trains, buses, routes, and stations during a daily window and
-// tells them only when something changes. Checks are code: an evaluator registered per kind turns
-// one check into a normalized state, the service compares it with the last state stored for that
-// day's window, and a change into a triggering state becomes a durable alert. No model runs per
-// check; the model only proposes, changes, and explains watches.
+// Package watch checks a user's trains, buses, routes, stations, and home devices during a daily
+// window and tells them only when something changes. Checks are code: an evaluator registered per
+// kind turns one check into a normalized state, the service compares it with the last state stored
+// for that day's window, and a change into a triggering state becomes a durable alert. No model
+// runs per check; the model only proposes, changes, and explains watches.
 package watch
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -20,6 +22,7 @@ const (
 	KindDeparture   = "departure"
 	KindDisruptions = "disruptions"
 	KindRoute       = "route"
+	KindHome        = "home"
 
 	ModeTrain = "train"
 	ModeBus   = "bus"
@@ -35,10 +38,15 @@ const (
 	// Disruption triggers.
 	TriggerNew     = "new"
 	TriggerChanged = "changed"
+	// Home triggers: the watched condition starting to hold, and ending after an alert.
+	TriggerEnter = "enter"
+	TriggerClear = "clear"
 
 	MaximumWatchesPerPrincipal = 20
-	// MaximumMessages caps what one window of one watch may send, alerts and notices together.
-	MaximumMessages = 5
+	// MaximumMessages caps what one window of one transit watch may send, alerts and notices
+	// together; a home watch may send MaximumHomeMessages.
+	MaximumMessages     = 5
+	MaximumHomeMessages = 10
 	// FailureNoticeAfter is how many checks in a row must fail before the owner is told, once.
 	FailureNoticeAfter = 3
 
@@ -48,6 +56,11 @@ const (
 	FinalCheckInterval  = 2 * time.Minute
 	// FinalStretch is the end of the window where checks run at FinalCheckInterval.
 	FinalStretch = 30 * time.Minute
+	// HomeCheckInterval is how often a home watch is checked, all through its window.
+	HomeCheckInterval = time.Minute
+	// HomeAlertLifetime is how long a home alert stays deliverable after it is queued, since its
+	// window may end at midnight.
+	HomeAlertLifetime = 30 * time.Minute
 
 	minimumLead          = 10 * time.Minute
 	maximumLead          = 4 * time.Hour
@@ -57,6 +70,10 @@ const (
 	maximumNameRunes     = 80
 	maximumLanguageRunes = 40
 	maximumStations      = 10
+	maximumStates        = 10
+	maximumForMinutes    = 240
+	endOfDay             = "24:00"
+	startOfDay           = "00:00"
 	dateLayout           = "2006-01-02"
 	clockLayout          = "15:04"
 	alertTypeAlert       = "alert"
@@ -72,11 +89,17 @@ const (
 // ErrTooManyWatches reports that the principal already holds MaximumWatchesPerPrincipal watches.
 var ErrTooManyWatches = errors.New("the principal already has the maximum number of watches")
 
+// ErrSkip is returned by an evaluator that has nothing to check right now, such as when the owner
+// has switched the integration off. The service then skips the check: it counts no failure and
+// changes no state.
+var ErrSkip = errors.New("the check is skipped")
+
 // kindTriggers lists each kind's triggers in the order they are shown.
 var kindTriggers = map[string][]string{
 	KindDeparture:   {TriggerCancelled, TriggerPartlyCancelled, TriggerDelay, TriggerPlatform},
 	KindRoute:       {TriggerLeg, TriggerArrival},
 	KindDisruptions: {TriggerNew, TriggerChanged},
+	KindHome:        {TriggerEnter, TriggerClear},
 }
 
 var triggerDescriptions = map[string]string{
@@ -88,6 +111,8 @@ var triggerDescriptions = map[string]string{
 	TriggerArrival:         "the arrival target no longer being met",
 	TriggerNew:             "a new disruption or engineering work",
 	TriggerChanged:         "a change to one already known",
+	TriggerEnter:           "the condition starting to hold",
+	TriggerClear:           "the condition ending",
 }
 
 // weekdays are in the order they are shown, Monday first.
@@ -96,7 +121,8 @@ var weekdays = []string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
 func weekdayName(day time.Weekday) string { return weekdays[(int(day)+6)%7] }
 
 // Target is what a watch looks at. A departure watch is a train (From, To, optional Via) or a bus
-// (Stop, Line); a disruption watch has Stations; a route watch names a saved route.
+// (Stop, Line); a disruption watch has Stations; a route watch names a saved route; a home watch
+// has the Entity ID of a Home Assistant entity and, as resolved, its friendly Name.
 type Target struct {
 	Mode     string   `json:"mode,omitempty"`
 	From     string   `json:"from,omitempty"`
@@ -106,23 +132,56 @@ type Target struct {
 	Line     string   `json:"line,omitempty"`
 	Stations []string `json:"stations,omitempty"`
 	Route    string   `json:"route,omitempty"`
+	Entity   string   `json:"entity,omitempty"`
+	Name     string   `json:"name,omitempty"`
+}
+
+// Condition is what a home watch waits for: the entity being in one of State, or its numeric value
+// being Above or Below a threshold. Exactly one of the three is set. ForMinutes, when not zero, is
+// how long it must have held before it counts.
+type Condition struct {
+	State      []string `json:"state,omitempty"`
+	Above      *float64 `json:"above,omitempty"`
+	Below      *float64 `json:"below,omitempty"`
+	ForMinutes int      `json:"for_minutes,omitempty"`
+}
+
+func (c Condition) numeric() bool { return c.Above != nil || c.Below != nil }
+
+// Describe is the condition as the user reads it, such as "open for 10 min" or "above -15".
+func (c Condition) Describe() string {
+	var text string
+	switch {
+	case len(c.State) > 0:
+		text = strings.Join(c.State, " or ")
+	case c.Above != nil:
+		text = "above " + strconv.FormatFloat(*c.Above, 'f', -1, 64)
+	case c.Below != nil:
+		text = "below " + strconv.FormatFloat(*c.Below, 'f', -1, 64)
+	}
+	if c.ForMinutes > 0 {
+		text += fmt.Sprintf(" for %d min", c.ForMinutes)
+	}
+	return text
 }
 
 // Spec is a watch as the user confirms it. Start and End bound its daily window as local HH:MM
-// times; for a departure or a route End is the planned departure. A watch runs on Days, or once on
-// Date and then expires. Language, such as Russian, is what its messages are rewritten into before
-// they are sent; empty means the English text as is.
+// times; for a departure or a route End is the planned departure, and a home watch may end at
+// "24:00", the end of the day. A watch runs on Days, or once on Date and then expires. Language,
+// such as Russian, is what its messages are rewritten into before they are sent; empty means the
+// English text as is.
 type Spec struct {
-	Kind         string   `json:"kind"`
-	Target       Target   `json:"target"`
-	Triggers     []string `json:"triggers"`
-	DelayMinutes int      `json:"delay_minutes,omitempty"`
-	Days         []string `json:"days,omitempty"`
-	Date         string   `json:"date,omitempty"`
-	Start        string   `json:"start"`
-	End          string   `json:"end"`
-	Zone         string   `json:"zone"`
-	Language     string   `json:"language,omitempty"`
+	Kind         string     `json:"kind"`
+	Target       Target     `json:"target"`
+	Condition    *Condition `json:"condition,omitempty"`
+	Triggers     []string   `json:"triggers"`
+	DelayMinutes int        `json:"delay_minutes,omitempty"`
+	Days         []string   `json:"days,omitempty"`
+	Date         string     `json:"date,omitempty"`
+	Start        string     `json:"start"`
+	End          string     `json:"end"`
+	Zone         string     `json:"zone"`
+	Language     string     `json:"language,omitempty"`
 }
 
 // Watch is one principal's stored watch. MutedOn is the local date "Mute today" silenced.
@@ -145,8 +204,13 @@ type Occurrence struct {
 	End time.Time
 	// Cache answers identical upstream queries once within one check cycle.
 	Cache *Cache
-	// Previous is the State of the window's last successful check, empty before the first.
+	// Previous is the State of the window's last successful check, empty before the first. A home
+	// watch whose window directly follows the previous day's, from 00:00 after a 24:00 end, starts
+	// from that day's last State; any other window starts empty.
 	Previous string
+	// Since is when the watched condition started holding, as the previous check reported it; zero
+	// when it was not holding. It is carried across midnight like Previous.
+	Since time.Time
 }
 
 // Evaluator checks the watches of one kind. It must be safe to call from one goroutine at a time
@@ -180,6 +244,9 @@ type Observation struct {
 	// Silent stores a changed State without any message, for a change the watch's triggers leave
 	// out, such as one of several disruptions ending, while what was alerted on still holds.
 	Silent bool
+	// Since is when the watched condition started holding, zero when it does not hold. The service
+	// stores it with every successful check and hands it back as Occurrence.Since.
+	Since time.Time
 }
 
 // UpstreamError marks a check that failed because an outside service did, for metrics.
@@ -202,7 +269,9 @@ type State struct {
 	Messages       int
 	Failures       int
 	FailureNoticed bool
-	CheckedAt      time.Time
+	// Since is Observation.Since of the last successful check.
+	Since     time.Time
+	CheckedAt time.Time
 }
 
 // Alert is one message a watch owes its owner. Kind, Enabled, MutedOn, and Language are read from
@@ -237,6 +306,11 @@ type Repository interface {
 	MuteWatch(ctx context.Context, principalID, watchID, date string) (bool, error)
 	DeleteWatch(ctx context.Context, principalID, watchID string) (bool, error)
 	LoadWatchState(ctx context.Context, watchID, occurrence string) (State, bool, error)
+	// LastWatchAlertSequence returns the highest sequence queued for a window, 0 if none, so a
+	// window whose state was reset by an edit continues numbering after the alerts it already sent.
+	LastWatchAlertSequence(ctx context.Context, watchID, occurrence string) (int, error)
+	// LatestWatchStateBefore returns the watch's newest window state for a date before occurrence.
+	LatestWatchStateBefore(ctx context.Context, watchID, occurrence string) (State, bool, error)
 	// SaveWatchCheck stores a window's state after a check and, when alert is set, queues it in the
 	// same transaction. An alert already queued under the same sequence is not queued again.
 	SaveWatchCheck(ctx context.Context, state State, alert *Alert, now time.Time) error
@@ -265,6 +339,15 @@ func (s Spec) Label() string {
 		return "Disruptions at " + strings.Join(target.Stations, ", ")
 	case KindRoute:
 		return fmt.Sprintf("Route %q, leaving %s", target.Route, s.End)
+	case KindHome:
+		name := target.Name
+		if name == "" {
+			name = target.Entity
+		}
+		if s.Condition == nil {
+			return name
+		}
+		return name + ": " + s.Condition.Describe()
 	default:
 		return s.Kind
 	}
@@ -307,12 +390,27 @@ func (s Spec) DescribeTriggers() string {
 	return strings.Join(described, ", ")
 }
 
+// DescribeWindow is the daily window, such as "07:00–09:30", or "all day" for a whole-day one.
+func (s Spec) DescribeWindow() string {
+	if s.Start == startOfDay && s.End == endOfDay {
+		return "all day"
+	}
+	return s.Start + "–" + s.End
+}
+
+// checkEvery is how often the watch's kind is checked, as the user reads it.
+func (s Spec) checkEvery() string {
+	if s.Kind == KindHome {
+		return "checked every minute"
+	}
+	return fmt.Sprintf("checked every %d minutes and every %d in the last %d", int(CheckInterval.Minutes()), int(FinalCheckInterval.Minutes()), int(FinalStretch.Minutes()))
+}
+
 // Describe is the watch's definition as the user confirms it.
 func (s Spec) Describe() string {
 	lines := []string{
 		"Days: " + s.DescribeDays(),
-		fmt.Sprintf("Window: %s–%s (%s), checked every %d minutes and every %d in the last %d",
-			s.Start, s.End, s.Zone, int(CheckInterval.Minutes()), int(FinalCheckInterval.Minutes()), int(FinalStretch.Minutes())),
+		fmt.Sprintf("Window: %s (%s), %s", s.DescribeWindow(), s.Zone, s.checkEvery()),
 		"Tells you about: " + s.DescribeTriggers(),
 	}
 	if s.Language != "" {
@@ -366,7 +464,7 @@ func (s Spec) Expired(now time.Time) bool {
 func normalize(spec Spec, now time.Time) (Spec, error) {
 	allowed, known := kindTriggers[spec.Kind]
 	if !known {
-		return Spec{}, fmt.Errorf("the kind must be departure, disruptions, or route")
+		return Spec{}, fmt.Errorf("the kind must be departure, disruptions, route, or home")
 	}
 	target, err := normalizeTarget(spec.Kind, spec.Target)
 	if err != nil {
@@ -376,10 +474,16 @@ func normalize(spec Spec, now time.Time) (Spec, error) {
 	if spec.Language, err = normalizeLanguage(spec.Language); err != nil {
 		return Spec{}, err
 	}
+	if spec.Condition, err = normalizeCondition(spec.Kind, spec.Condition); err != nil {
+		return Spec{}, err
+	}
 
 	given := uniqueStrings(spec.Triggers)
 	if len(given) == 0 {
 		given = allowed
+		if spec.Kind == KindHome && !spec.Condition.numeric() {
+			given = []string{TriggerEnter}
+		}
 	}
 	triggers := make([]string, 0, len(allowed))
 	for _, trigger := range allowed {
@@ -406,19 +510,34 @@ func normalize(spec Spec, now time.Time) (Spec, error) {
 	if err != nil {
 		return Spec{}, err
 	}
-	start, startErr := time.Parse(clockLayout, spec.Start)
-	end, endErr := time.Parse(clockLayout, spec.End)
+	if spec.Kind == KindHome {
+		if spec.Start == "" {
+			spec.Start = startOfDay
+		}
+		if spec.End == "" {
+			spec.End = endOfDay
+		}
+	}
+	start, startErr := clockOffset(spec.Start, false)
+	end, endErr := clockOffset(spec.End, spec.Kind == KindHome)
 	if startErr != nil || endErr != nil {
 		return Spec{}, fmt.Errorf("times must be local HH:MM, such as 07:42")
 	}
-	spec.Start, spec.End = start.Format(clockLayout), end.Format(clockLayout)
-	length := end.Sub(start)
-	if spec.Kind == KindDisruptions {
+	spec.Start, spec.End = formatOffset(start), formatOffset(end)
+	length := end - start
+	switch spec.Kind {
+	case KindDisruptions:
 		if length < minimumFixedWindow || length > maximumFixedWindow {
 			return Spec{}, fmt.Errorf("the window must run forward within one day, between %d minutes and %d hours long", int(minimumFixedWindow.Minutes()), int(maximumFixedWindow.Hours()))
 		}
-	} else if length < minimumLead || length > maximumLead {
-		return Spec{}, fmt.Errorf("checking must start between %d and %d minutes before the departure, on the same day", int(minimumLead.Minutes()), int(maximumLead.Minutes()))
+	case KindHome:
+		if length < minimumFixedWindow {
+			return Spec{}, fmt.Errorf("the window must run forward within one day, at least %d minutes long, and may end at 24:00", int(minimumFixedWindow.Minutes()))
+		}
+	default:
+		if length < minimumLead || length > maximumLead {
+			return Spec{}, fmt.Errorf("checking must start between %d and %d minutes before the departure, on the same day", int(minimumLead.Minutes()), int(maximumLead.Minutes()))
+		}
 	}
 
 	switch hasDays, hasDate := len(spec.Days) > 0, spec.Date != ""; {
@@ -491,8 +610,70 @@ func normalizeTarget(kind string, target Target) (Target, error) {
 		}
 	case KindRoute:
 		normalized.Route = field(target.Route, "route", true)
+	case KindHome:
+		normalized.Entity = field(target.Entity, "entity", false)
+		normalized.Name = field(target.Name, "name", false)
+		if err == nil && normalized.Entity == "" && normalized.Name == "" {
+			return Target{}, fmt.Errorf("a home watch needs the name of the device or sensor to watch")
+		}
 	}
 	return normalized, err
+}
+
+// normalizeCondition checks a home watch's condition and refuses one on any other kind.
+func normalizeCondition(kind string, condition *Condition) (*Condition, error) {
+	if kind != KindHome {
+		if condition != nil {
+			return nil, fmt.Errorf("only a home watch takes a condition")
+		}
+		return nil, nil
+	}
+	if condition == nil {
+		return nil, fmt.Errorf("a home watch needs a condition: state, above, or below")
+	}
+	normalized := Condition{ForMinutes: condition.ForMinutes}
+	set := 0
+	if len(condition.State) > 0 {
+		set++
+	}
+	if condition.Above != nil {
+		set++
+	}
+	if condition.Below != nil {
+		set++
+	}
+	if set != 1 {
+		return nil, fmt.Errorf("give exactly one of state, above, or below in the condition")
+	}
+	for _, threshold := range []*float64{condition.Above, condition.Below} {
+		if threshold != nil && (math.IsNaN(*threshold) || math.IsInf(*threshold, 0)) {
+			return nil, fmt.Errorf("the threshold must be a number")
+		}
+	}
+	if condition.Above != nil {
+		above := *condition.Above
+		normalized.Above = &above
+	}
+	if condition.Below != nil {
+		below := *condition.Below
+		normalized.Below = &below
+	}
+	if len(condition.State) > maximumStates {
+		return nil, fmt.Errorf("the condition takes at most %d states", maximumStates)
+	}
+	for _, state := range condition.State {
+		cleaned, err := cleanName(state, "state", true)
+		if err != nil {
+			return nil, err
+		}
+		if !slices.Contains(normalized.State, cleaned) {
+			normalized.State = append(normalized.State, cleaned)
+		}
+	}
+	if normalized.ForMinutes < 0 || normalized.ForMinutes > maximumForMinutes {
+		return nil, fmt.Errorf("for_minutes must be between 0 and %d", maximumForMinutes)
+	}
+	return &normalized, nil
 }
 
 // cleanName accepts a single line of at most maximumNameRunes characters.
@@ -547,11 +728,32 @@ func loadZone(zone string) (*time.Location, error) {
 	return location, nil
 }
 
-// clockOn is the local HH:MM time on the day of the given instant, in that instant's zone.
+// clockOn is the local HH:MM time on the day of the given instant, in that instant's zone; 24:00
+// is midnight at the end of that day.
 func clockOn(day time.Time, clock string) (time.Time, error) {
+	if clock == endOfDay {
+		return time.Date(day.Year(), day.Month(), day.Day()+1, 0, 0, 0, 0, day.Location()), nil
+	}
 	parsed, err := time.Parse(clockLayout, clock)
 	if err != nil {
 		return time.Time{}, err
 	}
 	return time.Date(day.Year(), day.Month(), day.Day(), parsed.Hour(), parsed.Minute(), 0, 0, day.Location()), nil
+}
+
+// clockOffset is an HH:MM time as the time since midnight; endOfDay allows 24:00.
+func clockOffset(clock string, endOfDayAllowed bool) (time.Duration, error) {
+	clock = strings.TrimSpace(clock)
+	if endOfDayAllowed && clock == endOfDay {
+		return 24 * time.Hour, nil
+	}
+	parsed, err := time.Parse(clockLayout, clock)
+	if err != nil {
+		return 0, err
+	}
+	return time.Duration(parsed.Hour())*time.Hour + time.Duration(parsed.Minute())*time.Minute, nil
+}
+
+func formatOffset(offset time.Duration) string {
+	return fmt.Sprintf("%02d:%02d", int(offset.Hours()), int(offset.Minutes())%60)
 }
