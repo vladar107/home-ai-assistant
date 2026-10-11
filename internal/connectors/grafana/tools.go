@@ -20,6 +20,7 @@ const (
 	toolDashboards = "grafana_dashboards"
 	toolMetrics    = "grafana_metrics"
 	toolLogs       = "grafana_logs"
+	toolAlerts     = "grafana_alerts"
 
 	toolTimeout = 30 * time.Second
 
@@ -35,6 +36,7 @@ const (
 	maximumQueryRunes = 2000
 	defaultLogLines   = 50
 	maximumLogLines   = 200
+	defaultAlertRange = 24 * time.Hour
 
 	DisabledText = "Grafana is off for this user; they can turn it on in /settings."
 )
@@ -42,6 +44,7 @@ const (
 const guidance = "Grafana: the grafana_ tools read the household's own monitoring through Grafana. " +
 	"Prometheus has metrics for the NAS (node_* and smartctl_* with instance=\"nas\"), the UniFi network (unpoller_*), Immich (immich_*), this assistant (home_agent_*), and the monitoring stack itself. " +
 	"Loki has every container's logs, labelled compose_project, container, service_name, and stream. " +
+	"When asked whether anything is wrong at home or what fired, call " + toolAlerts + " first, then explain what it reports with " + toolMetrics + " and " + toolLogs + ". " +
 	"Start from " + toolDashboards + ": its panels hold tested queries for each area. Reuse them, replacing $__rate_interval and $__interval with a concrete duration such as 5m and dashboard variables with their values. " +
 	"A range is a duration ending now, such as 30m, 6h, or 2d, at most 7d; pass end only to look at an earlier window, as RFC 3339 from the current time you are given. " +
 	"Prefer aggregations (sum, max, topk, rate) over raw series, and narrow logs with label matchers and |= or |~ filters rather than widening the range. " +
@@ -90,6 +93,19 @@ var definitions = []tools.Definition{
 			`"direction":{"type":"string","enum":["backward","forward"],"description":"backward returns the newest lines first (the default); forward the oldest."}},` +
 			`"required":["query"],"additionalProperties":false}`),
 	},
+	{
+		Name:        toolAlerts,
+		Description: "Grafana: the alerts firing or pending now and any rules that fail to evaluate (view active, the default), or the alert state changes of a recent range, newest first (view history).",
+		Risk:        tools.RiskRead,
+		Activity:    tools.ActivityGrafana,
+		Timeout:     toolTimeout,
+		ThirdParty:  true,
+		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
+			`"view":{"type":"string","enum":["active","history"],"description":"active lists what is firing or pending now (the default); history lists state changes."},` +
+			`"range":{"type":"string","description":"History only: how far back from end to look, such as 6h or 2d, at most 7d; default 24h."},` +
+			`"end":{"type":"string","description":"History only: RFC 3339 time the range ends at; omit for now."}},` +
+			`"additionalProperties":false}`),
+	},
 }
 
 var (
@@ -128,6 +144,8 @@ func (s *Service) Execute(ctx context.Context, principalID string, call tools.Ca
 		text, err = s.metrics(ctx, call.Arguments)
 	case toolLogs:
 		text, err = s.logs(ctx, call.Arguments)
+	case toolAlerts:
+		text, err = s.alerts(ctx, call.Arguments)
 	default:
 		return tools.Result{Text: "This Grafana tool is not available.", IsError: true}, nil
 	}
@@ -286,6 +304,51 @@ func (s *Service) logs(ctx context.Context, raw json.RawMessage) (string, error)
 		return s.renderStreams(response, w, limit, direction)
 	}
 	return s.renderResult(response, w, "Loki")
+}
+
+type alertsArguments struct {
+	View  string `json:"view"`
+	Range string `json:"range"`
+	End   string `json:"end"`
+}
+
+func (s *Service) alerts(ctx context.Context, raw json.RawMessage) (string, error) {
+	var arguments alertsArguments
+	if err := decodeArguments(raw, &arguments); err != nil {
+		return "", err
+	}
+	switch arguments.View {
+	case "", "active":
+		var response rulesResponse
+		if err := s.client.get(ctx, "/api/prometheus/grafana/api/v1/rules", nil, &response); err != nil {
+			return "", err
+		}
+		return s.renderActiveAlerts(response), nil
+	case "history":
+	default:
+		return "", fmt.Errorf("view must be active or history")
+	}
+	end, err := s.parseEnd(arguments.End)
+	if err != nil {
+		return "", err
+	}
+	if arguments.Range == "" {
+		arguments.Range = formatDuration(defaultAlertRange)
+	}
+	w, err := s.window(arguments.Range, end, "")
+	if err != nil {
+		return "", err
+	}
+	var found []annotation
+	if err := s.client.get(ctx, "/api/annotations", url.Values{
+		"type":  {"alert"},
+		"from":  {strconv.FormatInt(w.start.UnixMilli(), 10)},
+		"to":    {strconv.FormatInt(w.end.UnixMilli(), 10)},
+		"limit": {strconv.Itoa(maximumAlertHistory + 1)},
+	}, &found); err != nil {
+		return "", err
+	}
+	return s.renderAlertHistory(found, w), nil
 }
 
 func checkQuery(query string) (string, error) {

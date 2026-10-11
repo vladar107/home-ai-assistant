@@ -30,6 +30,10 @@ const (
 
 var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;?]*[A-Za-z]`)
 
+// addressPattern matches URLs and host:port pairs, which evaluation errors embed from the data
+// source's address.
+var addressPattern = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://\S+|\[[0-9A-Fa-f:]+\]:[0-9]+|[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?:[0-9]{2,5}\b`)
+
 // text collects lines up to maximumTextBytes; once a line does not fit, it drops the rest and
 // ends with a note saying so.
 type text struct {
@@ -482,4 +486,176 @@ func clip(value string, limit int) string {
 		return string(runes[:limit]) + "…"
 	}
 	return value
+}
+
+// maximumAlertInstances and maximumAlertHistory bound the alerts and the state changes listed.
+const (
+	maximumAlertInstances = 50
+	maximumAlertHistory   = 50
+)
+
+type rulesResponse struct {
+	Data struct {
+		Groups []struct {
+			Rules []rule `json:"rules"`
+		} `json:"groups"`
+	} `json:"data"`
+}
+
+type rule struct {
+	Name      string          `json:"name"`
+	Health    string          `json:"health"`
+	LastError string          `json:"lastError"`
+	Alerts    []alertInstance `json:"alerts"`
+}
+
+type alertInstance struct {
+	Labels      map[string]string `json:"labels"`
+	Annotations map[string]string `json:"annotations"`
+	State       string            `json:"state"`
+	ActiveAt    string            `json:"activeAt"`
+}
+
+// activity classifies an instance by its state, which Grafana words as Alerting, Pending, Normal,
+// Recovering (still firing during keep_firing_for), or Normal (NoData), and its Prometheus view as firing.
+func (a alertInstance) activity() (firing, pending bool) {
+	state := strings.ToLower(a.State)
+	if strings.HasPrefix(state, "normal") {
+		return false, false
+	}
+	return strings.Contains(state, "alerting") || strings.Contains(state, "firing") || strings.Contains(state, "recovering"), strings.Contains(state, "pending")
+}
+
+// renderActiveAlerts lists the alert instances that are firing or pending, firing first, and the
+// rules that fail to evaluate.
+func (s *Service) renderActiveAlerts(response rulesResponse) string {
+	type instance struct {
+		rule   string
+		alert  alertInstance
+		firing bool
+	}
+	type brokenRule struct{ name, health, lastError string }
+	var current []instance
+	var broken []brokenRule
+	for _, group := range response.Data.Groups {
+		for _, r := range group.Rules {
+			for _, a := range r.Alerts {
+				if firing, pending := a.activity(); firing || pending {
+					current = append(current, instance{r.Name, a, firing})
+				}
+			}
+			if health := strings.ToLower(r.Health); health == "error" || health == "nodata" {
+				broken = append(broken, brokenRule{r.Name, health, r.LastError})
+			}
+		}
+	}
+	sort.SliceStable(current, func(i, j int) bool { return current[i].firing && !current[j].firing })
+
+	var out text
+	at := s.now().In(s.location).Format(fullTimeLayout)
+	if len(current) == 0 && len(broken) == 0 {
+		out.add("Alerts at %s: none are firing or pending, and every rule evaluates.", at)
+		return out.String()
+	}
+	firingCount := 0
+	for _, one := range current {
+		if one.firing {
+			firingCount++
+		}
+	}
+	out.add("Alerts at %s: %d firing, %d pending.", at, firingCount, len(current)-firingCount)
+	omitted := max(0, len(current)-maximumAlertInstances)
+	for _, one := range current[:len(current)-omitted] {
+		state := "PENDING"
+		if one.firing {
+			state = "FIRING"
+		}
+		line := state + " " + oneLine(one.rule)
+		if severity := one.alert.Labels["severity"]; severity != "" {
+			line += " [" + oneLine(severity) + "]"
+		}
+		if active, err := time.Parse(time.RFC3339, one.alert.ActiveAt); err == nil {
+			line += " since " + active.In(s.location).Format(longTimeLayout)
+		}
+		if summary := clip(one.alert.Annotations["summary"], maximumDescRunes); summary != "" {
+			line += ": " + summary
+		}
+		if labels := alertLabels(one.alert.Labels); labels != "" {
+			line += " (" + labels + ")"
+		}
+		out.add("%s", line)
+	}
+	if omitted > 0 {
+		out.add("%d more alerts were left out.", omitted)
+	}
+	if len(broken) > 0 {
+		out.add("Rules that fail to evaluate:")
+		for _, one := range broken {
+			line := fmt.Sprintf("%s: health %s", oneLine(one.name), one.health)
+			if message := clip(addressPattern.ReplaceAllString(one.lastError, "<address>"), maximumDescRunes); message != "" {
+				line += ", " + message
+			}
+			out.add("%s", line)
+		}
+	}
+	return out.String()
+}
+
+// alertLabels lists the labels that tell instances apart, without those the line already shows.
+func alertLabels(labels map[string]string) string {
+	keys := make([]string, 0, len(labels))
+	for key := range labels {
+		if !strings.HasPrefix(key, "__") && key != "alertname" && key != "grafana_folder" && key != "severity" {
+			keys = append(keys, key)
+		}
+	}
+	slices.Sort(keys)
+	pairs := make([]string, 0, len(keys))
+	for _, key := range keys {
+		pairs = append(pairs, key+"="+strconv.Quote(oneLine(labels[key])))
+	}
+	return strings.Join(pairs, ", ")
+}
+
+// annotation is one alert state change; its text and data carry query values and are not decoded.
+type annotation struct {
+	AlertName string   `json:"alertName"`
+	PrevState string   `json:"prevState"`
+	NewState  string   `json:"newState"`
+	Time      int64    `json:"time"`
+	Tags      []string `json:"tags"`
+}
+
+func (s *Service) renderAlertHistory(found []annotation, w window) string {
+	sort.SliceStable(found, func(i, j int) bool { return found[i].Time > found[j].Time })
+	var out text
+	span := formatDuration(w.end.Sub(w.start))
+	until := w.end.In(s.location).Format(fullTimeLayout)
+	if len(found) == 0 {
+		out.add("Alert history over %s to %s: no state changes.", span, until)
+		return out.String()
+	}
+	truncated := len(found) > maximumAlertHistory
+	if truncated {
+		found = found[:maximumAlertHistory]
+	}
+	out.add("Alert history over %s to %s, newest first: %s.", span, until, countOf(len(found), "state change", "state changes"))
+	if truncated {
+		out.add("Only the newest %d are shown; shorten the range to see older ones.", maximumAlertHistory)
+	}
+	layout := shortClockLayout
+	if w.end.Sub(w.start) > 24*time.Hour {
+		layout = longClockLayout
+	}
+	for _, one := range found {
+		line := fmt.Sprintf("%s %s: %s → %s", time.UnixMilli(one.Time).In(s.location).Format(layout), clip(one.AlertName, maximumDescRunes), oneLine(one.PrevState), oneLine(one.NewState))
+		for _, tag := range one.Tags {
+			if severity, ok := strings.CutPrefix(tag, "severity:"); ok {
+				line += " [" + clip(severity, 40) + "]"
+				break
+			}
+		}
+		out.add("%s", line)
+	}
+	return out.String()
 }

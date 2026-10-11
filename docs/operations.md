@@ -219,6 +219,8 @@ Assistant to watch.
    `scripts/nas-sync-secrets`, and deploy as for NS.
 
 The tools query the provisioned `prometheus` and `loki` data sources by UID.
+The same `Viewer` account also reads alert rules and alert annotations for
+`grafana_alerts`; no further permission is needed.
 To revoke access, delete the token in Grafana; the `claude-mcp` account is
 separate.
 

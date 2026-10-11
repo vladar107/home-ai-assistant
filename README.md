@@ -35,6 +35,8 @@ borrowed between users.
   planned departures a user names, one normalized status each.
 - **Home.** Reads and controls the devices exposed to Home Assistant's Assist.
   Everyday actions run immediately; sensitive devices are confirmed.
+- **Monitoring.** Read-only questions about the household's Grafana for the
+  operator: dashboards, metrics, and logs, plus active alerts and alert history.
 - **Buses.** Live departures, direct buses, and operator disruption notices from
   OVapi, trips at any time or with changes planned by Transitous, and checks of
   one planned departure of a line.

@@ -56,6 +56,10 @@ type simulator struct {
 	// containing "bad(" into the data source's own error.
 	prometheus func(query url.Values) string
 	loki       func(query url.Values) string
+	// rules and annotations answer the alert endpoints; a nonzero alertStatus fails both.
+	rules       string
+	annotations func(query url.Values) string
+	alertStatus int
 }
 
 const (
@@ -106,6 +110,16 @@ func (s *simulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeBody(w, nasDashboard)
 	case strings.HasPrefix(r.URL.Path, "/api/dashboards/uid/"):
 		http.NotFound(w, r)
+	case r.URL.Path == "/api/prometheus/grafana/api/v1/rules", r.URL.Path == "/api/annotations":
+		if s.alertStatus != 0 {
+			http.Error(w, "boom", s.alertStatus)
+			return
+		}
+		if r.URL.Path == "/api/annotations" {
+			writeBody(w, s.annotations(query))
+			return
+		}
+		writeBody(w, s.rules)
 	case strings.HasPrefix(r.URL.Path, "/api/datasources/proxy/uid/prometheus/api/v1/"):
 		if strings.Contains(query.Get("query"), "bad(") {
 			w.WriteHeader(http.StatusBadRequest)
@@ -153,7 +167,9 @@ func newSimulator() *simulator {
 		prometheus: func(url.Values) string {
 			return envelope("vector", fmt.Sprintf(`[{"metric":{"__name__":"node_load1","instance":"nas"},"value":[%d,"0.42"]}]`, now.Unix()))
 		},
-		loki: func(url.Values) string { return envelope("streams", "[]") },
+		loki:        func(url.Values) string { return envelope("streams", "[]") },
+		rules:       `{"status":"success","data":{"groups":[]}}`,
+		annotations: func(url.Values) string { return "[]" },
 	}
 }
 
@@ -291,7 +307,7 @@ func wantContains(t *testing.T, text string, fragments ...string) {
 	}
 }
 
-var grafanaTools = []string{"grafana_dashboards", "grafana_logs", "grafana_metrics"}
+var grafanaTools = []string{"grafana_alerts", "grafana_dashboards", "grafana_logs", "grafana_metrics"}
 
 func TestOnlyAllowedPrincipalsGetTools(t *testing.T) {
 	f := newFixture(t, newSimulator())
@@ -692,6 +708,7 @@ func TestWrongTokenPointsAtTheServiceAccount(t *testing.T) {
 		"grafana_dashboards": map[string]any{},
 		"grafana_metrics":    map[string]any{"query": "up"},
 		"grafana_logs":       map[string]any{"query": `{a="b"}`},
+		"grafana_alerts":     map[string]any{},
 	} {
 		result := f.call(set, name, arguments)
 		wantError(t, result, "service-account token")
@@ -732,4 +749,142 @@ func TestServiceRejectsBadConfiguration(t *testing.T) {
 	if _, err := grafana.NewService(grafana.Config{Token: token, Principals: allowed}, state, logger); err != nil {
 		t.Fatalf("default URL was rejected: %v", err)
 	}
+}
+
+const rulesWithAlerts = `{"status":"success","data":{"groups":[
+	{"name":"services","file":"Home","rules":[
+		{"state":"firing","name":"Scrape target down","health":"ok","annotations":{"summary":"{{ $labels.instance }} is not answering"},"alerts":[
+			{"labels":{"alertname":"Scrape target down","grafana_folder":"Home","severity":"critical","instance":"web (host-a:8081)","job":"probe"},
+				"annotations":{"summary":"web (host-a:8081) is not answering"},"state":"Alerting","activeAt":"2026-10-02T05:30:00Z","value":"[ var='A' value=0 ]"},
+			{"labels":{"alertname":"Scrape target down","severity":"critical","instance":"cache (host-c:6379)"},
+				"annotations":{"summary":"cache (host-c:6379) is not answering"},"state":"Recovering","activeAt":"2026-10-02T06:00:00Z"},
+			{"labels":{"alertname":"Scrape target down","severity":"critical","instance":"db (host-b:5432)"},
+				"annotations":{"summary":"db (host-b:5432) is not answering"},"state":"Normal","activeAt":"0001-01-01T00:00:00Z"}
+		]},
+		{"state":"pending","name":"Volume filling","health":"ok","alerts":[
+			{"labels":{"alertname":"Volume filling","severity":"warning","__name__":"x"},
+				"annotations":{"summary":"Volume is 91% full"},"state":"Pending","activeAt":"2026-10-02T07:45:00Z"}
+		]},
+		{"state":"inactive","name":"Logs dropped","health":"nodata","lastError":"","alerts":[
+			{"labels":{"alertname":"Logs dropped"},"state":"Normal (NoData)","activeAt":"0001-01-01T00:00:00Z"}
+		]},
+		{"state":"inactive","name":"Backups stale","health":"error","lastError":"failed to execute query A: Get http://prom-host.internal:9090/api/v1/query: dial tcp 10.0.0.5:9090: refused;\nrange too large","alerts":[]}
+	]}
+]}}`
+
+func TestActiveAlertsListFiringPendingAndBrokenRules(t *testing.T) {
+	sim := newSimulator()
+	sim.rules = rulesWithAlerts
+	f := newFixture(t, sim)
+
+	got := f.run("grafana_alerts", map[string]any{})
+	wantContains(t, got,
+		"2 firing, 1 pending",
+		`FIRING Scrape target down [critical] since Oct 2 07:30: web (host-a:8081) is not answering (instance="web (host-a:8081)", job="probe")`,
+		`FIRING Scrape target down [critical] since Oct 2 08:00: cache (host-c:6379) is not answering`,
+		`PENDING Volume filling [warning] since Oct 2 09:45: Volume is 91% full`,
+		"Rules that fail to evaluate:",
+		"Logs dropped: health nodata",
+		"Backups stale: health error, failed to execute query A: Get <address> dial tcp <address>: refused; range too large",
+	)
+	wantInOrder(t, got, "FIRING Scrape target down", "PENDING Volume filling")
+	for _, left := range []string{"db (host-b", "grafana_folder", "__name__", "alertname=", "prom-host", "10.0.0.5"} {
+		if strings.Contains(got, left) {
+			t.Fatalf("result includes %q:\n%s", left, got)
+		}
+	}
+	if sim.last().path != "/api/prometheus/grafana/api/v1/rules" {
+		t.Fatalf("last request = %+v", sim.last())
+	}
+}
+
+func TestActiveAlertsSayWhenNothingIsWrong(t *testing.T) {
+	sim := newSimulator()
+	sim.rules = `{"status":"success","data":{"groups":[{"name":"g","rules":[
+		{"state":"inactive","name":"Quiet","health":"ok","alerts":[{"labels":{"alertname":"Quiet"},"state":"Normal"}]}]}]}}`
+	f := newFixture(t, sim)
+
+	wantContains(t, f.run("grafana_alerts", map[string]any{"view": "active"}), "none are firing or pending, and every rule evaluates")
+}
+
+func TestActiveAlertsAreCapped(t *testing.T) {
+	var alerts []string
+	for i := range 60 {
+		alerts = append(alerts, fmt.Sprintf(`{"labels":{"alertname":"Disk","severity":"warning","device":"d%d"},"state":"Alerting","activeAt":"2026-10-02T05:30:00Z"}`, i))
+	}
+	sim := newSimulator()
+	sim.rules = `{"status":"success","data":{"groups":[{"name":"g","rules":[{"name":"Disk","health":"ok","alerts":[` + strings.Join(alerts, ",") + `]}]}]}}`
+	f := newFixture(t, sim)
+
+	got := f.run("grafana_alerts", nil)
+	wantContains(t, got, "60 firing", "10 more alerts were left out")
+	if strings.Count(got, "FIRING Disk") != 50 {
+		t.Fatalf("listed %d alerts, want 50", strings.Count(got, "FIRING Disk"))
+	}
+}
+
+func annotationsOf(count int) func(url.Values) string {
+	return func(url.Values) string {
+		var entries []string
+		for i := range count {
+			at := now.Add(-time.Duration(i+1) * time.Minute).UnixMilli()
+			entries = append(entries, fmt.Sprintf(`{"id":%d,"alertName":"Logs dropped","prevState":"Pending","newState":"Normal (NoData)","time":%d,`+
+				`"text":"Logs dropped {instance=host-a} - A=-1.0, B=-1.0","tags":["alertname:Logs dropped","grafana_folder:Home","severity:warning"],"data":{"values":{"A":42}}}`, i, at))
+		}
+		return "[" + strings.Join(entries, ",") + "]"
+	}
+}
+
+func TestAlertHistoryDefaultsToADayAndLeavesOutText(t *testing.T) {
+	sim := newSimulator()
+	sim.annotations = annotationsOf(2)
+	f := newFixture(t, sim)
+
+	got := f.run("grafana_alerts", map[string]any{"view": "history"})
+	wantContains(t, got, "Alert history over 1d", "2 state changes", "09:59:00 Logs dropped: Pending → Normal (NoData) [warning]")
+	wantInOrder(t, got, "09:59:00", "09:58:00")
+	for _, left := range []string{"A=-1.0", "host-a", "42"} {
+		if strings.Contains(got, left) {
+			t.Fatalf("result includes %q:\n%s", left, got)
+		}
+	}
+	query := sim.last().query
+	if query.Get("type") != "alert" ||
+		query.Get("to") != strconv.FormatInt(now.UnixMilli(), 10) ||
+		query.Get("from") != strconv.FormatInt(now.Add(-24*time.Hour).UnixMilli(), 10) {
+		t.Fatalf("history query = %v", query)
+	}
+}
+
+func TestAlertHistoryCapsEntriesAndNotesIt(t *testing.T) {
+	sim := newSimulator()
+	sim.annotations = annotationsOf(51)
+	f := newFixture(t, sim)
+
+	got := f.run("grafana_alerts", map[string]any{"view": "history", "range": "2d"})
+	wantContains(t, got, "50 state changes", "Only the newest 50 are shown")
+	if strings.Count(got, "Logs dropped:") != 50 {
+		t.Fatalf("listed %d entries, want 50", strings.Count(got, "Logs dropped:"))
+	}
+}
+
+func TestAlertHistoryEmptyAndBadArguments(t *testing.T) {
+	f := newFixture(t, newSimulator())
+
+	wantContains(t, f.run("grafana_alerts", map[string]any{"view": "history", "range": "7d"}), "no state changes")
+	f.fail("grafana_alerts", map[string]any{"view": "history", "range": "8d"}, "range must be")
+	f.fail("grafana_alerts", map[string]any{"view": "history", "range": "soon"}, "range must be")
+	f.fail("grafana_alerts", map[string]any{"view": "silences"}, "view must be")
+	f.fail("grafana_alerts", map[string]any{"state": "active"}, "do not match")
+}
+
+func TestAlertsMapGrafanaFailuresToErrorClasses(t *testing.T) {
+	sim := newSimulator()
+	sim.alertStatus = http.StatusServiceUnavailable
+	f := newFixture(t, sim)
+
+	f.fail("grafana_alerts", map[string]any{}, "unavailable")
+	f.fail("grafana_alerts", map[string]any{"view": "history"}, "unavailable")
+	sim.alertStatus = http.StatusForbidden
+	f.fail("grafana_alerts", map[string]any{}, "not allowed")
 }
