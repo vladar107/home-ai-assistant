@@ -540,6 +540,9 @@ func normalize(spec Spec, now time.Time) (Spec, error) {
 		}
 	}
 
+	if spec.Kind == KindHome && len(spec.Days) == 0 && spec.Date == "" {
+		spec.Days = slices.Clone(weekdays)
+	}
 	switch hasDays, hasDate := len(spec.Days) > 0, spec.Date != ""; {
 	case hasDays == hasDate:
 		return Spec{}, fmt.Errorf("give either the weekdays the watch runs on or one date for a one-off watch")

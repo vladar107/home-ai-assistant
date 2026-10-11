@@ -888,3 +888,18 @@ func TestAlertsMapGrafanaFailuresToErrorClasses(t *testing.T) {
 	sim.alertStatus = http.StatusForbidden
 	f.fail("grafana_alerts", map[string]any{}, "not allowed")
 }
+
+// Alert names and summaries come from the household's own rules, so reading them must not make
+// later home actions wait for confirmation, while metrics and logs still may.
+func TestOnlyAlertsAreHouseholdData(t *testing.T) {
+	f := newFixture(t, newSimulator())
+	contribution, err := f.service.Contribute(t.Context(), "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, definition := range contribution.Definitions {
+		if !definition.ThirdParty || definition.Household != (definition.Name == "grafana_alerts") {
+			t.Errorf("%s: third party %v, household %v", definition.Name, definition.ThirdParty, definition.Household)
+		}
+	}
+}

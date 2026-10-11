@@ -79,6 +79,7 @@ plan that links back to the earlier record.
 | 0067 | [Keep a device's sensors in the Home Assistant live context](0067-unfiltered-live-context.md) | done |
 | 0068 | [Home Assistant watches: tell me when something at home changes](0068-home-assistant-watches.md) | done |
 | 0069 | [Grafana alerts in conversation](0069-grafana-alerts.md) | done |
+| 0070 | [Home watch tuning after the first conversation](0070-home-watch-tuning.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -115,6 +116,18 @@ func (s *Service) Resolve(ctx context.Context, principalID string, spec watch.Sp
 		condition := *spec.Condition
 		condition.State = states
 		spec.Condition = &condition
+	} else if spec.Condition != nil && len(spec.Condition.State) > 0 {
+		var current stateObject
+		if err := s.client.getJSON(ctx, "/api/states/"+url.PathEscape(id), &current); err != nil {
+			return watch.Spec{}, err
+		}
+		if options := current.options(); len(options) > 0 {
+			for _, wanted := range spec.Condition.State {
+				if !slices.ContainsFunc(options, func(option string) bool { return strings.EqualFold(option, wanted) }) {
+					return watch.Spec{}, fmt.Errorf("%s never reports %q; it reports one of: %s", target.Name, wanted, strings.Join(options, ", "))
+				}
+			}
+		}
 	}
 	if spec.Condition != nil && (spec.Condition.Above != nil || spec.Condition.Below != nil) {
 		var current stateObject

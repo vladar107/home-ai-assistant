@@ -100,6 +100,7 @@ var definitions = []tools.Definition{
 		Activity:    tools.ActivityGrafana,
 		Timeout:     toolTimeout,
 		ThirdParty:  true,
+		Household:   true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"view":{"type":"string","enum":["active","history"],"description":"active lists what is firing or pending now (the default); history lists state changes."},` +
 			`"range":{"type":"string","description":"History only: how far back from end to look, such as 6h or 2d, at most 7d; default 24h."},` +

@@ -37,9 +37,11 @@ func proposeGuidance(zone string, kinds []string) string {
 	}
 	if slices.Contains(kinds, KindHome) {
 		guidance += " A home watch tells the user when a device or sensor at home enters a condition, such as the washing machine being done, the balcony door being open for more than 10 minutes, or the freezer going above -15. " +
+			"When the user asks to be told when something at home starts, finishes, opens, or changes, propose a home watch at once rather than reading a schedule or the current state. " +
+			"Prefer the device's own entity, such as the vacuum itself with Home Assistant's standard states like cleaning, docked, or returning, over a vendor status sensor. " +
 			"Give the device's name as the user says it in name (or its entity id in entity) and a condition with exactly one of state (the states that count, such as on, off, or idle; a door, window, motion, or leak sensor reports on when open, moving, or wet, and open or detected are mapped to on), above, or below (a number), and optionally for_minutes (1 to 240) for how long it must hold first. " +
 			"Its triggers are enter, when the condition starts to hold, and clear, when it ends after an alert; a numeric condition uses both by default and a state condition only enter, so ask for clear only when the user wants to hear it ends. " +
-			"A home watch checks all day by default, every minute, so a message can come up to a minute late; give window_from and window_until, which may be 24:00 for the end of the day, only to keep it quiet outside certain hours. " +
+			"A home watch runs every day unless the user names days or one date, and checks all day by default, every minute, so a message can come up to a minute late; give window_from and window_until, which may be 24:00 for the end of the day, only to keep it quiet outside certain hours. " +
 			"Do not ask for a departure for it, and never guess a device: if the name is unknown or matches several devices, tell the user what the tool reports."
 	}
 	return guidance

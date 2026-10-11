@@ -435,6 +435,15 @@ func TestHomeWatchProposalValidatesTheCondition(t *testing.T) {
 		t.Fatalf("narrowed window = %+v", spec)
 	}
 
+	everyDay := base(map[string]any{"state": []string{"open"}})
+	delete(everyDay, "days")
+	if result := h.propose(everyDay); result.IsError {
+		t.Fatalf("proposal without days refused: %s", result.Text)
+	}
+	if spec = h.proposed(); spec.DescribeDays() != "every day" {
+		t.Fatalf("days without any given = %v", spec.Days)
+	}
+
 	tooMany := make([]string, 11)
 	for i := range tooMany {
 		tooMany[i] = fmt.Sprintf("state%d", i)
@@ -458,7 +467,8 @@ func TestHomeWatchProposalValidatesTheCondition(t *testing.T) {
 		"a delay threshold":            {"kind": "home", "name": "Balcony door", "days": []string{"mon"}, "triggers": []string{"delay"}, "condition": map[string]any{"state": []string{"open"}}},
 		"a condition on a train": {"kind": "departure", "mode": "train", "from": "A", "to": "B", "departure": "07:42", "days": []string{"mon"},
 			"condition": map[string]any{"state": []string{"open"}}},
-		"24:00 for a train": {"kind": "departure", "mode": "train", "from": "A", "to": "B", "departure": "24:00", "days": []string{"mon"}},
+		"24:00 for a train":    {"kind": "departure", "mode": "train", "from": "A", "to": "B", "departure": "24:00", "days": []string{"mon"}},
+		"a train without days": {"kind": "departure", "mode": "train", "from": "A", "to": "B", "departure": "07:42"},
 	} {
 		if result := h.propose(arguments); !result.IsError {
 			t.Errorf("%s was proposed", name)

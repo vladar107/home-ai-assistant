@@ -15,6 +15,7 @@ const (
 	freezer        = "- names: Freezer\n  domain: sensor\n  state: '-18'\n  attributes:\n    unit_of_measurement: °C\n"
 	washingMachine = "- names: Washing machine\n  domain: sensor\n  state: idle\n"
 	hallLamp       = "- names: Hall lamp\n  domain: light\n  state: 'off'\n"
+	robotStatus    = "- names: Robot status\n  domain: sensor\n  state: sleeping\n"
 )
 
 func homeStates(changed time.Time) []map[string]any {
@@ -34,6 +35,7 @@ func homeStates(changed time.Time) []map[string]any {
 		entity("light.hall_lamp_one", "off", "Hall lamp", nil),
 		entity("light.hall_lamp_two", "off", "Hall lamp", nil),
 		entity("sensor.cellar_humidity", "55", "Cellar humidity", nil),
+		entity("sensor.robot_status", "sleeping", "Robot status", map[string]any{"options": []any{"cleaning", "sleeping", "returning"}}),
 	}
 }
 
@@ -330,5 +332,21 @@ func TestHomeWatchResolveMapsBinarySensorWords(t *testing.T) {
 	open, err := f.service.Evaluate(ctx, "alice", doorWatch(0), watch.Occurrence{Cache: watch.NewCache()})
 	if err != nil || open.Headline != "Balcony door is open." {
 		t.Fatalf("open = %+v, %v", open, err)
+	}
+}
+
+func TestHomeWatchResolveChecksStatesAgainstTheSensorsOptions(t *testing.T) {
+	f := homeFixture(t, robotStatus, washingMachine)
+	ctx := t.Context()
+
+	_, err := f.service.Resolve(ctx, "alice", watch.Spec{Target: watch.Target{Name: "Robot status"}, Condition: &watch.Condition{State: []string{"vacuuming"}}})
+	if err == nil || !strings.Contains(err.Error(), "cleaning, sleeping, returning") {
+		t.Fatalf("unlisted state err = %v", err)
+	}
+	if _, err := f.service.Resolve(ctx, "alice", watch.Spec{Target: watch.Target{Name: "Robot status"}, Condition: &watch.Condition{State: []string{"Cleaning"}}}); err != nil {
+		t.Fatalf("listed state refused: %v", err)
+	}
+	if _, err := f.service.Resolve(ctx, "alice", watch.Spec{Target: watch.Target{Name: "Washing machine"}, Condition: &watch.Condition{State: []string{"done"}}}); err != nil {
+		t.Fatalf("a sensor without options must accept any state: %v", err)
 	}
 }

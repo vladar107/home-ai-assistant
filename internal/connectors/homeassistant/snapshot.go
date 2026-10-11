@@ -200,6 +200,18 @@ func (s stateObject) unit() string {
 	return unit
 }
 
+// options are the states an enum sensor declares it can report, empty when it declares none.
+func (s stateObject) options() []string {
+	listed, _ := s.Attributes["options"].([]any)
+	options := make([]string, 0, len(listed))
+	for _, option := range listed {
+		if text, ok := option.(string); ok && text != "" {
+			options = append(options, text)
+		}
+	}
+	return options
+}
+
 // liveContext asks the MCP server for every exposed entity. A non-admin token cannot read the
 // exposure settings, but this tool lists exactly what Assist exposes.
 func (s *Service) liveContext(ctx context.Context) ([]exposedEntity, error) {
