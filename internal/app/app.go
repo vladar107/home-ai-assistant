@@ -14,6 +14,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/approval/withdrawal"
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
+	"github.com/vladar107/home-ai-assistant/internal/backlog"
 	"github.com/vladar107/home-ai-assistant/internal/chatgpt"
 	"github.com/vladar107/home-ai-assistant/internal/config"
 	"github.com/vladar107/home-ai-assistant/internal/connection"
@@ -85,6 +86,7 @@ type App struct {
 	routes        *routes.Service
 	locations     *userlocation.Service
 	memory        *usermemory.Service
+	backlog       *backlog.Service
 	typeSafe      *judgment.OptInService
 	telegram      *telegram.Service
 	telemetry     *observability.Telemetry
@@ -613,6 +615,18 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			return err
 		}
 		a.memory = memoryService
+		backlogService, err := backlog.NewService(backlog.Config{}, a.store, approvals, a.logger)
+		if err != nil {
+			return fmt.Errorf("initialize backlog: %w", err)
+		}
+		backlogService.SetExposure(exposures)
+		if err := broker.Register(backlogService); err != nil {
+			return err
+		}
+		if err := approvals.RegisterExecutor(backlogService); err != nil {
+			return err
+		}
+		a.backlog = backlogService
 		a.scheduler = scheduler
 		if tasks != nil {
 			tasks.SetRunner(conversationService)
@@ -858,6 +872,9 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	}
 	if a.memory != nil {
 		service.SetMemory(a.memory)
+	}
+	if a.backlog != nil {
+		service.SetBacklog(a.backlog)
 	}
 	if a.tasks != nil {
 		service.SetTasks(a.tasks)

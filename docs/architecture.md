@@ -116,6 +116,7 @@ flowchart TB
     integration["<b>integration</b><br/>per-user enable / disable"]
     loc["<b>location</b><br/>latest shared position, expiry"]
     mem["<b>memory</b><br/>per-user instructions and facts"]
+    backlog["<b>backlog</b><br/>per-user ideas for developing<br/>the assistant"]
     attach["<b>attachment</b><br/>inbound photos and files"]
     delivery["<b>delivery</b><br/>outbound files"]
     card["<b>daycard / outbox</b><br/>rendered day cards"]
@@ -150,6 +151,9 @@ flowchart TB
     conv --> mem
     broker --> mem
     approval --> mem
+    tg --> backlog
+    broker --> backlog
+    approval --> backlog
     loc --> placesc
     conv --> runtime
     conv --> broker
@@ -184,7 +188,7 @@ flowchart TB
     nasc --> delivery
     web --> pdf
     connectors --> integration
-    identity & conv & approval & schedule & connection & integration & loc & mem --> store
+    identity & conv & approval & schedule & connection & integration & loc & mem & backlog --> store
 ```
 
 `internal/app` wires these together. Each connector registers with the module
@@ -499,6 +503,11 @@ routes after jobs and watches, read-only, with a Delete button each.
   instruction, and any write in a conversation that has read third-party
   content, including a web search, needs Confirm.
   Every write is shown in the reply, and `/memory` deletes any entry.
+- **Backlog.** Each principal's ideas for developing the assistant live in
+  SQLite, apart from memory, and never reach the prompt; the model reads them
+  only through `backlog_list`. The tools are offered in chat turns alone, and a
+  write in a conversation that has read text from outside the household needs
+  Confirm, because an exported item is pasted into a development session.
 - **Short-lived location.** Only each user's latest shared position is stored. It is
   used while fresh, then deleted by a prune with SQLite `secure_delete` on; a user
   forgets it at once from `/settings`, and a forgotten live share stays ignored.

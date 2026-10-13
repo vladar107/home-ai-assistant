@@ -24,6 +24,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/approval/withdrawal"
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
+	"github.com/vladar107/home-ai-assistant/internal/backlog"
 	"github.com/vladar107/home-ai-assistant/internal/chatgpt"
 	"github.com/vladar107/home-ai-assistant/internal/connection"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/bus"
@@ -213,6 +214,9 @@ type harnessOptions struct {
 	typingInterval, draftDelay, draftInterval time.Duration
 	// reactions adds the react tool, as the application always does.
 	reactions bool
+	// backlog adds the backlog with its tools and /backlog, with outside content checked on the
+	// conversation.
+	backlog bool
 }
 
 type fixedDescriber string
@@ -250,6 +254,7 @@ type conversationHarness struct {
 	bus            *bus.Service
 	locations      *location.Service
 	memory         *memory.Service
+	backlog        *backlog.Service
 	searches       *searchcheck.Service
 	approvals      *approval.Service
 	scheduler      *schedule.Service
@@ -720,6 +725,19 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		}
 		memoryTurns = h.memory
 	}
+	if options.backlog {
+		h.backlog, err = backlog.NewService(backlog.Config{}, h.store, h.approvals, logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.backlog.SetExposure(exposures)
+		if err := broker.Register(h.backlog); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.approvals.RegisterExecutor(h.backlog); err != nil {
+			t.Fatal(err)
+		}
+	}
 	var searchChecks conversation.SearchChecks
 	if options.search {
 		h.searches, err = searchcheck.NewService(exposures, h.approvals, logger, now)
@@ -777,6 +795,9 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	}
 	if h.memory != nil {
 		h.service.SetMemory(h.memory)
+	}
+	if h.backlog != nil {
+		h.service.SetBacklog(h.backlog)
 	}
 	if h.tasks != nil {
 		h.tasks.SetRunner(h.conversation)

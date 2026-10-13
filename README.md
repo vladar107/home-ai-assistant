@@ -16,7 +16,7 @@ borrowed between users.
 - **Conversation.** Natural-language chat with per-user context, backed by the
   [Pi](https://github.com/badlogic/pi-mono) agent runtime on the user's own model
   subscription. `/status`, `/privacy`, `/cancel`, `/new`, `/sessions`,
-  `/memory`, `/tasks`, and `/settings` are deterministic shortcuts. Asked how to
+  `/memory`, `/backlog`, `/tasks`, and `/settings` are deterministic shortcuts. Asked how to
   set something up, the assistant reads its own help, built from the same
   `/settings` pages and command list the user sees.
 - **Earlier conversations.** `/sessions` lists recent conversations to resume,
@@ -59,6 +59,11 @@ borrowed between users.
   at once and shown in the reply; instructions and anything learned after
   reading outside content are confirmed first. `/memory` lists and deletes
   entries, and `/settings` turns memory off.
+- **Backlog.** Ideas for developing the assistant itself ("add to the backlog:
+  answer weather questions with a chart") are kept as a per-user backlog that
+  never changes how the assistant behaves. `/backlog` marks items done or
+  deletes them, and `/backlog export` sends them as Markdown to paste into a
+  development session.
 - **Background tasks.** Long requests, such as a month of mail or research across
   many pages, run as a sub-agent beside the chat and report back as a reply;
   `/tasks` shows and cancels them.
@@ -118,6 +123,7 @@ internal/tools/        tool broker
 internal/connectors/   notion, gmail, nas, ns, bus, web, homeassistant, places
 internal/location/     shared positions and their expiry
 internal/memory/       per-user memory, its tools, and prompt rendering
+internal/backlog/      per-user backlog of ideas for developing the assistant
 internal/store/sqlite/ persistence and migrations
 deploy/                Compose files and configuration examples
 scripts/               operator scripts (deploy, secrets, checks)

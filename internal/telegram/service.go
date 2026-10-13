@@ -127,6 +127,7 @@ type Service struct {
 	locations     LocationController
 	grafana       GrafanaController
 	memory        MemoryController
+	backlog       BacklogController
 	tasks         TaskController
 	watches       WatchController
 	routes        RouteController
@@ -240,6 +241,9 @@ func (s *Service) botCommands() []BotCommand {
 	commands := registeredCommands(s.conversation != nil, len(s.sections) > 0, s.schedules != nil)
 	if s.memory != nil {
 		commands = append(commands, BotCommand{Command: "memory", Description: "Show and delete what I remember about you"})
+	}
+	if s.backlog != nil {
+		commands = append(commands, BotCommand{Command: "backlog", Description: "Show and export your ideas for developing me"})
 	}
 	if s.tasks != nil {
 		commands = append(commands, BotCommand{Command: "tasks", Description: "Show and cancel your background tasks"})
@@ -474,6 +478,9 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 
 	command, isCommand := ParseCommand(message.Text, bot.Username)
 	if isCommand {
+		if command == "backlog" && s.backlog != nil && commandArgument(message.Text) == backlogExportArgument {
+			return s.sendBacklogExport(ctx, message, authorization.Principal.ID)
+		}
 		reply, keyboard, err := s.handleCommand(ctx, authorization.Principal.ID, command)
 		if err != nil {
 			return processingResult{}, "handle_command", err
@@ -788,6 +795,9 @@ func (s *Service) processCallback(ctx context.Context, bot Bot, updateID int64, 
 	if press, isMemory := parseMemoryCallback(callback.Data); isMemory && s.memory != nil {
 		return s.processMemoryPress(ctx, callback, principalID, press)
 	}
+	if press, isBacklog := parseBacklogCallback(callback.Data); isBacklog && s.backlog != nil {
+		return s.processBacklogPress(ctx, callback, principalID, press)
+	}
 	if snooze, jobID, isSnooze := parseReminderCallback(callback.Data); isSnooze && s.schedules != nil {
 		return s.processSnoozePress(ctx, callback, principalID, snooze, jobID)
 	}
@@ -1101,6 +1111,11 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 			return HelpReply, nil, nil
 		}
 		return renderMemory(ctx, principalID, s.memory, 1)
+	case "backlog":
+		if s.backlog == nil {
+			return HelpReply, nil, nil
+		}
+		return renderBacklog(ctx, principalID, s.backlog, 1)
 	case "tasks":
 		if s.tasks == nil {
 			return HelpReply, nil, nil
@@ -1119,6 +1134,9 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		reply := HelpReply
 		if s.memory != nil {
 			reply += MemoryHelpLine
+		}
+		if s.backlog != nil {
+			reply += BacklogHelpLine
 		}
 		if s.tasks != nil {
 			reply += TasksHelpLine
