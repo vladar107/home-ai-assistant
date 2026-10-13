@@ -69,6 +69,19 @@ func TestSearchRunsOnlyWhenTheCheckAllowsIt(t *testing.T) {
 	}
 }
 
+// An empty query is the model's slip; it is told so rather than that search is down, and the check
+// never sees it.
+func TestEmptySearchQueryIsRefusedAsEmpty(t *testing.T) {
+	check := func(context.Context, string) agentruntime.SearchDecision {
+		t.Error("check ran for an empty query")
+		return agentruntime.SearchDecision{Verdict: agentruntime.SearchAllow}
+	}
+	got := searchTurn(t, check, "")
+	if want := "Searching.\n\nsaw: The search query was empty, so nothing was searched; search again with the words to look for."; got != want {
+		t.Fatalf("response = %q, want %q", got, want)
+	}
+}
+
 func TestSearchWithoutACheckIsRefused(t *testing.T) {
 	got := searchTurn(t, nil, "plain")
 	if want := "Searching.\n\nsaw: Web search is unavailable right now; the search was not run."; got != want {
@@ -122,7 +135,7 @@ func TestSearchCheckEndpointRequiresTheTurnToken(t *testing.T) {
 		}
 	}
 	token := "Bearer " + environmentValue(report, "HOME_AGENT_TOOL_BRIDGE_TOKEN")
-	if status := postSearchCheck(t, url, token, `{"query":"  "}`); status != 400 {
+	if status := postSearchCheck(t, url, token, `{"query":"  "}`); status != 200 {
 		t.Errorf("blank query: status = %d", status)
 	}
 	if status := postSearchCheck(t, url, token, `not json`); status != 400 {

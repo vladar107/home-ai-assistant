@@ -27,6 +27,7 @@ const (
 	maximumArgumentBytes  = 64 << 10
 	bridgeCallFailedText  = "The tool call could not be executed."
 	searchUnavailableText = "Web search is unavailable right now; the search was not run."
+	emptyQueryText        = "The search query was empty, so nothing was searched; search again with the words to look for."
 	bridgeURLVariable     = "HOME_AGENT_TOOL_BRIDGE_URL"
 	bridgeTokenVariable   = "HOME_AGENT_TOOL_BRIDGE_TOKEN"
 	bridgeToolsVariable   = "HOME_AGENT_TOOL_BRIDGE_TOOLS"
@@ -201,12 +202,16 @@ func (b *bridge) serveSearchCheck(w http.ResponseWriter, r *http.Request, body [
 	var search struct {
 		Query string `json:"query"`
 	}
-	if err := json.Unmarshal(body, &search); err != nil || strings.TrimSpace(search.Query) == "" {
+	if err := json.Unmarshal(body, &search); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
 	decision := agentruntime.SearchDecision{Verdict: agentruntime.SearchDeny, Reason: "no_check", Text: searchUnavailableText}
-	if b.check != nil {
+	// A blank query is the model's slip, not an outage: the extension reports any failed check as
+	// search being unavailable, which the model would pass on to the user.
+	if strings.TrimSpace(search.Query) == "" {
+		decision = agentruntime.SearchDecision{Verdict: agentruntime.SearchDeny, Reason: "empty_query", Text: emptyQueryText}
+	} else if b.check != nil {
 		decision = b.check(r.Context(), search.Query)
 	}
 	w.Header().Set("Content-Type", "application/json")

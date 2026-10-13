@@ -11,15 +11,16 @@ import (
 )
 
 const (
-	promptExcerptRunes = 300
-	promptSectionRunes = 4000
+	promptExcerptRunes = 800
+	promptSectionRunes = 10000
 	// promptOmittedRunes keeps room for the line counting the jobs left out.
 	promptOmittedRunes = 60
 )
 
 const promptSectionHeading = "Scheduled jobs: the user's enabled scheduled jobs and pending reminders, newest first. " +
 	"Their instructions hold facts the user expects you to know, such as their stops, trains, routes, and what they care about. " +
-	"When the user refers to something that fits a job, use these facts, and call schedule_get with the job's id for its full instructions when the excerpt is not enough."
+	"When the user refers to something that fits a job, use these facts, and call schedule_get with the job's id for its full instructions when the excerpt is not enough. " +
+	"Before asking the user about their plans, trips, or routine, read the job that covers them with schedule_get."
 
 var _ conversation.Jobs = (*Service)(nil)
 

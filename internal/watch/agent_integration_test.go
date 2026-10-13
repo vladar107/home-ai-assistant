@@ -430,7 +430,7 @@ func TestAgentWatchProposalValidatesAndLimits(t *testing.T) {
 	if _, err := a.service.ExecuteApproved(a.ctx, approval.Record{ID: "00000000000000b1", PrincipalID: "alice", Tool: "watch_propose", Arguments: raw}); !errors.As(err, &refused) || !strings.Contains(refused.Text, "5 agent watches") {
 		t.Fatalf("sixth confirmed watch = %v", err)
 	}
-	if outcome, err := a.service.ExecuteApproved(a.ctx, approval.Record{ID: "00000000000000b2", PrincipalID: "bob", Tool: "watch_propose", Arguments: raw}); err != nil || !strings.HasPrefix(outcome.Text, "Watching.") {
+	if outcome, err := a.service.ExecuteApproved(a.ctx, approval.Record{ID: "00000000000000b2", PrincipalID: "bob", Tool: "watch_propose", Arguments: raw}); err != nil || !strings.HasPrefix(outcome.Text, "Watching. Checking all day, every day, checked every") || strings.Contains(outcome.Text, "midnight") {
 		t.Fatalf("bob's first agent watch = %+v %v", outcome, err)
 	}
 }

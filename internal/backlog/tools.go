@@ -34,7 +34,7 @@ const (
 var definitions = []tools.Definition{
 	{
 		Name:        toolAdd,
-		Description: "Add an idea for developing the assistant to the user's backlog.",
+		Description: "Add an idea for developing the assistant, a feature or change to build later in a development session, to the user's backlog; facts and preferences belong in memory instead.",
 		Risk:        tools.RiskWrite,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"title":{"type":"string","description":"A short title, at most 120 characters."},` +

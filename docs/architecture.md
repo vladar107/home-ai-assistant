@@ -283,7 +283,7 @@ were last written.
 
 The system prompt of chat turns and background tasks ends, after memory, with the
 principal's enabled jobs and pending reminders: ID, name, schedule, and the first
-300 runes of the instructions, newest first and capped at 4000 runes. It changes
+800 runes of the instructions, newest first and capped at 10000 runes. It changes
 only when a job is added, changed, paused, or finished, so the prompt stays
 cacheable; scheduled turns carry their own prompt instead. Each delivered report of
 a job or reminder is kept in SQLite for 14 days, at most 200 per principal, with

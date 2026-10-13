@@ -84,6 +84,7 @@ plan that links back to the earlier record.
 | 0072 | [Scheduled jobs and their reports in the conversation's context](0072-job-reports-in-context.md) | done |
 | 0073 | [A backlog of ideas for the assistant](0073-backlog.md) | done |
 | 0074 | [Watch anything: model-checked watches](0074-watch-anything.md) | in-progress |
+| 0075 | [Tuning after the first conversation with jobs, backlog, and agent watches](0075-tuning-after-first-use.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

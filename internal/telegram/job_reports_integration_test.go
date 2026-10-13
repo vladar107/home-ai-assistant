@@ -198,7 +198,8 @@ func TestChatTurnsKnowTheUsersJobs(t *testing.T) {
 	h.provision("alice", "account-alice")
 	h.provision("bob", "account-bob")
 	h.start()
-	prompt := "Check the 08:12 from Central to Riverside and the bus from Riverside to the office. " + strings.Repeat("Mention delays over five minutes. ", 12) + "Skip the weather."
+	delays := strings.Repeat("Mention delays over five minutes. ", 12)
+	prompt := "Check the 08:12 from Central to Riverside and the bus from Riverside to the office. " + delays + "Come home on the 17:10 from Riverside. " + delays + "Skip the weather."
 	job := h.createJob("alice", "a1b2c3d4e5f60718", "Commute", "0 9 * * 1-5", prompt)
 	h.createJob("bob", "c1b2c3d4e5f60718", "Garden", "0 18 * * *", "Check the soil moisture.")
 	clock.Set(t, "2026-09-28T08:00:05+02:00")
@@ -209,8 +210,9 @@ func TestChatTurnsKnowTheUsersJobs(t *testing.T) {
 	jobs := chat.request.Jobs
 	for _, want := range []string{
 		`id a1b2c3d4e5f60718: "Commute", 0 9 * * 1-5 (Europe/Amsterdam): Check the 08:12 from Central to Riverside`,
+		"Come home on the 17:10 from Riverside.",
 		"id b1b2c3d4e5f60718: reminder, once, Tue 29 Sep 17:00 CEST: Call the plumber",
-		"schedule_get",
+		"read the job that covers them with schedule_get",
 	} {
 		if !strings.Contains(jobs, want) {
 			t.Fatalf("jobs section lacks %q: %q", want, jobs)

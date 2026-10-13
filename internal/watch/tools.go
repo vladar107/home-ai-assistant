@@ -581,8 +581,12 @@ func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (ap
 	return approval.Outcome{Text: "Changed. " + s.nextWindow(spec)}, nil
 }
 
-// nextWindow says when the watch next checks, within the coming week.
+// nextWindow says when the watch next checks, within the coming week. A watch that checks all day
+// says how often instead, since the end of today's window is no end to it.
 func (s *Service) nextWindow(spec Spec) string {
+	if allDay(spec.Kind) && spec.Start == startOfDay && spec.End == endOfDay {
+		return "Checking all day, " + spec.DescribeDays() + ", " + spec.checkEvery() + "."
+	}
 	now := s.now()
 	for days := 0; days < 8; days++ {
 		occurrence, active := spec.OccurrenceAt(now.AddDate(0, 0, days))
