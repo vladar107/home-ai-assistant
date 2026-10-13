@@ -91,6 +91,11 @@ func (s *Store) EnqueueConversation(
 		Message:           input.Message,
 		State:             conversation.RequestStateQueued,
 	}
+	var replyTo any
+	if input.ReplyToMessageID > 0 {
+		request.ReplyToMessageID = input.ReplyToMessageID
+		replyTo = input.ReplyToMessageID
+	}
 	var resumedFrom any
 	if switched.switched {
 		request.ResumedFrom = switched.session.LastActive
@@ -100,8 +105,8 @@ func (s *Store) EnqueueConversation(
 		ctx,
 		`INSERT INTO conversation_requests (
 		    id, bot_user_id, telegram_update_id, telegram_message_id, principal_id, chat_id, session_id, message,
-		    resumed_from
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		    resumed_from, reply_to_message_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		request.ID,
 		input.BotUserID,
 		input.TelegramUpdateID,
@@ -111,6 +116,7 @@ func (s *Store) EnqueueConversation(
 		request.SessionID,
 		request.Message,
 		resumedFrom,
+		replyTo,
 	); err != nil {
 		return conversation.EnqueueResult{}, fmt.Errorf("create conversation request: %w", err)
 	}
@@ -179,7 +185,8 @@ func (s *Store) NextConversationRequest(ctx context.Context, principalID string)
 		`SELECT request.id, request.principal_id, request.chat_id, COALESCE(request.telegram_message_id, 0),
 		        request.session_id, session.runtime_session_id, request.message, request.state,
 		        COALESCE(request.response_text, ''), COALESCE(request.error_kind, ''), request.created_at,
-		        COALESCE(request.resumed_from, '')
+		        COALESCE(request.resumed_from, ''), COALESCE(request.reply_to_message_id, 0),
+		        `+requestOpensSession+`
 		 FROM conversation_requests AS request
 		 JOIN conversation_sessions AS session
 		   ON session.id = request.session_id AND session.principal_id = request.principal_id
@@ -346,6 +353,13 @@ func (s *Store) ResetConversation(ctx context.Context, principalID string) (stri
 	return session.ID, changed == 1, nil
 }
 
+// requestOpensSession is whether no earlier request joined the request's session.
+const requestOpensSession = `NOT EXISTS (
+		     SELECT 1 FROM conversation_requests AS earlier
+		     WHERE earlier.session_id = request.session_id AND earlier.principal_id = request.principal_id
+		       AND (earlier.created_at < request.created_at OR (earlier.created_at = request.created_at AND earlier.id < request.id))
+		 )`
+
 type queryRower interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
@@ -356,7 +370,8 @@ func loadConversationByUpdate(ctx context.Context, db queryRower, botUserID, upd
 		`SELECT request.id, request.principal_id, request.chat_id, COALESCE(request.telegram_message_id, 0),
 		        request.session_id, session.runtime_session_id, request.message, request.state,
 		        COALESCE(request.response_text, ''), COALESCE(request.error_kind, ''), request.created_at,
-		        COALESCE(request.resumed_from, '')
+		        COALESCE(request.resumed_from, ''), COALESCE(request.reply_to_message_id, 0),
+		        `+requestOpensSession+`
 		 FROM conversation_requests AS request
 		 JOIN conversation_sessions AS session
 		   ON session.id = request.session_id AND session.principal_id = request.principal_id
@@ -406,6 +421,8 @@ func scanConversationRequest(row *sql.Row) (conversation.Request, error) {
 		&request.ErrorKind,
 		&createdAt,
 		&resumedFrom,
+		&request.ReplyToMessageID,
+		&request.OpensSession,
 	)
 	if err != nil {
 		return request, err

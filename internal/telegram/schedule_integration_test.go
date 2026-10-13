@@ -210,7 +210,8 @@ func TestScheduledJobIsProposedConfirmedRunAndDelivered(t *testing.T) {
 
 	h.push(textUpdate(4, 101, "tell me more about the first one"))
 	followUp := receive(t, h.ctx, runtime.calls)
-	if !strings.Contains(followUp.request.Message, "Your scheduled job \"Weekly tasks\" just sent the user this report:\nTwo tasks are overdue.") {
+	if !strings.Contains(followUp.request.Message, "job \"Weekly tasks\" (job id "+h.jobID("alice")+"), Mon 28 Sep 09:00 CEST, report id ") ||
+		!strings.Contains(followUp.request.Message, ": Two tasks are overdue.\n") {
 		t.Fatalf("follow-up turn message = %q", followUp.request.Message)
 	}
 	followUp.answer <- agentruntime.RunResult{Response: "details"}

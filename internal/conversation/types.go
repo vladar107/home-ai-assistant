@@ -79,6 +79,10 @@ type Request struct {
 	// ResumedFrom is when the conversation this request returned to was last active; zero when the
 	// request did not switch conversations.
 	ResumedFrom time.Time
+	// ReplyToMessageID is the message the request replied to; zero when it is not a reply.
+	ReplyToMessageID int64
+	// OpensSession is true for the first request of its conversation.
+	OpensSession bool
 }
 
 type EnqueueResult struct {
@@ -310,6 +314,28 @@ func noticeFrom(source Notice, principalID string) (string, bool) {
 	return source.PendingNotice(principalID), false
 }
 
+// Reports tells a chat turn about the reports the principal's scheduled jobs sent. A report's text
+// may retell outside content, so a turn given any of it counts as having read it.
+type Reports interface {
+	// TurnReports returns the reports the turn should know of: those no earlier turn was told of,
+	// the last day's when the turn opens a conversation, and in full the one the turn's message
+	// replied to. outside reports whether the text carries any report's own text, and private
+	// whether any of that may retell private content.
+	TurnReports(ctx context.Context, principalID string, turn ReportTurn) (text string, outside, private bool)
+}
+
+// ReportTurn is what Reports needs to know of the turn it informs.
+type ReportTurn struct {
+	OpensSession     bool
+	ReplyToMessageID int64
+}
+
+// Jobs describes the principal's scheduled jobs for the system prompt of chat turns and background
+// tasks, or returns "" when there are none or they cannot be read.
+type Jobs interface {
+	PromptSection(ctx context.Context, principalID string) string
+}
+
 // Attachments keeps the photos and files a principal sent, for as long as the session lives; nil
 // leaves a deployment without attachment support.
 type Attachments interface {
@@ -364,6 +390,9 @@ type Config struct {
 	TurnTimeout time.Duration
 	FollowUp    FollowUp
 	Notice      Notice
+	// Reports tells each chat turn about the scheduled job reports it should know of; nil leaves
+	// them out.
+	Reports     Reports
 	Recent      Exchange
 	Attachments Attachments
 	WebSearch   WebSearch
@@ -378,6 +407,9 @@ type Config struct {
 	// Memory goes into every turn's system prompt and adds a line to a reply for each write the
 	// turn made; nil leaves memory out.
 	Memory Memory
+	// Jobs goes into the system prompt of chat turns and background tasks beside memory; nil
+	// leaves it out.
+	Jobs Jobs
 	// Exposure records a turn that searched the web or carried an outside notice as having read
 	// text from outside the household; nil records nothing.
 	Exposure Exposure

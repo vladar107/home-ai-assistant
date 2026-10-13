@@ -515,7 +515,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		if err := broker.Register(conversationHistory); err != nil {
 			return err
 		}
-		notices := conversation.Notices{approvals, conversation.OutsideNotice{Notice: scheduler}}
+		notices := conversation.Notices{approvals}
 		var tasks *task.Service
 		if a.cfg.Tasks.Enabled {
 			tasks, err = task.NewService(task.Config{Timeout: a.cfg.Tasks.Timeout, Cards: cards, Photos: client}, a.store, a.store, telegram.TaskMessenger{Client: client}, client, a.logger)
@@ -565,6 +565,8 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 				TurnTimeout:  a.cfg.Conversation.TurnTimeout,
 				FollowUp:     approvals,
 				Notice:       notices,
+				Reports:      scheduler,
+				Jobs:         scheduler,
 				Attachments:  attachments,
 				WebSearch:    webSearch,
 				Cards:        cards,

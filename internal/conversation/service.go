@@ -643,6 +643,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 			Images:      attachments.Images,
 			Tools:       tools,
 			Memory:      memory,
+			Jobs:        s.jobsText(turnCtx, request.PrincipalID),
 			WebSearch:   webSearch,
 			SearchCheck: s.searchCheck(request.PrincipalID, webSearch, true),
 		}, sink)
@@ -763,6 +764,13 @@ func (s *Service) memoryText(ctx context.Context, principalID string) (string, e
 	return s.config.Memory.Render(ctx, principalID)
 }
 
+func (s *Service) jobsText(ctx context.Context, principalID string) string {
+	if s.config.Jobs == nil {
+		return ""
+	}
+	return s.config.Jobs.PromptSection(ctx, principalID)
+}
+
 func (s *Service) memoryNotes(principalID, turn string) []string {
 	if s.config.Memory == nil {
 		return nil
@@ -835,10 +843,19 @@ type turnNotice struct {
 // household marks the turn as having read it, before the turn decides whether it may search, and a
 // notice that may retell private content makes the conversation private before the turn replies.
 func (s *Service) takeNotice(ctx context.Context, request Request) turnNotice {
-	if s.config.Notice == nil {
-		return turnNotice{}
+	var text string
+	var outside, private bool
+	if s.config.Notice != nil {
+		text, outside, private = pendingNotice(s.config.Notice, request.PrincipalID)
 	}
-	text, outside, private := pendingNotice(s.config.Notice, request.PrincipalID)
+	if s.config.Reports != nil {
+		reports, fromOutside, fromPrivate := s.config.Reports.TurnReports(ctx, request.PrincipalID, ReportTurn{OpensSession: request.OpensSession, ReplyToMessageID: request.ReplyToMessageID})
+		if reports != "" {
+			text = strings.TrimSpace(text + "\n\n" + reports)
+			outside = outside || fromOutside
+			private = private || fromPrivate
+		}
+	}
 	if private && s.config.Exposure != nil {
 		s.config.Exposure.MarkTurnPrivate(ctx, request.PrincipalID, outbox.ChatTurn(request.ID))
 	}

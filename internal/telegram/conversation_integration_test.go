@@ -622,6 +622,8 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		turnTimeout = 10 * time.Second
 	}
 	notices := conversation.Notices{h.approvals}
+	var reports conversation.Reports
+	var jobs conversation.Jobs
 	var scheduleController ScheduleController
 	if options.schedules != nil {
 		h.scheduler, err = schedule.NewService(schedule.Config{Zone: "Europe/Amsterdam", TickInterval: 10 * time.Millisecond, Now: options.schedules.Now, Cards: cards, Photos: photos, Reminders: ReminderSender{Client: h.client}},
@@ -636,8 +638,9 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		if err := h.approvals.RegisterExecutor(h.scheduler); err != nil {
 			t.Fatal(err)
 		}
-		notices = append(notices, conversation.OutsideNotice{Notice: h.scheduler})
 		scheduleController = h.scheduler
+		reports = h.scheduler
+		jobs = h.scheduler
 	}
 	if options.watches != nil {
 		h.watches, err = watch.NewService(watch.Config{Zone: "Europe/Amsterdam", Now: options.schedules.Now}, h.store, h.store, WatchAlertSender{Client: h.client}, h.approvals, logger)
@@ -744,7 +747,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		recent = options.recent
 	}
 	h.conversation, err = conversation.NewService(
-		conversation.Config{Recent: recent, Memory: memoryTurns, Exposure: exposures, SearchChecks: searchChecks, Locations: locationTurns, TurnTimeout: turnTimeout, FollowUp: h.approvals, Notice: notices, Attachments: h.attachments, WebSearch: webSearch, Cards: cards, Photos: photos, Location: options.location, Now: now, History: conversationHistory, Reactions: reactions,
+		conversation.Config{Recent: recent, Memory: memoryTurns, Exposure: exposures, SearchChecks: searchChecks, Locations: locationTurns, TurnTimeout: turnTimeout, FollowUp: h.approvals, Notice: notices, Reports: reports, Jobs: jobs, Attachments: h.attachments, WebSearch: webSearch, Cards: cards, Photos: photos, Location: options.location, Now: now, History: conversationHistory, Reactions: reactions,
 			TypingInterval: options.typingInterval, DraftDelay: options.draftDelay, DraftInterval: options.draftInterval},
 		h.store, runtime, h.client, broker, h.connections, logger, integrationTelemetry{turns: h.turns, indicatorFailure: h.recordIndicatorFailure, feedback: h.recordFeedback},
 	)

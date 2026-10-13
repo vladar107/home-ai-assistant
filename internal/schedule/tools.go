@@ -150,10 +150,13 @@ var _ approval.Previewer = (*Service)(nil)
 
 // Contribute offers the list and get tools, the reminder tools when the reminder type is
 // registered, and the proposal tools when there is an approval service and the model.turn type is
-// registered. A scheduled run itself receives only the read tools, because the broker offers it
-// read tools alone.
-func (s *Service) Contribute(context.Context, string) (tools.Contribution, error) {
+// registered, and job_reports when the principal has a stored report. A scheduled run itself
+// receives only the read tools, because the broker offers it read tools alone.
+func (s *Service) Contribute(ctx context.Context, principalID string) (tools.Contribution, error) {
 	contribution := tools.Contribution{Guidance: listGuidance, Definitions: []tools.Definition{listDefinition, getDefinition}}
+	if err := s.contributeReports(ctx, principalID, &contribution); err != nil {
+		return tools.Contribution{}, err
+	}
 	var guidance []string
 	if _, known := s.types[TypeReminder]; known {
 		guidance = append(guidance, reminderGuidance(s.zone))
@@ -177,6 +180,8 @@ func (s *Service) Execute(ctx context.Context, principalID string, call tools.Ca
 		return tools.Result{Text: renderJobs(jobs, s.zone)}, nil
 	case toolGet:
 		return s.getJob(ctx, principalID, call)
+	case toolReports:
+		return s.executeReports(ctx, principalID, call)
 	case toolPropose:
 		return s.proposeJob(ctx, principalID, call)
 	case toolUpdate:

@@ -61,9 +61,10 @@ type SessionPruner interface {
 	PruneSessions(ctx context.Context, before time.Time) error
 }
 
-// ReminderDeliverer sends one reminder to its owner's chat with buttons that snooze the job.
+// ReminderDeliverer sends one reminder to its owner's chat with buttons that snooze the job, and
+// returns the sent message's ID.
 type ReminderDeliverer interface {
-	SendReminder(ctx context.Context, chatID int64, jobID, text string) error
+	SendReminder(ctx context.Context, chatID int64, jobID, text string) (int64, error)
 }
 
 type Service struct {
@@ -91,7 +92,6 @@ type Service struct {
 	wake     chan struct{}
 	inflight map[string]bool
 	running  int
-	notices  map[string][]notice
 	pruned   time.Time
 	workers  sync.WaitGroup
 }
@@ -218,7 +218,6 @@ func NewService(cfg Config, repository Repository, chats Chats, deliverer conver
 		proposer:   proposer,
 		wake:       make(chan struct{}, 1),
 		inflight:   make(map[string]bool),
-		notices:    make(map[string][]notice),
 	}, nil
 }
 
@@ -316,6 +315,9 @@ func (s *Service) runTick(ctx context.Context) {
 			s.logger.WarnContext(ctx, "schedule.tick.failed", "stage", "prune", "error", err)
 		} else {
 			s.pruned = now
+		}
+		if err := s.repository.PruneJobReports(ctx, now.Add(-reportRetention)); err != nil && ctx.Err() == nil {
+			s.logger.WarnContext(ctx, "schedule.tick.failed", "stage", "prune_reports", "error", err)
 		}
 		if s.cards != nil {
 			if err := s.cards.Sweep(now.Add(-conversation.CardRetention)); err != nil && ctx.Err() == nil {
@@ -522,7 +524,8 @@ func (s *Service) deliver(ctx context.Context, run Run) {
 		return
 	}
 	if run.JobType == TypeReminder && s.reminders != nil && run.ErrorKind == "" {
-		s.finishDelivery(ctx, run, s.reminders.SendReminder(ctx, chatID, run.JobID, deliveryText(run)))
+		messageID, err := s.reminders.SendReminder(ctx, chatID, run.JobID, deliveryText(run))
+		s.finishDelivery(ctx, run, []int64{messageID}, err)
 		return
 	}
 	chunks := conversation.SplitReply(deliveryText(run))
@@ -536,17 +539,21 @@ func (s *Service) deliver(ctx context.Context, run Run) {
 			return
 		}
 	}
+	messageIDs := make([]int64, 0, len(chunks))
 	for _, chunk := range chunks {
-		if err := s.deliverer.SendReply(ctx, chatID, 0, chunk); err != nil {
-			s.finishDelivery(ctx, run, err)
+		messageID, err := s.deliverer.SendTrackedReply(ctx, chatID, 0, chunk)
+		if err != nil {
+			s.finishDelivery(ctx, run, nil, err)
 			return
 		}
+		messageIDs = append(messageIDs, messageID)
 	}
-	s.finishDelivery(ctx, run, nil)
+	s.finishDelivery(ctx, run, messageIDs, nil)
 }
 
-// finishDelivery records how sending a ready run ended. A transient failure leaves it ready.
-func (s *Service) finishDelivery(ctx context.Context, run Run, err error) {
+// finishDelivery records how sending a ready run ended, keeping a delivered run's report with the
+// messages it was sent as. A transient failure leaves it ready.
+func (s *Service) finishDelivery(ctx context.Context, run Run, messageIDs []int64, err error) {
 	if err != nil {
 		if isPermanent(err) {
 			if _, err := s.repository.TransitionScheduledRun(ctx, run.ID, StatusReady, StatusFailed, "", "undeliverable", s.now()); err != nil {
@@ -563,24 +570,31 @@ func (s *Service) finishDelivery(ctx context.Context, run Run, err error) {
 		}
 		return
 	}
+	// The report is kept before the run is marked delivered, which clears its text, so a crash
+	// between the two cannot lose it.
+	s.saveReport(ctx, run, slices.DeleteFunc(messageIDs, func(id int64) bool { return id <= 0 }))
 	if _, err := s.repository.TransitionScheduledRun(ctx, run.ID, StatusReady, StatusDelivered, "", run.ErrorKind, s.now()); err != nil {
 		s.logRunError(ctx, run, "store_delivery", err)
 		return
 	}
 	s.removeCard(run)
-	s.remember(run)
 	s.recordRun(ctx, run, runDelivered)
 	s.logger.InfoContext(ctx, "schedule.run.delivered", "principal_id", run.PrincipalID, "job_id", run.JobID)
 }
 
 func deliveryText(run Run) string {
-	if run.JobOneTime && run.ErrorKind == "interrupted" {
-		run.Reply = OneTimeInterruptedText
-	}
 	if run.JobType == TypeReminder && run.ErrorKind == "" {
-		return "⏰ " + strings.TrimSpace(run.Reply)
+		return "⏰ " + reportText(run)
 	}
-	return "**Scheduled: " + run.JobName + "**\n\n" + strings.TrimSpace(run.Reply)
+	return "**Scheduled: " + run.JobName + "**\n\n" + reportText(run)
+}
+
+// reportText is what a run tells its owner, without the heading its message carries.
+func reportText(run Run) string {
+	if run.JobOneTime && run.ErrorKind == "interrupted" {
+		return OneTimeInterruptedText
+	}
+	return strings.TrimSpace(run.Reply)
 }
 
 func (s *Service) skip(ctx context.Context, run Run, from, reason string) {
@@ -601,52 +615,6 @@ func (s *Service) removeCard(run Run) {
 
 func (s *Service) logRunError(ctx context.Context, run Run, stage string, err error) {
 	s.logger.WarnContext(ctx, "schedule.run.retry", "principal_id", run.PrincipalID, "job_id", run.JobID, "stage", stage, "error", err)
-}
-
-// notice is a delivered report kept for the owner's next conversation turn, and whether it may
-// retell private content.
-type notice struct {
-	text    string
-	private bool
-}
-
-// remember keeps the delivered report for the owner's next conversation turn, so a follow-up
-// question about it has something to refer to.
-func (s *Service) remember(run Run) {
-	report := truncateRunes(strings.TrimSpace(run.Reply), maximumNoticeRunes)
-	text := fmt.Sprintf("Your scheduled job %q just sent the user this report:\n%s", run.JobName, report)
-	if run.JobType == TypeReminder {
-		text = fmt.Sprintf("The user's reminder (job id %s) was just delivered to them:\n%s", run.JobID, report)
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	notices := append(s.notices[run.PrincipalID], notice{text: text, private: run.Private})
-	if len(notices) > 2 {
-		notices = notices[len(notices)-2:]
-	}
-	s.notices[run.PrincipalID] = notices
-}
-
-// PendingNotice returns and forgets the reports delivered since the principal's last turn.
-func (s *Service) PendingNotice(principalID string) string {
-	text, _ := s.TakeNotice(principalID)
-	return text
-}
-
-// TakeNotice is PendingNotice that also reports whether any of the reports may retell Notion page
-// content or NAS file contents.
-func (s *Service) TakeNotice(principalID string) (string, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	notices := s.notices[principalID]
-	delete(s.notices, principalID)
-	texts := make([]string, 0, len(notices))
-	private := false
-	for _, notice := range notices {
-		texts = append(texts, notice.text)
-		private = private || notice.private
-	}
-	return strings.Join(texts, "\n\n"), private
 }
 
 // Jobs lists the principal's own jobs.

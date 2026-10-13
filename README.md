@@ -51,7 +51,9 @@ borrowed between users.
 - **Schedules.** Recurring or one-time model turns ("every weekday at 07:30, plan
   my trip to work") that the user confirms, can change later in conversation, and
   that survive restarts, and reminders ("remind me at five to call mom") that are
-  set at once and can be snoozed.
+  set at once and can be snoozed. The conversation knows each job's instructions
+  and the reports they sent: replying to a report, or asking about "the report
+  this morning", works after `/new` and restarts.
 - **Memory.** Each user has a small memory of instructions and facts that the
   assistant keeps across `/new`, scheduled runs, and restarts. Facts are saved
   at once and shown in the reply; instructions and anything learned after

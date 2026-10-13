@@ -81,6 +81,7 @@ plan that links back to the earlier record.
 | 0069 | [Grafana alerts in conversation](0069-grafana-alerts.md) | done |
 | 0070 | [Home watch tuning after the first conversation](0070-home-watch-tuning.md) | done |
 | 0071 | [Emoji-only replies become reactions](0071-emoji-replies-become-reactions.md) | done |
+| 0072 | [Scheduled jobs and their reports in the conversation's context](0072-job-reports-in-context.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

@@ -90,6 +90,7 @@ func (s *Service) RunTask(ctx context.Context, run TaskRun) (TaskReply, error) {
 		Message:     message,
 		Tools:       toolSet,
 		Memory:      memory,
+		Jobs:        s.jobsText(runCtx, run.PrincipalID),
 		WebSearch:   webSearch,
 		SearchCheck: s.searchCheck(run.PrincipalID, webSearch, false),
 	}, sink)

@@ -274,6 +274,21 @@ unanswered message. Chat session files are kept; the files of scheduled runs and
 finished tasks, which no conversation refers to, are deleted 30 days after they
 were last written.
 
+### Scheduled jobs in conversation
+
+The system prompt of chat turns and background tasks ends, after memory, with the
+principal's enabled jobs and pending reminders: ID, name, schedule, and the first
+300 runes of the instructions, newest first and capped at 4000 runes. It changes
+only when a job is added, changed, paused, or finished, so the prompt stays
+cacheable; scheduled turns carry their own prompt instead. Each delivered report of
+a job or reminder is kept in SQLite for 14 days, at most 200 per principal, with
+the Telegram messages it was sent as. The next chat turn gets a one-line excerpt
+of each report no turn has heard of, the first turn of a conversation those of the
+last day, and a reply to a report's message that report in full; the
+`job_reports` read tool lists and reads them. Every lookup is keyed by principal.
+A report counts as outside content, and one whose run read private content makes
+the conversation private.
+
 ### A background task
 
 A request that needs many lookups is handed by the model to `task_start`, which

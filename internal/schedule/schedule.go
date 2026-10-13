@@ -114,6 +114,20 @@ type Repository interface {
 	// PruneScheduledRuns removes runs and finished one-time jobs that finished before the given
 	// instant, keeping a job while any of its runs is still open.
 	PruneScheduledRuns(ctx context.Context, before time.Time) error
+	// SaveJobReport keeps a delivered report and the messages it was sent as, then drops the
+	// principal's oldest reports beyond keep. Saving a report again adds only its new messages.
+	SaveJobReport(ctx context.Context, report Report, keep int) error
+	// TakeJobReports returns the principal's reports no turn has been told of, oldest first, and
+	// marks them told.
+	TakeJobReports(ctx context.Context, principalID string) ([]Report, error)
+	// RecentJobReports returns the principal's reports delivered at or after since, newest first.
+	RecentJobReports(ctx context.Context, principalID string, since time.Time) ([]Report, error)
+	LoadJobReport(ctx context.Context, principalID, reportID string) (Report, bool, error)
+	// JobReportByMessage returns the principal's report that was sent as the given message.
+	JobReportByMessage(ctx context.Context, principalID string, messageID int64) (Report, bool, error)
+	HasJobReports(ctx context.Context, principalID string) (bool, error)
+	// PruneJobReports removes reports delivered before the given instant.
+	PruneJobReports(ctx context.Context, before time.Time) error
 }
 
 // Occurrence is what a job type's handler receives: one run of one principal's job.
