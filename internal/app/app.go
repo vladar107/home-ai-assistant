@@ -554,8 +554,9 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			}
 			// Alerts are written by code from transit data and Home Assistant names and states, which
 			// no tool marks as outside content, so retelling one does not withhold search or make
-			// home actions wait.
-			notices = append(notices, watches)
+			// home actions wait. An agent watch's alert is written by a model from web pages or mail,
+			// so it reaches the next turn as outside content, like a scheduled report.
+			notices = append(notices, watches, conversation.OutsideNotice{Notice: watches.AgentNotices()})
 			a.watches = watches
 		}
 		displayNames := make(map[string]string, len(a.cfg.Telegram.Users))
@@ -634,6 +635,14 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		}
 		if a.watches != nil {
 			a.watches.SetRewriter(conversationService)
+			agent, err := watch.NewAgentEvaluator(conversationService, watch.AgentConfig{Finished: a.watches.Wake})
+			if err != nil {
+				return fmt.Errorf("initialize agent watches: %w", err)
+			}
+			if err := a.watches.Register(watch.KindAgent, agent); err != nil {
+				return err
+			}
+			a.telemetry.ZeroWatchOutcomes(ctx, principals, []string{watch.KindAgent})
 		}
 		a.attachments = attachments
 		a.connections = connections

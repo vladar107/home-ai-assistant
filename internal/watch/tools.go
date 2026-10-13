@@ -23,8 +23,10 @@ const (
 
 const listGuidance = "Watches: watch_list shows the user's watches with their ids. A watch checks a train or bus departure, a saved route, NS disruptions at some stations, or the state of a device or sensor at home during a daily window, in code and without a model, and messages the user only when something changes. The user manages watches with /jobs as well, and each alert has Mute today and Pause buttons."
 
+const agentListGuidance = " An agent watch instead runs one read-only model turn per check, on the user's own subscription, to check anything the tools can look at, such as a price, a mail, or a page."
+
 func proposeGuidance(zone string, kinds []string) string {
-	transit := slices.ContainsFunc(kinds, func(kind string) bool { return kind != KindHome })
+	transit := slices.ContainsFunc(kinds, func(kind string) bool { return !allDay(kind) })
 	guidance := "Suggest a watch instead of a scheduled report when the user wants to hear only when something goes wrong, such as tell me if my 07:42 is cancelled or more than 5 minutes late, or warn me about disruptions before I leave: a watch stays silent while all is fine, costs no model turn, and alerts within minutes, while a scheduled report runs the model at a fixed time and always sends a message. A report remains right for a summary the user wants every time. " +
 		"The kinds available now are: " + strings.Join(kinds, ", ") + ". " +
 		"A watch runs on days, such as mon to fri, or once on a date (YYYY-MM-DD) and then ends; times are local HH:MM in " + zone + " unless the user names another time zone. " +
@@ -44,6 +46,13 @@ func proposeGuidance(zone string, kinds []string) string {
 			"A home watch runs every day unless the user names days or one date, and checks all day by default, every minute, so a message can come up to a minute late; give window_from and window_until, which may be 24:00 for the end of the day, only to keep it quiet outside certain hours. " +
 			"Do not ask for a departure for it, and never guess a device: if the name is unknown or matches several devices, tell the user what the tool reports."
 	}
+	if slices.Contains(kinds, KindAgent) {
+		guidance += " An agent watch tells the user when something no other kind can check changes or happens, such as a ticket price dropping below a number, a mail from a sender arriving, a product coming back in stock, or a page announcing a date. Prefer a transit or home watch whenever one fits, because those cost no model turn. " +
+			"Each check is one read-only model turn on the user's own subscription with the tools the user has switched on, run without this conversation, so write check.instruction (up to 600 characters) so that a fresh turn can do it alone: what to look at and how, with any URL, search, or mail query to use. Put when to tell the user in check.condition (up to 300 characters), such as the cheapest price is below 150 euros. " +
+			"Give it a short name, such as Lisbon flight price. Pick the longest check.interval_minutes (30 to 1440, 60 by default) that still serves the request and say the interval in your proposal; set check.until (YYYY-MM-DD) when the watch stops mattering after a date. " +
+			"Its triggers are enter, when the condition starts to hold (the default), change, when the value it reports changes while the condition holds, and clear, when it stops holding after an alert; ask for change or clear only when the user wants to hear them. " +
+			"An agent watch runs every day and all day unless the user narrows it. Each user may have " + fmt.Sprint(MaximumAgentWatchesPerPrincipal) + " agent watches."
+	}
 	return guidance
 }
 
@@ -62,20 +71,25 @@ const specProperties = `"mode":{"type":"string","enum":["train","bus"],"descript
 	`"line":{"type":"string","description":"Bus: the line number."},` +
 	`"stations":{"type":"array","items":{"type":"string"},"maxItems":10,"description":"Disruptions: the stations to watch, such as a pair."},` +
 	`"route":{"type":"string","description":"Route: the saved route's name."},` +
-	`"name":{"type":"string","description":"Home: the name of the device or sensor as the user says it, such as Balcony door."},` +
+	`"name":{"type":"string","description":"Home: the name of the device or sensor as the user says it, such as Balcony door. Agent: a short label for the watch, such as Lisbon flight price."},` +
 	`"entity":{"type":"string","description":"Home: the entity id, only when the user or a tool result gave it."},` +
 	`"condition":{"type":"object","description":"Home: what to wait for. Give exactly one of state, above, or below.","properties":{` +
 	`"state":{"type":"array","items":{"type":"string"},"maxItems":10,"description":"The states that count, such as on, off, or idle; open and detected mean on for a binary sensor."},` +
 	`"above":{"type":"number","description":"A numeric sensor going above this value."},` +
 	`"below":{"type":"number","description":"A numeric sensor going below this value."},` +
 	`"for_minutes":{"type":"integer","minimum":1,"maximum":240,"description":"How long the condition must hold before it counts."}},"additionalProperties":false},` +
+	`"check":{"type":"object","description":"Agent: what each check's model turn does.","properties":{` +
+	`"instruction":{"type":"string","maxLength":600,"description":"What to look at and how, so that a turn without this conversation can do it, including any URL, search, or mail query."},` +
+	`"condition":{"type":"string","maxLength":300,"description":"When to tell the user, such as the cheapest price is below 150 euros."},` +
+	`"interval_minutes":{"type":"integer","minimum":30,"maximum":1440,"description":"How often to check; 60 by default."},` +
+	`"until":{"type":"string","description":"Optional last day, YYYY-MM-DD; the watch is deleted after it."}},"additionalProperties":false},` +
 	`"departure":{"type":"string","description":"Departure or route: the planned departure, local HH:MM."},` +
 	`"minutes_before":{"type":"integer","minimum":10,"maximum":240,"description":"Departure or route: how long before the departure checking starts; 90 by default."},` +
-	`"window_from":{"type":"string","description":"Disruptions or home: when checking starts, local HH:MM; a home watch defaults to 00:00."},` +
-	`"window_until":{"type":"string","description":"Disruptions or home: when checking ends, local HH:MM; a home watch may use 24:00 for the end of the day and defaults to it."},` +
+	`"window_from":{"type":"string","description":"Disruptions, home, or agent: when checking starts, local HH:MM; a home or agent watch defaults to 00:00."},` +
+	`"window_until":{"type":"string","description":"Disruptions, home, or agent: when checking ends, local HH:MM; a home or agent watch may use 24:00 for the end of the day and defaults to it."},` +
 	`"days":{"type":"array","items":{"type":"string","enum":["mon","tue","wed","thu","fri","sat","sun"]},"description":"The weekdays the watch runs on."},` +
 	`"date":{"type":"string","description":"Instead of days: the one date, YYYY-MM-DD, of a one-off watch."},` +
-	`"triggers":{"type":"array","items":{"type":"string","enum":["cancelled","partly_cancelled","delay","platform","leg","arrival","new","changed","enter","clear"]},"description":"What to alert on; omit for all of the kind's triggers."},` +
+	`"triggers":{"type":"array","items":{"type":"string","enum":["cancelled","partly_cancelled","delay","platform","leg","arrival","new","changed","enter","change","clear"]},"description":"What to alert on; omit for all of the kind's triggers."},` +
 	`"delay_minutes":{"type":"integer","minimum":1,"maximum":120,"description":"The delay that counts, in minutes; 5 by default."},` +
 	`"timezone":{"type":"string","description":"IANA time zone such as Europe/Amsterdam; omit to use the user's own."},` +
 	`"language":{"type":"string","description":"The language the watch's messages are written in, such as Russian: the one the user writes to you in. Omit for English."}`
@@ -83,10 +97,10 @@ const specProperties = `"mode":{"type":"string","enum":["train","bus"],"descript
 var writeDefinitions = []tools.Definition{
 	{
 		Name:        toolPropose,
-		Description: "Propose a watch that checks a departure, a saved route, NS disruptions, or a device or sensor at home during a daily window and messages the user only when something changes. The user must confirm.",
+		Description: "Propose a watch that checks a departure, a saved route, NS disruptions, a device or sensor at home, or, as an agent watch, anything the tools can look at, during a daily window and messages the user only when something changes. The user must confirm.",
 		Risk:        tools.RiskWrite,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
-			`"kind":{"type":"string","enum":["departure","disruptions","route","home"],"description":"What to watch."},` +
+			`"kind":{"type":"string","enum":["departure","disruptions","route","home","agent"],"description":"What to watch."},` +
 			specProperties + `},"required":["kind"],"additionalProperties":false}`),
 	},
 	{
@@ -116,7 +130,11 @@ func (s *Service) Contribute(context.Context, string) (tools.Contribution, error
 	if !s.Available() {
 		return tools.Contribution{}, nil
 	}
-	contribution := tools.Contribution{Guidance: listGuidance, Definitions: []tools.Definition{listDefinition}}
+	guidance := listGuidance
+	if _, agent := s.evaluators[KindAgent]; agent {
+		guidance += agentListGuidance
+	}
+	contribution := tools.Contribution{Guidance: guidance, Definitions: []tools.Definition{listDefinition}}
 	if s.proposer != nil {
 		contribution.WriteGuidance = proposeGuidance(s.zone, s.kinds())
 		contribution.Definitions = append(contribution.Definitions, writeDefinitions...)
@@ -126,7 +144,7 @@ func (s *Service) Contribute(context.Context, string) (tools.Contribution, error
 
 func (s *Service) kinds() []string {
 	var kinds []string
-	for _, kind := range []string{KindDeparture, KindRoute, KindDisruptions, KindHome} {
+	for _, kind := range []string{KindDeparture, KindRoute, KindDisruptions, KindHome, KindAgent} {
 		if _, known := s.evaluators[kind]; known {
 			kinds = append(kinds, kind)
 		}
@@ -166,6 +184,7 @@ type specArguments struct {
 	Name          string     `json:"name"`
 	Entity        string     `json:"entity"`
 	Condition     *Condition `json:"condition"`
+	Check         *Check     `json:"check"`
 	Departure     string     `json:"departure"`
 	MinutesBefore int        `json:"minutes_before"`
 	WindowFrom    string     `json:"window_from"`
@@ -237,6 +256,7 @@ func (s *Service) specOf(kind string, arguments specArguments) (Spec, error) {
 			Entity: arguments.Entity, Name: arguments.Name,
 		},
 		Condition:    arguments.Condition,
+		Check:        arguments.Check,
 		Triggers:     arguments.Triggers,
 		DelayMinutes: arguments.DelayMinutes,
 		Days:         arguments.Days,
@@ -247,7 +267,7 @@ func (s *Service) specOf(kind string, arguments specArguments) (Spec, error) {
 	if spec.Zone == "" {
 		spec.Zone = s.zone
 	}
-	if kind == KindDisruptions || kind == KindHome {
+	if kind == KindDisruptions || allDay(kind) {
 		if arguments.Departure != "" || arguments.MinutesBefore != 0 {
 			return Spec{}, fmt.Errorf("a %s watch takes window_from and window_until, not a departure", kind)
 		}
@@ -278,11 +298,11 @@ func argumentsOf(spec Spec) specArguments {
 	arguments := specArguments{
 		Mode: spec.Target.Mode, From: spec.Target.From, To: spec.Target.To, Via: spec.Target.Via,
 		Stop: spec.Target.Stop, Line: spec.Target.Line, Stations: spec.Target.Stations, Route: spec.Target.Route,
-		Name: spec.Target.Name, Entity: spec.Target.Entity, Condition: spec.Condition,
+		Name: spec.Target.Name, Entity: spec.Target.Entity, Condition: spec.Condition, Check: spec.Check,
 		Days: spec.Days, Date: spec.Date, Triggers: spec.Triggers, DelayMinutes: spec.DelayMinutes, Timezone: spec.Zone,
 		Language: spec.Language,
 	}
-	if spec.Kind == KindDisruptions || spec.Kind == KindHome {
+	if spec.Kind == KindDisruptions || allDay(spec.Kind) {
 		arguments.WindowFrom, arguments.WindowUntil = spec.Start, spec.End
 		return arguments
 	}
@@ -322,6 +342,19 @@ func overlay(current, change specArguments) specArguments {
 			next.Triggers = nil
 		}
 		next.Condition = change.Condition
+	}
+	if change.Check != nil {
+		check := Check{}
+		if current.Check != nil {
+			check = *current.Check
+		}
+		set(&check.Instruction, change.Check.Instruction)
+		set(&check.Condition, change.Check.Condition)
+		set(&check.Until, change.Check.Until)
+		if change.Check.IntervalMinutes != 0 {
+			check.IntervalMinutes = change.Check.IntervalMinutes
+		}
+		next.Check = &check
 	}
 	set(&next.Departure, change.Departure)
 	set(&next.WindowFrom, change.WindowFrom)
@@ -368,13 +401,19 @@ func (s *Service) proposeWatch(ctx context.Context, principalID string, call too
 	if len(existing) >= MaximumWatchesPerPrincipal {
 		return tools.Result{Text: tooManyText(), IsError: true}, nil
 	}
+	if spec.Kind == KindAgent && agentWatches(existing) >= MaximumAgentWatchesPerPrincipal {
+		return tools.Result{Text: tooManyAgentText(), IsError: true}, nil
+	}
 	canonical, err := json.Marshal(spec)
 	if err != nil {
 		return tools.Result{}, err
 	}
 	summary := "Watch " + spec.Label() + "\n" + spec.Describe() + "\nYou get a message only when something changes, and once more when it is back to normal."
-	if spec.Kind == KindHome {
+	switch spec.Kind {
+	case KindHome:
 		summary = "Watch " + spec.Label() + "\n" + spec.Describe() + "\nYou get a message only when this changes."
+	case KindAgent:
+		summary = "Watch " + spec.Label() + "\n" + spec.Describe() + "\nYou get a message only when the answer changes."
 	}
 	return s.propose(ctx, principalID, call, approval.Proposal{Tool: toolPropose, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "watch", TargetKind: spec.Kind + " watch", TargetName: intentName(spec)}})
 }
@@ -463,6 +502,15 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		spec, err := normalize(confirmed, s.now())
 		if err != nil {
 			return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "That watch is no longer valid (" + err.Error() + "); nothing was set up."}
+		}
+		if spec.Kind == KindAgent {
+			existing, err := s.repository.ListWatches(ctx, record.PrincipalID)
+			if err != nil {
+				return approval.Outcome{}, err
+			}
+			if agentWatches(existing) >= MaximumAgentWatchesPerPrincipal && !slices.ContainsFunc(existing, func(w Watch) bool { return w.ID == record.ID }) {
+				return approval.Outcome{}, &approval.ActionError{Reason: "too_many", Text: tooManyAgentText() + " Nothing was set up."}
+			}
 		}
 		now := s.now()
 		watch := Watch{ID: record.ID, PrincipalID: record.PrincipalID, Spec: spec, Enabled: true, CreatedAt: now, UpdatedAt: now}
@@ -555,16 +603,34 @@ func (s *Service) nextWindow(spec Spec) string {
 // intentName is the watch as the intent check reads it: its label and, when it has one, its
 // language, so a request to change only the language still reads as requested.
 func intentName(spec Spec) string {
-	if spec.Language == "" {
-		return spec.Label()
+	name := spec.Label()
+	if spec.Kind == KindAgent && spec.Check != nil {
+		name += ": " + spec.Check.Condition
 	}
-	return spec.Label() + ", messages in " + spec.Language
+	if spec.Language == "" {
+		return name
+	}
+	return name + ", messages in " + spec.Language
 }
 
 func sameSpec(a, b Spec) bool {
 	encodedA, errA := json.Marshal(a)
 	encodedB, errB := json.Marshal(b)
 	return errA == nil && errB == nil && bytes.Equal(encodedA, encodedB)
+}
+
+func agentWatches(watches []Watch) int {
+	count := 0
+	for _, watch := range watches {
+		if watch.Kind == KindAgent {
+			count++
+		}
+	}
+	return count
+}
+
+func tooManyAgentText() string {
+	return fmt.Sprintf("You already have %d agent watches, which is the most allowed; delete one in /jobs first.", MaximumAgentWatchesPerPrincipal)
 }
 
 func tooManyText() string {

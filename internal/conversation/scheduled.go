@@ -30,7 +30,18 @@ func (s *Service) RunScheduled(ctx context.Context, principalID, turn, message s
 		return ScheduledReply{}, err
 	}
 	defer release()
+	return s.runUnwatched(ctx, principalID, turn, message)
+}
 
+// RunCheck runs one check of an agent watch as RunScheduled runs a scheduled turn, but under no
+// turn key: nothing goes out with the reply but the watch's own alert, so its tools stage nothing.
+// It takes no turn slot, as a background task does not: checks run all day, and the user's chat
+// turn must not wait behind one. The caller reads the verdict from the final text.
+func (s *Service) RunCheck(ctx context.Context, principalID, message string) (ScheduledReply, error) {
+	return s.runUnwatched(ctx, principalID, "", message)
+}
+
+func (s *Service) runUnwatched(ctx context.Context, principalID, turn, message string) (ScheduledReply, error) {
 	run := tools.NewRun(message)
 	turnCtx, cancel := context.WithTimeout(tools.WithRun(tools.WithTurn(ctx, turn), run), s.config.TurnTimeout)
 	defer cancel()

@@ -83,6 +83,7 @@ plan that links back to the earlier record.
 | 0071 | [Emoji-only replies become reactions](0071-emoji-replies-become-reactions.md) | done |
 | 0072 | [Scheduled jobs and their reports in the conversation's context](0072-job-reports-in-context.md) | done |
 | 0073 | [A backlog of ideas for the assistant](0073-backlog.md) | done |
+| 0074 | [Watch anything: model-checked watches](0074-watch-anything.md) | in-progress |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

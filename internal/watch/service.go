@@ -114,8 +114,22 @@ type Service struct {
 	cancel   context.CancelFunc
 	done     chan struct{}
 	wake     chan struct{}
-	notices  map[string][]string
+	notices  map[string][]notice
 	unserved map[string]bool
+}
+
+// notice is a delivered message kept for its owner's next turn. Agent watches' messages are kept
+// apart, since a model wrote them from what it read outside the household.
+type notice struct {
+	text    string
+	agent   bool
+	private bool
+}
+
+// Stopper is an evaluator with work of its own running between checks, which the service stops
+// when it shuts down.
+type Stopper interface {
+	Stop(ctx context.Context) error
 }
 
 var _ module.Module = (*Service)(nil)
@@ -162,7 +176,7 @@ func NewService(cfg Config, repository Repository, chats Chats, sender Sender, p
 		now:        now,
 		evaluators: make(map[string]Evaluator),
 		wake:       make(chan struct{}, 1),
-		notices:    make(map[string][]string),
+		notices:    make(map[string][]notice),
 		unserved:   make(map[string]bool),
 	}, nil
 }
@@ -229,10 +243,17 @@ func (s *Service) Shutdown(ctx context.Context) error {
 	cancel()
 	select {
 	case <-done:
-		return nil
 	case <-ctx.Done():
 		return fmt.Errorf("shutdown watch service: %w", ctx.Err())
 	}
+	for kind, evaluator := range s.evaluators {
+		if stopper, ok := evaluator.(Stopper); ok {
+			if err := stopper.Stop(ctx); err != nil {
+				return fmt.Errorf("shutdown %s watches: %w", kind, err)
+			}
+		}
+	}
+	return nil
 }
 
 // Wake asks for a cycle now instead of at the next tick.
@@ -324,6 +345,7 @@ func (s *Service) check(ctx context.Context, watch Watch, now time.Time, cache *
 	if found && now.Sub(state.CheckedAt) < interval(watch.Kind, now, occurrence.End)-checkSlack {
 		return
 	}
+	checked := state.CheckedAt
 	if !found {
 		state = State{WatchID: watch.ID, PrincipalID: watch.PrincipalID, Occurrence: occurrence.Date}
 		sent, err := s.repository.LastWatchAlertSequence(ctx, watch.ID, occurrence.Date)
@@ -342,9 +364,19 @@ func (s *Service) check(ctx context.Context, watch Watch, now time.Time, cache *
 				state.Key, state.Alerted, state.Since = earlier.Key, earlier.Alerted, earlier.Since
 			}
 		}
+		if watch.Kind == KindAgent {
+			earlier, carried, err := s.repository.LatestWatchStateBefore(ctx, watch.ID, occurrence.Date)
+			if err != nil {
+				s.logWatchError(ctx, watch, "load_state", err)
+				return
+			}
+			if carried {
+				state.Key, state.Alerted, state.Since, checked = earlier.Key, earlier.Alerted, earlier.Since, earlier.CheckedAt
+			}
+		}
 	}
 
-	occurrence.Cache, occurrence.Previous, occurrence.Since = cache, state.Key, state.Since
+	occurrence.Cache, occurrence.Previous, occurrence.Since, occurrence.Checked = cache, state.Key, state.Since, checked
 	checkCtx, cancel := context.WithTimeout(ctx, s.timeout)
 	observation, err := evaluator.Evaluate(checkCtx, watch.PrincipalID, watch, occurrence)
 	cancel()
@@ -387,7 +419,11 @@ func (s *Service) check(ctx context.Context, watch Watch, now time.Time, cache *
 			switch {
 			case observation.Silent:
 			case observation.Triggered:
-				if wanted(watch, TriggerEnter) {
+				trigger := TriggerEnter
+				if watch.Kind == KindAgent && state.Alerted {
+					trigger = TriggerChange
+				}
+				if wanted(watch, trigger) {
 					alert = queue(&state, watch, occurrence, now, alertTypeAlert, alertText(watch, observation))
 				}
 				state.Alerted = true
@@ -398,6 +434,9 @@ func (s *Service) check(ctx context.Context, watch Watch, now time.Time, cache *
 				state.Alerted = false
 			}
 			state.Key = observation.State
+		}
+		if alert != nil {
+			alert.Private = observation.Private
 		}
 	}
 	state.CheckedAt = now
@@ -419,17 +458,21 @@ func followsDirectly(earlier, date string) bool {
 	return err == nil && day.AddDate(0, 0, 1).Format(dateLayout) == date
 }
 
-// wanted reports whether the watch messages on enter or clear. Only a home watch can leave one of
-// them out; the other kinds message on every change their evaluator reports.
+// wanted reports whether the watch messages on enter, change, or clear. Only a home or agent watch
+// can leave one of them out; the other kinds message on every change their evaluator reports.
 func wanted(watch Watch, trigger string) bool {
-	return watch.Kind != KindHome || slices.Contains(watch.Triggers, trigger)
+	return !allDay(watch.Kind) || slices.Contains(watch.Triggers, trigger)
 }
 
 // interval is how long after a check the next one is due: a home watch is checked at a fixed
-// pace, the others more often near the end of the window.
+// pace, an agent watch's evaluator is asked every AgentPollInterval and decides itself, and the
+// others are checked more often near the end of the window.
 func interval(kind string, now, end time.Time) time.Duration {
-	if kind == KindHome {
+	switch kind {
+	case KindHome:
 		return HomeCheckInterval
+	case KindAgent:
+		return AgentPollInterval
 	}
 	if end.Sub(now) <= FinalStretch {
 		return FinalCheckInterval
@@ -438,20 +481,21 @@ func interval(kind string, now, end time.Time) time.Duration {
 }
 
 func maximumMessages(kind string) int {
-	if kind == KindHome {
+	if allDay(kind) {
 		return MaximumHomeMessages
 	}
 	return MaximumMessages
 }
 
 // queue counts one more message for the window and returns it, or nil once the window has sent
-// its maximum. A home alert expires HomeAlertLifetime after now; the others with their window.
+// its maximum. A home or agent alert expires HomeAlertLifetime after now; the others with their
+// window.
 func queue(state *State, watch Watch, occurrence Occurrence, now time.Time, alertType, text string) *Alert {
 	if state.Messages >= maximumMessages(watch.Kind) {
 		return nil
 	}
 	expires := occurrence.End
-	if watch.Kind == KindHome {
+	if allDay(watch.Kind) {
 		expires = now.Add(HomeAlertLifetime)
 	}
 	state.Messages++
@@ -482,7 +526,11 @@ func alertText(watch Watch, observation Observation) string {
 }
 
 func recoveredText(watch Watch, observation Observation) string {
-	text := "**✅ " + watch.Label() + "**\n\nBack to normal."
+	ended := "Back to normal."
+	if watch.Kind == KindAgent {
+		ended = "No longer the case."
+	}
+	text := "**✅ " + watch.Label() + "**\n\n" + ended
 	if headline := strings.TrimSpace(observation.Headline); headline != "" {
 		text += " " + headline
 	}
@@ -541,7 +589,7 @@ func (s *Service) deliver(ctx context.Context) {
 			continue
 		}
 		if s.finish(ctx, alert, statusDelivered, "", alertDelivered) {
-			s.remember(alert.PrincipalID, alert.WatchID, text)
+			s.remember(alert, text)
 		}
 	}
 }
@@ -635,28 +683,73 @@ func (s *Service) logAlertError(ctx context.Context, alert Alert, stage string, 
 
 // remember keeps the delivered message for the owner's next conversation turn, so a reply to it has
 // something to refer to.
-func (s *Service) remember(principalID, watchID, sent string) {
+func (s *Service) remember(alert Alert, sent string) {
 	text := []rune(strings.TrimSpace(sent))
 	if len(text) > maximumNoticeRunes {
 		text = append(text[:maximumNoticeRunes], '…')
 	}
-	notice := fmt.Sprintf("One of the user's watches (id %s) just sent them this message:\n%s", watchID, string(text))
+	kept := notice{
+		text:    fmt.Sprintf("One of the user's watches (id %s) just sent them this message:\n%s", alert.WatchID, string(text)),
+		agent:   alert.Kind == KindAgent,
+		private: alert.Private,
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	notices := append(s.notices[principalID], notice)
+	notices := append(s.notices[alert.PrincipalID], kept)
 	if len(notices) > 2 {
 		notices = notices[len(notices)-2:]
 	}
-	s.notices[principalID] = notices
+	s.notices[alert.PrincipalID] = notices
 }
 
-// PendingNotice returns and forgets the alerts delivered since the principal's last turn.
-func (s *Service) PendingNotice(principalID string) string {
+// take returns and forgets the principal's kept messages of agent watches, or of the other kinds,
+// and whether any of them may retell private content.
+func (s *Service) take(principalID string, agent bool) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	notices := s.notices[principalID]
-	delete(s.notices, principalID)
-	return strings.Join(notices, "\n\n")
+	var texts []string
+	var rest []notice
+	private := false
+	for _, kept := range s.notices[principalID] {
+		if kept.agent != agent {
+			rest = append(rest, kept)
+			continue
+		}
+		texts = append(texts, kept.text)
+		private = private || kept.private
+	}
+	if len(rest) == 0 {
+		delete(s.notices, principalID)
+	} else {
+		s.notices[principalID] = rest
+	}
+	return strings.Join(texts, "\n\n"), private
+}
+
+// PendingNotice returns and forgets the messages of code-checked watches delivered since the
+// principal's last turn; AgentNotices hands out those of agent watches.
+func (s *Service) PendingNotice(principalID string) string {
+	text, _ := s.take(principalID, false)
+	return text
+}
+
+// AgentNotices is the source of the agent watches' delivered messages for the next turn. A model
+// wrote them from web pages or mail, so the conversation should take them as outside content.
+func (s *Service) AgentNotices() AgentNotices { return AgentNotices{service: s} }
+
+// AgentNotices returns and forgets the agent watches' messages delivered since a principal's last
+// turn.
+type AgentNotices struct{ service *Service }
+
+func (n AgentNotices) PendingNotice(principalID string) string {
+	text, _ := n.TakeNotice(principalID)
+	return text
+}
+
+// TakeNotice is PendingNotice that also reports whether any of the messages may retell private
+// content the check read.
+func (n AgentNotices) TakeNotice(principalID string) (string, bool) {
+	return n.service.take(principalID, true)
 }
 
 // Watches lists the principal's own watches.

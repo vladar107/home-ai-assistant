@@ -240,11 +240,11 @@ func (s *Store) SaveWatchCheck(ctx context.Context, state watch.State, alert *wa
 	if alert != nil {
 		if _, err := tx.ExecContext(
 			ctx,
-			`INSERT INTO watch_alerts (id, watch_id, principal_id, occurrence, sequence, type, text, status, expires_at, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?, ?)
+			`INSERT INTO watch_alerts (id, watch_id, principal_id, occurrence, sequence, type, text, status, expires_at, private, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?, ?, ?)
 			 ON CONFLICT DO NOTHING`,
 			alert.ID, alert.WatchID, alert.PrincipalID, alert.Occurrence, alert.Sequence, alert.Type, alert.Text,
-			formatTime(alert.ExpiresAt), formatTime(now), formatTime(now),
+			formatTime(alert.ExpiresAt), alert.Private, formatTime(now), formatTime(now),
 		); err != nil {
 			return fmt.Errorf("queue watch alert: %w", err)
 		}
@@ -261,7 +261,7 @@ func (s *Store) ReadyWatchAlerts(ctx context.Context) ([]watch.Alert, error) {
 	}
 	rows, err := s.db.QueryContext(
 		ctx,
-		`SELECT a.id, a.watch_id, a.principal_id, a.occurrence, a.sequence, a.type, a.text, a.expires_at, w.kind, w.enabled, COALESCE(w.muted_on, ''),
+		`SELECT a.id, a.watch_id, a.principal_id, a.occurrence, a.sequence, a.type, a.text, a.expires_at, a.private, w.kind, w.enabled, COALESCE(w.muted_on, ''),
 		        COALESCE(json_extract(w.config, '$.language'), '')
 		 FROM watch_alerts a JOIN watches w ON w.id = a.watch_id
 		 WHERE a.status = 'ready' ORDER BY a.created_at, a.sequence, a.id`,
@@ -276,7 +276,7 @@ func (s *Store) ReadyWatchAlerts(ctx context.Context) ([]watch.Alert, error) {
 		var expiresAt string
 		if err := rows.Scan(
 			&alert.ID, &alert.WatchID, &alert.PrincipalID, &alert.Occurrence, &alert.Sequence, &alert.Type, &alert.Text,
-			&expiresAt, &alert.Kind, &alert.Enabled, &alert.MutedOn, &alert.Language,
+			&expiresAt, &alert.Private, &alert.Kind, &alert.Enabled, &alert.MutedOn, &alert.Language,
 		); err != nil {
 			return nil, fmt.Errorf("scan watch alert: %w", err)
 		}

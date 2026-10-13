@@ -202,6 +202,10 @@ type harnessOptions struct {
 	// watches adds the watch service, on the schedules clock, checking departures with this
 	// evaluator; tests run its cycles themselves.
 	watches watch.Evaluator
+	// agentWatches adds agent watches checked by the conversation's own check turns, signalling
+	// agentChecked as each check ends, and passes watch alerts to the next turn as the
+	// application does.
+	agentWatches bool
 	// routes adds saved routes with their tools and /jobs entries, checked through the ns and bus
 	// connectors where those are set.
 	routes bool
@@ -260,6 +264,7 @@ type conversationHarness struct {
 	scheduler      *schedule.Service
 	tasks          *task.Service
 	watches        *watch.Service
+	agentChecked   chan struct{}
 	routes         *routes.Service
 	auth           *codexauth.Simulator
 	profilesDir    string
@@ -661,6 +666,9 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		if err := h.approvals.RegisterExecutor(h.watches); err != nil {
 			t.Fatal(err)
 		}
+		if options.agentWatches {
+			notices = append(notices, h.watches, conversation.OutsideNotice{Notice: h.watches.AgentNotices()})
+		}
 	}
 	if options.routes {
 		amsterdam, err := time.LoadLocation("Europe/Amsterdam")
@@ -805,6 +813,17 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	}
 	if h.watches != nil {
 		h.service.SetWatches(h.watches)
+	}
+	if options.agentWatches {
+		h.agentChecked = make(chan struct{}, 16)
+		agent, err := watch.NewAgentEvaluator(h.conversation, watch.AgentConfig{Now: options.schedules.Now, Finished: func() { h.agentChecked <- struct{}{} }})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := h.watches.Register(watch.KindAgent, agent); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = agent.Stop(context.Background()) })
 	}
 	if h.routes != nil {
 		h.service.SetRoutes(h.routes)

@@ -242,3 +242,77 @@ func TestWatchIsProposedConfirmedAndManagedByItsOwnerOnly(t *testing.T) {
 		t.Fatalf("watches after delete = %d", count)
 	}
 }
+
+func agentWatch() watch.Spec {
+	return watch.Spec{
+		Kind:   watch.KindAgent,
+		Target: watch.Target{Name: "Release date"},
+		Check: &watch.Check{
+			Instruction:     "Read the release notes page of the example project and find the next release date.",
+			Condition:       "a release date is announced",
+			IntervalMinutes: 60,
+		},
+		Triggers: []string{watch.TriggerEnter},
+		Days:     []string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"},
+		Start:    "00:00",
+		End:      "24:00",
+		Zone:     "Europe/Amsterdam",
+	}
+}
+
+// An agent watch's check is a turn of the owner's own subscription, in a fresh session with read
+// tools only. Its alert reaches the owner with the usual buttons, and the next chat turn is told
+// about it as outside content. Another user never sees the watch.
+func TestAgentWatchChecksInAReadOnlyTurnAndAlertsAsOutsideContent(t *testing.T) {
+	runtime := newControlledRuntime()
+	clock := newTestClock(t, mondayMorning)
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, watches: &stubEvaluator{}, agentWatches: true})
+	h.provision("alice", "account-alice")
+	h.provision("bob", "account-bob")
+	h.start()
+	const id = "00000000000000c1"
+	h.createWatch("alice", id, agentWatch())
+
+	h.watches.Cycle(h.ctx)
+	check := receive(t, h.ctx, runtime.calls)
+	if check.request.PrincipalID != "alice" || !strings.Contains(check.request.Message, `watch "Release date"`) ||
+		!strings.Contains(check.request.Message, "Check: Read the release notes page of the example project") {
+		t.Fatalf("check turn = %s %q", check.request.PrincipalID, check.request.Message)
+	}
+	names := toolNames(check.request.Tools)
+	if !slices.Contains(names, "watch_list") || slices.Contains(names, "watch_propose") || slices.Contains(names, "watch_remove") {
+		t.Fatalf("check tools = %v", names)
+	}
+	check.answer <- agentruntime.RunResult{Final: "The page names a date.\n" + `{"met": true, "value": "1 December", "headline": "The next release is on 1 December.", "details": "Found on the release notes page."}`}
+	receive(t, h.ctx, h.agentChecked)
+	h.watches.Cycle(h.ctx)
+	alert := h.nextMessage()
+	if alert.chatID != 101 || !strings.Contains(alert.text, "Release date") || !strings.Contains(alert.text, "The next release is on 1 December.") ||
+		!slices.Equal(buttonData(alert.keyboard), []string{"watch:mute:" + id, "watch:pause:" + id}) {
+		t.Fatalf("alert = %+v", alert)
+	}
+
+	h.push(textUpdate(1, 101, "which version is that?"))
+	chat := receive(t, h.ctx, runtime.calls)
+	if !strings.Contains(chat.request.Message, "just sent them this message") || !strings.Contains(chat.request.Message, "The next release is on 1 December.") {
+		t.Fatalf("chat turn message = %q", chat.request.Message)
+	}
+	if chat.request.SessionID == check.request.SessionID {
+		t.Fatal("the check ran in the chat's session")
+	}
+	chat.answer <- agentruntime.RunResult{Response: "the next one"}
+	h.wantReply(101, 1, "the next one")
+	h.waitState(1, "delivered")
+	sessionID, _ := h.activeSession("alice")
+	var exposed bool
+	if err := h.db.QueryRowContext(h.ctx, `SELECT exposed_at IS NOT NULL FROM conversation_sessions WHERE id = ?`, sessionID).Scan(&exposed); err != nil || !exposed {
+		t.Fatalf("the conversation told about the alert is not marked exposed: %v %v", exposed, err)
+	}
+
+	if listed := h.runTool(runtime, 2, 202, "watch_list", `{}`); !strings.HasSuffix(listed.Text, "The user has no watches.") {
+		t.Fatalf("bob's list = %+v", listed)
+	}
+	if listed := h.runTool(runtime, 3, 101, "watch_list", `{}`); !strings.Contains(listed.Text, "id "+id+": agent watch, Release date") {
+		t.Fatalf("alice's list = %+v", listed)
+	}
+}

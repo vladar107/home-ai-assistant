@@ -73,8 +73,11 @@ borrowed between users.
   Pause buttons; `/jobs` lists them. Train and bus departures, saved routes, and NS
   disruptions at stations are checked, and so are Home Assistant devices: "tell me
   if the balcony door stays open for 10 minutes", "warn me if the freezer goes above
-  -15 °C", or "tell me when the washing machine is done". A watch set up in another
-  language sends its messages in that language.
+  -15 °C", or "tell me when the washing machine is done". Anything else the
+  assistant can look at is watched by a model turn per check on the user's own
+  subscription: "tell me when the return flight drops below €150", "tell me when a
+  mail from the tax office arrives", or "watch this page for the release date". A
+  watch set up in another language sends its messages in that language.
 - **Routes.** Named journeys such as "work", saved in conversation with their
   weekdays, arrival target, and legs (walking or cycling minutes, fixed trains
   and buses), changed one leg at a time, and checked in one call: each leg's

@@ -109,7 +109,7 @@ flowchart TB
     approval["<b>approval</b><br/>Confirm / Reject proposals,<br/>exactly-once execution"]
     schedule["<b>schedule</b><br/>durable jobs, reminders,<br/>scheduled model turns"]
     task["<b>task</b><br/>background sub-agents<br/>beside the chat"]
-    watch["<b>watch</b><br/>windowed checks in code,<br/>alerts on change"]
+    watch["<b>watch</b><br/>windowed checks in code<br/>or model turns, alerts on change"]
     routes["<b>routes</b><br/>saved journeys,<br/>checked leg by leg in code"]
     judgment["<b>judgment</b><br/>TypeSafe screening, intent checks,<br/>tool hints (opt-in)"]
     searchcheck["<b>searchcheck</b><br/>per-query web search checks"]
@@ -181,6 +181,7 @@ flowchart TB
     watch --> nsc
     watch --> busc
     watch --> hac
+    watch --> conv
     tg --> routes
     broker --> routes
     approval --> routes
@@ -309,8 +310,8 @@ A restart resumes a running task in its session; a second interruption fails it.
 A watch is a confirmed, per-user definition: a train or bus departure, a saved
 route, or a set of stations, with weekdays or one date, a daily window (by default
 90 minutes before the departure until it), the triggers, and a delay threshold.
-The `watch` module runs its own loop, apart from the scheduler, because a check is
-code rather than a model turn. Inside the window it checks every 5 minutes, every 2
+The `watch` module runs its own loop, apart from the scheduler, because most checks
+are code rather than model turns. Inside the window it checks every 5 minutes, every 2
 in the last 30, through the evaluator registered for the watch's kind, and compares
 the normalized state with the one stored for that day's window. A change into a
 triggering state queues an alert; a later change out of it queues "back to normal";
@@ -347,6 +348,27 @@ change, or no departure left to take) plus whether the arrival target is missed,
 and its alert carries the route check's own leg lines. The check fails as an upstream
 failure only when every train and bus leg failed, and as a plain error when the
 route has been deleted; either ends in the usual failure notice.
+
+An agent watch checks anything the assistant can look at with a model turn instead of
+code. It has a short name, an instruction (what to look at and how), a condition (when
+to tell the user), an interval of 30 to 1440 minutes, and an optional last day after
+which it is deleted; each user may keep five. The service polls the kind every
+minute, and its evaluator decides when a check is due. A check is an unwatched turn
+like a scheduled run: the owner's own subscription, a fresh session, read-only tools
+with web search when the owner has it on, and memory, but no turn slot, so a chat
+turn never waits behind it, as with a background task. It runs
+in the background, at most one per user and two in all, so it never holds back the
+code-checked watches of the same cycle: `Evaluate` starts it and skips, and the
+first `Evaluate` after it finishes returns what it found, unless the watch was edited
+meanwhile. The turn's message carries the instruction, the condition, the value last
+reported, and the local time, and the reply must end with a JSON verdict (`met`,
+`value`, `headline`, `details`, or `error`); a reply without one, an `error`, or a
+failed turn is a failed check. The state is `met` or `unmet` with the normalized
+value: a new value is stored silently unless the condition holds and the watch
+alerts on a change, and a new window starts from the previous one's state and last
+check, so a condition that keeps holding is not reported again at midnight. Its
+alerts were written by a model that read web pages or mail, so they reach the next
+turn as outside content, and as private when the check read private content.
 
 A home watch waits for a Home Assistant entity to be in a state, or above or below a
 number, optionally for some minutes, and checks every minute all day by default. Its

@@ -1,8 +1,9 @@
-// Package watch checks a user's trains, buses, routes, stations, and home devices during a daily
-// window and tells them only when something changes. Checks are code: an evaluator registered per
-// kind turns one check into a normalized state, the service compares it with the last state stored
-// for that day's window, and a change into a triggering state becomes a durable alert. No model
-// runs per check; the model only proposes, changes, and explains watches.
+// Package watch checks a user's trains, buses, routes, stations, home devices, and anything else the
+// assistant can look at during a daily window and tells them only when something changes. An
+// evaluator registered per kind turns one check into a normalized state, the service compares it
+// with the last state stored for that day's window, and a change into a triggering state becomes a
+// durable alert. Every kind but agent checks in code, without a model; an agent watch runs one
+// read-only model turn per check on its owner's own subscription.
 package watch
 
 import (
@@ -23,6 +24,7 @@ const (
 	KindDisruptions = "disruptions"
 	KindRoute       = "route"
 	KindHome        = "home"
+	KindAgent       = "agent"
 
 	ModeTrain = "train"
 	ModeBus   = "bus"
@@ -41,10 +43,15 @@ const (
 	// Home triggers: the watched condition starting to hold, and ending after an alert.
 	TriggerEnter = "enter"
 	TriggerClear = "clear"
+	// Agent trigger: the reported value changing while the condition keeps holding.
+	TriggerChange = "change"
 
 	MaximumWatchesPerPrincipal = 20
+	// MaximumAgentWatchesPerPrincipal is how many of a principal's watches may be agent watches,
+	// each of which costs a model turn per check.
+	MaximumAgentWatchesPerPrincipal = 5
 	// MaximumMessages caps what one window of one transit watch may send, alerts and notices
-	// together; a home watch may send MaximumHomeMessages.
+	// together; a home or agent watch may send MaximumHomeMessages.
 	MaximumMessages     = 5
 	MaximumHomeMessages = 10
 	// FailureNoticeAfter is how many checks in a row must fail before the owner is told, once.
@@ -61,6 +68,11 @@ const (
 	// HomeAlertLifetime is how long a home alert stays deliverable after it is queued, since its
 	// window may end at midnight.
 	HomeAlertLifetime = 30 * time.Minute
+	// AgentPollInterval is how often the service asks an agent watch's evaluator whether a check is
+	// due or done; the watch's own interval_minutes sets how often a check actually runs.
+	AgentPollInterval = time.Minute
+	// DefaultAgentIntervalMinutes is how often an agent watch checks when the user names no pace.
+	DefaultAgentIntervalMinutes = 60
 
 	minimumLead          = 10 * time.Minute
 	maximumLead          = 4 * time.Hour
@@ -72,6 +84,10 @@ const (
 	maximumStations      = 10
 	maximumStates        = 10
 	maximumForMinutes    = 240
+	maximumInstruction   = 600
+	maximumCheckClause   = 300
+	minimumAgentInterval = 30
+	maximumAgentInterval = 1440
 	endOfDay             = "24:00"
 	startOfDay           = "00:00"
 	dateLayout           = "2006-01-02"
@@ -100,6 +116,7 @@ var kindTriggers = map[string][]string{
 	KindRoute:       {TriggerLeg, TriggerArrival},
 	KindDisruptions: {TriggerNew, TriggerChanged},
 	KindHome:        {TriggerEnter, TriggerClear},
+	KindAgent:       {TriggerEnter, TriggerChange, TriggerClear},
 }
 
 var triggerDescriptions = map[string]string{
@@ -113,6 +130,7 @@ var triggerDescriptions = map[string]string{
 	TriggerChanged:         "a change to one already known",
 	TriggerEnter:           "the condition starting to hold",
 	TriggerClear:           "the condition ending",
+	TriggerChange:          "the value changing while it holds",
 }
 
 // weekdays are in the order they are shown, Monday first.
@@ -122,7 +140,8 @@ func weekdayName(day time.Weekday) string { return weekdays[(int(day)+6)%7] }
 
 // Target is what a watch looks at. A departure watch is a train (From, To, optional Via) or a bus
 // (Stop, Line); a disruption watch has Stations; a route watch names a saved route; a home watch
-// has the Entity ID of a Home Assistant entity and, as resolved, its friendly Name.
+// has the Entity ID of a Home Assistant entity and, as resolved, its friendly Name; an agent watch
+// has only a short Name the model gives it.
 type Target struct {
 	Mode     string   `json:"mode,omitempty"`
 	From     string   `json:"from,omitempty"`
@@ -165,15 +184,28 @@ func (c Condition) Describe() string {
 	return text
 }
 
+// Check is what an agent watch asks a model turn to find out: the Instruction says what to look at
+// and how, and the Condition when the user wants to hear about it. A check runs every
+// IntervalMinutes, and the watch is deleted after Until, a local date, when one is set.
+type Check struct {
+	Instruction     string `json:"instruction"`
+	Condition       string `json:"condition"`
+	IntervalMinutes int    `json:"interval_minutes"`
+	Until           string `json:"until,omitempty"`
+}
+
+func (c Check) interval() time.Duration { return time.Duration(c.IntervalMinutes) * time.Minute }
+
 // Spec is a watch as the user confirms it. Start and End bound its daily window as local HH:MM
-// times; for a departure or a route End is the planned departure, and a home watch may end at
-// "24:00", the end of the day. A watch runs on Days, or once on Date and then expires. Language,
+// times; for a departure or a route End is the planned departure, and a home or agent watch may end
+// at "24:00", the end of the day. A watch runs on Days, or once on Date and then expires. Language,
 // such as Russian, is what its messages are rewritten into before they are sent; empty means the
 // English text as is.
 type Spec struct {
 	Kind         string     `json:"kind"`
 	Target       Target     `json:"target"`
 	Condition    *Condition `json:"condition,omitempty"`
+	Check        *Check     `json:"check,omitempty"`
 	Triggers     []string   `json:"triggers"`
 	DelayMinutes int        `json:"delay_minutes,omitempty"`
 	Days         []string   `json:"days,omitempty"`
@@ -211,6 +243,10 @@ type Occurrence struct {
 	// Since is when the watched condition started holding, as the previous check reported it; zero
 	// when it was not holding. It is carried across midnight like Previous.
 	Since time.Time
+	// Checked is when the watch was last checked, successfully or not; zero before its first check.
+	// An agent watch's window starts from the previous window's Previous, Since, and Checked
+	// whatever the gap, since what it watches changes over days rather than within one.
+	Checked time.Time
 }
 
 // Evaluator checks the watches of one kind. It must be safe to call from one goroutine at a time
@@ -247,6 +283,9 @@ type Observation struct {
 	// Since is when the watched condition started holding, zero when it does not hold. The service
 	// stores it with every successful check and hands it back as Occurrence.Since.
 	Since time.Time
+	// Private is set when the check read content that must stay private, such as Notion pages, so
+	// a turn that is told about the alert becomes private too.
+	Private bool
 }
 
 // UpstreamError marks a check that failed because an outside service did, for metrics.
@@ -289,6 +328,8 @@ type Alert struct {
 	Enabled     bool
 	MutedOn     string
 	Language    string
+	// Private is Observation.Private of the check that queued the alert.
+	Private bool
 }
 
 type Repository interface {
@@ -348,6 +389,8 @@ func (s Spec) Label() string {
 			return name
 		}
 		return name + ": " + s.Condition.Describe()
+	case KindAgent:
+		return target.Name
 	default:
 		return s.Kind
 	}
@@ -355,6 +398,18 @@ func (s Spec) Label() string {
 
 // DescribeDays is when a watch runs, such as "weekdays" or "once, Mon 5 Oct".
 func (s Spec) DescribeDays() string {
+	days := s.describeDays()
+	if s.Check != nil && s.Check.Until != "" {
+		until, err := time.Parse(dateLayout, s.Check.Until)
+		if err != nil {
+			return days + ", until " + s.Check.Until
+		}
+		return days + ", until " + until.Format("Mon 2 Jan")
+	}
+	return days
+}
+
+func (s Spec) describeDays() string {
 	if s.Date != "" {
 		day, err := time.Parse(dateLayout, s.Date)
 		if err != nil {
@@ -400,19 +455,28 @@ func (s Spec) DescribeWindow() string {
 
 // checkEvery is how often the watch's kind is checked, as the user reads it.
 func (s Spec) checkEvery() string {
-	if s.Kind == KindHome {
+	switch s.Kind {
+	case KindHome:
 		return "checked every minute"
+	case KindAgent:
+		if s.Check != nil {
+			return fmt.Sprintf("checked every %d minutes, each check a model turn on your own subscription", s.Check.IntervalMinutes)
+		}
 	}
 	return fmt.Sprintf("checked every %d minutes and every %d in the last %d", int(CheckInterval.Minutes()), int(FinalCheckInterval.Minutes()), int(FinalStretch.Minutes()))
 }
 
 // Describe is the watch's definition as the user confirms it.
 func (s Spec) Describe() string {
-	lines := []string{
-		"Days: " + s.DescribeDays(),
-		fmt.Sprintf("Window: %s (%s), %s", s.DescribeWindow(), s.Zone, s.checkEvery()),
-		"Tells you about: " + s.DescribeTriggers(),
+	var lines []string
+	if s.Kind == KindAgent && s.Check != nil {
+		lines = append(lines, "Checks: "+s.Check.Instruction, "Condition: "+s.Check.Condition)
 	}
+	lines = append(lines,
+		"Days: "+s.DescribeDays(),
+		fmt.Sprintf("Window: %s (%s), %s", s.DescribeWindow(), s.Zone, s.checkEvery()),
+		"Tells you about: "+s.DescribeTriggers(),
+	)
 	if s.Language != "" {
 		lines = append(lines, "Messages in: "+s.Language)
 	}
@@ -434,6 +498,9 @@ func (s Spec) OccurrenceAt(now time.Time) (Occurrence, bool) {
 	} else if !slices.Contains(s.Days, weekdayName(local.Weekday())) {
 		return Occurrence{}, false
 	}
+	if s.Check != nil && s.Check.Until != "" && date > s.Check.Until {
+		return Occurrence{}, false
+	}
 	start, startErr := clockOn(local, s.Start)
 	end, endErr := clockOn(local, s.End)
 	if startErr != nil || endErr != nil {
@@ -442,16 +509,21 @@ func (s Spec) OccurrenceAt(now time.Time) (Occurrence, bool) {
 	return Occurrence{Date: date, Start: start, End: end}, true
 }
 
-// Expired reports whether a one-off watch's window has ended.
+// Expired reports whether a one-off watch's window, or the last day of an agent watch with an
+// end date, has ended.
 func (s Spec) Expired(now time.Time) bool {
-	if s.Date == "" {
+	last := s.Date
+	if s.Check != nil && s.Check.Until != "" {
+		last = s.Check.Until
+	}
+	if last == "" {
 		return false
 	}
 	location, err := loadZone(s.Zone)
 	if err != nil {
 		return false
 	}
-	day, err := time.ParseInLocation(dateLayout, s.Date, location)
+	day, err := time.ParseInLocation(dateLayout, last, location)
 	if err != nil {
 		return false
 	}
@@ -459,12 +531,16 @@ func (s Spec) Expired(now time.Time) bool {
 	return err == nil && now.After(end)
 }
 
+// allDay reports whether a kind is watched through whole days by default rather than around a
+// departure or within a short fixed window.
+func allDay(kind string) bool { return kind == KindHome || kind == KindAgent }
+
 // normalize validates a spec and puts it in its canonical form: defaults filled in, triggers and
 // days in their fixed order, and names trimmed. now rejects a one-off window already over.
 func normalize(spec Spec, now time.Time) (Spec, error) {
 	allowed, known := kindTriggers[spec.Kind]
 	if !known {
-		return Spec{}, fmt.Errorf("the kind must be departure, disruptions, route, or home")
+		return Spec{}, fmt.Errorf("the kind must be departure, disruptions, route, home, or agent")
 	}
 	target, err := normalizeTarget(spec.Kind, spec.Target)
 	if err != nil {
@@ -477,11 +553,14 @@ func normalize(spec Spec, now time.Time) (Spec, error) {
 	if spec.Condition, err = normalizeCondition(spec.Kind, spec.Condition); err != nil {
 		return Spec{}, err
 	}
+	if spec.Check, err = normalizeCheck(spec.Kind, spec.Check); err != nil {
+		return Spec{}, err
+	}
 
 	given := uniqueStrings(spec.Triggers)
 	if len(given) == 0 {
 		given = allowed
-		if spec.Kind == KindHome && !spec.Condition.numeric() {
+		if spec.Kind == KindAgent || spec.Kind == KindHome && !spec.Condition.numeric() {
 			given = []string{TriggerEnter}
 		}
 	}
@@ -510,7 +589,7 @@ func normalize(spec Spec, now time.Time) (Spec, error) {
 	if err != nil {
 		return Spec{}, err
 	}
-	if spec.Kind == KindHome {
+	if allDay(spec.Kind) {
 		if spec.Start == "" {
 			spec.Start = startOfDay
 		}
@@ -519,7 +598,7 @@ func normalize(spec Spec, now time.Time) (Spec, error) {
 		}
 	}
 	start, startErr := clockOffset(spec.Start, false)
-	end, endErr := clockOffset(spec.End, spec.Kind == KindHome)
+	end, endErr := clockOffset(spec.End, allDay(spec.Kind))
 	if startErr != nil || endErr != nil {
 		return Spec{}, fmt.Errorf("times must be local HH:MM, such as 07:42")
 	}
@@ -530,7 +609,7 @@ func normalize(spec Spec, now time.Time) (Spec, error) {
 		if length < minimumFixedWindow || length > maximumFixedWindow {
 			return Spec{}, fmt.Errorf("the window must run forward within one day, between %d minutes and %d hours long", int(minimumFixedWindow.Minutes()), int(maximumFixedWindow.Hours()))
 		}
-	case KindHome:
+	case KindHome, KindAgent:
 		if length < minimumFixedWindow {
 			return Spec{}, fmt.Errorf("the window must run forward within one day, at least %d minutes long, and may end at 24:00", int(minimumFixedWindow.Minutes()))
 		}
@@ -540,7 +619,7 @@ func normalize(spec Spec, now time.Time) (Spec, error) {
 		}
 	}
 
-	if spec.Kind == KindHome && len(spec.Days) == 0 && spec.Date == "" {
+	if allDay(spec.Kind) && len(spec.Days) == 0 && spec.Date == "" {
 		spec.Days = slices.Clone(weekdays)
 	}
 	switch hasDays, hasDate := len(spec.Days) > 0, spec.Date != ""; {
@@ -567,6 +646,19 @@ func normalize(spec Spec, now time.Time) (Spec, error) {
 			return Spec{}, fmt.Errorf("days must be mon, tue, wed, thu, fri, sat, or sun")
 		}
 		spec.Days = days
+	}
+	if spec.Check != nil && spec.Check.Until != "" {
+		if spec.Date != "" {
+			return Spec{}, fmt.Errorf("give either one date for a one-off watch or the last day with until, not both")
+		}
+		day, err := time.ParseInLocation(dateLayout, spec.Check.Until, location)
+		if err != nil {
+			return Spec{}, fmt.Errorf("until must be YYYY-MM-DD")
+		}
+		spec.Check.Until = day.Format(dateLayout)
+		if lastEnd, _ := clockOn(day, spec.End); !lastEnd.After(now) {
+			return Spec{}, fmt.Errorf("that last day is already over")
+		}
 	}
 	return spec, nil
 }
@@ -619,6 +711,8 @@ func normalizeTarget(kind string, target Target) (Target, error) {
 		if err == nil && normalized.Entity == "" && normalized.Name == "" {
 			return Target{}, fmt.Errorf("a home watch needs the name of the device or sensor to watch")
 		}
+	case KindAgent:
+		normalized.Name = field(target.Name, "name", true)
 	}
 	return normalized, err
 }
@@ -677,6 +771,49 @@ func normalizeCondition(kind string, condition *Condition) (*Condition, error) {
 		return nil, fmt.Errorf("for_minutes must be between 0 and %d", maximumForMinutes)
 	}
 	return &normalized, nil
+}
+
+// normalizeCheck checks an agent watch's check and refuses one on any other kind.
+func normalizeCheck(kind string, check *Check) (*Check, error) {
+	if kind != KindAgent {
+		if check != nil {
+			return nil, fmt.Errorf("only an agent watch takes a check")
+		}
+		return nil, nil
+	}
+	if check == nil {
+		return nil, fmt.Errorf("an agent watch needs a check: an instruction and a condition")
+	}
+	instruction, err := cleanText(check.Instruction, "the check's instruction", maximumInstruction)
+	if err != nil {
+		return nil, err
+	}
+	condition, err := cleanText(check.Condition, "the check's condition", maximumCheckClause)
+	if err != nil {
+		return nil, err
+	}
+	normalized := Check{Instruction: instruction, Condition: condition, IntervalMinutes: check.IntervalMinutes, Until: strings.TrimSpace(check.Until)}
+	if normalized.IntervalMinutes == 0 {
+		normalized.IntervalMinutes = DefaultAgentIntervalMinutes
+	}
+	if normalized.IntervalMinutes < minimumAgentInterval || normalized.IntervalMinutes > maximumAgentInterval {
+		return nil, fmt.Errorf("interval_minutes must be between %d and %d", minimumAgentInterval, maximumAgentInterval)
+	}
+	return &normalized, nil
+}
+
+// cleanText accepts between 1 and limit characters, keeping line breaks but no other control
+// characters.
+func cleanText(value, name string, limit int) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("%s is required", name)
+	}
+	invalid := func(r rune) bool { return unicode.IsControl(r) && r != '\n' }
+	if !utf8.ValidString(value) || utf8.RuneCountInString(value) > limit || strings.IndexFunc(value, invalid) >= 0 {
+		return "", fmt.Errorf("%s must be at most %d characters", name, limit)
+	}
+	return value, nil
 }
 
 // cleanName accepts a single line of at most maximumNameRunes characters.
