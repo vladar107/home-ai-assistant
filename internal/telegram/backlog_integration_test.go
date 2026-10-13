@@ -175,7 +175,8 @@ func TestBacklogCommandMarksDoneAndDeletesOwnItems(t *testing.T) {
 		t.Fatalf("deleted item found = %v %v", found, err)
 	}
 
-	for updateID, data := range map[int64]string{5: "bl:done:bbbbbbb1:1", 6: "bl:del:bbbbbbb1:1"} {
+	for index, data := range []string{"bl:done:bbbbbbb1:1", "bl:del:bbbbbbb1:1"} {
+		updateID := int64(5 + index)
 		h.push(callbackUpdate(updateID, 101, settingsMessageID(2), data))
 		h.wantAnswer(updateID)
 		h.nextEdit()
