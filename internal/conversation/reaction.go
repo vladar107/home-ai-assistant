@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // ReconsiderMessage starts the turn that a 👎 on a reply asks for, followed by when that reply was
@@ -149,4 +150,75 @@ func feedbackClass(emojis []string) string {
 		}
 	}
 	return class
+}
+
+// replyAsReaction reports whether a chat turn's reply, made only of emoji, was answered with a
+// reaction instead, so it goes unsent. The model is told to react rather than write emoji but does
+// not always do so; a failed reaction leaves the reply to be sent.
+func (s *Service) replyAsReaction(ctx context.Context, principalID, reply string) bool {
+	if s.config.Reactions == nil {
+		return false
+	}
+	emoji, ok := onlyEmoji(reply)
+	if !ok {
+		return false
+	}
+	reacted, err := s.config.Reactions.ReplyAsReaction(ctx, principalID, emoji)
+	if err != nil {
+		s.telemetry.ContextLogger(ctx, s.logger).Warn(
+			"conversation.reply_reaction.failed",
+			"principal_id", principalID,
+		)
+		return false
+	}
+	return reacted
+}
+
+const zeroWidthJoiner = '‍'
+
+// onlyEmoji returns the first emoji of a text made only of emoji and the space between them, or
+// false for any other text.
+func onlyEmoji(text string) (string, bool) {
+	var first strings.Builder
+	seen, firstDone, joined := false, false, false
+	for _, r := range strings.TrimSpace(text) {
+		switch {
+		case unicode.IsSpace(r):
+			firstDone = firstDone || seen
+			joined = false
+		case emojiModifier(r):
+			if !seen {
+				return "", false
+			}
+			if !firstDone {
+				first.WriteRune(r)
+			}
+			joined = r == zeroWidthJoiner
+		case pictographic(r):
+			if seen && !joined {
+				firstDone = true
+			}
+			seen, joined = true, false
+			if !firstDone {
+				first.WriteRune(r)
+			}
+		default:
+			return "", false
+		}
+	}
+	return first.String(), seen
+}
+
+// emojiModifier reports whether a rune only changes the emoji before it: a variation selector, a
+// skin tone, a joiner, a keycap, or a subdivision flag's tag.
+func emojiModifier(r rune) bool {
+	return r == '︎' || r == '️' || r == zeroWidthJoiner || r == '⃣' ||
+		(r >= 0x1F3FB && r <= 0x1F3FF) || (r >= 0xE0020 && r <= 0xE007F)
+}
+
+// pictographic reports whether a rune starts an emoji, judged by the blocks that hold them. Those
+// blocks also hold a few plain symbols; a reply of only those is treated as emoji too.
+func pictographic(r rune) bool {
+	return (r >= 0x1F000 && r <= 0x1FAFF) || (r >= 0x2600 && r <= 0x27BF) ||
+		(r >= 0x2300 && r <= 0x23FF) || (r >= 0x2B00 && r <= 0x2BFF)
 }

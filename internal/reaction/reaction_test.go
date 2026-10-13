@@ -24,6 +24,8 @@ type unusedTelemetry struct{}
 
 func (unusedTelemetry) RecordReaction(context.Context, string, string) {}
 
+func (unusedTelemetry) RecordReactionConversion(context.Context, string, string) {}
+
 // react is offered only on a watched chat turn that answers the user's own message.
 func TestReactIsOfferedOnlyOnWatchedTurnsAnsweringTheUser(t *testing.T) {
 	provider, err := NewProvider(unusedOrigins{}, unusedReactor{}, unusedTelemetry{})

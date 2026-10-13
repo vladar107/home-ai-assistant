@@ -22,6 +22,7 @@ type Run struct {
 	private  bool
 	// userMessage marks a run that answers a message the user wrote, rather than one of ours.
 	userMessage bool
+	reacted     bool
 	seen        map[string]struct{}
 }
 
@@ -99,6 +100,20 @@ func (r *Run) UserMessage() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.userMessage
+}
+
+// MarkReacted records that the run set a reaction on the user's message.
+func (r *Run) MarkReacted() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.reacted = true
+}
+
+// Reacted reports whether the run set a reaction on the user's message.
+func (r *Run) Reacted() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.reacted
 }
 
 // Seen reports whether the address appeared whole in the run's instruction or in outside text the

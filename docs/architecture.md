@@ -241,8 +241,11 @@ not_retryable), and each retry is logged at debug level.
    continuation after Confirm, can also set one emoji reaction on that message
    with `react`; when the reaction is the whole answer the turn replies
    `[nothing-to-add]`, and delivery sends no text, not even the line marking a
-   resumed conversation, but still sends the turn's proposals.
-   `home_agent.reactions.sent` counts the reactions by emoji.
+   resumed conversation, but still sends the turn's proposals. Such a turn whose
+   reply is only emoji sends no text either: its first emoji, when it is one the
+   tool may set, becomes the reaction, or the reply is dropped when the turn
+   already reacted. `home_agent.reactions.sent` counts the reactions by emoji
+   and `home_agent.reactions.converted` the replies turned into one.
    The user's own reactions to their recorded replies, in their private chat,
    are kept as feedback: only the latest class (positive, negative, or other) and
    emoji per message, never the text, and removing the reaction removes it. The

@@ -666,6 +666,9 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 			reply, reportedKind = failureReply(runErr)
 		default:
 			reply = result.Response
+			if s.replyAsReaction(turnCtx, request.PrincipalID, reply) {
+				reply = NothingToAdd
+			}
 			if !strings.Contains(reply, NothingToAdd) {
 				plainReply = reply
 			}

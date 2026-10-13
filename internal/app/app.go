@@ -579,6 +579,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 				SearchChecks: searchChecks,
 				History:      conversationHistory,
 				DisplayNames: displayNames,
+				Reactions:    reactions,
 			},
 			a.store,
 			runtime,

@@ -400,6 +400,16 @@ type Config struct {
 	// DisplayNames tells each turn which household member its user is; a principal without a
 	// name goes unnamed.
 	DisplayNames map[string]string
+	// Reactions turns a chat turn's emoji-only reply into a reaction on the user's message; nil
+	// sends such replies as text.
+	Reactions Reactions
+}
+
+// Reactions answers a chat turn with a reaction instead of its emoji-only reply. ReplyAsReaction
+// is called under the turn's context with the reply's first emoji, and reports whether the reply
+// may go unsent.
+type Reactions interface {
+	ReplyAsReaction(ctx context.Context, principalID, emoji string) (bool, error)
 }
 
 // SearchChecks decides one web search query of a run. A run with nobody to confirm a search, such

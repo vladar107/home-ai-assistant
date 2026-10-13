@@ -425,3 +425,80 @@ func TestThumbsDownOnAnEarlierConversationReturnsToIt(t *testing.T) {
 	next.answer <- agentruntime.RunResult{Response: "You're welcome."}
 	h.wantReply(101, 5, "You're welcome.")
 }
+
+// A reply of only emoji to the user's message becomes a reaction and sends no text: the first emoji
+// is set when the turn has not reacted, and the reply is dropped when it has. An emoji outside the
+// curated set and a reply with words are sent as written.
+func TestEmojiOnlyRepliesBecomeReactions(t *testing.T) {
+	runtime := newControlledRuntime()
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{reactions: true})
+	h.provision("alice", "account-alice")
+	h.start()
+
+	h.push(textUpdate(1, 101, "thanks"))
+	receive(t, h.ctx, runtime.calls).answer <- agentruntime.RunResult{Response: " 👍 "}
+	h.waitState(1, "delivered")
+
+	h.push(textUpdate(2, 101, "the plants are watered"))
+	receive(t, h.ctx, runtime.calls).answer <- agentruntime.RunResult{Response: "❤️❤️ 🎉"}
+	h.waitState(2, "delivered")
+
+	h.push(textUpdate(3, 101, "got it"))
+	reacted := receive(t, h.ctx, runtime.calls)
+	react(t, reacted, "👌")
+	reacted.answer <- agentruntime.RunResult{Response: "👌🏻"}
+	h.waitState(3, "delivered")
+
+	if sent := h.sentTexts(); len(sent) != 0 {
+		t.Fatalf("emoji-only replies sent %q", sent)
+	}
+	want := []setReaction{
+		{chatID: 101, messageID: requestMessageID(1), emoji: "👍"},
+		{chatID: 101, messageID: requestMessageID(2), emoji: "❤"},
+		{chatID: 101, messageID: requestMessageID(3), emoji: "👌"},
+	}
+	if got := h.setReactions(); !slices.Equal(got, want) {
+		t.Fatalf("reactions = %+v, want %+v", got, want)
+	}
+	if reacted, dropped := h.feedbackCount("converted:reacted"), h.feedbackCount("converted:dropped"); reacted != 2 || dropped != 1 {
+		t.Fatalf("counted %d reacted and %d dropped conversions, want 2 and 1", reacted, dropped)
+	}
+
+	h.push(textUpdate(4, 101, "a unicorn please"))
+	receive(t, h.ctx, runtime.calls).answer <- agentruntime.RunResult{Response: "🦄"}
+	h.wantReply(101, 4, "🦄")
+	h.waitState(4, "delivered")
+
+	h.push(textUpdate(5, 101, "I fixed the tap"))
+	receive(t, h.ctx, runtime.calls).answer <- agentruntime.RunResult{Response: "Nice 👍"}
+	h.wantReply(101, 5, "Nice 👍")
+	h.waitState(5, "delivered")
+	if got := h.setReactions(); len(got) != len(want) {
+		t.Fatalf("reactions = %+v, want only the first %d", got, len(want))
+	}
+}
+
+// A turn that answers one of our own messages has no user message to react to, so its emoji-only
+// reply is sent as text.
+func TestEmojiOnlyReplyToOurOwnMessageIsSent(t *testing.T) {
+	runtime := newControlledRuntime()
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{reactions: true})
+	h.provision("alice", "account-alice")
+	h.start()
+
+	h.push(textUpdate(1, 101, "which plants need water on Sundays"))
+	receive(t, h.ctx, runtime.calls).answer <- agentruntime.RunResult{Response: "The ferns."}
+	reply := h.nextMessage()
+	h.waitState(1, "delivered")
+
+	h.push(reactionUpdate(2, 101, reply.messageID, "👎"))
+	reconsider := receive(t, h.ctx, runtime.calls)
+	reconsider.answer <- agentruntime.RunResult{Response: "🤔"}
+	if answer := h.nextMessage(); answer.replyTo != reply.messageID || answer.text != "🤔" {
+		t.Fatalf("reconsider answer = %+v", answer)
+	}
+	h.waitState(2, "delivered")
+	if got := h.setReactions(); len(got) != 0 {
+		t.Fatalf("reactions = %+v", got)
+	}
+}

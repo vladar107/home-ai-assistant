@@ -84,6 +84,7 @@ type Telemetry struct {
 	reactionsSent                metric.Int64Counter
 	reactionsReceived            metric.Int64Counter
 	reactionReconsiders          metric.Int64Counter
+	reactionConversions          metric.Int64Counter
 	tasks                        taskInstruments
 	watches                      watchInstruments
 }
@@ -416,6 +417,9 @@ func (t *Telemetry) createBusinessInstruments(meter metric.Meter) error {
 	if t.reactionReconsiders, err = counter("home_agent.reactions.reconsiders", "Reconsider turns asked for by a negative reaction, by outcome.", "{turn}"); err != nil {
 		return err
 	}
+	if t.reactionConversions, err = counter("home_agent.reactions.converted", "Emoji-only replies turned into a reaction, by outcome.", "{reply}"); err != nil {
+		return err
+	}
 	if err := t.createTaskInstruments(meter); err != nil {
 		return err
 	}
@@ -638,10 +642,10 @@ func (t *Telemetry) StartToolCall(ctx context.Context, principal, tool string) (
 }
 
 // ZeroRareOutcomes creates each principal's rare failure series, its series for each reaction the
-// bot may set, and its series for each class of a user's reaction and each reconsider outcome, at
-// zero, so increase() sees their first occurrence. The label tuples must match the ones
-// StartConversationTurn, StartModelCall, RecordReaction, RecordReplyFeedback, and RecordReconsider
-// record.
+// bot may set, and its series for each class of a user's reaction, each reconsider outcome, and
+// each reply conversion outcome, at zero, so increase() sees their first occurrence. The label
+// tuples must match the ones StartConversationTurn, StartModelCall, RecordReaction,
+// RecordReplyFeedback, RecordReconsider, and RecordReactionConversion record.
 func (t *Telemetry) ZeroRareOutcomes(ctx context.Context, principals, turnErrorKinds, reactions, feedbackClasses []string) {
 	for _, principal := range principals {
 		for _, errorKind := range turnErrorKinds {
@@ -671,6 +675,9 @@ func (t *Telemetry) ZeroRareOutcomes(ctx context.Context, principals, turnErrorK
 		}
 		for _, outcome := range []string{"started", "busy"} {
 			t.reactionReconsiders.Add(ctx, 0, metric.WithAttributes(principalAttr(principal), labelAttr("home_agent.outcome", outcome, "unknown")))
+		}
+		for _, outcome := range []string{"reacted", "dropped"} {
+			t.reactionConversions.Add(ctx, 0, metric.WithAttributes(principalAttr(principal), labelAttr("home_agent.outcome", outcome, "unknown")))
 		}
 	}
 }
@@ -794,6 +801,14 @@ func (t *Telemetry) RecordReaction(ctx context.Context, principal, emoji string)
 	t.reactionsSent.Add(ctx, 1, metric.WithAttributes(
 		principalAttr(principal),
 		labelAttr("home_agent.emoji", emoji, "unknown"),
+	))
+}
+
+// RecordReactionConversion counts an emoji-only reply turned into a reaction: "reacted" or "dropped".
+func (t *Telemetry) RecordReactionConversion(ctx context.Context, principal, outcome string) {
+	t.reactionConversions.Add(ctx, 1, metric.WithAttributes(
+		principalAttr(principal),
+		labelAttr("home_agent.outcome", outcome, "unknown"),
 	))
 }
 

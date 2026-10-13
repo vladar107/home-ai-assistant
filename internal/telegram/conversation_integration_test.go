@@ -293,7 +293,8 @@ type conversationHarness struct {
 	reactions         []setReaction
 	// reactionCounts counts the reactions the react tool reported to telemetry, by emoji.
 	reactionCounts map[string]int
-	// feedbackCounts counts the user reactions and reconsider outcomes the conversation reported.
+	// feedbackCounts counts the user reactions and reconsider outcomes the conversation reported,
+	// and the reply conversions the react tool reported.
 	feedbackCounts map[string]int
 }
 
@@ -467,14 +468,16 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 			t.Fatal(err)
 		}
 	}
+	var reactions conversation.Reactions
 	if options.reactions {
-		reactions, err := reaction.NewProvider(h.store, h.client, reactionTelemetry{h})
+		provider, err := reaction.NewProvider(h.store, h.client, reactionTelemetry{h})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := broker.Register(reactions); err != nil {
+		if err := broker.Register(provider); err != nil {
 			t.Fatal(err)
 		}
+		reactions = provider
 	}
 	h.credentialsDir = filepath.Join(t.TempDir(), "integrations")
 	var notionController NotionController
@@ -741,7 +744,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		recent = options.recent
 	}
 	h.conversation, err = conversation.NewService(
-		conversation.Config{Recent: recent, Memory: memoryTurns, Exposure: exposures, SearchChecks: searchChecks, Locations: locationTurns, TurnTimeout: turnTimeout, FollowUp: h.approvals, Notice: notices, Attachments: h.attachments, WebSearch: webSearch, Cards: cards, Photos: photos, Location: options.location, Now: now, History: conversationHistory,
+		conversation.Config{Recent: recent, Memory: memoryTurns, Exposure: exposures, SearchChecks: searchChecks, Locations: locationTurns, TurnTimeout: turnTimeout, FollowUp: h.approvals, Notice: notices, Attachments: h.attachments, WebSearch: webSearch, Cards: cards, Photos: photos, Location: options.location, Now: now, History: conversationHistory, Reactions: reactions,
 			TypingInterval: options.typingInterval, DraftDelay: options.draftDelay, DraftInterval: options.draftInterval},
 		h.store, runtime, h.client, broker, h.connections, logger, integrationTelemetry{turns: h.turns, indicatorFailure: h.recordIndicatorFailure, feedback: h.recordFeedback},
 	)
@@ -1252,6 +1255,10 @@ func (r reactionTelemetry) RecordReaction(_ context.Context, _, emoji string) {
 	r.h.mu.Lock()
 	defer r.h.mu.Unlock()
 	r.h.reactionCounts[emoji]++
+}
+
+func (r reactionTelemetry) RecordReactionConversion(_ context.Context, _, outcome string) {
+	r.h.recordFeedback("converted:" + outcome)
 }
 
 func (h *conversationHarness) sentTexts() []string {
