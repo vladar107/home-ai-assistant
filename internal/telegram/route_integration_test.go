@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
 // stationsGateway is an NS gateway that knows the recorded station list and nothing else, which is
@@ -34,7 +36,7 @@ func stationsGateway(t *testing.T) string {
 // owner.
 func TestRouteIsSavedChangedAndRemovedOnConfirm(t *testing.T) {
 	runtime := newControlledRuntime()
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: newTestClock(t, mondayMorning), ns: stationsGateway(t), routes: true})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: newTestClock(t, mondayMorning), ns: stationsGateway(t), routes: true, providers: []tools.Provider{outsideProvider{}}})
 	h.provision("alice", "account-alice")
 	h.provision("bob", "account-bob")
 	h.start()
@@ -60,7 +62,7 @@ func TestRouteIsSavedChangedAndRemovedOnConfirm(t *testing.T) {
 		return stored
 	}
 
-	saved := h.runTool(runtime, 1, 101, "route_save", `{"name":"work","days":["mon","tue","wed","thu","fri"],"arrive_by":"08:45","legs":[`+
+	saved := h.runExposedTool(runtime, 1, 101, "route_save", `{"name":"work","days":["mon","tue","wed","thu","fri"],"arrive_by":"08:45","legs":[`+
 		`{"mode":"bike","minutes":6},{"mode":"train","from":"amfs","to":"Utrecht","departures":["07:56"]},{"mode":"walk","minutes":10}]}`)
 	if saved.IsError {
 		t.Fatalf("save = %+v", saved)
@@ -122,15 +124,12 @@ func TestRouteDeletesFromJobs(t *testing.T) {
 	h.provision("alice", "account-alice")
 	h.start()
 
-	if saved := h.runTool(runtime, 1, 101, "route_save", `{"name":"gym","days":["sat"],"legs":[{"mode":"train","from":"Amersfoort","to":"Utrecht"}]}`); saved.IsError {
+	if saved := h.runTool(runtime, 1, 101, "route_save", `{"name":"gym","days":["sat"],"legs":[{"mode":"train","from":"Amersfoort","to":"Utrecht"}]}`); saved.IsError || !strings.Contains(saved.Text, "Done: the change is made") {
 		t.Fatalf("save = %+v", saved)
 	}
-	proposal := h.nextMessage()
-	accept, _ := approvalButtons(t, proposal.keyboard)
-	h.push(callbackUpdate(2, 101, proposal.messageID, accept))
-	h.wantAnswer(2)
-	h.nextEdit()
-	h.continueTurn(runtime, 2)
+	if done := h.nextMessage(); !strings.HasPrefix(done.text, "Done:") {
+		t.Fatalf("done message = %+v", done)
+	}
 
 	jobs := h.requestJobs(3)
 	data := buttonData(jobs.keyboard)

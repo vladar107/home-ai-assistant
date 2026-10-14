@@ -170,6 +170,12 @@ func (p *proposals) Propose(_ context.Context, _ string, proposal approval.Propo
 	return approval.Record{}, nil
 }
 
+// Act records the change as a proposal, as it is made outside a clean chat turn.
+func (p *proposals) Act(ctx context.Context, principalID string, proposal approval.Proposal) (string, error) {
+	_, err := p.Propose(ctx, principalID, proposal)
+	return approval.ProposedText, err
+}
+
 func (p *proposals) last(t *testing.T) approval.Proposal {
 	t.Helper()
 	p.mu.Lock()

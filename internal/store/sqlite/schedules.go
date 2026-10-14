@@ -134,6 +134,17 @@ func (s *Store) DeleteScheduledJob(ctx context.Context, principalID, jobID strin
 	return affectedOne(result, "deleted scheduled job")
 }
 
+func (s *Store) DeleteUnchangedScheduledJob(ctx context.Context, principalID, jobID string, updatedAt time.Time) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("delete scheduled job: SQLite store is not open")
+	}
+	result, err := s.db.ExecContext(ctx, `DELETE FROM scheduled_jobs WHERE id = ? AND principal_id = ? AND updated_at = ?`, jobID, principalID, formatTime(updatedAt))
+	if err != nil {
+		return false, fmt.Errorf("delete scheduled job: %w", err)
+	}
+	return affectedOne(result, "deleted scheduled job")
+}
+
 func (s *Store) DueScheduledJobs(ctx context.Context, now time.Time) ([]schedule.Job, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("list due scheduled jobs: SQLite store is not open")

@@ -23,7 +23,14 @@ borrowed between users.
   and replying to an earlier answer continues its conversation. The assistant
   can search and read the user's own earlier conversations when asked about
   something discussed before.
-- **Notion.** Search, read pages, and query data sources. Creates and updates are
+- **Act and tell.** A clear request to set up or change a scheduled job, a
+  watch, a saved route, a memory instruction, or a Notion property is done at
+  once. A "Done" message follows the reply with an Undo button per action,
+  which works once for 24 hours. Once the conversation has read anything from
+  outside the household, such as a web page, mail, or a file the user sent,
+  the same changes wait for Confirm.
+- **Notion.** Search, read pages, and query data sources. A property update the
+  user asked for runs at once with Undo; new pages and appended content are
   proposed and run only after Confirm.
 - **Gmail.** Read-only search and reading of the user's own mailbox.
 - **NAS files.** Browse and read the user's own folders, receive files in the
@@ -49,15 +56,17 @@ borrowed between users.
 - **Day cards.** A rendered image with the day's weather and trains, sent with
   the reply as its caption.
 - **Schedules.** Recurring or one-time model turns ("every weekday at 07:30, plan
-  my trip to work") that the user confirms, can change later in conversation, and
+  my trip to work") that are set up when the user asks, can change later in conversation, and
   that survive restarts, and reminders ("remind me at five to call mom") that are
   set at once and can be snoozed. The conversation knows each job's instructions
   and the reports they sent: replying to a report, or asking about "the report
   this morning", works after `/new` and restarts.
 - **Memory.** Each user has a small memory of instructions and facts that the
   assistant keeps across `/new`, scheduled runs, and restarts. Facts are saved
-  at once and shown in the reply; instructions and anything learned after
-  reading outside content are confirmed first. After a 👎, the assistant may
+  at once, and so are instructions the user states, with Undo, unless the
+  conversation has read device or outside content. A fact after outside
+  content, an instruction after either, and lessons from a 👎 are confirmed
+  first. After a 👎, the assistant may
   propose one instruction so the mistake does not recur, and when a correction
   states a lasting preference it offers to keep it. `/memory` lists and deletes
   entries, marking learned ones, and `/settings` turns memory, or learning from

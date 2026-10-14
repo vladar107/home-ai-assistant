@@ -12,6 +12,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
+	"github.com/vladar107/home-ai-assistant/internal/tools"
 	"github.com/vladar107/home-ai-assistant/internal/turnstate"
 )
 
@@ -128,12 +129,13 @@ func TestReactOnlyTurnInAResumedConversationSendsNothing(t *testing.T) {
 func TestContinuationAndScheduledRunsAreNotOfferedReact(t *testing.T) {
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, reactions: true})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, reactions: true, providers: []tools.Provider{outsideProvider{}}})
 	h.provision("alice", "account-alice")
 	h.start()
 
 	h.push(textUpdate(1, 101, "at 9 check whether my train is delayed"))
 	chat := receive(t, h.ctx, runtime.calls)
+	readOutside(t, chat)
 	result, err := chat.request.Tools.Executor.Execute(chat.ctx, agentruntime.ToolCall{
 		Name:      "schedule_propose",
 		Arguments: json.RawMessage(`{"name":"Train check","at":"2026-09-28 09:00","prompt":"Is my 9:30 train delayed?"}`),

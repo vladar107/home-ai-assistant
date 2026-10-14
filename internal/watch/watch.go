@@ -346,6 +346,8 @@ type Repository interface {
 	SetWatchEnabled(ctx context.Context, principalID, watchID string, enabled bool, now time.Time) (bool, error)
 	MuteWatch(ctx context.Context, principalID, watchID, date string) (bool, error)
 	DeleteWatch(ctx context.Context, principalID, watchID string) (bool, error)
+	// DeleteUnchangedWatch deletes the watch only while it was last changed at updatedAt.
+	DeleteUnchangedWatch(ctx context.Context, principalID, watchID string, updatedAt time.Time) (bool, error)
 	LoadWatchState(ctx context.Context, watchID, occurrence string) (State, bool, error)
 	// LastWatchAlertSequence returns the highest sequence queued for a window, 0 if none, so a
 	// window whose state was reset by an edit continues numbering after the alerts it already sent.

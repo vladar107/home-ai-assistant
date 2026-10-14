@@ -19,6 +19,9 @@ const (
 	toolPropose = "watch_propose"
 	toolUpdate  = "watch_update"
 	toolRemove  = "watch_remove"
+
+	// actTimeout lets a change made at once run as long as one made after Confirm.
+	actTimeout = 45 * time.Second
 )
 
 const listGuidance = "Watches: watch_list shows the user's watches with their ids. A watch checks a train or bus departure, a saved route, NS disruptions at some stations, or the state of a device or sensor at home during a daily window, in code and without a model, and messages the user only when something changes. The user manages watches with /jobs as well, and each alert has Mute today and Pause buttons."
@@ -31,7 +34,8 @@ func proposeGuidance(zone string, kinds []string) string {
 		"The kinds available now are: " + strings.Join(kinds, ", ") + ". " +
 		"A watch runs on days, such as mon to fri, or once on a date (YYYY-MM-DD) and then ends; times are local HH:MM in " + zone + " unless the user names another time zone. " +
 		"Set language to the language the user writes to you in, such as Russian, so the watch's messages are written in it; leave it out for English, and pass English to switch a watch back. " +
-		"watch_propose only proposes: after your reply the user sees the watch with Confirm and Reject buttons, so never claim it is set. watch_update proposes changing a watch by its id from watch_list, given only the fields that change; watch_remove proposes deleting one. Each user may have " + fmt.Sprint(MaximumWatchesPerPrincipal) + " watches."
+		"When the user asked for it in this conversation and the conversation has read no outside content, watch_propose, watch_update, and watch_remove make the change at once and the user can undo it; tell the user it is done. After outside content, such as a web page or an email, they only propose it with Confirm and Reject buttons, so never claim it is set. " +
+		"watch_update changes a watch by its id from watch_list, given only the fields that change; watch_remove deletes one. Each user may have " + fmt.Sprint(MaximumWatchesPerPrincipal) + " watches."
 	if transit {
 		guidance += " A departure watch is one train (mode train, from, to, optional via) or bus (mode bus, stop, line) with its planned departure time; checking starts minutes_before the departure, 90 by default, and ends at it. Its triggers are cancelled, partly_cancelled, delay (delay_minutes or more, 5 by default), and platform. " +
 			"A route watch names a saved route and the time the user leaves; its triggers are leg and arrival. A disruptions watch takes one or more stations and a fixed window, window_from to window_until; its triggers are new and changed. Omitting triggers means all of the kind's triggers. " +
@@ -97,24 +101,27 @@ const specProperties = `"mode":{"type":"string","enum":["train","bus"],"descript
 var writeDefinitions = []tools.Definition{
 	{
 		Name:        toolPropose,
-		Description: "Propose a watch that checks a departure, a saved route, NS disruptions, a device or sensor at home, or, as an agent watch, anything the tools can look at, during a daily window and messages the user only when something changes. The user must confirm.",
+		Description: "Set up a watch that checks a departure, a saved route, NS disruptions, a device or sensor at home, or, as an agent watch, anything the tools can look at, during a daily window and messages the user only when something changes. Done at once and undoable, or proposed for Confirm after outside content.",
 		Risk:        tools.RiskWrite,
+		Timeout:     actTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"kind":{"type":"string","enum":["departure","disruptions","route","home","agent"],"description":"What to watch."},` +
 			specProperties + `},"required":["kind"],"additionalProperties":false}`),
 	},
 	{
 		Name:        toolUpdate,
-		Description: "Propose changing one of the user's watches; omitted fields keep their current values. The user must confirm.",
+		Description: "Change one of the user's watches; omitted fields keep their current values. Done at once and undoable, or proposed for Confirm after outside content.",
 		Risk:        tools.RiskWrite,
+		Timeout:     actTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"watch_id":{"type":"string","description":"The id from watch_list."},` +
 			specProperties + `},"required":["watch_id"],"additionalProperties":false}`),
 	},
 	{
 		Name:        toolRemove,
-		Description: "Propose deleting one of the user's watches. The user must confirm.",
+		Description: "Delete one of the user's watches. Done at once and undoable, or proposed for Confirm after outside content.",
 		Risk:        tools.RiskWrite,
+		Timeout:     actTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"watch_id":{"type":"string","description":"The id from watch_list."}},` +
 			`"required":["watch_id"],"additionalProperties":false}`),
@@ -123,6 +130,7 @@ var writeDefinitions = []tools.Definition{
 
 var _ tools.Provider = (*Service)(nil)
 var _ approval.Executor = (*Service)(nil)
+var _ approval.Undoer = (*Service)(nil)
 
 // Contribute offers nothing until an evaluator is registered, so watches are never promised before
 // they can be checked; the write tools need the approval service as well.
@@ -415,7 +423,7 @@ func (s *Service) proposeWatch(ctx context.Context, principalID string, call too
 	case KindAgent:
 		summary = "Watch " + spec.Label() + "\n" + spec.Describe() + "\nYou get a message only when the answer changes."
 	}
-	return s.propose(ctx, principalID, call, approval.Proposal{Tool: toolPropose, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "watch", TargetKind: spec.Kind + " watch", TargetName: intentName(spec)}})
+	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolPropose, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "watch", TargetKind: spec.Kind + " watch", TargetName: intentName(spec)}})
 }
 
 func (s *Service) proposeUpdate(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
@@ -448,7 +456,7 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 	if !watch.Enabled {
 		summary += "\nIt stays paused until you resume it in /jobs."
 	}
-	return s.propose(ctx, principalID, call, approval.Proposal{Tool: toolUpdate, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "change", TargetKind: watch.Kind + " watch", TargetName: intentName(watch.Spec), NewName: intentName(spec)}})
+	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolUpdate, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "change", TargetKind: watch.Kind + " watch", TargetName: intentName(watch.Spec), NewName: intentName(spec)}})
 }
 
 func (s *Service) proposeRemoval(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
@@ -471,18 +479,20 @@ func (s *Service) proposeRemoval(ctx context.Context, principalID string, call t
 		return tools.Result{}, err
 	}
 	summary := "Stop watching " + watch.Label() + " (" + watch.DescribeDays() + ", " + watch.DescribeWindow() + ")."
-	return s.propose(ctx, principalID, call, approval.Proposal{Tool: toolRemove, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "remove", TargetKind: watch.Kind + " watch", TargetName: watch.Label()}})
+	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolRemove, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "remove", TargetKind: watch.Kind + " watch", TargetName: watch.Label()}})
 }
 
-func (s *Service) propose(ctx context.Context, principalID string, call tools.Call, proposal approval.Proposal) (tools.Result, error) {
-	if _, err := s.proposer.Propose(ctx, principalID, proposal); err != nil {
+// act makes the change at once in a clean turn and proposes it otherwise.
+func (s *Service) act(ctx context.Context, principalID string, call tools.Call, proposal approval.Proposal) (tools.Result, error) {
+	text, err := s.proposer.Act(ctx, principalID, proposal)
+	if err != nil {
 		if approval.Refused(err) {
 			return tools.Result{Text: err.Error(), IsError: true}, nil
 		}
 		s.logger.WarnContext(ctx, "watch.proposal.failed", "principal_id", principalID, "tool", call.Name, "error", err)
-		return tools.Result{Text: "the proposal could not be recorded", IsError: true}, nil
+		return tools.Result{Text: "the change could not be recorded", IsError: true}, nil
 	}
-	return tools.Result{Text: approval.ProposedText}, nil
+	return tools.Result{Text: text}, nil
 }
 
 func (s *Service) ActionTools() []string {
@@ -524,7 +534,11 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		if created {
 			s.logger.InfoContext(ctx, "watch.created", "principal_id", record.PrincipalID, "watch_id", record.ID, "kind", spec.Kind)
 		}
-		return approval.Outcome{Text: "Watching. " + s.nextWindow(spec)}, nil
+		undo, err := s.undoPayload(ctx, record.PrincipalID, record.ID, nil)
+		if err != nil {
+			return approval.Outcome{}, err
+		}
+		return approval.Outcome{Text: "Watching. " + s.nextWindow(spec), Undo: undo}, nil
 	case toolUpdate:
 		return s.executeUpdate(ctx, record)
 	case toolRemove:
@@ -532,14 +546,25 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
 			return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed action could not be read; nothing was deleted."}
 		}
-		deleted, err := s.Delete(ctx, record.PrincipalID, confirmed.WatchID)
+		// The whole watch is read before it goes, so an Undo can put it back.
+		watch, found, err := s.repository.LoadWatch(ctx, record.PrincipalID, confirmed.WatchID)
 		if err != nil {
 			return approval.Outcome{}, err
+		}
+		deleted := false
+		if found {
+			if deleted, err = s.Delete(ctx, record.PrincipalID, confirmed.WatchID); err != nil {
+				return approval.Outcome{}, err
+			}
 		}
 		if !deleted {
 			return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That watch no longer exists."}
 		}
-		return approval.Outcome{Text: "Deleted."}, nil
+		undo, err := json.Marshal(watchUndo{WatchID: watch.ID, Removed: &watch})
+		if err != nil {
+			return approval.Outcome{}, err
+		}
+		return approval.Outcome{Text: "Deleted.", Undo: undo}, nil
 	default:
 		return approval.Outcome{}, &approval.ActionError{Reason: "unavailable", Text: "That action is no longer available."}
 	}
@@ -575,10 +600,14 @@ func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (ap
 		return approval.Outcome{}, stale
 	}
 	s.logger.InfoContext(ctx, "watch.updated", "principal_id", record.PrincipalID, "watch_id", current.ID, "kind", spec.Kind)
-	if !current.Enabled {
-		return approval.Outcome{Text: "Changed. It stays paused until you resume it in /jobs."}, nil
+	undo, err := s.undoPayload(ctx, record.PrincipalID, current.ID, &current)
+	if err != nil {
+		return approval.Outcome{}, err
 	}
-	return approval.Outcome{Text: "Changed. " + s.nextWindow(spec)}, nil
+	if !current.Enabled {
+		return approval.Outcome{Text: "Changed. It stays paused until you resume it in /jobs.", Undo: undo}, nil
+	}
+	return approval.Outcome{Text: "Changed. " + s.nextWindow(spec), Undo: undo}, nil
 }
 
 // nextWindow says when the watch next checks, within the coming week. A watch that checks all day

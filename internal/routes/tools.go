@@ -32,6 +32,8 @@ const (
 	// checkTimeout covers several legs, each under its connector's own deadline.
 	checkTimeout = 2 * time.Minute
 	dateLayout   = "2006-01-02"
+	// actTimeout lets a change made at once run as long as one made after Confirm.
+	actTimeout = 45 * time.Second
 )
 
 const guidance = "Routes: the user's saved journeys, such as work, each with the weekdays it applies to, an optional arrival target, and legs: walk or bike minutes the user stated; a train with from, to, optional via, and fixed planned departures; a bus with stop, line, optional towards, fixed departures, and optional ride minutes. " +
@@ -41,7 +43,8 @@ const guidance = "Routes: the user's saved journeys, such as work, each with the
 	"A scheduled report about a commute should only name the route to check, such as \"check my work route with route_check and report it\", or \"check today's route with route_check\" for one weekday job that serves routes differing by day, instead of spelling out legs and times in the prompt."
 
 func writeGuidance() string {
-	return "route_save proposes a new route; route_update proposes changing one, either named fields or one leg by its number from route_get, with leg_action replace (fields you leave out keep their values), insert, or remove; route_remove proposes deleting one. Each only proposes: the user confirms with buttons, so never claim it is saved. " +
+	return "route_save saves a new route; route_update changes one, either named fields or one leg by its number from route_get, with leg_action replace (fields you leave out keep their values), insert, or remove; route_remove deletes one. " +
+		"When the user asked for it in this conversation and the conversation has read no outside content, each is done at once and the user can undo it; tell the user it is done. After outside content, such as a web page or an email, it is only proposed with Confirm and Reject buttons, so never claim it is saved. " +
 		"Never invent a leg value: ask the user for a walking or cycling time, a departure, a ride time, or a buffer they did not state, instead of choosing one. Stations and stops are looked up when a leg is proposed; when the lookup offers candidates, ask which one the user means. " +
 		"Keep route details, such as legs, departures, and transfer times, in routes and not in memory; a memory entry may name a route instead. " +
 		"When the user changes one of several per-weekday copies of a commute report, offer to save the route, or one route per variant with its weekdays, and to replace the copies with one job on those weekdays whose prompt checks the day's route. " +
@@ -92,8 +95,9 @@ var readDefinitions = []tools.Definition{
 var writeDefinitions = []tools.Definition{
 	{
 		Name:        toolSave,
-		Description: "Propose saving a new route with its weekdays, optional arrival target, and legs. The user must confirm.",
+		Description: "Save a new route with its weekdays, optional arrival target, and legs. Done at once and undoable, or proposed for Confirm after outside content.",
 		Risk:        tools.RiskWrite,
+		Timeout:     actTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"name":{"type":"string","description":"A short name, such as work."},` +
 			`"days":` + daysSchema + `,` +
@@ -103,8 +107,9 @@ var writeDefinitions = []tools.Definition{
 	},
 	{
 		Name:        toolUpdate,
-		Description: "Propose changing a saved route: its name, weekdays, or arrival target, or one leg by its number. Omitted fields keep their values. The user must confirm.",
+		Description: "Change a saved route: its name, weekdays, or arrival target, or one leg by its number. Omitted fields keep their values. Done at once and undoable, or proposed for Confirm after outside content.",
 		Risk:        tools.RiskWrite,
+		Timeout:     actTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"name":{"type":"string","description":"The route's current name."},` +
 			`"new_name":{"type":"string","description":"A new name."},` +
@@ -117,8 +122,9 @@ var writeDefinitions = []tools.Definition{
 	},
 	{
 		Name:        toolRemove,
-		Description: "Propose deleting a saved route. The user must confirm.",
+		Description: "Delete a saved route. Done at once and undoable, or proposed for Confirm after outside content.",
 		Risk:        tools.RiskWrite,
+		Timeout:     actTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"name":{"type":"string","description":"The route's name."}},` +
 			`"required":["name"],"additionalProperties":false}`),
@@ -127,6 +133,7 @@ var writeDefinitions = []tools.Definition{
 
 var _ tools.Provider = (*Service)(nil)
 var _ approval.Executor = (*Service)(nil)
+var _ approval.Undoer = (*Service)(nil)
 
 // Contribute offers routes only where a train or bus leg can be checked; the write tools need the
 // approval service as well.
@@ -336,7 +343,7 @@ func (s *Service) proposeSave(ctx context.Context, principalID string, call tool
 		return tools.Result{}, err
 	}
 	summary := "Save the route " + spec.Describe()
-	return s.propose(ctx, principalID, call, approval.Proposal{Tool: toolSave, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "save", TargetKind: "route", TargetName: spec.Name}})
+	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolSave, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "save", TargetKind: "route", TargetName: spec.Name}})
 }
 
 func (s *Service) proposeUpdate(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
@@ -437,7 +444,7 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 		return tools.Result{}, err
 	}
 	summary := "Change the route " + route.Name + ":\n" + strings.Join(changes, "\n")
-	return s.propose(ctx, principalID, call, approval.Proposal{Tool: toolUpdate, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "change", TargetKind: "route", TargetName: route.Name, NewName: next.Name}})
+	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolUpdate, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "change", TargetKind: "route", TargetName: route.Name, NewName: next.Name}})
 }
 
 func (s *Service) proposeRemoval(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
@@ -460,18 +467,20 @@ func (s *Service) proposeRemoval(ctx context.Context, principalID string, call t
 		return tools.Result{}, err
 	}
 	summary := "Delete the route " + route.Heading() + "\n" + route.Outline()
-	return s.propose(ctx, principalID, call, approval.Proposal{Tool: toolRemove, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "delete", TargetKind: "route", TargetName: route.Name}})
+	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolRemove, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "delete", TargetKind: "route", TargetName: route.Name}})
 }
 
-func (s *Service) propose(ctx context.Context, principalID string, call tools.Call, proposal approval.Proposal) (tools.Result, error) {
-	if _, err := s.proposer.Propose(ctx, principalID, proposal); err != nil {
+// act makes the change at once in a clean turn and proposes it otherwise.
+func (s *Service) act(ctx context.Context, principalID string, call tools.Call, proposal approval.Proposal) (tools.Result, error) {
+	text, err := s.proposer.Act(ctx, principalID, proposal)
+	if err != nil {
 		if approval.Refused(err) {
 			return errorResult(err.Error()), nil
 		}
 		s.logger.WarnContext(ctx, "route.proposal.failed", "principal_id", principalID, "tool", call.Name, "error", err)
-		return errorResult("the proposal could not be recorded"), nil
+		return errorResult("the change could not be recorded"), nil
 	}
-	return tools.Result{Text: approval.ProposedText}, nil
+	return tools.Result{Text: text}, nil
 }
 
 // resolveLeg looks a train leg's stations or a bus leg's stop up, so the route keeps the names the
@@ -593,7 +602,11 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		if created {
 			s.logger.InfoContext(ctx, "route.created", "principal_id", record.PrincipalID, "route_id", record.ID, "legs", len(spec.Legs))
 		}
-		return approval.Outcome{Text: "Saved."}, nil
+		undo, err := s.undoPayload(ctx, record.PrincipalID, record.ID, nil)
+		if err != nil {
+			return approval.Outcome{}, err
+		}
+		return approval.Outcome{Text: "Saved.", Undo: undo}, nil
 	case toolUpdate:
 		return s.executeUpdate(ctx, record)
 	case toolRemove:
@@ -601,14 +614,25 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
 			return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed action could not be read; nothing was deleted."}
 		}
-		deleted, err := s.Delete(ctx, record.PrincipalID, confirmed.RouteID)
+		// The whole route is read before it goes, so an Undo can put it back.
+		route, found, err := s.repository.LoadRoute(ctx, record.PrincipalID, confirmed.RouteID)
 		if err != nil {
 			return approval.Outcome{}, err
+		}
+		deleted := false
+		if found {
+			if deleted, err = s.Delete(ctx, record.PrincipalID, confirmed.RouteID); err != nil {
+				return approval.Outcome{}, err
+			}
 		}
 		if !deleted {
 			return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That route no longer exists."}
 		}
-		return approval.Outcome{Text: "Deleted."}, nil
+		undo, err := json.Marshal(routeUndo{RouteID: route.ID, Removed: &route})
+		if err != nil {
+			return approval.Outcome{}, err
+		}
+		return approval.Outcome{Text: "Deleted.", Undo: undo}, nil
 	default:
 		return approval.Outcome{}, &approval.ActionError{Reason: "unavailable", Text: "That action is no longer available."}
 	}
@@ -647,7 +671,11 @@ func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (ap
 		return approval.Outcome{}, stale
 	}
 	s.logger.InfoContext(ctx, "route.updated", "principal_id", record.PrincipalID, "route_id", current.ID)
-	return approval.Outcome{Text: "Changed."}, nil
+	undo, err := s.undoPayload(ctx, record.PrincipalID, current.ID, &current)
+	if err != nil {
+		return approval.Outcome{}, err
+	}
+	return approval.Outcome{Text: "Changed.", Undo: undo}, nil
 }
 
 func tooManyText() string {

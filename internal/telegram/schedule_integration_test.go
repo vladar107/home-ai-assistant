@@ -12,6 +12,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
+	"github.com/vladar107/home-ai-assistant/internal/tools"
 	"github.com/vladar107/home-ai-assistant/internal/turnstate"
 )
 
@@ -123,12 +124,13 @@ func expectNoRuntimeCall(t *testing.T, runtime *controlledRuntime, wait time.Dur
 func TestScheduledJobIsProposedConfirmedRunAndDelivered(t *testing.T) {
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, providers: []tools.Provider{outsideProvider{}}})
 	h.provision("alice", "account-alice")
 	h.start()
 
 	h.push(textUpdate(1, 101, "every monday at 9 tell me what is overdue"))
 	chat := receive(t, h.ctx, runtime.calls)
+	readOutside(t, chat)
 	names := toolNames(chat.request.Tools)
 	if !slices.Contains(names, "schedule_propose") || !slices.Contains(names, "schedule_list") {
 		t.Fatalf("chat tools = %v", names)
@@ -276,7 +278,7 @@ func TestScheduledReportOfPrivateContentMakesTheNextConversationPrivate(t *testi
 func TestScheduledJobIsReadInFullAndChanged(t *testing.T) {
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, providers: []tools.Provider{outsideProvider{}}})
 	h.provision("alice", "account-alice")
 	h.start()
 	prompt := strings.Repeat("Summarise my day. ", 30) + "End with the weather."
@@ -287,6 +289,7 @@ func TestScheduledJobIsReadInFullAndChanged(t *testing.T) {
 
 	h.push(textUpdate(1, 101, "move my digest to 8 and drop the weather"))
 	chat := receive(t, h.ctx, runtime.calls)
+	readOutside(t, chat)
 	call := func(name, arguments string) agentruntime.ToolResult {
 		t.Helper()
 		result, err := chat.request.Tools.Executor.Execute(chat.ctx, agentruntime.ToolCall{Name: name, Arguments: json.RawMessage(arguments)})

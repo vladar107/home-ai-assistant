@@ -141,6 +141,17 @@ func (s *Store) DeleteRoute(ctx context.Context, principalID, routeID string) (b
 	return affectedOne(result, "deleted route")
 }
 
+func (s *Store) DeleteUnchangedRoute(ctx context.Context, principalID, routeID string, updatedAt time.Time) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("delete route: SQLite store is not open")
+	}
+	result, err := s.db.ExecContext(ctx, `DELETE FROM routes WHERE id = ? AND principal_id = ? AND updated_at = ?`, routeID, principalID, formatTime(updatedAt))
+	if err != nil {
+		return false, fmt.Errorf("delete route: %w", err)
+	}
+	return affectedOne(result, "deleted route")
+}
+
 // checkRouteName refuses a name another of the principal's routes has, so the unique index is never
 // what turns a confirmed route down.
 func checkRouteName(ctx context.Context, tx *sql.Tx, route routes.Route) error {

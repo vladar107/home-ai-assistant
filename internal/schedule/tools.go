@@ -28,11 +28,14 @@ const (
 	listedInstructionRunes = 200
 	// editQuoteRunes is how much of a failing edit's find text its error repeats.
 	editQuoteRunes = 80
+	// actTimeout lets a change made at once run as long as one made after Confirm.
+	actTimeout = 45 * time.Second
 )
 
 // Proposer is the core approval service as the scheduler sees it.
 type Proposer interface {
 	Propose(context.Context, string, approval.Proposal) (approval.Record, error)
+	Act(context.Context, string, approval.Proposal) (string, error)
 }
 
 // ExposureChecker reports whether the calling conversation has read content from outside the
@@ -45,18 +48,18 @@ const listGuidance = "Scheduled jobs: schedule_list shows the user's pending rem
 
 func proposeGuidance(zone string) string {
 	return "The user can ask for something to happen on a schedule, such as every Monday at 9 checking their Notion tasks and reporting what is overdue, or once, such as tomorrow at 7:30 checking whether their train is delayed. " +
-		"schedule_propose only proposes the job: after your reply the user sees its exact schedule, next runs, and instructions with Confirm and Reject buttons, so never claim it was scheduled. " +
-		"A proposal with new or changed instructions also gets a Preview button, which runs them once now and shows the report without saving anything, so the user can try a job before confirming it. " +
+		"When the user asked for it in this conversation and the conversation has read no outside content, schedule_propose, schedule_update, and schedule_remove make the change at once and the user can undo it; tell the user it is done. " +
+		"After outside content, such as a web page or an email, they only propose it: the user sees it with Confirm and Reject buttons, and new or changed instructions also get a Preview button that runs them once without saving, so never claim it was made. " +
 		"A recurring job takes cron, a standard five-field cron expression (minute hour day-of-month month day-of-week) in the user's time zone, " + zone + " unless they name another; " +
 		"for example 0 9 * * 1 is Mondays at 09:00 and 30 7 * * 1-5 is weekdays at 07:30. A recurring job may run at most once an hour. " +
 		"A one-time job takes at instead, a local date and time such as 2026-10-04 07:30 that you work out from the current time. " +
 		"Each run is a separate turn the user does not watch, with only read-only tools, so the prompt must say exactly what to look at and what to report, on its own, without relying on this conversation. " +
-		"schedule_update proposes changing a job by its id from schedule_list, given only the fields that change, and the user confirms the job as it will be. " +
+		"schedule_update changes a job by its id from schedule_list, given only the fields that change. " +
 		"To change its instructions, first read them with schedule_get, then pass prompt_edits: small find and replace pairs, each find copied exactly from the stored prompt and occurring in it once, that change only what the user asked for; the user sees just those passages, old and new. " +
 		"Never rewrite or reword the parts the user did not ask to change, and pass prompt, the complete new instructions, only when the user asks for a real rewrite. " +
 		"Never invent a value the user did not give, such as a time, a buffer, a walking time, or a threshold; ask for it instead. " +
 		"A recurring job stays recurring and a one-time job stays one-time; to switch, remove it and propose a new one. " +
-		"schedule_remove proposes deleting a job by its id from schedule_list. Every proposal you make in this turn is shown to the user together and confirmed or rejected as one batch, so propose every job change the request needs in this turn, once each, and withdraw a wrong one with proposal_withdraw; a proposal in a later turn replaces a batch still waiting."
+		"schedule_remove deletes a job by its id from schedule_list. Make every job change the request needs in this turn, once each. Proposals of one turn are shown together and confirmed or rejected as one batch; withdraw a wrong one with proposal_withdraw, and a proposal in a later turn replaces a batch still waiting."
 }
 
 func reminderGuidance(zone string) string {
@@ -107,8 +110,9 @@ var reminderDefinitions = []tools.Definition{
 var writeDefinitions = []tools.Definition{
 	{
 		Name:        toolPropose,
-		Description: "Propose a job that runs a prompt on a cron schedule, or once at a local time, with read-only tools and sends the result to the user. The user must confirm.",
+		Description: "Schedule a job that runs a prompt on a cron schedule, or once at a local time, with read-only tools and sends the result to the user. Done at once and undoable, or proposed for Confirm after outside content.",
 		Risk:        tools.RiskWrite,
+		Timeout:     actTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"name":{"type":"string","maxLength":60,"description":"A short name the user will recognise, such as Overdue Notion tasks."},` +
 			`"cron":{"type":"string","description":"For a recurring job: a five-field cron expression, such as 0 9 * * 1 for Mondays at 09:00."},` +
@@ -119,8 +123,9 @@ var writeDefinitions = []tools.Definition{
 	},
 	{
 		Name:        toolUpdate,
-		Description: "Propose changing one of the user's scheduled jobs; omitted fields keep their current values. The user must confirm.",
+		Description: "Change one of the user's scheduled jobs; omitted fields keep their current values. Done at once and undoable, or proposed for Confirm after outside content.",
 		Risk:        tools.RiskWrite,
+		Timeout:     actTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"job_id":{"type":"string","description":"The id from schedule_list."},` +
 			`"name":{"type":"string","maxLength":60,"description":"A new short name."},` +
@@ -136,8 +141,9 @@ var writeDefinitions = []tools.Definition{
 	},
 	{
 		Name:        toolRemove,
-		Description: "Propose deleting one of the user's scheduled jobs. The user must confirm.",
+		Description: "Delete one of the user's scheduled jobs. Done at once and undoable, or proposed for Confirm after outside content.",
 		Risk:        tools.RiskWrite,
+		Timeout:     actTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"job_id":{"type":"string","description":"The id from schedule_list."}},` +
 			`"required":["job_id"],"additionalProperties":false}`),
@@ -147,6 +153,7 @@ var writeDefinitions = []tools.Definition{
 var _ tools.Provider = (*Service)(nil)
 var _ approval.Executor = (*Service)(nil)
 var _ approval.Previewer = (*Service)(nil)
+var _ approval.Undoer = (*Service)(nil)
 
 // Contribute offers the list and get tools, the reminder tools when the reminder type is
 // registered, and the proposal tools when there is an approval service and the model.turn type is
@@ -362,14 +369,20 @@ func (s *Service) proposeJob(ctx context.Context, principalID string, call tools
 		return tools.Result{}, err
 	}
 	summary := proposalSummary(fmt.Sprintf("Schedule %q", job.Name), prepared)
-	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: toolPropose, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "schedule", TargetKind: targetKind, TargetName: job.Name}}); err != nil {
+	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolPropose, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "schedule", TargetKind: targetKind, TargetName: job.Name}})
+}
+
+// act makes the change at once in a clean turn and proposes it otherwise.
+func (s *Service) act(ctx context.Context, principalID string, call tools.Call, proposal approval.Proposal) (tools.Result, error) {
+	text, err := s.proposer.Act(ctx, principalID, proposal)
+	if err != nil {
 		if approval.Refused(err) {
 			return tools.Result{Text: err.Error(), IsError: true}, nil
 		}
 		s.logger.WarnContext(ctx, "schedule.proposal.failed", "principal_id", principalID, "tool", call.Name, "error", err)
-		return tools.Result{Text: "the proposal could not be recorded", IsError: true}, nil
+		return tools.Result{Text: "the change could not be recorded", IsError: true}, nil
 	}
-	return tools.Result{Text: approval.ProposedText}, nil
+	return tools.Result{Text: text}, nil
 }
 
 func (s *Service) getJob(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
@@ -462,14 +475,7 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 	if !job.Enabled {
 		summary += "\nIt stays paused until you resume it in /jobs."
 	}
-	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: toolUpdate, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "change", TargetKind: "scheduled job", TargetName: job.Name, NewName: changed.Name}}); err != nil {
-		if approval.Refused(err) {
-			return tools.Result{Text: err.Error(), IsError: true}, nil
-		}
-		s.logger.WarnContext(ctx, "schedule.proposal.failed", "principal_id", principalID, "tool", call.Name, "error", err)
-		return tools.Result{Text: "the proposal could not be recorded", IsError: true}, nil
-	}
-	return tools.Result{Text: approval.ProposedText}, nil
+	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolUpdate, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "change", TargetKind: "scheduled job", TargetName: job.Name, NewName: changed.Name}})
 }
 
 // currentJob is a stored model.turn job in the canonical form a proposal carries, with a one-time
@@ -531,14 +537,7 @@ func (s *Service) proposeRemoval(ctx context.Context, principalID string, call t
 		return tools.Result{}, err
 	}
 	summary := fmt.Sprintf("Delete the scheduled job %q (%s). It will not run again.", job.Name, DescribeJob(job, s.zone))
-	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: toolRemove, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "remove", TargetKind: "scheduled job", TargetName: job.Name}}); err != nil {
-		if approval.Refused(err) {
-			return tools.Result{Text: err.Error(), IsError: true}, nil
-		}
-		s.logger.WarnContext(ctx, "schedule.proposal.failed", "principal_id", principalID, "tool", call.Name, "error", err)
-		return tools.Result{Text: "the proposal could not be recorded", IsError: true}, nil
-	}
-	return tools.Result{Text: approval.ProposedText}, nil
+	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolRemove, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "remove", TargetKind: "scheduled job", TargetName: job.Name}})
 }
 
 func (s *Service) ActionTools() []string {
@@ -570,11 +569,15 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 			}
 			return approval.Outcome{}, err
 		}
+		undo, err := s.undoCreate(ctx, record.PrincipalID, record.ID)
+		if err != nil {
+			return approval.Outcome{}, err
+		}
 		at := FormatOccurrence(prepared.Job.NextRunAt, prepared.Schedule.Location)
 		if prepared.Job.OneTime() {
-			return approval.Outcome{Text: "Scheduled for " + at + "."}, nil
+			return approval.Outcome{Text: "Scheduled for " + at + ".", Undo: undo}, nil
 		}
-		return approval.Outcome{Text: "Scheduled. First run: " + at + "."}, nil
+		return approval.Outcome{Text: "Scheduled. First run: " + at + ".", Undo: undo}, nil
 	case toolReminderSet:
 		var confirmed confirmedReminder
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
@@ -602,14 +605,25 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
 			return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed action could not be read; nothing was deleted."}
 		}
-		deleted, err := s.Delete(ctx, record.PrincipalID, confirmed.JobID)
+		// The whole job is read before it goes, so an Undo can put it back.
+		job, found, err := s.repository.LoadScheduledJob(ctx, record.PrincipalID, confirmed.JobID)
 		if err != nil {
 			return approval.Outcome{}, err
+		}
+		deleted := false
+		if found {
+			if deleted, err = s.Delete(ctx, record.PrincipalID, confirmed.JobID); err != nil {
+				return approval.Outcome{}, err
+			}
 		}
 		if !deleted {
 			return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That job no longer exists."}
 		}
-		return approval.Outcome{Text: "Deleted."}, nil
+		undo, err := json.Marshal(jobUndo{JobID: job.ID, Removed: &job})
+		if err != nil {
+			return approval.Outcome{}, err
+		}
+		return approval.Outcome{Text: "Deleted.", Undo: undo}, nil
 	default:
 		return approval.Outcome{}, &approval.ActionError{Reason: "unavailable", Text: "That action is no longer available."}
 	}
@@ -647,14 +661,18 @@ func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (ap
 	if !updated {
 		return approval.Outcome{}, stale
 	}
+	undo, err := s.undoUpdate(ctx, job)
+	if err != nil {
+		return approval.Outcome{}, err
+	}
 	if !job.Enabled {
-		return approval.Outcome{Text: "Changed. It stays paused until you resume it in /jobs."}, nil
+		return approval.Outcome{Text: "Changed. It stays paused until you resume it in /jobs.", Undo: undo}, nil
 	}
 	at := FormatOccurrence(prepared.Job.NextRunAt, prepared.Schedule.Location)
 	if prepared.Job.OneTime() {
-		return approval.Outcome{Text: "Changed. Runs once: " + at + "."}, nil
+		return approval.Outcome{Text: "Changed. Runs once: " + at + ".", Undo: undo}, nil
 	}
-	return approval.Outcome{Text: "Changed. Next run: " + at + "."}, nil
+	return approval.Outcome{Text: "Changed. Next run: " + at + ".", Undo: undo}, nil
 }
 
 // Previewable reports whether a proposal runs instructions that are new or changed: a proposed job,
