@@ -51,10 +51,11 @@ var movieReadDefinitions = []tools.Definition{
 var movieWriteDefinitions = []tools.Definition{
 	{
 		Name:        toolMoviesSetScore,
-		Description: "Propose recording the current user's score for a film in their own score column of the movie table. The user must confirm before anything changes.",
+		Description: "Record the current user's score for a film in their own score column of the movie table. It is written at once when the user asked for it in a conversation that has read no outside content; otherwise it is proposed for the user to confirm.",
 		Risk:        tools.RiskWrite,
 		Activity:    tools.ActivityNotion,
 		Private:     true,
+		Timeout:     updateTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"data_source_id":{"type":"string","description":"The movie table's data source or database ID from an earlier result."},` +
 			`"film":{"type":"string","description":"The film title as the Фильм column spells it."},` +
@@ -63,11 +64,13 @@ var movieWriteDefinitions = []tools.Definition{
 	},
 	{
 		Name: toolMoviesSchedule,
-		Description: "Propose evening dates in the movie table. Without film, every film without a date gets one, in table order, each a week after the latest date in the table. " +
-			"With film, only that film is scheduled: on date when given, otherwise a week after the latest other date. The user must confirm before anything changes.",
+		Description: "Set evening dates in the movie table. Without film, every film without a date gets one, in table order, each a week after the latest date in the table. " +
+			"With film, only that film is scheduled: on date when given, otherwise a week after the latest other date. " +
+			"The dates are written at once when the user asked for them in a conversation that has read no outside content; otherwise they are proposed for the user to confirm.",
 		Risk:     tools.RiskWrite,
 		Activity: tools.ActivityNotion,
 		Private:  true,
+		Timeout:  updateTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"data_source_id":{"type":"string","description":"The movie table's data source or database ID from an earlier result."},` +
 			`"film":{"type":"string","description":"Schedule only this film, as the Фильм column spells it."},` +
@@ -370,14 +373,15 @@ func (s *Service) proposeScore(ctx context.Context, principalID, token string, t
 		}
 	}
 	properties := map[string]any{column: richTextValue(strconv.FormatFloat(score, 'f', -1, 64))}
-	if err := s.proposeRowUpdate(ctx, principalID, token, row.page.ID, properties); err != nil {
+	result, err := s.proposeRowUpdate(ctx, principalID, token, row.page.ID, properties)
+	if err != nil {
 		return "", err
 	}
 	text := fmt.Sprintf("Score %s for %s goes to column %s.", strconv.FormatFloat(score, 'f', -1, 64), movieFilm(row), column)
 	if len(rows) > 1 {
 		text += fmt.Sprintf(" The table holds %d rows of this film; the most recent was chosen.", len(rows))
 	}
-	return text + " " + approval.ProposedText, nil
+	return text + " " + result, nil
 }
 
 // scoreColumn is the score column whose single-letter header is the user's initial. Latin and
@@ -473,33 +477,47 @@ func (s *Service) proposeSchedule(ctx context.Context, principalID, token string
 	}
 
 	lines := make([]string, 0, len(evenings))
+	results := make([]string, 0, len(evenings))
 	for _, evening := range evenings {
 		properties := map[string]any{table.titleProperty: map[string]any{"title": []any{map[string]any{"text": map[string]any{"content": evening.date.Format(movieDateLayout)}}}}}
-		if err := s.proposeRowUpdate(ctx, principalID, token, evening.row.page.ID, properties); err != nil {
+		result, err := s.proposeRowUpdate(ctx, principalID, token, evening.row.page.ID, properties)
+		if err != nil {
 			if len(lines) > 0 {
-				return "", fmt.Errorf("%w; already proposed: %s", err, strings.Join(lines, ", "))
+				return "", fmt.Errorf("%w; the evenings before it were already handled: %s", err, strings.Join(lines, ", "))
 			}
 			return "", err
 		}
 		lines = append(lines, fmt.Sprintf("%s → %s", evening.row.film, movieDay(evening.date)))
+		results = append(results, result)
 	}
-	return "Proposed dates: " + strings.Join(lines, ", ") + ". " + approval.ProposedText, nil
+	if !slices.ContainsFunc(results, func(result string) bool { return result != results[0] }) {
+		heading := "Dates: "
+		if results[0] == approval.ProposedText {
+			heading = "Proposed dates: "
+		}
+		return heading + strings.Join(lines, ", ") + ". " + results[0], nil
+	}
+	// Some evenings were set and others proposed, so each keeps its own result.
+	for index := range lines {
+		lines[index] += ": " + results[index]
+	}
+	return "Dates:\n" + strings.Join(lines, "\n"), nil
 }
 
-// proposeRowUpdate records the change as an ordinary notion_update_page proposal, so it is checked,
-// confirmed, and executed exactly like a property change the model proposed itself.
-func (s *Service) proposeRowUpdate(ctx context.Context, principalID, token, pageID string, properties map[string]any) error {
+// proposeRowUpdate records the change as an ordinary notion_update_page call, so it is checked,
+// made or proposed, and executed exactly like a property change the model asked for itself.
+func (s *Service) proposeRowUpdate(ctx context.Context, principalID, token, pageID string, properties map[string]any) (string, error) {
 	encoded := make(map[string]json.RawMessage, len(properties))
 	for name, value := range properties {
 		raw, err := json.Marshal(value)
 		if err != nil {
-			return err
+			return "", err
 		}
 		encoded[name] = raw
 	}
 	arguments, err := json.Marshal(updateArguments{PageID: pageID, Properties: encoded})
 	if err != nil {
-		return err
+		return "", err
 	}
 	return s.record(ctx, principalID, token, toolUpdatePage, arguments)
 }

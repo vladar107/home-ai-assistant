@@ -8,6 +8,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
@@ -24,10 +25,15 @@ const (
 	maximumProperties     = 50
 	maximumTitleRunes     = 500
 	summaryTextRunes      = 200
+
+	// updateTimeout covers a direct update made inside the tool call: the reads that check it, the
+	// read that keeps the values it replaces, and the write with its retry.
+	updateTimeout = 45 * time.Second
 )
 
-const writeGuidance = "Notion writes are on, and every write needs the user's confirmation: notion_create_page, notion_update_page, and notion_append_blocks only propose a change. " +
-	"After your reply the user sees the exact proposal with Confirm and Reject buttons, so describe what you proposed and never claim it was written. " +
+const writeGuidance = "Notion writes are on. notion_create_page and notion_append_blocks only propose a change. " +
+	"notion_update_page changes the page at once when the user asked for it in a conversation that has read no outside content, and after your reply the user sees it with an Undo button; after outside content it only proposes. " +
+	"The tool result says which happened. A proposal is shown after your reply with Confirm and Reject buttons, so describe what you proposed and never claim it was written. " +
 	"Every proposal you make in this turn is shown to the user together and confirmed or rejected as one batch, so propose every change the request needs in this turn, once each, and withdraw a wrong one with proposal_withdraw; a proposal in a later turn replaces a batch still waiting. " +
 	"Property values are Notion API property value objects keyed by property name, for example {\"Status\": {\"status\": {\"name\": \"Done\"}}}. " +
 	"Read the target's structure before proposing property values: notion_get_page shows a row's Structure line, and a data source lists every property with the options it accepts. " +
@@ -52,10 +58,11 @@ var writeDefinitions = []tools.Definition{
 	},
 	{
 		Name:        toolUpdatePage,
-		Description: "Propose setting property values on a shared Notion page. The user must confirm before anything changes.",
+		Description: "Set property values on a shared Notion page. It is changed at once when the user asked for it in a conversation that has read no outside content; otherwise it is proposed for the user to confirm.",
 		Risk:        tools.RiskWrite,
 		Activity:    tools.ActivityNotion,
 		Private:     true,
+		Timeout:     updateTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"page_id":{"type":"string","description":"The page ID from an earlier result."},` +
 			`"properties":{"type":"object","description":"Property values to set, keyed by property name."}},` +
@@ -76,6 +83,7 @@ var writeDefinitions = []tools.Definition{
 // Proposer is the core approval service as the connector sees it.
 type Proposer interface {
 	Propose(context.Context, string, approval.Proposal) (approval.Record, error)
+	Act(context.Context, string, approval.Proposal) (string, error)
 }
 
 var (
@@ -109,8 +117,9 @@ type appendArguments struct {
 	Paragraphs []string `json:"paragraphs"`
 }
 
-// propose validates a write call and records it for confirmation; nothing reaches Notion here
-// except the reads that name the target and check the write against its schema.
+// propose validates a write call and records it: an update is made at once in a clean turn, and
+// anything else waits for confirmation. Before that, nothing reaches Notion except the reads that
+// name the target and check the write against its schema.
 func (s *Service) propose(ctx context.Context, principalID, token string, call tools.Call) (string, error) {
 	if s.proposer == nil {
 		return "", fmt.Errorf("Notion writes are not available")
@@ -119,29 +128,34 @@ func (s *Service) propose(ctx context.Context, principalID, token string, call t
 	if err != nil {
 		return "", err
 	}
-	if err := s.record(ctx, principalID, token, call.Name, arguments); err != nil {
-		return "", err
-	}
-	return approval.ProposedText, nil
+	return s.record(ctx, principalID, token, call.Name, arguments)
 }
 
-// record checks validated write arguments against their target and records the proposal.
-func (s *Service) record(ctx context.Context, principalID, token, tool string, arguments json.RawMessage) error {
+// record checks validated write arguments against their target and acts on an update or proposes
+// any other write, returning what happened in words for the model.
+func (s *Service) record(ctx context.Context, principalID, token, tool string, arguments json.RawMessage) (string, error) {
 	if s.proposer == nil {
-		return fmt.Errorf("Notion writes are not available")
+		return "", fmt.Errorf("Notion writes are not available")
 	}
 	summary, intent, err := s.prepareProposal(ctx, token, tool, arguments)
 	if err != nil {
-		return err
+		return "", err
 	}
-	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: tool, Arguments: arguments, Summary: summary, Intent: intent}); err != nil {
+	proposal := approval.Proposal{Tool: tool, Arguments: arguments, Summary: summary, Intent: intent}
+	text := approval.ProposedText
+	if tool == toolUpdatePage {
+		text, err = s.proposer.Act(ctx, principalID, proposal)
+	} else {
+		_, err = s.proposer.Propose(ctx, principalID, proposal)
+	}
+	if err != nil {
 		if approval.Refused(err) {
-			return err
+			return "", err
 		}
 		s.logger.WarnContext(ctx, "notion.proposal.failed", "principal_id", principalID, "tool", tool, "error", err)
-		return fmt.Errorf("the proposal could not be recorded")
+		return "", fmt.Errorf("the change could not be recorded")
 	}
-	return nil
+	return text, nil
 }
 
 // validateWrite checks the model's arguments and returns them re-encoded without unknown fields.
@@ -555,8 +569,9 @@ func sortedKeys(values map[string]json.RawMessage) []string {
 	return keys
 }
 
-// ExecuteApproved performs a confirmed proposal with the principal's own token. Creates and
-// appends are never retried after an ambiguous failure; an update is retried once.
+// ExecuteApproved performs a confirmed proposal, or a direct update, with the principal's own token.
+// Creates and appends are never retried after an ambiguous failure; an update is retried once. A
+// direct update first keeps the values it replaces, so it can be undone.
 // PrivateOutcomes reports that a write's outcome may quote the page's table, such as the property
 // names and options of a rejected write.
 func (s *Service) PrivateOutcomes() bool { return true }
@@ -626,6 +641,10 @@ func (s *Service) write(ctx context.Context, token string, record approval.Recor
 		if err := json.Unmarshal(record.Arguments, &arguments); err != nil {
 			return approval.Outcome{}, fmt.Errorf("decode stored arguments: %w", err)
 		}
+		var undo json.RawMessage
+		if record.Mode == approval.ModeDirect {
+			undo = s.captureUndo(ctx, token, arguments)
+		}
 		_, err := s.client.UpdatePage(ctx, token, arguments.PageID, arguments.Properties)
 		var notionErr *Error
 		if errors.As(err, &notionErr) && notionErr.Class == ErrorUnavailable {
@@ -634,7 +653,7 @@ func (s *Service) write(ctx context.Context, token string, record approval.Recor
 		if err != nil {
 			return approval.Outcome{}, err
 		}
-		return approval.Outcome{Text: "Updated."}, nil
+		return approval.Outcome{Text: "Updated.", Undo: undo}, nil
 	case toolAppendBlocks:
 		var arguments appendArguments
 		if err := json.Unmarshal(record.Arguments, &arguments); err != nil {

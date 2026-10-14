@@ -125,11 +125,13 @@ func TestMemoryFactCarriesToTheNextSessionAndNeverToAnotherUser(t *testing.T) {
 	}
 }
 
-func TestMemoryInstructionIsWrittenOnlyAfterConfirm(t *testing.T) {
+// After outside content an instruction is a proposal, written only once the user confirms it.
+func TestMemoryInstructionAfterOutsideContentIsWrittenOnlyAfterConfirm(t *testing.T) {
 	runtime := newControlledRuntime()
 	h := newMemoryHarness(t, runtime)
 
-	_, results := h.memoryTurn(runtime, 1, 101, "ok", addCall("instruction", "answer briefly"))
+	_, results := h.memoryTurn(runtime, 1, 101, "ok", memoryCall("read_outside", `{}`), addCall("instruction", "answer briefly"))
+	results = results[1:]
 	if len(results) != 1 || results[0].IsError || !strings.Contains(results[0].Text, "awaiting the user's confirmation") {
 		t.Fatalf("instruction result = %+v", results)
 	}
@@ -233,7 +235,7 @@ func TestMemoryConfirmAfterTurningMemoryOffWritesNothing(t *testing.T) {
 	runtime := newControlledRuntime()
 	h := newMemoryHarness(t, runtime)
 
-	h.memoryTurn(runtime, 1, 101, "ok", addCall("instruction", "answer briefly"))
+	h.memoryTurn(runtime, 1, 101, "ok", memoryCall("read_outside", `{}`), addCall("instruction", "answer briefly"))
 	proposal := h.nextMessage()
 	if err := h.memory.SetEnabled(h.ctx, "alice", false); err != nil {
 		t.Fatal(err)

@@ -72,6 +72,7 @@ type Repository interface {
 // Proposer is the core approval service as memory sees it.
 type Proposer interface {
 	Propose(context.Context, string, approval.Proposal) (approval.Record, error)
+	Act(context.Context, string, approval.Proposal) (string, error)
 }
 
 // Telemetry records memory writes by kind and outcome, and lessons by outcome, never their content.
@@ -103,7 +104,10 @@ type Service struct {
 }
 
 var _ tools.Provider = (*Service)(nil)
-var _ approval.Executor = (*Service)(nil)
+var (
+	_ approval.Executor = (*Service)(nil)
+	_ approval.Undoer   = (*Service)(nil)
+)
 
 func NewService(cfg Config, repository Repository, proposer Proposer, logger *slog.Logger) (*Service, error) {
 	if repository == nil {

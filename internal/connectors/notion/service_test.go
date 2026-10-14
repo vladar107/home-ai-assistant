@@ -52,6 +52,14 @@ func (r *recorder) Propose(_ context.Context, principalID string, proposal appro
 	return approval.Record{ID: fmt.Sprintf("approval-%d", len(r.proposals)), PrincipalID: principalID, Tool: proposal.Tool, Arguments: proposal.Arguments, Summary: proposal.Summary}, nil
 }
 
+// Act proposes, as the approval service does outside a clean chat turn.
+func (r *recorder) Act(ctx context.Context, principalID string, proposal approval.Proposal) (string, error) {
+	if _, err := r.Propose(ctx, principalID, proposal); err != nil {
+		return "", err
+	}
+	return approval.ProposedText, nil
+}
+
 type fixture struct {
 	t         *testing.T
 	ctx       context.Context
