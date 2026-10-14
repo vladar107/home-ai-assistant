@@ -477,6 +477,31 @@ func (c *Client) SendPreview(ctx context.Context, chatID, replyTo int64, text st
 	return nil
 }
 
+// SendDirectActions posts a turn's "Done" message with one Undo button per row.
+func (c *Client) SendDirectActions(ctx context.Context, chatID int64, actions approval.DirectActions) (int64, error) {
+	message, err := c.sendMessage(ctx, chatID, 0, actions.Text, undoKeyboard(actions.Undo))
+	if err != nil {
+		return 0, err
+	}
+	if message.MessageID <= 0 {
+		return 0, fmt.Errorf("Telegram sendMessage returned no message ID")
+	}
+	return message.MessageID, nil
+}
+
+// EditDirectActions replaces the text and the Undo buttons of a "Done" message.
+func (c *Client) EditDirectActions(ctx context.Context, chatID, messageID int64, actions approval.DirectActions) error {
+	return c.EditKeyboard(ctx, chatID, messageID, actions.Text, undoKeyboard(actions.Undo))
+}
+
+func undoKeyboard(buttons []approval.UndoButton) InlineKeyboard {
+	var keyboard InlineKeyboard
+	for _, button := range buttons {
+		keyboard = append(keyboard, []InlineButton{{Text: button.Label, CallbackData: button.Data}})
+	}
+	return keyboard
+}
+
 // EditProposal replaces the text of a proposal message and keeps its buttons as given.
 func (c *Client) EditProposal(ctx context.Context, chatID, messageID int64, text string, buttons approval.Buttons) error {
 	return c.EditKeyboard(ctx, chatID, messageID, text, proposalKeyboard(buttons))

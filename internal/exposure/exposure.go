@@ -18,6 +18,9 @@ type Repository interface {
 	// exposed when external is set.
 	MarkConversationExposed(ctx context.Context, principalID, requestID string, external bool) error
 	ConversationExternal(ctx context.Context, principalID, requestID string) (bool, error)
+	// ConversationExposed reports whether the session of the chat request has read any third-party
+	// content, the household's own devices included.
+	ConversationExposed(ctx context.Context, principalID, requestID string) (bool, error)
 	// MarkConversationPrivate flags the session of the chat request as having read private content.
 	MarkConversationPrivate(ctx context.Context, principalID, requestID string) error
 	ConversationPrivate(ctx context.Context, principalID, requestID string) (bool, error)
@@ -73,6 +76,35 @@ func (s *Service) External(ctx context.Context, principalID string) bool {
 		return true
 	}
 	return external
+}
+
+// UserChatRequest returns the chat request of a call whose run answers a message the user wrote, not
+// a continuation, a reconsider, or a scheduled or task run; any other call reports false.
+func (s *Service) UserChatRequest(ctx context.Context) (string, bool) {
+	run := tools.RunFrom(ctx)
+	if run == nil || !run.UserMessage() {
+		return "", false
+	}
+	return outbox.ChatRequest(tools.TurnFrom(ctx))
+}
+
+// Exposed reports whether the calling run has read outside text, or the chat conversation it
+// belongs to any third-party content, the household's own devices included. A call without a chat
+// turn, or a failed lookup, counts as exposed.
+func (s *Service) Exposed(ctx context.Context, principalID string) bool {
+	if run := tools.RunFrom(ctx); run != nil && run.External() {
+		return true
+	}
+	requestID, chat := outbox.ChatRequest(tools.TurnFrom(ctx))
+	if !chat {
+		return true
+	}
+	exposed, err := s.repository.ConversationExposed(ctx, principalID, requestID)
+	if err != nil {
+		s.logger.WarnContext(ctx, "exposure.lookup_failed", "principal_id", principalID, "error", err)
+		return true
+	}
+	return exposed
 }
 
 // MarkTurnPrivate records that a turn read Notion page content or NAS file contents. Only a chat

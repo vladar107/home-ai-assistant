@@ -30,6 +30,10 @@ func (r *repository) ConversationExternal(context.Context, string, string) (bool
 	return r.external, r.err
 }
 
+func (r *repository) ConversationExposed(context.Context, string, string) (bool, error) {
+	return r.external, r.err
+}
+
 func (r *repository) MarkConversationPrivate(_ context.Context, _, requestID string) error {
 	r.privates = append(r.privates, requestID)
 	return nil

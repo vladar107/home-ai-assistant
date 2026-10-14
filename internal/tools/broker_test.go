@@ -365,6 +365,41 @@ func TestHouseholdAndOutsideResultsMarkTheRun(t *testing.T) {
 	}
 }
 
+// An outside call marks its run before it runs, so a write made beside it in the same run is not
+// taken as clean, and a failed one still leaves the run marked. Household calls never mark it.
+func TestOutsideCallMarksTheRunWhenItStarts(t *testing.T) {
+	broker := testBroker(t)
+	household := testDefinition("home_state", 0)
+	household.ThirdParty, household.Household = true, true
+	outside := testDefinition("read_page", 0)
+	outside.ThirdParty = true
+	externalAtStart := map[string]bool{}
+	provider := &fakeProvider{
+		principal:   testPrincipal,
+		definitions: []Definition{household, outside},
+		respond: func(ctx context.Context, call Call) (Result, error) {
+			externalAtStart[call.Name] = RunFrom(ctx).External()
+			return Result{}, errors.New("unavailable")
+		},
+	}
+	if err := broker.Register(provider); err != nil {
+		t.Fatal(err)
+	}
+	run := NewRun("read it")
+	set, err := broker.ToolsFor(WithRun(WithTurn(context.Background(), outbox.ChatTurn(chatRequest)), run), testPrincipal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"home_state", "read_page"} {
+		if _, err := set.Executor.Execute(context.Background(), agentruntime.ToolCall{Name: name, Arguments: json.RawMessage(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if externalAtStart["home_state"] || !externalAtStart["read_page"] || !run.External() {
+		t.Fatalf("external at start = %v, run external = %v", externalAtStart, run.External())
+	}
+}
+
 func TestToolsForRejectsHouseholdWithoutThirdParty(t *testing.T) {
 	broker := testBroker(t)
 	definition := testDefinition("home_state", 0)
