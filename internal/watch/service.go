@@ -63,6 +63,7 @@ type Chats interface {
 // Proposer is the core approval service as the watch service sees it.
 type Proposer interface {
 	Propose(context.Context, string, approval.Proposal) (approval.Record, error)
+	Act(context.Context, string, approval.Proposal) (string, error)
 }
 
 // Sender delivers one alert to its owner's chat with buttons that mute or pause the watch.

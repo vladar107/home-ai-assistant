@@ -25,6 +25,8 @@ type Repository interface {
 	// refusing with ErrNameTaken for a name another of the principal's routes uses.
 	UpdateRoute(ctx context.Context, route Route, expectedUpdatedAt time.Time) (bool, error)
 	DeleteRoute(ctx context.Context, principalID, routeID string) (bool, error)
+	// DeleteUnchangedRoute deletes the route only while it was last changed at updatedAt.
+	DeleteUnchangedRoute(ctx context.Context, principalID, routeID string, updatedAt time.Time) (bool, error)
 }
 
 // Trains is the NS connector as routes use it.
@@ -42,6 +44,7 @@ type Buses interface {
 // Proposer is the core approval service as the routes service sees it.
 type Proposer interface {
 	Propose(context.Context, string, approval.Proposal) (approval.Record, error)
+	Act(context.Context, string, approval.Proposal) (string, error)
 }
 
 type Config struct {

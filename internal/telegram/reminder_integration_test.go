@@ -241,12 +241,13 @@ func TestReminderDeliveredLateSaysWhenItWasDue(t *testing.T) {
 func TestOneTimeJobIsProposedConfirmedRunOnceAndLeavesJobs(t *testing.T) {
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, providers: []tools.Provider{outsideProvider{}}})
 	h.provision("alice", "account-alice")
 	h.start()
 
 	h.push(textUpdate(1, 101, "at 9 check whether my train is delayed"))
 	chat := receive(t, h.ctx, runtime.calls)
+	readOutside(t, chat)
 	result, err := chat.request.Tools.Executor.Execute(chat.ctx, agentruntime.ToolCall{
 		Name:      "schedule_propose",
 		Arguments: json.RawMessage(`{"name":"Train check","at":"2026-09-28 09:00","prompt":"Is my 9:30 train delayed?"}`),

@@ -1,6 +1,6 @@
 # 0079 — Act and tell: fewer confirmations, with Undo
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
@@ -87,7 +87,7 @@ extends it.
 - **Duplicates in one turn.** A repeated identical direct call (same tool and
   argument hash, same turn) returns the first record's result instead of
   acting twice, as proposals are deduplicated today. Records carry their
-  turn's request ID for this, and for the "Done" message.
+  turn's request ID for this.
 
 ### Records and Undo
 
@@ -112,9 +112,14 @@ extends it.
   fills it when it writes, because a create's ID and Notion's previous
   values are known only then. `Act` stores it when the record finishes, and
   an optional `Undoer` interface on the executor applies it.
-- **Wiring.** `approval.Service` gets the exposure check through a setter,
-  like `SetIntentChecker`, because approvals are built before exposure in
-  `internal/app`. There is no import cycle.
+- **Wiring.** `approval.Service` gets the gate through an `Exposure`
+  interface and a setter, like `SetIntentChecker`, because approvals are built
+  before exposure in `internal/app`. `approval` cannot import `tools` or
+  `outbox` without a cycle through `judgment`. So `exposure.Service`
+  implements the clean-turn checks:
+  - `UserChatRequest`: a chat turn whose run answers the user's message;
+  - `External`;
+  - `Exposed`: the stricter check, which also counts household content.
 - **Execution deadline.** A write inside a tool call runs under the tool's
   deadline, 15 seconds by default, not the 45 seconds `execute` gives after
   Confirm. The direct-acting tools' definitions set `Timeout: 45s`. Notion
@@ -143,9 +148,11 @@ extends it.
 ### What the user and the model see
 
 - **The "Done" message.**
-  - After the reply, `approval.AfterDelivery` sends one message per turn
-    listing its direct actions, found by the turn's request ID, one line each, from the summary a card would
-    have shown.
+  - After the reply, `approval.AfterDelivery` sends the principal's direct
+    actions that have no "Done" message yet and are still inside their undo
+    window, so actions from a cancelled turn follow the next reply. It lists
+    them one line each, from the summary a card would have shown, split over
+    several messages when needed.
   - A new deliverer method sends an inline keyboard with one Undo button per
     action, row by row, and edits it as buttons are pressed.
   - The callback data is `undo:<record id>`, parsed by its own parser in the
@@ -258,7 +265,10 @@ Waves and chunks:
 - **Notion is shared with whoever else edits it.** Undo works only while
   nobody else has changed the property.
 - **The parallel window.** A direct write evaluated before a concurrent
-  outside read has started still acts.
+  outside read has started still acts. The early mark covers only
+  non-household third-party calls. A household read running in parallel with
+  a memory instruction is caught only by the conversation mark, which is set
+  after the read returns.
 - **Private reads can steer Notion updates.** A Notion page a guest edited
   can influence a direct Notion property update in the same turn, as it
   already can a reminder.

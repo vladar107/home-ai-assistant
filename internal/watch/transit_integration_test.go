@@ -107,6 +107,12 @@ func (f *fakeProposer) Propose(_ context.Context, principalID string, proposal a
 	return approval.Record{}, nil
 }
 
+// Act records the change as a proposal, as it is made outside a clean chat turn.
+func (f *fakeProposer) Act(ctx context.Context, principalID string, proposal approval.Proposal) (string, error) {
+	_, err := f.Propose(ctx, principalID, proposal)
+	return approval.ProposedText, err
+}
+
 // transitEngine is the watch service with the real departure and disruption evaluators, on the
 // real NS and bus connectors talking to a gateway that serves recorded responses.
 type transitEngine struct {

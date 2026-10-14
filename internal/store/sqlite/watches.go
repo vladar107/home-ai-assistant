@@ -160,6 +160,17 @@ func (s *Store) DeleteWatch(ctx context.Context, principalID, watchID string) (b
 	return affectedOne(result, "deleted watch")
 }
 
+func (s *Store) DeleteUnchangedWatch(ctx context.Context, principalID, watchID string, updatedAt time.Time) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("delete watch: SQLite store is not open")
+	}
+	result, err := s.db.ExecContext(ctx, `DELETE FROM watches WHERE id = ? AND principal_id = ? AND updated_at = ?`, watchID, principalID, formatTime(updatedAt))
+	if err != nil {
+		return false, fmt.Errorf("delete watch: %w", err)
+	}
+	return affectedOne(result, "deleted watch")
+}
+
 func (s *Store) LoadWatchState(ctx context.Context, watchID, occurrence string) (watch.State, bool, error) {
 	if s == nil || s.db == nil {
 		return watch.State{}, false, fmt.Errorf("load watch state: SQLite store is not open")

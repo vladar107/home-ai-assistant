@@ -9,6 +9,7 @@ import (
 
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
+	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
 // toolCaller calls the chat turn's tools as the model would.
@@ -28,7 +29,7 @@ func toolCaller(t *testing.T, chat runtimeCall) func(name, arguments string) age
 func TestScheduledJobInstructionsArePatched(t *testing.T) {
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, providers: []tools.Provider{outsideProvider{}}})
 	h.provision("alice", "account-alice")
 	h.start()
 	prompt := "Check the trains from Utrecht Centraal to Den Haag Centraal. Report delays over 5 minutes. Report cancellations. End with the weather."
@@ -36,6 +37,7 @@ func TestScheduledJobInstructionsArePatched(t *testing.T) {
 
 	h.push(textUpdate(1, 101, "only tell me about delays over 10 minutes and skip the weather"))
 	chat := receive(t, h.ctx, runtime.calls)
+	readOutside(t, chat)
 	call := toolCaller(t, chat)
 	for _, refused := range []struct{ arguments, want string }{
 		{`{"job_id":"` + job.ID + `","prompt_edits":[{"find":"over 15 minutes","replace":"over 10 minutes"}]}`, "Edit 1: its find text \"over 15 minutes\" does not occur"},
@@ -101,13 +103,14 @@ func (h *conversationHarness) nextAnswer(updateID int64) string {
 func TestProposedJobIsPreviewedWithoutSavingAnything(t *testing.T) {
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, providers: []tools.Provider{outsideProvider{}}})
 	h.provision("alice", "account-alice")
 	h.provision("bob", "account-bob")
 	h.start()
 
 	h.push(textUpdate(1, 101, "every monday at 9 tell me what is overdue"))
 	chat := receive(t, h.ctx, runtime.calls)
+	readOutside(t, chat)
 	if proposed := toolCaller(t, chat)("schedule_propose", `{"name":"Weekly tasks","cron":"0 9 * * 1","prompt":"List my overdue Notion tasks."}`); proposed.IsError {
 		t.Fatalf("schedule_propose = %+v", proposed)
 	}
@@ -200,12 +203,13 @@ func TestProposedJobIsPreviewedWithoutSavingAnything(t *testing.T) {
 func TestModelWithdrawsPartOfABatch(t *testing.T) {
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, providers: []tools.Provider{outsideProvider{}}})
 	h.provision("alice", "account-alice")
 	h.start()
 
 	h.push(textUpdate(1, 101, "set up three weekly reports"))
 	chat := receive(t, h.ctx, runtime.calls)
+	readOutside(t, chat)
 	call := toolCaller(t, chat)
 	for _, name := range []string{"Report A", "Report B", "Report C"} {
 		if proposed := call("schedule_propose", `{"name":"`+name+`","cron":"0 9 * * 1","prompt":"Summarise `+name+`."}`); proposed.IsError {

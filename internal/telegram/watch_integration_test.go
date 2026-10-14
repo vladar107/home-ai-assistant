@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
+	"github.com/vladar107/home-ai-assistant/internal/tools"
 	"github.com/vladar107/home-ai-assistant/internal/watch"
 )
 
@@ -133,13 +134,14 @@ func (h *conversationHarness) runTool(runtime *controlledRuntime, updateID, user
 func TestWatchIsProposedConfirmedAndManagedByItsOwnerOnly(t *testing.T) {
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, watches: &stubEvaluator{}})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, watches: &stubEvaluator{}, providers: []tools.Provider{outsideProvider{}}})
 	h.provision("alice", "account-alice")
 	h.provision("bob", "account-bob")
 	h.start()
 
 	h.push(textUpdate(1, 101, "tell me if my 08:30 to Amsterdam is cancelled or late on weekdays"))
 	chat := receive(t, h.ctx, runtime.calls)
+	readOutside(t, chat)
 	names := toolNames(chat.request.Tools)
 	for _, name := range []string{"watch_list", "watch_propose", "watch_update", "watch_remove"} {
 		if !slices.Contains(names, name) {

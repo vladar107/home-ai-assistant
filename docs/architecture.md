@@ -232,7 +232,23 @@ not_retryable), and each retry is logged at debug level.
    extension and those tool definitions.
 5. Every tool call returns over loopback to `tools`, which rechecks the grant and
    bounds it to 15 seconds, 16 KiB, and 8 calls per turn.
-6. A write becomes a proposal; `approval` sends Confirm and Reject after the reply
+6. A write either acts at once or becomes a proposal. Tools that act and tell
+   (scheduled jobs, watches, routes, memory instructions, and Notion property
+   updates) call `approval.Act`, which acts directly only in a clean turn:
+   - a chat turn whose run answers the user's own message, so not a
+     reconsider or continuation turn;
+   - a conversation that has not read outside content;
+   - for memory instructions, not household content either.
+   Anything else, or anything it cannot check, proposes instead. A direct
+   action is an approval record in the `direct` mode, executed once inside
+   the tool call and deduplicated per turn. After the reply, a "Done" message
+   lists the direct actions not yet shown, with one Undo button each.
+   - Undo is the owner's, works once, and lasts 24 hours.
+   - It is refused when the object has changed since.
+   - A restart during an Undo leaves it pressable again.
+   - The next turn is told what was undone.
+   - `home_agent.approvals` counts `done` and `undone` by tool.
+   `approval` sends Confirm and Reject for proposals after the reply
    and executes a confirmed proposal once. A turn's proposals (up to ten) form one
    bundle; a long one is sent as several messages, each item whole in one of them
    and the buttons on the last, which is the only one edited with the outcome.
@@ -321,7 +337,7 @@ A restart resumes a running task in its session; a second interruption fails it.
 
 ### A watch
 
-A watch is a confirmed, per-user definition: a train or bus departure, a saved
+A watch is a per-user definition: a train or bus departure, a saved
 route, or a set of stations, with weekdays or one date, a daily window (by default
 90 minutes before the departure until it), the triggers, and a delay threshold.
 The `watch` module runs its own loop, apart from the scheduler, because most checks
@@ -422,7 +438,7 @@ checks to Go callers.
 
 ### A saved route
 
-A route is a confirmed, per-user record in `routes`: a name, the weekdays it
+A route is a per-user record in `routes`: a name, the weekdays it
 applies to, an optional arrival target, and up to eight legs stored as checked
 JSON. A walk or bike leg has the minutes the user stated; a train leg has from,
 to, an optional via, and fixed planned departures; a bus leg has a stop, a line,
@@ -430,8 +446,8 @@ an optional direction, fixed departures, and optional ride minutes. The tools
 refuse a missing number instead of choosing one, and station and stop names are
 looked up through the NS and bus connectors when a leg is proposed, so the stored
 names are the ones the checks find again. `route_save`, `route_update` (named
-fields or one leg by number), and `route_remove` are confirmed like other writes,
-and an update's summary shows only what changes. `route_check` is code: for a day,
+fields or one leg by number), and `route_remove` act and tell like other own-data
+writes, and an update's summary shows only what changes. `route_check` is code: for a day,
 the named route or the one whose weekdays include that day, it runs the departure
 checks for each train and bus leg, takes the first departure that runs and leaves
 no earlier than the previous leg ends, adds the walk and bike minutes without any
@@ -456,8 +472,11 @@ routes after jobs and watches, read-only, with a Delete button each.
   environment without the Telegram token. A call that ends in an error gives its
   budget slot back, and a ceiling of twice the budget, failed calls included,
   still bounds a turn.
-- **Read first, confirm writes.** Writes to Notion, the NAS, and schedules are
-  off until the user turns them on and are always confirmed per action. A
+- **Read first, act and tell, confirm the rest.** Writes to Notion and the NAS
+  are off until the user turns them on. In a clean turn, scheduled jobs,
+  watches, routes, memory instructions, and Notion property updates act at
+  once with Undo. New Notion pages, appended blocks, and NAS saves are
+  always confirmed per action. A
   reminder is set and cancelled without confirmation, since it only sends its
   owner's own text to their own chat, and scheduled turns cannot set one. Background
   tasks start without confirmation too: they only spend the owner's own
@@ -473,8 +492,12 @@ routes after jobs and watches, read-only, with a Delete button each.
   text written outside the household, such as a web page, an email, a calendar
   invite, log lines, or a background task's report, it stays marked until `/new`.
   Text from the household's own devices through Home Assistant does not count.
+  A file or photo the user sends counts as outside content, and so does
+  `read_attachment`. A run is marked when such a read starts, so a write
+  running beside it in the same batch proposes too.
   In a marked conversation, or a run that has read such text:
-  - home actions, `reminder_set`, and `task_start` are proposed for Confirm;
+  - home actions, `reminder_set`, `task_start`, and every act-and-tell tool
+    are proposed for Confirm;
   - `fetch_page` opens only addresses from the user's message or from what the
     run has read;
   - each web search query is checked before it is sent (below).
@@ -535,10 +558,13 @@ routes after jobs and watches, read-only, with a Delete button each.
   and sizes, never message text, usernames, tokens, or locations.
 - **Memory.** Each principal's instructions and facts live in SQLite, are capped
   in size, and are rendered into the system prompt of that principal's turns
-  only. The model writes them through tools offered in chat turns alone; an
-  instruction, and any write in a conversation that has read third-party
-  content, including a web search, needs Confirm.
-  Every write is shown in the reply, and `/memory` deletes any entry. Only the
+  only. The model writes them through tools offered in chat turns alone. A fact,
+  or an instruction the user states, is written at once (an instruction with
+  Undo). Any write in a conversation that has read third-party content,
+  including a web search, needs Confirm, and so does an instruction after
+  household content.
+  Every write is shown, in the reply or, for a direct instruction, in the
+  "Done" message, and `/memory` deletes any entry. Only the
   turn a 👎 starts writes `learned` entries, one proposal at most, and each still
   needs Confirm.
 - **Backlog.** Each principal's ideas for developing the assistant live in

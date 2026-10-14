@@ -30,6 +30,11 @@ func (p *recordingProposer) Propose(_ context.Context, principalID string, propo
 	return approval.Record{PrincipalID: principalID, Tool: proposal.Tool, Arguments: proposal.Arguments}, nil
 }
 
+func (p *recordingProposer) Act(ctx context.Context, principalID string, proposal approval.Proposal) (string, error) {
+	_, err := p.Propose(ctx, principalID, proposal)
+	return approval.ProposedText, err
+}
+
 type reminderFixture struct {
 	service  *schedule.Service
 	store    *sqlite.Store
