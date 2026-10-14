@@ -39,6 +39,10 @@ type Repository interface {
 	// ListBacklog returns the principal's items with the status, oldest first.
 	ListBacklog(ctx context.Context, principalID, status string) ([]Item, error)
 	LoadBacklogItem(ctx context.Context, principalID, id string) (Item, bool, error)
+	// ListAllBacklog returns every principal's items with the status, oldest first.
+	ListAllBacklog(ctx context.Context, status string) ([]Item, error)
+	// LoadBacklogItemByID finds an item of any principal; IDs are unique across principals.
+	LoadBacklogItemByID(ctx context.Context, id string) (Item, bool, error)
 	AddBacklogItem(context.Context, Item) error
 	// UpdateBacklogItem saves the item's title, details, status, and update time.
 	UpdateBacklogItem(context.Context, Item) (bool, error)
@@ -85,6 +89,16 @@ func (s *Service) Now() time.Time { return s.now() }
 // Items returns the principal's open items, oldest first.
 func (s *Service) Items(ctx context.Context, principalID string) ([]Item, error) {
 	return s.repository.ListBacklog(ctx, principalID, StatusOpen)
+}
+
+// AllItems returns every principal's open items, oldest first.
+func (s *Service) AllItems(ctx context.Context) ([]Item, error) {
+	return s.repository.ListAllBacklog(ctx, StatusOpen)
+}
+
+// Item finds an item of any principal, open or done.
+func (s *Service) Item(ctx context.Context, id string) (Item, bool, error) {
+	return s.repository.LoadBacklogItemByID(ctx, id)
 }
 
 // MarkDone closes one of the principal's open items; false means it is not open any more.

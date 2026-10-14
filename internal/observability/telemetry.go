@@ -475,7 +475,7 @@ func (t *Telemetry) SetRunning(ctx context.Context, running bool) {
 }
 
 func (t *Telemetry) StartHTTP(ctx context.Context, endpoint string) (context.Context, func(string, int)) {
-	ctx, span := t.tracer.Start(ctx, "home_agent.http.health",
+	ctx, span := t.tracer.Start(ctx, "home_agent.http.request",
 		trace.WithAttributes(attribute.String("home_agent.endpoint", endpoint)),
 	)
 	started := time.Now()

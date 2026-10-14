@@ -68,8 +68,10 @@ flowchart TB
             tempo[("Tempo")]
             grafana["Grafana"]
         end
+        caddy["home-edge Caddy<br/>(home-edge repository)"]
         shares[("NAS shares<br/>bind-mounted per root")]
     end
+    dev["Development session<br/>home network"]
 
     telegram <-->|long polling| go
     go -->|spawn, RPC over stdio| pi
@@ -81,6 +83,8 @@ flowchart TB
     go --> files
     go --> shares
     go -->|OTLP metrics, traces| alloy
+    dev -->|HTTPS, /api/backlog| caddy
+    caddy -->|HTTP| go
     alloy --> prom
     alloy --> tempo
     grafana --> prom
@@ -121,6 +125,7 @@ flowchart TB
     delivery["<b>delivery</b><br/>outbound files"]
     card["<b>daycard / outbox</b><br/>rendered day cards"]
     pdf["<b>pdftext</b>"]
+    api["<b>HTTP</b><br/>health, backlog API"]
 
     subgraph connectors["connectors"]
         notion["notion"]
@@ -154,6 +159,7 @@ flowchart TB
     tg --> backlog
     broker --> backlog
     approval --> backlog
+    api --> backlog
     loc --> placesc
     conv --> runtime
     conv --> broker
@@ -530,6 +536,9 @@ routes after jobs and watches, read-only, with a Delete button each.
   only through `backlog_list`. The tools are offered in chat turns alone, and a
   write in a conversation that has read text from outside the household needs
   Confirm, because an exported item is pasted into a development session.
+  `/api/backlog` serves every principal's open items, one item by ID, and
+  marking one done, without authentication: the home-edge Caddy exposes only
+  `/api/*` to the home network, and the API cannot add, edit, or delete items.
 - **Short-lived location.** Only each user's latest shared position is stored. It is
   used while fresh, then deleted by a prune with SQLite `secure_delete` on; a user
   forgets it at once from `/settings`, and a forgotten live share stays ignored.
