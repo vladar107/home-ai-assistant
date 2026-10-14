@@ -10,6 +10,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/notionsim"
+	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
 func writableNotionSimulator(t *testing.T) *notionsim.Simulator {
@@ -40,10 +41,14 @@ func (h *conversationHarness) enableNotionWrites(settingsUpdate, pressUpdate, us
 }
 
 // proposeTurn runs one model turn that makes the given write call and returns the proposal message.
+// An update is made at once in a clean turn, so its turn has read outside text first.
 func (h *conversationHarness) proposeTurn(runtime *controlledRuntime, updateID int64, tool, arguments string) sentMessage {
 	h.t.Helper()
 	h.push(textUpdate(updateID, 101, "please write to notion"))
 	call := receive(h.t, h.ctx, runtime.calls)
+	if tool == "notion_update_page" {
+		tools.RunFrom(call.ctx).MarkExternal("")
+	}
 	result, err := call.request.Tools.Executor.Execute(call.ctx, agentruntime.ToolCall{Name: tool, Arguments: json.RawMessage(arguments)})
 	if err != nil || result.IsError || !strings.Contains(result.Text, "awaiting the user's confirmation") {
 		h.t.Fatalf("proposal result = %+v %v", result, err)
@@ -456,6 +461,8 @@ func TestProposalsOfOneTurnAreConfirmedTogetherAndRunPastAFailure(t *testing.T) 
 
 	h.push(textUpdate(3, 101, "close both tasks"))
 	call := receive(t, h.ctx, runtime.calls)
+	// Outside text makes the updates proposals, which this turn confirms together.
+	tools.RunFrom(call.ctx).MarkExternal("")
 	for _, page := range []string{"page-groceries", "page-chores"} {
 		result, err := call.request.Tools.Executor.Execute(call.ctx, agentruntime.ToolCall{Name: "notion_update_page", Arguments: json.RawMessage(
 			`{"page_id":"` + page + `","properties":{"Status":{"status":{"name":"Done"}}}}`)})

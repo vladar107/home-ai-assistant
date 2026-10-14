@@ -116,7 +116,8 @@ func TestLearningOffLeavesTheReconsiderTurnWithoutALesson(t *testing.T) {
 	}
 }
 
-// An instruction proposed in an ordinary chat turn, even one after a reconsider, is not a lesson.
+// An instruction kept in an ordinary chat turn, even one after a reconsider, is not a lesson: it is
+// written at once, as the model's own.
 func TestInstructionInAChatTurnIsNotALesson(t *testing.T) {
 	runtime := newControlledRuntime()
 	h := newMemoryHarness(t, runtime)
@@ -127,16 +128,11 @@ func TestInstructionInAChatTurnIsNotALesson(t *testing.T) {
 	h.waitState(2, "delivered")
 
 	h.memoryTurn(runtime, 3, 101, "ok", addCall("instruction", "Always use 24-hour times."))
-	proposal := h.nextMessage()
-	if strings.Contains(proposal.text, "Learned from") || !strings.HasPrefix(proposal.text, "Remember this instruction") {
-		t.Fatalf("chat proposal = %+v", proposal)
+	done := h.nextMessage()
+	if strings.Contains(done.text, "Learned from") || !strings.HasPrefix(done.text, "Done:\n\nRemember this instruction") {
+		t.Fatalf("chat done message = %+v", done)
 	}
-	confirm, _ := approvalButtons(t, proposal.keyboard)
-	h.push(callbackUpdate(4, 101, proposal.messageID, confirm))
-	h.wantAnswer(4)
-	h.nextEdit()
-	h.continueTurn(runtime, 4)
-	if entries := h.memoryEntries("alice"); len(entries) != 1 || entries[0].Source != memory.SourceConfirmed {
+	if entries := h.memoryEntries("alice"); len(entries) != 1 || entries[0].Source != memory.SourceModel {
 		t.Fatalf("entries = %+v", entries)
 	}
 }
