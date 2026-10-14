@@ -24,7 +24,7 @@ import (
 // large enough to matter would be refused by the model or by Telegram first.
 const (
 	MaximumImageBytes   = 5 << 20
-	MaximumFileBytes    = 10 << 20
+	MaximumFileBytes    = 20 << 20
 	MaximumSessionFiles = 10
 	MaximumSessionBytes = 50 << 20
 

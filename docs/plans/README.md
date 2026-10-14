@@ -86,6 +86,7 @@ plan that links back to the earlier record.
 | 0074 | [Watch anything: model-checked watches](0074-watch-anything.md) | in-progress |
 | 0075 | [Tuning after the first conversation with jobs, backlog, and agent watches](0075-tuning-after-first-use.md) | done |
 | 0076 | [Backlog over HTTP for development sessions](0076-backlog-api.md) | done |
+| 0077 | [Larger file uploads](0077-larger-file-uploads.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

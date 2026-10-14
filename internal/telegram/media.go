@@ -168,7 +168,7 @@ func attachmentTooLargeReply(item media) string {
 	if item.kind == attachment.KindImage {
 		return "That image is too large for me to hold; images must stay under 5 MB."
 	}
-	return "That file is too large for me to hold; files must stay under 10 MB."
+	return "That file is too large for me to hold; files must stay under 20 MB."
 }
 
 // unsupportedMediaReply answers a message carrying something no model reachable here can read.
