@@ -206,9 +206,9 @@ func TestUnsupportedAndOversizedMediaAreAnswered(t *testing.T) {
 	h.wantReply(101, 1, UnsupportedAudioReply)
 
 	h.push(documentUpdate(2, 101, "", MediaFile{
-		FileID: "doc-huge", FileName: "backup.zip", MimeType: "application/zip", FileSize: 11 << 20,
+		FileID: "doc-huge", FileName: "backup.zip", MimeType: "application/zip", FileSize: 21 << 20,
 	}))
-	h.wantReply(101, 2, "That file is too large for me to hold; files must stay under 10 MB.")
+	h.wantReply(101, 2, "That file is too large for me to hold; files must stay under 20 MB.")
 
 	// Neither message may have started a turn, which the next text message proves by arriving first.
 	h.push(textUpdate(3, 101, "are you there?"))
