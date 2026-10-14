@@ -95,6 +95,8 @@ type ApprovalController interface {
 	// Preview starts previews of a bundle's items, posted under its proposal message; the trigger
 	// names the press so a retried update starts nothing new.
 	Preview(ctx context.Context, principalID, approvalID, trigger string, chatID, messageID int64) (approval.PreviewPressed, error)
+	// Undo reverses a direct action; a press on another principal's action is not owned.
+	Undo(ctx context.Context, principalID, recordID string) (approval.Undid, error)
 }
 
 type identityResolver interface {
@@ -756,6 +758,8 @@ func (s *Service) resolvePrincipal(ctx context.Context, from *User) (identity.Au
 	return authorization, "", "", nil
 }
 
+const undoCallbackPrefix = "undo:"
+
 // processCallback handles a button press on a settings message: the press is answered first, the
 // section acts, and the message is refreshed from current state so stale buttons stay harmless.
 func (s *Service) processCallback(ctx context.Context, bot Bot, updateID int64, callback *CallbackQuery) (processingResult, string, error) {
@@ -778,6 +782,12 @@ func (s *Service) processCallback(ctx context.Context, bot Bot, updateID int64, 
 
 	if action, approvalID, isApproval := approval.ParseCallback(callback.Data); isApproval && action == approval.ActionPreview {
 		return s.processPreviewPress(ctx, pressTrigger(bot, updateID), callback, principalID, approvalID)
+	}
+	if recordID, isUndo := approval.ParseUndoCallback(callback.Data); isUndo {
+		return s.processUndoPress(ctx, callback, principalID, recordID)
+	}
+	if strings.HasPrefix(callback.Data, undoCallbackPrefix) {
+		return s.ignoreUnknownPress(ctx, callback, principalID)
 	}
 	if err := s.client.AnswerCallback(ctx, callback.ID, ""); err != nil && !isPermanentAPIError(err) {
 		return processingResult{}, "answer_callback", err
@@ -885,6 +895,38 @@ func (s *Service) processApprovalPress(ctx context.Context, bot Bot, updateID in
 		return processingResult{}, "send_message", err
 	}
 	return result, "", nil
+}
+
+// processUndoPress reverses a direct action and answers the press with the outcome; the approval
+// service updates the "Done" message itself.
+func (s *Service) processUndoPress(ctx context.Context, callback *CallbackQuery, principalID, recordID string) (processingResult, string, error) {
+	result := processingResult{event: "telegram.callback.handled", principalID: principalID, command: "approval.undo"}
+	var undid approval.Undid
+	if s.approvals != nil {
+		var err error
+		undid, err = s.approvals.Undo(ctx, principalID, recordID)
+		if err != nil {
+			return processingResult{}, "approval_undo", err
+		}
+	}
+	if err := s.client.AnswerCallback(ctx, callback.ID, undid.Answer); err != nil && !isPermanentAPIError(err) {
+		return processingResult{}, "answer_callback", err
+	}
+	switch {
+	case s.approvals == nil:
+		result.event, result.reason = "telegram.update.ignored", "unknown_action"
+	case !undid.Owned:
+		result.event, result.reason = "telegram.update.ignored", "foreign_approval"
+	}
+	return result, "", nil
+}
+
+// ignoreUnknownPress answers a press whose data no handler accepts without touching the message.
+func (s *Service) ignoreUnknownPress(ctx context.Context, callback *CallbackQuery, principalID string) (processingResult, string, error) {
+	if err := s.client.AnswerCallback(ctx, callback.ID, ""); err != nil && !isPermanentAPIError(err) {
+		return processingResult{}, "answer_callback", err
+	}
+	return processingResult{event: "telegram.update.ignored", principalID: principalID, reason: "unknown_action"}, "", nil
 }
 
 // processPreviewPress starts a preview of the pressed bundle and answers the press with what it
