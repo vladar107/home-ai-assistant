@@ -16,7 +16,8 @@ var _ approval.Repository = (*Store)(nil)
 
 const approvalColumns = `id, bundle_id, position, principal_id, tool, arguments, arguments_hash, summary, status,
 	COALESCE(reason, ''), COALESCE(outcome, ''), COALESCE(chat_id, 0), COALESCE(message_id, 0),
-	created_at, expires_at, COALESCE(started_at, ''), COALESCE(finished_at, '')`
+	created_at, expires_at, COALESCE(started_at, ''), COALESCE(finished_at, ''), mode, COALESCE(request_id, ''),
+	COALESCE(undo, ''), COALESCE(undo_until, '')`
 
 func (s *Store) CreateApproval(ctx context.Context, record approval.Record) ([]approval.Record, error) {
 	if s == nil || s.db == nil {
@@ -30,7 +31,7 @@ func (s *Store) CreateApproval(ctx context.Context, record approval.Record) ([]a
 
 	var replaced []approval.Record
 	if record.BundleID == record.ID {
-		replaced, err = queryApprovals(ctx, tx, `SELECT `+approvalColumns+` FROM approvals WHERE principal_id = ? AND status = 'pending' ORDER BY bundle_id, position`, record.PrincipalID)
+		replaced, err = queryApprovals(ctx, tx, `SELECT `+approvalColumns+` FROM approvals WHERE principal_id = ? AND status = 'pending' AND mode = 'proposed' ORDER BY bundle_id, position`, record.PrincipalID)
 		if err != nil {
 			return nil, err
 		}
@@ -88,7 +89,7 @@ func (s *Store) PendingApprovals(ctx context.Context, principalID string) ([]app
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("load pending approvals: SQLite store is not open")
 	}
-	return queryApprovals(ctx, s.db, `SELECT `+approvalColumns+` FROM approvals WHERE principal_id = ? AND status = 'pending' ORDER BY bundle_id, position`, principalID)
+	return queryApprovals(ctx, s.db, `SELECT `+approvalColumns+` FROM approvals WHERE principal_id = ? AND status = 'pending' AND mode = 'proposed' ORDER BY bundle_id, position`, principalID)
 }
 
 func (s *Store) ConfirmBundle(ctx context.Context, bundleID, principalID string, now time.Time) (bool, error) {
@@ -161,7 +162,7 @@ func (s *Store) SetApprovalSummary(ctx context.Context, id, summary string) erro
 	if s == nil || s.db == nil {
 		return fmt.Errorf("update approval summary: SQLite store is not open")
 	}
-	if _, err := s.db.ExecContext(ctx, `UPDATE approvals SET summary = ? WHERE id = ? AND status = 'pending'`, summary, id); err != nil {
+	if _, err := s.db.ExecContext(ctx, `UPDATE approvals SET summary = ? WHERE id = ? AND (status = 'pending' OR (mode = 'direct' AND status = 'done'))`, summary, id); err != nil {
 		return fmt.Errorf("update approval summary: %w", err)
 	}
 	return nil
@@ -201,8 +202,8 @@ func (s *Store) ExpireApprovals(ctx context.Context, now time.Time, all bool) ([
 	query := `SELECT ` + approvalColumns + ` FROM approvals WHERE status = 'pending' AND expires_at <= ?`
 	arguments := []any{formatTime(now)}
 	if all {
-		query = `SELECT ` + approvalColumns + ` FROM approvals WHERE status IN ('pending', 'confirmed')`
-		arguments = nil
+		query = `SELECT ` + approvalColumns + ` FROM approvals WHERE status IN ('pending', 'confirmed') OR (mode = 'direct' AND status = 'done' AND reason = ?)`
+		arguments = []any{approval.ReasonUndoing}
 	}
 	expiring, err := queryApprovals(ctx, tx, query+` ORDER BY bundle_id, position`, arguments...)
 	if err != nil {
@@ -212,6 +213,15 @@ func (s *Store) ExpireApprovals(ctx context.Context, now time.Time, all bool) ([
 	finished := formatTime(now)
 	for index := range expiring {
 		record := &expiring[index]
+		if record.Status == approval.StatusDone {
+			// The action itself still stands and keeps its finish time; only the interrupted Undo is
+			// marked, and the record can be undone again until its deadline.
+			record.Reason = approval.ReasonUndoInterrupted
+			if _, err := tx.ExecContext(ctx, `UPDATE approvals SET reason = ? WHERE id = ?`, record.Reason, record.ID); err != nil {
+				return nil, fmt.Errorf("release interrupted undo: %w", err)
+			}
+			continue
+		}
 		if record.Status == approval.StatusConfirmed && !record.StartedAt.IsZero() {
 			record.Status, record.Reason = approval.StatusFailed, approval.ReasonInterrupted
 		} else if all {
@@ -244,8 +254,185 @@ func (s *Store) UndeliveredApprovals(ctx context.Context) ([]approval.Record, er
 	return queryApprovals(
 		ctx,
 		s.db,
-		`SELECT `+approvalColumns+` FROM approvals WHERE status = 'pending' AND chat_id IS NOT NULL AND message_id IS NULL ORDER BY bundle_id, position`,
+		`SELECT `+approvalColumns+` FROM approvals WHERE status = 'pending' AND mode = 'proposed' AND chat_id IS NOT NULL AND message_id IS NULL ORDER BY bundle_id, position`,
 	)
+}
+
+func (s *Store) CreateDirectApproval(ctx context.Context, record approval.Record) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("create direct approval: SQLite store is not open")
+	}
+	if _, err := s.db.ExecContext(
+		ctx,
+		`INSERT INTO approvals (id, bundle_id, position, principal_id, tool, arguments, arguments_hash, summary, status, created_at, expires_at, started_at, mode, request_id)
+		 VALUES (?, ?, 0, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, 'direct', ?)`,
+		record.ID,
+		record.ID,
+		record.PrincipalID,
+		record.Tool,
+		string(record.Arguments),
+		record.Hash,
+		record.Summary,
+		formatTime(record.CreatedAt),
+		formatTime(record.ExpiresAt),
+		formatTime(record.CreatedAt),
+		record.RequestID,
+	); err != nil {
+		return fmt.Errorf("insert direct approval: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) FinishDirectApproval(ctx context.Context, id, status, reason, outcome string, undo json.RawMessage, undoUntil time.Time) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("finish direct approval: SQLite store is not open")
+	}
+	var storedUndo, storedUntil any
+	if len(undo) > 0 && status == approval.StatusDone {
+		storedUndo, storedUntil = string(undo), formatTime(undoUntil)
+	}
+	result, err := s.db.ExecContext(
+		ctx,
+		`UPDATE approvals
+		 SET status = ?, reason = NULLIF(?, ''), outcome = NULLIF(?, ''), finished_at = ?, undo = ?, undo_until = ?
+		 WHERE id = ? AND mode = 'direct' AND status = 'confirmed'`,
+		status,
+		reason,
+		outcome,
+		formatTime(time.Now()),
+		storedUndo,
+		storedUntil,
+		id,
+	)
+	if err != nil {
+		return false, fmt.Errorf("finish direct approval: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("read finished direct approval count: %w", err)
+	}
+	return changed == 1, nil
+}
+
+func (s *Store) DirectApprovals(ctx context.Context, principalID, requestID string) ([]approval.Record, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("list direct approvals: SQLite store is not open")
+	}
+	return queryApprovals(ctx, s.db, `SELECT `+approvalColumns+` FROM approvals WHERE principal_id = ? AND request_id = ? AND mode = 'direct' ORDER BY created_at, rowid`, principalID, requestID)
+}
+
+func (s *Store) UnsentDirectApprovals(ctx context.Context, principalID string, now time.Time) ([]approval.Record, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("list unsent direct approvals: SQLite store is not open")
+	}
+	return queryApprovals(
+		ctx,
+		s.db,
+		`SELECT `+approvalColumns+` FROM approvals
+		 WHERE principal_id = ? AND mode = 'direct' AND status IN ('done', 'undone') AND message_id IS NULL AND expires_at > ?
+		 ORDER BY created_at, rowid`,
+		principalID,
+		formatTime(now),
+	)
+}
+
+func (s *Store) ShownDirectApprovals(ctx context.Context, principalID string, chatID, messageID int64) ([]approval.Record, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("list shown direct approvals: SQLite store is not open")
+	}
+	return queryApprovals(
+		ctx,
+		s.db,
+		`SELECT `+approvalColumns+` FROM approvals WHERE principal_id = ? AND chat_id = ? AND message_id = ? AND mode = 'direct' ORDER BY created_at, rowid`,
+		principalID,
+		chatID,
+		messageID,
+	)
+}
+
+func (s *Store) FindDirectApproval(ctx context.Context, principalID, tool, hash, requestID string) (approval.Record, bool, error) {
+	if s == nil || s.db == nil {
+		return approval.Record{}, false, fmt.Errorf("find direct approval: SQLite store is not open")
+	}
+	return scanApproval(s.db.QueryRowContext(
+		ctx,
+		`SELECT `+approvalColumns+` FROM approvals
+		 WHERE principal_id = ? AND tool = ? AND arguments_hash = ? AND request_id = ? AND mode = 'direct'
+		 ORDER BY created_at, rowid LIMIT 1`,
+		principalID, tool, hash, requestID,
+	))
+}
+
+func (s *Store) ClaimUndo(ctx context.Context, id, principalID string, now time.Time) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("claim approval undo: SQLite store is not open")
+	}
+	result, err := s.db.ExecContext(
+		ctx,
+		`UPDATE approvals SET reason = ?
+		 WHERE id = ? AND principal_id = ? AND mode = 'direct' AND status = 'done' AND (reason IS NULL OR reason = ?)
+		   AND undo IS NOT NULL AND undo_until > ?`,
+		approval.ReasonUndoing,
+		id,
+		principalID,
+		approval.ReasonUndoInterrupted,
+		formatTime(now),
+	)
+	if err != nil {
+		return false, fmt.Errorf("claim approval undo: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("read claimed approval undo count: %w", err)
+	}
+	return changed == 1, nil
+}
+
+func (s *Store) CompleteUndo(ctx context.Context, id, outcome string) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("complete approval undo: SQLite store is not open")
+	}
+	result, err := s.db.ExecContext(
+		ctx,
+		`UPDATE approvals SET status = 'undone', reason = NULL, outcome = NULLIF(?, '')
+		 WHERE id = ? AND mode = 'direct' AND status = 'done' AND reason = ?`,
+		outcome,
+		id,
+		approval.ReasonUndoing,
+	)
+	if err != nil {
+		return fmt.Errorf("complete approval undo: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read completed approval undo count: %w", err)
+	}
+	if changed != 1 {
+		return fmt.Errorf("complete approval undo: record is not being undone")
+	}
+	return nil
+}
+
+func (s *Store) ReleaseUndo(ctx context.Context, id, reason, outcome string, spent bool) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("release approval undo: SQLite store is not open")
+	}
+	if _, err := s.db.ExecContext(
+		ctx,
+		`UPDATE approvals
+		 SET reason = NULLIF(?, ''), outcome = COALESCE(NULLIF(?, ''), outcome),
+		     undo = CASE WHEN ? THEN NULL ELSE undo END, undo_until = CASE WHEN ? THEN NULL ELSE undo_until END
+		 WHERE id = ? AND mode = 'direct' AND status = 'done' AND reason = ?`,
+		reason,
+		outcome,
+		spent,
+		spent,
+		id,
+		approval.ReasonUndoing,
+	); err != nil {
+		return fmt.Errorf("release approval undo: %w", err)
+	}
+	return nil
 }
 
 type queryer interface {
@@ -289,10 +476,11 @@ func scanApproval(row *sql.Row) (approval.Record, bool, error) {
 
 func scanApprovalRow(row rowScanner) (approval.Record, error) {
 	var record approval.Record
-	var arguments, createdAt, expiresAt, startedAt, finishedAt string
+	var arguments, createdAt, expiresAt, startedAt, finishedAt, undo, undoUntil string
 	err := row.Scan(
 		&record.ID, &record.BundleID, &record.Position, &record.PrincipalID, &record.Tool, &arguments, &record.Hash, &record.Summary, &record.Status,
 		&record.Reason, &record.Outcome, &record.ChatID, &record.MessageID, &createdAt, &expiresAt, &startedAt, &finishedAt,
+		&record.Mode, &record.RequestID, &undo, &undoUntil,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -301,6 +489,14 @@ func scanApprovalRow(row rowScanner) (approval.Record, error) {
 		return approval.Record{}, fmt.Errorf("scan approval: %w", err)
 	}
 	record.Arguments = json.RawMessage(arguments)
+	if undo != "" {
+		record.Undo = json.RawMessage(undo)
+	}
+	if undoUntil != "" {
+		if record.UndoUntil, err = time.Parse(time.RFC3339Nano, undoUntil); err != nil {
+			return approval.Record{}, fmt.Errorf("parse approval undo deadline: %w", err)
+		}
+	}
 	if record.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt); err != nil {
 		return approval.Record{}, fmt.Errorf("parse approval creation time: %w", err)
 	}

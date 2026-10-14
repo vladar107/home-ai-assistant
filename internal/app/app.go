@@ -410,6 +410,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		}
 		broker.SetTurnExposure(exposures)
 		broker.SetTurnPrivacy(exposures)
+		approvals.SetExposure(exposures)
 		searchChecks, err := searchcheck.NewService(exposures, approvals, a.logger, nil)
 		if err != nil {
 			return fmt.Errorf("initialize search checks: %w", err)

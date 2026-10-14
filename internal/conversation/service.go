@@ -614,6 +614,8 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 			attachments, runErr = s.config.Attachments.Turn(turnCtx, request.PrincipalID, request.ID)
 			if runErr != nil {
 				errorKind, reportedKind = ErrorKindRuntime, ErrorKindAttachments
+			} else if attachments.Summary != "" {
+				s.markAttachmentsExternal(turnCtx, request, run)
 			}
 		}
 		if hinted != nil && runErr == nil {
@@ -840,6 +842,16 @@ func (s *Service) startToolHint(ctx context.Context, request Request, tools agen
 type turnNotice struct {
 	text    string
 	outside bool
+}
+
+// markAttachmentsExternal treats a turn that carries files as having read outside content: a
+// forwarded file or photo can carry instructions, and it stays readable in the conversation after
+// its turn.
+func (s *Service) markAttachmentsExternal(ctx context.Context, request Request, run *tools.Run) {
+	run.MarkExternal("")
+	if s.config.Exposure != nil {
+		s.config.Exposure.MarkTurnExposed(ctx, request.PrincipalID, outbox.ChatTurn(request.ID), true)
+	}
 }
 
 // takeNotice collects the pending notices for a turn that is about to run. A notice from outside the

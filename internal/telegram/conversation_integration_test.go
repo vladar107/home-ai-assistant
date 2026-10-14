@@ -472,6 +472,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	if err != nil {
 		t.Fatal(err)
 	}
+	h.approvals.SetExposure(exposures)
 	// Tests that assert a turn's exact tools leave the withdraw tool out by not using the scheduler.
 	if options.schedules != nil {
 		if err := broker.Register(withdrawal.Provider{Withdrawer: h.approvals}); err != nil {

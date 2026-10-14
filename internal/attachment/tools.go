@@ -61,6 +61,8 @@ func (s *Service) Contribute(ctx context.Context, principalID string) (tools.Con
 				Description: "Read the text content of a file the user sent in this conversation. Text-based files and PDFs can be read.",
 				InputSchema: readSchema,
 				Risk:        tools.RiskRead,
+				// A file can carry someone else's instructions, whoever forwarded it.
+				ThirdParty: true,
 			},
 		},
 	}, nil

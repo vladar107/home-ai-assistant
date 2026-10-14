@@ -313,6 +313,14 @@ func (deliverer) EditProposal(context.Context, int64, int64, string, approval.Bu
 
 func (deliverer) SendPreview(context.Context, int64, int64, string) error { return nil }
 
+func (deliverer) SendDirectActions(context.Context, int64, approval.DirectActions) (int64, error) {
+	return 1, nil
+}
+
+func (deliverer) EditDirectActions(context.Context, int64, int64, approval.DirectActions) error {
+	return nil
+}
+
 type fixture struct {
 	t        *testing.T
 	service  *homeassistant.Service

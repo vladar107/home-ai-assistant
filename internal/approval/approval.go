@@ -29,6 +29,12 @@ const (
 	StatusExpired   = "expired"
 	StatusExecuted  = "executed"
 	StatusFailed    = "failed"
+	// StatusDone and StatusUndone end a direct action: made without asking, then possibly undone.
+	StatusDone   = "done"
+	StatusUndone = "undone"
+
+	ModeProposed = "proposed"
+	ModeDirect   = "direct"
 
 	ReasonReplaced       = "replaced"
 	ReasonRestart        = "restart"
@@ -38,6 +44,12 @@ const (
 	ReasonExecutorFailed = "executor_failed"
 	// ReasonWithdrawn marks a rejected record the model withdrew itself.
 	ReasonWithdrawn = "withdrawn"
+	// ReasonUndoRefused marks a done record whose Undo was refused for good; its outcome says why.
+	ReasonUndoRefused = "undo_refused"
+	// ReasonUndoing marks a done record whose Undo is running; the restart sweep turns it into
+	// ReasonUndoInterrupted, which a later press may still undo.
+	ReasonUndoing         = "undoing"
+	ReasonUndoInterrupted = "undo_interrupted"
 
 	ActionConfirm = "confirm"
 	ActionReject  = "reject"
@@ -48,8 +60,11 @@ const (
 	maximumSummaryRunes  = 3000
 	intentCheckTimeout   = 3 * time.Second
 	IntentWarning        = "⚠️ This does not look like something you asked for. Check it carefully before confirming."
-	executionTimeout     = 45 * time.Second
-	idBytes              = 8
+	DirectIntentWarning  = "⚠️ This does not look like something you asked for. Check it, and press Undo if it is wrong."
+	// UndoWindow is how long the owner of a direct action can undo it.
+	UndoWindow       = 24 * time.Hour
+	executionTimeout = 45 * time.Second
+	idBytes          = 8
 
 	maximumBundleItems = 10
 	// bundleSummaryUnits is the summary budget of one bundle message; it leaves room in Telegram's
@@ -67,17 +82,30 @@ var ErrBundleFull = errors.New("the batch of changes waiting for the user's conf
 // refused instead of cut, because the confirmation must show the exact action.
 var ErrSummaryTooLong = errors.New("the proposal is too long to show the user in full for confirmation; nothing was added. Propose a shorter one")
 
-// Refused reports whether the error is a proposal refusal whose text tells the model what to do next.
+// Refused reports whether the error is a proposal refusal or a failed direct action, whose text
+// tells the model what happened and what to do next.
 func Refused(err error) bool {
-	return errors.Is(err, ErrBundleFull) || errors.Is(err, ErrSummaryTooLong)
+	var failed *FailedError
+	return errors.Is(err, ErrBundleFull) || errors.Is(err, ErrSummaryTooLong) || errors.As(err, &failed)
 }
 
-// Proposal is what a connector asks the user to confirm: the exact tool call and its rendering.
+// FailedError is a direct action that was tried and failed; its text is for the model.
+type FailedError struct {
+	Text string
+}
+
+func (e *FailedError) Error() string { return e.Text }
+
+// Proposal is what a connector asks the user to confirm, or acts on at once in a clean turn: the
+// exact tool call and its rendering.
 type Proposal struct {
 	Tool      string
 	Arguments json.RawMessage
 	Summary   string
 	Intent    Intent
+	// Strict lets Act act directly only while the conversation has read no third-party content at
+	// all, the household's own devices included.
+	Strict bool
 }
 
 // Intent is a short description of a proposed action for the intent check, which sends it to an
@@ -117,11 +145,51 @@ type Record struct {
 	ExpiresAt   time.Time
 	StartedAt   time.Time
 	FinishedAt  time.Time
+	// Mode tells a proposal from a direct action, which carries the chat request it was made in.
+	Mode      string
+	RequestID string
+	// Undo is the payload a done direct action's executor returned to reverse it, until UndoUntil.
+	Undo      json.RawMessage
+	UndoUntil time.Time
 }
 
 // Outcome is the content-free result line of an executed action, such as a created page URL.
 type Outcome struct {
 	Text string
+	// Undo is what reverses a direct action, such as a created object's ID or the values it
+	// replaced. It is kept apart from the arguments, whose hash stays canonical, and an action
+	// without it cannot be undone.
+	Undo json.RawMessage
+}
+
+// Undoer is implemented by an executor whose direct actions can be undone. Undo reverses the action
+// of a done record from the payload its execution returned in Outcome.Undo. It returns an
+// *UndoRefusal when the object changed since or is gone; any other error leaves the action
+// undoable, so the user can try again.
+type Undoer interface {
+	Undo(ctx context.Context, record Record, undo json.RawMessage) (Outcome, error)
+}
+
+// UndoRefusal refuses an Undo for good, with the reason shown to the user.
+type UndoRefusal struct {
+	Reason string
+}
+
+func (e *UndoRefusal) Error() string { return "undo refused: " + e.Reason }
+
+// Exposure tells Act whether the calling turn may act without asking: whether it answers the user's
+// own message, and whether it has read content that must not steer such an action. It reads the
+// turn from the call's context, which this package cannot do itself without an import cycle.
+type Exposure interface {
+	// UserChatRequest returns the chat request of a call whose run answers a message the user wrote;
+	// any other call reports false.
+	UserChatRequest(ctx context.Context) (string, bool)
+	// External reports whether the call's run or conversation has read text from outside the
+	// household.
+	External(ctx context.Context, principalID string) bool
+	// Exposed reports whether the call's run or conversation has read any third-party content, the
+	// household's own devices included.
+	Exposed(ctx context.Context, principalID string) bool
 }
 
 // ActionError marks a failed execution with a short reason word and the sentence shown to the user.
@@ -187,11 +255,36 @@ type Repository interface {
 	SetApprovalSummary(ctx context.Context, id, summary string) error
 	// ExpireApprovals moves every pending record past its expiry, or every pending and confirmed
 	// record when all is set, to expired, or to failed for a confirmed record that had started,
-	// returning the changed records.
+	// returning the changed records. With all set it also marks a done record whose Undo was running
+	// with ReasonUndoInterrupted, leaving it done.
 	ExpireApprovals(ctx context.Context, now time.Time, all bool) ([]Record, error)
 	// UndeliveredApprovals returns pending records whose chat is known but whose message never
 	// reached Telegram.
 	UndeliveredApprovals(context.Context) ([]Record, error)
+	// CreateDirectApproval stores a direct record already confirmed and started, leaving every
+	// bundle alone.
+	CreateDirectApproval(context.Context, Record) error
+	// FinishDirectApproval moves a confirmed direct record to done or failed, keeping the undo
+	// payload of a done one until undoUntil.
+	FinishDirectApproval(ctx context.Context, id, status, reason, outcome string, undo json.RawMessage, undoUntil time.Time) (bool, error)
+	// DirectApprovals returns the direct records of a chat request in the order they were made.
+	DirectApprovals(ctx context.Context, principalID, requestID string) ([]Record, error)
+	// UnsentDirectApprovals returns the principal's done and undone direct records that no message
+	// shows yet and that are still inside their undo window, in the order they were made.
+	UnsentDirectApprovals(ctx context.Context, principalID string, now time.Time) ([]Record, error)
+	// ShownDirectApprovals returns the principal's direct records that the message shows, in order.
+	ShownDirectApprovals(ctx context.Context, principalID string, chatID, messageID int64) ([]Record, error)
+	// FindDirectApproval returns the first direct record of the chat request with the same tool and
+	// arguments.
+	FindDirectApproval(ctx context.Context, principalID, tool, hash, requestID string) (Record, bool, error)
+	// ClaimUndo marks the principal's done, undoable direct record with ReasonUndoing if its undo
+	// deadline is after now, reporting whether it did, so only one press undoes it.
+	ClaimUndo(ctx context.Context, id, principalID string, now time.Time) (bool, error)
+	// CompleteUndo moves a claimed record to undone with the outcome of its Undo.
+	CompleteUndo(ctx context.Context, id, outcome string) error
+	// ReleaseUndo returns a claimed record to plain done with a reason and outcome. A spent one loses
+	// its undo payload, so it cannot be pressed again.
+	ReleaseUndo(ctx context.Context, id, reason, outcome string, spent bool) error
 }
 
 // Deliverer sends and updates the proposal messages in the user's chat.
@@ -204,6 +297,23 @@ type Deliverer interface {
 	EditProposal(ctx context.Context, chatID, messageID int64, text string, buttons Buttons) error
 	// SendPreview posts a preview's output as a reply to the proposal message.
 	SendPreview(ctx context.Context, chatID, replyTo int64, text string) error
+	// SendDirectActions posts a turn's "Done" message with one Undo button per row.
+	SendDirectActions(ctx context.Context, chatID int64, actions DirectActions) (int64, error)
+	// EditDirectActions replaces the text and the Undo buttons of a "Done" message.
+	EditDirectActions(ctx context.Context, chatID, messageID int64, actions DirectActions) error
+}
+
+// DirectActions is a turn's "Done" message: its text and the Undo buttons of the actions that can
+// still be undone, in order.
+type DirectActions struct {
+	Text string
+	Undo []UndoButton
+}
+
+// UndoButton is one Undo button; Data is UndoCallback of its record's ID.
+type UndoButton struct {
+	Label string
+	Data  string
 }
 
 // Buttons is the callback data of a bundle's buttons; an empty Preview leaves that button out.
@@ -232,6 +342,7 @@ type Service struct {
 	proposing map[string]*sync.Mutex
 	executors map[string]Executor
 	checker   IntentChecker
+	exposure  Exposure
 	telemetry Telemetry
 	intents   map[string]Intent
 	notices   map[string]notice
@@ -315,7 +426,7 @@ func (s *Service) recordStatus(ctx context.Context, record Record, status string
 	if telemetry == nil {
 		return
 	}
-	telemetry.RecordApproval(ctx, record.PrincipalID, record.Tool, status, strings.HasPrefix(record.Summary, IntentWarning))
+	telemetry.RecordApproval(ctx, record.PrincipalID, record.Tool, status, strings.HasPrefix(record.Summary, IntentWarning) || strings.HasPrefix(record.Summary, DirectIntentWarning))
 }
 
 // SetIntentChecker enables the intent check on proposals delivered from now on.
@@ -323,6 +434,14 @@ func (s *Service) SetIntentChecker(checker IntentChecker) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.checker = checker
+}
+
+// SetExposure enables direct actions, which are told apart from proposals by the exposure of the
+// calling turn. Without it Act always proposes.
+func (s *Service) SetExposure(exposure Exposure) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.exposure = exposure
 }
 
 // RegisterExecutor binds a connector to the tools it can execute once confirmed.
@@ -529,8 +648,10 @@ func joinable(pending []Record, now time.Time, lifetime time.Duration) bool {
 	return now.Sub(first.CreatedAt) < lifetime/2 && now.Before(first.ExpiresAt)
 }
 
-// AfterDelivery sends the principal's undelivered bundle to the chat once the turn's reply is out.
+// AfterDelivery sends the "Done" messages of the principal's unshown direct actions, then the
+// principal's undelivered bundle, to the chat once the turn's reply is out.
 func (s *Service) AfterDelivery(ctx context.Context, principalID string, chatID int64) error {
+	s.sendDirect(ctx, principalID, chatID)
 	bundle, err := s.repository.PendingApprovals(ctx, principalID)
 	if err != nil {
 		return err
@@ -588,7 +709,11 @@ func (s *Service) checkIntent(ctx context.Context, record Record) {
 	if !mismatch {
 		return
 	}
-	summary := truncateRunes(IntentWarning+"\n\n"+record.Summary, maximumSummaryRunes)
+	warning := IntentWarning
+	if record.Mode == ModeDirect {
+		warning = DirectIntentWarning
+	}
+	summary := truncateRunes(warning+"\n\n"+record.Summary, maximumSummaryRunes)
 	if err := s.repository.SetApprovalSummary(ctx, record.ID, summary); err != nil {
 		s.logger.WarnContext(ctx, "approval.intent_warning.unsaved", "principal_id", record.PrincipalID, "approval_id", record.ID)
 	}
@@ -674,7 +799,7 @@ func (s *Service) Press(ctx context.Context, principalID, action, approvalID str
 	if err != nil {
 		return Pressed{}, err
 	}
-	if !found || record.PrincipalID != principalID {
+	if !found || record.PrincipalID != principalID || record.Mode == ModeDirect {
 		return Pressed{}, nil
 	}
 	bundle, err := s.repository.LoadBundle(ctx, record.BundleID)
@@ -760,21 +885,10 @@ func (s *Service) execute(ctx context.Context, record Record) Record {
 		}
 	}
 	if bound {
-		executionCtx, cancel := context.WithTimeout(ctx, executionTimeout)
-		result, err := executor.ExecuteApproved(executionCtx, record)
-		cancel()
-		var actionErr *ActionError
-		switch {
-		case err == nil:
-			status, reason, outcome = StatusExecuted, "", result.Text
-		case errors.As(err, &actionErr):
-			reason, outcome = actionErr.Reason, actionErr.Text
-		case errors.Is(err, context.DeadlineExceeded):
-			reason = ReasonTimeout
-		case errors.Is(err, context.Canceled):
-			reason = ReasonInterrupted
-		default:
-			reason = ReasonExecutorFailed
+		var succeeded bool
+		succeeded, reason, outcome, _ = runExecutor(ctx, executor, record)
+		if succeeded {
+			status = StatusExecuted
 		}
 	}
 	if _, err := s.repository.FinishApproval(context.WithoutCancel(ctx), record.ID, StatusConfirmed, status, reason, outcome); err != nil {
@@ -786,9 +900,41 @@ func (s *Service) execute(ctx context.Context, record Record) Record {
 	return record
 }
 
+// runExecutor runs a started record's action, returning whether it succeeded, the failure reason,
+// the outcome line, and the undo payload of a success.
+func runExecutor(ctx context.Context, executor Executor, record Record) (bool, string, string, json.RawMessage) {
+	executionCtx, cancel := context.WithTimeout(ctx, executionTimeout)
+	defer cancel()
+	result, err := executor.ExecuteApproved(executionCtx, record)
+	var actionErr *ActionError
+	switch {
+	case err == nil:
+		return true, "", result.Text, result.Undo
+	case errors.As(err, &actionErr):
+		return false, actionErr.Reason, actionErr.Text, nil
+	case errors.Is(err, context.DeadlineExceeded):
+		return false, ReasonTimeout, "", nil
+	case errors.Is(err, context.Canceled):
+		return false, ReasonInterrupted, "", nil
+	default:
+		return false, ReasonExecutorFailed, "", nil
+	}
+}
+
 // report records records resolved without a press and edits each of their bundles' messages.
 func (s *Service) report(ctx context.Context, records []Record) {
 	s.dropIntents(records)
+	resolved := records[:0:0]
+	for _, record := range records {
+		if record.Mode == ModeDirect && record.Reason == ReasonUndoInterrupted {
+			s.logger.WarnContext(ctx, "approval.undo.interrupted", "principal_id", record.PrincipalID, "approval_id", record.ID, "tool", record.Tool)
+			s.addNotice(record)
+			s.showDirect(ctx, record)
+			continue
+		}
+		resolved = append(resolved, record)
+	}
+	records = resolved
 	for _, record := range records {
 		status := record.Status
 		if record.Reason == ReasonReplaced {
@@ -805,7 +951,7 @@ func (s *Service) report(ctx context.Context, records []Record) {
 		}
 		s.rememberNotice(bundle)
 		last := bundle[len(bundle)-1]
-		if last.ChatID == 0 || last.MessageID == 0 {
+		if last.ChatID == 0 || last.MessageID == 0 || last.Mode == ModeDirect {
 			continue
 		}
 		if err := s.deliverer.EditText(ctx, last.ChatID, last.MessageID, bundleText(bundle)); err != nil {
@@ -886,6 +1032,9 @@ func (s *Service) TakeNotice(principalID string) (string, bool) {
 }
 
 func noticeText(record Record) string {
+	if record.Mode == ModeDirect {
+		return directNoticeText(record)
+	}
 	switch record.Status {
 	case StatusExecuted:
 		return strings.TrimSpace("The user confirmed your " + record.Tool + " proposal and it was executed. " + record.Outcome)

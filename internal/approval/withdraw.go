@@ -21,7 +21,11 @@ func (s *Service) Withdraw(ctx context.Context, principalID string, items []int,
 	if err != nil {
 		return "", false, err
 	}
+	direct := s.directNote(ctx, principalID)
 	if len(pending) == 0 {
+		if direct != "" {
+			return "No proposal of yours is waiting for the user's confirmation; nothing was withdrawn. " + direct, false, nil
+		}
 		return "No proposal of yours is waiting for the user's confirmation; nothing was withdrawn.", false, nil
 	}
 	bundle, err := s.repository.LoadBundle(ctx, pending[0].BundleID)
@@ -97,7 +101,39 @@ func (s *Service) Withdraw(ctx context.Context, principalID string, items []int,
 	} else {
 		text.WriteString("Still waiting for the user's confirmation, numbered as the user sees them: " + strings.Join(waiting, "; "))
 	}
+	if direct != "" {
+		text.WriteString(" " + direct)
+	}
 	return text.String(), len(withdrawn) > 0, nil
+}
+
+// directNote names the actions this turn already made without asking, which cannot be withdrawn.
+func (s *Service) directNote(ctx context.Context, principalID string) string {
+	s.mu.Lock()
+	exposure := s.exposure
+	s.mu.Unlock()
+	if exposure == nil {
+		return ""
+	}
+	requestID, chat := exposure.UserChatRequest(ctx)
+	if !chat {
+		return ""
+	}
+	records, err := s.repository.DirectApprovals(ctx, principalID, requestID)
+	if err != nil {
+		return ""
+	}
+	var done []string
+	for _, record := range records {
+		if record.Status == StatusDone {
+			done = append(done, itemLabel(record))
+		}
+	}
+	if len(done) == 0 {
+		return ""
+	}
+	return "Already done without asking, so not withdrawable: " + strings.Join(done, "; ") +
+		". The user can undo it with its Undo button, shown after your reply, or you can make the opposite change."
 }
 
 // showWithdrawal edits the messages that show the withdrawn records. The message with the buttons
@@ -132,7 +168,7 @@ func (s *Service) showWithdrawal(ctx context.Context, bundle []Record, withdrawn
 
 // itemLabel names a proposal for the model by its tool and the first line of its summary.
 func itemLabel(record Record) string {
-	summary := strings.TrimPrefix(record.Summary, IntentWarning+"\n\n")
+	summary := strings.TrimPrefix(strings.TrimPrefix(record.Summary, IntentWarning+"\n\n"), DirectIntentWarning+"\n\n")
 	line, _, _ := strings.Cut(summary, "\n")
 	return record.Tool + ": " + truncateRunes(line, withdrawnLabelRunes)
 }

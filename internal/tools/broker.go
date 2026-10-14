@@ -409,6 +409,11 @@ func (e *turnExecutor) perform(ctx context.Context, call agentruntime.ToolCall, 
 	}
 	callCtx, cancel := context.WithTimeout(callCtx, deadline)
 	defer cancel()
+	// The run is marked before the outside call runs, so a write the model makes in parallel with
+	// it is not taken as clean while the outside text is on its way.
+	if binding.thirdParty && !binding.household && e.run != nil {
+		e.run.MarkExternal("")
+	}
 	result, err := binding.provider.Execute(callCtx, e.principalID, Call{Name: call.Name, Arguments: call.Arguments})
 	switch {
 	case err != nil && errors.Is(callCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil:
