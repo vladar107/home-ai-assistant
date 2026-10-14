@@ -544,6 +544,9 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 	if !ownMessage(request.Message) {
 		run.MarkUserMessage()
 	}
+	if strings.HasPrefix(request.Message, ReconsiderMessage) {
+		s.markReconsider(ctx, run, request)
+	}
 	turnCtx, cancel := context.WithTimeout(tools.WithRun(tools.WithTurn(ctx, outbox.ChatTurn(request.ID)), run), s.config.TurnTimeout)
 	s.mu.Lock()
 	s.inflight[request.PrincipalID] = cancel

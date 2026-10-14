@@ -24,6 +24,7 @@ const (
 		"kind is instruction for how you should behave, such as answer briefly, and fact for something about the user or household, such as prefers metric units. Write each entry as one short, self-contained sentence. " +
 		"A fact is saved at once and the user's reply gets a Remembered line, so do not repeat it. An instruction only becomes a proposal: after your reply the user sees it with Confirm and Reject buttons, so never claim it was saved. " +
 		"After you have read mail or web pages in this conversation, facts become proposals too. " +
+		"When the user corrects you and the correction states a lasting preference, such as use metric or always 24-hour times, propose keeping it as an instruction; a one-off fix, such as I meant the 07:42, is not one. " +
 		"When the conversation contradicts an entry, change it with memory_replace, and when the user asks you to forget something use memory_remove, by id. " +
 		"Each entry holds at most 300 characters, instructions 1500 and facts 2000 in total; when a write is refused for size, merge or remove entries first."
 
@@ -68,6 +69,18 @@ type addArguments struct {
 type replaceArguments struct {
 	ID   string `json:"id"`
 	Text string `json:"text"`
+}
+
+// proposedAdd and proposedReplace are the arguments a proposal stores. Learned marks the lesson of
+// a turn a 👎 started; the application sets it, never the model.
+type proposedAdd struct {
+	addArguments
+	Learned bool `json:"learned,omitempty"`
+}
+
+type proposedReplace struct {
+	replaceArguments
+	Learned bool `json:"learned,omitempty"`
 }
 
 type removeArguments struct {
@@ -133,20 +146,22 @@ func (s *Service) add(ctx context.Context, principalID string, call tools.Call) 
 		s.record(ctx, principalID, arguments.Kind, rejected.outcome)
 		return tools.Result{Text: rejected.text, IsError: true}, nil
 	}
-	canonical, err := json.Marshal(addArguments{Kind: arguments.Kind, Text: text})
+	stored := addArguments{Kind: arguments.Kind, Text: text}
+	summary := fmt.Sprintf("Remember this %s: %q", arguments.Kind, text)
+	proposal := approval.Proposal{Tool: toolAdd, Intent: approval.Intent{Verb: "remember", TargetKind: arguments.Kind + " in memory"}}
+	if arguments.Kind == KindInstruction {
+		proposal.Summary = summary + "\nIt will apply to every later conversation, scheduled run, and background task until you delete it in /memory."
+		return s.proposeInstruction(ctx, principalID, exposed, text, proposal, func(learned bool) ([]byte, error) {
+			return json.Marshal(proposedAdd{addArguments: stored, Learned: learned})
+		})
+	}
+	canonical, err := json.Marshal(stored)
 	if err != nil {
 		return tools.Result{}, err
 	}
-	summary := fmt.Sprintf("Remember this %s: %q", arguments.Kind, text)
-	if arguments.Kind == KindInstruction {
-		summary += "\nIt will apply to every later conversation, scheduled run, and background task until you delete it in /memory."
-	} else {
-		summary += "\nI read outside content in this conversation, so I need your confirmation before keeping it."
-	}
-	return s.propose(ctx, principalID, exposed, text, arguments.Kind, approval.Proposal{
-		Tool: toolAdd, Arguments: canonical, Summary: summary,
-		Intent: approval.Intent{Verb: "remember", TargetKind: arguments.Kind + " in memory"},
-	})
+	proposal.Arguments = canonical
+	proposal.Summary = summary + "\nI read outside content in this conversation, so I need your confirmation before keeping it."
+	return s.propose(ctx, principalID, exposed, text, arguments.Kind, proposal)
 }
 
 func (s *Service) writeFact(ctx context.Context, principalID, text string) (tools.Result, error) {
@@ -199,15 +214,22 @@ func (s *Service) replace(ctx context.Context, principalID string, call tools.Ca
 		s.record(ctx, principalID, entry.Kind, rejected.outcome)
 		return tools.Result{Text: rejected.text, IsError: true}, nil
 	}
-	canonical, err := json.Marshal(replaceArguments{ID: entry.ID, Text: text})
+	stored := replaceArguments{ID: entry.ID, Text: text}
+	proposal := approval.Proposal{
+		Tool: toolReplace, Summary: fmt.Sprintf("Change the remembered %s\nfrom: %q\nto: %q", entry.Kind, entry.Text, text),
+		Intent: approval.Intent{Verb: "change", TargetKind: entry.Kind + " in memory"},
+	}
+	if entry.Kind == KindInstruction {
+		return s.proposeInstruction(ctx, principalID, exposed, text, proposal, func(learned bool) ([]byte, error) {
+			return json.Marshal(proposedReplace{replaceArguments: stored, Learned: learned})
+		})
+	}
+	canonical, err := json.Marshal(stored)
 	if err != nil {
 		return tools.Result{}, err
 	}
-	summary := fmt.Sprintf("Change the remembered %s\nfrom: %q\nto: %q", entry.Kind, entry.Text, text)
-	return s.propose(ctx, principalID, exposed, text, entry.Kind, approval.Proposal{
-		Tool: toolReplace, Arguments: canonical, Summary: summary,
-		Intent: approval.Intent{Verb: "change", TargetKind: entry.Kind + " in memory"},
-	})
+	proposal.Arguments = canonical
+	return s.propose(ctx, principalID, exposed, text, entry.Kind, proposal)
 }
 
 func (s *Service) writeReplacement(ctx context.Context, principalID, id, text string) (tools.Result, error) {
@@ -253,6 +275,71 @@ func (s *Service) remove(ctx context.Context, principalID string, call tools.Cal
 	s.record(ctx, principalID, entry.Kind, outcomeRemoved)
 	s.addNote(ctx, principalID, "Forgot: "+entry.Text)
 	return tools.Result{Text: "Forgot the entry. The user's reply will show it as a Forgot line."}, nil
+}
+
+// proposeInstruction proposes an instruction. In a turn a 👎 started it is that turn's one lesson:
+// labelled with the 👎 unless the conversation read outside content, stored as learned, and refused while learning from 👎 is off or once the turn
+// has proposed one. arguments renders what the proposal stores.
+func (s *Service) proposeInstruction(ctx context.Context, principalID string, exposed bool, text string, proposal approval.Proposal, arguments func(learned bool) ([]byte, error)) (tools.Result, error) {
+	run, sentAt, refusal, err := s.claimLesson(ctx, principalID)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	if refusal != "" {
+		return tools.Result{Text: refusal, IsError: true}, nil
+	}
+	if proposal.Arguments, err = arguments(run != nil); err != nil {
+		if run != nil {
+			run.ReleaseLesson()
+		}
+		return tools.Result{}, err
+	}
+	if run == nil {
+		return s.propose(ctx, principalID, exposed, text, KindInstruction, proposal)
+	}
+	// Outside content in the conversation may have shaped the text, so it is not presented as what
+	// the user's own 👎 taught.
+	if !exposed {
+		proposal.Summary = lessonLabel(sentAt) + "\n" + proposal.Summary
+	}
+	result, err := s.propose(ctx, principalID, exposed, text, KindInstruction, proposal)
+	if err != nil || result.IsError {
+		run.ReleaseLesson()
+		return result, err
+	}
+	s.recordLesson(ctx, principalID, outcomeProposed)
+	return result, nil
+}
+
+// claimLesson takes the one instruction a turn a 👎 started may propose. It returns that turn's run
+// and when the reply was sent, a nil run for any other turn, or a refusal for the model.
+func (s *Service) claimLesson(ctx context.Context, principalID string) (*tools.Run, time.Time, string, error) {
+	run := tools.RunFrom(ctx)
+	if run == nil {
+		return nil, time.Time{}, "", nil
+	}
+	sentAt, reconsider := run.Reconsider()
+	if !reconsider {
+		return nil, time.Time{}, "", nil
+	}
+	learn, err := s.repository.LearnFromFeedback(ctx, principalID)
+	if err != nil {
+		return nil, time.Time{}, "", err
+	}
+	if !learn {
+		return nil, time.Time{}, "Not proposed: the user turned off learning from 👎, so this turn proposes no instruction. Do not mention memory in your reply.", nil
+	}
+	if !run.ClaimLesson() {
+		return nil, time.Time{}, "Not proposed: this turn may propose only one instruction, and it already has; that proposal is waiting for the user.", nil
+	}
+	return run, sentAt, "", nil
+}
+
+func lessonLabel(sentAt time.Time) string {
+	if sentAt.IsZero() {
+		return "Learned from your 👎:"
+	}
+	return "Learned from your 👎 on " + sentAt.Format("Mon 2 Jan") + ":"
 }
 
 const unknownEntryText = "No memory entry has that id. The ids are in the Memory section of your prompt."
@@ -306,7 +393,7 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 	}
 	switch record.Tool {
 	case toolAdd:
-		var confirmed addArguments
+		var confirmed proposedAdd
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil || !validKind(confirmed.Kind) || validText(confirmed.Text) != "" {
 			return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed entry could not be read; nothing was remembered."}
 		}
@@ -319,13 +406,16 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 			return approval.Outcome{}, err
 		}
 		now := s.now()
-		if err := s.repository.AddMemory(ctx, Entry{ID: id, PrincipalID: record.PrincipalID, Kind: confirmed.Kind, Text: confirmed.Text, Source: SourceConfirmed, CreatedAt: now, UpdatedAt: now}); err != nil {
+		if err := s.repository.AddMemory(ctx, Entry{ID: id, PrincipalID: record.PrincipalID, Kind: confirmed.Kind, Text: confirmed.Text, Source: confirmedSource(confirmed.Learned), CreatedAt: now, UpdatedAt: now}); err != nil {
 			return approval.Outcome{}, err
 		}
 		s.record(ctx, record.PrincipalID, confirmed.Kind, outcomeWritten)
+		if confirmed.Learned {
+			s.recordLesson(ctx, record.PrincipalID, outcomeWritten)
+		}
 		return approval.Outcome{Text: "Remembered."}, nil
 	case toolReplace:
-		var confirmed replaceArguments
+		var confirmed proposedReplace
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil || validText(confirmed.Text) != "" {
 			return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed entry could not be read; nothing was changed."}
 		}
@@ -337,14 +427,24 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 			s.record(ctx, record.PrincipalID, entry.Kind, rejected.outcome)
 			return approval.Outcome{}, &approval.ActionError{Reason: rejected.outcome, Text: userFacing(rejected)}
 		}
-		if _, err := s.repository.ReplaceMemory(ctx, record.PrincipalID, entry.ID, confirmed.Text, SourceConfirmed, s.now()); err != nil {
+		if _, err := s.repository.ReplaceMemory(ctx, record.PrincipalID, entry.ID, confirmed.Text, confirmedSource(confirmed.Learned), s.now()); err != nil {
 			return approval.Outcome{}, err
 		}
 		s.record(ctx, record.PrincipalID, entry.Kind, outcomeWritten)
+		if confirmed.Learned {
+			s.recordLesson(ctx, record.PrincipalID, outcomeWritten)
+		}
 		return approval.Outcome{Text: "Updated."}, nil
 	default:
 		return approval.Outcome{}, &approval.ActionError{Reason: "unavailable", Text: "That action is no longer available."}
 	}
+}
+
+func confirmedSource(learned bool) string {
+	if learned {
+		return SourceLearned
+	}
+	return SourceConfirmed
 }
 
 // userFacing is a rejection as the user reads it after pressing Confirm.

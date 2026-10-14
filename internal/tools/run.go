@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
 
 // maximumSeenURLs bounds what one run remembers; a run that reads more links than this can still
@@ -22,8 +23,12 @@ type Run struct {
 	private  bool
 	// userMessage marks a run that answers a message the user wrote, rather than one of ours.
 	userMessage bool
-	reacted     bool
-	seen        map[string]struct{}
+	// reconsider marks a run that looks again at a reply the user marked 👎, sent at reconsidered.
+	reconsider   bool
+	reconsidered time.Time
+	lesson       bool
+	reacted      bool
+	seen         map[string]struct{}
 }
 
 // NewRun starts the record of a run whose trusted instruction is the given text: the user's own
@@ -100,6 +105,40 @@ func (r *Run) UserMessage() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.userMessage
+}
+
+// MarkReconsider records that the run looks again at a reply the user marked 👎, sent at sentAt,
+// which is zero when unknown. It is set before the run's tools are called.
+func (r *Run) MarkReconsider(sentAt time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.reconsider, r.reconsidered = true, sentAt
+}
+
+// Reconsider reports whether the run looks again at a reply the user marked 👎, and when that reply
+// was sent.
+func (r *Run) Reconsider() (time.Time, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.reconsidered, r.reconsider
+}
+
+// ClaimLesson reports whether the run may propose its one lesson, claiming it when it may.
+func (r *Run) ClaimLesson() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.lesson {
+		return false
+	}
+	r.lesson = true
+	return true
+}
+
+// ReleaseLesson gives back a claimed lesson whose proposal was not made.
+func (r *Run) ReleaseLesson() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.lesson = false
 }
 
 // MarkReacted records that the run set a reaction on the user's message.

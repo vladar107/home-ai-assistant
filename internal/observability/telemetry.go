@@ -78,6 +78,7 @@ type Telemetry struct {
 	hintFollowThrough            metric.Int64Counter
 	scheduleRuns                 metric.Int64Counter
 	memoryWrites                 metric.Int64Counter
+	memoryLessons                metric.Int64Counter
 	conversationResumes          metric.Int64Counter
 	conversationSearches         metric.Int64Counter
 	turnIndicatorFailures        metric.Int64Counter
@@ -399,6 +400,9 @@ func (t *Telemetry) createBusinessInstruments(meter metric.Meter) error {
 	if t.memoryWrites, err = counter("home_agent.memory.writes", "Memory writes by kind and outcome.", "{write}"); err != nil {
 		return err
 	}
+	if t.memoryLessons, err = counter("home_agent.memory.lessons", "Instructions learned from a negative reaction, by outcome.", "{lesson}"); err != nil {
+		return err
+	}
 	if t.conversationResumes, err = counter("home_agent.conversation.resumes", "Returns to an earlier conversation, by trigger.", "{resume}"); err != nil {
 		return err
 	}
@@ -642,10 +646,11 @@ func (t *Telemetry) StartToolCall(ctx context.Context, principal, tool string) (
 }
 
 // ZeroRareOutcomes creates each principal's rare failure series, its series for each reaction the
-// bot may set, and its series for each class of a user's reaction, each reconsider outcome, and
-// each reply conversion outcome, at zero, so increase() sees their first occurrence. The label
-// tuples must match the ones StartConversationTurn, StartModelCall, RecordReaction,
-// RecordReplyFeedback, RecordReconsider, and RecordReactionConversion record.
+// bot may set, and its series for each class of a user's reaction, each reconsider outcome, each
+// reply conversion outcome, and each lesson outcome, at zero, so increase() sees their first
+// occurrence. The label tuples must match the ones StartConversationTurn, StartModelCall,
+// RecordReaction, RecordReplyFeedback, RecordReconsider, RecordReactionConversion, and
+// RecordMemoryLesson record.
 func (t *Telemetry) ZeroRareOutcomes(ctx context.Context, principals, turnErrorKinds, reactions, feedbackClasses []string) {
 	for _, principal := range principals {
 		for _, errorKind := range turnErrorKinds {
@@ -678,6 +683,9 @@ func (t *Telemetry) ZeroRareOutcomes(ctx context.Context, principals, turnErrorK
 		}
 		for _, outcome := range []string{"reacted", "dropped"} {
 			t.reactionConversions.Add(ctx, 0, metric.WithAttributes(principalAttr(principal), labelAttr("home_agent.outcome", outcome, "unknown")))
+		}
+		for _, outcome := range []string{"proposed", "written"} {
+			t.memoryLessons.Add(ctx, 0, metric.WithAttributes(principalAttr(principal), labelAttr("home_agent.outcome", outcome, "unknown")))
 		}
 	}
 }
@@ -839,6 +847,14 @@ func (t *Telemetry) RecordMemoryWrite(ctx context.Context, principal, kind, outc
 	t.memoryWrites.Add(ctx, 1, metric.WithAttributes(
 		principalAttr(principal),
 		labelAttr("home_agent.kind", kind, "unknown"),
+		labelAttr("home_agent.outcome", outcome, "unknown"),
+	))
+}
+
+// RecordMemoryLesson counts an instruction learned from a negative reaction: "proposed" or "written".
+func (t *Telemetry) RecordMemoryLesson(ctx context.Context, principal, outcome string) {
+	t.memoryLessons.Add(ctx, 1, metric.WithAttributes(
+		principalAttr(principal),
 		labelAttr("home_agent.outcome", outcome, "unknown"),
 	))
 }
