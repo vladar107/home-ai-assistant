@@ -271,6 +271,14 @@ not_retryable), and each retry is logged at debug level.
    without marking it and sends nothing. `home_agent.reactions.received` counts
    reactions by class and `home_agent.reactions.reconsiders` the reconsider turns
    by outcome.
+   While the user has memory and "Learn from 👎" on, the reconsider message adds
+   a second step: when the mistake would recur because of a preference, a habit,
+   or a rule, propose one memory instruction. The run is marked as a reconsider,
+   so the memory tools label that proposal "Learned from your 👎", with the
+   reply's date when known and not when the conversation read outside
+   content, refuse a second one in the same turn, and refuse any while learning is off;
+   a confirmed lesson is kept with source `learned`. `home_agent.memory.lessons`
+   counts lessons proposed and written.
 
 ### Earlier conversations
 
@@ -530,7 +538,9 @@ routes after jobs and watches, read-only, with a Delete button each.
   only. The model writes them through tools offered in chat turns alone; an
   instruction, and any write in a conversation that has read third-party
   content, including a web search, needs Confirm.
-  Every write is shown in the reply, and `/memory` deletes any entry.
+  Every write is shown in the reply, and `/memory` deletes any entry. Only the
+  turn a 👎 starts writes `learned` entries, one proposal at most, and each still
+  needs Confirm.
 - **Backlog.** Each principal's ideas for developing the assistant live in
   SQLite, apart from memory, and never reach the prompt; the model reads them
   only through `backlog_list`. The tools are offered in chat turns alone, and a

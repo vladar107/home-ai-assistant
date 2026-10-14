@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
 // ReconsiderMessage starts the turn that a 👎 on a reply asks for, followed by when that reply was
@@ -43,8 +45,37 @@ func ownMessage(message string) bool {
 	return message == ContinueMessage || strings.HasPrefix(message, ReconsiderMessage)
 }
 
-func reconsiderMessage(sentAt time.Time) string {
-	return ReconsiderMessage + " The reply was sent at " + sentAt.Format("15:04 on Monday 2 January 2006") + "."
+// reconsiderLesson is the reconsider message's second step while the user lets it learn from 👎.
+const reconsiderLesson = " Then, if the mistake would recur because of a preference, a habit of the user's, or a rule you should follow, " +
+	"propose one memory instruction for it; otherwise propose nothing and do not mention memory."
+
+func reconsiderMessage(sentAt time.Time, learn bool) string {
+	message := ReconsiderMessage
+	if learn {
+		message += reconsiderLesson
+	}
+	return message + " The reply was sent at " + sentAt.Format("15:04 on Monday 2 January 2006") + "."
+}
+
+// learnsFromFeedback reports whether a reconsider turn may propose a lesson. A failed lookup
+// leaves the step out; the memory tools refuse the lesson then too.
+func (s *Service) learnsFromFeedback(ctx context.Context, principalID string) bool {
+	if s.config.Memory == nil {
+		return false
+	}
+	learn, err := s.config.Memory.LearnsFromFeedback(ctx, principalID)
+	return err == nil && learn
+}
+
+// markReconsider tells the run's tools that it looks again at the reply the request quotes. A
+// failed lookup leaves the reply's time unknown.
+func (s *Service) markReconsider(ctx context.Context, run *tools.Run, request Request) {
+	_, _, sentAt, found, err := s.repository.ReplyOrigin(ctx, request.PrincipalID, request.ReplyToMessageID)
+	if err != nil || !found {
+		run.MarkReconsider(time.Time{})
+		return
+	}
+	run.MarkReconsider(s.local(sentAt))
 }
 
 // ReactionInput is the user's new set of reactions to a message in their private chat.
@@ -110,7 +141,7 @@ func (s *Service) React(ctx context.Context, input ReactionInput) (ReactionResul
 		TelegramMessageID: input.MessageID,
 		PrincipalID:       input.PrincipalID,
 		ChatID:            input.ChatID,
-		Message:           reconsiderMessage(s.local(sentAt)),
+		Message:           reconsiderMessage(s.local(sentAt), s.learnsFromFeedback(ctx, input.PrincipalID)),
 		ReplyToMessageID:  input.MessageID,
 	})
 	if errors.Is(err, ErrBusy) {

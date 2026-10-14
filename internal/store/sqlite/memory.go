@@ -145,6 +145,39 @@ func (s *Store) SetMemoryEnabled(ctx context.Context, principalID string, enable
 	return nil
 }
 
+// LearnFromFeedback is true for a principal who never changed the switch.
+func (s *Store) LearnFromFeedback(ctx context.Context, principalID string) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("load learning switch: SQLite store is not open")
+	}
+	var learn int
+	err := s.db.QueryRowContext(ctx, `SELECT learn_from_feedback FROM memory_settings WHERE principal_id = ?`, principalID).Scan(&learn)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("query learning switch: %w", err)
+	}
+	return learn == 1, nil
+}
+
+// SetLearnFromFeedback keeps the memory switch as it is; a principal without a row has memory on.
+func (s *Store) SetLearnFromFeedback(ctx context.Context, principalID string, learn bool) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("set learning switch: SQLite store is not open")
+	}
+	value := 0
+	if learn {
+		value = 1
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO memory_settings (principal_id, enabled, learn_from_feedback) VALUES (?, 1, ?)
+		 ON CONFLICT (principal_id) DO UPDATE SET learn_from_feedback = excluded.learn_from_feedback`, principalID, value); err != nil {
+		return fmt.Errorf("set learning switch: %w", err)
+	}
+	return nil
+}
+
 // MarkConversationExposed flags the session the chat request belongs to as having read
 // third-party content, and as externally exposed when that content came from outside the
 // household. Neither flag is ever cleared; /new starts a fresh session.

@@ -11,19 +11,25 @@ import (
 )
 
 const (
-	MemoryTitle       = "Memory"
-	NoMemoryReply     = "I have nothing remembered about you. Tell me in conversation, for example: remember that I prefer short answers."
-	MemoryGoneReply   = "That entry no longer exists."
-	MemoryOffNote     = "Memory is off: nothing here is used until you turn it on in /settings."
-	MemoryClearedNote = "Forgot everything."
-	MemoryOnLine      = "Memory: on (the default). I keep the preferences and facts you ask me to remember, or that I learn in conversation, and use them in every conversation, scheduled run, and background task. See and delete them with /memory."
-	MemoryOffLine     = "Memory: off. I do not use or add to what I remembered; the saved entries are kept until you delete them in /memory."
-	MemoryHelpLine    = " /memory shows what I remember about you."
-	MemoryPrivacyLine = "Memory is kept until you delete it in /memory and goes to your model with every request while it is on."
+	MemoryTitle        = "Memory"
+	NoMemoryReply      = "I have nothing remembered about you. Tell me in conversation, for example: remember that I prefer short answers."
+	MemoryGoneReply    = "That entry no longer exists."
+	MemoryOffNote      = "Memory is off: nothing here is used until you turn it on in /settings."
+	MemoryClearedNote  = "Forgot everything."
+	MemoryOnLine       = "Memory: on (the default). I keep the preferences and facts you ask me to remember, or that I learn in conversation, and use them in every conversation, scheduled run, and background task. See and delete them with /memory."
+	MemoryOffLine      = "Memory: off. I do not use or add to what I remembered; the saved entries are kept until you delete them in /memory."
+	MemoryLearnOnLine  = "Learn from 👎: on (the default). When you mark a reply 👎 and the mistake would recur, I may propose an instruction to avoid it; it is kept only if you confirm."
+	MemoryLearnOffLine = "Learn from 👎: off. A 👎 only makes me look at that reply again."
+	MemoryHelpLine     = " /memory shows what I remember about you."
+	MemoryPrivacyLine  = "Memory is kept until you delete it in /memory and goes to your model with every request while it is on."
 
 	memorySectionPrefix = "memory"
 	memoryOnAction      = "on"
 	memoryOffAction     = "off"
+	learnOnAction       = "learn_on"
+	learnOffAction      = "learn_off"
+
+	learnedMarker = " (learned)"
 
 	memoryCallbackPrefix = "mem"
 	memoryDeleteAction   = "del"
@@ -44,6 +50,9 @@ type MemoryController interface {
 	Clear(context.Context, string) (int, error)
 	Enabled(context.Context, string) (bool, error)
 	SetEnabled(context.Context, string, bool) error
+	// LearnsFromFeedback is false while memory is off.
+	LearnsFromFeedback(context.Context, string) (bool, error)
+	SetLearnFromFeedback(context.Context, string, bool) error
 }
 
 // SetMemory adds /memory and the memory switch to /settings; call it before Start.
@@ -77,10 +86,19 @@ func (m memorySection) render(ctx context.Context, principalID string) (settings
 		return settingsView{}, err
 	}
 	if enabled {
-		return settingsView{
-			lines:   []string{MemoryOnLine},
-			buttons: []InlineButton{{Text: "Turn off memory", CallbackData: memorySectionPrefix + ":" + memoryOffAction}},
-		}, nil
+		learn, err := m.memory.LearnsFromFeedback(ctx, principalID)
+		if err != nil {
+			return settingsView{}, err
+		}
+		view := settingsView{
+			lines:   []string{MemoryOnLine, MemoryLearnOffLine},
+			buttons: []InlineButton{{Text: "Turn off memory", CallbackData: memorySectionPrefix + ":" + memoryOffAction}, {Text: "Learn from 👎", CallbackData: memorySectionPrefix + ":" + learnOnAction}},
+		}
+		if learn {
+			view.lines[1] = MemoryLearnOnLine
+			view.buttons[1] = InlineButton{Text: "Stop learning from 👎", CallbackData: memorySectionPrefix + ":" + learnOffAction}
+		}
+		return view, nil
 	}
 	return settingsView{
 		lines:   []string{MemoryOffLine},
@@ -96,6 +114,13 @@ func (m memorySection) act(ctx context.Context, principalID string, _ int64, act
 			return settingsOutcome{}, err
 		}
 		m.telemetry.ContextLogger(ctx, m.logger).InfoContext(ctx, "memory.changed", "principal_id", principalID, "enabled", enabled)
+		return settingsOutcome{}, nil
+	case learnOnAction, learnOffAction:
+		learn := action == learnOnAction
+		if err := m.memory.SetLearnFromFeedback(ctx, principalID, learn); err != nil {
+			return settingsOutcome{}, err
+		}
+		m.telemetry.ContextLogger(ctx, m.logger).InfoContext(ctx, "memory.learning.changed", "principal_id", principalID, "learn", learn)
 		return settingsOutcome{}, nil
 	default:
 		return settingsOutcome{}, errUnknownSettingsAction
@@ -139,7 +164,11 @@ func renderMemory(ctx context.Context, principalID string, controller MemoryCont
 			lines = append(lines, "", map[string]string{memory.KindInstruction: "Instructions", memory.KindFact: "Facts"}[heading])
 		}
 		number := strconv.Itoa(first + index + 1)
-		lines = append(lines, number+". "+entry.Text)
+		line := number + ". " + entry.Text
+		if entry.Source == memory.SourceLearned {
+			line += learnedMarker
+		}
+		lines = append(lines, line)
 		deletes = append(deletes, InlineButton{Text: "Delete " + number, CallbackData: memoryCallback(memoryDeleteAction, entry.ID, page)})
 		if len(deletes) == deletesPerRow {
 			keyboard, deletes = append(keyboard, deletes), nil

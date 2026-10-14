@@ -26,6 +26,8 @@ const (
 
 	SourceModel     = "model"
 	SourceConfirmed = "confirmed"
+	// SourceLearned is an instruction the turn a 👎 started proposed and the user confirmed.
+	SourceLearned = "learned"
 
 	MaximumEntryRunes       = 300
 	MaximumInstructionRunes = 1500
@@ -59,6 +61,9 @@ type Repository interface {
 	// MemoryEnabled is true for a principal who never changed the switch.
 	MemoryEnabled(ctx context.Context, principalID string) (bool, error)
 	SetMemoryEnabled(ctx context.Context, principalID string, enabled bool) error
+	// LearnFromFeedback is true for a principal who never changed the switch.
+	LearnFromFeedback(ctx context.Context, principalID string) (bool, error)
+	SetLearnFromFeedback(ctx context.Context, principalID string, learn bool) error
 	// ConversationExposed reports whether the session the chat request belongs to has read
 	// third-party content.
 	ConversationExposed(ctx context.Context, principalID, requestID string) (bool, error)
@@ -69,9 +74,10 @@ type Proposer interface {
 	Propose(context.Context, string, approval.Proposal) (approval.Record, error)
 }
 
-// Telemetry records memory writes by kind and outcome, never their content.
+// Telemetry records memory writes by kind and outcome, and lessons by outcome, never their content.
 type Telemetry interface {
 	RecordMemoryWrite(ctx context.Context, principal, kind, outcome string)
+	RecordMemoryLesson(ctx context.Context, principal, outcome string)
 }
 
 type Config struct {
@@ -125,6 +131,12 @@ func (s *Service) record(ctx context.Context, principalID, kind, outcome string)
 	}
 }
 
+func (s *Service) recordLesson(ctx context.Context, principalID, outcome string) {
+	if s.telemetry != nil {
+		s.telemetry.RecordMemoryLesson(ctx, principalID, outcome)
+	}
+}
+
 func (s *Service) Entries(ctx context.Context, principalID string) ([]Entry, error) {
 	return s.repository.ListMemory(ctx, principalID)
 }
@@ -143,6 +155,20 @@ func (s *Service) Enabled(ctx context.Context, principalID string) (bool, error)
 
 func (s *Service) SetEnabled(ctx context.Context, principalID string, enabled bool) error {
 	return s.repository.SetMemoryEnabled(ctx, principalID, enabled)
+}
+
+// LearnsFromFeedback reports whether the turn a 👎 starts may propose an instruction: the user has
+// memory on and has not turned learning from 👎 off.
+func (s *Service) LearnsFromFeedback(ctx context.Context, principalID string) (bool, error) {
+	enabled, err := s.repository.MemoryEnabled(ctx, principalID)
+	if err != nil || !enabled {
+		return false, err
+	}
+	return s.repository.LearnFromFeedback(ctx, principalID)
+}
+
+func (s *Service) SetLearnFromFeedback(ctx context.Context, principalID string, learn bool) error {
+	return s.repository.SetLearnFromFeedback(ctx, principalID, learn)
 }
 
 // Render is the principal's memory as the section of the system prompt, or "" when memory is off

@@ -57,8 +57,11 @@ borrowed between users.
 - **Memory.** Each user has a small memory of instructions and facts that the
   assistant keeps across `/new`, scheduled runs, and restarts. Facts are saved
   at once and shown in the reply; instructions and anything learned after
-  reading outside content are confirmed first. `/memory` lists and deletes
-  entries, and `/settings` turns memory off.
+  reading outside content are confirmed first. After a 👎, the assistant may
+  propose one instruction so the mistake does not recur, and when a correction
+  states a lasting preference it offers to keep it. `/memory` lists and deletes
+  entries, marking learned ones, and `/settings` turns memory, or learning from
+  👎, off.
 - **Backlog.** Ideas for developing the assistant itself ("add to the backlog:
   answer weather questions with a chart") are kept as a per-user backlog that
   never changes how the assistant behaves. `/backlog` marks items done or
