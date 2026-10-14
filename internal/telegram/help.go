@@ -19,6 +19,7 @@ const (
 	helpTopicWebSearch = "web_search"
 
 	helpGuidance = "App help: for any question about this assistant itself, such as how to connect or turn on an integration, what a /settings page or button does, how /jobs or /memory work, or how web search works, call app_help with the topic and answer from what it returns, naming the exact buttons; never describe setup steps from general knowledge. " +
+		"Clear requests to change a scheduled job, watch, saved route, memory instruction, or Notion property are done at once and shown with an Undo button that works for 24 hours; changes made after reading outside content, such as a web page or an email, still ask for Confirm first. " +
 		"When a web search is waiting for the user's confirmation, say so once, plainly; do not reword the query to get around it."
 )
 
