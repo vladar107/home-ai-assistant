@@ -63,7 +63,8 @@ borrowed between users.
   answer weather questions with a chart") are kept as a per-user backlog that
   never changes how the assistant behaves. `/backlog` marks items done or
   deletes them, and `/backlog export` sends them as Markdown to paste into a
-  development session.
+  development session. On the home network, a development session reads the
+  whole backlog and marks items done through `/api/backlog`.
 - **Background tasks.** Long requests, such as a month of mail or research across
   many pages, run as a sub-agent beside the chat and report back as a reply;
   `/tasks` shows and cancels them.

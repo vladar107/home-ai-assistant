@@ -18,9 +18,21 @@ func (s *Store) ListBacklog(ctx context.Context, principalID, status string) ([]
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("list backlog: SQLite store is not open")
 	}
-	rows, err := s.db.QueryContext(ctx,
+	return s.queryBacklog(ctx,
 		`SELECT `+backlogColumns+` FROM backlog_items WHERE principal_id = ? AND status = ?
 		 ORDER BY created_at, rowid`, principalID, status)
+}
+
+func (s *Store) ListAllBacklog(ctx context.Context, status string) ([]backlog.Item, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("list backlog: SQLite store is not open")
+	}
+	return s.queryBacklog(ctx,
+		`SELECT `+backlogColumns+` FROM backlog_items WHERE status = ? ORDER BY created_at, rowid`, status)
+}
+
+func (s *Store) queryBacklog(ctx context.Context, query string, args ...any) ([]backlog.Item, error) {
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query backlog: %w", err)
 	}
@@ -45,6 +57,21 @@ func (s *Store) LoadBacklogItem(ctx context.Context, principalID, id string) (ba
 	}
 	item, err := scanBacklogItem(s.db.QueryRowContext(ctx,
 		`SELECT `+backlogColumns+` FROM backlog_items WHERE principal_id = ? AND id = ?`, principalID, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return backlog.Item{}, false, nil
+	}
+	if err != nil {
+		return backlog.Item{}, false, err
+	}
+	return item, true, nil
+}
+
+func (s *Store) LoadBacklogItemByID(ctx context.Context, id string) (backlog.Item, bool, error) {
+	if s == nil || s.db == nil {
+		return backlog.Item{}, false, fmt.Errorf("load backlog item: SQLite store is not open")
+	}
+	item, err := scanBacklogItem(s.db.QueryRowContext(ctx,
+		`SELECT `+backlogColumns+` FROM backlog_items WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return backlog.Item{}, false, nil
 	}

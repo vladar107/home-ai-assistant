@@ -195,6 +195,8 @@ func (a *App) Run(ctx context.Context) (runErr error) {
 		return errors.Join(err, shutdownErr, a.closeStore())
 	}
 
+	// The backlog service exists only after initialization; the listener is not open yet.
+	a.server.Handler = httpHandler(a, telemetry, a.backlog)
 	_, endListen := telemetry.StartLifecycle(ctx, "http_listen")
 	listener, err := net.Listen("tcp", a.cfg.ListenAddress)
 	endListen(err)
@@ -226,7 +228,7 @@ func (a *App) Run(ctx context.Context) (runErr error) {
 	case <-ctx.Done():
 	case err := <-serverErrors:
 		if !errors.Is(err, http.ErrServerClosed) {
-			runErr = fmt.Errorf("serve health endpoint: %w", err)
+			runErr = fmt.Errorf("serve HTTP: %w", err)
 		}
 	}
 
