@@ -56,6 +56,17 @@ func (s *snapshot) visible() map[string]string {
 	return s.visibleIDs
 }
 
+func matchVisible(visible map[string]string, name string) []string {
+	var matches []string
+	for candidate, friendly := range visible {
+		if strings.EqualFold(friendly, name) {
+			matches = append(matches, candidate)
+		}
+	}
+	sort.Strings(matches)
+	return matches
+}
+
 // Resolve checks that a home watch looks at one entity the assistant can see and that its
 // condition fits the entity's state, and returns the spec with the entity ID and friendly name.
 func (s *Service) Resolve(ctx context.Context, principalID string, spec watch.Spec) (watch.Spec, error) {
@@ -82,13 +93,13 @@ func (s *Service) Resolve(ctx context.Context, principalID string, spec watch.Sp
 		if name == "" {
 			return watch.Spec{}, errors.New("name the device to watch")
 		}
-		var matches []string
-		for candidate, friendly := range visible {
-			if strings.EqualFold(friendly, name) {
-				matches = append(matches, candidate)
+		matches := matchVisible(visible, name)
+		if len(matches) == 0 {
+			if fresh := s.refreshOnMiss(ctx, snap); fresh != snap {
+				visible = fresh.visible()
+				matches = matchVisible(visible, name)
 			}
 		}
-		sort.Strings(matches)
 		switch {
 		case len(matches) == 1:
 			id = matches[0]

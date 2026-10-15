@@ -554,7 +554,8 @@ routes after jobs and watches, read-only, with a Delete button each.
   Confirm.
 - **Home Assistant scope.** One household token from a dedicated non-admin Home
   Assistant user. Only entities exposed to Assist are reachable by the MCP tools;
-  the tool, exposure, and label snapshot is cached for 5 minutes.
+  the tool, exposure, and label snapshot is cached for 5 minutes, and a name
+  that matches nothing refreshes it once, at most every 30 seconds.
 - **Grafana scope.** One Viewer service-account token, offered only to the
   principals in `HOME_AGENT_GRAFANA_PRINCIPALS`. Queries go through Grafana's
   data source proxy and are bounded in range, resolution, series, and lines.
