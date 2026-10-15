@@ -17,7 +17,7 @@ var _ approval.Repository = (*Store)(nil)
 const approvalColumns = `id, bundle_id, position, principal_id, tool, arguments, arguments_hash, summary, status,
 	COALESCE(reason, ''), COALESCE(outcome, ''), COALESCE(chat_id, 0), COALESCE(message_id, 0),
 	created_at, expires_at, COALESCE(started_at, ''), COALESCE(finished_at, ''), mode, COALESCE(request_id, ''),
-	COALESCE(undo, ''), COALESCE(undo_until, '')`
+	COALESCE(undo, ''), COALESCE(undo_until, ''), thread_id`
 
 func (s *Store) CreateApproval(ctx context.Context, record approval.Record) ([]approval.Record, error) {
 	if s == nil || s.db == nil {
@@ -31,7 +31,7 @@ func (s *Store) CreateApproval(ctx context.Context, record approval.Record) ([]a
 
 	var replaced []approval.Record
 	if record.BundleID == record.ID {
-		replaced, err = queryApprovals(ctx, tx, `SELECT `+approvalColumns+` FROM approvals WHERE principal_id = ? AND status = 'pending' AND mode = 'proposed' ORDER BY bundle_id, position`, record.PrincipalID)
+		replaced, err = queryApprovals(ctx, tx, `SELECT `+approvalColumns+` FROM approvals WHERE principal_id = ? AND thread_id = ? AND status = 'pending' AND mode = 'proposed' ORDER BY bundle_id, position`, record.PrincipalID, record.ThreadID)
 		if err != nil {
 			return nil, err
 		}
@@ -50,8 +50,8 @@ func (s *Store) CreateApproval(ctx context.Context, record approval.Record) ([]a
 	}
 	if _, err := tx.ExecContext(
 		ctx,
-		`INSERT INTO approvals (id, bundle_id, position, principal_id, tool, arguments, arguments_hash, summary, status, created_at, expires_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+		`INSERT INTO approvals (id, bundle_id, position, principal_id, tool, arguments, arguments_hash, summary, status, created_at, expires_at, thread_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
 		record.ID,
 		record.BundleID,
 		record.Position,
@@ -62,6 +62,7 @@ func (s *Store) CreateApproval(ctx context.Context, record approval.Record) ([]a
 		record.Summary,
 		formatTime(record.CreatedAt),
 		formatTime(record.ExpiresAt),
+		record.ThreadID,
 	); err != nil {
 		return nil, fmt.Errorf("insert approval: %w", err)
 	}
@@ -85,11 +86,11 @@ func (s *Store) LoadBundle(ctx context.Context, bundleID string) ([]approval.Rec
 	return queryApprovals(ctx, s.db, `SELECT `+approvalColumns+` FROM approvals WHERE bundle_id = ? ORDER BY position`, bundleID)
 }
 
-func (s *Store) PendingApprovals(ctx context.Context, principalID string) ([]approval.Record, error) {
+func (s *Store) PendingApprovals(ctx context.Context, principalID string, threadID int64) ([]approval.Record, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("load pending approvals: SQLite store is not open")
 	}
-	return queryApprovals(ctx, s.db, `SELECT `+approvalColumns+` FROM approvals WHERE principal_id = ? AND status = 'pending' AND mode = 'proposed' ORDER BY bundle_id, position`, principalID)
+	return queryApprovals(ctx, s.db, `SELECT `+approvalColumns+` FROM approvals WHERE principal_id = ? AND thread_id = ? AND status = 'pending' AND mode = 'proposed' ORDER BY bundle_id, position`, principalID, threadID)
 }
 
 func (s *Store) ConfirmBundle(ctx context.Context, bundleID, principalID string, now time.Time) (bool, error) {
@@ -264,8 +265,8 @@ func (s *Store) CreateDirectApproval(ctx context.Context, record approval.Record
 	}
 	if _, err := s.db.ExecContext(
 		ctx,
-		`INSERT INTO approvals (id, bundle_id, position, principal_id, tool, arguments, arguments_hash, summary, status, created_at, expires_at, started_at, mode, request_id)
-		 VALUES (?, ?, 0, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, 'direct', ?)`,
+		`INSERT INTO approvals (id, bundle_id, position, principal_id, tool, arguments, arguments_hash, summary, status, created_at, expires_at, started_at, mode, request_id, thread_id)
+		 VALUES (?, ?, 0, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, 'direct', ?, ?)`,
 		record.ID,
 		record.ID,
 		record.PrincipalID,
@@ -277,6 +278,7 @@ func (s *Store) CreateDirectApproval(ctx context.Context, record approval.Record
 		formatTime(record.ExpiresAt),
 		formatTime(record.CreatedAt),
 		record.RequestID,
+		record.ThreadID,
 	); err != nil {
 		return fmt.Errorf("insert direct approval: %w", err)
 	}
@@ -321,7 +323,7 @@ func (s *Store) DirectApprovals(ctx context.Context, principalID, requestID stri
 	return queryApprovals(ctx, s.db, `SELECT `+approvalColumns+` FROM approvals WHERE principal_id = ? AND request_id = ? AND mode = 'direct' ORDER BY created_at, rowid`, principalID, requestID)
 }
 
-func (s *Store) UnsentDirectApprovals(ctx context.Context, principalID string, now time.Time) ([]approval.Record, error) {
+func (s *Store) UnsentDirectApprovals(ctx context.Context, principalID string, threadID int64, now time.Time) ([]approval.Record, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("list unsent direct approvals: SQLite store is not open")
 	}
@@ -329,9 +331,10 @@ func (s *Store) UnsentDirectApprovals(ctx context.Context, principalID string, n
 		ctx,
 		s.db,
 		`SELECT `+approvalColumns+` FROM approvals
-		 WHERE principal_id = ? AND mode = 'direct' AND status IN ('done', 'undone') AND message_id IS NULL AND expires_at > ?
+		 WHERE principal_id = ? AND thread_id = ? AND mode = 'direct' AND status IN ('done', 'undone') AND message_id IS NULL AND expires_at > ?
 		 ORDER BY created_at, rowid`,
 		principalID,
+		threadID,
 		formatTime(now),
 	)
 }
@@ -480,7 +483,7 @@ func scanApprovalRow(row rowScanner) (approval.Record, error) {
 	err := row.Scan(
 		&record.ID, &record.BundleID, &record.Position, &record.PrincipalID, &record.Tool, &arguments, &record.Hash, &record.Summary, &record.Status,
 		&record.Reason, &record.Outcome, &record.ChatID, &record.MessageID, &createdAt, &expiresAt, &startedAt, &finishedAt,
-		&record.Mode, &record.RequestID, &undo, &undoUntil,
+		&record.Mode, &record.RequestID, &undo, &undoUntil, &record.ThreadID,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

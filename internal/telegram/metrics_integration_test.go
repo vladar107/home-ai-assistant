@@ -65,7 +65,7 @@ func TestApprovalLifecycleIsRecordedOncePerResolution(t *testing.T) {
 		t.Fatal(err)
 	}
 	registry := turnstate.New(time.Now)
-	registry.RecordMessage("alice", "hello")
+	registry.RecordMessage("alice", 0, "hello")
 	h.approvals.SetIntentChecker(judgment.NewIntentChecker(client, stubOptIn(true), registry, registry))
 	expiring := h.proposeTurn(runtime, 8, "notion_create_page", arguments)
 	if edit := h.nextEdit(); edit.messageID != expiring.messageID {

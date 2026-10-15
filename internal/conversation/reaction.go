@@ -70,12 +70,12 @@ func (s *Service) learnsFromFeedback(ctx context.Context, principalID string) bo
 // markReconsider tells the run's tools that it looks again at the reply the request quotes. A
 // failed lookup leaves the reply's time unknown.
 func (s *Service) markReconsider(ctx context.Context, run *tools.Run, request Request) {
-	_, _, sentAt, found, err := s.repository.ReplyOrigin(ctx, request.PrincipalID, request.ReplyToMessageID)
+	origin, found, err := s.repository.ReplyOrigin(ctx, request.PrincipalID, request.ReplyToMessageID)
 	if err != nil || !found {
 		run.MarkReconsider(time.Time{})
 		return
 	}
-	run.MarkReconsider(s.local(sentAt))
+	run.MarkReconsider(s.local(origin.SentAt))
 }
 
 // ReactionInput is the user's new set of reactions to a message in their private chat.
@@ -99,16 +99,17 @@ type ReactionResult struct {
 }
 
 // React keeps the user's latest reaction to one of their delivered replies as feedback. The first
-// 👎 on a reply starts one reconsider turn in its conversation, keyed by the reply's request so a
+// 👎 on a reply starts one reconsider turn in its conversation and the tab it was sent to, keyed by the reply's request so a
 // reply sent in several messages starts at most one. The turn is enqueued before the key is
 // claimed: enqueuing is idempotent per Telegram update, so a redelivered update finds its own
 // request instead of starting a second, and a principal with a turn pending claims nothing, so a
 // later 👎 can still start one.
 func (s *Service) React(ctx context.Context, input ReactionInput) (ReactionResult, error) {
-	_, requestID, sentAt, found, err := s.repository.ReplyOrigin(ctx, input.PrincipalID, input.MessageID)
+	origin, found, err := s.repository.ReplyOrigin(ctx, input.PrincipalID, input.MessageID)
 	if err != nil || !found {
 		return ReactionResult{}, err
 	}
+	requestID := origin.RequestID
 	class := feedbackClass(input.Emojis)
 	if class == "" {
 		return ReactionResult{Recorded: true}, s.repository.DeleteReplyFeedback(ctx, input.PrincipalID, input.MessageID)
@@ -140,8 +141,9 @@ func (s *Service) React(ctx context.Context, input ReactionInput) (ReactionResul
 		TelegramUpdateID:  input.TelegramUpdateID,
 		TelegramMessageID: input.MessageID,
 		PrincipalID:       input.PrincipalID,
+		ThreadID:          origin.ThreadID,
 		ChatID:            input.ChatID,
-		Message:           reconsiderMessage(s.local(sentAt), s.learnsFromFeedback(ctx, input.PrincipalID)),
+		Message:           reconsiderMessage(s.local(origin.SentAt), s.learnsFromFeedback(ctx, input.PrincipalID)),
 		ReplyToMessageID:  input.MessageID,
 	})
 	if errors.Is(err, ErrBusy) {

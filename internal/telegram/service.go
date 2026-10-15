@@ -22,6 +22,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
+	"github.com/vladar107/home-ai-assistant/internal/thread"
 	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
@@ -47,12 +48,15 @@ type botAPI interface {
 
 type ConversationController interface {
 	Enqueue(context.Context, conversation.EnqueueInput) error
-	Cancel(context.Context, string) (bool, error)
-	// StopDraft cancels the running turn when draftID is the one it shows and reports whether it did.
-	StopDraft(ctx context.Context, principalID string, draftID int64) (bool, error)
-	NewSession(context.Context, string) (bool, error)
-	Sessions(context.Context, string) ([]conversation.SessionSummary, error)
-	Resume(context.Context, string, string) (conversation.ResumeResult, error)
+	Cancel(context.Context, conversation.Lane) (bool, error)
+	// CancelAll stops the turns of every tab of the principal.
+	CancelAll(context.Context, string) (bool, error)
+	// StopDraft cancels the lane's running turn when draftID is the one it shows and reports whether
+	// it did.
+	StopDraft(ctx context.Context, lane conversation.Lane, draftID int64) (bool, error)
+	NewSession(context.Context, conversation.Lane) (bool, error)
+	Sessions(context.Context, conversation.Lane) ([]conversation.SessionSummary, error)
+	Resume(context.Context, conversation.Lane, string) (conversation.ResumeResult, error)
 	// React records a reaction to one of the principal's replies and starts a reconsider turn for a
 	// first 👎.
 	React(context.Context, conversation.ReactionInput) (conversation.ReactionResult, error)
@@ -97,8 +101,8 @@ type ApprovalController interface {
 	Preview(ctx context.Context, principalID, approvalID, trigger string, chatID, messageID int64) (approval.PreviewPressed, error)
 	// Undo reverses a direct action; a press on another principal's action is not owned.
 	Undo(ctx context.Context, principalID, recordID string) (approval.Undid, error)
-	// DeferContinuation keeps a continuation until the principal's in-flight turn is delivered.
-	DeferContinuation(principalID string, continuation func(context.Context))
+	// DeferContinuation keeps a continuation until the tab's in-flight turn is delivered.
+	DeferContinuation(principalID string, threadID int64, continuation func(context.Context))
 }
 
 type identityResolver interface {
@@ -246,17 +250,17 @@ func (s *Service) SetTypeSafe(typeSafe TypeSafeController) {
 }
 
 func (s *Service) botCommands() []BotCommand {
-	commands := registeredCommands(s.conversation != nil, len(s.sections) > 0, s.schedules != nil)
-	if s.memory != nil {
-		commands = append(commands, BotCommand{Command: "memory", Description: "Show and delete what I remember about you"})
-	}
-	if s.backlog != nil {
-		commands = append(commands, BotCommand{Command: "backlog", Description: "Show and export your ideas for developing me"})
-	}
-	if s.tasks != nil {
-		commands = append(commands, BotCommand{Command: "tasks", Description: "Show and cancel your background tasks"})
-	}
-	return commands
+	conversationEnabled := s.conversation != nil
+	return menuCommands([]menuCommand{
+		{BotCommand{Command: "backlog", Description: "Show and export your ideas for developing me"}, s.backlog != nil},
+		{BotCommand{Command: "cancel", Description: "Stop the current response"}, conversationEnabled},
+		{BotCommand{Command: "jobs", Description: "Show and manage your reminders and scheduled jobs"}, s.schedules != nil},
+		{BotCommand{Command: "memory", Description: "Show and delete what I remember about you"}, s.memory != nil},
+		{BotCommand{Command: "new", Description: "Start a fresh conversation"}, conversationEnabled},
+		{BotCommand{Command: "sessions", Description: "Return to a recent conversation"}, conversationEnabled},
+		{BotCommand{Command: "settings", Description: "Show and change your settings"}, len(s.sections) > 0},
+		{BotCommand{Command: "tasks", Description: "Show and cancel your background tasks"}, s.tasks != nil},
+	})
 }
 
 func (s *Service) Start(ctx context.Context) error {
@@ -455,7 +459,12 @@ type processingResult struct {
 	err         error
 }
 
+// processUpdate handles one update in the tab it came from, so every reply lands beside it. With
+// tabs off every update is in the main view.
 func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (processingResult, string, error) {
+	if bot.HasTopicsEnabled {
+		ctx = thread.With(ctx, updateThread(update))
+	}
 	if update.CallbackQuery != nil {
 		return s.processCallback(ctx, bot, update.UpdateID, update.CallbackQuery)
 	}
@@ -558,6 +567,7 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 		TelegramUpdateID:  update.UpdateID,
 		TelegramMessageID: message.MessageID,
 		PrincipalID:       authorization.Principal.ID,
+		ThreadID:          thread.From(ctx),
 		ChatID:            message.Chat.ID,
 		Message:           text,
 		Attachments:       attachments,
@@ -594,7 +604,7 @@ func (s *Service) processDraftStop(ctx context.Context, stopped *MessageGenerati
 		return ignoredResult(string(authorization.Status)), "", nil
 	}
 	principalID := authorization.Principal.ID
-	cancelled, err := s.conversation.StopDraft(ctx, principalID, stopped.DraftID)
+	cancelled, err := s.conversation.StopDraft(ctx, laneOf(ctx, principalID), stopped.DraftID)
 	if err != nil {
 		return processingResult{}, "stop_draft", err
 	}
@@ -977,12 +987,13 @@ func (s *Service) continueConversation(ctx context.Context, bot Bot, updateID in
 		TelegramUpdateID:  updateID,
 		TelegramMessageID: callback.Message.MessageID,
 		PrincipalID:       principalID,
+		ThreadID:          thread.From(ctx),
 		ChatID:            callback.Message.Chat.ID,
 		Message:           conversation.ContinueMessage,
 	}
 	err := s.conversation.Enqueue(ctx, input)
 	if errors.Is(err, conversation.ErrBusy) && s.approvals != nil {
-		s.approvals.DeferContinuation(principalID, func(ctx context.Context) {
+		s.approvals.DeferContinuation(principalID, input.ThreadID, func(ctx context.Context) {
 			s.continueConversation(ctx, bot, updateID, callback, principalID)
 		})
 		// The busy turn may have been delivered before the deferral was stored, so nothing would
@@ -1140,7 +1151,7 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		if s.conversation == nil {
 			return NothingToCancelReply, nil, nil
 		}
-		cancelled, err := s.conversation.Cancel(ctx, principalID)
+		cancelled, err := s.conversation.Cancel(ctx, laneOf(ctx, principalID))
 		if err != nil {
 			return "", nil, err
 		}
@@ -1152,7 +1163,7 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		if s.conversation == nil {
 			return NoSessionReply, nil, nil
 		}
-		reset, err := s.conversation.NewSession(ctx, principalID)
+		reset, err := s.conversation.NewSession(ctx, laneOf(ctx, principalID))
 		if err != nil {
 			return "", nil, err
 		}
@@ -1164,7 +1175,7 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		if s.conversation == nil {
 			return HelpReply, nil, nil
 		}
-		return renderSessions(ctx, principalID, s.conversation)
+		return renderSessions(ctx, laneOf(ctx, principalID), s.conversation)
 	case "jobs":
 		if s.schedules == nil {
 			return HelpReply, nil, nil

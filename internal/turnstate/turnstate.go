@@ -1,5 +1,5 @@
-// Package turnstate holds, per principal, the last few user messages, the assistant's latest chat
-// reply, and whether outside content has recently reached the model. Guards read it to judge an
+// Package turnstate holds, per principal, the last few user messages and the assistant's latest chat
+// reply in each Telegram tab, and whether outside content has recently reached the model. Guards read it to judge an
 // action against what the user asked and how much the turn can be trusted. It is memory-only by
 // design: a restart forgets it, and pending approvals expire on restart anyway.
 package turnstate
@@ -13,7 +13,7 @@ import (
 const (
 	// Window is how long a message or an exposure mark stays relevant.
 	Window = 30 * time.Minute
-	// MaxMessages is how many recent messages are kept per principal.
+	// MaxMessages is how many recent messages are kept per tab.
 	MaxMessages = 2
 	// MaxReplyRunes bounds a kept reply to its end, where the question a user answers usually is.
 	// A reader scrubs the reply and then keeps only a much shorter end of it, so a fragment this
@@ -52,9 +52,16 @@ type message struct {
 	seq uint64
 }
 
+// exchange is what one tab said most recently.
+type exchange struct {
+	messages []message
+	reply    message
+}
+
+// entry keeps exposure per principal rather than per tab: outside content one tab read can still
+// steer what the principal does in another.
 type entry struct {
-	messages   []message
-	reply      message
+	exchanges  map[int64]*exchange
 	exposedAt  time.Time
 	suspicious time.Time
 }
@@ -76,9 +83,9 @@ func New(now func() time.Time) *Registry {
 	return &Registry{now: now, principals: make(map[string]*entry)}
 }
 
-// RecordMessage remembers a user message, dropping the oldest beyond MaxMessages. Blank text is
-// ignored.
-func (r *Registry) RecordMessage(principalID, text string) {
+// RecordMessage remembers a user message in a tab, dropping the oldest beyond MaxMessages. Blank
+// text is ignored.
+func (r *Registry) RecordMessage(principalID string, threadID int64, text string) {
 	if strings.TrimSpace(text) == "" {
 		return
 	}
@@ -86,7 +93,7 @@ func (r *Registry) RecordMessage(principalID, text string) {
 	defer r.mu.Unlock()
 	now := r.now()
 	r.pruneLocked(now)
-	e := r.entryLocked(principalID)
+	e := r.exchangeLocked(principalID, threadID)
 	r.seq++
 	e.messages = append(e.messages, message{text: text, at: now, seq: r.seq})
 	if len(e.messages) > MaxMessages {
@@ -97,7 +104,7 @@ func (r *Registry) RecordMessage(principalID, text string) {
 // RecordReply remembers the assistant's latest chat reply in place of the previous one, keeping
 // its last MaxReplyRunes runes from a line start, so the cut never splits a path or address for the
 // scrubber to miss. Blank text is ignored.
-func (r *Registry) RecordReply(principalID, text string) {
+func (r *Registry) RecordReply(principalID string, threadID int64, text string) {
 	if strings.TrimSpace(text) == "" {
 		return
 	}
@@ -112,16 +119,16 @@ func (r *Registry) RecordReply(principalID, text string) {
 	now := r.now()
 	r.pruneLocked(now)
 	r.seq++
-	r.entryLocked(principalID).reply = message{text: text, at: now, seq: r.seq}
+	r.exchangeLocked(principalID, threadID).reply = message{text: text, at: now, seq: r.seq}
 }
 
-// RecentMessages returns the principal's messages from the last Window, oldest first.
-func (r *Registry) RecentMessages(principalID string) []string {
+// RecentMessages returns the principal's messages in a tab from the last Window, oldest first.
+func (r *Registry) RecentMessages(principalID string, threadID int64) []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.pruneLocked(r.now())
-	e, ok := r.principals[principalID]
-	if !ok {
+	e := r.findLocked(principalID, threadID)
+	if e == nil {
 		return nil
 	}
 	texts := make([]string, 0, len(e.messages))
@@ -131,14 +138,14 @@ func (r *Registry) RecentMessages(principalID string) []string {
 	return texts
 }
 
-// RecentExchange returns the principal's messages and the assistant's latest reply from the last
-// Window, oldest first.
-func (r *Registry) RecentExchange(principalID string) []Line {
+// RecentExchange returns the principal's messages and the assistant's latest reply in a tab from
+// the last Window, oldest first.
+func (r *Registry) RecentExchange(principalID string, threadID int64) []Line {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.pruneLocked(r.now())
-	e, ok := r.principals[principalID]
-	if !ok {
+	e := r.findLocked(principalID, threadID)
+	if e == nil {
 		return nil
 	}
 	lines := make([]Line, 0, len(e.messages)+1)
@@ -196,10 +203,28 @@ func (r *Registry) Exposure(principalID string) Level {
 func (r *Registry) entryLocked(principalID string) *entry {
 	e, ok := r.principals[principalID]
 	if !ok {
-		e = &entry{}
+		e = &entry{exchanges: make(map[int64]*exchange)}
 		r.principals[principalID] = e
 	}
 	return e
+}
+
+func (r *Registry) exchangeLocked(principalID string, threadID int64) *exchange {
+	e := r.entryLocked(principalID)
+	x, ok := e.exchanges[threadID]
+	if !ok {
+		x = &exchange{}
+		e.exchanges[threadID] = x
+	}
+	return x
+}
+
+func (r *Registry) findLocked(principalID string, threadID int64) *exchange {
+	e, ok := r.principals[principalID]
+	if !ok {
+		return nil
+	}
+	return e.exchanges[threadID]
 }
 
 // pruneLocked runs on every access, which keeps memory bounded by the principals active within
@@ -207,15 +232,20 @@ func (r *Registry) entryLocked(principalID string) *entry {
 func (r *Registry) pruneLocked(now time.Time) {
 	cutoff := now.Add(-Window)
 	for id, e := range r.principals {
-		kept := e.messages[:0]
-		for _, m := range e.messages {
-			if m.at.After(cutoff) {
-				kept = append(kept, m)
+		for threadID, x := range e.exchanges {
+			kept := x.messages[:0]
+			for _, m := range x.messages {
+				if m.at.After(cutoff) {
+					kept = append(kept, m)
+				}
 			}
-		}
-		e.messages = kept
-		if !e.reply.at.After(cutoff) {
-			e.reply = message{}
+			x.messages = kept
+			if !x.reply.at.After(cutoff) {
+				x.reply = message{}
+			}
+			if len(x.messages) == 0 && x.reply.text == "" {
+				delete(e.exchanges, threadID)
+			}
 		}
 		if !e.exposedAt.After(cutoff) {
 			e.exposedAt = time.Time{}
@@ -223,7 +253,7 @@ func (r *Registry) pruneLocked(now time.Time) {
 		if !e.suspicious.After(cutoff) {
 			e.suspicious = time.Time{}
 		}
-		if len(e.messages) == 0 && e.reply.text == "" && e.exposedAt.IsZero() && e.suspicious.IsZero() {
+		if len(e.exchanges) == 0 && e.exposedAt.IsZero() && e.suspicious.IsZero() {
 			delete(r.principals, id)
 		}
 	}

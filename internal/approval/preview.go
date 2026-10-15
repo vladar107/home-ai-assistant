@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
 const (
@@ -108,7 +110,7 @@ func (s *Service) Preview(ctx context.Context, principalID, approvalID, trigger 
 	}
 	s.previewing[record.BundleID] = true
 	s.previews.Add(1)
-	go s.runPreviews(s.runCtx, record.BundleID, items, chatID, messageID)
+	go s.runPreviews(thread.With(s.runCtx, record.ThreadID), record.BundleID, items, chatID, messageID)
 	s.logger.InfoContext(ctx, "approval.preview.started", "principal_id", principalID, "bundle_id", record.BundleID, "items", len(items))
 	return PreviewPressed{Text: text, Owned: true}, nil
 }

@@ -45,6 +45,18 @@ const (
 	RequestStateReady  = "ready"
 )
 
+// Lane is one conversation place of a principal: a Telegram tab, or the chat's main view at thread
+// zero, which is the only lane while the bot has tabs off. Each lane holds its own active session
+// and runs its turns apart from the others.
+type Lane struct {
+	PrincipalID string
+	ThreadID    int64
+}
+
+func (r Request) Lane() Lane {
+	return Lane{PrincipalID: r.PrincipalID, ThreadID: r.ThreadID}
+}
+
 type Session struct {
 	ID               string
 	PrincipalID      string
@@ -56,9 +68,11 @@ type EnqueueInput struct {
 	TelegramUpdateID  int64
 	TelegramMessageID int64
 	PrincipalID       string
-	ChatID            int64
-	Message           string
-	Attachments       []attachment.Incoming
+	// ThreadID is the tab the message was sent in, or zero for the main view.
+	ThreadID    int64
+	ChatID      int64
+	Message     string
+	Attachments []attachment.Incoming
 	// ReplyToMessageID is the message the user replied to; a reply to an answer from a closed
 	// conversation returns to that conversation. Zero when the message is not a reply.
 	ReplyToMessageID int64
@@ -67,6 +81,7 @@ type EnqueueInput struct {
 type Request struct {
 	ID                string
 	PrincipalID       string
+	ThreadID          int64
 	ChatID            int64
 	TelegramMessageID int64
 	SessionID         string
@@ -106,11 +121,15 @@ type SessionSummary struct {
 	Title      string
 	Active     bool
 	LastActive time.Time
+	// Elsewhere is true for a conversation another tab holds; it cannot be resumed here.
+	Elsewhere bool
 }
 
 type ResumeResult struct {
 	Found bool
 	Busy  bool
+	// Elsewhere is true when another tab holds the chosen conversation.
+	Elsewhere bool
 	// Current is true when the chosen conversation already was the active one.
 	Current bool
 	// Session is the conversation now active, as it was last active before the switch.
@@ -130,11 +149,24 @@ type SessionRecord struct {
 	LastActive       time.Time
 	// Private is true once the conversation has read Notion page content or NAS file contents.
 	Private bool
+	// ThreadID is the tab the conversation was last active in.
+	ThreadID int64
+}
+
+// ReplyOrigin is where a delivered reply came from: its session and request, when it was sent, and
+// the tab it was sent to. RequestID is empty for a reply recorded before requests were.
+type ReplyOrigin struct {
+	SessionID string
+	RequestID string
+	SentAt    time.Time
+	ThreadID  int64
 }
 
 type SwitchResult struct {
 	Found bool
 	Busy  bool
+	// Elsewhere is true when the target is the active conversation of another tab.
+	Elsewhere bool
 	// Switched is false when the target already was the active session.
 	Switched bool
 	// Session is the conversation now active, with its last activity from before the switch.
@@ -147,27 +179,28 @@ type Repository interface {
 	// EnqueueConversation records the request and its attachments in one transaction, filling in
 	// each attachment's session from the session the request joined.
 	EnqueueConversation(context.Context, EnqueueInput, Session, string, []attachment.Record) (EnqueueResult, error)
-	RecoverConversations(context.Context) ([]string, error)
-	NextConversationRequest(context.Context, string) (Request, bool, error)
+	RecoverConversations(context.Context) ([]Lane, error)
+	NextConversationRequest(context.Context, Lane) (Request, bool, error)
 	ClaimConversationRequest(context.Context, string) (bool, error)
 	SaveConversationResponse(context.Context, string, string, string) (bool, error)
 	ClaimConversationDelivery(context.Context, string) (bool, error)
 	ReleaseConversationDelivery(context.Context, string) error
 	CancelConversationDelivery(context.Context, string) error
 	MarkConversationDelivered(context.Context, string) error
-	CancelPendingConversation(context.Context, string) (bool, error)
-	// ResetConversation closes the principal's active session and returns its ID.
-	ResetConversation(context.Context, string) (string, bool, error)
+	CancelPendingConversation(context.Context, Lane) (bool, error)
+	// CancelPrincipalConversations cancels the pending turns of every lane of the principal.
+	CancelPrincipalConversations(context.Context, string) (bool, error)
+	// ResetConversation closes the lane's active session and returns its ID.
+	ResetConversation(context.Context, Lane) (string, bool, error)
 	// ConversationSessions lists the principal's conversations, most recently active first.
 	ConversationSessions(ctx context.Context, principalID string, limit int) ([]SessionRecord, error)
-	// SwitchConversation makes the principal's own session the active one unless a turn is pending,
-	// closing the previously active session as switched.
-	SwitchConversation(ctx context.Context, principalID, sessionID string) (SwitchResult, error)
+	// SwitchConversation makes the principal's own session the lane's active one unless the lane has
+	// a turn pending or another tab holds it, closing the lane's previously active session as switched.
+	SwitchConversation(ctx context.Context, lane Lane, sessionID string) (SwitchResult, error)
 	// RecordConversationReply remembers which session and request a delivered Telegram message belongs to.
 	RecordConversationReply(ctx context.Context, principalID, sessionID, requestID string, messageID int64) error
-	// ReplyOrigin returns the session and request a recorded reply came from; the request is empty
-	// for a reply recorded before requests were.
-	ReplyOrigin(ctx context.Context, principalID string, messageID int64) (sessionID, requestID string, sentAt time.Time, found bool, err error)
+	// ReplyOrigin returns where a recorded reply came from.
+	ReplyOrigin(ctx context.Context, principalID string, messageID int64) (ReplyOrigin, bool, error)
 	SetReplyFeedback(ctx context.Context, principalID string, messageID int64, class, emoji string) error
 	DeleteReplyFeedback(ctx context.Context, principalID string, messageID int64) error
 	// ReplyReconsidered reports whether a reconsider turn was already started for the key.
@@ -246,12 +279,21 @@ type Notice interface {
 	PendingNotice(principalID string) string
 }
 
+// LaneNotice is a notice source that keeps some notices for the tab they concern, such as the
+// outcome of a proposal pressed there; TakeLaneNotice returns those of the lane and the
+// principal's others, and whether the text may retell private content.
+type LaneNotice interface {
+	PrivateNotice
+	TakeLaneNotice(principalID string, threadID int64) (text string, private bool)
+}
+
 // Exchange remembers the raw text of each user message a chat turn runs and of the plain replies
-// delivered to them, for guards that judge an action against what the user asked or agreed to.
+// delivered to them in each tab, for guards that judge an action against what the user asked or
+// agreed to there.
 type Exchange interface {
-	RecordMessage(principalID, text string)
-	RecordReply(principalID, text string)
-	RecentExchange(principalID string) []turnstate.Line
+	RecordMessage(principalID string, threadID int64, text string)
+	RecordReply(principalID string, threadID int64, text string)
+	RecentExchange(principalID string, threadID int64) []turnstate.Line
 }
 
 // ToolHinter names the offered tool a message most likely needs, or "" when none clearly fits.
@@ -279,18 +321,18 @@ type OutsideNotice struct{ Notice }
 type Notices []Notice
 
 func (n Notices) PendingNotice(principalID string) string {
-	text, _, _ := pendingNotice(n, principalID)
+	text, _, _ := pendingNotice(n, Lane{PrincipalID: principalID})
 	return text
 }
 
-// pendingNotice returns the notice text, whether any part of it came from an OutsideNotice, and
-// whether any part of it may retell private content.
-func pendingNotice(source Notice, principalID string) (text string, outside, private bool) {
+// pendingNotice returns the lane's notice text, whether any part of it came from an OutsideNotice,
+// and whether any part of it may retell private content.
+func pendingNotice(source Notice, lane Lane) (text string, outside, private bool) {
 	switch source := source.(type) {
 	case Notices:
 		var pending []string
 		for _, notice := range source {
-			if text, fromOutside, fromPrivate := pendingNotice(notice, principalID); text != "" {
+			if text, fromOutside, fromPrivate := pendingNotice(notice, lane); text != "" {
 				pending = append(pending, text)
 				outside = outside || fromOutside
 				private = private || fromPrivate
@@ -298,20 +340,24 @@ func pendingNotice(source Notice, principalID string) (text string, outside, pri
 		}
 		return strings.Join(pending, "\n\n"), outside, private
 	case OutsideNotice:
-		text, private := noticeFrom(source.Notice, principalID)
+		text, private := noticeFrom(source.Notice, lane)
 		return text, text != "", private
 	default:
-		text, private := noticeFrom(source, principalID)
+		text, private := noticeFrom(source, lane)
 		return text, false, private
 	}
 }
 
-func noticeFrom(source Notice, principalID string) (string, bool) {
-	if source, ok := source.(PrivateNotice); ok {
-		text, private := source.TakeNotice(principalID)
+func noticeFrom(source Notice, lane Lane) (string, bool) {
+	switch source := source.(type) {
+	case LaneNotice:
+		text, private := source.TakeLaneNotice(lane.PrincipalID, lane.ThreadID)
+		return text, private && text != ""
+	case PrivateNotice:
+		text, private := source.TakeNotice(lane.PrincipalID)
 		return text, private && text != ""
 	}
-	return source.PendingNotice(principalID), false
+	return source.PendingNotice(lane.PrincipalID), false
 }
 
 // Reports tells a chat turn about the reports the principal's scheduled jobs sent. A report's text

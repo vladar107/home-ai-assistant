@@ -20,6 +20,8 @@ import (
 	"sync"
 	"time"
 	"unicode/utf16"
+
+	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
 const (
@@ -141,10 +143,12 @@ type Record struct {
 	Outcome     string
 	ChatID      int64
 	MessageID   int64
-	CreatedAt   time.Time
-	ExpiresAt   time.Time
-	StartedAt   time.Time
-	FinishedAt  time.Time
+	// ThreadID is the Telegram tab of the turn that made the record, or zero for the main view.
+	ThreadID   int64
+	CreatedAt  time.Time
+	ExpiresAt  time.Time
+	StartedAt  time.Time
+	FinishedAt time.Time
 	// Mode tells a proposal from a direct action, which carries the chat request it was made in.
 	Mode      string
 	RequestID string
@@ -238,8 +242,8 @@ type Repository interface {
 	LoadApproval(context.Context, string) (Record, bool, error)
 	// LoadBundle returns a bundle's records in position order.
 	LoadBundle(ctx context.Context, bundleID string) ([]Record, error)
-	// PendingApprovals returns the principal's pending records in position order.
-	PendingApprovals(context.Context, string) ([]Record, error)
+	// PendingApprovals returns the principal's pending records of one tab in position order.
+	PendingApprovals(ctx context.Context, principalID string, threadID int64) ([]Record, error)
 	// ConfirmBundle moves the pending, unexpired records of the principal's bundle to confirmed,
 	// reporting whether any moved.
 	ConfirmBundle(ctx context.Context, bundleID, principalID string, now time.Time) (bool, error)
@@ -269,9 +273,9 @@ type Repository interface {
 	FinishDirectApproval(ctx context.Context, id, status, reason, outcome string, undo json.RawMessage, undoUntil time.Time) (bool, error)
 	// DirectApprovals returns the direct records of a chat request in the order they were made.
 	DirectApprovals(ctx context.Context, principalID, requestID string) ([]Record, error)
-	// UnsentDirectApprovals returns the principal's done and undone direct records that no message
-	// shows yet and that are still inside their undo window, in the order they were made.
-	UnsentDirectApprovals(ctx context.Context, principalID string, now time.Time) ([]Record, error)
+	// UnsentDirectApprovals returns the principal's done and undone direct records of one tab that
+	// no message shows yet and that are still inside their undo window, in the order they were made.
+	UnsentDirectApprovals(ctx context.Context, principalID string, threadID int64, now time.Time) ([]Record, error)
 	// ShownDirectApprovals returns the principal's direct records that the message shows, in order.
 	ShownDirectApprovals(ctx context.Context, principalID string, chatID, messageID int64) ([]Record, error)
 	// FindDirectApproval returns the first direct record of the chat request with the same tool and
@@ -345,10 +349,12 @@ type Service struct {
 	exposure  Exposure
 	telemetry Telemetry
 	intents   map[string]Intent
-	notices   map[string]notice
-	// continuations holds, per principal, the turn a Confirm could not queue because another turn
-	// was in flight; it runs after that turn is delivered if the outcome is still unanswered.
-	continuations map[string]func(context.Context)
+	// notices holds what became of resolved proposals per tab, so the outcome reaches the
+	// conversation that made them.
+	notices map[lane]notice
+	// continuations holds, per tab, the turn a Confirm could not queue because another turn was in
+	// flight; it runs after that turn is delivered if the outcome is still unanswered.
+	continuations map[lane]func(context.Context)
 	cancel        context.CancelFunc
 	done          chan struct{}
 	// runCtx is the context previews run in while the service is started.
@@ -391,8 +397,8 @@ func NewService(cfg Config, repository Repository, deliverer Deliverer, logger *
 		sweepInterval: sweepInterval,
 		now:           time.Now,
 		executors:     make(map[string]Executor),
-		notices:       make(map[string]notice),
-		continuations: make(map[string]func(context.Context)),
+		notices:       make(map[lane]notice),
+		continuations: make(map[lane]func(context.Context)),
 		intents:       make(map[string]Intent),
 		proposing:     make(map[string]*sync.Mutex),
 		previewing:    make(map[string]bool),
@@ -590,7 +596,7 @@ func (s *Service) store(ctx context.Context, principalID, tool string, canonical
 	if utf16Units(strings.TrimSpace(summary))+utf16Units(IntentWarning)+2 > bundleSummaryUnits {
 		return Record{}, nil, ErrSummaryTooLong
 	}
-	pending, err := s.repository.PendingApprovals(ctx, principalID)
+	pending, err := s.repository.PendingApprovals(ctx, principalID, thread.From(ctx))
 	if err != nil {
 		return Record{}, nil, fmt.Errorf("load pending approvals: %w", err)
 	}
@@ -607,6 +613,7 @@ func (s *Service) store(ctx context.Context, principalID, tool string, canonical
 		Hash:        hash,
 		Summary:     strings.TrimSpace(summary),
 		Status:      StatusPending,
+		ThreadID:    thread.From(ctx),
 		CreatedAt:   now,
 		ExpiresAt:   now.Add(lifetime),
 	}
@@ -652,30 +659,36 @@ func joinable(pending []Record, now time.Time, lifetime time.Duration) bool {
 	return now.Sub(first.CreatedAt) < lifetime/2 && now.Before(first.ExpiresAt)
 }
 
-// AfterDelivery sends the "Done" messages of the principal's unshown direct actions, then the
-// principal's undelivered bundle, to the chat once the turn's reply is out, and then starts a
+// lane is one Telegram tab of a principal; thread zero is the chat's main view.
+type lane struct {
+	principalID string
+	threadID    int64
+}
+
+// AfterDelivery sends the "Done" messages of the unshown direct actions, then the undelivered
+// bundle, of the context's tab to the chat once the turn's reply is out, and then starts a
 // continuation deferred while that turn was in flight.
 func (s *Service) AfterDelivery(ctx context.Context, principalID string, chatID int64) error {
 	err := s.afterDelivery(ctx, principalID, chatID)
-	s.runDeferredContinuation(ctx, principalID)
+	s.runDeferredContinuation(ctx, lane{principalID, thread.From(ctx)})
 	return err
 }
 
-// DeferContinuation keeps the turn that should continue a confirmed request until the principal's
+// DeferContinuation keeps the turn that should continue a confirmed request until the tab's
 // in-flight turn is delivered, unless a turn takes the outcome first. A later deferral replaces an
 // earlier one, since one notice holds every outcome not yet reported.
-func (s *Service) DeferContinuation(principalID string, continuation func(context.Context)) {
+func (s *Service) DeferContinuation(principalID string, threadID int64, continuation func(context.Context)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.continuations[principalID] = continuation
+	s.continuations[lane{principalID, threadID}] = continuation
 }
 
 // runDeferredContinuation starts the deferred continuation; a turn that took the outcome as its
 // notice has already dropped it.
-func (s *Service) runDeferredContinuation(ctx context.Context, principalID string) {
+func (s *Service) runDeferredContinuation(ctx context.Context, key lane) {
 	s.mu.Lock()
-	continuation, deferred := s.continuations[principalID]
-	delete(s.continuations, principalID)
+	continuation, deferred := s.continuations[key]
+	delete(s.continuations, key)
 	s.mu.Unlock()
 	if deferred {
 		continuation(ctx)
@@ -684,7 +697,7 @@ func (s *Service) runDeferredContinuation(ctx context.Context, principalID strin
 
 func (s *Service) afterDelivery(ctx context.Context, principalID string, chatID int64) error {
 	s.sendDirect(ctx, principalID, chatID)
-	bundle, err := s.repository.PendingApprovals(ctx, principalID)
+	bundle, err := s.repository.PendingApprovals(ctx, principalID, thread.From(ctx))
 	if err != nil {
 		return err
 	}
@@ -697,7 +710,7 @@ func (s *Service) afterDelivery(ctx context.Context, principalID string, chatID 
 	proposing := s.proposalLock(principalID)
 	proposing.Lock()
 	defer proposing.Unlock()
-	current, err := s.repository.PendingApprovals(ctx, principalID)
+	current, err := s.repository.PendingApprovals(ctx, principalID, thread.From(ctx))
 	if err != nil {
 		return err
 	}
@@ -810,7 +823,7 @@ func (s *Service) resendUndelivered(ctx context.Context) {
 		if err != nil || len(bundle) == 0 {
 			continue
 		}
-		_ = s.send(ctx, bundle, group[0].ChatID)
+		_ = s.send(thread.With(ctx, group[0].ThreadID), bundle, group[0].ChatID)
 	}
 }
 
@@ -1039,7 +1052,7 @@ func (s *Service) rememberNotice(bundle []Record) {
 		executor, ok := s.executors[record.Tool].(PrivateExecutor)
 		private = private || record.Outcome != "" && ok && executor.PrivateOutcomes()
 	}
-	s.notices[bundle[0].PrincipalID] = notice{text: text, private: private}
+	s.notices[lane{bundle[0].PrincipalID, bundle[0].ThreadID}] = notice{text: text, private: private}
 }
 
 type notice struct {
@@ -1047,7 +1060,8 @@ type notice struct {
 	private bool
 }
 
-// PendingNotice takes the principal's unreported proposal resolution, if there is one.
+// PendingNotice takes the unreported proposal resolution of the principal's main view, if there is
+// one.
 func (s *Service) PendingNotice(principalID string) string {
 	text, _ := s.TakeNotice(principalID)
 	return text
@@ -1056,12 +1070,18 @@ func (s *Service) PendingNotice(principalID string) string {
 // TakeNotice is PendingNotice that also reports whether an outcome in it may retell private
 // content.
 func (s *Service) TakeNotice(principalID string) (string, bool) {
+	return s.TakeLaneNotice(principalID, 0)
+}
+
+// TakeLaneNotice is TakeNotice for the proposals made in one tab.
+func (s *Service) TakeLaneNotice(principalID string, threadID int64) (string, bool) {
+	key := lane{principalID, threadID}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	pending := s.notices[principalID]
-	delete(s.notices, principalID)
+	pending := s.notices[key]
+	delete(s.notices, key)
 	// The turn taking the outcome answers it, so a continuation deferred for it has nothing to do.
-	delete(s.continuations, principalID)
+	delete(s.continuations, key)
 	return pending.text, pending.private
 }
 

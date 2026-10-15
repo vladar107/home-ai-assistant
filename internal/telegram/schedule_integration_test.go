@@ -260,7 +260,7 @@ func TestScheduledReportOfPrivateContentMakesTheNextConversationPrivate(t *testi
 			// own reply is not recorded until it is delivered.
 			h.push(textUpdate(2, 101, "thanks"))
 			next := receive(t, h.ctx, runtime.calls)
-			kept := slices.ContainsFunc(registry.RecentExchange("alice"), func(line turnstate.Line) bool {
+			kept := slices.ContainsFunc(registry.RecentExchange("alice", 0), func(line turnstate.Line) bool {
 				return line.Role == turnstate.RoleAssistant && line.Text == "Milk and eggs."
 			})
 			next.answer <- agentruntime.RunResult{Response: "You're welcome."}

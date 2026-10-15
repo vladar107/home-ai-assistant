@@ -22,6 +22,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
 const (
@@ -59,6 +60,8 @@ type Client struct {
 type Bot struct {
 	ID       int64  `json:"id"`
 	Username string `json:"username"`
+	// HasTopicsEnabled is BotFather's switch for tabs in private chats.
+	HasTopicsEnabled bool `json:"has_topics_enabled"`
 }
 
 type Update struct {
@@ -112,17 +115,19 @@ type InlineButton struct {
 type InlineKeyboard [][]InlineButton
 
 type Message struct {
-	MessageID int64       `json:"message_id"`
-	From      *User       `json:"from"`
-	Chat      Chat        `json:"chat"`
-	Date      int64       `json:"date"`
-	EditDate  int64       `json:"edit_date"`
-	Text      string      `json:"text"`
-	Caption   string      `json:"caption"`
-	Photo     []PhotoSize `json:"photo"`
-	Document  *MediaFile  `json:"document"`
-	Location  *Location   `json:"location"`
-	Venue     *Venue      `json:"venue"`
+	MessageID int64 `json:"message_id"`
+	// MessageThreadID is the tab the message is in, when the bot has tabs on.
+	MessageThreadID int64       `json:"message_thread_id"`
+	From            *User       `json:"from"`
+	Chat            Chat        `json:"chat"`
+	Date            int64       `json:"date"`
+	EditDate        int64       `json:"edit_date"`
+	Text            string      `json:"text"`
+	Caption         string      `json:"caption"`
+	Photo           []PhotoSize `json:"photo"`
+	Document        *MediaFile  `json:"document"`
+	Location        *Location   `json:"location"`
+	Venue           *Venue      `json:"venue"`
 	// ReplyToMessage is the message this one replies to, as Telegram includes it.
 	ReplyToMessage *Message `json:"reply_to_message"`
 	// Voice and Audio reach the model as a transcript when a transcriber is set.
@@ -230,6 +235,16 @@ func (e *apiError) Permanent() bool {
 	}
 	return e.errorCode >= 400 && e.errorCode < 500 ||
 		e.httpStatus >= 400 && e.httpStatus < 500
+}
+
+// ThreadGone reports Telegram's rejection of a send to a tab that no longer exists.
+func (e *apiError) ThreadGone() bool {
+	return e.errorCode == http.StatusBadRequest && strings.Contains(strings.ToLower(e.description), "message thread not found")
+}
+
+func isThreadGone(err error) bool {
+	var apiErr *apiError
+	return errors.As(err, &apiErr) && apiErr.ThreadGone()
 }
 
 func hasUnparsableEntities(err error) bool {
@@ -421,6 +436,17 @@ func (c *Client) sendMessage(ctx context.Context, chatID, replyToMessageID int64
 	if err := setKeyboard(params, keyboard); err != nil {
 		return Message{}, err
 	}
+	hasThread := setThread(ctx, params)
+	message, err := c.sendFormatted(ctx, params, text)
+	// A reply to a tab the user has since deleted still reaches them in the main view.
+	if hasThread && isThreadGone(err) {
+		params.Del("message_thread_id")
+		return c.sendFormatted(ctx, params, text)
+	}
+	return message, err
+}
+
+func (c *Client) sendFormatted(ctx context.Context, params url.Values, text string) (Message, error) {
 	setFormattedText(params, text)
 	message, err := execute[Message](c, ctx, "sendMessage", params)
 	if hasUnparsableEntities(err) {
@@ -428,6 +454,16 @@ func (c *Client) sendMessage(ctx context.Context, chatID, replyToMessageID int64
 		return execute[Message](c, ctx, "sendMessage", params)
 	}
 	return message, err
+}
+
+// setThread sends to the context's tab and reports whether it named one.
+func setThread(ctx context.Context, params url.Values) bool {
+	threadID := thread.From(ctx)
+	if threadID <= 0 {
+		return false
+	}
+	params.Set("message_thread_id", strconv.FormatInt(threadID, 10))
+	return true
 }
 
 // SendText posts a message without buttons and returns its message ID.
@@ -593,6 +629,7 @@ func (c *Client) SendTyping(ctx context.Context, chatID int64) error {
 		"action":  {"typing"},
 		"chat_id": {strconv.FormatInt(chatID, 10)},
 	}
+	setThread(ctx, params)
 	_, err := execute[bool](c, ctx, "sendChatAction", params)
 	return err
 }
@@ -609,6 +646,7 @@ func (c *Client) SendMessageDraft(ctx context.Context, chatID, draftID int64, te
 	if canStop {
 		params.Set("can_stop", "true")
 	}
+	setThread(ctx, params)
 	_, err := execute[bool](c, ctx, "sendMessageDraft", params)
 	return err
 }
@@ -661,6 +699,11 @@ func (c *Client) SendDocument(ctx context.Context, chatID int64, name string, bo
 	if err := writer.WriteField("chat_id", strconv.FormatInt(chatID, 10)); err != nil {
 		return fmt.Errorf("Telegram sendDocument request could not be created")
 	}
+	if threadID := thread.From(ctx); threadID > 0 {
+		if err := writer.WriteField("message_thread_id", strconv.FormatInt(threadID, 10)); err != nil {
+			return fmt.Errorf("Telegram sendDocument request could not be created")
+		}
+	}
 	if _, err := writer.CreateFormFile("document", documentName(name)); err != nil {
 		return fmt.Errorf("Telegram sendDocument request could not be created")
 	}
@@ -704,6 +747,9 @@ func (c *Client) SendPhoto(ctx context.Context, chatID, replyToMessageID int64, 
 		return fmt.Errorf("Telegram sendPhoto requires a photo to upload")
 	}
 	fields := map[string]string{"chat_id": strconv.FormatInt(chatID, 10)}
+	if threadID := thread.From(ctx); threadID > 0 {
+		fields["message_thread_id"] = strconv.FormatInt(threadID, 10)
+	}
 	if replyToMessageID > 0 {
 		fields["reply_parameters"] = fmt.Sprintf(`{"message_id":%d,"allow_sending_without_reply":true}`, replyToMessageID)
 	}

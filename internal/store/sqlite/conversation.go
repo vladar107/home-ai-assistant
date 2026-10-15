@@ -43,12 +43,12 @@ func (s *Store) EnqueueConversation(
 
 	var switched switchOutcome
 	if input.ReplyToMessageID > 0 {
-		switched, err = switchToRepliedSession(ctx, tx, input.PrincipalID, input.ReplyToMessageID)
+		switched, err = switchToRepliedSession(ctx, tx, conversation.Lane{PrincipalID: input.PrincipalID, ThreadID: input.ThreadID}, input.ReplyToMessageID)
 		if err != nil {
 			return conversation.EnqueueResult{}, err
 		}
 	}
-	session, found, err := loadActiveConversationSession(ctx, tx, input.PrincipalID)
+	session, found, err := loadActiveConversationSession(ctx, tx, conversation.Lane{PrincipalID: input.PrincipalID, ThreadID: input.ThreadID})
 	if err != nil {
 		return conversation.EnqueueResult{}, err
 	}
@@ -56,34 +56,28 @@ func (s *Store) EnqueueConversation(
 		session = candidate
 		if _, err := tx.ExecContext(
 			ctx,
-			`INSERT INTO conversation_sessions (id, principal_id, runtime_session_id) VALUES (?, ?, ?)`,
+			`INSERT INTO conversation_sessions (id, principal_id, runtime_session_id, thread_id) VALUES (?, ?, ?, ?)`,
 			session.ID,
 			session.PrincipalID,
 			session.RuntimeSessionID,
+			input.ThreadID,
 		); err != nil {
 			return conversation.EnqueueResult{}, fmt.Errorf("create conversation session: %w", err)
 		}
 	}
 
-	var pending int
-	err = tx.QueryRowContext(
-		ctx,
-		`SELECT EXISTS(
-		    SELECT 1 FROM conversation_requests
-		    WHERE principal_id = ? AND state IN ('queued', 'running', 'ready', 'delivering')
-		)`,
-		input.PrincipalID,
-	).Scan(&pending)
+	pending, err := lanePending(ctx, tx, conversation.Lane{PrincipalID: input.PrincipalID, ThreadID: input.ThreadID})
 	if err != nil {
-		return conversation.EnqueueResult{}, fmt.Errorf("check pending conversation: %w", err)
+		return conversation.EnqueueResult{}, err
 	}
-	if pending != 0 {
+	if pending {
 		return conversation.EnqueueResult{Busy: true}, nil
 	}
 
 	request := conversation.Request{
 		ID:                requestID,
 		PrincipalID:       input.PrincipalID,
+		ThreadID:          input.ThreadID,
 		ChatID:            input.ChatID,
 		TelegramMessageID: input.TelegramMessageID,
 		SessionID:         session.ID,
@@ -105,8 +99,8 @@ func (s *Store) EnqueueConversation(
 		ctx,
 		`INSERT INTO conversation_requests (
 		    id, bot_user_id, telegram_update_id, telegram_message_id, principal_id, chat_id, session_id, message,
-		    resumed_from, reply_to_message_id
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		    resumed_from, reply_to_message_id, thread_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		request.ID,
 		input.BotUserID,
 		input.TelegramUpdateID,
@@ -117,6 +111,7 @@ func (s *Store) EnqueueConversation(
 		request.Message,
 		resumedFrom,
 		replyTo,
+		request.ThreadID,
 	); err != nil {
 		return conversation.EnqueueResult{}, fmt.Errorf("create conversation request: %w", err)
 	}
@@ -132,7 +127,7 @@ func (s *Store) EnqueueConversation(
 	return conversation.EnqueueResult{Request: request, Created: true, SwitchedFrom: switched.previous}, nil
 }
 
-func (s *Store) RecoverConversations(ctx context.Context) ([]string, error) {
+func (s *Store) RecoverConversations(ctx context.Context) ([]conversation.Lane, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("recover conversations: SQLite store is not open")
 	}
@@ -154,29 +149,29 @@ func (s *Store) RecoverConversations(ctx context.Context) ([]string, error) {
 
 	rows, err := s.db.QueryContext(
 		ctx,
-		`SELECT DISTINCT principal_id FROM conversation_requests
-		 WHERE state IN ('queued', 'ready') ORDER BY principal_id`,
+		`SELECT DISTINCT principal_id, thread_id FROM conversation_requests
+		 WHERE state IN ('queued', 'ready') ORDER BY principal_id, thread_id`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list recoverable conversations: %w", err)
 	}
 	defer rows.Close()
 
-	var principals []string
+	var lanes []conversation.Lane
 	for rows.Next() {
-		var principalID string
-		if err := rows.Scan(&principalID); err != nil {
+		var lane conversation.Lane
+		if err := rows.Scan(&lane.PrincipalID, &lane.ThreadID); err != nil {
 			return nil, fmt.Errorf("scan recoverable conversation: %w", err)
 		}
-		principals = append(principals, principalID)
+		lanes = append(lanes, lane)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate recoverable conversations: %w", err)
 	}
-	return principals, nil
+	return lanes, nil
 }
 
-func (s *Store) NextConversationRequest(ctx context.Context, principalID string) (conversation.Request, bool, error) {
+func (s *Store) NextConversationRequest(ctx context.Context, lane conversation.Lane) (conversation.Request, bool, error) {
 	if s == nil || s.db == nil {
 		return conversation.Request{}, false, fmt.Errorf("load next conversation request: SQLite store is not open")
 	}
@@ -186,13 +181,14 @@ func (s *Store) NextConversationRequest(ctx context.Context, principalID string)
 		        request.session_id, session.runtime_session_id, request.message, request.state,
 		        COALESCE(request.response_text, ''), COALESCE(request.error_kind, ''), request.created_at,
 		        COALESCE(request.resumed_from, ''), COALESCE(request.reply_to_message_id, 0),
-		        `+requestOpensSession+`
+		        request.thread_id, `+requestOpensSession+`
 		 FROM conversation_requests AS request
 		 JOIN conversation_sessions AS session
 		   ON session.id = request.session_id AND session.principal_id = request.principal_id
-		 WHERE request.principal_id = ? AND request.state IN ('queued', 'ready')
+		 WHERE request.principal_id = ? AND request.thread_id = ? AND request.state IN ('queued', 'ready')
 		 ORDER BY request.created_at, request.id LIMIT 1`,
-		principalID,
+		lane.PrincipalID,
+		lane.ThreadID,
 	))
 	if errors.Is(err, sql.ErrNoRows) {
 		return conversation.Request{}, false, nil
@@ -209,8 +205,8 @@ func (s *Store) ClaimConversationRequest(ctx context.Context, requestID string) 
 		`UPDATE conversation_requests
 		 SET state = 'running', started_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 		 WHERE id = ? AND state = 'queued'`,
-		requestID,
 		"claim conversation request",
+		requestID,
 	)
 }
 
@@ -258,8 +254,8 @@ func (s *Store) ClaimConversationDelivery(ctx context.Context, requestID string)
 	return s.changeConversationState(
 		ctx,
 		`UPDATE conversation_requests SET state = 'delivering' WHERE id = ? AND state = 'ready'`,
-		requestID,
 		"claim conversation delivery",
+		requestID,
 	)
 }
 
@@ -294,19 +290,32 @@ func (s *Store) CancelConversationDelivery(ctx context.Context, requestID string
 	return nil
 }
 
-func (s *Store) CancelPendingConversation(ctx context.Context, principalID string) (bool, error) {
+func (s *Store) CancelPendingConversation(ctx context.Context, lane conversation.Lane) (bool, error) {
+	return s.changeConversationState(
+		ctx,
+		`UPDATE conversation_requests
+		 SET state = 'cancelled', message = '', response_text = NULL,
+		     finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+		 WHERE principal_id = ? AND thread_id = ? AND state IN ('queued', 'running', 'ready', 'delivering')`,
+		"cancel pending conversation",
+		lane.PrincipalID,
+		lane.ThreadID,
+	)
+}
+
+func (s *Store) CancelPrincipalConversations(ctx context.Context, principalID string) (bool, error) {
 	return s.changeConversationState(
 		ctx,
 		`UPDATE conversation_requests
 		 SET state = 'cancelled', message = '', response_text = NULL,
 		     finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 		 WHERE principal_id = ? AND state IN ('queued', 'running', 'ready', 'delivering')`,
+		"cancel principal conversations",
 		principalID,
-		"cancel pending conversation",
 	)
 }
 
-func (s *Store) ResetConversation(ctx context.Context, principalID string) (string, bool, error) {
+func (s *Store) ResetConversation(ctx context.Context, lane conversation.Lane) (string, bool, error) {
 	if s == nil || s.db == nil {
 		return "", false, fmt.Errorf("reset conversation: SQLite store is not open")
 	}
@@ -316,7 +325,7 @@ func (s *Store) ResetConversation(ctx context.Context, principalID string) (stri
 	}
 	defer tx.Rollback()
 
-	session, _, err := loadActiveConversationSession(ctx, tx, principalID)
+	session, _, err := loadActiveConversationSession(ctx, tx, lane)
 	if err != nil {
 		return "", false, err
 	}
@@ -326,8 +335,9 @@ func (s *Store) ResetConversation(ctx context.Context, principalID string) (stri
 		`UPDATE conversation_requests
 		 SET state = 'cancelled', message = '', response_text = NULL,
 		     finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-		 WHERE principal_id = ? AND state IN ('queued', 'running', 'ready', 'delivering')`,
-		principalID,
+		 WHERE principal_id = ? AND thread_id = ? AND state IN ('queued', 'running', 'ready', 'delivering')`,
+		lane.PrincipalID,
+		lane.ThreadID,
 	); err != nil {
 		return "", false, fmt.Errorf("cancel requests during conversation reset: %w", err)
 	}
@@ -337,8 +347,9 @@ func (s *Store) ResetConversation(ctx context.Context, principalID string) (stri
 		 SET status = 'closed', close_reason = 'user_reset',
 		     closed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
 		     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-		 WHERE principal_id = ? AND status = 'active'`,
-		principalID,
+		 WHERE principal_id = ? AND thread_id = ? AND status = 'active'`,
+		lane.PrincipalID,
+		lane.ThreadID,
 	)
 	if err != nil {
 		return "", false, fmt.Errorf("close active conversation: %w", err)
@@ -371,7 +382,7 @@ func loadConversationByUpdate(ctx context.Context, db queryRower, botUserID, upd
 		        request.session_id, session.runtime_session_id, request.message, request.state,
 		        COALESCE(request.response_text, ''), COALESCE(request.error_kind, ''), request.created_at,
 		        COALESCE(request.resumed_from, ''), COALESCE(request.reply_to_message_id, 0),
-		        `+requestOpensSession+`
+		        request.thread_id, `+requestOpensSession+`
 		 FROM conversation_requests AS request
 		 JOIN conversation_sessions AS session
 		   ON session.id = request.session_id AND session.principal_id = request.principal_id
@@ -388,13 +399,14 @@ func loadConversationByUpdate(ctx context.Context, db queryRower, botUserID, upd
 	return request, true, nil
 }
 
-func loadActiveConversationSession(ctx context.Context, db queryRower, principalID string) (conversation.Session, bool, error) {
+func loadActiveConversationSession(ctx context.Context, db queryRower, lane conversation.Lane) (conversation.Session, bool, error) {
 	var session conversation.Session
 	err := db.QueryRowContext(
 		ctx,
 		`SELECT id, principal_id, runtime_session_id
-		 FROM conversation_sessions WHERE principal_id = ? AND status = 'active'`,
-		principalID,
+		 FROM conversation_sessions WHERE principal_id = ? AND thread_id = ? AND status = 'active'`,
+		lane.PrincipalID,
+		lane.ThreadID,
 	).Scan(&session.ID, &session.PrincipalID, &session.RuntimeSessionID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return conversation.Session{}, false, nil
@@ -403,6 +415,23 @@ func loadActiveConversationSession(ctx context.Context, db queryRower, principal
 		return conversation.Session{}, false, fmt.Errorf("query active conversation session: %w", err)
 	}
 	return session, true, nil
+}
+
+// lanePending reports whether the lane has a turn queued, running, or waiting for delivery.
+func lanePending(ctx context.Context, db queryRower, lane conversation.Lane) (bool, error) {
+	var pending int
+	if err := db.QueryRowContext(
+		ctx,
+		`SELECT EXISTS(
+		    SELECT 1 FROM conversation_requests
+		    WHERE principal_id = ? AND thread_id = ? AND state IN ('queued', 'running', 'ready', 'delivering')
+		)`,
+		lane.PrincipalID,
+		lane.ThreadID,
+	).Scan(&pending); err != nil {
+		return false, fmt.Errorf("check pending conversation: %w", err)
+	}
+	return pending != 0, nil
 }
 
 func scanConversationRequest(row *sql.Row) (conversation.Request, error) {
@@ -422,6 +451,7 @@ func scanConversationRequest(row *sql.Row) (conversation.Request, error) {
 		&createdAt,
 		&resumedFrom,
 		&request.ReplyToMessageID,
+		&request.ThreadID,
 		&request.OpensSession,
 	)
 	if err != nil {
@@ -440,11 +470,11 @@ func scanConversationRequest(row *sql.Row) (conversation.Request, error) {
 	return request, nil
 }
 
-func (s *Store) changeConversationState(ctx context.Context, query, identifier, operation string) (bool, error) {
+func (s *Store) changeConversationState(ctx context.Context, query, operation string, arguments ...any) (bool, error) {
 	if s == nil || s.db == nil {
 		return false, fmt.Errorf("%s: SQLite store is not open", operation)
 	}
-	result, err := s.db.ExecContext(ctx, query, identifier)
+	result, err := s.db.ExecContext(ctx, query, arguments...)
 	if err != nil {
 		return false, fmt.Errorf("%s: %w", operation, err)
 	}

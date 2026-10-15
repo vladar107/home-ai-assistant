@@ -92,6 +92,7 @@ plan that links back to the earlier record.
 | 0080 | [Learn on correction](0080-learn-on-correction.md) | done |
 | 0081 | [Proactive answers](0081-proactive-answers.md) | done |
 | 0082 | [Smart trip reminders](0082-trip-reminders.md) | done |
+| 0083 | [Chat tabs](0083-chat-tabs.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

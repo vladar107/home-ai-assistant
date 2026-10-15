@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
 const (
@@ -98,6 +100,7 @@ func (s *Service) Act(ctx context.Context, principalID string, proposal Proposal
 		StartedAt:   now,
 		Mode:        ModeDirect,
 		RequestID:   requestID,
+		ThreadID:    thread.From(ctx),
 	}
 	err = s.repository.CreateDirectApproval(ctx, record)
 	proposing.Unlock()
@@ -177,7 +180,7 @@ func (s *Service) repeatedOrDone(record Record, repeated bool) (string, error) {
 // still be undone. Delivery is best-effort: an action stands even when the message is lost, and the
 // user's lists still show it.
 func (s *Service) sendDirect(ctx context.Context, principalID string, chatID int64) {
-	unsent, err := s.repository.UnsentDirectApprovals(ctx, principalID, s.now())
+	unsent, err := s.repository.UnsentDirectApprovals(ctx, principalID, thread.From(ctx), s.now())
 	if err != nil {
 		s.logger.WarnContext(ctx, "approval.direct.unlisted", "principal_id", principalID, "error", err)
 		return
@@ -191,7 +194,7 @@ func (s *Service) sendDirect(ctx context.Context, principalID string, chatID int
 	sending := s.proposalLock(principalID)
 	sending.Lock()
 	defer sending.Unlock()
-	if unsent, err = s.repository.UnsentDirectApprovals(ctx, principalID, s.now()); err != nil {
+	if unsent, err = s.repository.UnsentDirectApprovals(ctx, principalID, thread.From(ctx), s.now()); err != nil {
 		return
 	}
 	for _, group := range s.directMessages(unsent) {
@@ -411,10 +414,11 @@ func (s *Service) addNotice(record Record) {
 	defer s.mu.Unlock()
 	executor, ok := s.executors[record.Tool].(PrivateExecutor)
 	private := record.Outcome != "" && ok && executor.PrivateOutcomes()
-	if earlier := s.notices[record.PrincipalID]; earlier.text != "" {
+	key := lane{record.PrincipalID, record.ThreadID}
+	if earlier := s.notices[key]; earlier.text != "" {
 		text, private = earlier.text+" "+text, private || earlier.private
 	}
-	s.notices[record.PrincipalID] = notice{text: text, private: private}
+	s.notices[key] = notice{text: text, private: private}
 }
 
 func directNoticeText(record Record) string {

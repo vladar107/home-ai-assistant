@@ -33,53 +33,53 @@ func newTestRegistry() (*Registry, *clock) {
 
 func TestMessagesKeepTheLastTwoOldestFirst(t *testing.T) {
 	r, _ := newTestRegistry()
-	r.RecordMessage("alice", "one")
-	r.RecordMessage("alice", "  ")
-	r.RecordMessage("alice", "")
-	r.RecordMessage("alice", "two")
-	r.RecordMessage("alice", "three")
-	if got := r.RecentMessages("alice"); !slices.Equal(got, []string{"two", "three"}) {
+	r.RecordMessage("alice", 0, "one")
+	r.RecordMessage("alice", 0, "  ")
+	r.RecordMessage("alice", 0, "")
+	r.RecordMessage("alice", 0, "two")
+	r.RecordMessage("alice", 0, "three")
+	if got := r.RecentMessages("alice", 0); !slices.Equal(got, []string{"two", "three"}) {
 		t.Fatalf("messages = %v", got)
 	}
-	if got := r.RecentMessages("bob"); len(got) != 0 {
+	if got := r.RecentMessages("bob", 0); len(got) != 0 {
 		t.Fatalf("other principal's messages = %v", got)
 	}
 }
 
 func TestExchangeInterleavesTheLatestReplyInOrder(t *testing.T) {
 	r, _ := newTestRegistry()
-	r.RecordReply("alice", "too early")
-	r.RecordMessage("alice", "one")
-	r.RecordReply("alice", "first answer")
-	r.RecordReply("alice", "Shall I add bread?")
-	r.RecordReply("alice", " ")
-	r.RecordMessage("alice", "yes")
+	r.RecordReply("alice", 0, "too early")
+	r.RecordMessage("alice", 0, "one")
+	r.RecordReply("alice", 0, "first answer")
+	r.RecordReply("alice", 0, "Shall I add bread?")
+	r.RecordReply("alice", 0, " ")
+	r.RecordMessage("alice", 0, "yes")
 	want := []Line{{RoleUser, "one"}, {RoleAssistant, "Shall I add bread?"}, {RoleUser, "yes"}}
-	if got := r.RecentExchange("alice"); !slices.Equal(got, want) {
+	if got := r.RecentExchange("alice", 0); !slices.Equal(got, want) {
 		t.Fatalf("exchange = %v", got)
 	}
-	r.RecordReply("alice", "Added.")
+	r.RecordReply("alice", 0, "Added.")
 	want = []Line{{RoleUser, "one"}, {RoleUser, "yes"}, {RoleAssistant, "Added."}}
-	if got := r.RecentExchange("alice"); !slices.Equal(got, want) {
+	if got := r.RecentExchange("alice", 0); !slices.Equal(got, want) {
 		t.Fatalf("exchange = %v", got)
 	}
-	r.RecordMessage("alice", "thanks")
+	r.RecordMessage("alice", 0, "thanks")
 	want = []Line{{RoleUser, "yes"}, {RoleAssistant, "Added."}, {RoleUser, "thanks"}}
-	if got := r.RecentExchange("alice"); !slices.Equal(got, want) {
+	if got := r.RecentExchange("alice", 0); !slices.Equal(got, want) {
 		t.Fatalf("exchange = %v", got)
 	}
-	if got := r.RecentMessages("alice"); !slices.Equal(got, []string{"yes", "thanks"}) {
+	if got := r.RecentMessages("alice", 0); !slices.Equal(got, []string{"yes", "thanks"}) {
 		t.Fatalf("messages = %v", got)
 	}
-	if got := r.RecentExchange("bob"); len(got) != 0 {
+	if got := r.RecentExchange("bob", 0); len(got) != 0 {
 		t.Fatalf("other principal's exchange = %v", got)
 	}
 }
 
 func TestReplyKeepsItsEnd(t *testing.T) {
 	r, _ := newTestRegistry()
-	r.RecordReply("alice", "x"+strings.Repeat("é", MaxReplyRunes))
-	got := r.RecentExchange("alice")
+	r.RecordReply("alice", 0, "x"+strings.Repeat("é", MaxReplyRunes))
+	got := r.RecentExchange("alice", 0)
 	if len(got) != 1 || got[0].Text != strings.Repeat("é", MaxReplyRunes) {
 		t.Fatalf("exchange = %d lines, first %d runes", len(got), len([]rune(got[0].Text)))
 	}
@@ -87,24 +87,24 @@ func TestReplyKeepsItsEnd(t *testing.T) {
 
 func TestMessagesAndMarksExpireAfterTheWindow(t *testing.T) {
 	r, c := newTestRegistry()
-	r.RecordMessage("alice", "old")
-	r.RecordReply("alice", "old reply")
+	r.RecordMessage("alice", 0, "old")
+	r.RecordReply("alice", 0, "old reply")
 	r.MarkExposed("alice")
 	c.advance(20 * time.Minute)
-	r.RecordMessage("alice", "newer")
+	r.RecordMessage("alice", 0, "newer")
 	c.advance(15 * time.Minute)
-	if got := r.RecentMessages("alice"); !slices.Equal(got, []string{"newer"}) {
+	if got := r.RecentMessages("alice", 0); !slices.Equal(got, []string{"newer"}) {
 		t.Fatalf("messages = %v", got)
 	}
-	if got := r.RecentExchange("alice"); !slices.Equal(got, []Line{{RoleUser, "newer"}}) {
+	if got := r.RecentExchange("alice", 0); !slices.Equal(got, []Line{{RoleUser, "newer"}}) {
 		t.Fatalf("exchange = %v", got)
 	}
 	if got := r.Exposure("alice"); got != LevelNone {
 		t.Fatalf("exposure = %v", got)
 	}
-	r.RecordReply("alice", "newest reply")
+	r.RecordReply("alice", 0, "newest reply")
 	c.advance(Window)
-	r.RecentMessages("alice")
+	r.RecentMessages("alice", 0)
 	if len(r.principals) != 0 {
 		t.Fatalf("expired principals kept: %d", len(r.principals))
 	}
@@ -140,12 +140,12 @@ func TestConcurrentUse(t *testing.T) {
 			defer wg.Done()
 			id := fmt.Sprintf("p%d", i%3)
 			for range 100 {
-				r.RecordMessage(id, "hello")
-				r.RecordReply(id, "hi")
+				r.RecordMessage(id, 0, "hello")
+				r.RecordReply(id, 0, "hi")
 				r.MarkExposed(id)
 				r.MarkSuspicious(id)
-				r.RecentMessages(id)
-				r.RecentExchange(id)
+				r.RecentMessages(id, 0)
+				r.RecentExchange(id, 0)
 				r.Exposure(id)
 			}
 		}()

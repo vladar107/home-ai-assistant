@@ -25,10 +25,10 @@ type stopRecorder struct {
 	matches bool
 }
 
-func (r *stopRecorder) StopDraft(_ context.Context, principalID string, draftID int64) (bool, error) {
+func (r *stopRecorder) StopDraft(_ context.Context, lane conversation.Lane, draftID int64) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.stops = append(r.stops, principalID+":"+strconv.FormatInt(draftID, 10))
+	r.stops = append(r.stops, lane.PrincipalID+":"+strconv.FormatInt(draftID, 10))
 	return r.matches, nil
 }
 

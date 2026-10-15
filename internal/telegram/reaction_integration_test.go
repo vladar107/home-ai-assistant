@@ -297,7 +297,7 @@ func TestFirstThumbsDownStartsOneReconsiderTurn(t *testing.T) {
 		t.Fatalf("reconsider answer = %+v, want it quoting %d", answer, tail.messageID)
 	}
 	h.waitState(2, "delivered")
-	if messages := registry.RecentMessages("alice"); !slices.Equal(messages, []string{"explain the lease"}) {
+	if messages := registry.RecentMessages("alice", 0); !slices.Equal(messages, []string{"explain the lease"}) {
 		t.Fatalf("recent messages = %q", messages)
 	}
 

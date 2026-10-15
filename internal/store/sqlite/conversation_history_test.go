@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"path/filepath"
 	"testing"
+
+	"github.com/vladar107/home-ai-assistant/internal/conversation"
 )
 
 // Migration 015 rebuilds the conversation tables; sessions, requests, and attachments stored before
@@ -65,7 +67,7 @@ func TestMigrationConversationHistoryKeepsExistingRows(t *testing.T) {
 	}
 	store := &Store{db: db}
 
-	request, found, err := store.NextConversationRequest(ctx, "alice")
+	request, found, err := store.NextConversationRequest(ctx, conversation.Lane{PrincipalID: "alice"})
 	if err != nil || !found || request.ID != requestID || request.Message != "queued text" || request.TelegramMessageID != 1007 ||
 		request.SessionID != activeID || !request.ResumedFrom.IsZero() {
 		t.Fatalf("request after migration = %+v %v %v", request, found, err)
@@ -82,10 +84,10 @@ func TestMigrationConversationHistoryKeepsExistingRows(t *testing.T) {
 		t.Fatalf("sessions after migration = %+v %v", sessions, err)
 	}
 
-	if _, err := store.CancelPendingConversation(ctx, "alice"); err != nil {
+	if _, err := store.CancelPendingConversation(ctx, conversation.Lane{PrincipalID: "alice"}); err != nil {
 		t.Fatal(err)
 	}
-	switched, err := store.SwitchConversation(ctx, "alice", closedID)
+	switched, err := store.SwitchConversation(ctx, conversation.Lane{PrincipalID: "alice"}, closedID)
 	if err != nil || !switched.Found || !switched.Switched || switched.Previous != activeID {
 		t.Fatalf("switch after migration = %+v %v", switched, err)
 	}

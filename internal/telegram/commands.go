@@ -18,7 +18,7 @@ const (
 	NothingToCancelReply     = "There is no response to cancel."
 	NewSessionReply          = "Started a fresh conversation."
 	NoSessionReply           = "There is no conversation to reset yet."
-	HelpReply                = "Available commands: /status, /privacy, /cancel, /new, /sessions, /settings. You can otherwise talk to me normally, and reply to one of my earlier answers to continue that conversation."
+	HelpReply                = "Available commands: /cancel, /new, /privacy, /sessions, /settings, /status. You can otherwise talk to me normally, and reply to one of my earlier answers to continue that conversation."
 
 	// privacyItem starts each line /privacy adds below its opening paragraph.
 	privacyItem = "\n• "
@@ -46,24 +46,21 @@ type BotCommand struct {
 	Description string `json:"description"`
 }
 
-func registeredCommands(conversationEnabled, settingsEnabled, jobsEnabled bool) []BotCommand {
-	commands := []BotCommand{
-		{Command: "status", Description: "Show whether Home Agent is online"},
-		{Command: "privacy", Description: "Show the current privacy mode"},
-	}
-	if conversationEnabled {
-		commands = append(
-			commands,
-			BotCommand{Command: "cancel", Description: "Stop the current response"},
-			BotCommand{Command: "new", Description: "Start a fresh conversation"},
-			BotCommand{Command: "sessions", Description: "Return to a recent conversation"},
-		)
-	}
-	if jobsEnabled {
-		commands = append(commands, BotCommand{Command: "jobs", Description: "Show and manage your reminders and scheduled jobs"})
-	}
-	if settingsEnabled {
-		commands = append(commands, BotCommand{Command: "settings", Description: "Show and change your settings"})
+// menuCommand is one entry of the slash menu and whether the deployment offers it.
+type menuCommand struct {
+	BotCommand
+	offered bool
+}
+
+// menuCommands is the slash menu: the offered entries, which callers list alphabetically so a
+// command is found where the user looks for it. /status and /privacy are left out but still answer
+// when typed; the help reply and /settings name them.
+func menuCommands(entries []menuCommand) []BotCommand {
+	var commands []BotCommand
+	for _, entry := range entries {
+		if entry.offered {
+			commands = append(commands, entry.BotCommand)
+		}
 	}
 	return commands
 }

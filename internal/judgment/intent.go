@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/thread"
 	"github.com/vladar107/home-ai-assistant/internal/turnstate"
 )
 
@@ -24,13 +25,13 @@ const replyRunes = 600
 
 // RecentMessages returns a principal's latest user messages, oldest first.
 type RecentMessages interface {
-	RecentMessages(principalID string) []string
+	RecentMessages(principalID string, threadID int64) []string
 }
 
 // RecentExchange returns a principal's latest user messages and the assistant's latest chat reply,
 // oldest first.
 type RecentExchange interface {
-	RecentExchange(principalID string) []turnstate.Line
+	RecentExchange(principalID string, threadID int64) []turnstate.Line
 }
 
 // ExposureLevels reports how much untrusted content a principal's turn has seen.
@@ -64,7 +65,7 @@ func (c *IntentChecker) Mismatch(ctx context.Context, principalID, tool string, 
 		c.client.recordDecision(ctx, principalID, "intent", "suspicious")
 		return true, nil
 	}
-	exchange := redactExchange(c.recent.RecentExchange(principalID))
+	exchange := redactExchange(c.recent.RecentExchange(principalID, thread.From(ctx)))
 	if exchange.Empty() {
 		return false, nil
 	}

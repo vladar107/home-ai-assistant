@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
 const withdrawnLabelRunes = 80
@@ -17,7 +19,7 @@ func (s *Service) Withdraw(ctx context.Context, principalID string, items []int,
 	proposing := s.proposalLock(principalID)
 	proposing.Lock()
 	defer proposing.Unlock()
-	pending, err := s.repository.PendingApprovals(ctx, principalID)
+	pending, err := s.repository.PendingApprovals(ctx, principalID, thread.From(ctx))
 	if err != nil {
 		return "", false, err
 	}

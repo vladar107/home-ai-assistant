@@ -15,14 +15,20 @@ borrowed between users.
 
 - **Conversation.** Natural-language chat with per-user context, backed by the
   [Pi](https://github.com/badlogic/pi-mono) agent runtime on the user's own model
-  subscription. `/status`, `/privacy`, `/cancel`, `/new`, `/sessions`,
-  `/memory`, `/backlog`, `/tasks`, and `/settings` are deterministic shortcuts. Asked how to
+  subscription. `/backlog`, `/cancel`, `/jobs`, `/memory`, `/new`, `/sessions`,
+  `/settings`, and `/tasks` are deterministic shortcuts in the slash menu, and
+  `/status` and `/privacy` answer when typed. Asked how to
   set something up, the assistant reads its own help, built from the same
   `/settings` pages and command list the user sees.
 - **Earlier conversations.** `/sessions` lists recent conversations to resume,
   and replying to an earlier answer continues its conversation. The assistant
   can search and read the user's own earlier conversations when asked about
   something discussed before.
+- **Tabs.** With topics turned on for the bot in BotFather, each tab of the
+  private chat is its own conversation, and tabs answer in parallel. `/new`,
+  `/cancel`, and `/sessions` act on the tab they are sent in. Reminders,
+  scheduled reports, watches, and trip messages go to the main view. With
+  topics off, the chat is one conversation as before.
 - **Act and tell.** A clear request to set up or change a scheduled job, a
   watch, a saved route, a memory instruction, or a Notion property is done at
   once. A "Done" message follows the reply with an Undo button per action,
