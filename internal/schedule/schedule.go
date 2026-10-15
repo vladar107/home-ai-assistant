@@ -40,6 +40,8 @@ type Job struct {
 	Zone        string
 	Config      json.RawMessage
 	Enabled     bool
+	// TravelPause keeps a recurring job silent for occurrences that fall inside a trip.
+	TravelPause bool
 	NextRunAt   time.Time
 	FinishedAt  time.Time
 	CreatedAt   time.Time
@@ -94,8 +96,12 @@ type Repository interface {
 	DeleteScheduledJob(ctx context.Context, principalID, jobID string) (bool, error)
 	// DeleteUnchangedScheduledJob deletes the job only while it was last changed at updatedAt.
 	DeleteUnchangedScheduledJob(ctx context.Context, principalID, jobID string, updatedAt time.Time) (bool, error)
-	// UpdateScheduledJob replaces an unfinished job's name, schedule, zone, configuration, and next
-	// run, keeping its type, owner, and pause state. A job changed since expectedUpdatedAt, including
+	// SetScheduledJobTravelPause sets the travel flag of an unfinished recurring job.
+	SetScheduledJobTravelPause(ctx context.Context, principalID, jobID string, on bool) (bool, error)
+	// ScheduledJobsWithCron returns every principal's unfinished recurring jobs with the cron.
+	ScheduledJobsWithCron(ctx context.Context, cron string) ([]Job, error)
+	// UpdateScheduledJob replaces an unfinished job's name, schedule, zone, configuration, travel
+	// flag, and next run, keeping its type, owner, and pause state. A job changed since expectedUpdatedAt, including
 	// by a tick advancing it, is left alone and reported as not updated.
 	UpdateScheduledJob(ctx context.Context, job Job, expectedUpdatedAt time.Time) (bool, error)
 	DueScheduledJobs(ctx context.Context, now time.Time) ([]Job, error)

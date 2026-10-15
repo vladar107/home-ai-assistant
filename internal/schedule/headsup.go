@@ -1,6 +1,7 @@
 package schedule
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 
@@ -9,7 +10,9 @@ import (
 
 const (
 	HeadsUpName = "Heads-up"
-	HeadsUpCron = "0 8,19 * * *"
+	HeadsUpCron = "30 7,18 * * *"
+	// legacyHeadsUpCron is the schedule jobs were created with before the Trips scan shared 07:30.
+	legacyHeadsUpCron = "0 8,19 * * *"
 	// headsUpCallBudget fits the dozen lookups its prompt asks for, which a turn's usual budget
 	// would cut short and leave reported as failed checks.
 	headsUpCallBudget = 20
@@ -29,4 +32,37 @@ const HeadsUpPrompt = "Look at the user's calendar for today and tomorrow, their
 func HeadsUpJobID(principalID string) string {
 	sum := sha256.Sum256([]byte("heads-up\x00" + principalID))
 	return hex.EncodeToString(sum[:8])
+}
+
+// MigrateHeadsUp moves every Heads-up job still on the legacy schedule to HeadsUpCron, recomputing
+// its next run. A job whose schedule the user changed is left alone, and so is one that is not the
+// principal's built-in Heads-up job.
+func (s *Service) MigrateHeadsUp(ctx context.Context) error {
+	jobs, err := s.repository.ScheduledJobsWithCron(ctx, legacyHeadsUpCron)
+	if err != nil {
+		return err
+	}
+	moved := 0
+	for _, job := range jobs {
+		if job.ID != HeadsUpJobID(job.PrincipalID) {
+			continue
+		}
+		prepared, err := s.Prepare(job.PrincipalID, job.Name, job.Type, Timing{Cron: HeadsUpCron, Zone: job.Zone}, job.Config)
+		if err != nil {
+			s.logger.WarnContext(ctx, "schedule.headsup.migrate_failed", "principal_id", job.PrincipalID, "job_id", job.ID, "error", err)
+			continue
+		}
+		prepared.Job.TravelPause = job.TravelPause
+		updated, err := s.Update(ctx, job, job.UpdatedAt, prepared)
+		if err != nil {
+			return err
+		}
+		if updated {
+			moved++
+		}
+	}
+	if moved > 0 {
+		s.logger.InfoContext(ctx, "schedule.headsup.migrated", "count", moved)
+	}
+	return nil
 }

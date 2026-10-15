@@ -13,8 +13,8 @@ const (
 	headsUpOnAction      = "on"
 	headsUpOffAction     = "off"
 
-	HeadsUpOnLine  = "Heads-up: on. A message at 08:00 and 19:00 when something needs your attention; quiet otherwise. Uses your model subscription."
-	HeadsUpOffLine = "Heads-up: off. Turn it on for a message at 08:00 and 19:00 when something needs your attention; quiet otherwise. Needs a connected model subscription, which it uses."
+	HeadsUpOnLine  = "Heads-up: on. A message at 07:30 and 18:30 when something needs your attention; quiet otherwise. Uses your model subscription."
+	HeadsUpOffLine = "Heads-up: off. Turn it on for a message at 07:30 and 18:30 when something needs your attention; quiet otherwise. Needs a connected model subscription, which it uses."
 	// HeadsUpTooManyNote explains why the switch could not create its job.
 	HeadsUpTooManyNote = "You already have the maximum number of scheduled jobs. Remove one in /jobs, then turn Heads-up on."
 )

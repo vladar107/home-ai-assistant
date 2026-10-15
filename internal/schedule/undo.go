@@ -18,6 +18,9 @@ type jobUndo struct {
 	After   *jobDefinition `json:"after,omitempty"`
 	Before  *Job           `json:"before,omitempty"`
 	Removed *Job           `json:"removed,omitempty"`
+	// TravelChanged is true when the update changed the travel flag, which is then the only case an
+	// Undo restores it; an older payload lacks it and leaves the flag as it is.
+	TravelChanged bool `json:"travel_changed,omitempty"`
 }
 
 // jobDefinition is what the user can change about a job. Every run moves a job's UpdatedAt, so an
@@ -56,13 +59,13 @@ func (s *Service) undoCreate(ctx context.Context, principalID, jobID string) (js
 }
 
 // undoUpdate is the payload that puts back the job an update replaced, with the job as it is now.
-func (s *Service) undoUpdate(ctx context.Context, before Job) (json.RawMessage, error) {
+func (s *Service) undoUpdate(ctx context.Context, before Job, travelChanged bool) (json.RawMessage, error) {
 	job, found, err := s.repository.LoadScheduledJob(ctx, before.PrincipalID, before.ID)
 	if err != nil || !found {
 		return nil, err
 	}
 	after := definitionOf(job)
-	return json.Marshal(jobUndo{JobID: before.ID, After: &after, Before: &before})
+	return json.Marshal(jobUndo{JobID: before.ID, After: &after, Before: &before, TravelChanged: travelChanged})
 }
 
 // Undo reverses a direct job action: it deletes a created job, puts back the job an update
@@ -129,6 +132,9 @@ func (s *Service) undoUpdated(ctx context.Context, principalID string, undo jobU
 	if err != nil {
 		return approval.Outcome{}, err
 	}
+	if !undo.TravelChanged {
+		prepared.Job.TravelPause = job.TravelPause
+	}
 	updated, err := s.Update(ctx, job, job.UpdatedAt, prepared)
 	if err != nil {
 		return approval.Outcome{}, err
@@ -179,6 +185,7 @@ func (s *Service) restorable(job Job) (Prepared, error) {
 	if err != nil {
 		return Prepared{}, &approval.UndoRefusal{Reason: "it can no longer be scheduled (" + err.Error() + ")."}
 	}
+	prepared.Job.TravelPause = job.TravelPause
 	if job.OneTime() {
 		// The stored instant may carry seconds, as a snoozed reminder's does, which the local
 		// time above drops.

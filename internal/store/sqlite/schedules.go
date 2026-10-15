@@ -14,7 +14,7 @@ import (
 
 var _ schedule.Repository = (*Store)(nil)
 
-const scheduledJobColumns = `id, principal_id, name, job_type, cron, run_at, zone, config, enabled, next_run_at, finished_at, created_at, updated_at`
+const scheduledJobColumns = `id, principal_id, name, job_type, cron, run_at, zone, config, enabled, next_run_at, finished_at, created_at, updated_at, travel_pause`
 
 const scheduleRunColumns = `r.id, r.job_id, r.principal_id, r.scheduled_for, r.manual, r.status,
 	COALESCE(r.error_kind, ''), COALESCE(r.reply, ''), j.name, j.job_type, j.zone, j.run_at IS NOT NULL, j.config`
@@ -49,9 +49,9 @@ func (s *Store) CreateScheduledJob(ctx context.Context, job schedule.Job, limit 
 	}
 	if _, err := tx.ExecContext(
 		ctx,
-		`INSERT INTO scheduled_jobs (`+scheduledJobColumns+`) VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), ?, ?)`,
+		`INSERT INTO scheduled_jobs (`+scheduledJobColumns+`) VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?)`,
 		job.ID, job.PrincipalID, job.Name, job.Type, job.Cron, optionalTime(job.RunAt), job.Zone, string(job.Config), job.Enabled,
-		formatTime(job.NextRunAt), optionalTime(job.FinishedAt), formatTime(job.CreatedAt), formatTime(job.UpdatedAt),
+		formatTime(job.NextRunAt), optionalTime(job.FinishedAt), formatTime(job.CreatedAt), formatTime(job.UpdatedAt), job.TravelPause,
 	); err != nil {
 		return false, fmt.Errorf("insert scheduled job: %w", err)
 	}
@@ -106,15 +106,45 @@ func (s *Store) SetScheduledJobEnabled(ctx context.Context, principalID, jobID s
 	return affectedOne(result, "changed scheduled job")
 }
 
+// SetScheduledJobTravelPause leaves updated_at alone, like muting a watch: the flag is not a change
+// to the job's definition that a pending edit could overwrite.
+func (s *Store) SetScheduledJobTravelPause(ctx context.Context, principalID, jobID string, on bool) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("change scheduled job: SQLite store is not open")
+	}
+	result, err := s.db.ExecContext(
+		ctx,
+		`UPDATE scheduled_jobs SET travel_pause = ? WHERE id = ? AND principal_id = ? AND finished_at IS NULL AND run_at IS NULL`,
+		on, jobID, principalID,
+	)
+	if err != nil {
+		return false, fmt.Errorf("change scheduled job: %w", err)
+	}
+	return affectedOne(result, "changed scheduled job")
+}
+
+// ScheduledJobsWithCron returns every principal's unfinished recurring jobs with the given cron
+// expression.
+func (s *Store) ScheduledJobsWithCron(ctx context.Context, cron string) ([]schedule.Job, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("list scheduled jobs: SQLite store is not open")
+	}
+	return s.queryScheduledJobs(
+		ctx,
+		`SELECT `+scheduledJobColumns+` FROM scheduled_jobs WHERE cron = ? AND finished_at IS NULL ORDER BY id`,
+		cron,
+	)
+}
+
 func (s *Store) UpdateScheduledJob(ctx context.Context, job schedule.Job, expectedUpdatedAt time.Time) (bool, error) {
 	if s == nil || s.db == nil {
 		return false, fmt.Errorf("update scheduled job: SQLite store is not open")
 	}
 	result, err := s.db.ExecContext(
 		ctx,
-		`UPDATE scheduled_jobs SET name = ?, cron = NULLIF(?, ''), run_at = NULLIF(?, ''), zone = ?, config = ?, next_run_at = ?, updated_at = ?
+		`UPDATE scheduled_jobs SET name = ?, cron = NULLIF(?, ''), run_at = NULLIF(?, ''), zone = ?, config = ?, next_run_at = ?, updated_at = ?, travel_pause = ?
 		 WHERE id = ? AND principal_id = ? AND job_type = ? AND finished_at IS NULL AND updated_at = ?`,
-		job.Name, job.Cron, optionalTime(job.RunAt), job.Zone, string(job.Config), formatTime(job.NextRunAt), formatTime(job.UpdatedAt),
+		job.Name, job.Cron, optionalTime(job.RunAt), job.Zone, string(job.Config), formatTime(job.NextRunAt), formatTime(job.UpdatedAt), job.TravelPause,
 		job.ID, job.PrincipalID, job.Type, formatTime(expectedUpdatedAt),
 	)
 	if err != nil {
@@ -370,7 +400,7 @@ func scanScheduledJob(row rowScanner) (schedule.Job, error) {
 	var cron, runAt, finishedAt sql.NullString
 	if err := row.Scan(
 		&job.ID, &job.PrincipalID, &job.Name, &job.Type, &cron, &runAt, &job.Zone, &config, &job.Enabled,
-		&nextRunAt, &finishedAt, &createdAt, &updatedAt,
+		&nextRunAt, &finishedAt, &createdAt, &updatedAt, &job.TravelPause,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return schedule.Job{}, err

@@ -134,6 +134,7 @@ type Service struct {
 	backlog       BacklogController
 	tasks         TaskController
 	watches       WatchController
+	trips         TripController
 	routes        RouteController
 	transcriber   Transcriber
 	sections      []settingsSection
@@ -818,6 +819,9 @@ func (s *Service) processCallback(ctx context.Context, bot Bot, updateID int64, 
 	}
 	if action, watchID, isWatch := parseWatchCallback(callback.Data); isWatch && s.watches != nil {
 		return s.processWatchPress(ctx, callback, principalID, action, watchID)
+	}
+	if action, tripID, isTrip := parseTripCallback(callback.Data); isTrip && s.trips != nil {
+		return s.processTripPress(ctx, callback, principalID, action, tripID)
 	}
 	if sessionID, isSession := parseSessionCallback(callback.Data); isSession && s.conversation != nil {
 		return s.processSessionPress(ctx, callback, principalID, sessionID)

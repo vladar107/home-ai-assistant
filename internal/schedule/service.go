@@ -86,6 +86,7 @@ type Service struct {
 	exposure   ExposureChecker
 	telemetry  Telemetry
 	safety     SafetyChecks
+	travel     Travel
 	startedAt  time.Time
 
 	mu       sync.Mutex
@@ -113,6 +114,9 @@ const (
 // Telemetry records scheduled run metrics.
 type Telemetry interface {
 	RecordScheduleRun(ctx context.Context, principal, outcome string)
+	// RecordScheduleTravelPaused counts an occurrence that moved forward unrun because its job
+	// pauses while its owner travels.
+	RecordScheduleTravelPaused(ctx context.Context, principal string)
 	RecordReply(ctx context.Context, principal, kind, outcome, safetyChecks string, duration time.Duration)
 }
 
@@ -120,6 +124,17 @@ type Telemetry interface {
 // scheduled reply metrics.
 type SafetyChecks interface {
 	JudgmentsEnabled(ctx context.Context, principalID string) (bool, error)
+}
+
+// Travel reports whether a principal is on a trip at an instant.
+type Travel interface {
+	Traveling(ctx context.Context, principalID string, at time.Time) (bool, error)
+}
+
+// SetTravel sets the trip lookup that jobs flagged to pause while traveling consult, at wiring
+// time; without it nobody is ever traveling.
+func (s *Service) SetTravel(travel Travel) {
+	s.travel = travel
 }
 
 // SetTelemetry sets where run metrics are recorded, at wiring time before the scheduler starts.
@@ -253,6 +268,10 @@ func (s *Service) Start(ctx context.Context) error {
 		s.logger.InfoContext(ctx, "schedule.runs.recovered", "count", recovered)
 	}
 
+	if err := s.MigrateHeadsUp(ctx); err != nil {
+		return fmt.Errorf("migrate heads-up schedules: %w", err)
+	}
+
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	done := make(chan struct{})
 	s.mu.Lock()
@@ -369,7 +388,12 @@ func (s *Service) advance(ctx context.Context, now time.Time) error {
 			next = now.AddDate(100, 0, 0)
 		}
 		var run *Run
-		if !latest.IsZero() && (job.OneTime() || now.Sub(latest) <= jobType.CatchUp) {
+		if !latest.IsZero() && job.TravelPause && !job.OneTime() && s.travelingAt(ctx, job, latest) {
+			s.logger.InfoContext(ctx, "schedule.run.travel_paused", "principal_id", job.PrincipalID, "job_id", job.ID)
+			if s.telemetry != nil {
+				s.telemetry.RecordScheduleTravelPaused(ctx, job.PrincipalID)
+			}
+		} else if !latest.IsZero() && (job.OneTime() || now.Sub(latest) <= jobType.CatchUp) {
 			id, err := newRunID()
 			if err != nil {
 				return err
@@ -383,6 +407,20 @@ func (s *Service) advance(ctx context.Context, now time.Time) error {
 		}
 	}
 	return nil
+}
+
+// travelingAt reports whether the job's owner is on a trip at the occurrence. A failed lookup
+// counts as not traveling, so a reminder is never lost to it.
+func (s *Service) travelingAt(ctx context.Context, job Job, at time.Time) bool {
+	if s.travel == nil {
+		return false
+	}
+	traveling, err := s.travel.Traveling(ctx, job.PrincipalID, at)
+	if err != nil {
+		s.logger.WarnContext(ctx, "schedule.travel.failed", "principal_id", job.PrincipalID, "job_id", job.ID, "error", err)
+		return false
+	}
+	return traveling
 }
 
 // dispatch starts one run in the background unless it is already in flight or, for a run still to
@@ -663,6 +701,36 @@ func (s *Service) SetEnabled(ctx context.Context, principalID, jobID string, ena
 	return changed, err
 }
 
+// SetTravelPause flags or unflags one of the principal's recurring jobs to stay silent while the
+// principal is traveling.
+func (s *Service) SetTravelPause(ctx context.Context, principalID, jobID string, on bool) (bool, error) {
+	job, found, err := s.repository.LoadScheduledJob(ctx, principalID, jobID)
+	if err != nil || !found || !TravelPausable(job) || !job.FinishedAt.IsZero() {
+		return false, err
+	}
+	changed, err := s.repository.SetScheduledJobTravelPause(ctx, principalID, jobID, on)
+	if err == nil && changed {
+		s.logger.InfoContext(ctx, "schedule.job.changed", "principal_id", principalID, "job_id", jobID, "travel_pause", on)
+	}
+	return changed, err
+}
+
+// TravelPausedNames returns the names of the principal's enabled recurring jobs flagged to pause
+// while traveling.
+func (s *Service) TravelPausedNames(ctx context.Context, principalID string) ([]string, error) {
+	jobs, err := s.repository.ListScheduledJobs(ctx, principalID)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, job := range jobs {
+		if job.TravelPause && job.Enabled && !job.OneTime() {
+			names = append(names, job.Name)
+		}
+	}
+	return names, nil
+}
+
 func (s *Service) Delete(ctx context.Context, principalID, jobID string) (bool, error) {
 	deleted, err := s.repository.DeleteScheduledJob(ctx, principalID, jobID)
 	if err == nil && deleted {
@@ -778,7 +846,8 @@ func (s *Service) Create(ctx context.Context, id string, prepared Prepared) (boo
 }
 
 // Update replaces one of the principal's jobs with a prepared one under the same ID, keeping its
-// pause state. A job changed since expectedUpdatedAt is reported as not updated.
+// pause state. The prepared job's TravelPause is stored, so a caller that does not mean to change it
+// copies the current one. A job changed since expectedUpdatedAt is reported as not updated.
 func (s *Service) Update(ctx context.Context, current Job, expectedUpdatedAt time.Time, prepared Prepared) (bool, error) {
 	job := prepared.Job
 	job.ID, job.Enabled, job.CreatedAt = current.ID, current.Enabled, current.CreatedAt

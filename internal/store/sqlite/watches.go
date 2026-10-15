@@ -13,7 +13,7 @@ import (
 
 var _ watch.Repository = (*Store)(nil)
 
-const watchColumns = `id, principal_id, config, enabled, COALESCE(muted_on, ''), created_at, updated_at`
+const watchColumns = `id, principal_id, config, enabled, COALESCE(muted_on, ''), created_at, updated_at, travel_pause`
 
 func (s *Store) CreateWatch(ctx context.Context, w watch.Watch, limit int) (bool, error) {
 	if s == nil || s.db == nil {
@@ -45,8 +45,8 @@ func (s *Store) CreateWatch(ctx context.Context, w watch.Watch, limit int) (bool
 	}
 	if _, err := tx.ExecContext(
 		ctx,
-		`INSERT INTO watches (id, principal_id, kind, config, enabled, muted_on, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?)`,
-		w.ID, w.PrincipalID, w.Kind, string(config), w.Enabled, w.MutedOn, formatTime(w.CreatedAt), formatTime(w.UpdatedAt),
+		`INSERT INTO watches (id, principal_id, kind, config, enabled, muted_on, created_at, updated_at, travel_pause) VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?)`,
+		w.ID, w.PrincipalID, w.Kind, string(config), w.Enabled, w.MutedOn, formatTime(w.CreatedAt), formatTime(w.UpdatedAt), w.TravelPause,
 	); err != nil {
 		return false, fmt.Errorf("insert watch: %w", err)
 	}
@@ -99,8 +99,8 @@ func (s *Store) UpdateWatch(ctx context.Context, w watch.Watch, expectedUpdatedA
 	defer tx.Rollback()
 	result, err := tx.ExecContext(
 		ctx,
-		`UPDATE watches SET config = ?, updated_at = ? WHERE id = ? AND principal_id = ? AND kind = ? AND updated_at = ?`,
-		string(config), formatTime(w.UpdatedAt), w.ID, w.PrincipalID, w.Kind, formatTime(expectedUpdatedAt),
+		`UPDATE watches SET config = ?, updated_at = ?, travel_pause = ? WHERE id = ? AND principal_id = ? AND kind = ? AND updated_at = ?`,
+		string(config), formatTime(w.UpdatedAt), w.TravelPause, w.ID, w.PrincipalID, w.Kind, formatTime(expectedUpdatedAt),
 	)
 	if err != nil {
 		return false, fmt.Errorf("update watch: %w", err)
@@ -127,6 +127,19 @@ func (s *Store) SetWatchEnabled(ctx context.Context, principalID, watchID string
 		`UPDATE watches SET enabled = ?, updated_at = ? WHERE id = ? AND principal_id = ?`,
 		enabled, formatTime(now), watchID, principalID,
 	)
+	if err != nil {
+		return false, fmt.Errorf("change watch: %w", err)
+	}
+	return affectedOne(result, "changed watch")
+}
+
+// SetWatchTravelPause leaves updated_at alone, like muting: the flag is not a change to the watch a
+// pending edit could overwrite.
+func (s *Store) SetWatchTravelPause(ctx context.Context, principalID, watchID string, on bool) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("change watch: SQLite store is not open")
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE watches SET travel_pause = ? WHERE id = ? AND principal_id = ?`, on, watchID, principalID)
 	if err != nil {
 		return false, fmt.Errorf("change watch: %w", err)
 	}
@@ -272,7 +285,7 @@ func (s *Store) ReadyWatchAlerts(ctx context.Context) ([]watch.Alert, error) {
 	}
 	rows, err := s.db.QueryContext(
 		ctx,
-		`SELECT a.id, a.watch_id, a.principal_id, a.occurrence, a.sequence, a.type, a.text, a.expires_at, a.private, w.kind, w.enabled, COALESCE(w.muted_on, ''),
+		`SELECT a.id, a.watch_id, a.principal_id, a.occurrence, a.sequence, a.type, a.text, a.expires_at, a.private, w.kind, w.enabled, COALESCE(w.muted_on, ''), w.travel_pause,
 		        COALESCE(json_extract(w.config, '$.language'), '')
 		 FROM watch_alerts a JOIN watches w ON w.id = a.watch_id
 		 WHERE a.status = 'ready' ORDER BY a.created_at, a.sequence, a.id`,
@@ -287,7 +300,7 @@ func (s *Store) ReadyWatchAlerts(ctx context.Context) ([]watch.Alert, error) {
 		var expiresAt string
 		if err := rows.Scan(
 			&alert.ID, &alert.WatchID, &alert.PrincipalID, &alert.Occurrence, &alert.Sequence, &alert.Type, &alert.Text,
-			&expiresAt, &alert.Private, &alert.Kind, &alert.Enabled, &alert.MutedOn, &alert.Language,
+			&expiresAt, &alert.Private, &alert.Kind, &alert.Enabled, &alert.MutedOn, &alert.TravelPause, &alert.Language,
 		); err != nil {
 			return nil, fmt.Errorf("scan watch alert: %w", err)
 		}
@@ -354,7 +367,7 @@ func (s *Store) queryWatches(ctx context.Context, query string, arguments ...any
 func scanWatch(row rowScanner) (watch.Watch, error) {
 	var w watch.Watch
 	var config, createdAt, updatedAt string
-	if err := row.Scan(&w.ID, &w.PrincipalID, &config, &w.Enabled, &w.MutedOn, &createdAt, &updatedAt); err != nil {
+	if err := row.Scan(&w.ID, &w.PrincipalID, &config, &w.Enabled, &w.MutedOn, &createdAt, &updatedAt, &w.TravelPause); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return watch.Watch{}, err
 		}

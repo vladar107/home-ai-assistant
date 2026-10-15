@@ -53,6 +53,7 @@ func proposeGuidance(zone string) string {
 		"A recurring job takes cron, a standard five-field cron expression (minute hour day-of-month month day-of-week) in the user's time zone, " + zone + " unless they name another; " +
 		"for example 0 9 * * 1 is Mondays at 09:00 and 30 7 * * 1-5 is weekdays at 07:30. A recurring job may run at most once an hour. " +
 		"A one-time job takes at instead, a local date and time such as 2026-10-04 07:30 that you work out from the current time. " +
+		"Set pause_while_traveling on a recurring job that only matters while the user is home, such as cleaning, bins, the commute, or home devices, so it stays silent during a trip and resumes by itself afterwards; never set it for a one-time job or a reminder, and leave it out for anything that should still arrive while away. " +
 		"A job meant to \"only tell me when…\" should say so in its instructions; its runs then stay silent unless the condition holds. " +
 		"Each run is a separate turn the user does not watch, with only read-only tools, so the prompt must say exactly what to look at and what to report, on its own, without relying on this conversation. " +
 		"schedule_update changes a job by its id from schedule_list, given only the fields that change. " +
@@ -119,7 +120,8 @@ var writeDefinitions = []tools.Definition{
 			`"cron":{"type":"string","description":"For a recurring job: a five-field cron expression, such as 0 9 * * 1 for Mondays at 09:00."},` +
 			`"at":{"type":"string","description":"For a one-time job instead of cron: local date and time, YYYY-MM-DD HH:MM."},` +
 			`"prompt":{"type":"string","maxLength":1000,"description":"The complete instructions for each run, at most 1000 characters."},` +
-			`"timezone":{"type":"string","description":"IANA time zone such as Europe/Amsterdam; omit to use the user's own."}},` +
+			`"timezone":{"type":"string","description":"IANA time zone such as Europe/Amsterdam; omit to use the user's own."},` +
+			`"pause_while_traveling":{"type":"boolean","description":"Recurring jobs only: stay silent while the user is on a trip."}},` +
 			`"required":["name","prompt"],"additionalProperties":false}`),
 	},
 	{
@@ -137,7 +139,8 @@ var writeDefinitions = []tools.Definition{
 			`"find":{"type":"string","minLength":1,"maxLength":1000,"description":"A passage copied exactly from the current instructions; it must occur there exactly once."},` +
 			`"replace":{"type":"string","maxLength":1000,"description":"The text that replaces it; empty to delete the passage."}},` +
 			`"required":["find","replace"],"additionalProperties":false}},` +
-			`"timezone":{"type":"string","description":"A new IANA time zone such as Europe/Amsterdam."}},` +
+			`"timezone":{"type":"string","description":"A new IANA time zone such as Europe/Amsterdam."},` +
+			`"pause_while_traveling":{"type":"boolean","description":"Recurring jobs only: true to stay silent while the user is on a trip, false to stop doing so; omit to keep it as it is."}},` +
 			`"required":["job_id"],"additionalProperties":false}`),
 	},
 	{
@@ -206,11 +209,12 @@ func (s *Service) Execute(ctx context.Context, principalID string, call tools.Ca
 }
 
 type proposeArguments struct {
-	Name     string `json:"name"`
-	Cron     string `json:"cron"`
-	At       string `json:"at"`
-	Prompt   string `json:"prompt"`
-	Timezone string `json:"timezone"`
+	Name                string `json:"name"`
+	Cron                string `json:"cron"`
+	At                  string `json:"at"`
+	Prompt              string `json:"prompt"`
+	Timezone            string `json:"timezone"`
+	PauseWhileTraveling bool   `json:"pause_while_traveling"`
 }
 
 type confirmedReminder struct {
@@ -227,6 +231,9 @@ type confirmedJob struct {
 	At     string `json:"at,omitempty"`
 	Zone   string `json:"zone"`
 	Prompt string `json:"prompt"`
+	// TravelPause is nil unless the model set the flag, so Confirm keeps the job's current value
+	// instead of one read when the proposal was made.
+	TravelPause *bool `json:"pause_while_traveling,omitempty"`
 }
 
 type updateArguments struct {
@@ -237,6 +244,8 @@ type updateArguments struct {
 	Prompt      string       `json:"prompt"`
 	PromptEdits []promptEdit `json:"prompt_edits"`
 	Timezone    string       `json:"timezone"`
+	// PauseWhileTraveling is nil when the model left the flag alone.
+	PauseWhileTraveling *bool `json:"pause_while_traveling"`
 }
 
 // promptEdit replaces the one occurrence of Find in a job's instructions with Replace.
@@ -350,6 +359,10 @@ func (s *Service) proposeJob(ctx context.Context, principalID string, call tools
 	if err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
+	if arguments.PauseWhileTraveling && prepared.Job.OneTime() {
+		return tools.Result{Text: oneTimeTravelPauseText, IsError: true}, nil
+	}
+	prepared.Job.TravelPause = arguments.PauseWhileTraveling
 	job := prepared.Job
 	existing, err := s.repository.ListScheduledJobs(ctx, principalID)
 	if err != nil {
@@ -360,6 +373,10 @@ func (s *Service) proposeJob(ctx context.Context, principalID string, call tools
 	}
 
 	confirmed := confirmedJob{Name: job.Name, Cron: job.Cron, Zone: job.Zone, Prompt: ModelTurnPrompt(job.Config)}
+	if job.TravelPause {
+		on := true
+		confirmed.TravelPause = &on
+	}
 	targetKind := "recurring job"
 	if job.OneTime() {
 		confirmed.At = job.RunAt.In(prepared.Schedule.Location).Format(localTimeLayouts[0])
@@ -433,6 +450,13 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 		return tools.Result{Text: "Give either prompt, the complete new instructions, or prompt_edits, not both; nothing was proposed.", IsError: true}, nil
 	}
 	next := current
+	travel := job.TravelPause
+	if arguments.PauseWhileTraveling != nil {
+		if *arguments.PauseWhileTraveling && !TravelPausable(job) {
+			return tools.Result{Text: unpausableTravelText, IsError: true}, nil
+		}
+		travel = *arguments.PauseWhileTraveling
+	}
 	override(&next.Name, arguments.Name)
 	override(&next.Cron, arguments.Cron)
 	override(&next.At, arguments.At)
@@ -453,12 +477,15 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 	if err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
+	prepared.Job.TravelPause = travel
 	changed := prepared.Job
-	confirmed := confirmedUpdate{JobID: job.ID, UpdatedAt: job.UpdatedAt, confirmedJob: confirmedJob{Name: changed.Name, Cron: changed.Cron, Zone: changed.Zone, Prompt: ModelTurnPrompt(changed.Config)}}
+	confirmed := confirmedUpdate{JobID: job.ID, UpdatedAt: job.UpdatedAt, confirmedJob: confirmedJob{Name: changed.Name, Cron: changed.Cron, Zone: changed.Zone, Prompt: ModelTurnPrompt(changed.Config), TravelPause: arguments.PauseWhileTraveling}}
 	if changed.OneTime() {
 		confirmed.At = changed.RunAt.In(prepared.Schedule.Location).Format(localTimeLayouts[0])
 	}
-	if confirmed.confirmedJob == current {
+	unflagged := confirmed.confirmedJob
+	unflagged.TravelPause = nil
+	if unflagged == current && travel == job.TravelPause {
 		return tools.Result{Text: "That changes nothing; the job already reads exactly like this.", IsError: true}, nil
 	}
 	canonical, err := json.Marshal(confirmed)
@@ -564,6 +591,7 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		if err != nil {
 			return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "That schedule is no longer valid (" + err.Error() + "); nothing was scheduled."}
 		}
+		prepared.Job.TravelPause = confirmed.TravelPause != nil && *confirmed.TravelPause && !prepared.Job.OneTime()
 		if _, err := s.Create(ctx, record.ID, prepared); err != nil {
 			if errors.Is(err, ErrTooManyJobs) {
 				return approval.Outcome{}, &approval.ActionError{Reason: "too_many", Text: tooManyText(prepared.Job.OneTime()) + " Nothing was scheduled."}
@@ -655,6 +683,10 @@ func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (ap
 	if err != nil {
 		return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "That schedule is no longer valid (" + err.Error() + "); nothing was changed."}
 	}
+	prepared.Job.TravelPause = job.TravelPause
+	if confirmed.TravelPause != nil {
+		prepared.Job.TravelPause = *confirmed.TravelPause && TravelPausable(job)
+	}
 	updated, err := s.Update(ctx, job, confirmed.UpdatedAt, prepared)
 	if err != nil {
 		return approval.Outcome{}, err
@@ -662,7 +694,7 @@ func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (ap
 	if !updated {
 		return approval.Outcome{}, stale
 	}
-	undo, err := s.undoUpdate(ctx, job)
+	undo, err := s.undoUpdate(ctx, job, prepared.Job.TravelPause != job.TravelPause)
 	if err != nil {
 		return approval.Outcome{}, err
 	}
@@ -746,6 +778,17 @@ func (s *Service) Preview(ctx context.Context, record approval.Record) (approval
 	return approval.Preview{Name: confirmed.Name, Text: text}, nil
 }
 
+const (
+	oneTimeTravelPauseText = "Only recurring jobs can pause while traveling; a one-time job or reminder is never paused, so leave pause_while_traveling out."
+	unpausableTravelText   = "This job cannot pause while traveling: only the user's own recurring jobs can, not one-time jobs, reminders, or built-in ones such as Heads-up. Leave pause_while_traveling out."
+)
+
+// TravelPausable reports whether a job may be flagged to pause while its owner travels.
+func TravelPausable(job Job) bool {
+	return job.Type == TypeModelTurn && !job.OneTime() &&
+		job.ID != HeadsUpJobID(job.PrincipalID) && job.ID != TripsJobID(job.PrincipalID)
+}
+
 func tooManyText(oneTime bool) string {
 	if oneTime {
 		return fmt.Sprintf("You already have %d pending reminders and one-time jobs, which is the most allowed; delete one in /jobs first.", MaximumOneTimeJobsPerPrincipal)
@@ -805,6 +848,9 @@ func scheduleSummary(heading string, prepared Prepared) string {
 	}
 	fmt.Fprintf(&builder, "Runs: %s (%s)\n", job.Cron, job.Zone)
 	fmt.Fprintf(&builder, "Next: %s\n", strings.Join(times, "; "))
+	if job.TravelPause {
+		builder.WriteString("Pauses while you are traveling\n")
+	}
 	builder.WriteString("Each run asks your model, with read-only tools, and sends you the reply")
 	return builder.String()
 }
@@ -835,6 +881,9 @@ func renderJob(job Job, zone string, limit int) string {
 	}
 	if !job.Enabled {
 		state += ", paused"
+	}
+	if job.TravelPause {
+		state += ", pauses while traveling"
 	}
 	return fmt.Sprintf("id %s: %q, %s\nInstructions: %s", job.ID, job.Name, state, truncateRunes(ModelTurnPrompt(job.Config), limit))
 }

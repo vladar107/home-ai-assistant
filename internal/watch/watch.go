@@ -221,10 +221,12 @@ type Watch struct {
 	ID          string
 	PrincipalID string
 	Spec
-	Enabled   bool
-	MutedOn   string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	Enabled bool
+	MutedOn string
+	// TravelPause keeps the watch from being checked or alerting while its owner is on a trip.
+	TravelPause bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // Occurrence is one day's window of a watch, as an evaluator receives it.
@@ -313,8 +315,8 @@ type State struct {
 	CheckedAt time.Time
 }
 
-// Alert is one message a watch owes its owner. Kind, Enabled, MutedOn, and Language are read from
-// the watch with it.
+// Alert is one message a watch owes its owner. Kind, Enabled, MutedOn, TravelPause, and Language are
+// read from the watch with it.
 type Alert struct {
 	ID          string
 	WatchID     string
@@ -327,6 +329,7 @@ type Alert struct {
 	Kind        string
 	Enabled     bool
 	MutedOn     string
+	TravelPause bool
 	Language    string
 	// Private is Observation.Private of the check that queued the alert.
 	Private bool
@@ -340,11 +343,12 @@ type Repository interface {
 	LoadWatch(ctx context.Context, principalID, watchID string) (Watch, bool, error)
 	// AllWatches returns every principal's watches, for the check loop.
 	AllWatches(ctx context.Context) ([]Watch, error)
-	// UpdateWatch replaces a watch's definition and forgets its window states, keeping its owner,
-	// pause, and mute. A watch changed since expectedUpdatedAt is left alone and reported as not updated.
+	// UpdateWatch replaces a watch's definition and travel flag and forgets its window states,
+	// keeping its owner, pause, and mute. A watch changed since expectedUpdatedAt is left alone and reported as not updated.
 	UpdateWatch(ctx context.Context, watch Watch, expectedUpdatedAt time.Time) (bool, error)
 	SetWatchEnabled(ctx context.Context, principalID, watchID string, enabled bool, now time.Time) (bool, error)
 	MuteWatch(ctx context.Context, principalID, watchID, date string) (bool, error)
+	SetWatchTravelPause(ctx context.Context, principalID, watchID string, on bool) (bool, error)
 	DeleteWatch(ctx context.Context, principalID, watchID string) (bool, error)
 	// DeleteUnchangedWatch deletes the watch only while it was last changed at updatedAt.
 	DeleteUnchangedWatch(ctx context.Context, principalID, watchID string, updatedAt time.Time) (bool, error)

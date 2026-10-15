@@ -77,6 +77,7 @@ type Telemetry struct {
 	searchChecks                 metric.Int64Counter
 	hintFollowThrough            metric.Int64Counter
 	scheduleRuns                 metric.Int64Counter
+	scheduleTravelPaused         metric.Int64Counter
 	memoryWrites                 metric.Int64Counter
 	memoryLessons                metric.Int64Counter
 	conversationResumes          metric.Int64Counter
@@ -395,6 +396,9 @@ func (t *Telemetry) createBusinessInstruments(meter metric.Meter) error {
 		return err
 	}
 	if t.scheduleRuns, err = counter("home_agent.schedule.runs", "Scheduled runs completed.", "{run}"); err != nil {
+		return err
+	}
+	if t.scheduleTravelPaused, err = counter("home_agent.schedule.travel_paused", "Scheduled occurrences skipped because the owner was traveling.", "{occurrence}"); err != nil {
 		return err
 	}
 	if t.memoryWrites, err = counter("home_agent.memory.writes", "Memory writes by kind and outcome.", "{write}"); err != nil {
@@ -841,6 +845,11 @@ func (t *Telemetry) RecordScheduleRun(ctx context.Context, principal, outcome st
 		principalAttr(principal),
 		labelAttr("home_agent.outcome", outcome, "unknown"),
 	))
+}
+
+// RecordScheduleTravelPaused counts an occurrence that moved forward unrun because its job pauses while traveling.
+func (t *Telemetry) RecordScheduleTravelPaused(ctx context.Context, principal string) {
+	t.scheduleTravelPaused.Add(ctx, 1, metric.WithAttributes(principalAttr(principal)))
 }
 
 func (t *Telemetry) RecordMemoryWrite(ctx context.Context, principal, kind, outcome string) {

@@ -645,7 +645,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		result, err := s.runtime.Run(turnCtx, agentruntime.RunRequest{
 			PrincipalID: request.PrincipalID,
 			SessionID:   request.RuntimeSessionID,
-			Message:     s.turnMessage(request, notice.text, attachments.Summary, hint.name, s.locationLine(turnCtx, request.PrincipalID)),
+			Message:     s.turnMessage(request, notice.text, attachments.Summary, hint.name, s.placeLines(turnCtx, request.PrincipalID)),
 			Images:      attachments.Images,
 			Tools:       tools,
 			Memory:      memory,
@@ -1299,4 +1299,29 @@ func (s *Service) locationLine(ctx context.Context, principalID string) string {
 		return ""
 	}
 	return line
+}
+
+// tripLine is the principal's active or next trip, for the turn's message. A failed lookup
+// leaves the line out rather than failing the turn.
+func (s *Service) tripLine(ctx context.Context, principalID string) string {
+	if s.config.Trips == nil {
+		return ""
+	}
+	line, err := s.config.Trips.TurnLine(ctx, principalID)
+	if err != nil {
+		s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "conversation.trip.failed", "principal_id", principalID, "error", err)
+		return ""
+	}
+	return line
+}
+
+// placeLines is where the principal is and where they are going, for the turn's message.
+func (s *Service) placeLines(ctx context.Context, principalID string) string {
+	var lines []string
+	for _, line := range []string{s.locationLine(ctx, principalID), s.tripLine(ctx, principalID)} {
+		if line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, " ")
 }

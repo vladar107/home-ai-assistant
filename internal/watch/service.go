@@ -101,6 +101,7 @@ type Service struct {
 	proposer   Proposer
 	rewriter   Rewriter
 	telemetry  Telemetry
+	travel     Travel
 	logger     *slog.Logger
 	zone       string
 	tick       time.Duration
@@ -199,6 +200,34 @@ func (s *Service) Register(kind string, evaluator Evaluator) error {
 // service starts; without one they go out in English.
 func (s *Service) SetRewriter(rewriter Rewriter) {
 	s.rewriter = rewriter
+}
+
+// Travel reports whether a principal is on a trip at an instant.
+type Travel interface {
+	Traveling(ctx context.Context, principalID string, at time.Time) (bool, error)
+}
+
+// SetTravel sets the trip lookup that watches flagged to pause while traveling consult, at wiring
+// time; without it nobody is ever traveling.
+func (s *Service) SetTravel(travel Travel) {
+	s.travel = travel
+}
+
+// travelingAt reports whether the watch's owner is on a trip at the instant, asking once per
+// principal and instant within the cache's cycle. A failed lookup counts as not traveling, so an
+// alert is never lost to it.
+func (s *Service) travelingAt(ctx context.Context, cache *Cache, principalID, watchID string, at time.Time) bool {
+	if s.travel == nil {
+		return false
+	}
+	traveling, err := Cached(ctx, cache, "travel|"+principalID+"|"+at.UTC().Format(time.RFC3339Nano), func(ctx context.Context) (bool, error) {
+		return s.travel.Traveling(ctx, principalID, at)
+	})
+	if err != nil {
+		s.logger.WarnContext(ctx, "watch.travel.failed", "principal_id", principalID, "watch_id", watchID, "error", err)
+		return false
+	}
+	return traveling
 }
 
 // SetTelemetry sets where watch metrics are recorded, at wiring time before the service starts.
@@ -325,6 +354,9 @@ func (s *Service) check(ctx context.Context, watch Watch, now time.Time, cache *
 	}
 	occurrence, active := watch.OccurrenceAt(now)
 	if !active || now.Before(occurrence.Start) || now.After(occurrence.End) || watch.MutedOn == occurrence.Date {
+		return
+	}
+	if watch.TravelPause && s.travelingAt(ctx, cache, watch.PrincipalID, watch.ID, now) {
 		return
 	}
 	evaluator, known := s.evaluators[watch.Kind]
@@ -543,8 +575,8 @@ func failureText(watch Watch) string {
 }
 
 // deliver sends the ready alerts to their owners. An alert past its window, or of a watch paused
-// or muted since it was queued, is dropped rather than sent late; a transient failure leaves it
-// ready for the next cycle.
+// or muted since it was queued, or of a watch that pauses while its owner travels, is dropped
+// rather than sent late; a transient failure leaves it ready for the next cycle.
 func (s *Service) deliver(ctx context.Context) {
 	alerts, err := s.repository.ReadyWatchAlerts(ctx)
 	if err != nil {
@@ -553,6 +585,7 @@ func (s *Service) deliver(ctx context.Context) {
 		}
 		return
 	}
+	cache, started := NewCache(), s.now()
 	for _, alert := range alerts {
 		if ctx.Err() != nil {
 			return
@@ -566,6 +599,9 @@ func (s *Service) deliver(ctx context.Context) {
 			continue
 		case alert.MutedOn == alert.Occurrence:
 			s.finish(ctx, alert, statusDropped, "muted", alertDropped)
+			continue
+		case alert.TravelPause && s.travelingAt(ctx, cache, alert.PrincipalID, alert.WatchID, started):
+			s.finish(ctx, alert, statusDropped, "travel_paused", alertDropped)
 			continue
 		}
 		chatID, found, err := s.chats.ResolveActiveChat(ctx, alert.PrincipalID)
@@ -767,6 +803,32 @@ func (s *Service) SetEnabled(ctx context.Context, principalID, watchID string, e
 	return changed, err
 }
 
+// SetTravelPause flags or unflags one of the principal's watches to stay silent while the
+// principal is traveling.
+func (s *Service) SetTravelPause(ctx context.Context, principalID, watchID string, on bool) (bool, error) {
+	changed, err := s.repository.SetWatchTravelPause(ctx, principalID, watchID, on)
+	if err == nil && changed {
+		s.logger.InfoContext(ctx, "watch.changed", "principal_id", principalID, "watch_id", watchID, "travel_pause", on)
+	}
+	return changed, err
+}
+
+// TravelPausedNames returns the labels of the principal's enabled watches flagged to pause while
+// traveling.
+func (s *Service) TravelPausedNames(ctx context.Context, principalID string) ([]string, error) {
+	watches, err := s.repository.ListWatches(ctx, principalID)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, watch := range watches {
+		if watch.TravelPause && watch.Enabled {
+			names = append(names, watch.Label())
+		}
+	}
+	return names, nil
+}
+
 // Mute silences one of the principal's watches for the rest of its local day; it checks again the
 // next day it runs.
 func (s *Service) Mute(ctx context.Context, principalID, watchID string) (bool, error) {
@@ -802,6 +864,9 @@ func (s *Service) DescribeState(watch Watch) string {
 	}
 	if occurrence, active := watch.OccurrenceAt(s.now()); active && watch.MutedOn == occurrence.Date {
 		state += ", muted today"
+	}
+	if watch.TravelPause {
+		state += ", pauses while traveling"
 	}
 	return state
 }
