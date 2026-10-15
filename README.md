@@ -26,7 +26,9 @@ borrowed between users.
   something discussed before.
 - **Tabs.** With topics turned on for the bot in BotFather, each tab of the
   private chat is its own conversation, and tabs answer in parallel. `/new`,
-  `/cancel`, and `/sessions` act on the tab they are sent in. Reminders,
+  `/cancel`, and `/sessions` act on the tab they are sent in. Resuming an
+  earlier conversation opens it in a new tab with its earlier messages
+  forwarded in, or points to the tab that already holds it. Reminders,
   scheduled reports, watches, and trip messages go to the main view. With
   topics off, the chat is one conversation as before.
 - **Act and tell.** A clear request to set up or change a scheduled job, a

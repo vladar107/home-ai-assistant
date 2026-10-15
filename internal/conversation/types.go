@@ -123,6 +123,8 @@ type SessionSummary struct {
 	LastActive time.Time
 	// Elsewhere is true for a conversation another tab holds; it cannot be resumed here.
 	Elsewhere bool
+	// ThreadID is the tab the conversation is active in, or was last active in.
+	ThreadID int64
 }
 
 type ResumeResult struct {
@@ -197,6 +199,9 @@ type Repository interface {
 	// SwitchConversation makes the principal's own session the lane's active one unless the lane has
 	// a turn pending or another tab holds it, closing the lane's previously active session as switched.
 	SwitchConversation(ctx context.Context, lane Lane, sessionID string) (SwitchResult, error)
+	// SessionMessageIDs returns the Telegram message IDs of the session's requests and recorded
+	// replies, ascending and without repeats.
+	SessionMessageIDs(ctx context.Context, principalID, sessionID string) ([]int64, error)
 	// RecordConversationReply remembers which session and request a delivered Telegram message belongs to.
 	RecordConversationReply(ctx context.Context, principalID, sessionID, requestID string, messageID int64) error
 	// ReplyOrigin returns where a recorded reply came from.

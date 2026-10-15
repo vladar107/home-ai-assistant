@@ -587,6 +587,65 @@ func (c *Client) DeleteMessage(ctx context.Context, chatID, messageID int64) err
 	return err
 }
 
+// topicNameLimit is Telegram's longest tab name, in characters.
+const topicNameLimit = 128
+
+// CreateForumTopic opens a tab in the chat and returns its thread ID. A bot may open one in a
+// private chat while it has tabs on.
+func (c *Client) CreateForumTopic(ctx context.Context, chatID int64, name string) (int64, error) {
+	if runes := []rune(strings.TrimSpace(name)); len(runes) > topicNameLimit {
+		name = string(runes[:topicNameLimit])
+	}
+	params := url.Values{
+		"chat_id": {strconv.FormatInt(chatID, 10)},
+		"name":    {strings.TrimSpace(name)},
+	}
+	topic, err := execute[struct {
+		MessageThreadID int64 `json:"message_thread_id"`
+	}](c, ctx, "createForumTopic", params)
+	if err != nil {
+		return 0, err
+	}
+	if topic.MessageThreadID <= 0 {
+		return 0, fmt.Errorf("Telegram createForumTopic returned no thread ID")
+	}
+	return topic.MessageThreadID, nil
+}
+
+// DeleteForumTopic removes a tab with all of its messages.
+func (c *Client) DeleteForumTopic(ctx context.Context, chatID, threadID int64) error {
+	params := url.Values{
+		"chat_id":           {strconv.FormatInt(chatID, 10)},
+		"message_thread_id": {strconv.FormatInt(threadID, 10)},
+	}
+	_, err := execute[bool](c, ctx, "deleteForumTopic", params)
+	return err
+}
+
+// forwardBatch is Telegram's limit on the messages of one forwardMessages call.
+const forwardBatch = 100
+
+// ForwardMessages forwards the chat's messages to the context's tab in the order given, which must
+// be ascending. Telegram skips any message that no longer exists.
+func (c *Client) ForwardMessages(ctx context.Context, chatID int64, messageIDs []int64) error {
+	for start := 0; start < len(messageIDs); start += forwardBatch {
+		encoded, err := json.Marshal(messageIDs[start:min(start+forwardBatch, len(messageIDs))])
+		if err != nil {
+			return fmt.Errorf("Telegram forwardMessages message list could not be encoded")
+		}
+		params := url.Values{
+			"chat_id":      {strconv.FormatInt(chatID, 10)},
+			"from_chat_id": {strconv.FormatInt(chatID, 10)},
+			"message_ids":  {string(encoded)},
+		}
+		setThread(ctx, params)
+		if _, err := execute[json.RawMessage](c, ctx, "forwardMessages", params); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // AnswerCallback closes the loading state of a button press, with an optional short toast.
 func (c *Client) AnswerCallback(ctx context.Context, callbackID, text string) error {
 	params := url.Values{"callback_query_id": {callbackID}}
