@@ -75,6 +75,9 @@ type Run struct {
 	// Private is true when the reply may retell Notion page content or NAS file contents. It is
 	// known only to the process that executed the run.
 	Private bool
+	// External is true when the run read outside content such as web pages or third-party tool
+	// results. Like Private, it is known only to the process that executed the run.
+	External bool
 }
 
 type Repository interface {
@@ -151,6 +154,9 @@ type Result struct {
 	// Private is true when the text may retell Notion page content or NAS file contents the run
 	// read.
 	Private bool
+	// External is true when the run read outside content such as web pages or third-party tool
+	// results.
+	External bool
 }
 
 type Handler interface {

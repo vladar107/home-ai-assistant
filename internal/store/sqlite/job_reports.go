@@ -12,7 +12,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 )
 
-const jobReportColumns = `id, principal_id, job_id, job_name, job_type, text, private, delivered_at`
+const jobReportColumns = `id, principal_id, job_id, job_name, job_type, text, private, external, delivered_at`
 
 func (s *Store) SaveJobReport(ctx context.Context, report schedule.Report, keep int) error {
 	if s == nil || s.db == nil {
@@ -25,10 +25,10 @@ func (s *Store) SaveJobReport(ctx context.Context, report schedule.Report, keep 
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(
 		ctx,
-		`INSERT INTO job_reports (id, principal_id, job_id, job_name, job_type, text, private, delivered_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO job_reports (id, principal_id, job_id, job_name, job_type, text, private, external, delivered_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (id) DO NOTHING`,
-		report.ID, report.PrincipalID, report.JobID, report.JobName, report.JobType, report.Text, report.Private, formatTime(report.DeliveredAt),
+		report.ID, report.PrincipalID, report.JobID, report.JobName, report.JobType, report.Text, report.Private, report.External, formatTime(report.DeliveredAt),
 	); err != nil {
 		return fmt.Errorf("save job report: %w", err)
 	}
@@ -107,7 +107,7 @@ func (s *Store) JobReportByMessage(ctx context.Context, principalID string, mess
 	}
 	return s.queryJobReport(ctx,
 		`SELECT report.id, report.principal_id, report.job_id, report.job_name, report.job_type, report.text,
-		        report.private, report.delivered_at
+		        report.private, report.external, report.delivered_at
 		 FROM job_report_messages AS message
 		 JOIN job_reports AS report ON report.id = message.report_id AND report.principal_id = message.principal_id
 		 WHERE message.principal_id = ? AND message.telegram_message_id = ?`,
@@ -170,7 +170,7 @@ func (s *Store) queryJobReports(ctx context.Context, query string, arguments ...
 func scanJobReport(row rowScanner) (schedule.Report, error) {
 	var report schedule.Report
 	var deliveredAt string
-	if err := row.Scan(&report.ID, &report.PrincipalID, &report.JobID, &report.JobName, &report.JobType, &report.Text, &report.Private, &deliveredAt); err != nil {
+	if err := row.Scan(&report.ID, &report.PrincipalID, &report.JobID, &report.JobName, &report.JobType, &report.Text, &report.Private, &report.External, &deliveredAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return schedule.Report{}, err
 		}

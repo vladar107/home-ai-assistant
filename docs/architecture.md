@@ -329,8 +329,9 @@ the Telegram messages it was sent as. The next chat turn gets a one-line excerpt
 of each report no turn has heard of, the first turn of a conversation those of the
 last day, and a reply to a report's message that report in full; the
 `job_reports` read tool lists and reads them. Every lookup is keyed by principal.
-A report counts as outside content, and one whose run read private content makes
-the conversation private.
+A report counts as outside content when its run read outside content (a run
+recovered after a restart counts, a reminder never does), and one whose run read
+private content makes the conversation private.
 
 ### A background task
 

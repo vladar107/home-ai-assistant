@@ -17,6 +17,9 @@ type ScheduledReply struct {
 	// Private is true when the text may retell Notion page content or NAS file contents the turn
 	// read.
 	Private bool
+	// External is true when the turn read outside content such as web pages or third-party tool
+	// results.
+	External bool
 }
 
 // RunScheduled runs one turn nobody is watching: on the principal's own subscription, in a fresh
@@ -91,7 +94,7 @@ func (s *Service) runUnwatched(ctx context.Context, principalID, turn, message s
 		reply, kind := failureReply(runErr)
 		return ScheduledReply{Text: reply, ErrorKind: kind}, nil
 	default:
-		return ScheduledReply{Text: result.Final, Private: run.Private()}, nil
+		return ScheduledReply{Text: result.Final, Private: run.Private(), External: run.External()}, nil
 	}
 }
 
