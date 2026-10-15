@@ -65,9 +65,22 @@ borrowed between users.
   A job meant to "only tell me when…" stays silent until it has something to
   say.
 - **Heads-up.** Turned on in `/settings`, the assistant looks over the user's
-  day at 08:00 and 19:00 (calendar, trips, weather, home devices, health and
+  day at 07:30 and 18:30 (calendar, trips, weather, home devices, health and
   energy trends) and writes first, only when something needs attention. It is
   an ordinary job the user can move, reword, or pause in conversation.
+- **Trips.** A trip the user mentions ("I fly to Lisbon on 12 March and stay a
+  week") is recorded with its dates and bookings, and every turn knows about the
+  active or next one. With Google mail or calendar on, an optional Trips scan
+  in `/settings` reads them daily at 07:30 and sends each new booking as a card
+  with Track and Ignore buttons; nothing is planned until Track is pressed, and
+  an ignored trip is never offered again. Each booking with a check-in or pickup
+  time (flight, hotel, train, car) reminds the user in their own chat when
+  check-in opens. The time comes from the booking itself, else from the
+  provider's website, else it is 24 hours before the booking starts, and the
+  reminder says which. Recurring jobs and watches marked "pause while
+  traveling" stay silent during a trip, resume by themselves, and are named in
+  one notice when the trip starts and one when it ends. `/jobs` and `/watches`
+  show and toggle the mark.
 - **Memory.** Each user has a small memory of instructions and facts that the
   assistant keeps across `/new`, scheduled runs, and restarts. Facts are saved
   at once, and so are instructions the user states, with Undo, unless the

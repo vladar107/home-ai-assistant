@@ -19,17 +19,21 @@ const (
 	JobGoneReply        = "That job no longer exists."
 	SchedulePrivacyLine = "Reminders and jobs are kept until you delete them in /jobs; one-time jobs, 30 days after they run."
 
-	jobsPrefix      = "jobs"
-	jobPauseAction  = "pause"
-	jobResumeAction = "resume"
-	jobRunAction    = "run"
-	jobDeleteAction = "delete"
-	jobsPageAction  = "page"
+	jobsPrefix         = "jobs"
+	jobPauseAction     = "pause"
+	jobResumeAction    = "resume"
+	jobRunAction       = "run"
+	jobDeleteAction    = "delete"
+	jobTravelOnAction  = "tpause"
+	jobTravelOffAction = "tresume"
+	jobsPageAction     = "page"
 	// Watches share the /jobs list under their own actions, since a watch ID is not a job ID.
-	watchPauseJobAction  = "wpause"
-	watchResumeJobAction = "wresume"
-	watchDeleteJobAction = "wdelete"
-	routeDeleteJobAction = "rdelete"
+	watchPauseJobAction     = "wpause"
+	watchResumeJobAction    = "wresume"
+	watchDeleteJobAction    = "wdelete"
+	watchTravelOnJobAction  = "wtpause"
+	watchTravelOffJobAction = "wtresume"
+	routeDeleteJobAction    = "rdelete"
 
 	jobsPerPage = 8
 )
@@ -39,6 +43,7 @@ type ScheduleController interface {
 	Jobs(context.Context, string) ([]schedule.Job, error)
 	SetEnabled(context.Context, string, string, bool) (bool, error)
 	Delete(context.Context, string, string) (bool, error)
+	SetTravelPause(context.Context, string, string, bool) (bool, error)
 	RunNow(context.Context, string, string, string) (bool, error)
 	Snooze(context.Context, string, string, schedule.Snooze) (schedule.Job, bool, error)
 	DefaultZone() string
@@ -111,6 +116,14 @@ func renderJobs(ctx context.Context, principalID string, schedules ScheduleContr
 				toggle = InlineButton{Text: "Resume " + number, CallbackData: jobCallback(jobResumeAction, job.ID, page)}
 			}
 			row = append(row, toggle)
+			if schedule.TravelPausable(job) {
+				travel := InlineButton{Text: "Pause on trip " + number, CallbackData: jobCallback(jobTravelOnAction, job.ID, page)}
+				if job.TravelPause {
+					state += ", pauses while traveling"
+					travel = InlineButton{Text: "Run on trip " + number, CallbackData: jobCallback(jobTravelOffAction, job.ID, page)}
+				}
+				row = append(row, travel)
+			}
 		}
 		name := job.Name
 		if job.Type == schedule.TypeReminder {
@@ -141,8 +154,13 @@ func renderWatchEntry(w watch.Watch, watches WatchController, number string, pag
 	if !w.Enabled {
 		toggle = InlineButton{Text: "Resume " + number, CallbackData: jobCallback(watchResumeJobAction, w.ID, page)}
 	}
+	travel := InlineButton{Text: "Pause on trip " + number, CallbackData: jobCallback(watchTravelOnJobAction, w.ID, page)}
+	if w.TravelPause {
+		travel = InlineButton{Text: "Run on trip " + number, CallbackData: jobCallback(watchTravelOffJobAction, w.ID, page)}
+	}
 	return fmt.Sprintf("%s. 👁 %s\n%s", number, w.Label(), watches.DescribeState(w)), []InlineButton{
 		toggle,
+		travel,
 		{Text: "Delete " + number, CallbackData: jobCallback(watchDeleteJobAction, w.ID, page)},
 	}
 }
@@ -200,13 +218,18 @@ func actOnJob(ctx context.Context, principalID, action, jobID, trigger string, s
 		changed, err = schedules.SetEnabled(ctx, principalID, jobID, action == jobResumeAction)
 	case jobDeleteAction:
 		changed, err = schedules.Delete(ctx, principalID, jobID)
-	case watchPauseJobAction, watchResumeJobAction, watchDeleteJobAction:
+	case jobTravelOnAction, jobTravelOffAction:
+		changed, err = schedules.SetTravelPause(ctx, principalID, jobID, action == jobTravelOnAction)
+	case watchPauseJobAction, watchResumeJobAction, watchDeleteJobAction, watchTravelOnJobAction, watchTravelOffJobAction:
 		if watches == nil {
 			return "", errUnknownJobAction
 		}
-		if action == watchDeleteJobAction {
+		switch action {
+		case watchDeleteJobAction:
 			changed, err = watches.Delete(ctx, principalID, jobID)
-		} else {
+		case watchTravelOnJobAction, watchTravelOffJobAction:
+			changed, err = watches.SetTravelPause(ctx, principalID, jobID, action == watchTravelOnJobAction)
+		default:
 			changed, err = watches.SetEnabled(ctx, principalID, jobID, action == watchResumeJobAction)
 		}
 		if err == nil && !changed {

@@ -390,7 +390,7 @@ func TestJobsCommandControlsAndSharesTheTurnSlot(t *testing.T) {
 	if !strings.Contains(list.text, "1. Daily digest\n30 7 * * * (Europe/Amsterdam), next Tue 29 Sep 07:30 CEST") {
 		t.Fatalf("jobs = %q", list.text)
 	}
-	if data := buttonData(list.keyboard); !slices.Equal(data, []string{"jobs:pause:" + job.ID + ":1", "jobs:run:" + job.ID + ":1", "jobs:delete:" + job.ID + ":1"}) {
+	if data := buttonData(list.keyboard); !slices.Equal(data, []string{"jobs:pause:" + job.ID + ":1", "jobs:tpause:" + job.ID + ":1", "jobs:run:" + job.ID + ":1", "jobs:delete:" + job.ID + ":1"}) {
 		t.Fatalf("jobs buttons = %v", data)
 	}
 
@@ -447,6 +447,35 @@ func TestJobsCommandControlsAndSharesTheTurnSlot(t *testing.T) {
 	deleted := h.pressJob(7, list.messageID, "jobs:delete:"+job.ID)
 	if deleted.text != NoJobsReply {
 		t.Fatalf("jobs after delete = %q", deleted.text)
+	}
+}
+
+// /jobs toggles a recurring job's pause while traveling, and offers it neither for the built-in
+// Heads-up job nor for a one-time job.
+func TestJobsCommandTogglesThePauseWhileTraveling(t *testing.T) {
+	runtime := newControlledRuntime()
+	clock := newTestClock(t, mondayMorning)
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
+	h.provision("alice", "account-alice")
+	h.start()
+	job := h.createJob("alice", "a1b2c3d4e5f60718", "Daily digest", "30 7 * * *", "Summarise my day.")
+	headsUp := h.createJob("alice", schedule.HeadsUpJobID("alice"), schedule.HeadsUpName, schedule.HeadsUpCron, schedule.HeadsUpPrompt)
+
+	list := h.requestJobs(1)
+	if slices.Contains(buttonData(list.keyboard), "jobs:tpause:"+headsUp.ID+":1") {
+		t.Fatalf("Heads-up offers the travel pause: %v", buttonData(list.keyboard))
+	}
+	flagged := h.pressJob(2, list.messageID, "jobs:tpause:"+job.ID)
+	if !strings.Contains(flagged.text, "Daily digest\n30 7 * * * (Europe/Amsterdam), next Tue 29 Sep 07:30 CEST, pauses while traveling") ||
+		!slices.Contains(buttonData(flagged.keyboard), "jobs:tresume:"+job.ID+":1") {
+		t.Fatalf("jobs after the travel pause = %+v", flagged)
+	}
+	if count := h.countRows(`SELECT count(*) FROM scheduled_jobs WHERE travel_pause = 1`); count != 1 {
+		t.Fatalf("flagged jobs = %d", count)
+	}
+	cleared := h.pressJob(3, list.messageID, "jobs:tresume:"+job.ID)
+	if strings.Contains(cleared.text, "traveling") || !slices.Contains(buttonData(cleared.keyboard), "jobs:tpause:"+job.ID+":1") {
+		t.Fatalf("jobs after clearing the travel pause = %+v", cleared)
 	}
 }
 

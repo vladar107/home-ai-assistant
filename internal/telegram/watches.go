@@ -23,6 +23,7 @@ type WatchController interface {
 	Watches(context.Context, string) ([]watch.Watch, error)
 	SetEnabled(context.Context, string, string, bool) (bool, error)
 	Delete(context.Context, string, string) (bool, error)
+	SetTravelPause(context.Context, string, string, bool) (bool, error)
 	Mute(context.Context, string, string) (bool, error)
 	DescribeState(watch.Watch) string
 }

@@ -53,6 +53,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/task"
 	"github.com/vladar107/home-ai-assistant/internal/telegram"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
+	"github.com/vladar107/home-ai-assistant/internal/trip"
 	"github.com/vladar107/home-ai-assistant/internal/turnstate"
 	"github.com/vladar107/home-ai-assistant/internal/watch"
 )
@@ -87,6 +88,7 @@ type App struct {
 	locations     *userlocation.Service
 	memory        *usermemory.Service
 	backlog       *backlog.Service
+	trips         *trip.Service
 	typeSafe      *judgment.OptInService
 	telegram      *telegram.Service
 	telemetry     *observability.Telemetry
@@ -452,6 +454,11 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		scheduler.SetTelemetry(a.telemetry)
 		scheduler.SetSafetyChecks(safetyChecks)
 		scheduler.SetExposure(exposures)
+		tripService, err := trip.NewService(trip.Config{}, a.store, trip.NewScheduleReminders(scheduler), a.logger)
+		if err != nil {
+			return fmt.Errorf("initialize trips: %w", err)
+		}
+		scheduler.SetTravel(tripService)
 		var nsService *ns.Service
 		var trains web.Trains
 		if a.cfg.NS.Enabled() {
@@ -545,6 +552,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 				return fmt.Errorf("initialize watches: %w", err)
 			}
 			watches.SetTelemetry(a.telemetry)
+			watches.SetTravel(tripService)
 			a.telemetry.ZeroWatchOutcomes(ctx, principals, []string{watch.KindDeparture, watch.KindRoute, watch.KindDisruptions})
 			if err := a.registry.Register(watches); err != nil {
 				return err
@@ -582,6 +590,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 				SafetyChecks: safetyChecks,
 				Location:     location,
 				Locations:    turnLocations,
+				Trips:        tripService,
 				Memory:       memoryService,
 				Exposure:     exposures,
 				SearchChecks: searchChecks,
@@ -619,6 +628,32 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			return err
 		}
 		a.memory = memoryService
+		tripTools, err := trip.NewTools(trip.ToolsConfig{Zone: scheduler.DefaultZone()}, tripService, approvals, a.logger)
+		if err != nil {
+			return fmt.Errorf("initialize trip tools: %w", err)
+		}
+		if err := broker.Register(tripTools); err != nil {
+			return err
+		}
+		if err := approvals.RegisterExecutor(tripTools); err != nil {
+			return err
+		}
+		tripNotifier := telegram.TripNotifier{Client: client, Chats: a.store}
+		if err := scheduler.Register(trip.ScanJobType(tripScanChecker{conversationService}, tripService, tripNotifier, tripNotifier, scheduler.Now, a.logger)); err != nil {
+			return err
+		}
+		paused := []trip.Paused{scheduler}
+		if a.watches != nil {
+			paused = append(paused, a.watches)
+		}
+		tripLoop, err := trip.NewLoop(trip.LoopConfig{}, tripService, paused, tripNotifier, a.logger)
+		if err != nil {
+			return fmt.Errorf("initialize trip loop: %w", err)
+		}
+		if err := a.registry.Register(tripLoop); err != nil {
+			return err
+		}
+		a.trips = tripService
 		backlogService, err := backlog.NewService(backlog.Config{}, a.store, approvals, a.logger)
 		if err != nil {
 			return fmt.Errorf("initialize backlog: %w", err)
@@ -887,6 +922,9 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	}
 	if a.backlog != nil {
 		service.SetBacklog(a.backlog)
+	}
+	if a.trips != nil {
+		service.SetTrips(a.trips)
 	}
 	if a.tasks != nil {
 		service.SetTasks(a.tasks)

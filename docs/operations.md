@@ -258,6 +258,28 @@ Add a Telegram contact point `Hearthwatch` with the alert bot token and chat ID
 from Keychain. Start with an alert on an absent `home_agent_application_running`
 metric, pending for two minutes.
 
+### Trips
+
+Migration 029 adds the `trips` and `trip_bookings` tables, and migration 030 adds
+a `travel_pause` column to jobs and watches; neither can be undone, so take a data
+backup before the first deploy that carries them. No setting is needed. Each user
+turns the Trips scan on in `/settings`; it is offered only while Google mail or
+calendar is on for them, and it runs daily at 07:30 as the job "Trips" (also
+visible in `/jobs`). Heads-up moved to 07:30 and 18:30; at start, a Heads-up job
+still on the old schedule is moved once, and one the user changed is left alone.
+Moving a Heads-up job from 19:00 to 18:30 skips that one evening run.
+
+`home_agent_schedule_travel_paused_total` counts occurrences skipped because a job was
+paused for a trip, and `schedule.run.travel_paused` logs the same with IDs only.
+If a scan fails or sends no card, look for `trip.scan.done` (counts of found, new,
+updated, and dropped trips), `trip.scan.unreadable` (the model did not return
+valid JSON), and `trip.scan.card_failed` in the logs, and check that the user's
+model subscription is connected and Google mail or calendar is on. A manual Run
+now from `/jobs` answers "nothing to report" when nothing is new. Start and end
+notices log `trip.notice.sent` and, when a send fails and is retried on the next
+minute, `trip.notice.send_failed`. Logs carry IDs and counts, never titles,
+destinations, or references.
+
 ## 7. Logs and rollback
 
 ```sh

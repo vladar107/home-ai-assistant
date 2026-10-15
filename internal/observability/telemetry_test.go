@@ -34,6 +34,7 @@ func TestBusinessMetricsAreRecordedWithNormalizedLabels(t *testing.T) {
 	telemetry.RecordSearchCheck(ctx, "alice", "confirm", "pattern")
 	telemetry.RecordHintFollowThrough(ctx, "alice", "followed")
 	telemetry.RecordScheduleRun(ctx, "alice", "success")
+	telemetry.RecordScheduleTravelPaused(ctx, "alice")
 	telemetry.ZeroWatchOutcomes(ctx, []string{"alice"}, []string{"departure"})
 	telemetry.RecordWatchCheck(ctx, "alice", "departure", "triggered")
 	telemetry.RecordWatchAlert(ctx, "alice", "departure", "alert", "delivered")

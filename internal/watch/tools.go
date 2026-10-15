@@ -35,7 +35,8 @@ func proposeGuidance(zone string, kinds []string) string {
 		"A watch runs on days, such as mon to fri, or once on a date (YYYY-MM-DD) and then ends; times are local HH:MM in " + zone + " unless the user names another time zone. " +
 		"Set language to the language the user writes to you in, such as Russian, so the watch's messages are written in it; leave it out for English, and pass English to switch a watch back. " +
 		"When the user asked for it in this conversation and the conversation has read no outside content, watch_propose, watch_update, and watch_remove make the change at once and the user can undo it; tell the user it is done. After outside content, such as a web page or an email, they only propose it with Confirm and Reject buttons, so never claim it is set. " +
-		"watch_update changes a watch by its id from watch_list, given only the fields that change; watch_remove deletes one. Each user may have " + fmt.Sprint(MaximumWatchesPerPrincipal) + " watches."
+		"Set pause_while_traveling on a watch that only matters while the user is home, such as a commute departure or a home device, so it stays silent during a trip and resumes by itself afterwards; leave it out for anything that should still alert while away. " +
+		"watch_update changes a watch by its id from watch_list, given only the fields that change; pause_while_traveling there turns the pause on or off, and leaving it out keeps it as it is. watch_remove deletes one. Each user may have " + fmt.Sprint(MaximumWatchesPerPrincipal) + " watches."
 	if transit {
 		guidance += " A departure watch is one train (mode train, from, to, optional via) or bus (mode bus, stop, line) with its planned departure time; checking starts minutes_before the departure, 90 by default, and ends at it. Its triggers are cancelled, partly_cancelled, delay (delay_minutes or more, 5 by default), and platform. " +
 			"A route watch names a saved route and the time the user leaves; its triggers are leg and arrival. A disruptions watch takes one or more stations and a fixed window, window_from to window_until; its triggers are new and changed. Omitting triggers means all of the kind's triggers. " +
@@ -96,7 +97,8 @@ const specProperties = `"mode":{"type":"string","enum":["train","bus"],"descript
 	`"triggers":{"type":"array","items":{"type":"string","enum":["cancelled","partly_cancelled","delay","platform","leg","arrival","new","changed","enter","change","clear"]},"description":"What to alert on; omit for all of the kind's triggers."},` +
 	`"delay_minutes":{"type":"integer","minimum":1,"maximum":120,"description":"The delay that counts, in minutes; 5 by default."},` +
 	`"timezone":{"type":"string","description":"IANA time zone such as Europe/Amsterdam; omit to use the user's own."},` +
-	`"language":{"type":"string","description":"The language the watch's messages are written in, such as Russian: the one the user writes to you in. Omit for English."}`
+	`"language":{"type":"string","description":"The language the watch's messages are written in, such as Russian: the one the user writes to you in. Omit for English."},` +
+	`"pause_while_traveling":{"type":"boolean","description":"Stay silent while the user is on a trip. On update, omit to keep it as it is."}`
 
 var writeDefinitions = []tools.Definition{
 	{
@@ -203,6 +205,8 @@ type specArguments struct {
 	DelayMinutes  int        `json:"delay_minutes"`
 	Timezone      string     `json:"timezone"`
 	Language      string     `json:"language"`
+	// PauseWhileTraveling is nil when the model left the flag alone.
+	PauseWhileTraveling *bool `json:"pause_while_traveling"`
 }
 
 type proposeArguments struct {
@@ -219,12 +223,20 @@ type removeArguments struct {
 	WatchID string `json:"watch_id"`
 }
 
+// confirmedWatch is a proposed watch. Its spec is flattened into it, so a proposal recorded before
+// the travel flag existed, which is a bare spec, still decodes.
+type confirmedWatch struct {
+	Spec
+	TravelPause bool `json:"pause_while_traveling,omitempty"`
+}
+
 // confirmedUpdate is the watch as it will be, with its last change as proposed, so a watch changed
-// before the press is not overwritten.
+// before the press is not overwritten. A nil TravelPause keeps the watch's flag.
 type confirmedUpdate struct {
-	WatchID   string    `json:"watch_id"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Spec      Spec      `json:"spec"`
+	WatchID     string    `json:"watch_id"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	Spec        Spec      `json:"spec"`
+	TravelPause *bool     `json:"pause_while_traveling,omitempty"`
 }
 
 // prepare turns a kind and the model's arguments into a normalized spec, refusing a kind that
@@ -412,7 +424,7 @@ func (s *Service) proposeWatch(ctx context.Context, principalID string, call too
 	if spec.Kind == KindAgent && agentWatches(existing) >= MaximumAgentWatchesPerPrincipal {
 		return tools.Result{Text: tooManyAgentText(), IsError: true}, nil
 	}
-	canonical, err := json.Marshal(spec)
+	canonical, err := json.Marshal(confirmedWatch{Spec: spec, TravelPause: arguments.PauseWhileTraveling != nil && *arguments.PauseWhileTraveling})
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -422,6 +434,9 @@ func (s *Service) proposeWatch(ctx context.Context, principalID string, call too
 		summary = "Watch " + spec.Label() + "\n" + spec.Describe() + "\nYou get a message only when this changes."
 	case KindAgent:
 		summary = "Watch " + spec.Label() + "\n" + spec.Describe() + "\nYou get a message only when the answer changes."
+	}
+	if arguments.PauseWhileTraveling != nil && *arguments.PauseWhileTraveling {
+		summary += "\nIt stays silent while you are traveling."
 	}
 	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolPropose, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "watch", TargetKind: spec.Kind + " watch", TargetName: intentName(spec)}})
 }
@@ -445,14 +460,22 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 	if err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
-	if sameSpec(spec, watch.Spec) {
+	flagChanged := arguments.PauseWhileTraveling != nil && *arguments.PauseWhileTraveling != watch.TravelPause
+	if sameSpec(spec, watch.Spec) && !flagChanged {
 		return tools.Result{Text: "That changes nothing; the watch already reads exactly like this.", IsError: true}, nil
 	}
-	canonical, err := json.Marshal(confirmedUpdate{WatchID: watch.ID, UpdatedAt: watch.UpdatedAt, Spec: spec})
+	canonical, err := json.Marshal(confirmedUpdate{WatchID: watch.ID, UpdatedAt: watch.UpdatedAt, Spec: spec, TravelPause: arguments.PauseWhileTraveling})
 	if err != nil {
 		return tools.Result{}, err
 	}
 	summary := "Change the watch " + watch.Label() + " to:\n" + spec.Label() + "\n" + spec.Describe()
+	if flagChanged {
+		if *arguments.PauseWhileTraveling {
+			summary += "\nIt will stay silent while you are traveling."
+		} else {
+			summary += "\nIt will no longer pause while you are traveling."
+		}
+	}
 	if !watch.Enabled {
 		summary += "\nIt stays paused until you resume it in /jobs."
 	}
@@ -505,11 +528,11 @@ func (s *Service) ActionTools() []string {
 func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (approval.Outcome, error) {
 	switch record.Tool {
 	case toolPropose:
-		var confirmed Spec
+		var confirmed confirmedWatch
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
 			return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed watch could not be read; nothing was set up."}
 		}
-		spec, err := normalize(confirmed, s.now())
+		spec, err := normalize(confirmed.Spec, s.now())
 		if err != nil {
 			return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "That watch is no longer valid (" + err.Error() + "); nothing was set up."}
 		}
@@ -523,7 +546,7 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 			}
 		}
 		now := s.now()
-		watch := Watch{ID: record.ID, PrincipalID: record.PrincipalID, Spec: spec, Enabled: true, CreatedAt: now, UpdatedAt: now}
+		watch := Watch{ID: record.ID, PrincipalID: record.PrincipalID, Spec: spec, Enabled: true, TravelPause: confirmed.TravelPause, CreatedAt: now, UpdatedAt: now}
 		created, err := s.repository.CreateWatch(ctx, watch, MaximumWatchesPerPrincipal)
 		if err != nil {
 			if errors.Is(err, ErrTooManyWatches) {
@@ -534,7 +557,7 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		if created {
 			s.logger.InfoContext(ctx, "watch.created", "principal_id", record.PrincipalID, "watch_id", record.ID, "kind", spec.Kind)
 		}
-		undo, err := s.undoPayload(ctx, record.PrincipalID, record.ID, nil)
+		undo, err := s.undoPayload(ctx, record.PrincipalID, record.ID, nil, false)
 		if err != nil {
 			return approval.Outcome{}, err
 		}
@@ -590,17 +613,30 @@ func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (ap
 	if err != nil {
 		return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "That watch is no longer valid (" + err.Error() + "); nothing was changed."}
 	}
-	next := current
-	next.Spec, next.UpdatedAt = spec, s.now()
-	updated, err := s.repository.UpdateWatch(ctx, next, confirmed.UpdatedAt)
-	if err != nil {
-		return approval.Outcome{}, err
-	}
-	if !updated {
-		return approval.Outcome{}, stale
+	travelChanged := confirmed.TravelPause != nil && *confirmed.TravelPause != current.TravelPause
+	if sameSpec(spec, current.Spec) {
+		// Only the flag changes, which must not reset the window states an edit forgets.
+		if travelChanged {
+			if _, err := s.repository.SetWatchTravelPause(ctx, record.PrincipalID, current.ID, *confirmed.TravelPause); err != nil {
+				return approval.Outcome{}, err
+			}
+		}
+	} else {
+		next := current
+		next.Spec, next.UpdatedAt = spec, s.now()
+		if travelChanged {
+			next.TravelPause = *confirmed.TravelPause
+		}
+		updated, err := s.repository.UpdateWatch(ctx, next, confirmed.UpdatedAt)
+		if err != nil {
+			return approval.Outcome{}, err
+		}
+		if !updated {
+			return approval.Outcome{}, stale
+		}
 	}
 	s.logger.InfoContext(ctx, "watch.updated", "principal_id", record.PrincipalID, "watch_id", current.ID, "kind", spec.Kind)
-	undo, err := s.undoPayload(ctx, record.PrincipalID, current.ID, &current)
+	undo, err := s.undoPayload(ctx, record.PrincipalID, current.ID, &current, travelChanged)
 	if err != nil {
 		return approval.Outcome{}, err
 	}
@@ -684,6 +720,9 @@ func (s *Service) renderWatches(watches []Watch) string {
 		}
 		if occurrence, active := watch.OccurrenceAt(now); active && watch.MutedOn == occurrence.Date {
 			states = append(states, "muted today")
+		}
+		if watch.TravelPause {
+			states = append(states, "pauses while traveling")
 		}
 		if _, known := s.evaluators[watch.Kind]; !known {
 			states = append(states, "not checked: this kind is not available")

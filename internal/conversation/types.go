@@ -378,6 +378,11 @@ type Locations interface {
 	TurnLine(ctx context.Context, principalID string) (string, error)
 }
 
+// Trips describes a principal's active or next trip for a turn, or returns "" when there is none.
+type Trips interface {
+	TurnLine(ctx context.Context, principalID string) (string, error)
+}
+
 // Memory is the principal's remembered instructions and facts, which every turn starts from.
 type Memory interface {
 	// Render is the memory as prompt text, or "" when it is off or empty.
@@ -406,6 +411,8 @@ type Config struct {
 	Photos PhotoDeliverer
 	// Locations tells each turn where its user is while they share a location; nil leaves it out.
 	Locations Locations
+	// Trips tells each turn about the user's active or next trip; nil leaves it out.
+	Trips Trips
 	// Memory goes into every turn's system prompt and adds a line to a reply for each write the
 	// turn made; nil leaves memory out.
 	Memory Memory

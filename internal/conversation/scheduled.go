@@ -79,7 +79,7 @@ func (s *Service) runUnwatched(ctx context.Context, principalID, turn, message s
 	result, runErr := s.runtime.Run(turnCtx, agentruntime.RunRequest{
 		PrincipalID: principalID,
 		SessionID:   sessionID,
-		Message:     s.withUser(principalID, withPlace(s.locationLine(turnCtx, principalID), message)),
+		Message:     s.withUser(principalID, withPlace(s.placeLines(turnCtx, principalID), message)),
 		Tools:       tools,
 		Memory:      memory,
 		WebSearch:   webSearch,

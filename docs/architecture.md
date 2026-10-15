@@ -121,6 +121,7 @@ flowchart TB
     loc["<b>location</b><br/>latest shared position, expiry"]
     mem["<b>memory</b><br/>per-user instructions and facts"]
     backlog["<b>backlog</b><br/>per-user ideas for developing<br/>the assistant"]
+    trip["<b>trip</b><br/>trips, bookings, check-in reminders,<br/>start and end notices"]
     attach["<b>attachment</b><br/>inbound photos and files"]
     delivery["<b>delivery</b><br/>outbound files"]
     card["<b>daycard / outbox</b><br/>rendered day cards"]
@@ -160,6 +161,13 @@ flowchart TB
     broker --> backlog
     approval --> backlog
     api --> backlog
+    tg --> trip
+    broker --> trip
+    approval --> trip
+    trip --> schedule
+    schedule -.->|travel gate| trip
+    watch -.->|travel gate| trip
+    conv --> trip
     loc --> placesc
     conv --> runtime
     conv --> broker
@@ -195,7 +203,7 @@ flowchart TB
     nasc --> delivery
     web --> pdf
     connectors --> integration
-    identity & conv & approval & schedule & connection & integration & loc & mem & backlog --> store
+    identity & conv & approval & schedule & connection & integration & loc & mem & backlog & trip --> store
 ```
 
 `internal/app` wires these together. Each connector registers with the module
@@ -324,10 +332,44 @@ reason `quiet`: nothing is sent and no report is kept. Its message allows that
 only when the job's instructions ask to report on a condition that does not
 hold; a failed run still reports. A manual Run now that ends quiet answers
 "Nothing to report right now". Heads-up is a per-user switch in `/settings` that
-creates an ordinary model-turn job with a built-in prompt at 08:00 and 19:00 in
+creates an ordinary model-turn job with a built-in prompt at 07:30 and 18:30 in
 the default zone, under an ID derived from the principal, so the switch finds
 the job however it was renamed, paused, or deleted in conversation. Its runs
 look over the user's day and stay quiet unless something needs attention.
+
+### Trips
+
+`trip` keeps a principal's trips and bookings in SQLite (`trips`, `trip_bookings`)
+and is the only place that decides whether the principal is traveling: a planned
+trip is active while `starts_at <= now < ends_at`. A trip enters from chat tools
+(`trip_add`, `trip_update`, which act at once in a clean turn and are proposed for
+Confirm after outside content, like the backlog tools) or from the daily Trips scan.
+The scan is a built-in job of type `trip.scan`, created by a per-user switch in
+`/settings` the way Heads-up is. Its handler calls `RunCheck` with read-only
+tools and a call budget of 30, asks for strict JSON, and then code validates and
+caps every field, computes each booking's fingerprint (never the model), and
+stores new candidates as `suggested` trips. The scan writes nothing a press has not
+approved: a suggested trip is inactive, has no reminders, and is not in the turn
+line until Track makes it `planned`; Ignore makes it `dismissed`, and its
+fingerprints keep it from being offered again. Mail is outside content, so
+suggested trips never reach the model: `trip_list` and the turn line leave them
+out. A card is sent once, when the trip is first found; if the send fails the
+suggested trip is deleted so the next scan offers it again. A trip the user
+tracked appears, with its text quoted, in `trip_list` and the turn line.
+
+Each planned booking with a future check-in has an ordinary one-time `reminder`
+job whose ID is derived from the trip and booking, so syncing is idempotent;
+`trip` reaches the scheduler through a narrow `Reminders` interface and imports
+`schedule`, never the reverse. Jobs and watches marked `travel_pause` consult a
+`Travel` interface that `trip` implements, set at startup. In the scheduler's
+`advance`, a flagged job whose occurrence falls inside an active trip moves
+forward with no run queued, as a missed occurrence does, and is logged as
+`schedule.run.travel_paused`. The watch cycle skips flagged watches, and
+`deliver` drops their queued alerts. `Enabled` is never touched, and Run now
+bypasses the gate. A minute loop (module `trip`) sends the start and end notices,
+naming the paused jobs and watches, marks them sent only after delivery, and
+prunes old trips. Every turn, chat, scheduled, and task, gets a one-line summary of
+the active or next trip beside the location line.
 
 ### Scheduled jobs in conversation
 

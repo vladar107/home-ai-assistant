@@ -18,15 +18,18 @@ type watchUndo struct {
 	UpdatedAt time.Time `json:"updated_at,omitzero"`
 	Before    *Watch    `json:"before,omitempty"`
 	Removed   *Watch    `json:"removed,omitempty"`
+	// TravelChanged is true when the update changed the travel flag, which is then the only case an
+	// Undo restores it; an older payload lacks it and leaves the flag as it is.
+	TravelChanged bool `json:"travel_changed,omitempty"`
 }
 
 // undoPayload is the payload that reverses a create, or an update of before, read back as stored.
-func (s *Service) undoPayload(ctx context.Context, principalID, watchID string, before *Watch) (json.RawMessage, error) {
+func (s *Service) undoPayload(ctx context.Context, principalID, watchID string, before *Watch, travelChanged bool) (json.RawMessage, error) {
 	watch, found, err := s.repository.LoadWatch(ctx, principalID, watchID)
 	if err != nil || !found {
 		return nil, err
 	}
-	return json.Marshal(watchUndo{WatchID: watchID, UpdatedAt: watch.UpdatedAt, Before: before})
+	return json.Marshal(watchUndo{WatchID: watchID, UpdatedAt: watch.UpdatedAt, Before: before, TravelChanged: travelChanged})
 }
 
 // Undo reverses a direct watch action: it deletes a created watch, puts back the definition an
@@ -93,8 +96,19 @@ func (s *Service) undoUpdated(ctx context.Context, principalID string, undo watc
 	if err != nil {
 		return approval.Outcome{}, &approval.UndoRefusal{Reason: "the watch as it was is no longer valid (" + err.Error() + ")."}
 	}
+	if sameSpec(spec, watch.Spec) {
+		if undo.TravelChanged {
+			if _, err := s.repository.SetWatchTravelPause(ctx, principalID, watch.ID, undo.Before.TravelPause); err != nil {
+				return approval.Outcome{}, err
+			}
+		}
+		return approval.Outcome{Text: "Restored the watch " + spec.Label() + " as it was."}, nil
+	}
 	next := watch
 	next.Spec, next.UpdatedAt = spec, s.now()
+	if undo.TravelChanged {
+		next.TravelPause = undo.Before.TravelPause
+	}
 	updated, err := s.repository.UpdateWatch(ctx, next, watch.UpdatedAt)
 	if err != nil {
 		return approval.Outcome{}, err
@@ -127,7 +141,7 @@ func (s *Service) undoRemoved(ctx context.Context, principalID string, removed W
 			return approval.Outcome{}, &approval.UndoRefusal{Reason: tooManyAgentText()}
 		}
 	}
-	watch := Watch{ID: removed.ID, PrincipalID: principalID, Spec: spec, Enabled: removed.Enabled, MutedOn: removed.MutedOn, CreatedAt: removed.CreatedAt, UpdatedAt: now}
+	watch := Watch{ID: removed.ID, PrincipalID: principalID, Spec: spec, Enabled: removed.Enabled, MutedOn: removed.MutedOn, TravelPause: removed.TravelPause, CreatedAt: removed.CreatedAt, UpdatedAt: now}
 	created, err := s.repository.CreateWatch(ctx, watch, MaximumWatchesPerPrincipal)
 	if errors.Is(err, ErrTooManyWatches) {
 		return approval.Outcome{}, &approval.UndoRefusal{Reason: tooManyText()}
