@@ -121,7 +121,7 @@ func TestTripAddAfterOutsideContentIsProposedAndConfirmMakesIt(t *testing.T) {
 	if trips, _ := f.trips.Trips(t.Context(), "alice"); len(trips) != 0 {
 		t.Fatalf("a proposal saved %d trips", len(trips))
 	}
-	pending, err := f.store.PendingApprovals(t.Context(), "alice")
+	pending, err := f.store.PendingApprovals(t.Context(), "alice", 0)
 	if err != nil || len(pending) != 1 || pending[0].Tool != "trip_add" {
 		t.Fatalf("pending = %+v, %v", pending, err)
 	}
@@ -266,7 +266,7 @@ func TestConfirmedUpdateIsRejectedWhenTheTripChangedSincePropose(t *testing.T) {
 	if result := f.call("trip_update", `{"id":"`+id+`","title":"Renamed trip"}`); result.Text != approval.ProposedText {
 		t.Fatalf("update = %+v, want a proposal", result)
 	}
-	pending, err := f.store.PendingApprovals(t.Context(), "alice")
+	pending, err := f.store.PendingApprovals(t.Context(), "alice", 0)
 	if err != nil || len(pending) != 1 {
 		t.Fatalf("pending = %+v, %v", pending, err)
 	}

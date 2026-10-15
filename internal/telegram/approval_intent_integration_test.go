@@ -113,7 +113,7 @@ func intentProposalWith(t *testing.T, stub *typeSafeStub, enabled bool, prepare 
 
 	checker, registry := newIntentChecker(t, stub, enabled)
 	for _, message := range messages {
-		registry.RecordMessage("alice", message)
+		registry.RecordMessage("alice", 0, message)
 	}
 	if prepare != nil {
 		prepare(registry)

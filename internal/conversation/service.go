@@ -15,6 +15,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
+	"github.com/vladar107/home-ai-assistant/internal/thread"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 	"github.com/vladar107/home-ai-assistant/internal/turnstate"
 )
@@ -66,15 +67,16 @@ type Service struct {
 	mu       sync.Mutex
 	ctx      context.Context
 	cancel   context.CancelFunc
-	workers  map[string]chan struct{}
-	inflight map[string]context.CancelFunc
-	// turns holds one slot per principal, so chat turns and scheduled runs take turns. It guarded
-	// against a credential-refresh race that Pi 1.0.0 removed by locking auth.json, which is why
-	// background tasks run outside it; relaxing it for chat and scheduled runs is a separate decision.
-	turns map[string]chan struct{}
-	// drafts holds the draft of each principal's running chat turn, so a stop press counts only
-	// while that turn is still running.
-	drafts map[string]*runningDraft
+	workers  map[Lane]chan struct{}
+	inflight map[Lane]context.CancelFunc
+	// turns holds one slot per lane, so a lane's chat turns take turns with each other and the main
+	// lane's also with scheduled runs. It once guarded a whole principal against a credential-refresh
+	// race that Pi 1.0.0 removed by locking auth.json, which is why tabs and background tasks run
+	// beside each other.
+	turns map[Lane]chan struct{}
+	// drafts holds the draft of each lane's running chat turn, so a stop press counts only while
+	// that turn is still running.
+	drafts map[Lane]*runningDraft
 	wg     sync.WaitGroup
 	// captures holds what a finished chat turn measured until its reply is delivered; a restart
 	// in between loses it, and that reply is then counted as recovered.
@@ -88,7 +90,7 @@ type runningDraft struct {
 }
 
 type replyCapture struct {
-	principalID         string
+	lane                Lane
 	queue, setup, model time.Duration
 	safetyChecks        string
 	// plainReply is the model's successful chat reply without memory notes, or "" for any other.
@@ -156,10 +158,10 @@ func NewService(
 		telemetry:    telemetry,
 		startedAt:    time.Now().Truncate(time.Millisecond),
 		captures:     make(map[string]replyCapture),
-		workers:      make(map[string]chan struct{}),
-		inflight:     make(map[string]context.CancelFunc),
-		turns:        make(map[string]chan struct{}),
-		drafts:       make(map[string]*runningDraft),
+		workers:      make(map[Lane]chan struct{}),
+		inflight:     make(map[Lane]context.CancelFunc),
+		turns:        make(map[Lane]chan struct{}),
+		drafts:       make(map[Lane]*runningDraft),
 	}, nil
 }
 
@@ -192,7 +194,7 @@ func (s *Service) Start(ctx context.Context) error {
 		}
 	}
 
-	principals, err := s.repository.RecoverConversations(ctx)
+	lanes, err := s.repository.RecoverConversations(ctx)
 	if err != nil {
 		cancel()
 		s.mu.Lock()
@@ -201,8 +203,8 @@ func (s *Service) Start(ctx context.Context) error {
 		s.mu.Unlock()
 		return fmt.Errorf("recover conversation work: %w", err)
 	}
-	for _, principalID := range principals {
-		s.notify(principalID)
+	for _, lane := range lanes {
+		s.notify(lane)
 	}
 	return nil
 }
@@ -227,8 +229,8 @@ func (s *Service) Shutdown(ctx context.Context) error {
 	case <-done:
 		s.mu.Lock()
 		s.ctx = nil
-		s.workers = make(map[string]chan struct{})
-		s.inflight = make(map[string]context.CancelFunc)
+		s.workers = make(map[Lane]chan struct{})
+		s.inflight = make(map[Lane]context.CancelFunc)
 		s.mu.Unlock()
 		return nil
 	case <-ctx.Done():
@@ -295,19 +297,19 @@ func (s *Service) Enqueue(ctx context.Context, input EnqueueInput) error {
 		s.telemetry.RecordConversationResume(ctx, input.PrincipalID, "reply")
 	}
 	if result.Request.State == RequestStateQueued || result.Request.State == RequestStateReady {
-		s.notify(input.PrincipalID)
+		s.notify(result.Request.Lane())
 	}
 	return nil
 }
 
-func (s *Service) Cancel(ctx context.Context, principalID string) (bool, error) {
-	cancelled, err := s.repository.CancelPendingConversation(ctx, principalID)
+func (s *Service) Cancel(ctx context.Context, lane Lane) (bool, error) {
+	cancelled, err := s.repository.CancelPendingConversation(ctx, lane)
 	if err != nil {
 		return false, err
 	}
 	s.mu.Lock()
-	cancel := s.inflight[principalID]
-	s.dropCaptures(principalID)
+	cancel := s.inflight[lane]
+	s.dropCaptures(lane)
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -315,80 +317,118 @@ func (s *Service) Cancel(ctx context.Context, principalID string) (bool, error) 
 	return cancelled, nil
 }
 
-// StopDraft cancels the principal's running turn when draftID is the draft that turn shows. Like
+// CancelAll stops the pending and running turns of every lane of the principal, as when their model
+// subscription is disconnected.
+func (s *Service) CancelAll(ctx context.Context, principalID string) (bool, error) {
+	cancelled, err := s.repository.CancelPrincipalConversations(ctx, principalID)
+	if err != nil {
+		return false, err
+	}
+	var cancels []context.CancelFunc
+	s.mu.Lock()
+	for lane, cancel := range s.inflight {
+		if lane.PrincipalID == principalID {
+			cancels = append(cancels, cancel)
+			s.dropCaptures(lane)
+		}
+	}
+	s.mu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
+	return cancelled, nil
+}
+
+// StopDraft cancels the lane's running turn when draftID is the draft that turn shows. Like
 // /cancel it cancels the request in the store before the context, so a failed store call leaves the
 // turn running and a retried press still finds it. A turn that finds itself stopped when it
 // unregisters saves nothing; one that saved first finds its request no longer running.
-func (s *Service) StopDraft(ctx context.Context, principalID string, draftID int64) (bool, error) {
-	if !s.showsDraft(principalID, draftID) {
+func (s *Service) StopDraft(ctx context.Context, lane Lane, draftID int64) (bool, error) {
+	if !s.showsDraft(lane, draftID) {
 		return false, nil
 	}
-	if _, err := s.repository.CancelPendingConversation(ctx, principalID); err != nil {
+	if _, err := s.repository.CancelPendingConversation(ctx, lane); err != nil {
 		return false, err
 	}
 	s.mu.Lock()
-	if draft := s.drafts[principalID]; draft != nil && draft.id == draftID {
+	if draft := s.drafts[lane]; draft != nil && draft.id == draftID {
 		draft.stopped = true
 		draft.cancel()
 	}
-	s.dropCaptures(principalID)
+	s.dropCaptures(lane)
 	s.mu.Unlock()
 	return true, nil
 }
 
-func (s *Service) showsDraft(principalID string, draftID int64) bool {
+func (s *Service) showsDraft(lane Lane, draftID int64) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	draft := s.drafts[principalID]
+	draft := s.drafts[lane]
 	return draft != nil && draft.id == draftID
 }
 
-// endDraft unregisters the principal's running turn from StopDraft and reports whether a stop
-// press already cancelled it.
-func (s *Service) endDraft(principalID string) bool {
+// endDraft unregisters the lane's running turn from StopDraft and reports whether a stop press
+// already cancelled it.
+func (s *Service) endDraft(lane Lane) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	draft := s.drafts[principalID]
-	delete(s.drafts, principalID)
+	draft := s.drafts[lane]
+	delete(s.drafts, lane)
 	return draft != nil && draft.stopped
 }
 
-// dropCaptures forgets the measurements of the principal's cancelled requests, which never reach
+// dropCaptures forgets the measurements of the lane's cancelled requests, which never reach
 // delivery. The caller holds s.mu.
-func (s *Service) dropCaptures(principalID string) {
+func (s *Service) dropCaptures(lane Lane) {
 	for id, capture := range s.captures {
-		if capture.principalID == principalID {
+		if capture.lane == lane {
 			delete(s.captures, id)
 		}
 	}
 }
 
-func (s *Service) NewSession(ctx context.Context, principalID string) (bool, error) {
-	sessionID, reset, err := s.repository.ResetConversation(ctx, principalID)
+// othersBusy reports whether another lane of the principal has a turn running or delivering. The
+// caller holds s.mu.
+func (s *Service) othersBusy(lane Lane) bool {
+	for other := range s.inflight {
+		if other.PrincipalID == lane.PrincipalID && other != lane {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) NewSession(ctx context.Context, lane Lane) (bool, error) {
+	sessionID, reset, err := s.repository.ResetConversation(ctx, lane)
 	if err != nil {
 		return false, err
 	}
 	if reset && s.config.Attachments != nil {
-		if err := s.config.Attachments.CloseSession(ctx, principalID, sessionID); err != nil {
+		if err := s.config.Attachments.CloseSession(ctx, lane.PrincipalID, sessionID); err != nil {
 			return false, err
 		}
 	}
-	if s.config.Cards != nil {
-		s.config.Cards.Discard(principalID)
-	}
 	s.mu.Lock()
-	cancel := s.inflight[principalID]
-	s.dropCaptures(principalID)
+	cancel := s.inflight[lane]
+	s.dropCaptures(lane)
+	// Staged cards are kept per principal, so they are cleared only while no other tab's turn may
+	// still send one. A cancelled turn removes its own card, and the sweep removes any left over.
+	discard := s.config.Cards != nil && !s.othersBusy(lane)
 	s.mu.Unlock()
+	if discard {
+		s.config.Cards.Discard(lane.PrincipalID)
+	}
 	if cancel != nil {
 		cancel()
 	}
 	return reset, nil
 }
 
-// Sessions lists the principal's recent conversations, newest first. Earlier conversations of
-// which Pi recorded nothing the user wrote are left out.
-func (s *Service) Sessions(ctx context.Context, principalID string) ([]SessionSummary, error) {
+// Sessions lists the principal's recent conversations, newest first, as the lane sees them: only
+// the lane's own active conversation is current, and one another tab holds is marked. Earlier
+// conversations of which Pi recorded nothing the user wrote are left out.
+func (s *Service) Sessions(ctx context.Context, lane Lane) ([]SessionSummary, error) {
+	principalID := lane.PrincipalID
 	records, err := s.repository.ConversationSessions(ctx, principalID, sessionCandidates)
 	if err != nil {
 		return nil, err
@@ -402,6 +442,9 @@ func (s *Service) Sessions(ctx context.Context, principalID string) ([]SessionSu
 		if err != nil {
 			return nil, err
 		}
+		if summary.Active && record.ThreadID != lane.ThreadID {
+			summary.Active, summary.Elsewhere = false, true
+		}
 		if summary.Title == "" && !summary.Active && s.config.History != nil {
 			continue
 		}
@@ -410,15 +453,17 @@ func (s *Service) Sessions(ctx context.Context, principalID string) ([]SessionSu
 	return summaries, nil
 }
 
-// Resume makes one of the principal's earlier conversations the active one, so the next turn
-// continues its Pi session. A pending turn blocks it, like a new message.
-func (s *Service) Resume(ctx context.Context, principalID, sessionID string) (ResumeResult, error) {
-	switched, err := s.repository.SwitchConversation(ctx, principalID, sessionID)
+// Resume makes one of the principal's earlier conversations the lane's active one, so the lane's
+// next turn continues its Pi session. A pending turn in the lane blocks it, like a new message, and
+// a conversation another tab holds stays there.
+func (s *Service) Resume(ctx context.Context, lane Lane, sessionID string) (ResumeResult, error) {
+	principalID := lane.PrincipalID
+	switched, err := s.repository.SwitchConversation(ctx, lane, sessionID)
 	if err != nil {
 		return ResumeResult{}, err
 	}
-	if switched.Busy || !switched.Found {
-		return ResumeResult{Found: switched.Found, Busy: switched.Busy}, nil
+	if switched.Busy || !switched.Found || switched.Elsewhere {
+		return ResumeResult{Found: switched.Found, Busy: switched.Busy, Elsewhere: switched.Elsewhere}, nil
 	}
 	if switched.Switched {
 		s.leaveSession(ctx, principalID, switched.Previous)
@@ -469,18 +514,18 @@ func (s *Service) running() bool {
 	return s.ctx != nil && s.cancel != nil
 }
 
-func (s *Service) notify(principalID string) {
+func (s *Service) notify(lane Lane) {
 	s.mu.Lock()
 	if s.ctx == nil || s.cancel == nil {
 		s.mu.Unlock()
 		return
 	}
-	wake, exists := s.workers[principalID]
+	wake, exists := s.workers[lane]
 	if !exists {
 		wake = make(chan struct{}, 1)
-		s.workers[principalID] = wake
+		s.workers[lane] = wake
 		s.wg.Add(1)
-		go s.runWorker(s.ctx, principalID, wake)
+		go s.runWorker(s.ctx, lane, wake)
 	}
 	s.mu.Unlock()
 
@@ -490,8 +535,11 @@ func (s *Service) notify(principalID string) {
 	}
 }
 
-func (s *Service) runWorker(ctx context.Context, principalID string, wake <-chan struct{}) {
+// runWorker runs one lane's turns in order. Everything it sends goes to the lane's tab.
+func (s *Service) runWorker(ctx context.Context, lane Lane, wake <-chan struct{}) {
 	defer s.wg.Done()
+	ctx = thread.With(ctx, lane.ThreadID)
+	principalID := lane.PrincipalID
 	for {
 		select {
 		case <-ctx.Done():
@@ -500,7 +548,7 @@ func (s *Service) runWorker(ctx context.Context, principalID string, wake <-chan
 		}
 
 		for ctx.Err() == nil {
-			request, found, err := s.repository.NextConversationRequest(ctx, principalID)
+			request, found, err := s.repository.NextConversationRequest(ctx, lane)
 			if err != nil {
 				if ctx.Err() != nil {
 					return
@@ -549,13 +597,14 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		s.markReconsider(ctx, run, request)
 	}
 	turnCtx, cancel := context.WithTimeout(tools.WithRun(tools.WithTurn(ctx, outbox.ChatTurn(request.ID)), run), s.config.TurnTimeout)
+	lane := request.Lane()
 	s.mu.Lock()
-	s.inflight[request.PrincipalID] = cancel
+	s.inflight[lane] = cancel
 	s.mu.Unlock()
 	defer func() {
 		cancel()
 		s.mu.Lock()
-		delete(s.inflight, request.PrincipalID)
+		delete(s.inflight, lane)
 		s.mu.Unlock()
 	}()
 
@@ -591,12 +640,12 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 	var activity *turnActivity
 	defer func() {
 		activity.stop()
-		s.endDraft(request.PrincipalID)
+		s.endDraft(lane)
 	}()
 	if runErr == nil && connected {
 		draft := draftID(request.ID)
 		s.mu.Lock()
-		s.drafts[request.PrincipalID] = &runningDraft{id: draft, cancel: cancel}
+		s.drafts[lane] = &runningDraft{id: draft, cancel: cancel}
 		s.mu.Unlock()
 		activity = s.startActivity(turnCtx, request.PrincipalID, request.ChatID, draft)
 		tools, runErr = s.toolProvider.ToolsFor(turnCtx, request.PrincipalID)
@@ -636,7 +685,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		// A continuation's or a reconsider's message is ours, so the user's own earlier request stays
 		// the one actions are judged against.
 		if s.config.Recent != nil && !ownMessage(request.Message) {
-			s.config.Recent.RecordMessage(request.PrincipalID, request.Message)
+			s.config.Recent.RecordMessage(request.PrincipalID, request.ThreadID, request.Message)
 		}
 		notice := s.takeNotice(turnCtx, request)
 		sink := s.newCountingSink(request.PrincipalID, outbox.ChatTurn(request.ID), run)
@@ -686,7 +735,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		reportedKind = errorKind
 	}
 	activity.stop()
-	if s.endDraft(request.PrincipalID) {
+	if s.endDraft(lane) {
 		s.removeCard(request)
 		endTurn("cancelled", "cancelled")
 		return
@@ -722,7 +771,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 	}
 	s.mu.Lock()
 	s.captures[request.ID] = replyCapture{
-		principalID:  request.PrincipalID,
+		lane:         lane,
 		queue:        max(claimedAt.Sub(request.CreatedAt), 0),
 		setup:        runStarted.Sub(claimedAt),
 		model:        modelTime,
@@ -811,7 +860,7 @@ func (s *Service) startToolHint(ctx context.Context, request Request, tools agen
 	// Read before this turn's message is recorded, so earlier holds only what came before it.
 	var earlier []turnstate.Line
 	if s.config.Recent != nil {
-		earlier = s.config.Recent.RecentExchange(request.PrincipalID)
+		earlier = s.config.Recent.RecentExchange(request.PrincipalID, request.ThreadID)
 	}
 	result := make(chan toolHint, 1)
 	go func() {
@@ -862,7 +911,7 @@ func (s *Service) takeNotice(ctx context.Context, request Request) turnNotice {
 	var text string
 	var outside, private bool
 	if s.config.Notice != nil {
-		text, outside, private = pendingNotice(s.config.Notice, request.PrincipalID)
+		text, outside, private = pendingNotice(s.config.Notice, request.Lane())
 	}
 	if s.config.Reports != nil {
 		reports, fromOutside, fromPrivate := s.config.Reports.TurnReports(ctx, request.PrincipalID, ReportTurn{OpensSession: request.OpensSession, ReplyToMessageID: request.ReplyToMessageID})
@@ -912,13 +961,14 @@ func (s *Service) turnMessage(request Request, notice, attachments, hint, place 
 
 func (s *Service) deliver(ctx context.Context, request Request) error {
 	deliveryCtx, cancel := context.WithCancel(ctx)
+	lane := request.Lane()
 	s.mu.Lock()
-	s.inflight[request.PrincipalID] = cancel
+	s.inflight[lane] = cancel
 	s.mu.Unlock()
 	defer func() {
 		cancel()
 		s.mu.Lock()
-		delete(s.inflight, request.PrincipalID)
+		delete(s.inflight, lane)
 		s.mu.Unlock()
 	}()
 
@@ -1009,7 +1059,7 @@ func (s *Service) rememberReply(ctx context.Context, request Request, plainReply
 	if s.config.Exposure.Private(ctx, request.PrincipalID, request.ID) {
 		return
 	}
-	s.config.Recent.RecordReply(request.PrincipalID, plainReply)
+	s.config.Recent.RecordReply(request.PrincipalID, request.ThreadID, plainReply)
 }
 
 // recordReply counts a delivered reply and returns its plain text, if the turn kept one. The stages
@@ -1113,10 +1163,11 @@ func failureReply(err error) (string, string) {
 	return UnavailableReply, ErrorKindRuntime
 }
 
-// awaitTurn waits for the principal's turn slot. While another turn holds it the user sees the
-// typing indicator, and /cancel or /new can still stop the wait.
+// awaitTurn waits for the lane's turn slot. While another turn holds it the user sees the typing
+// indicator, and /cancel or /new can still stop the wait.
 func (s *Service) awaitTurn(ctx context.Context, request Request) (func(), bool) {
-	slot := s.turnSlot(request.PrincipalID)
+	lane := request.Lane()
+	slot := s.turnSlot(lane)
 	select {
 	case slot <- struct{}{}:
 		return func() { <-slot }, true
@@ -1125,12 +1176,12 @@ func (s *Service) awaitTurn(ctx context.Context, request Request) (func(), bool)
 
 	waitCtx, stopWaiting := context.WithCancel(ctx)
 	s.mu.Lock()
-	s.inflight[request.PrincipalID] = stopWaiting
+	s.inflight[lane] = stopWaiting
 	s.mu.Unlock()
 	defer func() {
 		stopWaiting()
 		s.mu.Lock()
-		delete(s.inflight, request.PrincipalID)
+		delete(s.inflight, lane)
 		s.mu.Unlock()
 	}()
 	typing := s.startActivity(waitCtx, request.PrincipalID, request.ChatID, 0)
@@ -1143,8 +1194,9 @@ func (s *Service) awaitTurn(ctx context.Context, request Request) (func(), bool)
 	}
 }
 
+// acquireTurn takes the main lane's slot, where scheduled runs take turns with chat turns.
 func (s *Service) acquireTurn(ctx context.Context, principalID string) (func(), error) {
-	slot := s.turnSlot(principalID)
+	slot := s.turnSlot(Lane{PrincipalID: principalID})
 	select {
 	case slot <- struct{}{}:
 		return func() { <-slot }, nil
@@ -1153,13 +1205,13 @@ func (s *Service) acquireTurn(ctx context.Context, principalID string) (func(), 
 	}
 }
 
-func (s *Service) turnSlot(principalID string) chan struct{} {
+func (s *Service) turnSlot(lane Lane) chan struct{} {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	slot, exists := s.turns[principalID]
+	slot, exists := s.turns[lane]
 	if !exists {
 		slot = make(chan struct{}, 1)
-		s.turns[principalID] = slot
+		s.turns[lane] = slot
 	}
 	return slot
 }

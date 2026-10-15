@@ -25,9 +25,11 @@ var ErrTooManyTasks = errors.New("too many open background tasks")
 
 // Task is one background task as stored.
 type Task struct {
-	ID               string
-	PrincipalID      string
-	ChatID           int64
+	ID          string
+	PrincipalID string
+	ChatID      int64
+	// ThreadID is the Telegram tab the task was asked for in; its report goes back there.
+	ThreadID         int64
 	RequestMessageID int64
 	Title            string
 	Brief            string

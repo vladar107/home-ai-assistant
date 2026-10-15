@@ -16,6 +16,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
+	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
 const (
@@ -251,7 +252,7 @@ func (s *Service) Create(ctx context.Context, principalID, requestID, title, bri
 		return Task{}, err
 	}
 	task := Task{
-		ID: id, PrincipalID: principalID, ChatID: chatID, RequestMessageID: messageID,
+		ID: id, PrincipalID: principalID, ChatID: chatID, ThreadID: thread.From(ctx), RequestMessageID: messageID,
 		Title: title, Brief: brief, SessionID: sessionID, Status: StatusQueued, CreatedAt: time.Now(),
 	}
 	ahead, err := s.repository.CreateTask(ctx, task, maximumOpen)
@@ -615,9 +616,11 @@ func (s *Service) editStatus(ctx context.Context, task Task) {
 	}
 }
 
-// deliver sends a finished task's report as a reply to the message that asked for it. A transient
-// failure returns an error and is retried; a permanent one, or an owner without a chat, ends it.
+// deliver sends a finished task's report as a reply to the message that asked for it, in its tab. A
+// transient failure returns an error and is retried; a permanent one, or an owner without a chat,
+// ends it.
 func (s *Service) deliver(ctx context.Context, task Task) error {
+	ctx = thread.With(ctx, task.ThreadID)
 	if _, found, err := s.chats.ResolveActiveChat(ctx, task.PrincipalID); err != nil {
 		return err
 	} else if !found {

@@ -62,7 +62,7 @@ func TestIntentDecisionsAreRecorded(t *testing.T) {
 	check := func(f decisionFixture, prepare func(*turnstate.Registry)) {
 		t.Helper()
 		registry := turnstate.New(nil)
-		registry.RecordMessage("alice", "add bread to my shopping page")
+		registry.RecordMessage("alice", 0, "add bread to my shopping page")
 		if prepare != nil {
 			prepare(registry)
 		}

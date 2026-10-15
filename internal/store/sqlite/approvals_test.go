@@ -61,7 +61,7 @@ func TestMigrationDirectApprovalsKeepsExistingRows(t *testing.T) {
 	}
 	store := &Store{db: db}
 
-	pending, err := store.PendingApprovals(ctx, "alice")
+	pending, err := store.PendingApprovals(ctx, "alice", 0)
 	if err != nil || len(pending) != 2 || pending[0].Summary != "First" || pending[1].Position != 1 || pending[1].MessageID != 7 ||
 		pending[0].Mode != approval.ModeProposed || pending[0].RequestID != "" || pending[0].Undo != nil {
 		t.Fatalf("pending after migration = %+v %v", pending, err)
@@ -84,7 +84,7 @@ func TestMigrationDirectApprovalsKeepsExistingRows(t *testing.T) {
 	if err := store.CreateDirectApproval(ctx, interrupted); err != nil {
 		t.Fatal(err)
 	}
-	if pending, err := store.PendingApprovals(ctx, "alice"); err != nil || len(pending) != 2 {
+	if pending, err := store.PendingApprovals(ctx, "alice", 0); err != nil || len(pending) != 2 {
 		t.Fatalf("pending beside direct records = %d %v", len(pending), err)
 	}
 	if found, ok, err := store.FindDirectApproval(ctx, "alice", "note_write", hash, direct.RequestID); err != nil || !ok || found.ID != direct.ID || found.Status != approval.StatusConfirmed || found.StartedAt.IsZero() {

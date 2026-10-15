@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/vladar107/home-ai-assistant/internal/thread"
 	"github.com/vladar107/home-ai-assistant/internal/turnstate"
 )
 
@@ -59,7 +60,7 @@ func (j *SearchJudge) OffRequest(ctx context.Context, principalID, query string)
 	if err != nil || !enabled {
 		return false, nil
 	}
-	messages := j.recent.RecentMessages(principalID)
+	messages := j.recent.RecentMessages(principalID, thread.From(ctx))
 	if len(messages) == 0 {
 		return false, nil
 	}

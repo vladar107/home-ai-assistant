@@ -120,7 +120,7 @@ func (h *conversationHarness) useSearchJudge(stub *searchJudgeStub, optedIn bool
 		h.t.Fatal(err)
 	}
 	registry := turnstate.New(time.Now)
-	registry.RecordMessage("alice", "what happened in the news today")
+	registry.RecordMessage("alice", 0, "what happened in the news today")
 	if prepare != nil {
 		prepare(registry)
 	}

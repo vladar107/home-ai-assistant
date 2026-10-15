@@ -168,7 +168,7 @@ func TestNotionWritesAreProposedConfirmedAndExecutedOnce(t *testing.T) {
 	if countRequests(sim, "POST", "/v1/pages") != 0 {
 		t.Fatal("a proposal reached Notion during the turn")
 	}
-	waiting, err := h.store.PendingApprovals(h.ctx, "alice")
+	waiting, err := h.store.PendingApprovals(h.ctx, "alice", 0)
 	if err != nil || len(waiting) != 1 || waiting[0].Tool != "notion_create_page" || waiting[0].MessageID != 0 {
 		t.Fatalf("pending approvals = %+v err=%v", waiting, err)
 	}

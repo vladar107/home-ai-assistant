@@ -448,7 +448,7 @@ func wantError(t *testing.T, result agentruntime.ToolResult, fragment string) {
 
 func (f *fixture) pending() (approval.Record, bool) {
 	f.t.Helper()
-	records, err := f.state.PendingApprovals(f.t.Context(), "alice")
+	records, err := f.state.PendingApprovals(f.t.Context(), "alice", 0)
 	if err != nil {
 		f.t.Fatal(err)
 	}

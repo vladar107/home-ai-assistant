@@ -194,7 +194,7 @@ func TestMemoryWriteAfterThirdPartyContentBecomesAProposal(t *testing.T) {
 	if entries := h.memoryEntries("alice"); len(entries) != 1 || entries[0].Text != "likes tea" {
 		t.Fatalf("entries = %+v", entries)
 	}
-	if pending, err := h.store.PendingApprovals(h.ctx, "alice"); err != nil || len(pending) != 3 || pending[0].Tool != "memory_add" {
+	if pending, err := h.store.PendingApprovals(h.ctx, "alice", 0); err != nil || len(pending) != 3 || pending[0].Tool != "memory_add" {
 		t.Fatalf("pending approvals = %+v %v", pending, err)
 	}
 }

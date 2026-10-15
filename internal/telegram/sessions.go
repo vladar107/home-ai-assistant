@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
 const (
@@ -14,6 +15,7 @@ const (
 	NoSessionsReply     = "There are no conversations to return to yet."
 	SessionGoneReply    = "That conversation is no longer available."
 	SessionCurrentReply = "That is already the current conversation."
+	SessionElsewhere    = "That conversation is open in another tab."
 
 	sessionsPrefix       = "sessions"
 	sessionResumeAction  = "resume"
@@ -22,9 +24,10 @@ const (
 )
 
 // renderSessions lists the principal's recent conversations, newest first, with a Resume button for
-// each one that is not the current conversation. Buttons are numbered like the list.
-func renderSessions(ctx context.Context, principalID string, conversations ConversationController) (string, InlineKeyboard, error) {
-	sessions, err := conversations.Sessions(ctx, principalID)
+// each one that is neither the lane's current conversation nor open in another tab. Buttons are
+// numbered like the list.
+func renderSessions(ctx context.Context, lane conversation.Lane, conversations ConversationController) (string, InlineKeyboard, error) {
+	sessions, err := conversations.Sessions(ctx, lane)
 	if err != nil {
 		return "", nil, err
 	}
@@ -43,6 +46,10 @@ func renderSessions(ctx context.Context, principalID string, conversations Conve
 		line := fmt.Sprintf("%s. %s, %s", number, session.LastActive.Format("2 Jan 2006"), title)
 		if session.Active {
 			lines = append(lines, line+" (current)")
+			continue
+		}
+		if session.Elsewhere {
+			lines = append(lines, line+" (open in another tab)")
 			continue
 		}
 		lines = append(lines, line)
@@ -75,13 +82,14 @@ func parseSessionCallback(data string) (string, bool) {
 func (s *Service) processSessionPress(ctx context.Context, callback *CallbackQuery, principalID, sessionID string) (processingResult, string, error) {
 	result := processingResult{event: "telegram.callback.handled", principalID: principalID, command: "sessions." + sessionResumeAction}
 	chatID, messageID := callback.Message.Chat.ID, callback.Message.MessageID
-	resumed, err := s.conversation.Resume(ctx, principalID, sessionID)
+	lane := laneOf(ctx, principalID)
+	resumed, err := s.conversation.Resume(ctx, lane, sessionID)
 	if err != nil {
 		return processingResult{}, "sessions_action", err
 	}
 	followUp := resumedReply(resumed)
 
-	text, keyboard, err := renderSessions(ctx, principalID, s.conversation)
+	text, keyboard, err := renderSessions(ctx, lane, s.conversation)
 	if err != nil {
 		return processingResult{}, "render_sessions", err
 	}
@@ -106,6 +114,8 @@ func resumedReply(resumed conversation.ResumeResult) string {
 	switch {
 	case resumed.Busy:
 		return conversation.BusyReply
+	case resumed.Elsewhere:
+		return SessionElsewhere
 	case !resumed.Found:
 		return SessionGoneReply
 	case resumed.Current:
@@ -116,6 +126,27 @@ func resumedReply(resumed conversation.ResumeResult) string {
 		reply += "\n\n“" + resumed.Session.Title + "”"
 	}
 	return reply
+}
+
+// laneOf is the principal's conversation in the tab the update came from.
+func laneOf(ctx context.Context, principalID string) conversation.Lane {
+	return conversation.Lane{PrincipalID: principalID, ThreadID: thread.From(ctx)}
+}
+
+// updateThread is the tab an update came from, or zero for the main view. A reaction names no tab;
+// the conversation finds the tab of the reply it is on.
+func updateThread(update Update) int64 {
+	switch {
+	case update.CallbackQuery != nil && update.CallbackQuery.Message != nil:
+		return update.CallbackQuery.Message.MessageThreadID
+	case update.StoppedMessageGeneration != nil:
+		return update.StoppedMessageGeneration.MessageThreadID
+	case update.EditedMessage != nil:
+		return update.EditedMessage.MessageThreadID
+	case update.Message != nil:
+		return update.Message.MessageThreadID
+	}
+	return 0
 }
 
 // repliedTo is the message the user answered by replying, or zero.

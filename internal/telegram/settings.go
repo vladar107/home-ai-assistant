@@ -15,7 +15,7 @@ import (
 
 const (
 	SettingsTitle         = "Settings"
-	SettingsPrivacyLine   = "Privacy mode: strict-local. Use /privacy for details."
+	SettingsPrivacyLine   = "Privacy mode: strict-local. Use /privacy for details and /status to check that I am online."
 	ModelNotConnectedLine = "Model subscription: not connected."
 
 	maximumCallbackDataBytes = 64
@@ -380,7 +380,7 @@ func (m modelSection) act(ctx context.Context, principalID string, chatID int64,
 		return settingsOutcome{message: ConnectInstructions(ceremony)}, nil
 	case modelDisconnectAction:
 		if m.conversation != nil {
-			if _, err := m.conversation.Cancel(ctx, principalID); err != nil {
+			if _, err := m.conversation.CancelAll(ctx, principalID); err != nil {
 				return settingsOutcome{}, err
 			}
 		}

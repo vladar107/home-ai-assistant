@@ -16,7 +16,7 @@ var _ task.Repository = (*Store)(nil)
 const taskColumns = `id, principal_id, chat_id, request_message_id, title, brief, session_id, status, partial,
 	COALESCE(error_kind, ''), COALESCE(result, ''), COALESCE(status_message_id, 0), attempts,
 	tool_calls, web_searches, model_calls, prompt_tokens, output_tokens,
-	deadline, created_at, started_at, finished_at, delivered_at`
+	deadline, created_at, started_at, finished_at, delivered_at, thread_id`
 
 // taskOpenWork is a task that still needs its worker: one to run, or a report to deliver.
 const taskOpenWork = `(status IN ('queued', 'running') OR (finished_at IS NOT NULL AND delivered_at IS NULL))`
@@ -44,9 +44,9 @@ func (s *Store) CreateTask(ctx context.Context, created task.Task, maximumOpen i
 	now := formatTime(created.CreatedAt)
 	if _, err := tx.ExecContext(
 		ctx,
-		`INSERT INTO tasks (id, principal_id, chat_id, request_message_id, title, brief, session_id, status, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
-		created.ID, created.PrincipalID, created.ChatID, created.RequestMessageID, created.Title, created.Brief, created.SessionID, now, now,
+		`INSERT INTO tasks (id, principal_id, chat_id, request_message_id, title, brief, session_id, status, created_at, updated_at, thread_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)`,
+		created.ID, created.PrincipalID, created.ChatID, created.RequestMessageID, created.Title, created.Brief, created.SessionID, now, now, created.ThreadID,
 	); err != nil {
 		return 0, fmt.Errorf("insert task: %w", err)
 	}
@@ -311,7 +311,7 @@ func scanTask(row rowScanner) (task.Task, error) {
 		&loaded.ID, &loaded.PrincipalID, &loaded.ChatID, &loaded.RequestMessageID, &loaded.Title, &loaded.Brief, &loaded.SessionID,
 		&loaded.Status, &loaded.Partial, &loaded.ErrorKind, &loaded.Result, &loaded.StatusMessageID, &loaded.Attempts,
 		&loaded.Progress.ToolCalls, &loaded.Progress.WebSearches, &loaded.Progress.ModelCalls, &loaded.Progress.PromptTokens, &loaded.Progress.OutputTokens,
-		&deadline, &createdAt, &startedAt, &finishedAt, &deliveredAt,
+		&deadline, &createdAt, &startedAt, &finishedAt, &deliveredAt, &loaded.ThreadID,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return task.Task{}, err

@@ -35,15 +35,15 @@ func TestReplyOriginReturnsTheRequestOrEmptyForOlderReplies(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	session, request, _, found, err := store.ReplyOrigin(ctx, "alice", 500)
-	if err != nil || !found || session != feedbackSession || request != "request-1" {
-		t.Fatalf("origin of 500 = %q %q %v %v", session, request, found, err)
+	origin, found, err := store.ReplyOrigin(ctx, "alice", 500)
+	if err != nil || !found || origin.SessionID != feedbackSession || origin.RequestID != "request-1" {
+		t.Fatalf("origin of 500 = %+v %v %v", origin, found, err)
 	}
-	session, request, _, found, err = store.ReplyOrigin(ctx, "alice", 501)
-	if err != nil || !found || session != feedbackSession || request != "" {
-		t.Fatalf("origin of 501 = %q %q %v %v", session, request, found, err)
+	origin, found, err = store.ReplyOrigin(ctx, "alice", 501)
+	if err != nil || !found || origin.SessionID != feedbackSession || origin.RequestID != "" {
+		t.Fatalf("origin of 501 = %+v %v %v", origin, found, err)
 	}
-	if _, _, _, found, err := store.ReplyOrigin(ctx, "bob", 500); err != nil || found {
+	if _, found, err := store.ReplyOrigin(ctx, "bob", 500); err != nil || found {
 		t.Fatalf("another principal found the reply: %v %v", found, err)
 	}
 }

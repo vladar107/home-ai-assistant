@@ -7,6 +7,8 @@ import (
 	"fmt"
 
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
+	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
 var _ attachment.Repository = (*Store)(nil)
@@ -69,9 +71,10 @@ func (s *Store) LoadAttachment(ctx context.Context, principalID, id string) (att
 		`SELECT `+qualifiedAttachmentColumns+` FROM conversation_attachments AS file
 		 JOIN conversation_sessions AS session
 		   ON session.id = file.session_id AND session.principal_id = file.principal_id
-		 WHERE file.principal_id = ? AND file.id = ? AND session.status = 'active'`,
+		 WHERE file.principal_id = ? AND file.id = ? AND session.status = 'active' AND session.thread_id = ?`,
 		principalID,
 		id,
+		thread.From(ctx),
 	))
 	if errors.Is(err, sql.ErrNoRows) {
 		return attachment.Record{}, false, nil
@@ -82,11 +85,13 @@ func (s *Store) LoadAttachment(ctx context.Context, principalID, id string) (att
 	return record, true, nil
 }
 
+// ActiveAttachmentSession returns the active session of the context's tab, so a turn sees only the
+// files its own tab holds.
 func (s *Store) ActiveAttachmentSession(ctx context.Context, principalID string) (string, bool, error) {
 	if s == nil || s.db == nil {
 		return "", false, fmt.Errorf("load active conversation session: SQLite store is not open")
 	}
-	session, found, err := loadActiveConversationSession(ctx, s.db, principalID)
+	session, found, err := loadActiveConversationSession(ctx, s.db, conversation.Lane{PrincipalID: principalID, ThreadID: thread.From(ctx)})
 	if err != nil {
 		return "", false, err
 	}
