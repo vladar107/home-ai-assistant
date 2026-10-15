@@ -476,6 +476,12 @@ func (s *Service) Resume(ctx context.Context, lane Lane, sessionID string) (Resu
 	return ResumeResult{Found: true, Current: !switched.Switched, Session: summary}, nil
 }
 
+// SessionMessages returns the Telegram messages of one of the principal's conversations, oldest
+// first: what the user sent and the replies they got.
+func (s *Service) SessionMessages(ctx context.Context, principalID, sessionID string) ([]int64, error) {
+	return s.repository.SessionMessageIDs(ctx, principalID, sessionID)
+}
+
 // leaveSession removes the files a conversation held once another one replaced it, as /new does.
 // The switch is already committed, and the start-up purge removes the files of every closed
 // session, so a failure here is only logged.
@@ -489,7 +495,7 @@ func (s *Service) leaveSession(ctx context.Context, principalID, sessionID strin
 }
 
 func (s *Service) summarize(ctx context.Context, principalID string, record SessionRecord) (SessionSummary, error) {
-	summary := SessionSummary{ID: record.ID, Active: record.Active, LastActive: s.local(record.LastActive)}
+	summary := SessionSummary{ID: record.ID, Active: record.Active, LastActive: s.local(record.LastActive), ThreadID: record.ThreadID}
 	if s.config.History == nil {
 		return summary, nil
 	}

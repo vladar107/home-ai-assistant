@@ -44,6 +44,9 @@ type botAPI interface {
 	DeleteMessage(context.Context, int64, int64) error
 	AnswerCallback(context.Context, string, string) error
 	SetMyCommands(context.Context, CommandScope, []BotCommand) error
+	CreateForumTopic(context.Context, int64, string) (int64, error)
+	DeleteForumTopic(context.Context, int64, int64) error
+	ForwardMessages(context.Context, int64, []int64) error
 }
 
 type ConversationController interface {
@@ -57,6 +60,9 @@ type ConversationController interface {
 	NewSession(context.Context, conversation.Lane) (bool, error)
 	Sessions(context.Context, conversation.Lane) ([]conversation.SessionSummary, error)
 	Resume(context.Context, conversation.Lane, string) (conversation.ResumeResult, error)
+	// SessionMessages returns the Telegram messages of one of the principal's conversations, oldest
+	// first.
+	SessionMessages(ctx context.Context, principalID, sessionID string) ([]int64, error)
 	// React records a reaction to one of the principal's replies and starts a reconsider turn for a
 	// first 👎.
 	React(context.Context, conversation.ReactionInput) (conversation.ReactionResult, error)
@@ -834,7 +840,7 @@ func (s *Service) processCallback(ctx context.Context, bot Bot, updateID int64, 
 		return s.processTripPress(ctx, callback, principalID, action, tripID)
 	}
 	if sessionID, isSession := parseSessionCallback(callback.Data); isSession && s.conversation != nil {
-		return s.processSessionPress(ctx, callback, principalID, sessionID)
+		return s.processSessionPress(ctx, bot, callback, principalID, sessionID)
 	}
 	if taskID, isTask := parseTaskCallback(callback.Data); isTask && s.tasks != nil {
 		return s.processTaskPress(ctx, callback, principalID, taskID)

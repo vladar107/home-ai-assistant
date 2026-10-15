@@ -109,6 +109,41 @@ func (s *Store) SwitchConversation(ctx context.Context, lane conversation.Lane, 
 	}, nil
 }
 
+func (s *Store) SessionMessageIDs(ctx context.Context, principalID, sessionID string) ([]int64, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("list session messages: SQLite store is not open")
+	}
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT telegram_message_id FROM conversation_requests
+		 WHERE principal_id = ? AND session_id = ? AND telegram_message_id IS NOT NULL
+		 UNION
+		 SELECT telegram_message_id FROM conversation_reply_messages
+		 WHERE principal_id = ? AND session_id = ?
+		 ORDER BY 1`,
+		principalID,
+		sessionID,
+		principalID,
+		sessionID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list session messages: %w", err)
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan session message: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list session messages: %w", err)
+	}
+	return ids, nil
+}
+
 func (s *Store) RecordConversationReply(ctx context.Context, principalID, sessionID, requestID string, messageID int64) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("record conversation reply: SQLite store is not open")
