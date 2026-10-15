@@ -21,6 +21,8 @@ const (
 	// Home Assistant restart does not take the tools away mid-conversation.
 	staleSnapshotLimit = 30 * time.Minute
 	refreshTimeout     = 20 * time.Second
+	// missRefreshInterval bounds how often a name miss may refresh the snapshot.
+	missRefreshInterval = 30 * time.Second
 
 	liveContextTool = "homeassistant__GetLiveContext"
 	// ConfirmLabel marks an entity whose actions always need the user's confirmation; it must not
@@ -78,6 +80,8 @@ type snapshot struct {
 	// action tools are withheld.
 	conflicts []string
 	exposed   []exposedEntity
+	// location is Home Assistant's own time zone; UTC when it did not report one.
+	location  *time.Location
 	confirmed map[string]confirmedEntity
 	// entityIDs maps a lowercased friendly name to the entities that carry it.
 	entityIDs map[string][]string
@@ -114,6 +118,27 @@ func (s *Service) current(ctx context.Context) (*snapshot, error) {
 	}
 	s.snapshot = fresh
 	return fresh, nil
+}
+
+// refreshOnMiss refreshes the snapshot for a lookup that found nothing, unless it was fetched under
+// missRefreshInterval ago, so a newly exposed entity works at once and concurrent misses refresh
+// once. A failed refresh returns the snapshot the caller already had.
+func (s *Service) refreshOnMiss(ctx context.Context, seen *snapshot) *snapshot {
+	s.snapshotMu.Lock()
+	defer s.snapshotMu.Unlock()
+	now := s.now()
+	if s.snapshot != nil && now.Sub(s.snapshot.fetched) < missRefreshInterval {
+		return s.snapshot
+	}
+	refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), refreshTimeout)
+	defer cancel()
+	fresh, err := s.refresh(refreshCtx, now)
+	if err != nil {
+		s.logger.WarnContext(ctx, "homeassistant.refresh.failed", "error", err)
+		return seen
+	}
+	s.snapshot = fresh
+	return fresh
 }
 
 // forget drops the snapshot so the next call refreshes it, after an action may have changed what
@@ -167,6 +192,21 @@ func (s *Service) refresh(ctx context.Context, now time.Time) (*snapshot, error)
 		byID[state.EntityID] = state
 		if name := strings.ToLower(state.friendlyName()); name != "" {
 			fresh.entityIDs[name] = append(fresh.entityIDs[name], state.EntityID)
+		}
+	}
+
+	// A failed config read keeps the zone already known, so periods do not shift to UTC for one
+	// refresh.
+	fresh.location = time.UTC
+	if s.snapshot != nil && s.snapshot.location != nil {
+		fresh.location = s.snapshot.location
+	}
+	var config struct {
+		TimeZone string `json:"time_zone"`
+	}
+	if err := s.client.getJSON(ctx, "/api/config", &config); err == nil && config.TimeZone != "" {
+		if location, err := time.LoadLocation(config.TimeZone); err == nil {
+			fresh.location = location
 		}
 	}
 

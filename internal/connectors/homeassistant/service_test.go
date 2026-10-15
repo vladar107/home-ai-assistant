@@ -73,6 +73,8 @@ type simulator struct {
 	labels      []map[string]any
 	registry    []map[string]any
 	statistics  map[string]any
+	timeZone    string
+	series      map[string]map[string][]map[string]any
 
 	httpCalls    []httpCall
 	listCalls    int
@@ -110,6 +112,8 @@ func (s *simulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		http.NotFound(w, r)
+	case r.Method == http.MethodGet && r.URL.Path == "/api/config":
+		s.writeJSON(w, map[string]any{"time_zone": s.timeZone})
 	case r.Method == http.MethodGet && r.URL.Path == "/api/services":
 		s.writeJSON(w, s.services)
 	case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/services/"):
@@ -221,6 +225,15 @@ func (s *simulator) websocket(conn *websocket.Conn) {
 			result = s.labels
 		case "config/entity_registry/list_for_display":
 			result = map[string]any{"entity_categories": map[string]any{}, "entities": s.registry}
+		case "recorder/statistics_during_period":
+			s.statCommands = append(s.statCommands, command)
+			result = map[string]any{}
+			ids, _ := command["statistic_ids"].([]any)
+			for _, id := range ids {
+				if points, ok := s.series[fmt.Sprint(id)][fmt.Sprint(command["period"])]; ok {
+					result.(map[string]any)[fmt.Sprint(id)] = points
+				}
+			}
 		case "recorder/statistic_during_period":
 			s.statCommands = append(s.statCommands, command)
 			result = s.statistics
@@ -714,6 +727,86 @@ func TestHistoryResolvesAnExposedSensorAndReportsTheUnit(t *testing.T) {
 	f.sim.mu.Unlock()
 	if rolling == nil {
 		t.Fatalf("a partial name and a rolling period were not resolved: %+v", f.sim.statCommands)
+	}
+}
+
+func weightSeries(count int, step func(int) time.Time) []map[string]any {
+	points := make([]map[string]any, count)
+	for i := range points {
+		points[i] = map[string]any{"start": step(i).UnixMilli(), "mean": 80.0 - float64(i)/2}
+	}
+	return points
+}
+
+func TestHistoryPointsReturnsATrendWithFirstLastAndChange(t *testing.T) {
+	f := newFixture(t, newSimulator(livingTV, solarToday))
+	f.sim.set(func(s *simulator) {
+		s.timeZone = "Europe/Berlin"
+		s.series = map[string]map[string][]map[string]any{"sensor.solar_production_today": {"day": weightSeries(3, func(i int) time.Time {
+			return time.Date(2026, 9, 29+i, 0, 0, 0, 0, time.FixedZone("", 2*3600))
+		})}}
+	})
+	result := f.call(f.toolSet(), "ha_history", map[string]any{"name": "Solar production today", "period": "last_7_days", "points": "day"})
+	want := "Solar production today, last 7 days by day:\n2026-09-29: 80 kWh\n2026-09-30: 79.5 kWh\n2026-10-01: 79 kWh\nfirst: 80 kWh\nlast: 79 kWh\nchange: -1 kWh"
+	if result.IsError || !strings.HasSuffix(result.Text, want) {
+		t.Fatalf("result = %+v", result)
+	}
+	f.sim.mu.Lock()
+	command := f.sim.statCommands[0]
+	f.sim.mu.Unlock()
+	if command["period"] != "day" || command["start_time"] != "2026-09-25T10:00:00+02:00" || command["end_time"] != "2026-10-02T10:00:00+02:00" {
+		t.Fatalf("command = %+v", command)
+	}
+}
+
+func TestHistoryPointsUseACoarserBucketAboveSixtyPoints(t *testing.T) {
+	f := newFixture(t, newSimulator(solarToday))
+	f.sim.set(func(s *simulator) {
+		s.series = map[string]map[string][]map[string]any{"sensor.solar_production_today": {
+			"day":  weightSeries(120, func(i int) time.Time { return start.AddDate(0, 0, i-120) }),
+			"week": weightSeries(17, func(i int) time.Time { return start.AddDate(0, 0, 7*(i-17)) }),
+		}}
+	})
+	result := f.call(f.toolSet(), "ha_history", map[string]any{"name": "Solar production today", "period": "all", "points": "day"})
+	if result.IsError || !strings.Contains(result.Text, "all by week:") || strings.Count(result.Text, "\n2026-") != 17 {
+		t.Fatalf("result = %+v", result)
+	}
+	f.sim.mu.Lock()
+	defer f.sim.mu.Unlock()
+	if len(f.sim.statCommands) != 2 || f.sim.statCommands[1]["period"] != "week" {
+		t.Fatalf("commands = %+v", f.sim.statCommands)
+	}
+}
+
+func TestHistoryRefreshesOnceForANameMissAndNotAgainWithinThirtySeconds(t *testing.T) {
+	f := newFixture(t, newSimulator(livingTV, solarToday))
+	set := f.toolSet()
+	before := f.sim.listRequests()
+
+	added := "- names: Body weight\n  domain: sensor\n  state: '80'\n  attributes:\n    unit_of_measurement: kg\n"
+	f.sim.set(func(s *simulator) {
+		s.liveContext += added
+		s.states = append(s.states, map[string]any{"entity_id": "sensor.body_weight", "state": "80", "attributes": map[string]any{"friendly_name": "Body weight", "unit_of_measurement": "kg"}})
+		s.series = map[string]map[string][]map[string]any{"sensor.body_weight": {"month": weightSeries(2, func(i int) time.Time { return start.AddDate(0, i-2, 0) })}}
+	})
+
+	wantError(t, f.call(set, "ha_history", map[string]any{"name": "Body weight", "period": "last_year", "points": "month"}), "No exposed sensor")
+	if f.sim.listRequests() != before {
+		t.Fatalf("a fresh snapshot was refreshed on a miss")
+	}
+
+	f.clock.advance(time.Minute)
+	result := f.call(set, "ha_history", map[string]any{"name": "Body weight", "period": "last_year", "points": "month"})
+	if result.IsError || !strings.Contains(result.Text, "last: 79.5 kg") {
+		t.Fatalf("result = %+v", result)
+	}
+	if f.sim.listRequests() != before+1 {
+		t.Fatalf("list requests = %d, want %d", f.sim.listRequests(), before+1)
+	}
+
+	wantError(t, f.call(set, "ha_history", map[string]any{"name": "Missing sensor", "period": "today"}), "No exposed sensor")
+	if f.sim.listRequests() != before+1 {
+		t.Fatalf("a second miss within 30 seconds refreshed again")
 	}
 }
 
