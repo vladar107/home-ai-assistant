@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -41,6 +42,8 @@ type ScheduleController interface {
 	RunNow(context.Context, string, string, string) (bool, error)
 	Snooze(context.Context, string, string, schedule.Snooze) (schedule.Job, bool, error)
 	DefaultZone() string
+	Prepare(principalID, name, jobType string, timing schedule.Timing, config json.RawMessage) (schedule.Prepared, error)
+	Create(ctx context.Context, id string, prepared schedule.Prepared) (bool, error)
 }
 
 var errUnknownJobAction = errors.New("unknown job action")

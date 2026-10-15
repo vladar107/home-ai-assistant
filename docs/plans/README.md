@@ -90,6 +90,7 @@ plan that links back to the earlier record.
 | 0078 | [Self-learning from feedback and outcomes](0078-self-learning.md) | proposed |
 | 0079 | [Act and tell: fewer confirmations, with Undo](0079-act-and-tell.md) | done |
 | 0080 | [Learn on correction](0080-learn-on-correction.md) | done |
+| 0081 | [Proactive answers](0081-proactive-answers.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

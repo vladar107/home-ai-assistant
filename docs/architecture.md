@@ -317,6 +317,18 @@ unanswered message. Chat session files are kept; the files of scheduled runs and
 finished tasks, which no conversation refers to, are deleted 30 days after they
 were last written.
 
+### Quiet runs and Heads-up
+
+A model-turn run whose reply is only `[nothing-to-add]` ends as `skipped` with
+reason `quiet`: nothing is sent and no report is kept. Its message allows that
+only when the job's instructions ask to report on a condition that does not
+hold; a failed run still reports. A manual Run now that ends quiet answers
+"Nothing to report right now". Heads-up is a per-user switch in `/settings` that
+creates an ordinary model-turn job with a built-in prompt at 08:00 and 19:00 in
+the default zone, under an ID derived from the principal, so the switch finds
+the job however it was renamed, paused, or deleted in conversation. Its runs
+look over the user's day and stay quiet unless something needs attention.
+
 ### Scheduled jobs in conversation
 
 The system prompt of chat turns and background tasks ends, after memory, with the

@@ -53,6 +53,7 @@ func proposeGuidance(zone string) string {
 		"A recurring job takes cron, a standard five-field cron expression (minute hour day-of-month month day-of-week) in the user's time zone, " + zone + " unless they name another; " +
 		"for example 0 9 * * 1 is Mondays at 09:00 and 30 7 * * 1-5 is weekdays at 07:30. A recurring job may run at most once an hour. " +
 		"A one-time job takes at instead, a local date and time such as 2026-10-04 07:30 that you work out from the current time. " +
+		"A job meant to \"only tell me when…\" should say so in its instructions; its runs then stay silent unless the condition holds. " +
 		"Each run is a separate turn the user does not watch, with only read-only tools, so the prompt must say exactly what to look at and what to report, on its own, without relying on this conversation. " +
 		"schedule_update changes a job by its id from schedule_list, given only the fields that change. " +
 		"To change its instructions, first read them with schedule_get, then pass prompt_edits: small find and replace pairs, each find copied exactly from the stored prompt and occurring in it once, that change only what the user asked for; the user sees just those passages, old and new. " +

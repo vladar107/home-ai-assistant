@@ -11,6 +11,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
+	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
 const (
@@ -84,11 +85,19 @@ func (m modelTurn) Run(ctx context.Context, occurrence Occurrence) (Result, erro
 	if err != nil {
 		return Result{Text: FailedText, ErrorKind: "config"}, nil
 	}
+	if occurrence.JobID == HeadsUpJobID(occurrence.PrincipalID) {
+		ctx = tools.WithCallBudget(ctx, headsUpCallBudget)
+	}
 	reply, err := m.runner.RunScheduled(ctx, occurrence.PrincipalID, outbox.ScheduledTurn(occurrence.RunID), scheduledMessage(occurrence, config.Prompt))
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Text: reply.Text, ErrorKind: reply.ErrorKind, Private: reply.Private, External: reply.External}, nil
+	result := Result{Text: reply.Text, ErrorKind: reply.ErrorKind, Private: reply.Private, External: reply.External}
+	if reply.ErrorKind == "" && strings.Contains(reply.Text, conversation.NothingToAdd) {
+		result.Text = strings.TrimSpace(strings.ReplaceAll(reply.Text, conversation.NothingToAdd, ""))
+		result.Quiet = result.Text == ""
+	}
+	return result, nil
 }
 
 // scheduledMessage tells the model that nobody is waiting on this turn, so it does the task and
@@ -100,7 +109,8 @@ func scheduledMessage(occurrence Occurrence, prompt string) string {
 			"and only read-only tools are available, so nothing can be created, changed, or saved. "+
 			"Never show a status, time, or count that no tool returned in this run, and never carry one over from an earlier run; "+
 			"if a check failed, say which one, and leave a leg out rather than guess its status. "+
+			"If the task asks to report only when something holds and it does not hold now, reply with exactly %s and nothing else, and nothing is sent; a check that failed is still reported. "+
 			"Do the task below and reply with the report the user should receive.\n\n%s",
-		occurrence.JobName, at, prompt,
+		occurrence.JobName, at, conversation.NothingToAdd, prompt,
 	)
 }

@@ -62,6 +62,12 @@ borrowed between users.
   set at once and can be snoozed. The conversation knows each job's instructions
   and the reports they sent: replying to a report, or asking about "the report
   this morning", works after `/new` and restarts.
+  A job meant to "only tell me when…" stays silent until it has something to
+  say.
+- **Heads-up.** Turned on in `/settings`, the assistant looks over the user's
+  day at 08:00 and 19:00 (calendar, trips, weather, home devices, health and
+  energy trends) and writes first, only when something needs attention. It is
+  an ordinary job the user can move, reword, or pause in conversation.
 - **Memory.** Each user has a small memory of instructions and facts that the
   assistant keeps across `/new`, scheduled runs, and restarts. Facts are saved
   at once, and so are instructions the user states, with Undo, unless the
