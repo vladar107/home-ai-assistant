@@ -53,6 +53,7 @@ func TestJobReportsReachLaterTurns(t *testing.T) {
 	clock.Set(t, "2026-09-28T09:00:20+02:00")
 	h.scheduler.Wake()
 	run := receive(t, h.ctx, runtime.calls)
+	tools.RunFrom(run.ctx).MarkExternal("")
 	run.answer <- agentruntime.RunResult{Response: long, Final: long}
 	first := h.nextMessage()
 	h.waitRun(job.ID, schedule.StatusDelivered)
@@ -153,6 +154,66 @@ func TestJobReportsReachLaterTurns(t *testing.T) {
 	}
 	foreign.answer <- agentruntime.RunResult{Response: "no idea"}
 	h.wantReply(202, 7, "no idea")
+}
+
+// A report marks the conversation it is told in as having read outside content only when its run
+// read some: a run that only read household data leaves the conversation clean, a run that read a
+// web page marks it.
+func TestJobReportMarksConversationOnlyWhenItsRunWasExternal(t *testing.T) {
+	runtime := newControlledRuntime()
+	clock := newTestClock(t, mondayMorning)
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
+	h.provision("alice", "account-alice")
+	h.start()
+
+	job := h.createJob("alice", "a1b2c3d4e5f60718", "Commute", "0 9 * * *", "Check my trains.")
+	clock.Set(t, "2026-09-28T09:00:20+02:00")
+	h.scheduler.Wake()
+	run := receive(t, h.ctx, runtime.calls)
+	run.answer <- agentruntime.RunResult{Response: "Trains run.", Final: "Trains run."}
+	h.nextMessage()
+	h.waitRun(job.ID, schedule.StatusDelivered)
+	if got := h.countRows(`SELECT external FROM job_reports WHERE text = 'Trains run.'`); got != 0 {
+		t.Fatalf("clean report external = %d, want 0", got)
+	}
+
+	h.push(textUpdate(1, 101, "and now?"))
+	clean := receive(t, h.ctx, runtime.calls)
+	if !strings.Contains(clean.request.Message, "Trains run.") {
+		t.Fatalf("clean turn message = %q", clean.request.Message)
+	}
+	clean.answer <- agentruntime.RunResult{Response: "fine"}
+	h.wantReply(101, 1, "fine")
+	h.waitState(1, "delivered")
+	if count := h.countRows(`SELECT count(*) FROM conversation_sessions WHERE principal_id = 'alice' AND external_at IS NOT NULL`); count != 0 {
+		t.Fatalf("external sessions after a household-only report = %d, want 0", count)
+	}
+
+	if queued, err := h.scheduler.RunNow(h.ctx, "alice", job.ID, ""); err != nil || !queued {
+		t.Fatalf("run now = %v %v", queued, err)
+	}
+	h.scheduler.Wake()
+	run = receive(t, h.ctx, runtime.calls)
+	tools.RunFrom(run.ctx).MarkExternal("")
+	run.answer <- agentruntime.RunResult{Response: "Strike announced.", Final: "Strike announced."}
+	h.nextMessage()
+	for h.optionalReportID("Strike announced.") == "" {
+	}
+	if got := h.countRows(`SELECT external FROM job_reports WHERE text = 'Strike announced.'`); got != 1 {
+		t.Fatalf("web report external = %d, want 1", got)
+	}
+
+	h.push(textUpdate(2, 101, "anything new?"))
+	marked := receive(t, h.ctx, runtime.calls)
+	if !strings.Contains(marked.request.Message, "Strike announced.") {
+		t.Fatalf("external turn message = %q", marked.request.Message)
+	}
+	marked.answer <- agentruntime.RunResult{Response: "yes"}
+	h.wantReply(101, 2, "yes")
+	h.waitState(2, "delivered")
+	if count := h.countRows(`SELECT count(*) FROM conversation_sessions WHERE principal_id = 'alice' AND external_at IS NOT NULL`); count != 1 {
+		t.Fatalf("external sessions after a web report = %d, want 1", count)
+	}
 }
 
 // A reminder's message is kept as its report too, so a reply to it is understood.

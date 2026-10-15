@@ -36,7 +36,9 @@ type Report struct {
 	JobType     string
 	Text        string
 	// Private is true when the text may retell Notion page content or NAS file contents.
-	Private     bool
+	Private bool
+	// External is true when the run read outside content, so the text may carry it.
+	External    bool
 	DeliveredAt time.Time
 	// MessageIDs are the Telegram messages the report was sent as; only saving uses them.
 	MessageIDs []int64
@@ -68,6 +70,7 @@ func (s *Service) saveReport(ctx context.Context, run Run, messageIDs []int64) {
 		JobType:     run.JobType,
 		Text:        reportText(run),
 		Private:     run.Private,
+		External:    run.External,
 		DeliveredAt: s.now(),
 		MessageIDs:  messageIDs,
 	}
@@ -126,7 +129,7 @@ func (s *Service) TurnReports(ctx context.Context, principalID string, turn conv
 				continue
 			}
 			lines = append(lines, "- "+s.reportLine(report))
-			outside = true
+			outside = outside || report.External
 			private = private || report.Private
 		}
 		switch {
@@ -140,7 +143,7 @@ func (s *Service) TurnReports(ctx context.Context, principalID string, turn conv
 	if found {
 		parts = append(parts, fmt.Sprintf("The user is replying to this report (report id %s) from %s, sent %s:\n%s",
 			replied.ID, reportSource(replied), s.formatReportTime(replied.DeliveredAt), truncateRunes(replied.Text, maximumNoticeRunes)))
-		outside = true
+		outside = outside || replied.External
 		private = private || replied.Private
 	}
 	return strings.Join(parts, "\n\n"), outside, private

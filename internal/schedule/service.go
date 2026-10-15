@@ -418,8 +418,10 @@ func (s *Service) dispatch(ctx context.Context, run Run) {
 		}
 		if !executing {
 			// Whether a run executed before a restart or a failed delivery read private content
-			// is unknown; only a reminder's text is known not to retell any.
+			// is unknown; only a reminder's text is known not to retell any, or to be outside
+			// content.
 			run.Private = run.JobType != TypeReminder
+			run.External = run.JobType != TypeReminder
 		}
 		s.deliver(ctx, run)
 	}()
@@ -506,7 +508,7 @@ func (s *Service) execute(ctx context.Context, run Run) (Run, bool) {
 		"manual", run.Manual, "outcome", outcome, "error_kind", result.ErrorKind,
 		"duration_ms", time.Since(began).Milliseconds(),
 	)
-	run.Status, run.Reply, run.ErrorKind, run.Private = StatusReady, result.Text, result.ErrorKind, result.Private
+	run.Status, run.Reply, run.ErrorKind, run.Private, run.External = StatusReady, result.Text, result.ErrorKind, result.Private, result.External
 	return run, true
 }
 
