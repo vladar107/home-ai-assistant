@@ -157,6 +157,25 @@ func (h *conversationHarness) waitDraft(from int, label string) int {
 	}
 }
 
+func (h *conversationHarness) waitIndicatorFailure(method string) {
+	h.t.Helper()
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		h.mu.Lock()
+		failures := h.indicatorFailures[method]
+		h.mu.Unlock()
+		if failures > 0 {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-h.ctx.Done():
+			h.t.Fatalf("no %s failure was counted", method)
+		}
+	}
+}
+
 // wantIndicatorsQuiet expects no typing or draft request once the turn has ended.
 func (h *conversationHarness) wantIndicatorsQuiet() {
 	h.t.Helper()
@@ -350,6 +369,9 @@ func TestFailingTurnIndicatorsAreCountedAndLeaveTheReplyAlone(t *testing.T) {
 	h.push(textUpdate(1, 101, "long request"))
 	call := receive(t, h.ctx, runtime.calls)
 	h.waitDraft(0, "Thinking…")
+	// Answering before the refused draft comes back would cancel it, and a cancelled call is no
+	// failure.
+	h.waitIndicatorFailure("draft")
 	call.answer <- agentruntime.RunResult{Response: "done"}
 	h.wantReply(101, 1, "done")
 	elapsed := time.Since(started)
