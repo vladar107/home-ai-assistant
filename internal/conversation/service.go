@@ -46,8 +46,9 @@ const NothingToAdd = "[nothing-to-add]"
 // ContinueMessage starts the turn that follows a confirmed proposal, so a request with several
 // dependent steps moves on without the user asking again. The outcome arrives as the turn's notice.
 const ContinueMessage = "[system] The user pressed Confirm and the outcome is above. Continue the user's earlier request: " +
-	"if a step remains, do it, which may mean proposing the next change. If every step is done and the outcome " +
-	"already says everything, reply with exactly " + NothingToAdd + " and nothing else."
+	"if a step remains, do it, which may mean proposing the next change, and answer any question from the user's " +
+	"earlier messages that is still unanswered, using what you know now. Only when every step is done, every " +
+	"question is answered, and the outcome already says everything, reply with exactly " + NothingToAdd + " and nothing else."
 
 type Service struct {
 	config       Config

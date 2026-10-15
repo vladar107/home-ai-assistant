@@ -346,8 +346,11 @@ type Service struct {
 	telemetry Telemetry
 	intents   map[string]Intent
 	notices   map[string]notice
-	cancel    context.CancelFunc
-	done      chan struct{}
+	// continuations holds, per principal, the turn a Confirm could not queue because another turn
+	// was in flight; it runs after that turn is delivered if the outcome is still unanswered.
+	continuations map[string]func(context.Context)
+	cancel        context.CancelFunc
+	done          chan struct{}
 	// runCtx is the context previews run in while the service is started.
 	runCtx context.Context
 	// previewing holds the bundles with a preview running, and pressed the answer given to each
@@ -389,6 +392,7 @@ func NewService(cfg Config, repository Repository, deliverer Deliverer, logger *
 		now:           time.Now,
 		executors:     make(map[string]Executor),
 		notices:       make(map[string]notice),
+		continuations: make(map[string]func(context.Context)),
 		intents:       make(map[string]Intent),
 		proposing:     make(map[string]*sync.Mutex),
 		previewing:    make(map[string]bool),
@@ -649,8 +653,36 @@ func joinable(pending []Record, now time.Time, lifetime time.Duration) bool {
 }
 
 // AfterDelivery sends the "Done" messages of the principal's unshown direct actions, then the
-// principal's undelivered bundle, to the chat once the turn's reply is out.
+// principal's undelivered bundle, to the chat once the turn's reply is out, and then starts a
+// continuation deferred while that turn was in flight.
 func (s *Service) AfterDelivery(ctx context.Context, principalID string, chatID int64) error {
+	err := s.afterDelivery(ctx, principalID, chatID)
+	s.runDeferredContinuation(ctx, principalID)
+	return err
+}
+
+// DeferContinuation keeps the turn that should continue a confirmed request until the principal's
+// in-flight turn is delivered, unless a turn takes the outcome first. A later deferral replaces an
+// earlier one, since one notice holds every outcome not yet reported.
+func (s *Service) DeferContinuation(principalID string, continuation func(context.Context)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.continuations[principalID] = continuation
+}
+
+// runDeferredContinuation starts the deferred continuation; a turn that took the outcome as its
+// notice has already dropped it.
+func (s *Service) runDeferredContinuation(ctx context.Context, principalID string) {
+	s.mu.Lock()
+	continuation, deferred := s.continuations[principalID]
+	delete(s.continuations, principalID)
+	s.mu.Unlock()
+	if deferred {
+		continuation(ctx)
+	}
+}
+
+func (s *Service) afterDelivery(ctx context.Context, principalID string, chatID int64) error {
 	s.sendDirect(ctx, principalID, chatID)
 	bundle, err := s.repository.PendingApprovals(ctx, principalID)
 	if err != nil {
@@ -1028,6 +1060,8 @@ func (s *Service) TakeNotice(principalID string) (string, bool) {
 	defer s.mu.Unlock()
 	pending := s.notices[principalID]
 	delete(s.notices, principalID)
+	// The turn taking the outcome answers it, so a continuation deferred for it has nothing to do.
+	delete(s.continuations, principalID)
 	return pending.text, pending.private
 }
 

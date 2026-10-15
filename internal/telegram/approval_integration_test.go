@@ -395,9 +395,10 @@ func TestNotionProposalsExpireFailSafelyAndDoNotSurviveRestart(t *testing.T) {
 	h.assertNotionSecretHidden(aliceNotionToken)
 }
 
-// A press that runs the actions continues the request on its own; a rejection, or a message the
-// user sent meanwhile, leaves the outcome for the user's next turn instead.
-func TestConfirmContinuesTheRequestUnlessRejectedOrBusy(t *testing.T) {
+// A press that runs the actions continues the request on its own, and a rejection leaves the
+// outcome for the user's next turn instead. A press while a turn runs continues once that turn is
+// delivered.
+func TestConfirmContinuesTheRequestUnlessRejected(t *testing.T) {
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{notion: writableNotionSimulator(t)})
 	h.provision("alice", "acct-alice-1111")
@@ -431,19 +432,14 @@ func TestConfirmContinuesTheRequestUnlessRejectedOrBusy(t *testing.T) {
 	running.answer <- agentruntime.RunResult{Response: "ok"}
 	h.wantReply(101, 8, "ok")
 	h.waitState(8, "delivered")
+	continued := receive(t, h.ctx, runtime.calls)
+	if !strings.HasPrefix(continued.request.Message, "[system] The user confirmed your notion_append_blocks proposal and it was executed.") ||
+		!strings.HasSuffix(continued.request.Message, conversation.ContinueMessage) {
+		t.Fatalf("continuation after the busy turn = %q", continued.request.Message)
+	}
+	continued.answer <- agentruntime.RunResult{Response: conversation.NothingToAdd}
+	h.waitState(9, "delivered")
 	expectNoRuntimeCall(t, runtime, 100*time.Millisecond)
-	if count := h.countRows(`SELECT count(*) FROM conversation_requests WHERE telegram_update_id = 9`); count != 0 {
-		t.Fatalf("a busy principal queued %d continuations", count)
-	}
-
-	h.push(textUpdate(10, 101, "and?"))
-	informed := receive(t, h.ctx, runtime.calls)
-	if !strings.HasPrefix(informed.request.Message, "[system] The user confirmed your notion_append_blocks proposal and it was executed.") {
-		t.Fatalf("turn after a skipped continuation = %q", informed.request.Message)
-	}
-	informed.answer <- agentruntime.RunResult{Response: "done"}
-	h.wantReply(101, 10, "done")
-	h.waitState(10, "delivered")
 }
 
 func TestProposalsOfOneTurnAreConfirmedTogetherAndRunPastAFailure(t *testing.T) {

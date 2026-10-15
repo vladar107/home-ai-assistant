@@ -97,6 +97,8 @@ type ApprovalController interface {
 	Preview(ctx context.Context, principalID, approvalID, trigger string, chatID, messageID int64) (approval.PreviewPressed, error)
 	// Undo reverses a direct action; a press on another principal's action is not owned.
 	Undo(ctx context.Context, principalID, recordID string) (approval.Undid, error)
+	// DeferContinuation keeps a continuation until the principal's in-flight turn is delivered.
+	DeferContinuation(principalID string, continuation func(context.Context))
 }
 
 type identityResolver interface {
@@ -956,20 +958,33 @@ func (s *Service) processPreviewPress(ctx context.Context, trigger string, callb
 }
 
 // continueConversation queues the turn after a confirmed proposal. It is queued before the message
-// edit, because a replayed press finds the bundle resolved and would not queue it again. Failing to
-// queue costs only the automatic step: the outcome still reaches the user's next turn as a notice.
+// edit, because a replayed press finds the bundle resolved and would not queue it again. While
+// another turn is in flight it is deferred until that turn is delivered. Failing to queue costs
+// only the automatic step: the outcome still reaches the user's next turn as a notice.
 func (s *Service) continueConversation(ctx context.Context, bot Bot, updateID int64, callback *CallbackQuery, principalID string) {
 	if s.conversation == nil {
 		return
 	}
-	err := s.conversation.Enqueue(ctx, conversation.EnqueueInput{
+	input := conversation.EnqueueInput{
 		BotUserID:         bot.ID,
 		TelegramUpdateID:  updateID,
 		TelegramMessageID: callback.Message.MessageID,
 		PrincipalID:       principalID,
 		ChatID:            callback.Message.Chat.ID,
 		Message:           conversation.ContinueMessage,
-	})
+	}
+	err := s.conversation.Enqueue(ctx, input)
+	if errors.Is(err, conversation.ErrBusy) && s.approvals != nil {
+		s.approvals.DeferContinuation(principalID, func(ctx context.Context) {
+			s.continueConversation(ctx, bot, updateID, callback, principalID)
+		})
+		// The busy turn may have been delivered before the deferral was stored, so nothing would
+		// run it; queueing again closes that gap, and the turn it queues drops the deferral.
+		if err = s.conversation.Enqueue(ctx, input); errors.Is(err, conversation.ErrBusy) {
+			s.telemetry.ContextLogger(ctx, s.logger).InfoContext(ctx, "telegram.continuation.deferred", "principal_id", principalID, "reason", "busy")
+			return
+		}
+	}
 	logger := s.telemetry.ContextLogger(ctx, s.logger)
 	switch {
 	case errors.Is(err, conversation.ErrBusy):
