@@ -229,7 +229,12 @@ not_retryable), and each retry is logged at debug level.
    Both are best effort: a failed call is counted and skipped, and both stop
    before the turn ends, so neither lands after the reply.
 4. `runtime/pi` starts Pi with a private per-turn directory containing the bridge
-   extension and those tool definitions.
+   extension and those tool definitions. The system prompt of a turn with tools asks the
+   model to answer what the user is trying to find out with what its tools
+   offer, take the likely reading and say so instead of asking, take the step
+   the request implies (a new recurring job or watch only when asked), claim
+   nothing is unavailable without a tool showing it, and never end on work it
+   has not done.
 5. Every tool call returns over loopback to `tools`, which rechecks the grant and
    bounds it to 15 seconds, 16 KiB, and 8 calls per turn.
 6. A write either acts at once or becomes a proposal. Tools that act and tell
@@ -260,7 +265,10 @@ not_retryable), and each retry is logged at debug level.
    nothing is left.
    A Confirm that ran the actions queues a
    turn that continues the request from their outcome, so a dependent next step
-   needs no nudge; it stays silent when nothing is left to do.
+   needs no nudge and a question asked beside the action is still answered; it
+   stays silent when nothing is left to do. A Confirm pressed while another turn
+   is in flight continues once that turn is delivered, unless a turn has taken
+   the outcome first.
 7. The reply goes back through Telegram, as a day card photo with a caption when the
    turn produced one. Message bodies are then cleared from SQLite; the sent
    message's ID is kept with its session, so replying to it later returns to
