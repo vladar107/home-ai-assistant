@@ -40,6 +40,7 @@ var helpTopics = map[string]string{
 	webSectionPrefix:           "web",
 	nsSectionPrefix:            "trains",
 	busSectionPrefix:           "buses",
+	headsUpSectionPrefix:       "heads_up",
 	locationSectionPrefix:      "location",
 	memorySectionPrefix:        "memory",
 	grafanaSectionPrefix:       "grafana",

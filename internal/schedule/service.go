@@ -31,6 +31,8 @@ const (
 
 	InterruptedText = "This run was interrupted by a restart and was not retried. It will run again at its next scheduled time."
 	FailedText      = "This run could not be completed."
+	QuietManualText = "Nothing to report right now."
+	quietReason     = "quiet"
 	MissedText      = "This one-time job did not run: the assistant was offline when it was due, and it is too late to run it now."
 	// OneTimeInterruptedText replaces InterruptedText for a job that has no next scheduled time.
 	OneTimeInterruptedText = "This one-time run was interrupted by a restart and was not retried."
@@ -105,6 +107,7 @@ const (
 	runUndeliverable = "undeliverable"
 	runRecovered     = "recovered"
 	runSkipped       = "skipped"
+	runQuiet         = "quiet"
 )
 
 // Telemetry records scheduled run metrics.
@@ -151,7 +154,7 @@ func (s *Service) recordRun(ctx context.Context, run Run, outcome string) {
 		}
 	}
 	s.telemetry.RecordScheduleRun(ctx, run.PrincipalID, outcome)
-	if outcome == runSkipped {
+	if outcome == runSkipped || outcome == runQuiet {
 		return
 	}
 	s.telemetry.RecordReply(ctx, run.PrincipalID, "scheduled", outcome, s.safetyLabel(ctx, run.PrincipalID), max(s.now().Sub(run.ScheduledFor), 0))
@@ -489,6 +492,13 @@ func (s *Service) execute(ctx context.Context, run Run) (Run, bool) {
 	if err != nil {
 		result = Result{Text: FailedText, ErrorKind: "handler"}
 	}
+	if result.Quiet && result.ErrorKind == "" {
+		if !run.Manual {
+			s.skip(ctx, run, StatusRunning, quietReason)
+			return run, false
+		}
+		result = Result{Text: QuietManualText}
+	}
 	if strings.TrimSpace(result.Text) == "" {
 		result = Result{Text: FailedText, ErrorKind: "empty"}
 	}
@@ -605,7 +615,11 @@ func (s *Service) skip(ctx context.Context, run Run, from, reason string) {
 		return
 	}
 	s.removeCard(run)
-	s.recordRun(ctx, run, runSkipped)
+	outcome := runSkipped
+	if reason == quietReason {
+		outcome = runQuiet
+	}
+	s.recordRun(ctx, run, outcome)
 	s.logger.InfoContext(ctx, "schedule.run.skipped", "principal_id", run.PrincipalID, "job_id", run.JobID, "reason", reason)
 }
 

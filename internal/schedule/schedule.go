@@ -157,6 +157,8 @@ type Result struct {
 	// External is true when the run read outside content such as web pages or third-party tool
 	// results.
 	External bool
+	// Quiet is true when the run has nothing to report; the scheduler then sends nothing.
+	Quiet bool
 }
 
 type Handler interface {

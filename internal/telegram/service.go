@@ -228,6 +228,9 @@ func NewService(
 	if buses != nil {
 		service.sections = append(service.sections, busSection{bus: buses, logger: logger, telemetry: service.telemetry})
 	}
+	if schedules != nil {
+		service.sections = append(service.sections, headsUpSection{schedules: schedules, logger: logger, telemetry: service.telemetry})
+	}
 	return service, nil
 }
 
