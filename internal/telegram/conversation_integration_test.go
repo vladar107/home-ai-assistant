@@ -809,6 +809,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	if h.watches != nil {
 		h.watches.SetFeeds(h.service.Feeds())
 	}
+	h.conversation.SetTabReplies(h.service)
 	if err := broker.Register(h.service.Help()); err != nil {
 		t.Fatal(err)
 	}

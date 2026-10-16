@@ -60,6 +60,7 @@ type Service struct {
 	gate         ConnectionGate
 	logger       *slog.Logger
 	telemetry    Telemetry
+	tabReplies   TabReplies
 	// startedAt is truncated like the stored created_at, so a request queued in the same
 	// millisecond as the start does not read as recovered.
 	startedAt time.Time
@@ -95,6 +96,9 @@ type replyCapture struct {
 	safetyChecks        string
 	// plainReply is the model's successful chat reply without memory notes, or "" for any other.
 	plainReply string
+	// message is what the user wrote for a turn with a plain reply, which the store no longer
+	// holds once the reply is saved, or "" when the message was the bot's own.
+	message string
 }
 
 func NewService(
@@ -163,6 +167,11 @@ func NewService(
 		turns:        make(map[Lane]chan struct{}),
 		drafts:       make(map[Lane]*runningDraft),
 	}, nil
+}
+
+// SetTabReplies hands each plain reply delivered in a tab to tabs; call it before Start.
+func (s *Service) SetTabReplies(tabs TabReplies) {
+	s.tabReplies = tabs
 }
 
 func (s *Service) Start(ctx context.Context) error {
@@ -800,6 +809,10 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 	if runStarted.IsZero() {
 		runStarted = time.Now()
 	}
+	message := ""
+	if plainReply != "" && !ownMessage(request.Message) {
+		message = request.Message
+	}
 	s.mu.Lock()
 	s.captures[request.ID] = replyCapture{
 		lane:         lane,
@@ -808,6 +821,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		model:        modelTime,
 		safetyChecks: safetyChecks,
 		plainReply:   plainReply,
+		message:      message,
 	}
 	s.mu.Unlock()
 	endTurn(outcome, reportedKind)
@@ -1080,7 +1094,7 @@ func (s *Service) deliver(ctx context.Context, request Request) error {
 		_ = s.repository.ReleaseConversationDelivery(ctx, request.ID)
 		return err
 	}
-	plainReply := s.recordReply(ctx, request, deliveryStarted)
+	plainReply, message := s.recordReply(ctx, request, deliveryStarted)
 	s.removeCard(request)
 	if s.config.FollowUp != nil {
 		if err := s.config.FollowUp.AfterDelivery(deliveryCtx, request.PrincipalID, request.ChatID); err != nil && ctx.Err() == nil {
@@ -1088,7 +1102,23 @@ func (s *Service) deliver(ctx context.Context, request Request) error {
 		}
 	}
 	s.rememberReply(ctx, request, plainReply)
+	s.tabReplied(ctx, request, message, plainReply)
 	return nil
+}
+
+// tabReplied passes a plain reply in a tab on in the background, under the worker's context, so
+// Shutdown cancels and waits for it. A reply to the bot's own message, such as a continuation's,
+// tells nothing of the conversation's topic and is not passed on.
+func (s *Service) tabReplied(ctx context.Context, request Request, message, plainReply string) {
+	if s.tabReplies == nil || request.ThreadID <= 0 || message == "" || plainReply == "" {
+		return
+	}
+	reply := TabReply{Lane: request.Lane(), ChatID: request.ChatID, SessionID: request.SessionID, Message: message, Reply: plainReply}
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.tabReplies.TabReplied(ctx, reply)
+	}()
 }
 
 // rememberReply keeps a plain reply for the guards of the principal's next turns. It runs after the
@@ -1105,10 +1135,10 @@ func (s *Service) rememberReply(ctx context.Context, request Request, plainReply
 	s.config.Recent.RecordReply(request.PrincipalID, request.ThreadID, plainReply)
 }
 
-// recordReply counts a delivered reply and returns its plain text, if the turn kept one. The stages
-// are recorded only for a plain delivered reply, because dashboards divide their sums by the
-// delivered chat reply count.
-func (s *Service) recordReply(ctx context.Context, request Request, deliveryStarted time.Time) string {
+// recordReply counts a delivered reply and returns its plain text and the user's message, if the
+// turn kept them. The stages are recorded only for a plain delivered reply, because dashboards
+// divide their sums by the delivered chat reply count.
+func (s *Service) recordReply(ctx context.Context, request Request, deliveryStarted time.Time) (string, string) {
 	s.mu.Lock()
 	capture, captured := s.captures[request.ID]
 	delete(s.captures, request.ID)
@@ -1127,13 +1157,13 @@ func (s *Service) recordReply(ctx context.Context, request Request, deliveryStar
 	now := time.Now()
 	s.telemetry.RecordReply(ctx, request.PrincipalID, "chat", outcome, capture.safetyChecks, max(now.Sub(request.CreatedAt), 0))
 	if outcome != "delivered" {
-		return ""
+		return "", ""
 	}
 	s.telemetry.RecordReplyStage(ctx, request.PrincipalID, "queue", capture.queue)
 	s.telemetry.RecordReplyStage(ctx, request.PrincipalID, "setup", capture.setup)
 	s.telemetry.RecordReplyStage(ctx, request.PrincipalID, "model", capture.model)
 	s.telemetry.RecordReplyStage(ctx, request.PrincipalID, "delivery", now.Sub(deliveryStarted))
-	return capture.plainReply
+	return capture.plainReply, capture.message
 }
 
 // safetyChecksLabel reads the principal's opt-in once per turn; any failure to know is "unavailable".

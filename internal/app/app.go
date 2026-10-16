@@ -928,6 +928,9 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	if a.tripNotifier != nil {
 		a.tripNotifier.Feeds = service.Feeds()
 	}
+	if a.conversation != nil {
+		a.conversation.SetTabReplies(service)
+	}
 	if a.typeSafe != nil {
 		service.SetTypeSafe(a.typeSafe)
 	}

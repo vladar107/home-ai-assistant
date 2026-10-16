@@ -101,6 +101,61 @@ func TestMigrationTabsKeepsExistingRows(t *testing.T) {
 	}
 }
 
+func TestMigrationExistingTabNamesKeepsTabsAlreadyOpen(t *testing.T) {
+	ctx := t.Context()
+	path, err := filepath.Abs(filepath.Join(t.TempDir(), "assistant.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", dataSourceName(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	migrations, err := loadMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, createMigrationsTable); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range migrations {
+		if m.name >= "036" {
+			break
+		}
+		if _, err := db.ExecContext(ctx, m.sql); err != nil {
+			t.Fatalf("apply %s: %v", m.name, err)
+		}
+		if _, err := db.ExecContext(ctx, `INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, ?)`, m.version, m.name, m.checksum, "2026-10-01T00:00:00Z"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, statement := range []string{
+		`INSERT INTO principals (id, display_name) VALUES ('alice', 'Alice')`,
+		`INSERT INTO telegram_tabs (principal_id, thread_id, name, named_by) VALUES ('alice', 1, 'Opened without a name', 'bot')`,
+		`INSERT INTO telegram_tabs (principal_id, thread_id, name, named_by) VALUES ('alice', 2, 'Named by Alice', 'user')`,
+		`INSERT INTO telegram_tabs (principal_id, thread_id, name, named_by, subject) VALUES ('alice', 3, 'Reports', 'fixed', 'feed:reports')`,
+	} {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	store := &Store{db: db}
+	for threadID, want := range map[int64]string{1: TabNamedByUser, 2: TabNamedByUser, 3: TabNamedByFixed} {
+		if tab, found, err := store.Tab(ctx, "alice", threadID); err != nil || !found || tab.NamedBy != want {
+			t.Fatalf("tab %d after migration = %+v %v %v, want named by %s", threadID, tab, found, err, want)
+		}
+	}
+	if claimed, err := store.ClaimTabName(ctx, "alice", 1, "55555555-5555-4555-8555-555555555555"); err != nil || claimed {
+		t.Fatalf("claim of a tab open before the migration = %v %v", claimed, err)
+	}
+}
+
 // tabMessage queues one message in a lane, finishes its turn, and returns the session it joined.
 func tabMessage(t *testing.T, store *Store, lane conversation.Lane, update int64) string {
 	t.Helper()

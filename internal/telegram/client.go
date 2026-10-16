@@ -734,6 +734,42 @@ func (c *Client) DeleteForumTopic(ctx context.Context, chatID, threadID int64) e
 	return err
 }
 
+// EditForumTopic sets a tab's name, its icon, or both; an empty value keeps what the tab has. The
+// icon must be one of GetForumTopicIconStickers. A tab that is not found is not reported to the
+// observer, because nothing was sent there.
+func (c *Client) EditForumTopic(ctx context.Context, chatID, threadID int64, name, iconCustomEmojiID string) error {
+	name = strings.TrimSpace(name)
+	if name == "" && iconCustomEmojiID == "" {
+		return nil
+	}
+	params := url.Values{
+		"chat_id":           {strconv.FormatInt(chatID, 10)},
+		"message_thread_id": {strconv.FormatInt(threadID, 10)},
+	}
+	if runes := []rune(name); len(runes) > topicNameLimit {
+		name = strings.TrimSpace(string(runes[:topicNameLimit]))
+	}
+	if name != "" {
+		params.Set("name", name)
+	}
+	if iconCustomEmojiID != "" {
+		params.Set("icon_custom_emoji_id", iconCustomEmojiID)
+	}
+	_, err := execute[bool](c, ctx, "editForumTopic", params)
+	return err
+}
+
+// TopicIcon is one icon a tab may show: the custom emoji's ID and the emoji it stands for.
+type TopicIcon struct {
+	Emoji         string `json:"emoji"`
+	CustomEmojiID string `json:"custom_emoji_id"`
+}
+
+// GetForumTopicIconStickers returns the icons Telegram lets a tab show.
+func (c *Client) GetForumTopicIconStickers(ctx context.Context) ([]TopicIcon, error) {
+	return execute[[]TopicIcon](c, ctx, "getForumTopicIconStickers", nil)
+}
+
 // forwardBatch is Telegram's limit on the messages of one forwardMessages call.
 const forwardBatch = 100
 

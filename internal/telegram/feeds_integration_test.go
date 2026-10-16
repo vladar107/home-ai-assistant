@@ -208,6 +208,39 @@ func TestAScheduledRunSendsItsFilesToItsFeedTab(t *testing.T) {
 	h.waitRun(job.ID, schedule.StatusDelivered)
 }
 
+func TestFeedTabsShowTheirIconWhenTelegramOffersIt(t *testing.T) {
+	h, _ := newFeedHarness(t, newControlledRuntime(), nil, true)
+	if err := h.notifier().Send(h.ctx, "alice", "first"); err != nil {
+		t.Fatal(err)
+	}
+	reminders := h.wantFeedTab("Reminders", thread.FeedReminders)
+	// The clock is offered with a variation selector; the feed asks for it without one.
+	if edit := receive(t, h.ctx, h.tabs.topicEdits); edit != (editedTopic{threadID: reminders, iconID: "5000000000000000002", iconed: true}) {
+		t.Fatalf("feed tab edit = %+v, want only its icon", edit)
+	}
+	if message := h.nextMessage(); message.threadID != reminders {
+		t.Fatalf("message = %+v, want it in tab %d", message, reminders)
+	}
+	if tab, _ := h.registryTab(reminders); tab.IconCustomEmojiID != "5000000000000000002" || tab.Name != "Reminders" {
+		t.Fatalf("feed tab in the registry = %+v", tab)
+	}
+
+	if err := h.notifier().Send(h.ctx, "alice", "second"); err != nil {
+		t.Fatal(err)
+	}
+	h.nextMessage()
+	// The Reports icon is not in the set Telegram offers here, so that tab is made without one.
+	if _, err := h.service.Feeds().Thread(h.ctx, "alice", 101, thread.FeedReports); err != nil {
+		t.Fatal(err)
+	}
+	h.wantFeedTab("Reports", thread.FeedReports)
+	select {
+	case edit := <-h.tabs.topicEdits:
+		t.Fatalf("unexpected tab edit %+v", edit)
+	default:
+	}
+}
+
 func TestAGoneFeedTabIsMadeAgainOnItsNextMessage(t *testing.T) {
 	h, _ := newFeedHarness(t, newControlledRuntime(), nil, true)
 	if err := h.notifier().Send(h.ctx, "alice", "first"); err != nil {
