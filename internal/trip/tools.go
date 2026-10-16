@@ -31,7 +31,14 @@ const (
 	dateLayout  = "2006-01-02"
 )
 
-const listGuidance = "Trips: trip_list shows the user's upcoming and active trips with their ids, dates, bookings, and check-in reminders; with an id it shows one trip in full."
+const listGuidance = "Trips: trip_list shows the user's upcoming and active trips with their ids, dates, bookings, and check-in reminders; with an id it shows one trip in full. " +
+	"When the user asks about their trips, or asks to add a trip that trip_list does not have, and the mail or calendar tools are available, look before you answer that there is none: " +
+	"search mail with gmail_search and the calendar with calendar_events, open each likely booking in full with gmail_read_message or calendar_read_event, never relying on a search snippet alone, " +
+	"and then report or add what you found. A passing mention of travel is no reason to search mail or the calendar."
+
+// scanOffLine ends a listing while the Trips scan could run but does not.
+const scanOffLine = "The Trips scan is off, so bookings in the user's mail and calendar are not found on their own; " +
+	"offer to turn it on in /settings under Trips, or search mail and calendar now."
 
 func writeGuidance(zone string) string {
 	return "Trips: record a trip with trip_add when the user mentions travel plans with dates, and change one with trip_update by its id from trip_list. " +
@@ -169,6 +176,12 @@ type Proposer interface {
 	Act(context.Context, string, approval.Proposal) (string, error)
 }
 
+// ScanState says whether the principal's Trips scan is off although it could run, because Google
+// mail or calendar is readable; the application implements it.
+type ScanState interface {
+	ScanOff(ctx context.Context, principalID string) (bool, error)
+}
+
 // ToolsConfig configures the trip tools.
 type ToolsConfig struct {
 	// Zone is the IANA time zone a trip gets when none is named; the scheduler's default zone.
@@ -179,6 +192,7 @@ type ToolsConfig struct {
 type Tools struct {
 	service  *Service
 	proposer Proposer
+	scans    ScanState
 	zone     string
 	logger   *slog.Logger
 }
@@ -198,6 +212,10 @@ func NewTools(cfg ToolsConfig, service *Service, proposer Proposer, logger *slog
 	}
 	return &Tools{service: service, proposer: proposer, zone: cfg.Zone, logger: logger}, nil
 }
+
+// SetScanState lets trip_list say when the Trips scan is off; nil says nothing. Call it before the
+// tools are used.
+func (t *Tools) SetScanState(scans ScanState) { t.scans = scans }
 
 // Contribute offers trip_list everywhere and the write tools on chat turns when there is an
 // approval service.
@@ -361,16 +379,26 @@ func (t *Tools) executeList(ctx context.Context, principalID string, call tools.
 			trips = append(trips, trip)
 		}
 	}
-	if len(trips) == 0 {
-		return tools.Result{Text: "The user has no upcoming or active trips."}, nil
+	lines := []string{"The user has no upcoming or active trips."}
+	if len(trips) > 0 {
+		lines = []string{fmt.Sprintf("%d upcoming or active trips, earliest first:", len(trips))}
 	}
-	lines := []string{fmt.Sprintf("%d upcoming or active trips, earliest first:", len(trips))}
 	for index, trip := range trips {
 		if index == listedTrips {
 			lines = append(lines, fmt.Sprintf("%d later trips are not shown.", len(trips)-listedTrips))
 			break
 		}
 		lines = append(lines, renderTrip(trip, now))
+	}
+	// Only a chat turn can offer the switch; a scheduled turn would remind a user who chose it off.
+	if _, chat := outbox.ChatRequest(tools.TurnFrom(ctx)); chat && t.scans != nil {
+		off, err := t.scans.ScanOff(ctx, principalID)
+		if err != nil {
+			t.logger.WarnContext(ctx, "trip.scan_state.failed", "principal_id", principalID, "error", err)
+		}
+		if off && err == nil {
+			lines = append(lines, scanOffLine)
+		}
 	}
 	return tools.Result{Text: strings.Join(lines, "\n")}, nil
 }

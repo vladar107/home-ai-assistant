@@ -638,8 +638,10 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		if err := approvals.RegisterExecutor(tripTools); err != nil {
 			return err
 		}
+		tripState := &tripScanState{schedules: scheduler}
+		tripTools.SetScanState(tripState)
 		tripNotifier := telegram.TripNotifier{Client: client, Chats: a.store}
-		if err := scheduler.Register(trip.ScanJobType(tripScanChecker{conversationService}, tripService, tripNotifier, tripNotifier, scheduler.Now, a.logger)); err != nil {
+		if err := scheduler.Register(trip.ScanJobType(tripScanChecker{conversationService}, a.store, tripState, tripService, tripNotifier, tripNotifier, scheduler.Now, a.logger)); err != nil {
 			return err
 		}
 		paused := []trip.Paused{scheduler}
@@ -761,6 +763,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			if err := broker.Register(calendarService); err != nil {
 				return err
 			}
+			tripState.google = googleService
 			a.google = googleService
 		}
 		if nsService != nil {

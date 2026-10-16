@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,16 +16,53 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/trip"
 )
 
-type noCheck struct{}
-
-func (noCheck) RunCheck(context.Context, string, string) (string, string, error) {
-	return `{"trips":[]}`, "", nil
+// scanReply is the model's answer to a Trips scan, which finds nothing until a test sets it. While
+// hold is set, a scan waits for it to close.
+type scanReply struct {
+	mu   sync.Mutex
+	text string
+	hold chan struct{}
 }
+
+func (r *scanReply) RunCheck(ctx context.Context, _, _ string) (string, string, error) {
+	r.mu.Lock()
+	text, hold := r.text, r.hold
+	r.mu.Unlock()
+	if hold != nil {
+		select {
+		case <-hold:
+		case <-ctx.Done():
+			return "", "", ctx.Err()
+		}
+	}
+	if text == "" {
+		return `{"trips":[]}`, "", nil
+	}
+	return text, "", nil
+}
+
+func (r *scanReply) holdScans() chan struct{} {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.hold = make(chan struct{})
+	return r.hold
+}
+
+func (r *scanReply) set(text string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.text = text
+}
+
+type readableMail struct{}
+
+func (readableMail) MailReadable(context.Context, string) (bool, error) { return true, nil }
 
 type tripHarness struct {
 	*conversationHarness
 	clock *testClock
 	trips *trip.Service
+	scan  *scanReply
 }
 
 func newTripHarness(t *testing.T) (*tripHarness, *googlesim.Simulator) {
@@ -40,12 +78,13 @@ func newTripHarness(t *testing.T) (*tripHarness, *googlesim.Simulator) {
 		t.Fatal(err)
 	}
 	notifier := TripNotifier{Client: h.client, Chats: h.store}
-	if err := h.scheduler.Register(trip.ScanJobType(noCheck{}, trips, notifier, notifier, clock.Now, logger)); err != nil {
+	reply := &scanReply{}
+	if err := h.scheduler.Register(trip.ScanJobType(reply, h.store, readableMail{}, trips, notifier, notifier, clock.Now, logger)); err != nil {
 		t.Fatal(err)
 	}
 	h.service.SetTrips(trips)
 	h.start()
-	return &tripHarness{conversationHarness: h, clock: clock, trips: trips}, sim
+	return &tripHarness{conversationHarness: h, clock: clock, trips: trips, scan: reply}, sim
 }
 
 func (h *tripHarness) suggest(reference string) trip.Trip {
@@ -183,6 +222,104 @@ func TestTripsSwitchNeedsGoogleAndManagesItsJob(t *testing.T) {
 	page = h.press(23, 101, messageID, "trips:off")
 	if !strings.Contains(page.text, TripsOffLine) || h.countRows(`SELECT count(*) FROM scheduled_jobs`) != 0 {
 		t.Fatalf("page after off = %+v", page)
+	}
+}
+
+// Turning Trips on scans at once, both when it creates the job and when it resumes a paused one,
+// and Scan now queues one more run; a press on a switch that is already on queues nothing. A run
+// with nothing new says so, and one that sent a card says how many it found.
+func TestTripsSwitchScansAtOnceAndScanNowScansAgain(t *testing.T) {
+	h, sim := newTripHarness(t)
+	h.connectGoogle(sim, 1, 101, aliceMailbox, bothProducts)
+	id := schedule.TripsJobID("alice")
+	manualRuns := func() int {
+		return h.countRows(`SELECT count(*) FROM schedule_runs WHERE job_id = ? AND manual = 1`, id)
+	}
+	wantQuietReport := func() {
+		t.Helper()
+		if report := h.nextMessage(); report.chatID != 101 || !strings.Contains(report.text, schedule.QuietManualText) {
+			t.Fatalf("report = %+v", report)
+		}
+	}
+
+	h.requestSettings(10, 101)
+	messageID := settingsMessageID(10)
+	h.openSettingsPage(11, 101, messageID, "tools")
+	page := h.press(12, 101, messageID, "trips:on")
+	if !strings.Contains(page.text, TripsScanningNote) || !slices.Contains(buttonData(page.keyboard), "trips:scan") || manualRuns() != 1 {
+		t.Fatalf("page after on = %+v, manual runs %d", page, manualRuns())
+	}
+	wantQuietReport()
+	if page = h.press(13, 101, messageID, "trips:on"); strings.Contains(page.text, TripsScanningNote) || manualRuns() != 1 {
+		t.Fatalf("a second on press = %+v, manual runs %d", page, manualRuns())
+	}
+
+	if changed, err := h.scheduler.SetEnabled(h.ctx, "alice", id, false); err != nil || !changed {
+		t.Fatalf("pause: %v %v", changed, err)
+	}
+	if page = h.press(14, 101, messageID, "trips:scan"); slices.Contains(buttonData(page.keyboard), "trips:scan") || manualRuns() != 1 {
+		t.Fatalf("scan while paused = %+v, manual runs %d", page, manualRuns())
+	}
+	h.clock.Set(t, "2026-09-28T08:05:00+02:00")
+	if page = h.press(15, 101, messageID, "trips:on"); !strings.Contains(page.text, TripsScanningNote) || manualRuns() != 2 {
+		t.Fatalf("page after resume = %+v, manual runs %d", page, manualRuns())
+	}
+	wantQuietReport()
+
+	h.clock.Set(t, "2026-09-28T08:10:00+02:00")
+	if page = h.press(16, 101, messageID, "trips:scan"); !strings.Contains(page.text, TripsScanningNote) || manualRuns() != 3 {
+		t.Fatalf("page after scan now = %+v, manual runs %d", page, manualRuns())
+	}
+	wantQuietReport()
+
+	h.scan.set(`{"trips":[{"title":"Example trip","destination":"Example City","timezone":"Europe/Lisbon",` +
+		`"starts_at":"2026-10-10T09:00:00Z","ends_at":"2026-10-15T18:00:00Z","bookings":[{"kind":"flight","title":"Flight to Example City",` +
+		`"reference":"ABC123","starts_at":"2026-10-10T09:00:00Z","check_in_at":"2026-10-09T09:00:00Z","check_in_source":"stated"}]}]}`)
+	h.clock.Set(t, "2026-09-28T08:15:00+02:00")
+	h.press(17, 101, messageID, "trips:scan")
+	if card := h.nextMessage(); !strings.HasPrefix(card.text, "Trip found in mail:") || len(buttonData(card.keyboard)) != 2 {
+		t.Fatalf("card = %+v", card)
+	}
+	if report := h.nextMessage(); !strings.Contains(report.text, "Found 1 new trip in your mail and calendar; its card is above.") ||
+		strings.Contains(report.text, schedule.QuietManualText) {
+		t.Fatalf("report after a find = %+v", report)
+	}
+}
+
+// While a scan is queued or running, neither Scan now nor turning Trips back on queues another.
+func TestTripsScanNowWaitsForTheScanUnderWay(t *testing.T) {
+	h, sim := newTripHarness(t)
+	h.connectGoogle(sim, 1, 101, aliceMailbox, bothProducts)
+	id := schedule.TripsJobID("alice")
+	manualRuns := func() int {
+		return h.countRows(`SELECT count(*) FROM schedule_runs WHERE job_id = ? AND manual = 1`, id)
+	}
+	release := h.scan.holdScans()
+
+	h.requestSettings(10, 101)
+	messageID := settingsMessageID(10)
+	h.openSettingsPage(11, 101, messageID, "tools")
+	if page := h.press(12, 101, messageID, "trips:on"); !strings.Contains(page.text, TripsScanningNote) || manualRuns() != 1 {
+		t.Fatalf("page after on = %+v, manual runs %d", page, manualRuns())
+	}
+	h.clock.Set(t, "2026-09-28T08:05:00+02:00")
+	if page := h.press(13, 101, messageID, "trips:scan"); !strings.Contains(page.text, TripsBusyNote) || manualRuns() != 1 {
+		t.Fatalf("scan now during a scan = %+v, manual runs %d", page, manualRuns())
+	}
+	if changed, err := h.scheduler.SetEnabled(h.ctx, "alice", id, false); err != nil || !changed {
+		t.Fatalf("pause: %v %v", changed, err)
+	}
+	if page := h.press(14, 101, messageID, "trips:on"); !strings.Contains(page.text, TripsBusyNote) || manualRuns() != 1 {
+		t.Fatalf("resume during a scan = %+v, manual runs %d", page, manualRuns())
+	}
+
+	close(release)
+	if report := h.nextMessage(); !strings.Contains(report.text, schedule.QuietManualText) {
+		t.Fatalf("report = %+v", report)
+	}
+	h.waitRun(id, schedule.StatusDelivered)
+	if page := h.press(15, 101, messageID, "trips:scan"); !strings.Contains(page.text, TripsScanningNote) || manualRuns() != 2 {
+		t.Fatalf("scan now after the scan = %+v, manual runs %d", page, manualRuns())
 	}
 }
 

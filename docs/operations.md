@@ -269,13 +269,22 @@ visible in `/jobs`). Heads-up moved to 07:30 and 18:30; at start, a Heads-up job
 still on the old schedule is moved once, and one the user changed is left alone.
 Moving a Heads-up job from 19:00 to 18:30 skips that one evening run.
 
+Migration 033 adds `trip_scans`, which keeps when each user's last successful
+scan started. A scan with no success in the last 7 days searches 180 days of
+mail on a budget of 60 tool calls; otherwise it searches 8 days on 40. A failed
+or unreadable scan, one whose cards could not be sent, or one that could not
+read mail (`mail=false` on `trip.scan.done`) records nothing. Turning Trips on,
+or pressing *Scan now* in `/settings`, queues a manual run at once and logs
+`trips.scan.queued`, unless a scan is already queued or running.
+
 `home_agent_schedule_travel_paused_total` counts occurrences skipped because a job was
 paused for a trip, and `schedule.run.travel_paused` logs the same with IDs only.
-If a scan fails or sends no card, look for `trip.scan.done` (counts of found, new,
-updated, and dropped trips), `trip.scan.unreadable` (the model did not return
+If a scan fails or sends no card, look for `trip.scan.done` (the days searched and counts
+of found, new, updated, and dropped trips), `trip.scan.unreadable` (the model did not return
 valid JSON), and `trip.scan.card_failed` in the logs, and check that the user's
 model subscription is connected and Google mail or calendar is on. A manual Run
-now from `/jobs` answers "nothing to report" when nothing is new. Start and end
+now from `/jobs` answers "nothing to report" when nothing is new, and otherwise
+says how many trips it found or updated. Start and end
 notices log `trip.notice.sent` and, when a send fails and is retried on the next
 minute, `trip.notice.send_failed`. Logs carry IDs and counts, never titles,
 destinations, or references.

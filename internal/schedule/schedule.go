@@ -150,6 +150,8 @@ type Occurrence struct {
 	Config       json.RawMessage
 	ScheduledFor time.Time
 	Location     *time.Location
+	// Manual is true for a run the user asked for outside the schedule.
+	Manual bool
 }
 
 // Result is the text to deliver to the job's owner. ErrorKind is empty for success and a short

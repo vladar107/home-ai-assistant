@@ -24,6 +24,7 @@ const (
 	tripsSectionPrefix = "trips"
 	tripsOnAction      = "on"
 	tripsOffAction     = "off"
+	tripsScanAction    = "scan"
 
 	// tripCardBookings and tripCardRunes keep a card well inside Telegram's 4096-character limit.
 	tripCardBookings = 8
@@ -34,11 +35,13 @@ const (
 	TripIgnoredReply   = "Ignored; I won't offer it again."
 	TripCancelledReply = "This trip was cancelled."
 
-	TripsOnLine  = "Trips: on. Each morning I look in your mail and calendar for travel bookings and offer each trip with Track and Ignore buttons; nothing is planned without your press. Uses your model subscription."
-	TripsOffLine = "Trips: off. Turn it on and each morning I look in your mail and calendar for travel bookings and offer each trip with Track and Ignore buttons; nothing is planned without your press. Needs a connected model subscription, which it uses."
+	TripsOnLine  = "Trips: on. Each morning I look in your mail and calendar for travel bookings and offer each trip with Track and Ignore buttons; nothing is planned without your press. Press Scan now to look at once. Uses your model subscription."
+	TripsOffLine = "Trips: off. Turn it on and I look in your mail and calendar for travel bookings at once and then each morning, and offer each trip with Track and Ignore buttons; nothing is planned without your press. Needs a connected model subscription, which it uses."
 	// TripsNeedsGoogleLine explains why the switch is not offered.
 	TripsNeedsGoogleLine = "Trips: off. It reads your mail and calendar, so turn on Mail or Calendar for a connected Google account in Accounts › Google first."
 	TripsTooManyNote     = "You already have the maximum number of scheduled jobs. Remove one in /jobs, then turn Trips on."
+	TripsScanningNote    = "Scanning your mail and calendar now; any trips I find arrive here as cards."
+	TripsBusyNote        = "A scan is already running; any trips it finds arrive here as cards."
 )
 
 // TripController is implemented by the trip service; nil leaves the Trips switch and the buttons of
@@ -360,8 +363,11 @@ func (t tripsSection) render(ctx context.Context, principalID string) (settingsV
 	}
 	if enabled {
 		return settingsView{
-			lines:   []string{TripsOnLine},
-			buttons: []InlineButton{{Text: "Turn off Trips", CallbackData: tripsSectionPrefix + ":" + tripsOffAction}},
+			lines: []string{TripsOnLine},
+			buttons: []InlineButton{
+				{Text: "Scan now", CallbackData: tripsSectionPrefix + ":" + tripsScanAction},
+				{Text: "Turn off Trips", CallbackData: tripsSectionPrefix + ":" + tripsOffAction},
+			},
 		}, nil
 	}
 	readable, err := t.readable(ctx, principalID)
@@ -396,13 +402,14 @@ func (t tripsSection) act(ctx context.Context, principalID string, _ int64, acti
 			if job.ID != id {
 				continue
 			}
-			if !job.Enabled {
-				if _, err := t.schedules.SetEnabled(ctx, principalID, id, true); err != nil {
-					return settingsOutcome{}, err
-				}
-				t.telemetry.ContextLogger(ctx, t.logger).InfoContext(ctx, "trips.changed", "principal_id", principalID, "enabled", true)
+			if job.Enabled {
+				return settingsOutcome{}, nil
 			}
-			return settingsOutcome{}, nil
+			if _, err := t.schedules.SetEnabled(ctx, principalID, id, true); err != nil {
+				return settingsOutcome{}, err
+			}
+			t.telemetry.ContextLogger(ctx, t.logger).InfoContext(ctx, "trips.changed", "principal_id", principalID, "enabled", true)
+			return t.scan(ctx, principalID)
 		}
 		prepared, err := t.schedules.Prepare(principalID, schedule.TripsName, schedule.TripScanType,
 			schedule.Timing{Cron: schedule.TripsCron, Zone: t.schedules.DefaultZone()}, trip.ScanConfig())
@@ -416,10 +423,17 @@ func (t tripsSection) act(ctx context.Context, principalID string, _ int64, acti
 			}
 			return settingsOutcome{}, err
 		}
-		if created {
-			t.telemetry.ContextLogger(ctx, t.logger).InfoContext(ctx, "trips.changed", "principal_id", principalID, "enabled", true)
+		if !created {
+			return settingsOutcome{}, nil
 		}
-		return settingsOutcome{}, nil
+		t.telemetry.ContextLogger(ctx, t.logger).InfoContext(ctx, "trips.changed", "principal_id", principalID, "enabled", true)
+		return t.scan(ctx, principalID)
+	case tripsScanAction:
+		enabled, err := t.enabled(ctx, principalID)
+		if err != nil || !enabled {
+			return settingsOutcome{}, err
+		}
+		return t.scan(ctx, principalID)
 	case tripsOffAction:
 		deleted, err := t.schedules.Delete(ctx, principalID, id)
 		if err != nil {
@@ -432,4 +446,24 @@ func (t tripsSection) act(ctx context.Context, principalID string, _ int64, acti
 	default:
 		return settingsOutcome{}, errUnknownSettingsAction
 	}
+}
+
+// scan queues one run of the principal's Trips scan, named by the press so a retried update
+// queues no second one. A scan already queued or running is left to finish, so two far scans
+// never share the user's subscription.
+func (t tripsSection) scan(ctx context.Context, principalID string) (settingsOutcome, error) {
+	id := schedule.TripsJobID(principalID)
+	busy, err := t.schedules.Busy(ctx, principalID, id)
+	if err != nil {
+		return settingsOutcome{}, err
+	}
+	if busy {
+		return settingsOutcome{note: TripsBusyNote}, nil
+	}
+	queued, err := t.schedules.RunNow(ctx, principalID, id, pressTriggerFrom(ctx))
+	if err != nil || !queued {
+		return settingsOutcome{}, err
+	}
+	t.telemetry.ContextLogger(ctx, t.logger).InfoContext(ctx, "trips.scan.queued", "principal_id", principalID)
+	return settingsOutcome{note: TripsScanningNote}, nil
 }

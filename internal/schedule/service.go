@@ -522,6 +522,7 @@ func (s *Service) execute(ctx context.Context, run Run) (Run, bool) {
 			Config:       run.Config,
 			ScheduledFor: run.ScheduledFor,
 			Location:     location,
+			Manual:       run.Manual,
 		})
 	}
 	if ctx.Err() != nil {
@@ -762,6 +763,20 @@ func (s *Service) RunNow(ctx context.Context, principalID, jobID, trigger string
 	}
 	s.Wake()
 	return true, nil
+}
+
+// Busy is true while the principal's job has a run queued or running.
+func (s *Service) Busy(ctx context.Context, principalID, jobID string) (bool, error) {
+	runs, err := s.repository.ScheduledRuns(ctx, StatusQueued, StatusRunning)
+	if err != nil {
+		return false, err
+	}
+	for _, run := range runs {
+		if run.PrincipalID == principalID && run.JobID == jobID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // Prepared is a validated job ready to be proposed or stored, with its parsed schedule.

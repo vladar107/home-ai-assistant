@@ -1,6 +1,6 @@
 # 0086 — Trips that find the bookings in mail and calendar
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
@@ -37,10 +37,18 @@ The production logs for 2026-10-16 show three causes:
   - The prompt's mail window is computed in code. It is 180 days when there
     is no successful scan or the last one is more than 7 days old, and
     otherwise 8 days, so a day missed by a restart is still covered.
-  - The calendar window stays at the next 180 days.
+  - The calendar window stays at the next 180 days. `calendar_events` covers
+    at most 62 days per call, so the prompt asks for three calls.
   - A run counts as successful when its reply decodes, even if the tool
     budget ran out first. An unreadable reply or a failed run records
-    nothing.
+    nothing. A run whose cards could not be sent records nothing either,
+    because its finds are forgotten and the next scan must search as far
+    back to offer them again.
+  - A run counts only when the principal's mail could be read as it started:
+    Mail granted and on for an account that needs no reconnect. A run with
+    only Calendar readable still runs and offers cards, but it searched no
+    mail, so it leaves the next scan searching far. The scan handler asks
+    through a `MailCheck` interface, which `internal/app` implements.
 - **Read in full, within budget.**
   - The prompt names `gmail_read_message` and `calendar_read_event`, and it
     says never to report a booking from a snippet alone.
@@ -56,15 +64,32 @@ The production logs for 2026-10-16 show three causes:
     it creates the job and when it re-enables a paused one.
   - While the scan is on, the section also gets a *Scan now* button. A manual
     run with nothing new says so, as today.
+  - A manual run that sent cards or update lines says how many, in counts
+    only, counting an update only once its line was sent, such as "Found 2 new trips in your mail and calendar; their cards
+    are above." Before, the scheduler followed the cards with "Nothing to
+    report right now." `schedule.Occurrence` gains `Manual` so the handler
+    knows. Scheduled runs stay quiet.
+  - The run is named by the button press, so a retried Telegram update
+    queues no second run. Settings sections get the press through the
+    context, because their `act` has no parameter for it.
+  - No two scans run at once for one user. While the Trips job has a run
+    queued or running, turning it back on and *Scan now* queue nothing and
+    say a scan is already running. The section asks the new
+    `schedule.Service.Busy`, so `RunNow` keeps its meaning for `/jobs`.
 - **The model knows when the scan is off.**
-  - `trip_list` output ends with one line when the scan could run but does
+  - A `trip_list` listing ends with one line when the scan could run but does
     not: the scan is off and can be turned on in `/settings`, or the model
     can look now. That is when Google mail or calendar is readable for the
     principal (the same test as the `/settings` section) and there is no
     enabled Trips job.
-  - The trip tools read this through a small `ScanState` interface.
-    `internal/app` implements it over the schedule service and the Google
-    status, so `internal/trip` gains no new imports.
+  - The line appears on chat turns only. Scheduled and task turns, such as
+    Heads-up, never get it, so a user who chose the scan off is not reminded.
+  - The trip tools read this through a small `ScanState` interface, set with
+    `SetScanState`. `internal/app` implements it, and `MailCheck`, in one
+    value over the schedule service and one read of the Google account
+    status, which it gets once the Google connector exists. `internal/trip`
+    gains no new imports. If the state cannot be read, the line is left out
+    and a warning is logged.
 - **Chat looks before it says "none".**
   - The list guidance, which every turn with trip tools gets, says this.
     When the user asks about their trips, or asks to add one that
@@ -86,7 +111,8 @@ The production logs for 2026-10-16 show three causes:
 
 1. **Scan window and reading.** Jev: complex (1.00).
    - Migration 033 adds `trip_scans`, with store methods to read and record
-     the last scan.
+     the last scan. The number follows plan 0085's migration 032, which lands
+     first.
    - `ScanPrompt` becomes a function of the window. Add the read-in-full,
      search, and budget wording, and the two budgets.
    - `ScanJobType` takes the scan store, wired in `internal/app/app.go`.
@@ -121,11 +147,12 @@ The production logs for 2026-10-16 show three causes:
 
 ## Files affected
 
-- `internal/trip/`: `scan.go`, `tools.go`, `service.go`
+- `internal/trip/`: `scan.go`, `tools.go`
 - `internal/store/sqlite/`: `migrations/033_trip_scans.sql`, `trips.go`
-- `internal/telegram/trips.go`
+- `internal/telegram/`: `trips.go`, `settings.go`, `service.go`
+- `internal/schedule/`: `schedule.go`, `service.go`
 - `internal/app/app.go`, `internal/app/trips.go`
-- `README.md`, `docs/plans/README.md`
+- `README.md`, `docs/operations.md`, `docs/plans/README.md`
 
 ## Validation
 

@@ -11,7 +11,10 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/trip"
 )
 
-var _ trip.Repository = (*Store)(nil)
+var (
+	_ trip.Repository = (*Store)(nil)
+	_ trip.ScanLog    = (*Store)(nil)
+)
 
 const (
 	tripColumns = `id, principal_id, title, destination, starts_at, ends_at, zone, status, source,
@@ -292,6 +295,38 @@ func (s *Store) PruneTrips(ctx context.Context, before time.Time) (int, error) {
 		return 0, fmt.Errorf("read pruned trip count: %w", err)
 	}
 	return int(removed), nil
+}
+
+func (s *Store) LastTripScan(ctx context.Context, principalID string) (time.Time, bool, error) {
+	if s == nil || s.db == nil {
+		return time.Time{}, false, fmt.Errorf("load trip scan: SQLite store is not open")
+	}
+	var startedAt string
+	err := s.db.QueryRowContext(ctx, `SELECT started_at FROM trip_scans WHERE principal_id = ?`, principalID).Scan(&startedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("load trip scan: %w", err)
+	}
+	started, err := time.Parse(time.RFC3339Nano, startedAt)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("parse trip scan time: %w", err)
+	}
+	return started, true, nil
+}
+
+func (s *Store) RecordTripScan(ctx context.Context, principalID string, startedAt time.Time) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("record trip scan: SQLite store is not open")
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO trip_scans (principal_id, started_at) VALUES (?, ?)
+		 ON CONFLICT (principal_id) DO UPDATE SET started_at = excluded.started_at`,
+		principalID, formatTime(startedAt)); err != nil {
+		return fmt.Errorf("record trip scan: %w", err)
+	}
+	return nil
 }
 
 func parseOptionalTime(value sql.NullString) (time.Time, error) {

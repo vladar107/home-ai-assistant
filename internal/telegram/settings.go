@@ -37,6 +37,19 @@ type settingsSection interface {
 	act(ctx context.Context, principalID string, chatID int64, action string) (settingsOutcome, error)
 }
 
+type pressTriggerKey struct{}
+
+// withPressTrigger hands a section's act the press that caused it, for an action that queues work
+// once per press.
+func withPressTrigger(ctx context.Context, trigger string) context.Context {
+	return context.WithValue(ctx, pressTriggerKey{}, trigger)
+}
+
+func pressTriggerFrom(ctx context.Context) string {
+	trigger, _ := ctx.Value(pressTriggerKey{}).(string)
+	return trigger
+}
+
 // restrictedSection is a section only some principals may see, such as one the operator configured
 // for themselves alone.
 type restrictedSection interface {
