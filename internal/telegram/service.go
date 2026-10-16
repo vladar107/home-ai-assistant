@@ -877,7 +877,7 @@ func (s *Service) processCallback(ctx context.Context, bot Bot, updateID int64, 
 		page, result.command = target, "settings.nav"
 	} else if section, action, known := settingsSectionFor(sections, callback.Data); known {
 		page = settingsPageOf(sections, section.prefix())
-		outcome, err = section.act(ctx, principalID, chatID, action)
+		outcome, err = section.act(withPressTrigger(ctx, pressTrigger(bot, updateID)), principalID, chatID, action)
 		switch {
 		case errors.Is(err, errUnknownSettingsAction):
 			result.reason = "unknown_action"

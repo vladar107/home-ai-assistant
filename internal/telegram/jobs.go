@@ -45,6 +45,7 @@ type ScheduleController interface {
 	Delete(context.Context, string, string) (bool, error)
 	SetTravelPause(context.Context, string, string, bool) (bool, error)
 	RunNow(context.Context, string, string, string) (bool, error)
+	Busy(context.Context, string, string) (bool, error)
 	Snooze(context.Context, string, string, schedule.Snooze) (schedule.Job, bool, error)
 	DefaultZone() string
 	Prepare(principalID, name, jobType string, timing schedule.Timing, config json.RawMessage) (schedule.Prepared, error)

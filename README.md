@@ -85,9 +85,14 @@ borrowed between users.
 - **Trips.** A trip the user mentions ("I fly to Lisbon on 12 March and stay a
   week") is recorded with its dates and bookings, and every turn knows about the
   active or next one. With Google mail or calendar on, an optional Trips scan
-  in `/settings` reads them daily at 07:30 and sends each new booking as a card
-  with Track and Ignore buttons; nothing is planned until Track is pressed, and
-  an ignored trip is never offered again. Each booking with a check-in or pickup
+  in `/settings` reads them as soon as it is turned on, then daily at 07:30,
+  and *Scan now* runs it again at any time. The first scan looks at booking
+  mail from the last 180 days and the scans after it at the last 8, and each
+  booking is read in full. Each new booking arrives as a card with Track and Ignore
+  buttons; nothing is planned until Track is pressed, and an ignored trip is
+  never offered again. Asked about trips in chat, the assistant searches mail
+  and calendar before it says there are none, and mentions when the scan is
+  off. Each booking with a check-in or pickup
   time (flight, hotel, train, car) reminds the user in their own chat when
   check-in opens. The time comes from the booking itself, else from the
   provider's website, else it is 24 hours before the booking starts, and the
