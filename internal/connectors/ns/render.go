@@ -246,7 +246,7 @@ func renderTrip(builder *strings.Builder, v view, number int, item trip) {
 	status := ""
 	if ride, ok := firstRide(item); ok {
 		if planned, ok := parseTime(ride.Origin.PlannedDateTime); ok {
-			status = departureFrom(transit.Departure{Planned: planned.In(v.location)}, item, v.location).StatusText() + " — "
+			status = departureFrom(transit.Departure{Planned: planned.In(v.location)}, item, 0, v.location).StatusText() + " — "
 		}
 	}
 	fmt.Fprintf(builder, "%d. %sDepart %s %s", number, status, v.timed(first.Origin.PlannedDateTime, first.Origin.ActualDateTime), track(first.Origin.PlannedTrack, first.Origin.ActualTrack))

@@ -100,6 +100,7 @@ plan that links back to the earlier record.
 | 0088 | [Tab names and icons by topic](0088-tab-names-and-icons.md) | done |
 | 0089 | [A tab for each trip, with its summary pinned](0089-trip-tabs.md) | done |
 | 0090 | [Commands sent from the main view stay there](0090-commands-from-the-main-view.md) | done |
+| 0091 | [Departure checks that look past NS's preferred trips](0091-departure-checks-with-change-time.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

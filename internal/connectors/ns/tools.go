@@ -201,7 +201,7 @@ func (s *Service) trips(ctx context.Context, principalID string, request tripsRe
 		departures := s.checkDepartures(ctx, principalID, from, to, via, hasVia, at, times)
 		return tools.Result{Text: renderDepartureChecks(s.view(at), from, to, via, hasVia, at, departures)}
 	}
-	response, err := s.planTrips(ctx, from, to, via, hasVia, request.ArriveBy, at)
+	response, err := s.planTrips(ctx, from, to, via, hasVia, request.ArriveBy, at, 0)
 	if err != nil {
 		return s.failure(ctx, principalID, toolTrips, err)
 	}
@@ -228,9 +228,10 @@ func parseDepartures(values []string, arriveBy bool) ([]transit.Clock, error) {
 	return times, nil
 }
 
-// planTrips asks NS for trips, sharing the cache between ns_trips and TripStatus.
-func (s *Service) planTrips(ctx context.Context, from, to, via station, hasVia, arriveBy bool, at time.Time) (tripsResponse, error) {
-	key := strings.Join([]string{toolTrips, from.code, to.code, via.code, at.Format(dateTimeLayout), strconv.FormatBool(arriveBy)}, "|")
+// planTrips asks NS for trips, sharing the cache between ns_trips and TripStatus; changeTime adds
+// that many minutes to every transfer, and 0 leaves NS's own.
+func (s *Service) planTrips(ctx context.Context, from, to, via station, hasVia, arriveBy bool, at time.Time, changeTime int) (tripsResponse, error) {
+	key := strings.Join([]string{toolTrips, from.code, to.code, via.code, at.Format(dateTimeLayout), strconv.FormatBool(arriveBy), strconv.Itoa(changeTime)}, "|")
 	if cached, found := s.cached(key); found {
 		return cached.(tripsResponse), nil
 	}
@@ -245,6 +246,9 @@ func (s *Service) planTrips(ctx context.Context, from, to, via station, hasVia, 
 	}
 	if arriveBy {
 		query.Set("searchForArrival", "true")
+	}
+	if changeTime > 0 {
+		query.Set("addChangeTime", strconv.Itoa(changeTime))
 	}
 	var response tripsResponse
 	if err := s.client.get(ctx, "v3/trips", query, &response); err != nil {

@@ -21,6 +21,11 @@ const (
 	boardJourneys = 10
 )
 
+// changeTimeSteps are the extra transfer minutes NS is asked for in turn until its plan has a trip
+// leaving at the planned minute: NS drops a train whose connection a later departure also makes, or
+// that a later one with a transfer beats, and a longer change time lets it win again.
+var changeTimeSteps = []int{0, 10, 20, 30}
+
 // DepartureQuery asks how fixed planned departures between two stations run on one day.
 type DepartureQuery struct {
 	From string
@@ -93,28 +98,42 @@ func (s *Service) ResolveStation(ctx context.Context, principalID, role, query s
 }
 
 func (s *Service) checkDepartures(ctx context.Context, principalID string, from, to, via station, hasVia bool, day time.Time, times []transit.Clock) []transit.Departure {
-	var responses []tripsResponse
+	// plans holds the responses asked so far by change time, so each departure tries the plain plan
+	// first and is noted only when it needed the extra time.
+	plans := make(map[int][]tripsResponse, len(changeTimeSteps))
 	results := make([]transit.Departure, 0, len(times))
 	for _, clock := range times {
 		planned := clock.On(day, s.location)
 		base := transit.Departure{Planned: planned, From: from.name, To: to.name}
-		chosen, found := matchDeparture(responses, from, planned)
-		if !found {
-			response, err := s.planTrips(ctx, from, to, via, hasVia, false, planned)
-			if err != nil {
-				s.logger.InfoContext(ctx, "ns.request.failed", "principal_id", principalID, "tool", "departure_check", "error_class", errorClass(err))
-				base.Status, base.Note = transit.StatusCheckFailed, modelText(err)
-				results = append(results, base)
-				continue
+		var chosen trip
+		var changeTime int
+		var found bool
+		var err error
+		for _, step := range changeTimeSteps {
+			if chosen, found = matchDeparture(plans[step], from, planned); found {
+				changeTime = step
+				break
 			}
-			responses = append(responses, response)
-			chosen, found = matchDeparture(responses[len(responses)-1:], from, planned)
+			var response tripsResponse
+			if response, err = s.planTrips(ctx, from, to, via, hasVia, false, planned, step); err != nil {
+				break
+			}
+			plans[step] = append(plans[step], response)
+			if chosen, found = matchDeparture([]tripsResponse{response}, from, planned); found {
+				changeTime = step
+				break
+			}
 		}
-		if found {
-			results = append(results, departureFrom(base, chosen, s.location))
-			continue
+		switch {
+		case found:
+			results = append(results, departureFrom(base, chosen, changeTime, s.location))
+		case err != nil:
+			s.logger.InfoContext(ctx, "ns.request.failed", "principal_id", principalID, "tool", "departure_check", "error_class", errorClass(err))
+			base.Status, base.Note = transit.StatusCheckFailed, modelText(err)
+			results = append(results, base)
+		default:
+			results = append(results, s.boardFallback(ctx, principalID, base, from, to, via, hasVia))
 		}
-		results = append(results, s.boardFallback(ctx, principalID, base, from, to, via, hasVia))
 	}
 	return results
 }
@@ -160,7 +179,7 @@ func atStation(at stop, want station) bool {
 	return slices.Contains(want.forms, normalize(at.Name))
 }
 
-func departureFrom(base transit.Departure, item trip, location *time.Location) transit.Departure {
+func departureFrom(base transit.Departure, item trip, changeTime int, location *time.Location) transit.Departure {
 	local := func(value string) time.Time {
 		parsed, ok := parseTime(value)
 		if !ok {
@@ -223,6 +242,9 @@ func departureFrom(base transit.Departure, item trip, location *time.Location) t
 	}
 	if len(notes) > 0 {
 		result.Note = clip("NS: "+strings.Join(notes, "; "), maximumReasonBytes)
+	}
+	if changeTime > 0 {
+		result.Note = joinPresent(" ", result.Note, fmt.Sprintf("NS plans this train only with %d extra minutes for each transfer, so a connection shown may be later than the one the user makes.", changeTime))
 	}
 	result.Status = transit.StatusOf(cancelled, partly, result.DelayMinutes, result.PlatformChanged)
 	return result

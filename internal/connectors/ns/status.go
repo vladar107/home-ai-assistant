@@ -117,7 +117,7 @@ func (s *Service) TripStatus(ctx context.Context, principalID string, query Stat
 		return TripStatus{}, &RefusalError{Text: fmt.Sprintf("from and to are both %s.", from.name)}
 	}
 	at := time.Date(query.At.Year(), query.At.Month(), query.At.Day(), query.At.Hour(), query.At.Minute(), 0, 0, s.location)
-	response, err := s.planTrips(ctx, from, to, station{}, false, query.ArriveBy, at)
+	response, err := s.planTrips(ctx, from, to, station{}, false, query.ArriveBy, at, 0)
 	if err != nil {
 		s.logger.InfoContext(ctx, "ns.request.failed", "principal_id", principalID, "tool", "trip_status", "error_class", errorClass(err))
 		return TripStatus{}, &RefusalError{Text: modelText(err), Unavailable: true}
