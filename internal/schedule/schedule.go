@@ -137,7 +137,8 @@ type Repository interface {
 	// JobReportByMessage returns the principal's report that was sent as the given message.
 	JobReportByMessage(ctx context.Context, principalID string, messageID int64) (Report, bool, error)
 	HasJobReports(ctx context.Context, principalID string) (bool, error)
-	// PruneJobReports removes reports delivered before the given instant.
+	// PruneJobReports removes reports delivered before the given instant, and the watch alert
+	// messages sent before it.
 	PruneJobReports(ctx context.Context, before time.Time) error
 }
 

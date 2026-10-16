@@ -40,6 +40,16 @@ func SessionInTab(tabName string) string {
 	return "That conversation is in " + tabPlace(tabName) + ". Telegram does not let me switch tabs for you, so I posted there to bring it to the top."
 }
 
+// SessionOpenIn answers a reply to a conversation another tab, or the main view, holds; the message
+// does not run.
+func SessionOpenIn(threadID int64, tabName string) string {
+	place := tabPlace(tabName)
+	if threadID == 0 {
+		place = "the main view"
+	}
+	return "That conversation is open in " + place + ". Write there to continue it."
+}
+
 // CloseTabQuestion asks before closing a tab from /sessions.
 func CloseTabQuestion(tabName string) string {
 	place := "the tab that holds that conversation"

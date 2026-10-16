@@ -676,6 +676,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		}
 		if options.agentWatches {
 			notices = append(notices, h.watches, conversation.OutsideNotice{Notice: h.watches.AgentNotices()})
+			reports = conversation.ReportSources{h.scheduler, h.watches}
 		}
 	}
 	if options.routes {
@@ -802,6 +803,12 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	}
 	h.service.SetTabs(h.store)
 	h.client.ObserveTabs(h.service)
+	if h.scheduler != nil {
+		h.scheduler.SetFeeds(h.service.Feeds())
+	}
+	if h.watches != nil {
+		h.watches.SetFeeds(h.service.Feeds())
+	}
 	if err := broker.Register(h.service.Help()); err != nil {
 		t.Fatal(err)
 	}
@@ -920,7 +927,7 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 		case <-r.Context().Done():
 			return
 		}
-		result = Message{MessageID: messageID, Chat: Chat{ID: chatID, Type: ChatTypePrivate}}
+		result = Message{MessageID: messageID, MessageThreadID: threadID, Chat: Chat{ID: chatID, Type: ChatTypePrivate}}
 		if gate != nil {
 			select {
 			case <-gate:

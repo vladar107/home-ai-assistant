@@ -292,8 +292,13 @@ func (s *Service) Enqueue(ctx context.Context, input EnqueueInput) error {
 	if result.Busy {
 		return ErrBusy
 	}
-	if result.Created && !result.Request.ResumedFrom.IsZero() {
+	if result.Elsewhere {
+		return &OpenElsewhereError{ThreadID: result.ElsewhereThread, TabName: result.ElsewhereTab}
+	}
+	if result.Created {
 		s.leaveSession(ctx, input.PrincipalID, result.SwitchedFrom)
+	}
+	if result.Created && !result.Request.ResumedFrom.IsZero() {
 		s.telemetry.RecordConversationResume(ctx, input.PrincipalID, "reply")
 	}
 	if result.Request.State == RequestStateQueued || result.Request.State == RequestStateReady {
@@ -934,18 +939,20 @@ func (s *Service) markAttachmentsExternal(ctx context.Context, request Request, 
 // household marks the turn as having read it, before the turn decides whether it may search, and a
 // notice that may retell private content makes the conversation private before the turn replies.
 func (s *Service) takeNotice(ctx context.Context, request Request) turnNotice {
-	var text string
-	var outside, private bool
+	var text, reports string
+	var outside, private, reportsOutside, reportsPrivate bool
+	// Reports are read first, because quoting the message a reply answers drops that message's
+	// notice, so the turn is told of it once.
+	if s.config.Reports != nil {
+		reports, reportsOutside, reportsPrivate = s.config.Reports.TurnReports(ctx, request.PrincipalID, ReportTurn{OpensSession: request.OpensSession, ReplyToMessageID: request.ReplyToMessageID})
+	}
 	if s.config.Notice != nil {
 		text, outside, private = pendingNotice(s.config.Notice, request.Lane())
 	}
-	if s.config.Reports != nil {
-		reports, fromOutside, fromPrivate := s.config.Reports.TurnReports(ctx, request.PrincipalID, ReportTurn{OpensSession: request.OpensSession, ReplyToMessageID: request.ReplyToMessageID})
-		if reports != "" {
-			text = strings.TrimSpace(text + "\n\n" + reports)
-			outside = outside || fromOutside
-			private = private || fromPrivate
-		}
+	if reports != "" {
+		text = strings.TrimSpace(text + "\n\n" + reports)
+		outside = outside || reportsOutside
+		private = private || reportsPrivate
 	}
 	if private && s.config.Exposure != nil {
 		s.config.Exposure.MarkTurnPrivate(ctx, request.PrincipalID, outbox.ChatTurn(request.ID))
@@ -970,6 +977,9 @@ func (s *Service) turnMessage(request Request, notice, attachments, hint, place 
 		message = "[system] " + notice + "\n\n" + message
 	}
 	message = s.withUser(request.PrincipalID, withPlace(place, message))
+	if line := subjectContext(request.Subject, request.SubjectName); line != "" {
+		message = line + "\n\n" + message
+	}
 	if s.config.Location != nil {
 		// The time goes in the message rather than the system prompt, so the prompt stays
 		// cacheable and the session history keeps when each message was sent.
@@ -1019,7 +1029,14 @@ func (s *Service) deliver(ctx context.Context, request Request) error {
 	// A turn with nothing left to say sends nothing, not even the line marking a resumed conversation.
 	var chunks []string
 	if !silent {
-		if !request.ResumedFrom.IsZero() {
+		switch {
+		case request.SubjectLabel != "":
+			var resumedFrom time.Time
+			if !request.ResumedFrom.IsZero() {
+				resumedFrom = s.local(request.ResumedFrom)
+			}
+			response = SubjectLine(request.SubjectLabel, resumedFrom) + "\n\n" + response
+		case !request.ResumedFrom.IsZero():
 			response = ResumedLine(s.local(request.ResumedFrom)) + "\n\n" + response
 		}
 		chunks = SplitReply(response)
@@ -1033,7 +1050,7 @@ func (s *Service) deliver(ctx context.Context, request Request) error {
 		}
 	}
 	for _, chunk := range chunks {
-		messageID, err := s.deliverer.SendTrackedReply(deliveryCtx, request.ChatID, replyTo, chunk)
+		messageID, _, err := s.deliverer.SendTrackedReply(deliveryCtx, request.ChatID, replyTo, chunk)
 		if err != nil {
 			if isPermanentDeliveryError(err) {
 				s.removeCard(request)

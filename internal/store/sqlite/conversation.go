@@ -9,6 +9,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
 var _ conversation.Repository = (*Store)(nil)
@@ -41,19 +42,35 @@ func (s *Store) EnqueueConversation(
 		return conversation.EnqueueResult{Request: existing}, nil
 	}
 
+	lane := conversation.Lane{PrincipalID: input.PrincipalID, ThreadID: input.ThreadID}
+	inFeed, err := laneIsFeed(ctx, tx, lane)
+	if err != nil {
+		return conversation.EnqueueResult{}, err
+	}
 	var switched switchOutcome
-	if input.ReplyToMessageID > 0 {
-		switched, err = switchToRepliedSession(ctx, tx, conversation.Lane{PrincipalID: input.PrincipalID, ThreadID: input.ThreadID}, input.ReplyToMessageID)
-		if err != nil {
+	var previousSubject string
+	switch {
+	case inFeed:
+		if previousSubject, err = laneSubject(ctx, tx, lane); err != nil {
+			return conversation.EnqueueResult{}, err
+		}
+		if switched, err = routeInFeed(ctx, tx, lane, input.ReplyToMessageID, candidate); err != nil {
+			return conversation.EnqueueResult{}, err
+		}
+		if switched.elsewhere {
+			return conversation.EnqueueResult{Elsewhere: true, ElsewhereThread: switched.session.ThreadID, ElsewhereTab: switched.session.TabName}, nil
+		}
+	case input.ReplyToMessageID > 0:
+		if switched, err = switchToRepliedSession(ctx, tx, lane, input.ReplyToMessageID); err != nil {
 			return conversation.EnqueueResult{}, err
 		}
 	}
-	session, found, err := loadActiveConversationSession(ctx, tx, conversation.Lane{PrincipalID: input.PrincipalID, ThreadID: input.ThreadID})
+	session, found, err := loadActiveConversationSession(ctx, tx, lane)
 	if err != nil {
 		return conversation.EnqueueResult{}, err
 	}
 	if !found && input.ThreadID > 0 {
-		session, found, err = reopenGoneTab(ctx, tx, conversation.Lane{PrincipalID: input.PrincipalID, ThreadID: input.ThreadID})
+		session, found, err = reopenGoneTab(ctx, tx, lane)
 		if err != nil {
 			return conversation.EnqueueResult{}, err
 		}
@@ -72,12 +89,24 @@ func (s *Store) EnqueueConversation(
 		}
 	}
 
-	pending, err := lanePending(ctx, tx, conversation.Lane{PrincipalID: input.PrincipalID, ThreadID: input.ThreadID})
+	pending, err := lanePending(ctx, tx, lane)
 	if err != nil {
 		return conversation.EnqueueResult{}, err
 	}
 	if pending {
 		return conversation.EnqueueResult{Busy: true}, nil
+	}
+	var subjectLabel string
+	if inFeed {
+		subject, err := sessionSubject(ctx, tx, session)
+		if err != nil {
+			return conversation.EnqueueResult{}, err
+		}
+		if subject != "" && subject != previousSubject {
+			if subjectLabel, err = loadSubjectLabel(ctx, tx, input.PrincipalID, subject); err != nil {
+				return conversation.EnqueueResult{}, err
+			}
+		}
 	}
 
 	request := conversation.Request{
@@ -90,6 +119,7 @@ func (s *Store) EnqueueConversation(
 		RuntimeSessionID:  session.RuntimeSessionID,
 		Message:           input.Message,
 		State:             conversation.RequestStateQueued,
+		SubjectLabel:      subjectLabel,
 	}
 	var replyTo any
 	if input.ReplyToMessageID > 0 {
@@ -105,8 +135,8 @@ func (s *Store) EnqueueConversation(
 		ctx,
 		`INSERT INTO conversation_requests (
 		    id, bot_user_id, telegram_update_id, telegram_message_id, principal_id, chat_id, session_id, message,
-		    resumed_from, reply_to_message_id, thread_id
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		    resumed_from, reply_to_message_id, thread_id, subject_label
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''))`,
 		request.ID,
 		input.BotUserID,
 		input.TelegramUpdateID,
@@ -118,6 +148,7 @@ func (s *Store) EnqueueConversation(
 		resumedFrom,
 		replyTo,
 		request.ThreadID,
+		subjectLabel,
 	); err != nil {
 		return conversation.EnqueueResult{}, fmt.Errorf("create conversation request: %w", err)
 	}
@@ -187,7 +218,8 @@ func (s *Store) NextConversationRequest(ctx context.Context, lane conversation.L
 		        request.session_id, session.runtime_session_id, request.message, request.state,
 		        COALESCE(request.response_text, ''), COALESCE(request.error_kind, ''), request.created_at,
 		        COALESCE(request.resumed_from, ''), COALESCE(request.reply_to_message_id, 0),
-		        request.thread_id, `+requestOpensSession+`
+		        request.thread_id, `+requestOpensSession+`,
+		        COALESCE(session.subject, ''), COALESCE(request.subject_label, '')
 		 FROM conversation_requests AS request
 		 JOIN conversation_sessions AS session
 		   ON session.id = request.session_id AND session.principal_id = request.principal_id
@@ -201,6 +233,11 @@ func (s *Store) NextConversationRequest(ctx context.Context, lane conversation.L
 	}
 	if err != nil {
 		return conversation.Request{}, false, fmt.Errorf("query next conversation request: %w", err)
+	}
+	if request.Subject != "" {
+		if request.SubjectName, err = loadSubjectLabel(ctx, s.db, request.PrincipalID, request.Subject); err != nil {
+			return conversation.Request{}, false, err
+		}
 	}
 	return request, true, nil
 }
@@ -364,6 +401,14 @@ func (s *Store) ResetConversation(ctx context.Context, lane conversation.Lane) (
 	if err != nil {
 		return "", false, fmt.Errorf("read closed conversation count: %w", err)
 	}
+	if _, err := tx.ExecContext(
+		ctx,
+		`UPDATE telegram_tabs SET reset_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE principal_id = ? AND thread_id = ?`,
+		lane.PrincipalID,
+		lane.ThreadID,
+	); err != nil {
+		return "", false, fmt.Errorf("record tab reset: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return "", false, fmt.Errorf("commit conversation reset: %w", err)
 	}
@@ -440,6 +485,212 @@ func reopenGoneTab(ctx context.Context, tx *sql.Tx, lane conversation.Lane) (con
 	return session, true, nil
 }
 
+// laneIsFeed reports whether the lane is a tab the registry records as a feed.
+func laneIsFeed(ctx context.Context, tx *sql.Tx, lane conversation.Lane) (bool, error) {
+	if lane.ThreadID <= 0 {
+		return false, nil
+	}
+	var feed bool
+	if err := tx.QueryRowContext(
+		ctx,
+		`SELECT EXISTS(SELECT 1 FROM telegram_tabs WHERE principal_id = ? AND thread_id = ? AND subject LIKE ?)`,
+		lane.PrincipalID,
+		lane.ThreadID,
+		thread.FeedSubject("%"),
+	).Scan(&feed); err != nil {
+		return false, fmt.Errorf("check feed tab: %w", err)
+	}
+	return feed, nil
+}
+
+// routeInFeed finds the conversation a message in a feed tab belongs to. A reply to one of the
+// bot's answers returns to its conversation, and a reply to a report or an alert goes to the
+// conversation about its job or watch. A reply to anything else, the tab's root included, counts as
+// no reply. A message that replies to nothing goes to the subject of the tab's latest report or
+// alert when that arrived after the tab's last exchange, and otherwise stays in the tab's current
+// conversation. Only an explicit reply comes back as elsewhere when another tab holds its
+// conversation, so a tab is never stuck.
+func routeInFeed(ctx context.Context, tx *sql.Tx, lane conversation.Lane, replyTo int64, candidate conversation.Session) (switchOutcome, error) {
+	// Telegram numbers a tab's root message with the tab's thread ID.
+	if replyTo == lane.ThreadID {
+		replyTo = 0
+	}
+	if replyTo > 0 {
+		outcome, err := switchToRepliedSession(ctx, tx, lane, replyTo)
+		if err != nil || outcome.found {
+			return outcome, err
+		}
+		subject, found, err := feedMessageSubject(ctx, tx, lane.PrincipalID, replyTo)
+		if err != nil {
+			return switchOutcome{}, err
+		}
+		if found {
+			return switchToSubject(ctx, tx, lane, subject, candidate)
+		}
+	}
+	subject, found, err := latestFeedSubject(ctx, tx, lane)
+	if err != nil || !found {
+		return switchOutcome{}, err
+	}
+	outcome, err := switchToSubject(ctx, tx, lane, subject, candidate)
+	if err != nil || outcome.elsewhere {
+		return switchOutcome{}, err
+	}
+	return outcome, nil
+}
+
+// feedMessageSubject is the subject of the principal's report or alert sent as the message.
+func feedMessageSubject(ctx context.Context, tx *sql.Tx, principalID string, messageID int64) (string, bool, error) {
+	var kind, id string
+	err := tx.QueryRowContext(
+		ctx,
+		`SELECT ?, report.job_id FROM job_report_messages AS message
+		 JOIN job_reports AS report ON report.id = message.report_id AND report.principal_id = message.principal_id
+		 WHERE message.principal_id = ? AND message.telegram_message_id = ?
+		 UNION ALL
+		 SELECT ?, watch_id FROM watch_alert_messages WHERE principal_id = ? AND telegram_message_id = ?
+		 LIMIT 1`,
+		conversation.SubjectJob, principalID, messageID,
+		conversation.SubjectWatch, principalID, messageID,
+	).Scan(&kind, &id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("query feed message subject: %w", err)
+	}
+	return kind + ":" + id, true, nil
+}
+
+// latestFeedSubject is the subject of the newest report or alert sent to the lane's tab after its
+// last exchange: its newest request or delivered answer, the latest change of a conversation in it,
+// which counts a conversation's start and a switch, or its last /new.
+func latestFeedSubject(ctx context.Context, tx *sql.Tx, lane conversation.Lane) (string, bool, error) {
+	var kind, id string
+	err := tx.QueryRowContext(
+		ctx,
+		`SELECT kind, id FROM (
+		     SELECT ? AS kind, report.job_id AS id, message.sent_at AS sent_at
+		     FROM job_report_messages AS message
+		     JOIN job_reports AS report ON report.id = message.report_id AND report.principal_id = message.principal_id
+		     WHERE message.principal_id = ? AND message.thread_id = ? AND message.sent_at IS NOT NULL
+		     UNION ALL
+		     SELECT ?, watch_id, sent_at FROM watch_alert_messages WHERE principal_id = ? AND thread_id = ?
+		 )
+		 WHERE sent_at > max(
+		     COALESCE((SELECT MAX(COALESCE(finished_at, created_at)) FROM conversation_requests WHERE principal_id = ? AND thread_id = ?), ''),
+		     COALESCE((SELECT MAX(updated_at) FROM conversation_sessions WHERE principal_id = ? AND thread_id = ?), ''),
+		     COALESCE((SELECT reset_at FROM telegram_tabs WHERE principal_id = ? AND thread_id = ?), ''))
+		 ORDER BY sent_at DESC LIMIT 1`,
+		conversation.SubjectJob, lane.PrincipalID, lane.ThreadID,
+		conversation.SubjectWatch, lane.PrincipalID, lane.ThreadID,
+		lane.PrincipalID, lane.ThreadID,
+		lane.PrincipalID, lane.ThreadID,
+		lane.PrincipalID, lane.ThreadID,
+	).Scan(&kind, &id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("query latest feed message: %w", err)
+	}
+	return kind + ":" + id, true, nil
+}
+
+// switchToSubject makes the conversation about the subject the lane's active one: the one already
+// active there, the most recent earlier one switched back in, or a new one, which closes the lane's
+// current conversation as switched. One active in another tab stays there.
+func switchToSubject(ctx context.Context, tx *sql.Tx, lane conversation.Lane, subject string, candidate conversation.Session) (switchOutcome, error) {
+	var sessionID string
+	err := tx.QueryRowContext(
+		ctx,
+		`SELECT id FROM conversation_sessions WHERE principal_id = ? AND subject = ?
+		 ORDER BY status = 'active' DESC, updated_at DESC, id LIMIT 1`,
+		lane.PrincipalID,
+		subject,
+	).Scan(&sessionID)
+	if err == nil {
+		return switchActiveSession(ctx, tx, lane, sessionID)
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return switchOutcome{}, fmt.Errorf("query subject conversation: %w", err)
+	}
+	previous, _, err := loadActiveConversationSession(ctx, tx, lane)
+	if err != nil {
+		return switchOutcome{}, err
+	}
+	if err := closeSwitchedLane(ctx, tx, lane); err != nil {
+		return switchOutcome{}, err
+	}
+	if _, err := tx.ExecContext(
+		ctx,
+		`INSERT INTO conversation_sessions (id, principal_id, runtime_session_id, thread_id, subject) VALUES (?, ?, ?, ?, ?)`,
+		candidate.ID,
+		candidate.PrincipalID,
+		candidate.RuntimeSessionID,
+		lane.ThreadID,
+		subject,
+	); err != nil {
+		return switchOutcome{}, fmt.Errorf("create subject conversation: %w", err)
+	}
+	return switchOutcome{found: true, previous: previous.ID}, nil
+}
+
+// laneSubject is the subject of the lane's active conversation, or "".
+func laneSubject(ctx context.Context, tx *sql.Tx, lane conversation.Lane) (string, error) {
+	var subject string
+	err := tx.QueryRowContext(
+		ctx,
+		`SELECT COALESCE(subject, '') FROM conversation_sessions WHERE principal_id = ? AND thread_id = ? AND status = 'active'`,
+		lane.PrincipalID,
+		lane.ThreadID,
+	).Scan(&subject)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("query lane subject: %w", err)
+	}
+	return subject, nil
+}
+
+func sessionSubject(ctx context.Context, tx *sql.Tx, session conversation.Session) (string, error) {
+	var subject string
+	if err := tx.QueryRowContext(
+		ctx,
+		`SELECT COALESCE(subject, '') FROM conversation_sessions WHERE id = ? AND principal_id = ?`,
+		session.ID,
+		session.PrincipalID,
+	).Scan(&subject); err != nil {
+		return "", fmt.Errorf("query conversation subject: %w", err)
+	}
+	return subject, nil
+}
+
+// loadSubjectLabel is the name a subject's job or watch went by in the last report or alert it
+// sent, or "" when none is kept.
+func loadSubjectLabel(ctx context.Context, db queryRower, principalID, subject string) (string, error) {
+	kind, id := conversation.SplitSubject(subject)
+	var query string
+	switch kind {
+	case conversation.SubjectJob:
+		query = `SELECT job_name FROM job_reports WHERE principal_id = ? AND job_id = ? ORDER BY delivered_at DESC, id DESC LIMIT 1`
+	case conversation.SubjectWatch:
+		query = `SELECT watch_label FROM watch_alert_messages WHERE principal_id = ? AND watch_id = ? ORDER BY sent_at DESC LIMIT 1`
+	default:
+		return "", nil
+	}
+	var label string
+	err := db.QueryRowContext(ctx, query, principalID, id).Scan(&label)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("query subject label: %w", err)
+	}
+	return label, nil
+}
+
 // requestOpensSession is whether no earlier request joined the request's session.
 const requestOpensSession = `NOT EXISTS (
 		     SELECT 1 FROM conversation_requests AS earlier
@@ -458,7 +709,8 @@ func loadConversationByUpdate(ctx context.Context, db queryRower, botUserID, upd
 		        request.session_id, session.runtime_session_id, request.message, request.state,
 		        COALESCE(request.response_text, ''), COALESCE(request.error_kind, ''), request.created_at,
 		        COALESCE(request.resumed_from, ''), COALESCE(request.reply_to_message_id, 0),
-		        request.thread_id, `+requestOpensSession+`
+		        request.thread_id, `+requestOpensSession+`,
+		        COALESCE(session.subject, ''), COALESCE(request.subject_label, '')
 		 FROM conversation_requests AS request
 		 JOIN conversation_sessions AS session
 		   ON session.id = request.session_id AND session.principal_id = request.principal_id
@@ -529,6 +781,8 @@ func scanConversationRequest(row *sql.Row) (conversation.Request, error) {
 		&request.ReplyToMessageID,
 		&request.ThreadID,
 		&request.OpensSession,
+		&request.Subject,
+		&request.SubjectLabel,
 	)
 	if err != nil {
 		return request, err

@@ -333,6 +333,24 @@ type Alert struct {
 	Language    string
 	// Private is Observation.Private of the check that queued the alert.
 	Private bool
+	// Label is the watch's Label when the alert is read for delivery.
+	Label string
+}
+
+// AlertMessage is a delivered alert as it reached its owner: the Telegram message it was sent as,
+// the tab it landed in, and its watch and text as they were then.
+type AlertMessage struct {
+	PrincipalID string
+	MessageID   int64
+	ThreadID    int64
+	WatchID     string
+	WatchLabel  string
+	Text        string
+	// Private is true when the text may retell private content the check read, and External when
+	// a model wrote it from what it read outside the household.
+	Private  bool
+	External bool
+	SentAt   time.Time
 }
 
 type Repository interface {
@@ -367,6 +385,11 @@ type Repository interface {
 	FinishWatchAlert(ctx context.Context, alertID, status, reason string, now time.Time) (bool, error)
 	// PruneWatchHistory removes window states and finished alerts last changed before the instant.
 	PruneWatchHistory(ctx context.Context, before time.Time) error
+	// SaveWatchAlertMessage keeps a delivered alert's message, then drops the principal's oldest
+	// beyond keep; the job report pruning removes old ones.
+	SaveWatchAlertMessage(ctx context.Context, message AlertMessage, keep int) error
+	// WatchAlertByMessage returns the principal's alert that was sent as the given message.
+	WatchAlertByMessage(ctx context.Context, principalID string, messageID int64) (AlertMessage, bool, error)
 }
 
 // Label names a watch the way the user reads it in alerts and lists.

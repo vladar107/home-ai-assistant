@@ -28,13 +28,13 @@ type ReminderSender struct {
 	Client *Client
 }
 
-func (r ReminderSender) SendReminder(ctx context.Context, chatID int64, jobID, text string) (int64, error) {
+func (r ReminderSender) SendReminder(ctx context.Context, chatID int64, jobID, text string) (int64, int64, error) {
 	row := make([]InlineButton, 0, len(snoozeButtons))
 	for _, button := range snoozeButtons {
 		row = append(row, InlineButton{Text: button.label, CallbackData: reminderPrefix + ":" + string(button.snooze) + ":" + jobID})
 	}
 	message, err := r.Client.sendMessage(ctx, chatID, 0, text, InlineKeyboard{row})
-	return message.MessageID, err
+	return message.MessageID, message.MessageThreadID, err
 }
 
 // parseReminderCallback accepts only the fixed snooze vocabulary.

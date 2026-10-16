@@ -43,6 +43,10 @@ type TabStore interface {
 	DeleteTab(ctx context.Context, principalID string, threadID int64) error
 	// LaneLastRequest returns when the lane last took a message, if it ever did.
 	LaneLastRequest(ctx context.Context, lane conversation.Lane) (time.Time, bool, error)
+	// SubjectTab returns the tab recorded as serving the subject, such as a feed.
+	SubjectTab(ctx context.Context, principalID, subject string) (int64, bool, error)
+	// AddSubjectTab records a tab the bot made to serve the subject, under a fixed name.
+	AddSubjectTab(ctx context.Context, principalID string, threadID int64, name, subject string) error
 }
 
 // SetTabs gives the service the tab registry; call it before Start.

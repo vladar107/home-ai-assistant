@@ -32,13 +32,13 @@ func (s *Store) SaveJobReport(ctx context.Context, report schedule.Report, keep 
 	); err != nil {
 		return fmt.Errorf("save job report: %w", err)
 	}
-	for _, messageID := range report.MessageIDs {
+	for _, message := range report.Messages {
 		if _, err := tx.ExecContext(
 			ctx,
-			`INSERT INTO job_report_messages (principal_id, telegram_message_id, report_id)
-			 SELECT principal_id, ?, id FROM job_reports WHERE id = ? AND principal_id = ?
+			`INSERT INTO job_report_messages (principal_id, telegram_message_id, report_id, thread_id, sent_at)
+			 SELECT principal_id, ?, id, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now') FROM job_reports WHERE id = ? AND principal_id = ?
 			 ON CONFLICT DO NOTHING`,
-			messageID, report.ID, report.PrincipalID,
+			message.MessageID, message.ThreadID, report.ID, report.PrincipalID,
 		); err != nil {
 			return fmt.Errorf("save job report message: %w", err)
 		}
@@ -126,12 +126,17 @@ func (s *Store) HasJobReports(ctx context.Context, principalID string) (bool, er
 	return exists, nil
 }
 
+// PruneJobReports removes the reports delivered before the instant, and the watch alert messages
+// sent before it, which are kept as long.
 func (s *Store) PruneJobReports(ctx context.Context, before time.Time) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("prune job reports: SQLite store is not open")
 	}
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM job_reports WHERE delivered_at < ?`, formatTime(before)); err != nil {
 		return fmt.Errorf("prune job reports: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM watch_alert_messages WHERE sent_at < ?`, formatTime(before)); err != nil {
+		return fmt.Errorf("prune watch alert messages: %w", err)
 	}
 	return nil
 }

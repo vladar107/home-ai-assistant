@@ -38,6 +38,7 @@ type tabSimulator struct {
 	gone         map[int64]bool
 	next         int64
 	deleteStatus int
+	createStatus int
 	created      chan createdTopic
 	deleted      chan int64
 	forwards     chan forwardedMessages
@@ -95,6 +96,12 @@ func (h *conversationHarness) serveTabMethod(w http.ResponseWriter, r *http.Requ
 			h.t.Error(err)
 		}
 		h.mu.Lock()
+		if status := h.tabs.createStatus; status != 0 {
+			h.mu.Unlock()
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_code": status, "description": "Too Many Requests: retry after 5"})
+			return nil, true
+		}
 		h.tabs.next++
 		threadID := h.tabs.next
 		h.mu.Unlock()

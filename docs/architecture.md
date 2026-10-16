@@ -387,6 +387,50 @@ A report counts as outside content when its run read outside content (a run
 recovered after a restart counts, a reminder never does), and one whose run read
 private content makes the conversation private.
 
+### Feed tabs
+
+With tabs on, the scheduler, the watch service, and the trip notifier send what
+nobody asked for to a feed tab of its kind: reminders, Trips scans, and trip
+messages to Reminders; other job reports to Reports; Home Assistant watches to
+Home; every other watch to Watches. The tab registry records each feed tab with
+the subject `feed:<kind>` under a fixed name, and the Telegram service's resolver
+makes the tab on first use, one at a time per principal and feed.
+
+- **Delivery threads.** A delivery puts its feed tab on its context with
+  `thread.WithDelivery`, which only the Telegram client reads and which takes
+  precedence over the lane's `thread.From`. A scheduled run's own context gets
+  the same, so its files and pictures land in that tab, while `thread.From`
+  stays zero: the run never reads that tab's conversation, attachments,
+  approvals, or exchanges.
+- **Gone and suspect tabs.** A send to a gone feed tab falls back to the main
+  view through the client, and the observer's rules apply: a fresh feed tab
+  that never took a send is suspect for a day and kept, so a tab Telegram
+  refuses costs at most one new tab per feed per day. Once a tab is taken for
+  gone its row is dropped and the next delivery makes a new one. A tab that
+  cannot be made leaves the message in the main view, and the next delivery
+  tries again.
+- **Messages kept.** Report messages record the tab they actually landed in and
+  when they were sent. Watch alerts are kept the same way in
+  `watch_alert_messages`, with their watch, the sent text up to 2000 runes, and
+  whether it may be private or outside content, for 14 days and at most 200 per
+  principal.
+- **One conversation per job or watch.** Only in a feed tab, a message goes to
+  the conversation about a subject such as `job:<id>` or `watch:<id>`. A reply
+  to one of the bot's answers returns to its conversation; a reply to a report
+  or an alert goes to its subject's most recent conversation, or a new one. A
+  reply to the tab's root or to an unknown message counts as none. Without a
+  reply, a message goes to the subject of the tab's latest report or alert when
+  that arrived after the tab's last exchange (its newest request or delivered
+  answer, the latest change of a conversation in it, or its last `/new`), and
+  otherwise stays in the current conversation. An explicit reply to a
+  conversation another tab or the main view holds is refused, naming where it
+  is; any other message stays in the tab.
+  The request keeps the subject's name when its tab moved to another subject,
+  and delivery opens the answer with "About …", together with the resumed line
+  when both apply. Each turn of a subject's conversation carries one line naming
+  the job or watch and the tool that shows it, and a reply to an alert quotes it
+  once, marked private or outside content from its row.
+
 ### A background task
 
 A request that needs many lookups is handed by the model to `task_start`, which

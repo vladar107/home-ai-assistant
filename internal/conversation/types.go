@@ -106,14 +106,78 @@ type Request struct {
 	ReplyToMessageID int64
 	// OpensSession is true for the first request of its conversation.
 	OpensSession bool
+	// Subject is what the request's conversation is about, such as JobSubject of one job, or "".
+	Subject string
+	// SubjectName is the name the subject's job or watch last went by, or "" when none is kept.
+	SubjectName string
+	// SubjectLabel names the job or watch when the request moved its tab to a conversation about
+	// another one than the tab held before; "" otherwise.
+	SubjectLabel string
 }
 
 type EnqueueResult struct {
 	Request Request
 	Created bool
 	Busy    bool
-	// SwitchedFrom is the session the request closed by returning to an earlier one, if any.
+	// SwitchedFrom is the session the request closed by returning to an earlier one, or by
+	// starting a conversation about a job or watch, if any.
 	SwitchedFrom string
+	// Elsewhere is set when the message replied to a conversation another tab holds; nothing was
+	// queued. ElsewhereThread is that tab, zero for the main view, and ElsewhereTab its name when
+	// the registry knows it.
+	Elsewhere       bool
+	ElsewhereThread int64
+	ElsewhereTab    string
+}
+
+// OpenElsewhereError refuses a reply to a conversation another tab holds; the turn does not run.
+// ThreadID is that tab, zero for the main view, and TabName its name, or "" when it is not known.
+type OpenElsewhereError struct {
+	ThreadID int64
+	TabName  string
+}
+
+func (e *OpenElsewhereError) Error() string { return "the conversation is open in another tab" }
+
+// The kinds of subject a conversation can be about: one scheduled job, reminders included, or one
+// watch. A subject is its kind and the job's or watch's ID.
+const (
+	SubjectJob   = "job"
+	SubjectWatch = "watch"
+)
+
+func JobSubject(jobID string) string { return SubjectJob + ":" + jobID }
+
+func WatchSubject(watchID string) string { return SubjectWatch + ":" + watchID }
+
+// SplitSubject returns a subject's kind and ID.
+func SplitSubject(subject string) (kind, id string) {
+	kind, id, _ = strings.Cut(subject, ":")
+	return kind, id
+}
+
+// SubjectLine opens the first answer in a conversation about another job or watch than the tab
+// held before, together with the return to an earlier conversation when both apply.
+func SubjectLine(label string, resumedFrom time.Time) string {
+	if resumedFrom.IsZero() {
+		return "About “" + label + "”:"
+	}
+	return "About “" + label + "”, back in the conversation from " + resumedFrom.Format("2 January 2006") + "."
+}
+
+// subjectContext is the line every turn of a conversation about a job or watch starts from.
+func subjectContext(subject, name string) string {
+	named := ""
+	if name != "" {
+		named = " “" + name + "”"
+	}
+	switch kind, id := SplitSubject(subject); kind {
+	case SubjectJob:
+		return "[system] This conversation is about the user's scheduled job" + named + " (id " + id + "); schedule_get shows it in full."
+	case SubjectWatch:
+		return "[system] This conversation is about the user's watch" + named + " (id " + id + "); watch_list shows it in full."
+	}
+	return ""
 }
 
 // ListedSessions is how many conversations /sessions shows. More are read, because earlier
@@ -233,8 +297,8 @@ type Repository interface {
 type Deliverer interface {
 	// SendReply quotes the request message with the given ID; a zero ID sends without a quote.
 	SendReply(context.Context, int64, int64, string) error
-	// SendTrackedReply is SendReply returning the sent message's ID.
-	SendTrackedReply(context.Context, int64, int64, string) (int64, error)
+	// SendTrackedReply is SendReply returning the sent message's ID and the tab it landed in.
+	SendTrackedReply(context.Context, int64, int64, string) (int64, int64, error)
 	SendTyping(context.Context, int64) error
 	// SendMessageDraft shows an ephemeral draft; an empty text shows Telegram's thinking placeholder.
 	SendMessageDraft(ctx context.Context, chatID, draftID int64, text string, canStop bool) error
@@ -388,6 +452,24 @@ type Reports interface {
 	// replied to. outside reports whether the text carries any report's own text, and private
 	// whether any of that may retell private content.
 	TurnReports(ctx context.Context, principalID string, turn ReportTurn) (text string, outside, private bool)
+}
+
+// ReportSources joins several sources of reports into one, in order.
+type ReportSources []Reports
+
+func (r ReportSources) TurnReports(ctx context.Context, principalID string, turn ReportTurn) (string, bool, bool) {
+	var texts []string
+	outside, private := false, false
+	for _, source := range r {
+		text, fromOutside, fromPrivate := source.TurnReports(ctx, principalID, turn)
+		if text == "" {
+			continue
+		}
+		texts = append(texts, text)
+		outside = outside || fromOutside
+		private = private || fromPrivate
+	}
+	return strings.Join(texts, "\n\n"), outside, private
 }
 
 // ReportTurn is what Reports needs to know of the turn it informs.

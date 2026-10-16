@@ -335,17 +335,8 @@ func switchActiveSession(ctx context.Context, tx *sql.Tx, lane conversation.Lane
 	if err != nil {
 		return switchOutcome{}, err
 	}
-	if _, err := tx.ExecContext(
-		ctx,
-		`UPDATE conversation_sessions
-		 SET status = 'closed', close_reason = 'switched',
-		     closed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-		     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-		 WHERE principal_id = ? AND thread_id = ? AND status = 'active'`,
-		principalID,
-		lane.ThreadID,
-	); err != nil {
-		return switchOutcome{}, fmt.Errorf("close switched conversation: %w", err)
+	if err := closeSwitchedLane(ctx, tx, lane); err != nil {
+		return switchOutcome{}, err
 	}
 	if _, err := tx.ExecContext(
 		ctx,
@@ -361,6 +352,23 @@ func switchActiveSession(ctx context.Context, tx *sql.Tx, lane conversation.Lane
 	}
 	target.Active, target.ThreadID, target.TabName = true, lane.ThreadID, ""
 	return switchOutcome{found: true, switched: true, session: target, previous: previous.ID}, nil
+}
+
+// closeSwitchedLane closes the lane's active session as switched, if it has one.
+func closeSwitchedLane(ctx context.Context, tx *sql.Tx, lane conversation.Lane) error {
+	if _, err := tx.ExecContext(
+		ctx,
+		`UPDATE conversation_sessions
+		 SET status = 'closed', close_reason = 'switched',
+		     closed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+		     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+		 WHERE principal_id = ? AND thread_id = ? AND status = 'active'`,
+		lane.PrincipalID,
+		lane.ThreadID,
+	); err != nil {
+		return fmt.Errorf("close switched conversation: %w", err)
+	}
+	return nil
 }
 
 func scanSessionRecord(row rowScanner) (conversation.SessionRecord, error) {

@@ -17,6 +17,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/module"
+	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
 const (
@@ -66,9 +67,10 @@ type Proposer interface {
 	Act(context.Context, string, approval.Proposal) (string, error)
 }
 
-// Sender delivers one alert to its owner's chat with buttons that mute or pause the watch.
+// Sender delivers one alert to its owner's chat with buttons that mute or pause the watch, and
+// returns the sent message's ID and the tab it landed in.
 type Sender interface {
-	SendAlert(ctx context.Context, chatID int64, watchID, text string) error
+	SendAlert(ctx context.Context, chatID int64, watchID, text string) (int64, int64, error)
 }
 
 // Rewriter rewrites a message the code wrote into the owner's language, with the owner's own model
@@ -102,6 +104,7 @@ type Service struct {
 	rewriter   Rewriter
 	telemetry  Telemetry
 	travel     Travel
+	feeds      thread.Feeds
 	logger     *slog.Logger
 	zone       string
 	tick       time.Duration
@@ -126,6 +129,8 @@ type notice struct {
 	text    string
 	agent   bool
 	private bool
+	// messageID is the message the alert was sent as, so a reply that quotes it drops the notice.
+	messageID int64
 }
 
 // Stopper is an evaluator with work of its own running between checks, which the service stops
@@ -228,6 +233,33 @@ func (s *Service) travelingAt(ctx context.Context, cache *Cache, principalID, wa
 		return false
 	}
 	return traveling
+}
+
+// SetFeeds sets the tabs that alerts are delivered to while the bot has tabs on, at wiring time
+// before the service starts; without it every alert goes to the main view.
+func (s *Service) SetFeeds(feeds thread.Feeds) {
+	s.feeds = feeds
+}
+
+// feed is the tab of the alert's kind: Home Assistant watches have their own, and the others share one.
+func feed(alert Alert) string {
+	if alert.Kind == KindHome {
+		return thread.FeedHome
+	}
+	return thread.FeedWatches
+}
+
+// inFeed returns a context whose sends go to the alert's feed tab. A tab that cannot be had leaves
+// the alert in the main view, the resolver logs why, and the next alert tries again.
+func (s *Service) inFeed(ctx context.Context, alert Alert, chatID int64) context.Context {
+	if s.feeds == nil {
+		return ctx
+	}
+	threadID, err := s.feeds.Thread(ctx, alert.PrincipalID, chatID, feed(alert))
+	if err != nil {
+		threadID = 0
+	}
+	return thread.WithDelivery(ctx, threadID)
 }
 
 // SetTelemetry sets where watch metrics are recorded, at wiring time before the service starts.
@@ -617,7 +649,8 @@ func (s *Service) deliver(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		if err := s.sender.SendAlert(ctx, chatID, alert.WatchID, text); err != nil {
+		messageID, threadID, err := s.sender.SendAlert(s.inFeed(ctx, alert, chatID), chatID, alert.WatchID, text)
+		if err != nil {
 			if isPermanent(err) {
 				s.finish(ctx, alert, statusFailed, "undeliverable", alertUndeliverable)
 			} else if ctx.Err() == nil {
@@ -626,7 +659,8 @@ func (s *Service) deliver(ctx context.Context) {
 			continue
 		}
 		if s.finish(ctx, alert, statusDelivered, "", alertDelivered) {
-			s.remember(alert, text)
+			s.remember(alert, text, messageID)
+			s.keepMessage(ctx, alert, text, messageID, threadID)
 		}
 	}
 }
@@ -720,15 +754,16 @@ func (s *Service) logAlertError(ctx context.Context, alert Alert, stage string, 
 
 // remember keeps the delivered message for the owner's next conversation turn, so a reply to it has
 // something to refer to.
-func (s *Service) remember(alert Alert, sent string) {
+func (s *Service) remember(alert Alert, sent string, messageID int64) {
 	text := []rune(strings.TrimSpace(sent))
 	if len(text) > maximumNoticeRunes {
 		text = append(text[:maximumNoticeRunes], '…')
 	}
 	kept := notice{
-		text:    fmt.Sprintf("One of the user's watches (id %s) just sent them this message:\n%s", alert.WatchID, string(text)),
-		agent:   alert.Kind == KindAgent,
-		private: alert.Private,
+		text:      fmt.Sprintf("One of the user's watches (id %s) just sent them this message:\n%s", alert.WatchID, string(text)),
+		agent:     alert.Kind == KindAgent,
+		private:   alert.Private,
+		messageID: messageID,
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

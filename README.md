@@ -34,9 +34,20 @@ borrowed between users.
   the user's tab. `/close`, or Close in `/sessions`, ends a tab's conversation,
   which stays in `/sessions`, and deletes the tab. A tab Telegram no longer
   finds is noticed on the next send there: its messages go to the main view,
-  and its conversation can be resumed in a new tab. Reminders, scheduled
-  reports, watches, and trip messages go to the main view. With topics off,
-  the chat is one conversation as before.
+  and its conversation can be resumed in a new tab. With topics off, the chat
+  is one conversation as before.
+- **Feed tabs.** With tabs on, nothing arrives in the main view unasked, so it
+  can be muted without losing a notification. Messages nobody asked for go to
+  four tabs the bot makes on first use: Reminders (reminders, Trips scans, and
+  trip messages), Reports (scheduled job reports and Heads-up), Home (Home
+  Assistant watches), and Watches (the other watches). Every message keeps its
+  sound; muting a feed tab quiets it. A deleted feed tab comes back with its
+  next message. In a feed tab each job and watch has its own conversation:
+  replying to a report or an alert discusses it, and typing right after one
+  does too, without replying. An answer that moves to another job's or watch's
+  conversation starts with a line naming it, such as "About “Bins”:", and
+  `/new` starts a fresh conversation there. A reply to a conversation another
+  tab holds names that tab instead of running.
 - **Act and tell.** A clear request to set up or change a scheduled job, a
   watch, a saved route, a memory instruction, or a Notion property is done at
   once. A "Done" message follows the reply with an Undo button per action,

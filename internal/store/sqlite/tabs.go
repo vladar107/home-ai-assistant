@@ -166,3 +166,42 @@ func (s *Store) LaneLastRequest(ctx context.Context, lane conversation.Lane) (ti
 	}
 	return at, true, nil
 }
+
+// SubjectTab returns the tab the registry records as serving the subject, such as a feed.
+func (s *Store) SubjectTab(ctx context.Context, principalID, subject string) (int64, bool, error) {
+	if s == nil || s.db == nil {
+		return 0, false, fmt.Errorf("load subject tab: SQLite store is not open")
+	}
+	var threadID int64
+	err := s.db.QueryRowContext(
+		ctx,
+		`SELECT thread_id FROM telegram_tabs WHERE principal_id = ? AND subject = ?`,
+		principalID,
+		subject,
+	).Scan(&threadID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("load subject tab: %w", err)
+	}
+	return threadID, true, nil
+}
+
+// AddSubjectTab records a tab the bot made to serve the subject, under a fixed name.
+func (s *Store) AddSubjectTab(ctx context.Context, principalID string, threadID int64, name, subject string) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("add subject tab: SQLite store is not open")
+	}
+	if _, err := s.db.ExecContext(
+		ctx,
+		`INSERT INTO telegram_tabs (principal_id, thread_id, name, named_by, subject) VALUES (?, ?, ?, 'fixed', ?)`,
+		principalID,
+		threadID,
+		name,
+		subject,
+	); err != nil {
+		return fmt.Errorf("add subject tab: %w", err)
+	}
+	return nil
+}
