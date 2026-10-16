@@ -13,11 +13,14 @@ import (
 const conversationTimeLayout = "2006-01-02T15:04:05.000Z"
 
 // sessionColumns reads a session with its last activity: the newest request it took, or its
-// creation when it took none. Queries order by the activity, the fourth column.
+// creation when it took none, and the name of its tab when the registry knows it. Queries order by
+// the activity, the fourth column.
 const sessionColumns = `session.id, session.runtime_session_id, session.status = 'active',
 	COALESCE((SELECT MAX(request.created_at) FROM conversation_requests AS request
 	          WHERE request.session_id = session.id), session.created_at),
-	session.private_at IS NOT NULL, session.thread_id`
+	session.private_at IS NOT NULL, session.thread_id,
+	COALESCE((SELECT tab.name FROM telegram_tabs AS tab
+	          WHERE tab.principal_id = session.principal_id AND tab.thread_id = session.thread_id), '')`
 
 // ReferencedSessions returns the runtime session IDs of every conversation and every task kept.
 func (s *Store) ReferencedSessions(ctx context.Context) (map[string]struct{}, error) {
@@ -356,14 +359,14 @@ func switchActiveSession(ctx context.Context, tx *sql.Tx, lane conversation.Lane
 	); err != nil {
 		return switchOutcome{}, fmt.Errorf("reopen conversation: %w", err)
 	}
-	target.Active, target.ThreadID = true, lane.ThreadID
+	target.Active, target.ThreadID, target.TabName = true, lane.ThreadID, ""
 	return switchOutcome{found: true, switched: true, session: target, previous: previous.ID}, nil
 }
 
 func scanSessionRecord(row rowScanner) (conversation.SessionRecord, error) {
 	var record conversation.SessionRecord
 	var lastActive string
-	if err := row.Scan(&record.ID, &record.RuntimeSessionID, &record.Active, &lastActive, &record.Private, &record.ThreadID); err != nil {
+	if err := row.Scan(&record.ID, &record.RuntimeSessionID, &record.Active, &lastActive, &record.Private, &record.ThreadID, &record.TabName); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return record, err
 		}

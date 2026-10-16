@@ -1,6 +1,6 @@
 # 0085 — Tabs that tell the truth, and closing a tab
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
@@ -57,7 +57,8 @@ The causes in the code:
   - SQLite cannot widen the `close_reason` check in place, so the table is
     rebuilt the way migration 015 did it. The rebuild keeps everything that
     references the table through `(session_id, principal_id)`:
-    `conversation_requests`, `conversation_reply_messages`, and attachments.
+    `conversation_requests`, `conversation_reply_messages`, and attachments,
+    with `reply_feedback`, which references the reply messages.
   - It carries over migration 031's `thread_id`, and recreates
     `conversation_sessions_one_active_lane_idx`.
   - It adds `tab_gone` and `tab_closed` to the close reasons.
@@ -77,16 +78,33 @@ The causes in the code:
   - **Topic service messages are this plan's.** The update parser reads
     `forum_topic_created` (with `is_name_implicit`) and `forum_topic_edited`,
     both on a message and on its `reply_to_message`.
+    - In a tab, Telegram sets every message's `reply_to_message` to the
+      tab's `forum_topic_created` root. A creation seen only there adds a
+      row when the registry has none for that thread, and never changes an
+      existing one. Otherwise every message would turn a `bot` or `fixed`
+      row into `user` and undo later renames. The service remembers which
+      tabs the registry has a row for and skips the insert for them until a
+      tab is forgotten. For the same reason, a reply
+      to that root is not a reply: the request's `reply_to_message_id`
+      stays empty.
     - A created tab is recorded with its name. It is `named_by = bot` when
-      its name was implicit, and `user` otherwise.
+      its name was implicit or the bot sent the creation, and `user`
+      otherwise.
     - An edit sent by the user sets the name and `named_by = user`. An edit
       that comes from the bot itself, the echo of `editForumTopic`, changes
       nothing.
-    - Each one is logged as `telegram.topic.service`, with the thread ID and
-      which fields were present, never the name. This log is how plan 0088
+    - A `fixed` row is never changed by a service message.
+    - A service message is read before the sender check, because the bot's
+      own ones name the bot as the sender.
+    - Each service message itself is logged as `telegram.topic.service`,
+      with the thread ID, the kind, the sender (bot or user), and which
+      fields were present, never the name. A root seen on an ordinary
+      message is logged only when it added a row. This log is how plan 0088
       learns what Telegram sends in private chats.
   - The registry holds names. Sessions stay the record of which conversation
     a tab holds.
+  - A message of the user's from a tab confirms it, so an unconfirmed row
+    is one the bot made.
 - **Every send that names a tab reports a gone tab.**
   - One wrapper in the client covers every method that sends a thread:
     `sendMessage`, `sendPlain`, `SendPhoto`, `SendDocument`, and the keyboard
@@ -96,23 +114,45 @@ The causes in the code:
     to an observer. It logs `telegram.send.thread_gone` with the principal
     and thread IDs.
   - `sendPlain` starts sending the context's thread.
-  - `ForwardMessages` and `deleteForumTopic` report the thread but do not
-    fall back: a forward goes only into the tab it was meant for.
+  - `SendDocument` falls back only when its body can be read again from the
+    start, which every current caller's can.
+  - A successful send into a tab confirms it in the registry. The service
+    remembers a tab once the registry holds it confirmed, so later sends
+    write nothing. A tab the registry does not know yet is not remembered,
+    so it is confirmed once a row for it is added.
+  - `ForwardMessages` reports the thread but does not fall back: a forward
+    goes only into the tab it was meant for.
+  - `deleteForumTopic` does not report. Its callers, closing a tab and
+    removing a tab a failed resume left, are already ending the tab.
+  - A refusal that does not fall back carries the observer's verdict, so
+    the caller can tell a gone tab from a suspect one.
+  - Typing and drafts do not report.
 - **Gone or suspect.** Some "thread not found" answers are Telegram's bug and
   not a real deletion. The observer treats the report as suspect, and keeps
-  everything, when either of these holds:
+  everything, when any of these holds:
   - The user wrote in that thread in the last 24 hours.
   - The tab was created by the bot, has never been confirmed, and is less
     than 24 hours old.
+  - The tab's state cannot be read.
 
   A suspect report logs `telegram.send.thread_gone_suspect` and changes
   nothing. Otherwise the tab is treated as gone:
-  - The lane's active session closes with `tab_gone`.
+  - The lane's active session closes with `tab_gone`. A turn still pending
+    in that lane is left to finish: its replies already fall back to the
+    main view, so cancelling it would only lose them. A refusal during the
+    lane's own reply is almost always suspect anyway, since the user wrote
+    there moments before.
   - The registry row is dropped.
+  - Every refused send is logged, but `tab_gone` is counted only when a
+    session was actually closed, so each count is one gone tab.
 - **A gone tab can come back.** When a message arrives in a tab that has no
   active conversation, the store first reopens the most recent session closed
   as `tab_gone` in that tab, if there is one, and only then would create a
   new one. `tab_closed` is never reopened this way.
+  - If that session has a subject that is already active in another tab,
+    nothing is reopened and the message starts a fresh session as usual.
+    Plan 0087's unique index on active subjects would otherwise refuse the
+    enqueue.
 - **`/sessions` names tabs.** An entry open elsewhere reads "open in “Trip
   notes”" when the registry knows the name, and "open in another tab" when it
   does not.
@@ -120,11 +160,15 @@ The causes in the code:
   - The reply names the tab: "That conversation is in the tab “Trip notes”.
     Telegram does not let me switch tabs for you, so I posted there to bring
     it to the top."
+  - The nudge never falls back to the main view, which would claim a tab
+    that is gone.
   - If the nudge in that tab is reported gone, the lane is closed as
     `tab_gone`, and the press continues as a resume into a new tab with the
     history forwarded, as plan 0084 does.
   - A suspect report answers that the tab did not accept the message, and
     offers *Close N*.
+  - A tab the bot makes for a resume is recorded as `named_by = bot` before
+    anything is sent there, and dropped again if the resume fails.
 - **Closing a tab.**
   - `/close` in a tab answers with a confirmation: "Close this tab? Telegram
     deletes its messages, so resuming the conversation later cannot bring them
@@ -135,18 +179,23 @@ The causes in the code:
        the main view.
     2. It closes the lane's session with `tab_closed`.
     3. It calls `deleteForumTopic` and drops the registry row.
-  - If the delete fails, the session stays closed. The reply, sent in the
-    main view, says the tab could not be removed and can be deleted from its
-    menu.
+  - If the delete fails, the session stays closed. The reply says the tab
+    could not be removed and can be deleted from its menu. A delete that
+    Telegram answers with "thread not found" counts as removed.
+  - The outcome goes to the main view when the confirmation was pressed in
+    the closed tab, and otherwise replaces the confirmation. *Keep* replaces
+    it with a line saying the tab was kept.
   - `/close` in the main view answers that the main view cannot be closed and
     that `/new` starts a fresh conversation.
   - In `/sessions`, an entry open in another tab gets a *Close N* button
-    beside *Open N*, and it confirms the same way. This is how a broken tab
-    the user cannot enter gets cleaned up.
+    beside *Open N* while topics are on, and it confirms the same way. This
+    is how a broken tab the user cannot enter gets cleaned up.
   - `/close` joins the slash menu in alphabetical order, listed only when
-    topics are on.
-- **Telemetry** counts `tab_gone`, `tab_gone_suspect`, and `tab_closed` with
-  fixed outcome labels. Logs carry IDs only, never tab names.
+    topics are on, and the help reply names it then. With topics off,
+    `/close` gets the help reply.
+- **Telemetry** counts `tab_gone`, `tab_gone_suspect`, and `tab_closed` as
+  `home_agent.telegram.tabs` with fixed outcome labels, zeroed at start like
+  the other rare outcomes. Logs carry IDs only, never tab names.
 
 ## Approach
 
@@ -159,7 +208,7 @@ The causes in the code:
    - The reopen-on-message step in `EnqueueConversation`.
    - The lane's last user message time, for the suspect rule.
    - `conversation.Service.CloseLane(ctx, lane, reason)`, which cancels the
-     lane's turn first.
+     lane's turn first for `tab_closed`.
    - Tab names on `SessionSummary`.
    - Acceptance, from integration tests on real temporary SQLite:
      - The migration keeps existing sessions, requests, reply messages, and
@@ -197,10 +246,14 @@ Plans 0085 to 0089 land in that order, so their migrations are 032 to 036.
 ## Files affected
 
 - `internal/store/sqlite/`: `migrations/032_tabs.sql`, `conversation.go`,
-  `conversation_history.go`, and the new `tabs.go`
-- `internal/conversation/`: `service.go`, `types.go`
+  `conversation_history.go`, the new `tabs.go`, and `tabs_test.go`
+- `internal/conversation/`: `service.go`, `types.go`, and
+  `tabs_integration_test.go`
 - `internal/telegram/`: `client.go`, `trips.go` (`sendPlain`), `sessions.go`,
-  `service.go`, `commands.go`, `help.go`
+  `service.go` (the slash menu, which `app_help` reads, and the help reply),
+  `telemetry.go`, the new `tabs.go`, `tabs_integration_test.go`, and the
+  harness in `conversation_integration_test.go` and
+  `card_integration_test.go`
 - `internal/observability/telemetry.go`
 - `internal/app/app.go` (the observer wiring)
 - `README.md`, `docs/plans/README.md`
@@ -232,3 +285,6 @@ Plans 0085 to 0089 land in that order, so their migrations are 032 to 036.
   open list.
 - The rebuild in migration 032 cannot be undone. It follows the tested
   pattern of migration 015.
+- `/close` cancels the tab's turn but does not wait for a reply already
+  being delivered. A late chunk of it can fall back to the main view, as
+  with `/cancel`.

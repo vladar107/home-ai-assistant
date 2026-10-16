@@ -424,6 +424,26 @@ func (s *Service) NewSession(ctx context.Context, lane Lane) (bool, error) {
 	return reset, nil
 }
 
+// CloseLane ends the conversation of a tab that was closed or is gone, keeping it in the list to
+// resume. A tab the user closed has its turn cancelled first, so no reply of it reaches the main
+// view. A gone tab's turn, if one is pending, is left to finish: its replies already fall back to
+// the main view, so cancelling it would only lose them.
+func (s *Service) CloseLane(ctx context.Context, lane Lane, reason string) (bool, error) {
+	if reason == CloseTabClosed {
+		if _, err := s.Cancel(ctx, lane); err != nil {
+			return false, err
+		}
+	}
+	sessionID, closed, err := s.repository.CloseLane(ctx, lane, reason)
+	if err != nil {
+		return false, err
+	}
+	if closed && reason == CloseTabClosed {
+		s.leaveSession(ctx, lane.PrincipalID, sessionID)
+	}
+	return closed, nil
+}
+
 // Sessions lists the principal's recent conversations, newest first, as the lane sees them: only
 // the lane's own active conversation is current, and one another tab holds is marked. Earlier
 // conversations of which Pi recorded nothing the user wrote are left out.
@@ -495,7 +515,7 @@ func (s *Service) leaveSession(ctx context.Context, principalID, sessionID strin
 }
 
 func (s *Service) summarize(ctx context.Context, principalID string, record SessionRecord) (SessionSummary, error) {
-	summary := SessionSummary{ID: record.ID, Active: record.Active, LastActive: s.local(record.LastActive), ThreadID: record.ThreadID}
+	summary := SessionSummary{ID: record.ID, Active: record.Active, LastActive: s.local(record.LastActive), ThreadID: record.ThreadID, TabName: record.TabName}
 	if s.config.History == nil {
 		return summary, nil
 	}

@@ -108,8 +108,12 @@ func (c *Client) sendPlain(ctx context.Context, chatID int64, text string, keybo
 	}
 	setPlainText(params, text)
 	setNoLinkPreview(params)
-	_, err := execute[Message](c, ctx, "sendMessage", params)
-	return err
+	return c.inTab(ctx, chatID, true, func(ctx context.Context) error {
+		params.Del("message_thread_id")
+		setThread(ctx, params)
+		_, err := execute[Message](c, ctx, "sendMessage", params)
+		return err
+	})
 }
 
 // EditPlain replaces a bot message's text without markup or link previews and removes its buttons.

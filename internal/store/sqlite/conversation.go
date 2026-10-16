@@ -52,6 +52,12 @@ func (s *Store) EnqueueConversation(
 	if err != nil {
 		return conversation.EnqueueResult{}, err
 	}
+	if !found && input.ThreadID > 0 {
+		session, found, err = reopenGoneTab(ctx, tx, conversation.Lane{PrincipalID: input.PrincipalID, ThreadID: input.ThreadID})
+		if err != nil {
+			return conversation.EnqueueResult{}, err
+		}
+	}
 	if !found {
 		session = candidate
 		if _, err := tx.ExecContext(
@@ -362,6 +368,76 @@ func (s *Store) ResetConversation(ctx context.Context, lane conversation.Lane) (
 		return "", false, fmt.Errorf("commit conversation reset: %w", err)
 	}
 	return session.ID, changed == 1, nil
+}
+
+func (s *Store) CloseLane(ctx context.Context, lane conversation.Lane, reason string) (string, bool, error) {
+	if s == nil || s.db == nil {
+		return "", false, fmt.Errorf("close conversation lane: SQLite store is not open")
+	}
+	if reason != conversation.CloseTabGone && reason != conversation.CloseTabClosed {
+		return "", false, fmt.Errorf("close conversation lane: unknown reason %q", reason)
+	}
+	var sessionID string
+	err := s.db.QueryRowContext(
+		ctx,
+		`UPDATE conversation_sessions
+		 SET status = 'closed', close_reason = ?,
+		     closed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+		     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+		 WHERE principal_id = ? AND thread_id = ? AND status = 'active'
+		 RETURNING id`,
+		reason,
+		lane.PrincipalID,
+		lane.ThreadID,
+	).Scan(&sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("close conversation lane: %w", err)
+	}
+	return sessionID, true, nil
+}
+
+// reopenGoneTab makes the lane's most recent conversation closed as tab_gone active again, so a
+// message in a tab that was taken for deleted continues it. When another tab holds a conversation
+// of the same subject, nothing is reopened and the message starts a fresh one.
+func reopenGoneTab(ctx context.Context, tx *sql.Tx, lane conversation.Lane) (conversation.Session, bool, error) {
+	var session conversation.Session
+	var subjectTaken bool
+	err := tx.QueryRowContext(
+		ctx,
+		`SELECT session.id, session.principal_id, session.runtime_session_id,
+		        session.subject IS NOT NULL AND EXISTS (
+		            SELECT 1 FROM conversation_sessions AS other
+		            WHERE other.principal_id = session.principal_id AND other.subject = session.subject
+		              AND other.status = 'active')
+		 FROM conversation_sessions AS session
+		 WHERE session.principal_id = ? AND session.thread_id = ? AND session.status = 'closed'
+		   AND session.close_reason = ?
+		 ORDER BY session.closed_at DESC, session.id LIMIT 1`,
+		lane.PrincipalID,
+		lane.ThreadID,
+		conversation.CloseTabGone,
+	).Scan(&session.ID, &session.PrincipalID, &session.RuntimeSessionID, &subjectTaken)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && subjectTaken) {
+		return conversation.Session{}, false, nil
+	}
+	if err != nil {
+		return conversation.Session{}, false, fmt.Errorf("query gone tab conversation: %w", err)
+	}
+	if _, err := tx.ExecContext(
+		ctx,
+		`UPDATE conversation_sessions
+		 SET status = 'active', close_reason = NULL, closed_at = NULL,
+		     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+		 WHERE id = ? AND principal_id = ?`,
+		session.ID,
+		session.PrincipalID,
+	); err != nil {
+		return conversation.Session{}, false, fmt.Errorf("reopen gone tab conversation: %w", err)
+	}
+	return session, true, nil
 }
 
 // requestOpensSession is whether no earlier request joined the request's session.

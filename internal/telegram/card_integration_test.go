@@ -27,6 +27,7 @@ type sentPhoto struct {
 	parseMode string
 	data      []byte
 	status    int
+	threadID  int64
 }
 
 // cardProvider stands in for a tool that renders a card: it stages bytes naming the principal for
@@ -86,6 +87,10 @@ func (h *conversationHarness) servePhotoUpload(w http.ResponseWriter, r *http.Re
 		h.t.Error(err)
 		return
 	}
+	threadID := h.threadOf(r.FormValue("message_thread_id"))
+	if h.refuseGoneThread(w, r, "sendPhoto", threadID) {
+		return
+	}
 	h.mu.Lock()
 	status := http.StatusOK
 	if len(h.photoStatuses) > 0 {
@@ -97,7 +102,7 @@ func (h *conversationHarness) servePhotoUpload(w http.ResponseWriter, r *http.Re
 	messageID := sentMessageID(h.sentCount)
 	h.mu.Unlock()
 	select {
-	case h.photos <- sentPhoto{chatID: chatID, replyTo: replyTo, caption: r.FormValue("caption"), parseMode: r.FormValue("parse_mode"), data: data, status: status}:
+	case h.photos <- sentPhoto{chatID: chatID, replyTo: replyTo, caption: r.FormValue("caption"), parseMode: r.FormValue("parse_mode"), data: data, status: status, threadID: threadID}:
 	case <-r.Context().Done():
 		return
 	}

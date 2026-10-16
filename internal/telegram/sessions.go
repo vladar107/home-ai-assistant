@@ -17,24 +17,43 @@ const (
 	SessionGoneReply    = "That conversation is no longer available."
 	SessionCurrentReply = "That is already the current conversation."
 	SessionElsewhere    = "That conversation is open in another tab."
-	// SessionInItsTab answers a Resume press on a conversation another tab holds; SessionHere is
-	// posted in that tab, which moves it to the top of the list.
-	SessionInItsTab = "That conversation is open in its own tab, which is now at the top of your tabs."
-	SessionHere     = "You asked to return to this conversation. Your next message here continues it."
+	SessionNotInTab     = "That conversation is not open in another tab."
+	// SessionHere is posted in the tab that holds a conversation an Open press asked for, which
+	// moves that tab to the top of the list.
+	SessionHere = "You asked to return to this conversation. Your next message here continues it."
+	// TabSuspectReply answers an Open press whose tab did not take the line, when the tab may still
+	// exist.
+	TabSuspectReply = "That tab did not accept my message, so it may be gone. If you cannot find it, close it here; the conversation stays in /sessions."
 	// HistoryUnavailable follows a resume whose earlier messages could not be forwarded.
 	HistoryUnavailable = "I could not bring the earlier messages of this conversation into this tab."
 	untitledTab        = "Conversation from "
 
 	sessionsPrefix       = "sessions"
 	sessionResumeAction  = "resume"
+	sessionCloseAction   = "close"
 	sessionButtonsPerRow = 3
 	untitledSession      = "(no text)"
 )
 
+// SessionInTab answers an Open press: the bot cannot switch the user's tab, only post in it.
+func SessionInTab(tabName string) string {
+	return "That conversation is in " + tabPlace(tabName) + ". Telegram does not let me switch tabs for you, so I posted there to bring it to the top."
+}
+
+// CloseTabQuestion asks before closing a tab from /sessions.
+func CloseTabQuestion(tabName string) string {
+	place := "the tab that holds that conversation"
+	if tabName != "" {
+		place = tabPlace(tabName)
+	}
+	return "Close " + place + "? Telegram deletes its messages, so resuming the conversation later cannot bring them back. The conversation stays in /sessions."
+}
+
 // renderSessions lists the principal's recent conversations, newest first, with a Resume button for
 // each one that is not the lane's current conversation, or an Open button for one another tab
-// holds. Buttons are numbered like the list.
-func renderSessions(ctx context.Context, lane conversation.Lane, conversations ConversationController) (string, InlineKeyboard, error) {
+// holds, named when its tab is known, with a Close button beside it when tabs are on. Buttons are
+// numbered like the list.
+func renderSessions(ctx context.Context, lane conversation.Lane, conversations ConversationController, closable bool) (string, InlineKeyboard, error) {
 	sessions, err := conversations.Sessions(ctx, lane)
 	if err != nil {
 		return "", nil, err
@@ -56,15 +75,23 @@ func renderSessions(ctx context.Context, lane conversation.Lane, conversations C
 			lines = append(lines, line+" (current)")
 			continue
 		}
-		label := "Resume "
+		buttons := []InlineButton{{Text: "Resume " + number, CallbackData: sessionCallback(sessionResumeAction, session.ID)}}
 		if session.Elsewhere {
-			line, label = line+" (open in another tab)", "Open "
+			place := "another tab"
+			if session.TabName != "" {
+				place = "“" + session.TabName + "”"
+			}
+			line += " (open in " + place + ")"
+			buttons[0].Text = "Open " + number
+			if closable {
+				buttons = append(buttons, InlineButton{Text: "Close " + number, CallbackData: sessionCallback(sessionCloseAction, session.ID)})
+			}
 		}
 		lines = append(lines, line)
-		row = append(row, InlineButton{Text: label + number, CallbackData: sessionsPrefix + ":" + sessionResumeAction + ":" + session.ID})
-		if len(row) == sessionButtonsPerRow {
+		if len(row)+len(buttons) > sessionButtonsPerRow {
 			keyboard, row = append(keyboard, row), nil
 		}
+		row = append(row, buttons...)
 	}
 	if len(row) > 0 {
 		keyboard = append(keyboard, row)
@@ -72,31 +99,40 @@ func renderSessions(ctx context.Context, lane conversation.Lane, conversations C
 	return strings.Join(lines, "\n"), keyboard, nil
 }
 
-// parseSessionCallback accepts only sessions:resume:<session id>; anything else is not a session
-// press.
-func parseSessionCallback(data string) (string, bool) {
+func sessionCallback(action, sessionID string) string {
+	return sessionsPrefix + ":" + action + ":" + sessionID
+}
+
+// parseSessionCallback accepts only sessions:resume:<session id> and sessions:close:<session id>;
+// anything else is not a session press.
+func parseSessionCallback(data string) (string, string, bool) {
 	if len(data) > maximumCallbackDataBytes {
-		return "", false
+		return "", "", false
 	}
 	parts := strings.Split(data, ":")
-	if len(parts) != 3 || parts[0] != sessionsPrefix || parts[1] != sessionResumeAction || parts[2] == "" {
-		return "", false
+	if len(parts) != 3 || parts[0] != sessionsPrefix || (parts[1] != sessionResumeAction && parts[1] != sessionCloseAction) || parts[2] == "" {
+		return "", "", false
 	}
-	return parts[2], true
+	return parts[1], parts[2], true
 }
 
 // processSessionPress returns to the chosen conversation and refreshes the list from current
 // state, so a press on an outdated list can only reach the principal's own conversations. With
-// tabs on the conversation opens in a tab of its own; otherwise it replaces the current one.
-func (s *Service) processSessionPress(ctx context.Context, bot Bot, callback *CallbackQuery, principalID, sessionID string) (processingResult, string, error) {
+// tabs on the conversation opens in a tab of its own; otherwise it replaces the current one. A Close
+// press asks before closing the tab that holds the conversation.
+func (s *Service) processSessionPress(ctx context.Context, bot Bot, callback *CallbackQuery, principalID, action, sessionID string) (processingResult, string, error) {
+	if action == sessionCloseAction {
+		return s.processSessionClosePress(ctx, bot, callback, principalID, sessionID)
+	}
 	result := processingResult{event: "telegram.callback.handled", principalID: principalID, command: "sessions." + sessionResumeAction}
 	chatID, messageID := callback.Message.Chat.ID, callback.Message.MessageID
 	lane := laneOf(ctx, principalID)
 	followUp, followUpCtx := "", ctx
+	var followUpKeyboard InlineKeyboard
 	if bot.HasTopicsEnabled {
 		var failure string
 		var err error
-		if followUp, followUpCtx, failure, err = s.resumeInTab(ctx, chatID, lane, sessionID); err != nil {
+		if followUp, followUpKeyboard, followUpCtx, failure, err = s.resumeInTab(ctx, chatID, lane, sessionID); err != nil {
 			return processingResult{}, failure, err
 		}
 	}
@@ -108,7 +144,7 @@ func (s *Service) processSessionPress(ctx context.Context, bot Bot, callback *Ca
 		followUp = resumedReply(resumed)
 	}
 
-	text, keyboard, err := renderSessions(ctx, lane, s.conversation)
+	text, keyboard, err := renderSessions(ctx, lane, s.conversation, bot.HasTopicsEnabled)
 	if err != nil {
 		return processingResult{}, "render_sessions", err
 	}
@@ -117,7 +153,7 @@ func (s *Service) processSessionPress(ctx context.Context, bot Bot, callback *Ca
 		err = s.client.SendKeyboard(ctx, chatID, 0, text, keyboard)
 	}
 	if err == nil {
-		err = s.client.SendReply(followUpCtx, chatID, 0, followUp)
+		err = s.client.SendKeyboard(followUpCtx, chatID, 0, followUp, followUpKeyboard)
 	}
 	if err != nil {
 		if isPermanentAPIError(err) {
@@ -129,53 +165,92 @@ func (s *Service) processSessionPress(ctx context.Context, bot Bot, callback *Ca
 	return result, "", nil
 }
 
-// resumeInTab opens the chosen conversation in a tab of its own and returns the line to send and
-// the tab to send it to. A conversation another tab holds is pointed to there; any other closed
-// one gets a new tab named after it, with its earlier messages forwarded in. An empty line leaves
-// the press to resume in the current tab: the conversation is gone or already here, or no tab
-// could be made.
-func (s *Service) resumeInTab(ctx context.Context, chatID int64, lane conversation.Lane, sessionID string) (string, context.Context, string, error) {
+// processSessionClosePress asks whether to close the tab that holds the chosen conversation. It is
+// how a tab the user cannot reach is cleaned up.
+func (s *Service) processSessionClosePress(ctx context.Context, bot Bot, callback *CallbackQuery, principalID, sessionID string) (processingResult, string, error) {
+	result := processingResult{event: "telegram.callback.handled", principalID: principalID, command: "sessions." + sessionCloseAction}
+	sessions, err := s.conversation.Sessions(ctx, laneOf(ctx, principalID))
+	if err != nil {
+		return processingResult{}, "render_sessions", err
+	}
+	text, keyboard := SessionGoneReply, InlineKeyboard(nil)
+	if index := slices.IndexFunc(sessions, func(session conversation.SessionSummary) bool { return session.ID == sessionID }); index >= 0 {
+		text = SessionNotInTab
+		if chosen := sessions[index]; chosen.Elsewhere && bot.HasTopicsEnabled {
+			text, keyboard = CloseTabQuestion(chosen.TabName), closeTabKeyboard(chosen.ThreadID)
+		}
+	}
+	if err := s.client.SendKeyboard(ctx, callback.Message.Chat.ID, 0, text, keyboard); err != nil {
+		if isPermanentAPIError(err) {
+			result.event, result.reason, result.err = "telegram.callback.undeliverable", "send_rejected", err
+			return result, "", nil
+		}
+		return processingResult{}, "send_message", err
+	}
+	return result, "", nil
+}
+
+// resumeInTab opens the chosen conversation in a tab of its own and returns the line to send, its
+// buttons, and the tab to send it to. A conversation another tab holds is pointed to there, unless
+// that tab turns out to be gone, in which case it is resumed like a closed one: in a new tab named
+// after it, with its earlier messages forwarded in. A tab that refused the line but may still exist
+// is offered for closing. An empty line leaves the press to resume in the current tab: the
+// conversation is gone or already here, or no tab could be made.
+func (s *Service) resumeInTab(ctx context.Context, chatID int64, lane conversation.Lane, sessionID string) (string, InlineKeyboard, context.Context, string, error) {
 	sessions, err := s.conversation.Sessions(ctx, lane)
 	if err != nil {
-		return "", ctx, "render_sessions", err
+		return "", nil, ctx, "render_sessions", err
 	}
 	index := slices.IndexFunc(sessions, func(session conversation.SessionSummary) bool { return session.ID == sessionID })
 	if index < 0 || sessions[index].Active {
-		return "", ctx, "", nil
+		return "", nil, ctx, "", nil
 	}
 	chosen := sessions[index]
 	logger := s.telemetry.ContextLogger(ctx, s.logger)
 	if chosen.Elsewhere {
-		// The line in the other tab only surfaces it; the answer here says where it went.
-		if err := s.client.SendReply(thread.With(ctx, chosen.ThreadID), chatID, 0, SessionHere); err != nil && !isPermanentAPIError(err) {
-			return "", ctx, "send_message", err
+		// The line in the other tab only surfaces it; the answer here says where it went. It never
+		// falls back to the main view, which would claim a tab that is gone.
+		err := s.client.SendInTab(thread.With(ctx, chosen.ThreadID), chatID, SessionHere)
+		verdict, refused := tabRefusal(err)
+		switch {
+		case refused && verdict == TabSuspect:
+			closeButton := InlineButton{Text: "Close " + strconv.Itoa(index+1), CallbackData: sessionCallback(sessionCloseAction, chosen.ID)}
+			return TabSuspectReply, InlineKeyboard{{closeButton}}, ctx, "", nil
+		case refused:
+			logger.InfoContext(ctx, "telegram.sessions.tab_replaced", "principal_id", lane.PrincipalID, "thread_id", chosen.ThreadID)
+		case err != nil && !isPermanentAPIError(err):
+			return "", nil, ctx, "send_message", err
+		default:
+			return SessionInTab(chosen.TabName), nil, ctx, "", nil
 		}
-		return SessionInItsTab, ctx, "", nil
 	}
 
 	name := chosen.Title
 	if name == "" {
 		name = untitledTab + chosen.LastActive.Format("2 Jan 2006")
 	}
+	name = topicName(name)
 	threadID, err := s.client.CreateForumTopic(ctx, chatID, name)
 	if err != nil {
 		if !isPermanentAPIError(err) {
-			return "", ctx, "create_tab", err
+			return "", nil, ctx, "create_tab", err
 		}
 		logger.WarnContext(ctx, "telegram.sessions.tab_refused", "principal_id", lane.PrincipalID, "error", err)
-		return "", ctx, "", nil
+		return "", nil, ctx, "", nil
 	}
 	tab := conversation.Lane{PrincipalID: lane.PrincipalID, ThreadID: threadID}
+	s.recordBotTab(ctx, lane.PrincipalID, threadID, name)
 	tabCtx := thread.With(ctx, threadID)
 	resumed, err := s.conversation.Resume(tabCtx, tab, sessionID)
 	if err != nil || !resumed.Found || resumed.Busy || resumed.Elsewhere || resumed.Current {
 		if deleteErr := s.client.DeleteForumTopic(ctx, chatID, threadID); deleteErr != nil {
 			logger.WarnContext(ctx, "telegram.sessions.tab_left", "principal_id", lane.PrincipalID, "error", deleteErr)
 		}
+		s.forgetTab(ctx, chatID, tab)
 		if err != nil {
-			return "", ctx, "sessions_action", err
+			return "", nil, ctx, "sessions_action", err
 		}
-		return resumedReply(resumed), ctx, "", nil
+		return resumedReply(resumed), nil, ctx, "", nil
 	}
 	followUp := resumedReply(resumed)
 	messages, err := s.conversation.SessionMessages(ctx, lane.PrincipalID, sessionID)
@@ -186,7 +261,7 @@ func (s *Service) resumeInTab(ctx context.Context, chatID int64, lane conversati
 		logger.WarnContext(ctx, "telegram.sessions.history_failed", "principal_id", lane.PrincipalID, "error", err)
 		followUp = HistoryUnavailable + "\n\n" + followUp
 	}
-	return followUp, tabCtx, "", nil
+	return followUp, nil, tabCtx, "", nil
 }
 
 func resumedReply(resumed conversation.ResumeResult) string {
@@ -228,9 +303,10 @@ func updateThread(update Update) int64 {
 	return 0
 }
 
-// repliedTo is the message the user answered by replying, or zero.
+// repliedTo is the message the user answered by replying, or zero. A message in a tab replies to
+// the tab's creation without the user replying to anything.
 func repliedTo(message *Message) int64 {
-	if message.ReplyToMessage == nil {
+	if message.ReplyToMessage == nil || message.ReplyToMessage.ForumTopicCreated != nil {
 		return 0
 	}
 	return message.ReplyToMessage.MessageID

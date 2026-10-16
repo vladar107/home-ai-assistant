@@ -87,6 +87,7 @@ type Telemetry struct {
 	reactionsReceived            metric.Int64Counter
 	reactionReconsiders          metric.Int64Counter
 	reactionConversions          metric.Int64Counter
+	telegramTabs                 metric.Int64Counter
 	tasks                        taskInstruments
 	watches                      watchInstruments
 }
@@ -428,6 +429,9 @@ func (t *Telemetry) createBusinessInstruments(meter metric.Meter) error {
 	if t.reactionConversions, err = counter("home_agent.reactions.converted", "Emoji-only replies turned into a reaction, by outcome.", "{reply}"); err != nil {
 		return err
 	}
+	if t.telegramTabs, err = counter("home_agent.telegram.tabs", "Telegram tabs taken for gone, kept as suspect, or closed by the user, by outcome.", "{tab}"); err != nil {
+		return err
+	}
 	if err := t.createTaskInstruments(meter); err != nil {
 		return err
 	}
@@ -651,10 +655,10 @@ func (t *Telemetry) StartToolCall(ctx context.Context, principal, tool string) (
 
 // ZeroRareOutcomes creates each principal's rare failure series, its series for each reaction the
 // bot may set, and its series for each class of a user's reaction, each reconsider outcome, each
-// reply conversion outcome, and each lesson outcome, at zero, so increase() sees their first
-// occurrence. The label tuples must match the ones StartConversationTurn, StartModelCall,
-// RecordReaction, RecordReplyFeedback, RecordReconsider, RecordReactionConversion, and
-// RecordMemoryLesson record.
+// reply conversion outcome, each lesson outcome, and each tab outcome, at zero, so increase() sees
+// their first occurrence. The label tuples must match the ones StartConversationTurn,
+// StartModelCall, RecordReaction, RecordReplyFeedback, RecordReconsider, RecordReactionConversion,
+// RecordMemoryLesson, and RecordTab record.
 func (t *Telemetry) ZeroRareOutcomes(ctx context.Context, principals, turnErrorKinds, reactions, feedbackClasses []string) {
 	for _, principal := range principals {
 		for _, errorKind := range turnErrorKinds {
@@ -691,7 +695,18 @@ func (t *Telemetry) ZeroRareOutcomes(ctx context.Context, principals, turnErrorK
 		for _, outcome := range []string{"proposed", "written"} {
 			t.memoryLessons.Add(ctx, 0, metric.WithAttributes(principalAttr(principal), labelAttr("home_agent.outcome", outcome, "unknown")))
 		}
+		for _, outcome := range TabOutcomes() {
+			t.telegramTabs.Add(ctx, 0, metric.WithAttributes(principalAttr(principal), labelAttr("home_agent.outcome", outcome, "unknown")))
+		}
 	}
+}
+
+// TabOutcomes are the fixed outcomes RecordTab counts.
+func TabOutcomes() []string { return []string{"tab_gone", "tab_gone_suspect", "tab_closed"} }
+
+// RecordTab counts a tab taken for gone, one kept as suspect, or one the user closed.
+func (t *Telemetry) RecordTab(ctx context.Context, principal, outcome string) {
+	t.telegramTabs.Add(ctx, 1, metric.WithAttributes(principalAttr(principal), labelAttr("home_agent.outcome", outcome, "unknown")))
 }
 
 // RecordModelStall counts a turn whose model went silent: retried_ok, retried_failed, or not_retried.
