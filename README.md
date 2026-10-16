@@ -38,8 +38,11 @@ borrowed between users.
   bot cannot switch the user's tab. `/close`, or Close in `/sessions`, ends a
   tab's conversation, which stays in `/sessions`, and deletes the tab. A tab
   Telegram no longer finds is noticed on the next send there: its messages go
-  to the main view, and its conversation can be resumed in a new tab. With
-  topics off, the chat is one conversation as before.
+  to the main view, and its conversation can be resumed in a new tab. The
+  client opens a tab for anything sent from the main view, so a command that
+  is the first message of a tab just opened is answered in the main view, and
+  that tab is deleted. With topics off, the chat is one conversation as
+  before.
 - **Feed tabs.** With tabs on, nothing arrives in the main view unasked, so it
   can be muted without losing a notification. Messages nobody asked for go to
   four tabs the bot makes on first use, each with a fixed icon: Reminders
