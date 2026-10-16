@@ -1035,6 +1035,97 @@ func TestDepartureChecksNormalizeTheStatus(t *testing.T) {
 	}
 }
 
+// The 07:56 and the 08:04 from Schothorst both make the IC 1722, so NS may leave the earlier one out
+// of its plan; asking again with extra change time brings it back.
+func TestDepartureChecksLookPastTrainsALaterOneBeats(t *testing.T) {
+	f := newFixture(t)
+	f.server.serve("v2/departures", fixtureBytes(t, "departures.json"))
+	var response map[string]any
+	if err := json.Unmarshal(fixtureBytes(t, "trips.json"), &response); err != nil {
+		t.Fatal(err)
+	}
+	response["trips"] = response["trips"].([]any)[1:]
+	hidden, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := fixtureBytes(t, "trips.json")
+	// plans answers each addChangeTime with its body; a step it does not list fails.
+	plans := func(bodies map[string][]byte) {
+		f.clock.advance(time.Minute)
+		f.server.route("v3/trips", func(w http.ResponseWriter, r *http.Request) {
+			body, found := bodies[r.URL.Query().Get("addChangeTime")]
+			if !found {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(body)
+		})
+	}
+	changeTimes := func(from int) []string {
+		var steps []string
+		for _, query := range f.server.seen("v3/trips")[from:] {
+			steps = append(steps, query.Get("addChangeTime"))
+		}
+		return steps
+	}
+	day := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	clock := func(value string) transit.Clock {
+		parsed, err := transit.ParseClock(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return parsed
+	}
+
+	plans(map[string][]byte{"": hidden, "10": full})
+	result := f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal", "date_time": "2026-10-05T07:00", "departures": []string{"07:56", "08:04"}})
+	wantText(t, result,
+		"1. on time — the 07:56 from Amersfoort Schothorst to Utrecht Centraal\n   - SPR 5822: Amersfoort Schothorst 07:56",
+		"NS plans this train only with 10 extra minutes for each transfer, so a connection shown may be later than the one the user makes.",
+		"2. on time — the 08:04 from Amersfoort Schothorst to Utrecht Centraal\n   - ICD 1822",
+	)
+	if strings.Count(result.Text, "extra minutes") != 1 {
+		t.Fatalf("only the hidden train carries the note:\n%s", result.Text)
+	}
+	if got := changeTimes(0); !slices.Equal(got, []string{"", "10"}) {
+		t.Fatalf("change times asked = %q, want the plain plan and one retry that also answers the 08:04", got)
+	}
+
+	asked := len(f.server.seen("v3/trips"))
+	plans(map[string][]byte{"": hidden, "10": hidden, "20": full})
+	departures, err := f.service.CheckDepartures(t.Context(), "alice", ns.DepartureQuery{From: "AMFS", To: "UT", Date: day, Times: []transit.Clock{clock("07:56")}})
+	if err != nil || departures[0].Status != transit.StatusOnTime || departures[0].Legs[0].Name != "SPR 5822" || !strings.Contains(departures[0].Note, "20 extra minutes") {
+		t.Fatalf("departures = %+v %v", departures, err)
+	}
+	if got := changeTimes(asked); !slices.Equal(got, []string{"", "10", "20"}) {
+		t.Fatalf("change times asked = %q, want the steps up to the first that finds the train", got)
+	}
+
+	// A train no step finds is looked up on the board, and stays not in the timetable.
+	asked = len(f.server.seen("v3/trips"))
+	plans(map[string][]byte{"": hidden, "10": hidden, "20": hidden, "30": hidden})
+	departures, err = f.service.CheckDepartures(t.Context(), "alice", ns.DepartureQuery{From: "AMFS", To: "UT", Date: day, Times: []transit.Clock{clock("07:56")}})
+	if err != nil || departures[0].Status != transit.StatusNotInTimetable || len(departures[0].Legs) != 0 {
+		t.Fatalf("departures = %+v %v", departures, err)
+	}
+	if got := changeTimes(asked); !slices.Equal(got, []string{"", "10", "20", "30"}) {
+		t.Fatalf("change times asked = %q", got)
+	}
+
+	// A retry that fails leaves the train unknown, so the check failed.
+	asked = len(f.server.seen("v3/trips"))
+	plans(map[string][]byte{"": hidden})
+	departures, err = f.service.CheckDepartures(t.Context(), "alice", ns.DepartureQuery{From: "AMFS", To: "UT", Date: day, Times: []transit.Clock{clock("07:56")}})
+	if err != nil || departures[0].Status != transit.StatusCheckFailed || departures[0].Note != "NS travel information is unavailable right now." {
+		t.Fatalf("departures = %+v %v", departures, err)
+	}
+	if got := slices.Compact(changeTimes(asked)); !slices.Equal(got, []string{"", "10"}) {
+		t.Fatalf("change times asked = %q, want no step after the failed one", got)
+	}
+}
+
 func TestDisruptionsAreStructuredWithTheirStations(t *testing.T) {
 	f := newFixture(t)
 	f.server.serve("v3/disruptions", fixtureBytes(t, "disruptions.json"))
