@@ -11,6 +11,9 @@ type Telemetry interface {
 	StartStore(context.Context, string) (context.Context, func(error))
 	StartTelegramAPI(context.Context, string) (context.Context, func(error))
 	StartTelegramUpdate(context.Context) (context.Context, func(string, string, string, error))
+	// RecordTab counts a tab taken for gone, kept as suspect, or closed by the user: tab_gone,
+	// tab_gone_suspect, or tab_closed.
+	RecordTab(ctx context.Context, principal, outcome string)
 }
 
 type noopTelemetry struct{}
@@ -32,6 +35,8 @@ func (noopTelemetry) StartTelegramAPI(ctx context.Context, _ string) (context.Co
 func (noopTelemetry) StartTelegramUpdate(ctx context.Context) (context.Context, func(string, string, string, error)) {
 	return ctx, func(string, string, string, error) {}
 }
+
+func (noopTelemetry) RecordTab(context.Context, string, string) {}
 
 func telemetryOrNoop(telemetry Telemetry) Telemetry {
 	if telemetry == nil {

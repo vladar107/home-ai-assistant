@@ -106,12 +106,15 @@ type sentMessage struct {
 	keyboard  InlineKeyboard
 	status    int
 	messageID int64
+	// threadID is the tab the message was sent to, or zero for the main view.
+	threadID int64
 }
 
 type sentDocument struct {
-	chatID int64
-	name   string
-	data   []byte
+	chatID   int64
+	name     string
+	data     []byte
+	threadID int64
 }
 
 type editedMessage struct {
@@ -221,6 +224,8 @@ type harnessOptions struct {
 	// backlog adds the backlog with its tools and /backlog, with outside content checked on the
 	// conversation.
 	backlog bool
+	// topics turns the bot's tabs on, as BotFather's switch does.
+	topics bool
 }
 
 type fixedDescriber string
@@ -306,6 +311,8 @@ type conversationHarness struct {
 	// feedbackCounts counts the user reactions and reconsider outcomes the conversation reported,
 	// and the reply conversions the react tool reported.
 	feedbackCounts map[string]int
+	// tabs simulates the chat's tabs while topics are on.
+	tabs tabSimulator
 }
 
 type setReaction struct {
@@ -379,7 +386,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		t: t, ctx: ctx, updates: make(chan []Update, 20), messages: make(chan sentMessage, 100), documents: make(chan sentDocument, 20), photos: make(chan sentPhoto, 20), edits: make(chan editedMessage, 100),
 		answers: make(chan callbackAnswer, 100), deletes: make(chan deletedMessage, 100), offsets: make(chan int64, 100), registrations: make(chan commandRegistration, 10),
 		turns: make(chan turnOutcome, 20), logs: &lockedBuffer{}, files: make(map[string]testFile), indicatorFailures: make(map[string]int),
-		reactionCounts: make(map[string]int), feedbackCounts: make(map[string]int),
+		reactionCounts: make(map[string]int), feedbackCounts: make(map[string]int), tabs: newTabSimulator(options.topics),
 	}
 	server := httptest.NewServer(http.HandlerFunc(h.serveHTTP))
 	t.Cleanup(server.Close)
@@ -793,6 +800,8 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	if err != nil {
 		t.Fatal(err)
 	}
+	h.service.SetTabs(h.store)
+	h.client.ObserveTabs(h.service)
 	if err := broker.Register(h.service.Help()); err != nil {
 		t.Fatal(err)
 	}
@@ -857,7 +866,7 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 	var result any = struct{}{}
 	switch filepath.Base(r.URL.Path) {
 	case "getMe":
-		result = Bot{ID: 999, Username: "assistant_test_bot"}
+		result = Bot{ID: 999, Username: "assistant_test_bot", HasTopicsEnabled: h.tabs.enabled}
 	case "getUpdates":
 		offset, err := strconv.ParseInt(r.Form.Get("offset"), 10, 64)
 		if err != nil {
@@ -891,6 +900,10 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 			}
 			replyTo = parameters.MessageID
 		}
+		threadID := h.threadOf(r.Form.Get("message_thread_id"))
+		if h.refuseGoneThread(w, r, "sendMessage", threadID) {
+			return
+		}
 		h.mu.Lock()
 		status := http.StatusOK
 		if len(h.sendStatuses) > 0 {
@@ -903,7 +916,7 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 		messageID := sentMessageID(h.sentCount)
 		h.mu.Unlock()
 		select {
-		case h.messages <- sentMessage{chatID: chatID, replyTo: replyTo, text: r.Form.Get("text"), parseMode: r.Form.Get("parse_mode"), keyboard: h.parseKeyboard(r.Form.Get("reply_markup")), status: status, messageID: messageID}:
+		case h.messages <- sentMessage{chatID: chatID, replyTo: replyTo, text: r.Form.Get("text"), parseMode: r.Form.Get("parse_mode"), keyboard: h.parseKeyboard(r.Form.Get("reply_markup")), status: status, messageID: messageID, threadID: threadID}:
 		case <-r.Context().Done():
 			return
 		}
@@ -1064,8 +1077,15 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 		}
 		result = true
 	default:
+		var served bool
+		if result, served = h.serveTabMethod(w, r); served {
+			break
+		}
 		h.t.Errorf("unexpected Telegram method: %s", r.URL.Path)
 		w.WriteHeader(404)
+		return
+	}
+	if result == nil {
 		return
 	}
 	if err := json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": result}); err != nil && r.Context().Err() == nil {
@@ -1091,12 +1111,16 @@ func (h *conversationHarness) serveDocumentUpload(w http.ResponseWriter, r *http
 		h.t.Error(err)
 		return
 	}
+	threadID := h.threadOf(r.FormValue("message_thread_id"))
+	if h.refuseGoneThread(w, r, "sendDocument", threadID) {
+		return
+	}
 	h.mu.Lock()
 	h.sentCount++
 	messageID := sentMessageID(h.sentCount)
 	h.mu.Unlock()
 	select {
-	case h.documents <- sentDocument{chatID: chatID, name: header.Filename, data: data}:
+	case h.documents <- sentDocument{chatID: chatID, name: header.Filename, data: data, threadID: threadID}:
 	case <-r.Context().Done():
 		return
 	}

@@ -908,6 +908,8 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("initialize Telegram service: %w", err)
 	}
+	service.SetTabs(a.store)
+	client.ObserveTabs(service)
 	if a.typeSafe != nil {
 		service.SetTypeSafe(a.typeSafe)
 	}

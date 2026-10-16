@@ -45,6 +45,14 @@ const (
 	RequestStateReady  = "ready"
 )
 
+// Reasons a tab's conversation closes without the user starting another one. A conversation closed
+// as CloseTabGone comes back when the user writes in its tab again; one closed as CloseTabClosed
+// returns only when resumed.
+const (
+	CloseTabGone   = "tab_gone"
+	CloseTabClosed = "tab_closed"
+)
+
 // Lane is one conversation place of a principal: a Telegram tab, or the chat's main view at thread
 // zero, which is the only lane while the bot has tabs off. Each lane holds its own active session
 // and runs its turns apart from the others.
@@ -125,6 +133,8 @@ type SessionSummary struct {
 	Elsewhere bool
 	// ThreadID is the tab the conversation is active in, or was last active in.
 	ThreadID int64
+	// TabName is the name of that tab, or "" when it is not known.
+	TabName string
 }
 
 type ResumeResult struct {
@@ -153,6 +163,8 @@ type SessionRecord struct {
 	Private bool
 	// ThreadID is the tab the conversation was last active in.
 	ThreadID int64
+	// TabName is the name the tab registry knows that tab by, or "".
+	TabName string
 }
 
 // ReplyOrigin is where a delivered reply came from: its session and request, when it was sent, and
@@ -194,6 +206,9 @@ type Repository interface {
 	CancelPrincipalConversations(context.Context, string) (bool, error)
 	// ResetConversation closes the lane's active session and returns its ID.
 	ResetConversation(context.Context, Lane) (string, bool, error)
+	// CloseLane closes the lane's active session with CloseTabGone or CloseTabClosed and returns
+	// its ID. It leaves the lane's requests as they are.
+	CloseLane(ctx context.Context, lane Lane, reason string) (string, bool, error)
 	// ConversationSessions lists the principal's conversations, most recently active first.
 	ConversationSessions(ctx context.Context, principalID string, limit int) ([]SessionRecord, error)
 	// SwitchConversation makes the principal's own session the lane's active one unless the lane has

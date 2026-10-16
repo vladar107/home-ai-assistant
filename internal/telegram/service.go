@@ -47,6 +47,7 @@ type botAPI interface {
 	CreateForumTopic(context.Context, int64, string) (int64, error)
 	DeleteForumTopic(context.Context, int64, int64) error
 	ForwardMessages(context.Context, int64, []int64) error
+	SendInTab(context.Context, int64, string) error
 }
 
 type ConversationController interface {
@@ -58,6 +59,8 @@ type ConversationController interface {
 	// it did.
 	StopDraft(ctx context.Context, lane conversation.Lane, draftID int64) (bool, error)
 	NewSession(context.Context, conversation.Lane) (bool, error)
+	// CloseLane ends the conversation of a tab that was closed or is gone.
+	CloseLane(ctx context.Context, lane conversation.Lane, reason string) (bool, error)
 	Sessions(context.Context, conversation.Lane) ([]conversation.SessionSummary, error)
 	Resume(context.Context, conversation.Lane, string) (conversation.ResumeResult, error)
 	// SessionMessages returns the Telegram messages of one of the principal's conversations, oldest
@@ -147,10 +150,18 @@ type Service struct {
 	trips         TripController
 	routes        RouteController
 	transcriber   Transcriber
+	tabs          TabStore
 	sections      []settingsSection
 	interceptors  []messageInterceptor
 	logger        *slog.Logger
 	telemetry     Telemetry
+
+	// topics is the bot's tabs switch as getMe last reported it.
+	topics atomic.Bool
+	// confirmedTabs holds the tabs the registry holds as confirmed, so a send there writes nothing.
+	confirmedTabs sync.Map
+	// knownTabs holds the tabs the registry has a row for, so a message there adds none.
+	knownTabs sync.Map
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -260,6 +271,7 @@ func (s *Service) botCommands() []BotCommand {
 	return menuCommands([]menuCommand{
 		{BotCommand{Command: "backlog", Description: "Show and export your ideas for developing me"}, s.backlog != nil},
 		{BotCommand{Command: "cancel", Description: "Stop the current response"}, conversationEnabled},
+		{BotCommand{Command: "close", Description: "Close this tab"}, conversationEnabled && s.topics.Load()},
 		{BotCommand{Command: "jobs", Description: "Show and manage your reminders and scheduled jobs"}, s.schedules != nil},
 		{BotCommand{Command: "memory", Description: "Show and delete what I remember about you"}, s.memory != nil},
 		{BotCommand{Command: "new", Description: "Start a fresh conversation"}, conversationEnabled},
@@ -284,6 +296,7 @@ func (s *Service) Start(ctx context.Context) error {
 	if bot.ID <= 0 || bot.Username == "" || bot.Username != strings.TrimSpace(bot.Username) {
 		return fmt.Errorf("Telegram getMe returned an invalid bot identity")
 	}
+	s.topics.Store(bot.HasTopicsEnabled)
 
 	commands := s.botCommands()
 	// Private chats resolve the all-private-chats scope before the default one, so a stale list there would hide the default registration.
@@ -488,6 +501,10 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 	}
 
 	message := update.Message
+	// A topic service message may come from the bot itself, so it is read before the sender check.
+	if message.ForumTopicCreated != nil || message.ForumTopicEdited != nil {
+		return s.processTopicService(ctx, bot, message)
+	}
 	if reason := validatePrivateMessage(message.From, message.Chat, message.MessageID); reason != "" {
 		return ignoredResult(reason), "", nil
 	}
@@ -498,11 +515,15 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 	if reason != "" {
 		return ignoredResult(reason), "", nil
 	}
+	s.noteTab(ctx, bot, authorization.Principal.ID, message)
 
 	command, isCommand := ParseCommand(message.Text, bot.Username)
 	if isCommand {
 		if command == "backlog" && s.backlog != nil && commandArgument(message.Text) == backlogExportArgument {
 			return s.sendBacklogExport(ctx, message, authorization.Principal.ID)
+		}
+		if command == "close" && bot.HasTopicsEnabled && s.conversation != nil {
+			return s.processCloseCommand(ctx, message, authorization.Principal.ID)
 		}
 		reply, keyboard, err := s.handleCommand(ctx, authorization.Principal.ID, command)
 		if err != nil {
@@ -839,8 +860,11 @@ func (s *Service) processCallback(ctx context.Context, bot Bot, updateID int64, 
 	if action, tripID, isTrip := parseTripCallback(callback.Data); isTrip && s.trips != nil {
 		return s.processTripPress(ctx, callback, principalID, action, tripID)
 	}
-	if sessionID, isSession := parseSessionCallback(callback.Data); isSession && s.conversation != nil {
-		return s.processSessionPress(ctx, bot, callback, principalID, sessionID)
+	if action, sessionID, isSession := parseSessionCallback(callback.Data); isSession && s.conversation != nil {
+		return s.processSessionPress(ctx, bot, callback, principalID, action, sessionID)
+	}
+	if action, threadID, isTab := parseTabCallback(callback.Data); isTab && s.conversation != nil && bot.HasTopicsEnabled {
+		return s.processTabPress(ctx, callback, principalID, action, threadID)
 	}
 	if taskID, isTask := parseTaskCallback(callback.Data); isTask && s.tasks != nil {
 		return s.processTaskPress(ctx, callback, principalID, taskID)
@@ -1181,7 +1205,7 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		if s.conversation == nil {
 			return HelpReply, nil, nil
 		}
-		return renderSessions(ctx, laneOf(ctx, principalID), s.conversation)
+		return renderSessions(ctx, laneOf(ctx, principalID), s.conversation, s.topics.Load())
 	case "jobs":
 		if s.schedules == nil {
 			return HelpReply, nil, nil
@@ -1221,6 +1245,9 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		}
 		if s.tasks != nil {
 			reply += TasksHelpLine
+		}
+		if s.conversation != nil && s.topics.Load() {
+			reply += TabsHelpLine
 		}
 		return reply, nil, nil
 	}

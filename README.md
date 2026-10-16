@@ -16,7 +16,8 @@ borrowed between users.
 - **Conversation.** Natural-language chat with per-user context, backed by the
   [Pi](https://github.com/badlogic/pi-mono) agent runtime on the user's own model
   subscription. `/backlog`, `/cancel`, `/jobs`, `/memory`, `/new`, `/sessions`,
-  `/settings`, and `/tasks` are deterministic shortcuts in the slash menu, and
+  `/settings`, and `/tasks` are deterministic shortcuts in the slash menu, with
+  `/close` there too while tabs are on, and
   `/status` and `/privacy` answer when typed. Asked how to
   set something up, the assistant reads its own help, built from the same
   `/settings` pages and command list the user sees.
@@ -28,9 +29,14 @@ borrowed between users.
   private chat is its own conversation, and tabs answer in parallel. `/new`,
   `/cancel`, and `/sessions` act on the tab they are sent in. Resuming an
   earlier conversation opens it in a new tab with its earlier messages
-  forwarded in, or points to the tab that already holds it. Reminders,
-  scheduled reports, watches, and trip messages go to the main view. With
-  topics off, the chat is one conversation as before.
+  forwarded in. A conversation another tab holds is listed with that tab's
+  name, and Open posts there to bring it to the top, since a bot cannot switch
+  the user's tab. `/close`, or Close in `/sessions`, ends a tab's conversation,
+  which stays in `/sessions`, and deletes the tab. A tab Telegram no longer
+  finds is noticed on the next send there: its messages go to the main view,
+  and its conversation can be resumed in a new tab. Reminders, scheduled
+  reports, watches, and trip messages go to the main view. With topics off,
+  the chat is one conversation as before.
 - **Act and tell.** A clear request to set up or change a scheduled job, a
   watch, a saved route, a memory instruction, or a Notion property is done at
   once. A "Done" message follows the reply with an Undo button per action,

@@ -55,6 +55,78 @@ type Client struct {
 	httpClient   *http.Client
 	uploadClient *http.Client
 	telemetry    Telemetry
+	tabs         TabObserver
+}
+
+// TabVerdict is what a tab Telegram refused a send to is taken to be.
+type TabVerdict string
+
+const (
+	// TabGone is a tab taken for deleted.
+	TabGone TabVerdict = "gone"
+	// TabSuspect is a tab that refused a send but is kept, because Telegram also refuses sends to
+	// some tabs that exist.
+	TabSuspect TabVerdict = "suspect"
+)
+
+// TabObserver learns which tabs take the bot's sends. TabRefused hears of each tab Telegram
+// answered "message thread not found" for and returns what that tab is taken to be.
+type TabObserver interface {
+	TabAccepted(ctx context.Context, chatID, threadID int64)
+	TabRefused(ctx context.Context, chatID, threadID int64) TabVerdict
+}
+
+// ObserveTabs reports every send that names a tab to the observer; call it before the first send.
+func (c *Client) ObserveTabs(observer TabObserver) {
+	c.tabs = observer
+}
+
+// tabRefusedError is a send's "message thread not found" with what the tab was taken to be.
+type tabRefusedError struct {
+	verdict TabVerdict
+	err     error
+}
+
+func (e *tabRefusedError) Error() string { return e.err.Error() }
+
+func (e *tabRefusedError) Unwrap() error { return e.err }
+
+// tabRefusal returns what the tab of a refused send was taken to be.
+func tabRefusal(err error) (TabVerdict, bool) {
+	var refused *tabRefusedError
+	if !errors.As(err, &refused) {
+		return "", false
+	}
+	return refused.verdict, true
+}
+
+// inTab makes a send under the context's tab. When Telegram answers that the tab is not found, the
+// observer hears of it, and a send that may fall back is made once more to the main view, so a
+// reply for a deleted tab still reaches the user. Otherwise the refusal is returned with its
+// verdict.
+func (c *Client) inTab(ctx context.Context, chatID int64, fallback bool, send func(context.Context) error) error {
+	threadID := thread.From(ctx)
+	err := send(ctx)
+	if threadID <= 0 {
+		return err
+	}
+	if err == nil {
+		if c.tabs != nil {
+			c.tabs.TabAccepted(ctx, chatID, threadID)
+		}
+		return nil
+	}
+	if !isThreadGone(err) {
+		return err
+	}
+	verdict := TabGone
+	if c.tabs != nil {
+		verdict = c.tabs.TabRefused(ctx, chatID, threadID)
+	}
+	if fallback {
+		return send(thread.With(ctx, 0))
+	}
+	return &tabRefusedError{verdict: verdict, err: err}
 }
 
 type Bot struct {
@@ -139,6 +211,24 @@ type Message struct {
 	VideoNote *MediaFile `json:"video_note"`
 	Sticker   *MediaFile `json:"sticker"`
 	Animation *MediaFile `json:"animation"`
+	// ForumTopicCreated and ForumTopicEdited mark a service message about a tab. Telegram also sets
+	// every message in a tab to reply to the message that created the tab.
+	ForumTopicCreated *ForumTopicCreated `json:"forum_topic_created"`
+	ForumTopicEdited  *ForumTopicEdited  `json:"forum_topic_edited"`
+}
+
+// ForumTopicCreated is the creation of a tab. IsNameImplicit is set when its creator did not choose
+// the name.
+type ForumTopicCreated struct {
+	Name              string `json:"name"`
+	IconCustomEmojiID string `json:"icon_custom_emoji_id"`
+	IsNameImplicit    bool   `json:"is_name_implicit"`
+}
+
+// ForumTopicEdited is a change of a tab's name or icon; a field is nil when it did not change.
+type ForumTopicEdited struct {
+	Name              *string `json:"name"`
+	IconCustomEmojiID *string `json:"icon_custom_emoji_id"`
 }
 
 // Location is a shared point. LivePeriod is set only while a live location is running.
@@ -429,6 +519,17 @@ func (c *Client) send(ctx context.Context, chatID, replyToMessageID int64, text 
 }
 
 func (c *Client) sendMessage(ctx context.Context, chatID, replyToMessageID int64, text string, keyboard InlineKeyboard) (Message, error) {
+	return c.sendMessageIn(ctx, chatID, replyToMessageID, text, keyboard, true)
+}
+
+// SendInTab posts a message in the context's tab and nowhere else: a tab that is not found is
+// reported to the observer, and the error carries its verdict.
+func (c *Client) SendInTab(ctx context.Context, chatID int64, text string) error {
+	_, err := c.sendMessageIn(ctx, chatID, 0, text, nil, false)
+	return err
+}
+
+func (c *Client) sendMessageIn(ctx context.Context, chatID, replyToMessageID int64, text string, keyboard InlineKeyboard, fallback bool) (Message, error) {
 	params := url.Values{"chat_id": {strconv.FormatInt(chatID, 10)}}
 	if replyToMessageID > 0 {
 		params.Set("reply_parameters", fmt.Sprintf(`{"message_id":%d,"allow_sending_without_reply":true}`, replyToMessageID))
@@ -436,13 +537,14 @@ func (c *Client) sendMessage(ctx context.Context, chatID, replyToMessageID int64
 	if err := setKeyboard(params, keyboard); err != nil {
 		return Message{}, err
 	}
-	hasThread := setThread(ctx, params)
-	message, err := c.sendFormatted(ctx, params, text)
-	// A reply to a tab the user has since deleted still reaches them in the main view.
-	if hasThread && isThreadGone(err) {
+	var message Message
+	err := c.inTab(ctx, chatID, fallback, func(ctx context.Context) error {
 		params.Del("message_thread_id")
-		return c.sendFormatted(ctx, params, text)
-	}
+		setThread(ctx, params)
+		var err error
+		message, err = c.sendFormatted(ctx, params, text)
+		return err
+	})
 	return message, err
 }
 
@@ -612,7 +714,8 @@ func (c *Client) CreateForumTopic(ctx context.Context, chatID int64, name string
 	return topic.MessageThreadID, nil
 }
 
-// DeleteForumTopic removes a tab with all of its messages.
+// DeleteForumTopic removes a tab with all of its messages. Its callers are already ending the tab,
+// so a tab that is not found is not reported to the observer.
 func (c *Client) DeleteForumTopic(ctx context.Context, chatID, threadID int64) error {
 	params := url.Values{
 		"chat_id":           {strconv.FormatInt(chatID, 10)},
@@ -626,7 +729,8 @@ func (c *Client) DeleteForumTopic(ctx context.Context, chatID, threadID int64) e
 const forwardBatch = 100
 
 // ForwardMessages forwards the chat's messages to the context's tab in the order given, which must
-// be ascending. Telegram skips any message that no longer exists.
+// be ascending. Telegram skips any message that no longer exists. The messages go only to the tab
+// they were meant for: a tab that is not found is reported, and nothing goes to the main view.
 func (c *Client) ForwardMessages(ctx context.Context, chatID int64, messageIDs []int64) error {
 	for start := 0; start < len(messageIDs); start += forwardBatch {
 		encoded, err := json.Marshal(messageIDs[start:min(start+forwardBatch, len(messageIDs))])
@@ -638,8 +742,11 @@ func (c *Client) ForwardMessages(ctx context.Context, chatID int64, messageIDs [
 			"from_chat_id": {strconv.FormatInt(chatID, 10)},
 			"message_ids":  {string(encoded)},
 		}
-		setThread(ctx, params)
-		if _, err := execute[json.RawMessage](c, ctx, "forwardMessages", params); err != nil {
+		if err := c.inTab(ctx, chatID, false, func(ctx context.Context) error {
+			setThread(ctx, params)
+			_, err := execute[json.RawMessage](c, ctx, "forwardMessages", params)
+			return err
+		}); err != nil {
 			return err
 		}
 	}
@@ -737,8 +844,9 @@ func (c *Client) SetMessageReaction(ctx context.Context, chatID, messageID int64
 // SendDocument uploads a file to the chat as a Telegram document. The caller bounds the size; the
 // body is streamed into the multipart request between its prologue and closing boundary so a file
 // never has to be held in memory, which is also why the length is set rather than left to chunked
-// encoding.
-func (c *Client) SendDocument(ctx context.Context, chatID int64, name string, body io.Reader, size int64) (resultErr error) {
+// encoding. A file for a tab that is not found goes to the main view when its body can be read
+// again from the start.
+func (c *Client) SendDocument(ctx context.Context, chatID int64, name string, body io.Reader, size int64) error {
 	if chatID == 0 {
 		return fmt.Errorf("Telegram sendDocument requires a chat")
 	}
@@ -748,6 +856,27 @@ func (c *Client) SendDocument(ctx context.Context, chatID int64, name string, bo
 	if size <= 0 {
 		return fmt.Errorf("Telegram sendDocument requires a positive file size")
 	}
+	seeker, rewindable := body.(io.Seeker)
+	var start int64
+	if rewindable {
+		var err error
+		if start, err = seeker.Seek(0, io.SeekCurrent); err != nil {
+			rewindable = false
+		}
+	}
+	sent := false
+	return c.inTab(ctx, chatID, rewindable, func(ctx context.Context) error {
+		if sent {
+			if _, err := seeker.Seek(start, io.SeekStart); err != nil {
+				return fmt.Errorf("Telegram sendDocument file could not be read again")
+			}
+		}
+		sent = true
+		return c.sendDocument(ctx, chatID, name, body, size)
+	})
+}
+
+func (c *Client) sendDocument(ctx context.Context, chatID int64, name string, body io.Reader, size int64) (resultErr error) {
 	ctx, endTelemetry := c.telemetry.StartTelegramAPI(ctx, "sendDocument")
 	defer func() {
 		endTelemetry(resultErr)
@@ -805,25 +934,27 @@ func (c *Client) SendPhoto(ctx context.Context, chatID, replyToMessageID int64, 
 	if len(png) == 0 {
 		return fmt.Errorf("Telegram sendPhoto requires a photo to upload")
 	}
-	fields := map[string]string{"chat_id": strconv.FormatInt(chatID, 10)}
-	if threadID := thread.From(ctx); threadID > 0 {
-		fields["message_thread_id"] = strconv.FormatInt(threadID, 10)
-	}
-	if replyToMessageID > 0 {
-		fields["reply_parameters"] = fmt.Sprintf(`{"message_id":%d,"allow_sending_without_reply":true}`, replyToMessageID)
-	}
-	rendered := renderMarkup(caption)
-	if strings.TrimSpace(caption) != "" {
-		fields["caption"] = rendered
-		fields["parse_mode"] = "HTML"
-	}
-	err := c.sendPhoto(ctx, fields, png)
-	if hasUnparsableEntities(err) {
-		fields["caption"] = captionText(rendered)
-		delete(fields, "parse_mode")
-		err = c.sendPhoto(ctx, fields, png)
-	}
-	return err
+	return c.inTab(ctx, chatID, true, func(ctx context.Context) error {
+		fields := map[string]string{"chat_id": strconv.FormatInt(chatID, 10)}
+		if threadID := thread.From(ctx); threadID > 0 {
+			fields["message_thread_id"] = strconv.FormatInt(threadID, 10)
+		}
+		if replyToMessageID > 0 {
+			fields["reply_parameters"] = fmt.Sprintf(`{"message_id":%d,"allow_sending_without_reply":true}`, replyToMessageID)
+		}
+		rendered := renderMarkup(caption)
+		if strings.TrimSpace(caption) != "" {
+			fields["caption"] = rendered
+			fields["parse_mode"] = "HTML"
+		}
+		err := c.sendPhoto(ctx, fields, png)
+		if hasUnparsableEntities(err) {
+			fields["caption"] = captionText(rendered)
+			delete(fields, "parse_mode")
+			err = c.sendPhoto(ctx, fields, png)
+		}
+		return err
+	})
 }
 
 func (c *Client) sendPhoto(ctx context.Context, fields map[string]string, png []byte) (resultErr error) {
