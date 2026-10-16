@@ -2,7 +2,10 @@
 // with a thread lands in that tab; one made without lands in the chat's main view.
 package thread
 
-import "context"
+import (
+	"context"
+	"strings"
+)
 
 type contextKey struct{}
 
@@ -51,8 +54,26 @@ func FeedSubject(feed string) string {
 	return "feed:" + feed
 }
 
+// tripDestination opens the destination of a trip's messages.
+const tripDestination = "trip:"
+
+// TripDestination is where a trip's messages go: the trip's own tab, which the tab registry records
+// as serving the same value.
+func TripDestination(tripID string) string {
+	return tripDestination + tripID
+}
+
+// TripOf returns the trip a destination names, if it names one.
+func TripOf(destination string) (string, bool) {
+	tripID, found := strings.CutPrefix(destination, tripDestination)
+	return tripID, found && tripID != ""
+}
+
 // Feeds resolves the tab of a principal's feed, making it on first use. Zero is the main view,
 // which is where everything goes while the bot has tabs off.
 type Feeds interface {
 	Thread(ctx context.Context, principalID string, chatID int64, feed string) (int64, error)
+	// Destination resolves a destination such as TripDestination, and the feed when the
+	// destination has no tab to offer.
+	Destination(ctx context.Context, principalID string, chatID int64, destination, feed string) (int64, error)
 }

@@ -42,6 +42,9 @@ type Job struct {
 	Enabled     bool
 	// TravelPause keeps a recurring job silent for occurrences that fall inside a trip.
 	TravelPause bool
+	// Destination is where the job's runs go instead of the feed of their kind, such as a trip's
+	// tab; "" is the feed.
+	Destination string
 	NextRunAt   time.Time
 	FinishedAt  time.Time
 	CreatedAt   time.Time
@@ -74,6 +77,8 @@ type Run struct {
 	JobZone      string
 	JobOneTime   bool
 	Config       json.RawMessage
+	// Destination is the job's, read with the run like its name.
+	Destination string
 	// Private is true when the reply may retell Notion page content or NAS file contents. It is
 	// known only to the process that executed the run.
 	Private bool
@@ -96,12 +101,14 @@ type Repository interface {
 	DeleteScheduledJob(ctx context.Context, principalID, jobID string) (bool, error)
 	// DeleteUnchangedScheduledJob deletes the job only while it was last changed at updatedAt.
 	DeleteUnchangedScheduledJob(ctx context.Context, principalID, jobID string, updatedAt time.Time) (bool, error)
+	// SetScheduledJobDestination sets the destination of a job that has none.
+	SetScheduledJobDestination(ctx context.Context, principalID, jobID, destination string) (bool, error)
 	// SetScheduledJobTravelPause sets the travel flag of an unfinished recurring job.
 	SetScheduledJobTravelPause(ctx context.Context, principalID, jobID string, on bool) (bool, error)
 	// ScheduledJobsWithCron returns every principal's unfinished recurring jobs with the cron.
 	ScheduledJobsWithCron(ctx context.Context, cron string) ([]Job, error)
 	// UpdateScheduledJob replaces an unfinished job's name, schedule, zone, configuration, travel
-	// flag, and next run, keeping its type, owner, and pause state. A job changed since expectedUpdatedAt, including
+	// flag, destination, and next run, keeping its type, owner, and pause state. A job changed since expectedUpdatedAt, including
 	// by a tick advancing it, is left alone and reported as not updated.
 	UpdateScheduledJob(ctx context.Context, job Job, expectedUpdatedAt time.Time) (bool, error)
 	DueScheduledJobs(ctx context.Context, now time.Time) ([]Job, error)

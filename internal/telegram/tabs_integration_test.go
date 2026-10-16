@@ -47,6 +47,14 @@ type tabSimulator struct {
 	icons      []TopicIcon
 	iconStatus int
 	topicEdits chan editedTopic
+	// pins are the messages the bot pinned, and pinStatus fails pinning when set.
+	pins      chan pinnedMessage
+	pinStatus int
+}
+
+type pinnedMessage struct {
+	chatID, messageID int64
+	silent            bool
 }
 
 type editedTopic struct {
@@ -68,7 +76,7 @@ func newTabSimulator(enabled bool) tabSimulator {
 		enabled: enabled, gone: make(map[int64]bool), next: 500,
 		created: make(chan createdTopic, 20), deleted: make(chan int64, 20),
 		forwards: make(chan forwardedMessages, 20), refused: make(chan refusedSend, 50),
-		icons: testTopicIcons, topicEdits: make(chan editedTopic, 20),
+		icons: testTopicIcons, topicEdits: make(chan editedTopic, 20), pins: make(chan pinnedMessage, 20),
 	}
 }
 
@@ -173,6 +181,22 @@ func (h *conversationHarness) serveTabMethod(w http.ResponseWriter, r *http.Requ
 			stickers[index] = map[string]string{"file_id": "sticker-" + icon.CustomEmojiID, "type": "custom_emoji", "emoji": icon.Emoji, "custom_emoji_id": icon.CustomEmojiID}
 		}
 		return stickers, true
+	case "pinChatMessage":
+		chatID, chatErr := strconv.ParseInt(r.Form.Get("chat_id"), 10, 64)
+		messageID, messageErr := strconv.ParseInt(r.Form.Get("message_id"), 10, 64)
+		if chatErr != nil || messageErr != nil || r.Form.Has("message_thread_id") {
+			h.t.Errorf("pinChatMessage needs a chat and a message and names no tab: %v", r.Form)
+		}
+		h.tabs.pins <- pinnedMessage{chatID: chatID, messageID: messageID, silent: r.Form.Get("disable_notification") == "true"}
+		h.mu.Lock()
+		status := h.tabs.pinStatus
+		h.mu.Unlock()
+		if status != 0 {
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_code": status, "description": "Bad Request: not enough rights to manage pinned messages in the chat"})
+			return nil, true
+		}
+		return true, true
 	case "editForumTopic":
 		_, named := r.Form["name"]
 		_, iconed := r.Form["icon_custom_emoji_id"]
@@ -326,7 +350,7 @@ func TestEverySendToATabFallsBackOnceAndReportsTheTab(t *testing.T) {
 		t.Fatalf("keyboard message = %+v, want it in the main view", message)
 	}
 
-	if err := (TripNotifier{Client: h.client, Chats: h.store}).Send(tab, "alice", "a trip notice"); err != nil {
+	if err := (TripNotifier{Client: h.client, Chats: h.store}).Send(tab, "alice", "", "a trip notice"); err != nil {
 		t.Fatal(err)
 	}
 	h.wantRefused("sendMessage", 77)

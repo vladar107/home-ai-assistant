@@ -25,7 +25,7 @@ func NewScheduleReminders(schedules *schedule.Service) Reminders {
 	return scheduleReminders{schedules: schedules}
 }
 
-func (r scheduleReminders) SetReminder(ctx context.Context, principalID, id string, at time.Time, zone, text string) error {
+func (r scheduleReminders) SetReminder(ctx context.Context, principalID, id string, at time.Time, zone, text, destination string) error {
 	location, err := schedule.LoadZone(zone)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrReminderRefused, err)
@@ -44,6 +44,7 @@ func (r scheduleReminders) SetReminder(ctx context.Context, principalID, id stri
 	if !prepared.Job.RunAt.Equal(target) {
 		prepared.Job.RunAt, prepared.Job.NextRunAt, prepared.Schedule.Once = target, target, target
 	}
+	prepared.Job.Destination = destination
 	for attempt := 0; attempt < 2; attempt++ {
 		jobs, err := r.schedules.Jobs(ctx, principalID)
 		if err != nil {
@@ -84,5 +85,10 @@ func (r scheduleReminders) SetReminder(ctx context.Context, principalID, id stri
 
 func (r scheduleReminders) RemoveReminder(ctx context.Context, principalID, id string) error {
 	_, err := r.schedules.Delete(ctx, principalID, id)
+	return err
+}
+
+func (r scheduleReminders) SetReminderDestination(ctx context.Context, principalID, id, destination string) error {
+	_, err := r.schedules.SetDestination(ctx, principalID, id, destination)
 	return err
 }

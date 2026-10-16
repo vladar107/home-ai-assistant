@@ -24,7 +24,7 @@ type recordingSender struct {
 	fail bool
 }
 
-func (s *recordingSender) Send(_ context.Context, principalID, text string) error {
+func (s *recordingSender) Send(_ context.Context, principalID, _, text string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.fail {

@@ -44,8 +44,8 @@ func TestFeedConversationsKnowTheirSubject(t *testing.T) {
 	h, _ := newFeedHarness(t, runtime, nil, true)
 	bins := h.createJob("alice", "00000000000000f1", "Bins", "0 9 * * *", "Which bins go out?")
 	plants := h.createJob("alice", "00000000000000f2", "Plants", "0 9 * * *", "Do the plants need water?")
-	binsLine := "[system] This conversation is about the user's scheduled job “Bins” (id 00000000000000f1); schedule_get shows it in full."
-	plantsLine := "[system] This conversation is about the user's scheduled job “Plants” (id 00000000000000f2)"
+	binsLine := "[system] This conversation is about the user's scheduled job \"Bins\" (id 00000000000000f1); schedule_get shows it in full."
+	plantsLine := "[system] This conversation is about the user's scheduled job \"Plants\" (id 00000000000000f2)"
 
 	first := h.runReport(runtime, bins, "Paper and plastic.")
 	reports := first.threadID

@@ -18,7 +18,7 @@ var (
 
 const (
 	tripColumns = `id, principal_id, title, destination, starts_at, ends_at, zone, status, source,
-		started_notified_at, ended_notified_at, created_at, updated_at`
+		started_notified_at, ended_notified_at, created_at, updated_at, summary_message_id`
 	bookingColumns = `id, kind, title, reference, starts_at, check_in_at, check_in_source, fingerprint`
 )
 
@@ -39,6 +39,25 @@ func (s *Store) ListNoticeTrips(ctx context.Context, now time.Time) ([]trip.Trip
 		 WHERE status IN ('planned', 'cancelled') AND ended_notified_at IS NULL
 		   AND (started_notified_at IS NOT NULL OR (status = 'planned' AND ends_at > ?))
 		 ORDER BY starts_at, rowid`, formatTime(now))
+}
+
+func (s *Store) ListPlannedTrips(ctx context.Context, after time.Time) ([]trip.Trip, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("list trips: SQLite store is not open")
+	}
+	return s.queryTrips(ctx, true,
+		`SELECT `+tripColumns+` FROM trips WHERE status = 'planned' AND ends_at > ? ORDER BY principal_id, starts_at, rowid`, formatTime(after))
+}
+
+func (s *Store) SetTripSummary(ctx context.Context, principalID, id string, messageID int64) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("set trip summary: SQLite store is not open")
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE trips SET summary_message_id = NULLIF(?, 0) WHERE principal_id = ? AND id = ?`, messageID, principalID, id); err != nil {
+		return fmt.Errorf("set trip summary: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) LoadTrip(ctx context.Context, principalID, id string) (trip.Trip, bool, error) {
@@ -168,11 +187,11 @@ func (s *Store) AddTrip(ctx context.Context, item trip.Trip) error {
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO trips (`+tripColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO trips (`+tripColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, 0))`,
 		item.ID, item.PrincipalID, item.Title, item.Destination, formatTime(item.StartsAt), formatTime(item.EndsAt),
 		item.Zone, item.Status, item.Source,
 		nullableTime(item.StartedNotifiedAt), nullableTime(item.EndedNotifiedAt),
-		formatTime(item.CreatedAt), formatTime(item.UpdatedAt),
+		formatTime(item.CreatedAt), formatTime(item.UpdatedAt), item.SummaryMessageID,
 	); err != nil {
 		return fmt.Errorf("add trip: %w", err)
 	}
@@ -344,8 +363,9 @@ func scanTrip(row rowScanner) (trip.Trip, error) {
 	var item trip.Trip
 	var startsAt, endsAt, createdAt, updatedAt string
 	var startedAt, endedAt sql.NullString
+	var summary sql.NullInt64
 	if err := row.Scan(&item.ID, &item.PrincipalID, &item.Title, &item.Destination, &startsAt, &endsAt, &item.Zone,
-		&item.Status, &item.Source, &startedAt, &endedAt, &createdAt, &updatedAt); err != nil {
+		&item.Status, &item.Source, &startedAt, &endedAt, &createdAt, &updatedAt, &summary); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return trip.Trip{}, err
 		}
@@ -363,5 +383,6 @@ func scanTrip(row rowScanner) (trip.Trip, error) {
 	if item.EndedNotifiedAt, err = parseOptionalTime(endedAt); err != nil {
 		return trip.Trip{}, err
 	}
+	item.SummaryMessageID = summary.Int64
 	return item, nil
 }

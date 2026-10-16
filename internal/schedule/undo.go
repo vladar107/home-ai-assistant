@@ -185,7 +185,7 @@ func (s *Service) restorable(job Job) (Prepared, error) {
 	if err != nil {
 		return Prepared{}, &approval.UndoRefusal{Reason: "it can no longer be scheduled (" + err.Error() + ")."}
 	}
-	prepared.Job.TravelPause = job.TravelPause
+	prepared.Job.TravelPause, prepared.Job.Destination = job.TravelPause, job.Destination
 	if job.OneTime() {
 		// The stored instant may carry seconds, as a snoozed reminder's does, which the local
 		// time above drops.

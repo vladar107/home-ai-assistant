@@ -154,13 +154,20 @@ func feed(run Run) string {
 	return thread.FeedReports
 }
 
-// inFeed returns a context whose sends go to the run's feed tab. A tab that cannot be had leaves
-// the run's messages in the main view, the resolver logs why, and the next delivery tries again.
+// inFeed returns a context whose sends go to the run's destination, or its feed tab when it has
+// none. A tab that cannot be had leaves the run's messages in the main view, the resolver logs why,
+// and the next delivery tries again.
 func (s *Service) inFeed(ctx context.Context, run Run, chatID int64) context.Context {
 	if s.feeds == nil {
 		return ctx
 	}
-	threadID, err := s.feeds.Thread(ctx, run.PrincipalID, chatID, feed(run))
+	var threadID int64
+	var err error
+	if run.Destination != "" {
+		threadID, err = s.feeds.Destination(ctx, run.PrincipalID, chatID, run.Destination, feed(run))
+	} else {
+		threadID, err = s.feeds.Thread(ctx, run.PrincipalID, chatID, feed(run))
+	}
 	if err != nil {
 		threadID = 0
 	}
@@ -749,6 +756,16 @@ func (s *Service) SetTravelPause(ctx context.Context, principalID, jobID string,
 	return changed, err
 }
 
+// SetDestination gives one of the principal's jobs a destination when it has none, and reports
+// whether it did. Nothing else about the job changes.
+func (s *Service) SetDestination(ctx context.Context, principalID, jobID, destination string) (bool, error) {
+	changed, err := s.repository.SetScheduledJobDestination(ctx, principalID, jobID, destination)
+	if err == nil && changed {
+		s.logger.InfoContext(ctx, "schedule.job.changed", "principal_id", principalID, "job_id", jobID, "destination", true)
+	}
+	return changed, err
+}
+
 // TravelPausedNames returns the names of the principal's enabled recurring jobs flagged to pause
 // while traveling.
 func (s *Service) TravelPausedNames(ctx context.Context, principalID string) ([]string, error) {
@@ -894,11 +911,15 @@ func (s *Service) Create(ctx context.Context, id string, prepared Prepared) (boo
 }
 
 // Update replaces one of the principal's jobs with a prepared one under the same ID, keeping its
-// pause state. The prepared job's TravelPause is stored, so a caller that does not mean to change it
-// copies the current one. A job changed since expectedUpdatedAt is reported as not updated.
+// pause state, and its destination unless the prepared job names one. The prepared job's
+// TravelPause is stored, so a caller that does not mean to change it copies the current one. A job
+// changed since expectedUpdatedAt is reported as not updated.
 func (s *Service) Update(ctx context.Context, current Job, expectedUpdatedAt time.Time, prepared Prepared) (bool, error) {
 	job := prepared.Job
 	job.ID, job.Enabled, job.CreatedAt = current.ID, current.Enabled, current.CreatedAt
+	if job.Destination == "" {
+		job.Destination = current.Destination
+	}
 	updated, err := s.repository.UpdateScheduledJob(ctx, job, expectedUpdatedAt)
 	if err == nil && updated {
 		s.logger.InfoContext(ctx, "schedule.job.updated", "principal_id", job.PrincipalID, "job_id", job.ID, "job_type", job.Type)

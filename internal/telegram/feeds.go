@@ -43,18 +43,12 @@ func (f Feeds) Thread(ctx context.Context, principalID string, chatID int64, fee
 	if s == nil || s.tabs == nil {
 		return 0, nil
 	}
-	// Scheduled runs and watches start before the poller does, so the first of them may ask
-	// before Start has read the switch.
-	if !s.topicsKnown.Load() {
-		bot, err := s.client.GetMe(ctx)
-		if err != nil {
-			s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "telegram.feed.failed", "principal_id", principalID, "feed", feed, "stage", "topics", "error", err)
-			return 0, err
-		}
-		s.topics.Store(bot.HasTopicsEnabled)
-		s.topicsKnown.Store(true)
+	on, err := s.tabsOn(ctx)
+	if err != nil {
+		s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "telegram.feed.failed", "principal_id", principalID, "feed", feed, "stage", "topics", "error", err)
+		return 0, err
 	}
-	if !s.topics.Load() {
+	if !on {
 		return 0, nil
 	}
 	name, known := feedNames[feed]
@@ -95,22 +89,45 @@ func (f Feeds) Thread(ctx context.Context, principalID string, chatID int64, fee
 	return threadID, nil
 }
 
-// giveFeedIcon sets a feed tab's fixed icon once Telegram's icon set offers it, so a tab made
-// before the set was read gets it with a later message. A tab that has its icon, or that refused
-// it, is not asked again until a restart; a failure only costs the icon.
+// tabsOn reports the bot's tabs switch. Scheduled runs, watches, and trips start before the poller
+// does, so the first of them may ask before Start has read the switch.
+func (s *Service) tabsOn(ctx context.Context) (bool, error) {
+	if !s.topicsKnown.Load() {
+		bot, err := s.client.GetMe(ctx)
+		if err != nil {
+			return false, err
+		}
+		s.topics.Store(bot.HasTopicsEnabled)
+		s.topicsKnown.Store(true)
+	}
+	return s.topics.Load(), nil
+}
+
 func (s *Service) giveFeedIcon(ctx context.Context, principalID string, chatID, threadID int64, feed string) {
+	s.giveFixedIcon(ctx, principalID, chatID, threadID, feedIcons[feed], "telegram.feed.failed", "feed", feed)
+}
+
+// giveFixedIcon sets a fixed tab's icon once Telegram's icon set offers it, so a tab made before
+// the set was read gets it with a later message. A tab that has its icon, or that refused it, is
+// not asked again until a restart; a failure only costs the icon, and is logged as the event with
+// the attributes that name the tab's kind.
+func (s *Service) giveFixedIcon(ctx context.Context, principalID string, chatID, threadID int64, emoji, event string, kind ...any) {
 	key := chatTab{chatID, threadID}
 	if _, done := s.iconedFeeds.Load(key); done {
 		return
 	}
-	iconID, offered := s.IconFor(feedIcons[feed])
+	iconID, offered := s.IconFor(emoji)
 	if !offered {
 		return
 	}
 	logger := s.telemetry.ContextLogger(ctx, s.logger)
+	failed := func(err error) {
+		attributes := append([]any{"principal_id", principalID, "thread_id", threadID}, kind...)
+		logger.WarnContext(ctx, event, append(attributes, "stage", "icon", "error", err)...)
+	}
 	tab, found, err := s.tabs.Tab(ctx, principalID, threadID)
 	if err != nil {
-		logger.WarnContext(ctx, "telegram.feed.failed", "principal_id", principalID, "thread_id", threadID, "feed", feed, "stage", "icon", "error", err)
+		failed(err)
 		return
 	}
 	s.iconedFeeds.Store(key, struct{}{})
@@ -118,10 +135,10 @@ func (s *Service) giveFeedIcon(ctx context.Context, principalID string, chatID, 
 		return
 	}
 	if err := s.client.EditForumTopic(ctx, chatID, threadID, "", iconID); err != nil {
-		logger.WarnContext(ctx, "telegram.feed.failed", "principal_id", principalID, "thread_id", threadID, "feed", feed, "stage", "icon", "error", err)
+		failed(err)
 		return
 	}
 	if err := s.tabs.SetFixedTabIcon(ctx, principalID, threadID, iconID); err != nil {
-		logger.WarnContext(ctx, "telegram.feed.failed", "principal_id", principalID, "thread_id", threadID, "feed", feed, "stage", "icon", "error", err)
+		failed(err)
 	}
 }

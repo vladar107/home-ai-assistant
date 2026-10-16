@@ -196,7 +196,7 @@ func (s scan) Run(ctx context.Context, occurrence schedule.Occurrence) (schedule
 				}
 			}
 		case result.Outcome == OutcomeUpdated && result.Trip.Status == StatusPlanned:
-			if err := s.sender.Send(ctx, occurrence.PrincipalID, updateLine(result)); err != nil {
+			if err := s.sender.Send(ctx, occurrence.PrincipalID, result.Trip.ID, updateLine(result)); err != nil {
 				s.logger.WarnContext(ctx, "trip.scan.update_failed", "principal_id", occurrence.PrincipalID, "trip_id", result.Trip.ID, "error", err)
 				continue
 			}

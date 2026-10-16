@@ -90,7 +90,7 @@ func (r *recorder) SendTripCard(_ context.Context, found trip.Trip) error {
 	return nil
 }
 
-func (r *recorder) Send(_ context.Context, _, text string) error {
+func (r *recorder) Send(_ context.Context, _, _, text string) error {
 	if r.failLines {
 		return errors.New("chat unavailable")
 	}

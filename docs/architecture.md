@@ -390,8 +390,8 @@ private content makes the conversation private.
 ### Feed tabs
 
 With tabs on, the scheduler, the watch service, and the trip notifier send what
-nobody asked for to a feed tab of its kind: reminders, Trips scans, and trip
-messages to Reminders; other job reports to Reports; Home Assistant watches to
+nobody asked for to a feed tab of its kind: reminders, Trips scans, and
+suggested trips to Reminders; other job reports to Reports; Home Assistant watches to
 Home; every other watch to Watches. The tab registry records each feed tab with
 the subject `feed:<kind>` under a fixed name, and the Telegram service's resolver
 makes the tab on first use, one at a time per principal and feed.
@@ -430,6 +430,46 @@ makes the tab on first use, one at a time per principal and feed.
   when both apply. Each turn of a subject's conversation carries one line naming
   the job or watch and the tool that shows it, and a reply to an alert quotes it
   once, marked private or outside content from its row.
+
+### Trip tabs
+
+With tabs on, each planned trip has a tab of its own: a registry row with the
+subject `trip:<id>` under a fixed name, which is the only record of it.
+
+- **Destinations.** A job may carry a `destination`, which its runs go to
+  instead of their feed. `internal/schedule` only passes it to the resolver's
+  `Destination`, so it never sees thread IDs. The trip service sets `trip:<id>`
+  on each check-in reminder every time it sets one; `Update` and snooze keep
+  it. A report copies its job's destination when it is saved, so a reply still
+  finds the trip after the job is gone. At start, the trip loop gives each
+  planned trip's existing reminders that lack a destination the trip's, and
+  changes nothing else, so a reminder the user deleted or moved stays as it is.
+- **Resolving a trip.** A trip that has a tab resolves to it, whatever its
+  status, so its end notice lands there. A planned trip that has not ended and
+  has none gets one, with a fresh summary. Any other trip, one that no longer
+  exists, and tabs off resolve to the Reminders feed. The trip notifier
+  resolves the start and end notices and the scan's update lines the same
+  way; suggested-trip cards stay in Reminders.
+- **The summary.** `trip.Summary` is plain text without link previews, in the
+  trip's zone. It is sent only to the tab, so it is never pinned in the main
+  view, and pinned silently; a refused pin is logged once per trip. Every trip
+  write tells the notifier once the trip service has released its lock. The
+  notifier edits the summary in place, sends and pins it again when Telegram
+  no longer has it, and renames the tab when the title changed. Plan 0088's
+  topic naming never renames a fixed tab.
+- **Gone tabs.** When plan 0085's observer drops a trip tab's row, the trip's
+  summary is forgotten with it, and the trip's next message makes the tab
+  again while the trip is still ahead. Pruning a trip leaves its tab and row
+  for `/close`.
+- **Conversations.** A trip tab routes messages as a feed tab does, and a
+  report's trip destination is its subject, so a reply to a check-in reminder
+  continues the trip's conversation rather than the reminder job's. A
+  conversation that starts in the tab, also after `/new`, is about the trip
+  unless another tab holds the trip's conversation or the trip was pruned. The
+  answer gets no "About …" line for the tab's own trip, and each turn carries a
+  line naming the trip with `trip_list` to show it. Subject names in that line
+  are quoted with `strconv.Quote`, because a trip's title can come from mail.
+- **Privacy.** Logs carry trip, tab, and message IDs only.
 
 ### A background task
 
