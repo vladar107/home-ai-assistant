@@ -32,7 +32,7 @@ flowchart TB
     agent -->|turns, web search| model
     agent -->|read, confirmed writes| notion
     agent -->|read-only, several accounts per user| google
-    agent -->|trips, departures, disruptions| ns
+    agent -->|trips, departures, disruptions, OV-fiets| ns
     agent -->|reads, device actions, confirmed service calls| ha
     agent -->|forecasts| meteo
     agent -->|departures, stop list, notices| ovapi
