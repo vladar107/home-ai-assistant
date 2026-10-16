@@ -138,7 +138,7 @@ func TestEachKindOfMessageLandsInItsFeedTab(t *testing.T) {
 		t.Fatalf("report recorded in tab %d", landed)
 	}
 
-	if err := h.notifier().Send(h.ctx, "alice", "Your trip starts tomorrow."); err != nil {
+	if err := h.notifier().Send(h.ctx, "alice", "", "Your trip starts tomorrow."); err != nil {
 		t.Fatal(err)
 	}
 	if notice := h.nextMessage(); notice.threadID != reminders {
@@ -210,7 +210,7 @@ func TestAScheduledRunSendsItsFilesToItsFeedTab(t *testing.T) {
 
 func TestFeedTabsShowTheirIconWhenTelegramOffersIt(t *testing.T) {
 	h, _ := newFeedHarness(t, newControlledRuntime(), nil, true)
-	if err := h.notifier().Send(h.ctx, "alice", "first"); err != nil {
+	if err := h.notifier().Send(h.ctx, "alice", "", "first"); err != nil {
 		t.Fatal(err)
 	}
 	reminders := h.wantFeedTab("Reminders", thread.FeedReminders)
@@ -225,7 +225,7 @@ func TestFeedTabsShowTheirIconWhenTelegramOffersIt(t *testing.T) {
 		t.Fatalf("feed tab in the registry = %+v", tab)
 	}
 
-	if err := h.notifier().Send(h.ctx, "alice", "second"); err != nil {
+	if err := h.notifier().Send(h.ctx, "alice", "", "second"); err != nil {
 		t.Fatal(err)
 	}
 	h.nextMessage()
@@ -243,7 +243,7 @@ func TestFeedTabsShowTheirIconWhenTelegramOffersIt(t *testing.T) {
 
 func TestAGoneFeedTabIsMadeAgainOnItsNextMessage(t *testing.T) {
 	h, _ := newFeedHarness(t, newControlledRuntime(), nil, true)
-	if err := h.notifier().Send(h.ctx, "alice", "first"); err != nil {
+	if err := h.notifier().Send(h.ctx, "alice", "", "first"); err != nil {
 		t.Fatal(err)
 	}
 	first := h.wantFeedTab("Reminders", thread.FeedReminders)
@@ -251,7 +251,7 @@ func TestAGoneFeedTabIsMadeAgainOnItsNextMessage(t *testing.T) {
 
 	h.goneTab(first)
 	h.ageTab(first)
-	if err := h.notifier().Send(h.ctx, "alice", "second"); err != nil {
+	if err := h.notifier().Send(h.ctx, "alice", "", "second"); err != nil {
 		t.Fatal(err)
 	}
 	h.wantRefused("sendMessage", first)
@@ -259,7 +259,7 @@ func TestAGoneFeedTabIsMadeAgainOnItsNextMessage(t *testing.T) {
 		t.Fatalf("message to a gone feed tab = %+v, want it in the main view", message)
 	}
 
-	if err := h.notifier().Send(h.ctx, "alice", "third"); err != nil {
+	if err := h.notifier().Send(h.ctx, "alice", "", "third"); err != nil {
 		t.Fatal(err)
 	}
 	again := h.wantFeedTab("Reminders", thread.FeedReminders)
@@ -277,7 +277,7 @@ func TestANewFeedTabThatRefusesSendsIsNotReplacedForADay(t *testing.T) {
 	receive(t, h.ctx, h.tabs.created)
 	h.goneTab(broken)
 	for _, text := range []string{"first", "second"} {
-		if err := h.notifier().Send(h.ctx, "alice", text); err != nil {
+		if err := h.notifier().Send(h.ctx, "alice", "", text); err != nil {
 			t.Fatal(err)
 		}
 		h.wantRefused("sendMessage", broken)
@@ -298,7 +298,7 @@ func TestAFeedTabThatCannotBeMadeLeavesTheMessageInTheMainView(t *testing.T) {
 	h.mu.Lock()
 	h.tabs.createStatus = 429
 	h.mu.Unlock()
-	if err := h.notifier().Send(h.ctx, "alice", "first"); err != nil {
+	if err := h.notifier().Send(h.ctx, "alice", "", "first"); err != nil {
 		t.Fatal(err)
 	}
 	if message := h.nextMessage(); message.threadID != 0 || message.text != "first" {
@@ -311,7 +311,7 @@ func TestAFeedTabThatCannotBeMadeLeavesTheMessageInTheMainView(t *testing.T) {
 	h.mu.Lock()
 	h.tabs.createStatus = 0
 	h.mu.Unlock()
-	if err := h.notifier().Send(h.ctx, "alice", "second"); err != nil {
+	if err := h.notifier().Send(h.ctx, "alice", "", "second"); err != nil {
 		t.Fatal(err)
 	}
 	if tab := h.wantFeedTab("Reminders", thread.FeedReminders); h.nextMessage().threadID != tab {
@@ -321,7 +321,7 @@ func TestAFeedTabThatCannotBeMadeLeavesTheMessageInTheMainView(t *testing.T) {
 
 func TestWithTopicsOffFeedsSendNoThread(t *testing.T) {
 	h, clock := newFeedHarness(t, newControlledRuntime(), nil, false)
-	if err := h.notifier().Send(h.ctx, "alice", "a trip notice"); err != nil {
+	if err := h.notifier().Send(h.ctx, "alice", "", "a trip notice"); err != nil {
 		t.Fatal(err)
 	}
 	if message := h.nextMessage(); message.threadID != 0 {

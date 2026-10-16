@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -108,10 +109,11 @@ type Request struct {
 	OpensSession bool
 	// Subject is what the request's conversation is about, such as JobSubject of one job, or "".
 	Subject string
-	// SubjectName is the name the subject's job or watch last went by, or "" when none is kept.
+	// SubjectName is the name the subject's job or watch last went by, or the trip's title, or ""
+	// when none is kept.
 	SubjectName string
-	// SubjectLabel names the job or watch when the request moved its tab to a conversation about
-	// another one than the tab held before; "" otherwise.
+	// SubjectLabel names the job, watch, or trip when the request moved its tab to a conversation
+	// about another one than the tab held before; "" otherwise.
 	SubjectLabel string
 }
 
@@ -139,16 +141,20 @@ type OpenElsewhereError struct {
 
 func (e *OpenElsewhereError) Error() string { return "the conversation is open in another tab" }
 
-// The kinds of subject a conversation can be about: one scheduled job, reminders included, or one
-// watch. A subject is its kind and the job's or watch's ID.
+// The kinds of subject a conversation can be about: one scheduled job, reminders included, one
+// watch, or one trip. A subject is its kind and the job's, watch's, or trip's ID. A trip's subject
+// is also the destination of its messages and what the tab registry records its tab as serving.
 const (
 	SubjectJob   = "job"
 	SubjectWatch = "watch"
+	SubjectTrip  = "trip"
 )
 
 func JobSubject(jobID string) string { return SubjectJob + ":" + jobID }
 
 func WatchSubject(watchID string) string { return SubjectWatch + ":" + watchID }
+
+func TripSubject(tripID string) string { return SubjectTrip + ":" + tripID }
 
 // SplitSubject returns a subject's kind and ID.
 func SplitSubject(subject string) (kind, id string) {
@@ -156,8 +162,8 @@ func SplitSubject(subject string) (kind, id string) {
 	return kind, id
 }
 
-// SubjectLine opens the first answer in a conversation about another job or watch than the tab
-// held before, together with the return to an earlier conversation when both apply.
+// SubjectLine opens the first answer in a conversation about another job, watch, or trip than the
+// tab held before, together with the return to an earlier conversation when both apply.
 func SubjectLine(label string, resumedFrom time.Time) string {
 	if resumedFrom.IsZero() {
 		return "About “" + label + "”:"
@@ -165,17 +171,21 @@ func SubjectLine(label string, resumedFrom time.Time) string {
 	return "About “" + label + "”, back in the conversation from " + resumedFrom.Format("2 January 2006") + "."
 }
 
-// subjectContext is the line every turn of a conversation about a job or watch starts from.
+// subjectContext is the line every turn of a conversation about a job, watch, or trip starts from.
 func subjectContext(subject, name string) string {
 	named := ""
 	if name != "" {
-		named = " “" + name + "”"
+		// A name can come from outside, as a trip's title from mail can, so it is quoted in a way
+		// its own text cannot close.
+		named = " " + strconv.Quote(name)
 	}
 	switch kind, id := SplitSubject(subject); kind {
 	case SubjectJob:
 		return "[system] This conversation is about the user's scheduled job" + named + " (id " + id + "); schedule_get shows it in full."
 	case SubjectWatch:
 		return "[system] This conversation is about the user's watch" + named + " (id " + id + "); watch_list shows it in full."
+	case SubjectTrip:
+		return "[system] This conversation is about the user's trip" + named + " (id " + id + "); trip_list with its id shows it in full."
 	}
 	return ""
 }

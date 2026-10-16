@@ -45,16 +45,20 @@ const (
 	TripsBusyNote        = "A scan is already running; any trips it finds arrive here as cards."
 )
 
-// TripController is implemented by the trip service; nil leaves the Trips switch and the buttons of
-// trip cards out.
+// TripController is implemented by the trip service; nil leaves the Trips switch, the buttons of
+// trip cards, and trip tabs out.
 type TripController interface {
 	Track(ctx context.Context, principalID, id string) (trip.Result, error)
 	Dismiss(ctx context.Context, principalID, id string) (trip.Result, error)
 	Trip(ctx context.Context, principalID, id string) (trip.Trip, bool, error)
+	// SetSummaryMessage records the message that sums the trip up in its tab.
+	SetSummaryMessage(ctx context.Context, principalID, id string, messageID int64) error
+	// Now is the trips' clock, which says whether a trip has ended.
+	Now() time.Time
 }
 
-// SetTrips adds the Trips switch to /settings and handles the buttons of trip cards; call it before
-// Start.
+// SetTrips adds the Trips switch to /settings, handles the buttons of trip cards, and gives planned
+// trips their tabs; call it before Start.
 func (s *Service) SetTrips(trips TripController) {
 	s.trips = trips
 	if trips != nil && s.schedules != nil && s.google != nil {
@@ -67,22 +71,33 @@ type TripChats interface {
 	ResolveActiveChat(ctx context.Context, principalID string) (int64, bool, error)
 }
 
+// TripFeeds resolves the tabs trip messages go to and keeps each trip's tab in step with the trip;
+// the service's Feeds implement it.
+type TripFeeds interface {
+	thread.Feeds
+	// Summarize gives a planned trip its tab when it has none, and keeps its pinned summary and
+	// the tab's name current.
+	Summarize(ctx context.Context, principalID string, chatID int64, tripID string)
+}
+
 // TripNotifier delivers suggested trips as cards with Track and Ignore buttons, and plain trip
 // notices, to the principal's active chat. Its messages carry no markup and no link previews.
 type TripNotifier struct {
 	Client *Client
 	Chats  TripChats
-	// Feeds puts trip messages in the reminders tab while the bot has tabs on; nil sends them
-	// under the caller's context.
-	Feeds thread.Feeds
+	// Feeds puts a trip's notices in its own tab, and cards and notices of a trip without one in
+	// the reminders tab, while the bot has tabs on; nil sends them under the caller's context.
+	Feeds TripFeeds
 }
+
+var _ trip.Tabs = TripNotifier{}
 
 func (n TripNotifier) SendTripCard(ctx context.Context, found trip.Trip) error {
 	chatID, err := n.chat(ctx, found.PrincipalID)
 	if err != nil {
 		return err
 	}
-	ctx = n.inFeed(ctx, found.PrincipalID, chatID)
+	ctx = n.inFeed(ctx, found.PrincipalID, chatID, "")
 	keyboard := InlineKeyboard{{
 		{Text: "Track", CallbackData: tripPrefix + ":" + tripTrackAction + ":" + found.ID},
 		{Text: "Ignore", CallbackData: tripPrefix + ":" + tripIgnoreAction + ":" + found.ID},
@@ -90,21 +105,41 @@ func (n TripNotifier) SendTripCard(ctx context.Context, found trip.Trip) error {
 	return n.Client.sendPlain(ctx, chatID, tripCardText(found), keyboard)
 }
 
-func (n TripNotifier) Send(ctx context.Context, principalID, text string) error {
+func (n TripNotifier) Send(ctx context.Context, principalID, tripID, text string) error {
 	chatID, err := n.chat(ctx, principalID)
 	if err != nil {
 		return err
 	}
-	return n.Client.sendPlain(n.inFeed(ctx, principalID, chatID), chatID, text, nil)
+	return n.Client.sendPlain(n.inFeed(ctx, principalID, chatID, tripID), chatID, text, nil)
 }
 
-// inFeed returns a context whose sends go to the reminders tab. A tab that cannot be had leaves the
-// message in the main view; the resolver logs why.
-func (n TripNotifier) inFeed(ctx context.Context, principalID string, chatID int64) context.Context {
+// TripChanged keeps the trip's tab and its summary in step with a write to the trip. A failure is
+// logged by the resolver and leaves the next write to try again.
+func (n TripNotifier) TripChanged(ctx context.Context, changed trip.Trip) {
+	if n.Feeds == nil {
+		return
+	}
+	chatID, err := n.chat(ctx, changed.PrincipalID)
+	if err != nil {
+		return
+	}
+	n.Feeds.Summarize(ctx, changed.PrincipalID, chatID, changed.ID)
+}
+
+// inFeed returns a context whose sends go to the trip's tab, or to the reminders tab for a trip
+// without one or for no trip. A tab that cannot be had leaves the message in the main view; the
+// resolver logs why.
+func (n TripNotifier) inFeed(ctx context.Context, principalID string, chatID int64, tripID string) context.Context {
 	if n.Feeds == nil {
 		return ctx
 	}
-	threadID, err := n.Feeds.Thread(ctx, principalID, chatID, thread.FeedReminders)
+	var threadID int64
+	var err error
+	if tripID != "" {
+		threadID, err = n.Feeds.Destination(ctx, principalID, chatID, thread.TripDestination(tripID), thread.FeedReminders)
+	} else {
+		threadID, err = n.Feeds.Thread(ctx, principalID, chatID, thread.FeedReminders)
+	}
 	if err != nil {
 		threadID = 0
 	}
@@ -123,18 +158,52 @@ func (n TripNotifier) chat(ctx context.Context, principalID string) (int64, erro
 }
 
 func (c *Client) sendPlain(ctx context.Context, chatID int64, text string, keyboard InlineKeyboard) error {
+	_, err := c.sendPlainIn(ctx, chatID, text, keyboard, true)
+	return err
+}
+
+// SendPlainInTab posts plain text without link previews in the context's tab and nowhere else, and
+// returns its message ID: a tab that is not found is reported to the observer, and the error
+// carries its verdict.
+func (c *Client) SendPlainInTab(ctx context.Context, chatID int64, text string) (int64, error) {
+	message, err := c.sendPlainIn(ctx, chatID, text, nil, false)
+	if err != nil {
+		return 0, err
+	}
+	if message.MessageID <= 0 {
+		return 0, fmt.Errorf("Telegram sendMessage returned no message ID")
+	}
+	return message.MessageID, nil
+}
+
+func (c *Client) sendPlainIn(ctx context.Context, chatID int64, text string, keyboard InlineKeyboard, fallback bool) (Message, error) {
 	params := url.Values{"chat_id": {strconv.FormatInt(chatID, 10)}}
 	if err := setKeyboard(params, keyboard); err != nil {
-		return err
+		return Message{}, err
 	}
 	setPlainText(params, text)
 	setNoLinkPreview(params)
-	return c.inTab(ctx, chatID, true, func(ctx context.Context) error {
+	var message Message
+	err := c.inTab(ctx, chatID, fallback, func(ctx context.Context) error {
 		params.Del("message_thread_id")
 		setThread(ctx, params)
-		_, err := execute[Message](c, ctx, "sendMessage", params)
+		var err error
+		message, err = execute[Message](c, ctx, "sendMessage", params)
 		return err
 	})
+	return message, err
+}
+
+// PinChatMessage pins a message without a notification, which Telegram does in private chats
+// anyway.
+func (c *Client) PinChatMessage(ctx context.Context, chatID, messageID int64) error {
+	params := url.Values{
+		"chat_id":              {strconv.FormatInt(chatID, 10)},
+		"message_id":           {strconv.FormatInt(messageID, 10)},
+		"disable_notification": {"true"},
+	}
+	_, err := execute[bool](c, ctx, "pinChatMessage", params)
+	return err
 }
 
 // EditPlain replaces a bot message's text without markup or link previews and removes its buttons.

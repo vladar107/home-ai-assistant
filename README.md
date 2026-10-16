@@ -43,7 +43,7 @@ borrowed between users.
 - **Feed tabs.** With tabs on, nothing arrives in the main view unasked, so it
   can be muted without losing a notification. Messages nobody asked for go to
   four tabs the bot makes on first use, each with a fixed icon: Reminders
-  (reminders, Trips scans, and trip messages), Reports (scheduled job reports
+  (reminders, Trips scans, and suggested trips), Reports (scheduled job reports
   and Heads-up), Home (Home Assistant watches), and Watches (the other
   watches). Every message keeps its sound; muting a feed tab quiets it. A
   deleted feed tab comes back with its next message. In a feed tab each job
@@ -53,6 +53,15 @@ borrowed between users.
   line naming it, such as "About “Bins”:", and `/new` starts a fresh
   conversation there. A reply to a conversation another tab holds names that
   tab instead of running.
+- **Trip tabs.** With tabs on, each planned trip gets its own tab, named after
+  the trip with a ✈️ icon. It opens with a pinned summary: the destination, the
+  dates, each booking with its reference, and when its check-in opens. The
+  summary is kept current as the trip changes, and says when the trip ended
+  or was cancelled. The trip's check-in reminders, its start and end notices,
+  and changes the Trips scan finds arrive in the tab. Talking there,
+  or replying to its reminders, is a conversation about that trip, and `/new`
+  starts another one about it. A deleted tab of a trip still ahead comes back
+  with its next message; `/close` removes the tab of a trip that is over.
 - **Act and tell.** A clear request to set up or change a scheduled job, a
   watch, a saved route, a memory instruction, or a Notion property is done at
   once. A "Done" message follows the reply with an Undo button per action,

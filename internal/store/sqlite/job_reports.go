@@ -25,10 +25,11 @@ func (s *Store) SaveJobReport(ctx context.Context, report schedule.Report, keep 
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(
 		ctx,
-		`INSERT INTO job_reports (id, principal_id, job_id, job_name, job_type, text, private, external, delivered_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO job_reports (id, principal_id, job_id, job_name, job_type, text, private, external, delivered_at, destination)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''))
 		 ON CONFLICT (id) DO NOTHING`,
 		report.ID, report.PrincipalID, report.JobID, report.JobName, report.JobType, report.Text, report.Private, report.External, formatTime(report.DeliveredAt),
+		report.Destination,
 	); err != nil {
 		return fmt.Errorf("save job report: %w", err)
 	}

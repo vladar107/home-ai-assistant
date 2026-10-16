@@ -646,6 +646,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		tripTools.SetScanState(tripState)
 		tripNotifier := &telegram.TripNotifier{Client: client, Chats: a.store}
 		a.tripNotifier = tripNotifier
+		tripService.SetTabs(tripNotifier)
 		if err := scheduler.Register(trip.ScanJobType(tripScanChecker{conversationService}, a.store, tripState, tripService, tripNotifier, tripNotifier, scheduler.Now, a.logger)); err != nil {
 			return err
 		}

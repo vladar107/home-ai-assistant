@@ -59,7 +59,7 @@ const (
 var ErrReminderRefused = errors.New("the reminder was refused")
 
 // Trip is one journey. A zero StartedNotifiedAt or EndedNotifiedAt means that notice has not
-// been sent.
+// been sent, and a zero SummaryMessageID that the trip's tab holds no summary of it.
 type Trip struct {
 	ID                string
 	PrincipalID       string
@@ -74,12 +74,18 @@ type Trip struct {
 	EndedNotifiedAt   time.Time
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+	SummaryMessageID  int64
 	Bookings          []Booking
 }
 
 // Active is true while the trip is planned and now is in [StartsAt, EndsAt).
 func (t Trip) Active(now time.Time) bool {
 	return t.Status == StatusPlanned && !now.Before(t.StartsAt) && now.Before(t.EndsAt)
+}
+
+// Ended is true from the trip's end on.
+func (t Trip) Ended(now time.Time) bool {
+	return !now.Before(t.EndsAt)
 }
 
 // EndLabel is the trip's end in its zone. An end at local midnight is the start of the next day,
@@ -125,10 +131,15 @@ type Repository interface {
 	// ListActiveTrips returns the principal's planned trips with starts_at <= at < ends_at,
 	// without their bookings.
 	ListActiveTrips(ctx context.Context, principalID string, at time.Time) ([]Trip, error)
+	// ListPlannedTrips returns every principal's planned trips that end after the instant, with
+	// their bookings.
+	ListPlannedTrips(ctx context.Context, after time.Time) ([]Trip, error)
 	AddTrip(context.Context, Trip) error
-	// UpdateTrip saves the trip's fields other than its owner, source, and notice times, and
-	// replaces its bookings.
+	// UpdateTrip saves the trip's fields other than its owner, source, notice times, and summary,
+	// and replaces its bookings.
 	UpdateTrip(context.Context, Trip) (bool, error)
+	// SetTripSummary records the message that sums the trip up in its tab; zero forgets it.
+	SetTripSummary(ctx context.Context, principalID, id string, messageID int64) error
 	// ListNoticeTrips returns every principal's trips that may owe a notice at now: planned or
 	// cancelled, with no end notice sent, and either started or still ahead of their end.
 	ListNoticeTrips(ctx context.Context, now time.Time) ([]Trip, error)
@@ -147,12 +158,16 @@ type Repository interface {
 // Reminders sets the check-in reminders of planned trips; the adapter over the scheduler is
 // NewScheduleReminders.
 type Reminders interface {
-	// SetReminder creates the one-time reminder with the ID or moves it to the new time.
-	// schedule.ErrTooManyJobs is returned when it cannot be created for lack of room, and
-	// ErrReminderRefused when the scheduler refuses the time or text.
-	SetReminder(ctx context.Context, principalID, id string, at time.Time, zone, text string) error
+	// SetReminder creates the one-time reminder with the ID or moves it to the new time, and
+	// delivers it to the destination, which is its trip's. schedule.ErrTooManyJobs is returned
+	// when it cannot be created for lack of room, and ErrReminderRefused when the scheduler
+	// refuses the time or text.
+	SetReminder(ctx context.Context, principalID, id string, at time.Time, zone, text, destination string) error
 	// RemoveReminder deletes the reminder; one that does not exist is not an error.
 	RemoveReminder(ctx context.Context, principalID, id string) error
+	// SetReminderDestination gives the reminder the destination when it exists and has none, and
+	// changes nothing else.
+	SetReminderDestination(ctx context.Context, principalID, id, destination string) error
 }
 
 // Paused names what stays silent during a trip.
@@ -160,12 +175,20 @@ type Paused interface {
 	TravelPausedNames(ctx context.Context, principalID string) ([]string, error)
 }
 
-// Sender delivers plain text to the principal's active chat.
+// Sender delivers plain text about one of the principal's trips to their active chat, in the
+// trip's tab while it has one.
 type Sender interface {
-	Send(ctx context.Context, principalID, text string) error
+	Send(ctx context.Context, principalID, tripID, text string) error
 }
 
 // CardSender delivers a suggested trip with Track and Ignore buttons.
 type CardSender interface {
 	SendTripCard(ctx context.Context, trip Trip) error
+}
+
+// Tabs keeps the tab of each planned trip and the summary pinned there; the Telegram side
+// implements it. TripChanged hears of every write that may change what the summary shows, reads
+// the trip again, and does nothing while the bot has tabs off.
+type Tabs interface {
+	TripChanged(ctx context.Context, trip Trip)
 }

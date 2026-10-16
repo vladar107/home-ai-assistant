@@ -24,6 +24,8 @@ const (
 
 // Notices is the part of the trip service the loop drives.
 type Notices interface {
+	// Settle runs once before the first cycle.
+	Settle(ctx context.Context) error
 	DueNotices(ctx context.Context, now time.Time) ([]Notice, error)
 	MarkStarted(ctx context.Context, principalID, id string, at time.Time) (bool, error)
 	MarkEnded(ctx context.Context, principalID, id string, at time.Time) (bool, error)
@@ -124,6 +126,9 @@ func (l *Loop) Shutdown(ctx context.Context) error {
 
 func (l *Loop) loop(ctx context.Context, done chan<- struct{}) {
 	defer close(done)
+	if err := l.notices.Settle(ctx); err != nil && ctx.Err() == nil {
+		l.logger.WarnContext(ctx, "trip.loop.failed", "stage", "settle", "error", err)
+	}
 	ticker := time.NewTicker(l.interval)
 	defer ticker.Stop()
 	for {
@@ -163,7 +168,7 @@ func (l *Loop) Cycle(ctx context.Context) {
 func (l *Loop) deliver(ctx context.Context, notice Notice, now time.Time) {
 	trip := notice.Trip
 	text := l.text(ctx, notice)
-	if err := l.sender.Send(ctx, trip.PrincipalID, text); err != nil {
+	if err := l.sender.Send(ctx, trip.PrincipalID, trip.ID, text); err != nil {
 		if ctx.Err() == nil {
 			l.logger.WarnContext(ctx, "trip.notice.send_failed", "trip_id", trip.ID, "kind", notice.Kind, "error", err)
 		}

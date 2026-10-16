@@ -50,6 +50,8 @@ type botAPI interface {
 	SendInTab(context.Context, int64, string) error
 	EditForumTopic(context.Context, int64, int64, string, string) error
 	GetForumTopicIconStickers(context.Context) ([]TopicIcon, error)
+	SendPlainInTab(context.Context, int64, string) (int64, error)
+	PinChatMessage(context.Context, int64, int64) error
 }
 
 type ConversationController interface {
@@ -169,10 +171,14 @@ type Service struct {
 	confirmedTabs sync.Map
 	// knownTabs holds the tabs the registry has a row for, so a message there adds none.
 	knownTabs sync.Map
-	// feedLocks holds a lock per principal and feed, so deliveries of one feed at once make one tab.
+	// feedLocks holds a lock per principal and feed or trip, so deliveries to one of them at once
+	// make one tab.
 	feedLocks sync.Map
-	// iconedFeeds holds the feed tabs whose fixed icon was settled since start.
+	// iconedFeeds holds the feed and trip tabs whose fixed icon was settled since start.
 	iconedFeeds sync.Map
+	// pinFailures holds the trips whose summary could not be pinned since start, so each is logged
+	// once.
+	pinFailures sync.Map
 	// namedTabs holds the conversation each tab was last considered for naming after, so a reply
 	// there asks the registry once per conversation.
 	namedTabs sync.Map

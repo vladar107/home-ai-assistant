@@ -52,6 +52,8 @@ type TabStore interface {
 	AddSubjectTab(ctx context.Context, principalID string, threadID int64, name, subject string) error
 	// SetFixedTabIcon records the icon the bot gave a tab of a fixed kind.
 	SetFixedTabIcon(ctx context.Context, principalID string, threadID int64, iconCustomEmojiID string) error
+	// SetFixedTabName records the name the bot gave a tab of a fixed kind.
+	SetFixedTabName(ctx context.Context, principalID string, threadID int64, name string) error
 }
 
 // SetTabs gives the service the tab registry; call it before Start.

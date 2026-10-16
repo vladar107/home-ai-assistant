@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
 // Who chose a tab's name. A fixed name never follows the tab's topic.
@@ -186,17 +187,42 @@ func (s *Store) NameBotTab(ctx context.Context, principalID string, threadID int
 	return named > 0, nil
 }
 
+// DeleteTab forgets a tab. A trip's tab takes the trip's summary with it, since that message was in
+// the tab.
 func (s *Store) DeleteTab(ctx context.Context, principalID string, threadID int64) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("delete tab: SQLite store is not open")
 	}
-	if _, err := s.db.ExecContext(
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tab delete: %w", err)
+	}
+	defer tx.Rollback()
+	var subject sql.NullString
+	err = tx.QueryRowContext(
 		ctx,
-		`DELETE FROM telegram_tabs WHERE principal_id = ? AND thread_id = ?`,
+		`DELETE FROM telegram_tabs WHERE principal_id = ? AND thread_id = ? RETURNING subject`,
 		principalID,
 		threadID,
-	); err != nil {
+	).Scan(&subject)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
 		return fmt.Errorf("delete tab: %w", err)
+	}
+	if tripID, isTrip := thread.TripOf(subject.String); isTrip {
+		if _, err := tx.ExecContext(
+			ctx,
+			`UPDATE trips SET summary_message_id = NULL WHERE principal_id = ? AND id = ?`,
+			principalID,
+			tripID,
+		); err != nil {
+			return fmt.Errorf("forget trip summary: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit tab delete: %w", err)
 	}
 	return nil
 }
@@ -260,6 +286,26 @@ func (s *Store) AddSubjectTab(ctx context.Context, principalID string, threadID 
 		subject,
 	); err != nil {
 		return fmt.Errorf("add subject tab: %w", err)
+	}
+	return nil
+}
+
+// SetFixedTabName records the name the bot gave a tab of a fixed kind, such as a trip's after its
+// title changed.
+func (s *Store) SetFixedTabName(ctx context.Context, principalID string, threadID int64, name string) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("set tab name: SQLite store is not open")
+	}
+	if _, err := s.db.ExecContext(
+		ctx,
+		`UPDATE telegram_tabs
+		 SET name = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+		 WHERE principal_id = ? AND thread_id = ? AND named_by = 'fixed'`,
+		name,
+		principalID,
+		threadID,
+	); err != nil {
+		return fmt.Errorf("set tab name: %w", err)
 	}
 	return nil
 }

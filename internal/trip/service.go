@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
+	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
 const (
@@ -38,6 +39,7 @@ type Config struct {
 type Service struct {
 	repository Repository
 	reminders  Reminders
+	tabs       Tabs
 	logger     *slog.Logger
 	now        func() time.Time
 
@@ -64,6 +66,62 @@ func NewService(cfg Config, repository Repository, reminders Reminders, logger *
 }
 
 func (s *Service) Now() time.Time { return s.now() }
+
+// SetTabs gives each planned trip its own tab with a pinned summary, at wiring time; without it
+// trips have no tabs.
+func (s *Service) SetTabs(tabs Tabs) {
+	s.tabs = tabs
+}
+
+// changed tells the tabs of a write to the trip.
+func (s *Service) changed(ctx context.Context, trip Trip) {
+	if s.tabs != nil {
+		s.tabs.TripChanged(ctx, trip)
+	}
+}
+
+// announce tells the tabs of the trip a write saved. Writes defer it before taking the lock, so it
+// runs once the lock is released and the Telegram round trips of one trip never hold up the writes
+// of another.
+func (s *Service) announce(ctx context.Context, result *Result) {
+	if result.written {
+		s.changed(ctx, result.Trip)
+	}
+}
+
+// SetSummaryMessage records the message that sums the trip up in its tab; zero forgets it.
+func (s *Service) SetSummaryMessage(ctx context.Context, principalID, id string, messageID int64) error {
+	return s.repository.SetTripSummary(ctx, principalID, id, messageID)
+}
+
+// Settle runs once at start. Every planned trip that has not ended gives its destination to those
+// of its check-in reminders that exist and were set before reminders had one. Nothing else is
+// created or changed, so a reminder the user deleted or moved stays as they left it, and one about
+// to fire is untouched; running it again changes nothing. Each trip is then handed to the tabs,
+// which gives a trip without a tab its own.
+func (s *Service) Settle(ctx context.Context) error {
+	planned, err := s.repository.ListPlannedTrips(ctx, s.now())
+	if err != nil {
+		return err
+	}
+	for _, listed := range planned {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		failed := false
+		for _, booking := range listed.Bookings {
+			if err := s.reminders.SetReminderDestination(ctx, listed.PrincipalID, ReminderID(listed.ID, booking.ID), thread.TripDestination(listed.ID)); err != nil {
+				s.logger.WarnContext(ctx, "trip.settle.failed", "principal_id", listed.PrincipalID, "trip_id", listed.ID, "error", err)
+				failed = true
+				break
+			}
+		}
+		if !failed {
+			s.changed(ctx, listed)
+		}
+	}
+	return nil
+}
 
 // Draft is the editable content of a trip. Bookings without an ID are new.
 type Draft struct {
@@ -101,6 +159,8 @@ type Result struct {
 	// that update brought in.
 	Previous *Trip
 	Added    []string
+	// written is set when the write saved the trip.
+	written bool
 }
 
 const (
@@ -116,7 +176,8 @@ func stale(trip Trip, expectedUpdatedAt time.Time) bool {
 func rejected(text string) Result { return Result{Rejection: text} }
 
 // Add stores a planned trip and sets the reminders of its bookings.
-func (s *Service) Add(ctx context.Context, principalID string, draft Draft) (Result, error) {
+func (s *Service) Add(ctx context.Context, principalID string, draft Draft) (result Result, err error) {
+	defer s.announce(ctx, &result)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if draft.Source == "" {
@@ -136,7 +197,8 @@ func (s *Service) Add(ctx context.Context, principalID string, draft Draft) (Res
 // already known. A known suggested or planned trip is merged with it: matched bookings are
 // updated in place, new ones are added, and nothing the user added is removed. A trip the user
 // dismissed is never changed or offered again.
-func (s *Service) Suggest(ctx context.Context, principalID string, draft Draft) (Result, error) {
+func (s *Service) Suggest(ctx context.Context, principalID string, draft Draft) (result Result, err error) {
+	defer s.announce(ctx, &result)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if draft.Source != SourceMail && draft.Source != SourceCalendar {
@@ -164,7 +226,7 @@ func (s *Service) Suggest(ctx context.Context, principalID string, draft Draft) 
 		if text, err := s.checkSuggestedCap(ctx, principalID); err != nil || text != "" {
 			return rejected(text), err
 		}
-		result, err := s.create(ctx, principalID, normalized, StatusSuggested)
+		result, err = s.create(ctx, principalID, normalized, StatusSuggested)
 		result.Outcome = OutcomeNew
 		return result, err
 	}
@@ -198,7 +260,7 @@ func (s *Service) Suggest(ctx context.Context, principalID string, draft Draft) 
 	if added == nil && next.StartsAt.Equal(target.StartsAt) && next.EndsAt.Equal(target.EndsAt) && bookingSignature(next.Bookings) == bookingSignature(target.Bookings) {
 		return Result{Trip: *target, Outcome: OutcomeKnown}, nil
 	}
-	result, err := s.commit(ctx, *target, next)
+	result, err = s.commit(ctx, *target, next)
 	result.Outcome, result.Previous = OutcomeUpdated, target
 	for _, booking := range result.Trip.Bookings[len(target.Bookings):] {
 		result.Added = append(result.Added, booking.ID)
@@ -276,7 +338,8 @@ func latest(a, b time.Time) time.Time {
 // Update replaces the editable content of a suggested or planned trip and moves its reminders.
 // Bookings that keep their ID keep their reminder. A non-zero expectedUpdatedAt must be the
 // trip's last update time, so a change proposed earlier cannot overwrite a later one.
-func (s *Service) Update(ctx context.Context, principalID, id string, expectedUpdatedAt time.Time, draft Draft) (Result, error) {
+func (s *Service) Update(ctx context.Context, principalID, id string, expectedUpdatedAt time.Time, draft Draft) (result Result, err error) {
+	defer s.announce(ctx, &result)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	existing, found, err := s.repository.LoadTrip(ctx, principalID, id)
@@ -308,7 +371,8 @@ func (s *Service) Update(ctx context.Context, principalID, id string, expectedUp
 
 // Cancel cancels a planned trip, or dismisses a suggested one, and removes its reminders. A trip that has already started is
 // left owing its end notice.
-func (s *Service) Cancel(ctx context.Context, principalID, id string, expectedUpdatedAt time.Time) (Result, error) {
+func (s *Service) Cancel(ctx context.Context, principalID, id string, expectedUpdatedAt time.Time) (result Result, err error) {
+	defer s.announce(ctx, &result)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	existing, found, err := s.repository.LoadTrip(ctx, principalID, id)
@@ -329,7 +393,8 @@ func (s *Service) Cancel(ctx context.Context, principalID, id string, expectedUp
 }
 
 // EndNow ends an active trip at the current time.
-func (s *Service) EndNow(ctx context.Context, principalID, id string, expectedUpdatedAt time.Time) (Result, error) {
+func (s *Service) EndNow(ctx context.Context, principalID, id string, expectedUpdatedAt time.Time) (result Result, err error) {
+	defer s.announce(ctx, &result)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	existing, found, err := s.repository.LoadTrip(ctx, principalID, id)
@@ -351,7 +416,8 @@ func (s *Service) EndNow(ctx context.Context, principalID, id string, expectedUp
 }
 
 // Track makes a suggested trip planned and sets the reminders of its bookings.
-func (s *Service) Track(ctx context.Context, principalID, id string) (Result, error) {
+func (s *Service) Track(ctx context.Context, principalID, id string) (result Result, err error) {
+	defer s.announce(ctx, &result)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	existing, found, err := s.repository.LoadTrip(ctx, principalID, id)
@@ -371,7 +437,8 @@ func (s *Service) Track(ctx context.Context, principalID, id string) (Result, er
 }
 
 // Dismiss makes a suggested trip dismissed, so it is never offered again.
-func (s *Service) Dismiss(ctx context.Context, principalID, id string) (Result, error) {
+func (s *Service) Dismiss(ctx context.Context, principalID, id string) (result Result, err error) {
+	defer s.announce(ctx, &result)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	existing, found, err := s.repository.LoadTrip(ctx, principalID, id)
@@ -481,9 +548,17 @@ func (s *Service) MarkStarted(ctx context.Context, principalID, id string, at ti
 	return s.repository.MarkTripStarted(ctx, principalID, id, at)
 }
 
-// MarkEnded records that the end notice was sent; false means it already was.
+// MarkEnded records that the end notice was sent, and tells the tabs, whose summary then says the
+// trip ended; false means it already was.
 func (s *Service) MarkEnded(ctx context.Context, principalID, id string, at time.Time) (bool, error) {
-	return s.repository.MarkTripEnded(ctx, principalID, id, at)
+	marked, err := s.repository.MarkTripEnded(ctx, principalID, id, at)
+	if err != nil || !marked {
+		return marked, err
+	}
+	if ended, found, err := s.repository.LoadTrip(ctx, principalID, id); err == nil && found {
+		s.changed(ctx, ended)
+	}
+	return true, nil
 }
 
 // Prune deletes trips of every status that ended more than 30 days before now.
@@ -572,7 +647,7 @@ func (s *Service) create(ctx context.Context, principalID string, draft Draft, s
 	}
 	s.logger.InfoContext(ctx, "trip.added", "principal_id", principalID, "trip_id", id, "status", status, "source", draft.Source)
 	unset, err := s.sync(ctx, nil, trip)
-	return Result{Trip: trip, Unset: unset}, err
+	return Result{Trip: trip, Unset: unset, written: true}, err
 }
 
 // commit saves next in place of existing, forgets notices a changed date makes due again, and
@@ -600,7 +675,7 @@ func (s *Service) commit(ctx context.Context, existing, next Trip) (Result, erro
 	}
 	s.logger.InfoContext(ctx, "trip.updated", "principal_id", next.PrincipalID, "trip_id", next.ID, "status", next.Status)
 	unset, err := s.sync(ctx, &existing, next)
-	return Result{Trip: next, Unset: unset}, err
+	return Result{Trip: next, Unset: unset, written: true}, err
 }
 
 func (s *Service) setStatus(ctx context.Context, existing Trip, status string) (Result, error) {
@@ -705,7 +780,7 @@ func (s *Service) sync(ctx context.Context, previous *Trip, next Trip) ([]Unset,
 		case at.Sub(now) > reminderHorizon:
 			reason = UnsetFar
 		default:
-			err := s.reminders.SetReminder(ctx, next.PrincipalID, id, at, next.Zone, reminderText(booking))
+			err := s.reminders.SetReminder(ctx, next.PrincipalID, id, at, next.Zone, reminderText(booking), thread.TripDestination(next.ID))
 			switch {
 			case errors.Is(err, schedule.ErrTooManyJobs):
 				reason = UnsetCap

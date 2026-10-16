@@ -40,8 +40,10 @@ type Report struct {
 	// External is true when the run read outside content, so the text may carry it.
 	External    bool
 	DeliveredAt time.Time
-	// Messages are the Telegram messages the report was sent as; only saving uses them.
-	Messages []Sent
+	// Messages are the Telegram messages the report was sent as, and Destination the job's
+	// destination then; only saving uses them.
+	Messages    []Sent
+	Destination string
 }
 
 // Sent is one Telegram message a delivery went out as, with the tab it landed in: zero when it
@@ -80,6 +82,7 @@ func (s *Service) saveReport(ctx context.Context, run Run, messages []Sent) {
 		External:    run.External,
 		DeliveredAt: s.now(),
 		Messages:    messages,
+		Destination: run.Destination,
 	}
 	if report.Text == "" {
 		return

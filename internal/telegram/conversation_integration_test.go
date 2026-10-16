@@ -108,6 +108,8 @@ type sentMessage struct {
 	messageID int64
 	// threadID is the tab the message was sent to, or zero for the main view.
 	threadID int64
+	// preview is the link preview options the message was sent with.
+	preview string
 }
 
 type sentDocument struct {
@@ -924,7 +926,7 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 		messageID := sentMessageID(h.sentCount)
 		h.mu.Unlock()
 		select {
-		case h.messages <- sentMessage{chatID: chatID, replyTo: replyTo, text: r.Form.Get("text"), parseMode: r.Form.Get("parse_mode"), keyboard: h.parseKeyboard(r.Form.Get("reply_markup")), status: status, messageID: messageID, threadID: threadID}:
+		case h.messages <- sentMessage{chatID: chatID, replyTo: replyTo, text: r.Form.Get("text"), parseMode: r.Form.Get("parse_mode"), keyboard: h.parseKeyboard(r.Form.Get("reply_markup")), status: status, messageID: messageID, threadID: threadID, preview: r.Form.Get("link_preview_options")}:
 		case <-r.Context().Done():
 			return
 		}

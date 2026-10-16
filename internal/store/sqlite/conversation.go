@@ -43,10 +43,12 @@ func (s *Store) EnqueueConversation(
 	}
 
 	lane := conversation.Lane{PrincipalID: input.PrincipalID, ThreadID: input.ThreadID}
-	inFeed, err := laneIsFeed(ctx, tx, lane)
+	// A trip's tab routes its messages as a feed tab does.
+	tabSubject, err := laneTabSubject(ctx, tx, lane)
 	if err != nil {
 		return conversation.EnqueueResult{}, err
 	}
+	inFeed := tabSubject != ""
 	var switched switchOutcome
 	var previousSubject string
 	switch {
@@ -77,13 +79,18 @@ func (s *Store) EnqueueConversation(
 	}
 	if !found {
 		session = candidate
+		subject, err := newSessionSubject(ctx, tx, lane, tabSubject)
+		if err != nil {
+			return conversation.EnqueueResult{}, err
+		}
 		if _, err := tx.ExecContext(
 			ctx,
-			`INSERT INTO conversation_sessions (id, principal_id, runtime_session_id, thread_id) VALUES (?, ?, ?, ?)`,
+			`INSERT INTO conversation_sessions (id, principal_id, runtime_session_id, thread_id, subject) VALUES (?, ?, ?, ?, NULLIF(?, ''))`,
 			session.ID,
 			session.PrincipalID,
 			session.RuntimeSessionID,
 			input.ThreadID,
+			subject,
 		); err != nil {
 			return conversation.EnqueueResult{}, fmt.Errorf("create conversation session: %w", err)
 		}
@@ -102,7 +109,8 @@ func (s *Store) EnqueueConversation(
 		if err != nil {
 			return conversation.EnqueueResult{}, err
 		}
-		if subject != "" && subject != previousSubject {
+		// A trip's tab already names the trip its conversations are about.
+		if subject != "" && subject != previousSubject && subject != tabSubject {
 			if subjectLabel, err = loadSubjectLabel(ctx, tx, input.PrincipalID, subject); err != nil {
 				return conversation.EnqueueResult{}, err
 			}
@@ -485,22 +493,50 @@ func reopenGoneTab(ctx context.Context, tx *sql.Tx, lane conversation.Lane) (con
 	return session, true, nil
 }
 
-// laneIsFeed reports whether the lane is a tab the registry records as a feed.
-func laneIsFeed(ctx context.Context, tx *sql.Tx, lane conversation.Lane) (bool, error) {
+// laneTabSubject is what the registry records the lane's tab as serving when it is a feed or a
+// trip's tab, and "" otherwise.
+func laneTabSubject(ctx context.Context, tx *sql.Tx, lane conversation.Lane) (string, error) {
 	if lane.ThreadID <= 0 {
-		return false, nil
+		return "", nil
 	}
-	var feed bool
+	var subject string
 	if err := tx.QueryRowContext(
 		ctx,
-		`SELECT EXISTS(SELECT 1 FROM telegram_tabs WHERE principal_id = ? AND thread_id = ? AND subject LIKE ?)`,
+		`SELECT COALESCE((SELECT subject FROM telegram_tabs WHERE principal_id = ? AND thread_id = ? AND (subject LIKE ? OR subject LIKE ?)), '')`,
 		lane.PrincipalID,
 		lane.ThreadID,
 		thread.FeedSubject("%"),
-	).Scan(&feed); err != nil {
-		return false, fmt.Errorf("check feed tab: %w", err)
+		thread.TripDestination("%"),
+	).Scan(&subject); err != nil {
+		return "", fmt.Errorf("check feed tab: %w", err)
 	}
-	return feed, nil
+	return subject, nil
+}
+
+// newSessionSubject is the subject of a conversation that starts in the lane: a trip's tab starts
+// conversations about its trip, unless another tab holds one already or the trip is gone, and any
+// other tab starts conversations about nothing in particular.
+func newSessionSubject(ctx context.Context, tx *sql.Tx, lane conversation.Lane, tabSubject string) (string, error) {
+	tripID, isTrip := thread.TripOf(tabSubject)
+	if !isTrip {
+		return "", nil
+	}
+	var taken bool
+	if err := tx.QueryRowContext(
+		ctx,
+		`SELECT EXISTS(SELECT 1 FROM conversation_sessions WHERE principal_id = ? AND subject = ? AND status = 'active')
+		     OR NOT EXISTS(SELECT 1 FROM trips WHERE principal_id = ? AND id = ?)`,
+		lane.PrincipalID,
+		tabSubject,
+		lane.PrincipalID,
+		tripID,
+	).Scan(&taken); err != nil {
+		return "", fmt.Errorf("check trip conversation: %w", err)
+	}
+	if taken {
+		return "", nil
+	}
+	return tabSubject, nil
 }
 
 // routeInFeed finds the conversation a message in a feed tab belongs to. A reply to one of the
@@ -539,62 +575,66 @@ func routeInFeed(ctx context.Context, tx *sql.Tx, lane conversation.Lane, replyT
 	return outcome, nil
 }
 
+// reportSubject is the subject of a report: its trip when its job was delivered to one, such as a
+// check-in reminder, and its job otherwise.
+const reportSubject = `CASE WHEN report.destination LIKE ? THEN report.destination ELSE ? || report.job_id END`
+
 // feedMessageSubject is the subject of the principal's report or alert sent as the message.
 func feedMessageSubject(ctx context.Context, tx *sql.Tx, principalID string, messageID int64) (string, bool, error) {
-	var kind, id string
+	var subject string
 	err := tx.QueryRowContext(
 		ctx,
-		`SELECT ?, report.job_id FROM job_report_messages AS message
+		`SELECT `+reportSubject+` FROM job_report_messages AS message
 		 JOIN job_reports AS report ON report.id = message.report_id AND report.principal_id = message.principal_id
 		 WHERE message.principal_id = ? AND message.telegram_message_id = ?
 		 UNION ALL
-		 SELECT ?, watch_id FROM watch_alert_messages WHERE principal_id = ? AND telegram_message_id = ?
+		 SELECT ? || watch_id FROM watch_alert_messages WHERE principal_id = ? AND telegram_message_id = ?
 		 LIMIT 1`,
-		conversation.SubjectJob, principalID, messageID,
-		conversation.SubjectWatch, principalID, messageID,
-	).Scan(&kind, &id)
+		thread.TripDestination("%"), conversation.JobSubject(""), principalID, messageID,
+		conversation.WatchSubject(""), principalID, messageID,
+	).Scan(&subject)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}
 	if err != nil {
 		return "", false, fmt.Errorf("query feed message subject: %w", err)
 	}
-	return kind + ":" + id, true, nil
+	return subject, true, nil
 }
 
 // latestFeedSubject is the subject of the newest report or alert sent to the lane's tab after its
 // last exchange: its newest request or delivered answer, the latest change of a conversation in it,
 // which counts a conversation's start and a switch, or its last /new.
 func latestFeedSubject(ctx context.Context, tx *sql.Tx, lane conversation.Lane) (string, bool, error) {
-	var kind, id string
+	var subject string
 	err := tx.QueryRowContext(
 		ctx,
-		`SELECT kind, id FROM (
-		     SELECT ? AS kind, report.job_id AS id, message.sent_at AS sent_at
+		`SELECT subject FROM (
+		     SELECT `+reportSubject+` AS subject, message.sent_at AS sent_at
 		     FROM job_report_messages AS message
 		     JOIN job_reports AS report ON report.id = message.report_id AND report.principal_id = message.principal_id
 		     WHERE message.principal_id = ? AND message.thread_id = ? AND message.sent_at IS NOT NULL
 		     UNION ALL
-		     SELECT ?, watch_id, sent_at FROM watch_alert_messages WHERE principal_id = ? AND thread_id = ?
+		     SELECT ? || watch_id, sent_at FROM watch_alert_messages WHERE principal_id = ? AND thread_id = ?
 		 )
 		 WHERE sent_at > max(
 		     COALESCE((SELECT MAX(COALESCE(finished_at, created_at)) FROM conversation_requests WHERE principal_id = ? AND thread_id = ?), ''),
 		     COALESCE((SELECT MAX(updated_at) FROM conversation_sessions WHERE principal_id = ? AND thread_id = ?), ''),
 		     COALESCE((SELECT reset_at FROM telegram_tabs WHERE principal_id = ? AND thread_id = ?), ''))
 		 ORDER BY sent_at DESC LIMIT 1`,
-		conversation.SubjectJob, lane.PrincipalID, lane.ThreadID,
-		conversation.SubjectWatch, lane.PrincipalID, lane.ThreadID,
+		thread.TripDestination("%"), conversation.JobSubject(""), lane.PrincipalID, lane.ThreadID,
+		conversation.WatchSubject(""), lane.PrincipalID, lane.ThreadID,
 		lane.PrincipalID, lane.ThreadID,
 		lane.PrincipalID, lane.ThreadID,
 		lane.PrincipalID, lane.ThreadID,
-	).Scan(&kind, &id)
+	).Scan(&subject)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}
 	if err != nil {
 		return "", false, fmt.Errorf("query latest feed message: %w", err)
 	}
-	return kind + ":" + id, true, nil
+	return subject, true, nil
 }
 
 // switchToSubject makes the conversation about the subject the lane's active one: the one already
@@ -668,7 +708,7 @@ func sessionSubject(ctx context.Context, tx *sql.Tx, session conversation.Sessio
 }
 
 // loadSubjectLabel is the name a subject's job or watch went by in the last report or alert it
-// sent, or "" when none is kept.
+// sent, or a trip's title, or "" when none is kept.
 func loadSubjectLabel(ctx context.Context, db queryRower, principalID, subject string) (string, error) {
 	kind, id := conversation.SplitSubject(subject)
 	var query string
@@ -677,6 +717,8 @@ func loadSubjectLabel(ctx context.Context, db queryRower, principalID, subject s
 		query = `SELECT job_name FROM job_reports WHERE principal_id = ? AND job_id = ? ORDER BY delivered_at DESC, id DESC LIMIT 1`
 	case conversation.SubjectWatch:
 		query = `SELECT watch_label FROM watch_alert_messages WHERE principal_id = ? AND watch_id = ? ORDER BY sent_at DESC LIMIT 1`
+	case conversation.SubjectTrip:
+		query = `SELECT title FROM trips WHERE principal_id = ? AND id = ?`
 	default:
 		return "", nil
 	}
