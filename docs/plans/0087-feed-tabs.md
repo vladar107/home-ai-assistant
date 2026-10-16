@@ -1,6 +1,6 @@
 # 0087 — Feed tabs: messages nobody asked for go to a tab of their kind
 
-Status: `proposed`
+Status: `done`
 
 ## Context
 
@@ -65,9 +65,17 @@ With tabs off, nothing changes.
     or "Watches". Plan 0088 adds icons.
   - Creation is serialised per principal and feed, so two deliveries at the
     same time make one tab.
+  - The feed names, `thread.FeedSubject`, and the `thread.Feeds` interface
+    live in `internal/thread`, which the schedule and watch packages already
+    import; they cannot import `internal/telegram`.
+  - Scheduled runs and watches start before the Telegram poller, so the
+    resolver reads the tabs switch from `getMe` itself when `Start` has not
+    yet read it. Otherwise the first deliveries after a restart would land in
+    the main view.
 - **Delivery sets the thread, not the sender.**
   - `schedule.Service` and `watch.Service` gain `SetFeeds`, with an interface
-    `Thread(ctx, principalID, feed) (int64, error)`.
+    `Thread(ctx, principalID, chatID, feed) (int64, error)`. Every caller
+    already holds the chat ID, which `createForumTopic` needs.
   - Delivery puts the feed's thread on its context with a new, delivery-only
     key, `thread.WithDelivery`. Only the client's thread setter reads that
     key, and it takes precedence over `thread.From`. The client wrappers from
@@ -81,7 +89,11 @@ With tabs off, nothing changes.
   - A nil resolver, or tabs off, means thread 0, which is today's behaviour.
 - **Failures fall back to the main view without churning tabs.**
   - If a feed tab cannot be created, the message goes to the main view and
-    the failure is logged. The next delivery tries again.
+    the resolver logs the failure as `telegram.feed.failed` with a fixed
+    stage. The next delivery tries again.
+  - If Telegram made the tab but the registry row cannot be written, the
+    resolver deletes the new tab on a best-effort basis before falling back,
+    so the next delivery's tab does not leave an orphan behind.
   - A send to a gone feed tab reaches the main view through the client's
     fallback.
     - Plan 0085's observer drops a gone row, so the next delivery makes a
@@ -99,16 +111,21 @@ With tabs off, nothing changes.
     the message actually landed in, read from the sent message's
     `message_thread_id`, so a message that fell back to the main view
     records 0. The tracked send methods return it beside the message ID.
+  - It also adds `sent_at` there, taken from SQLite's clock like a request's
+    `created_at`, so the latest feed message and the lane's last exchange
+    are compared on one clock. Messages saved before the migration have no
+    time and never count as a tab's latest.
   - Migration 034 also adds `watch_alert_messages`. Each row holds:
     - principal and Telegram message ID
     - the thread it landed in
-    - watch ID
+    - watch ID, and the watch's label as it was then, which names the watch
+      in the "About …" line and the turn's subject line
     - the sent text, capped at 2000 runes
     - `private` and `external` flags, as on `job_reports`
     - the sent time
 
     Rows are pruned with job reports, after 14 days or past 200 per
-    principal. `SendAlert` returns the message ID.
+    principal. `SendAlert` returns the message ID and the landed thread.
   - **Only in feed tabs.** Subject routing applies only to a message sent in
     a thread that the registry marks as a feed. In the main view, and with
     tabs off, replies behave exactly as today.
@@ -117,7 +134,8 @@ With tabs off, nothing changes.
     root, or to a message no table knows, is treated as no reply.
   - A reply in a feed tab is resolved in this order:
     1. It replies to a message found in `conversation_reply_messages`: it
-       returns to that session, as today.
+       returns to that session, as today. If another tab holds that session,
+       the reply is refused as open elsewhere, like a reply to a report.
     2. It replies to a message found in `job_report_messages` or
        `watch_alert_messages`: it resolves that subject's most recent session.
        That session is switched into the lane with `switchActiveSession`, or
@@ -126,9 +144,15 @@ With tabs off, nothing changes.
   - A message that is not a reply goes to the subject of the most recent
     feed message in that tab, if that message arrived after the lane's last
     exchange. Otherwise it continues the tab's current conversation.
-    - The lane's last exchange is its newest request, or the start of its
-      active session if that is later. So after `/new`, the next message
-      stays in the new conversation.
+    - The lane's last exchange is the latest of:
+      - its newest request, or the delivery of its newest answer, from
+        `finished_at`, so a report that lands while a turn is still running
+        does not take the follow-up to that turn's answer;
+      - the latest change of any conversation last active in that tab: a
+        start, a switch, or a close;
+      - its last `/new`. `/new` closes the tab's conversation without
+        starting another and may find none to close, so migration 034 also
+        adds `telegram_tabs.reset_at`, which the reset sets.
     - If that subject's session is active in another tab, the message
       continues the current conversation instead. Only an explicit reply is
       refused as open elsewhere, so a tab can never get stuck.
@@ -142,7 +166,9 @@ With tabs off, nothing changes.
     example "About “Bins”:". The user always sees which conversation they
     are in, and `/new` starts a fresh one.
     - The enqueue stores the subject's label on the request, in a new
-      nullable `conversation_requests.subject_label`.
+      nullable `conversation_requests.subject_label`. The label is the job
+      name of the subject's latest report, or the watch label of its latest
+      alert.
     - `conversation.Service` delivery prepends it where it prepends
       `ResumedLine` today, as one combined line when both apply.
     - Creating a new subject session returns `SwitchedFrom`, as a switch
@@ -151,8 +177,9 @@ With tabs off, nothing changes.
     replying to them stays in that conversation.
   - A subject session that is active in another tab stays there. On an
     explicit reply, the turn does not run, and the answer names that tab, as
-    Open does in plan 0085: "That conversation is open in “Bins”. Write
-    there to continue it."
+    Open does in plan 0085: "That conversation is open in the tab “Bins”.
+    Write there to continue it." The refusal carries the tab's thread, so a
+    conversation the main view holds is named as "the main view".
   - Plan 0085 reopens a `tab_gone` session when its tab is written in again.
     It skips that reopen when the session's subject is already active
     elsewhere, so the unique subject index never fails an enqueue.
@@ -165,6 +192,10 @@ With tabs off, nothing changes.
     job reports already do (plan 0072). A quote provider in `internal/watch`
     mirrors `schedule/reports.go`, and the turn is marked private or outside
     content from the row's flags.
+    - `conversation.ReportSources` joins it with the scheduler's reports, as
+      `Notices` joins notices.
+    - The quote drops the alert's pending notice, and a turn now reads its
+      reports before its notices so that the alert is told once.
 - **Notices stay.** Watch, job-report, and task notices are still taken by
   the next turn of any tab.
 - **Privacy.** Logs carry IDs and feed names, which are fixed words. Metric
@@ -175,9 +206,9 @@ With tabs off, nothing changes.
 ### Chunks
 
 1. **Store.** Jev: complex (1.00).
-   - Migration 034: the tab `subject` with its index, the session subject
-     index, `job_report_messages.thread_id`, `watch_alert_messages`, and
-     `conversation_requests.subject_label`.
+   - Migration 034: the tab `subject` with its index, `telegram_tabs.reset_at`,
+     the session subject index, `job_report_messages.thread_id` and `sent_at`,
+     `watch_alert_messages`, and `conversation_requests.subject_label`.
    - Store methods for feed tabs, subjects, and alert messages, with pruning.
    - The feed-tab routing in `EnqueueConversation`: the root counted as no
      reply, then replies, then the latest feed message after the last
@@ -224,8 +255,8 @@ With tabs off, nothing changes.
      - The alert is quoted once.
      - A private alert marks the turn private, and an agent watch's alert
        marks it outside content.
-4. **Docs.** Done by the orchestrator. The README covers feed tabs and how to
-   discuss a report, and the architecture notes cover delivery threads.
+4. **Docs.** The README covers feed tabs and how to discuss a report, and the
+   architecture notes cover delivery threads.
 
 ### Waves
 

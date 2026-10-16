@@ -105,7 +105,7 @@ func tabRefusal(err error) (TabVerdict, bool) {
 // reply for a deleted tab still reaches the user. Otherwise the refusal is returned with its
 // verdict.
 func (c *Client) inTab(ctx context.Context, chatID int64, fallback bool, send func(context.Context) error) error {
-	threadID := thread.From(ctx)
+	threadID := sendThread(ctx)
 	err := send(ctx)
 	if threadID <= 0 {
 		return err
@@ -124,9 +124,18 @@ func (c *Client) inTab(ctx context.Context, chatID int64, fallback bool, send fu
 		verdict = c.tabs.TabRefused(ctx, chatID, threadID)
 	}
 	if fallback {
-		return send(thread.With(ctx, 0))
+		return send(thread.WithDelivery(thread.With(ctx, 0), 0))
 	}
 	return &tabRefusedError{verdict: verdict, err: err}
+}
+
+// sendThread is the tab a send goes to: the delivery's tab when one is set, and the context's
+// otherwise.
+func sendThread(ctx context.Context) int64 {
+	if threadID, set := thread.Delivery(ctx); set {
+		return threadID
+	}
+	return thread.From(ctx)
 }
 
 type Bot struct {
@@ -499,13 +508,13 @@ func (c *Client) SendReply(ctx context.Context, chatID, replyToMessageID int64, 
 }
 
 // SendTrackedReply is SendReply returning the sent message's ID, for an answer the user may reply
-// to later.
-func (c *Client) SendTrackedReply(ctx context.Context, chatID, replyToMessageID int64, text string) (int64, error) {
+// to later, and the tab it landed in, which is the main view when its tab was gone.
+func (c *Client) SendTrackedReply(ctx context.Context, chatID, replyToMessageID int64, text string) (int64, int64, error) {
 	message, err := c.sendMessage(ctx, chatID, replyToMessageID, text, nil)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	return message.MessageID, nil
+	return message.MessageID, message.MessageThreadID, nil
 }
 
 // SendKeyboard sends a message with inline buttons, quoting the request like SendReply.
@@ -560,7 +569,7 @@ func (c *Client) sendFormatted(ctx context.Context, params url.Values, text stri
 
 // setThread sends to the context's tab and reports whether it named one.
 func setThread(ctx context.Context, params url.Values) bool {
-	threadID := thread.From(ctx)
+	threadID := sendThread(ctx)
 	if threadID <= 0 {
 		return false
 	}
@@ -887,7 +896,7 @@ func (c *Client) sendDocument(ctx context.Context, chatID int64, name string, bo
 	if err := writer.WriteField("chat_id", strconv.FormatInt(chatID, 10)); err != nil {
 		return fmt.Errorf("Telegram sendDocument request could not be created")
 	}
-	if threadID := thread.From(ctx); threadID > 0 {
+	if threadID := sendThread(ctx); threadID > 0 {
 		if err := writer.WriteField("message_thread_id", strconv.FormatInt(threadID, 10)); err != nil {
 			return fmt.Errorf("Telegram sendDocument request could not be created")
 		}
@@ -936,7 +945,7 @@ func (c *Client) SendPhoto(ctx context.Context, chatID, replyToMessageID int64, 
 	}
 	return c.inTab(ctx, chatID, true, func(ctx context.Context) error {
 		fields := map[string]string{"chat_id": strconv.FormatInt(chatID, 10)}
-		if threadID := thread.From(ctx); threadID > 0 {
+		if threadID := sendThread(ctx); threadID > 0 {
 			fields["message_thread_id"] = strconv.FormatInt(threadID, 10)
 		}
 		if replyToMessageID > 0 {

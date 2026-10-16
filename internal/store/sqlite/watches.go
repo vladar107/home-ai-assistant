@@ -286,7 +286,7 @@ func (s *Store) ReadyWatchAlerts(ctx context.Context) ([]watch.Alert, error) {
 	rows, err := s.db.QueryContext(
 		ctx,
 		`SELECT a.id, a.watch_id, a.principal_id, a.occurrence, a.sequence, a.type, a.text, a.expires_at, a.private, w.kind, w.enabled, COALESCE(w.muted_on, ''), w.travel_pause,
-		        COALESCE(json_extract(w.config, '$.language'), '')
+		        COALESCE(json_extract(w.config, '$.language'), ''), w.config
 		 FROM watch_alerts a JOIN watches w ON w.id = a.watch_id
 		 WHERE a.status = 'ready' ORDER BY a.created_at, a.sequence, a.id`,
 	)
@@ -297,12 +297,16 @@ func (s *Store) ReadyWatchAlerts(ctx context.Context) ([]watch.Alert, error) {
 	var alerts []watch.Alert
 	for rows.Next() {
 		var alert watch.Alert
-		var expiresAt string
+		var expiresAt, config string
 		if err := rows.Scan(
 			&alert.ID, &alert.WatchID, &alert.PrincipalID, &alert.Occurrence, &alert.Sequence, &alert.Type, &alert.Text,
-			&expiresAt, &alert.Private, &alert.Kind, &alert.Enabled, &alert.MutedOn, &alert.TravelPause, &alert.Language,
+			&expiresAt, &alert.Private, &alert.Kind, &alert.Enabled, &alert.MutedOn, &alert.TravelPause, &alert.Language, &config,
 		); err != nil {
 			return nil, fmt.Errorf("scan watch alert: %w", err)
+		}
+		var spec watch.Spec
+		if err := json.Unmarshal([]byte(config), &spec); err == nil {
+			alert.Label = spec.Label()
 		}
 		if alert.ExpiresAt, err = time.Parse(time.RFC3339Nano, expiresAt); err != nil {
 			return nil, fmt.Errorf("parse watch alert expiry: %w", err)
@@ -342,6 +346,64 @@ func (s *Store) PruneWatchHistory(ctx context.Context, before time.Time) error {
 		return fmt.Errorf("prune watch states: %w", err)
 	}
 	return nil
+}
+
+func (s *Store) SaveWatchAlertMessage(ctx context.Context, message watch.AlertMessage, keep int) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("save watch alert message: SQLite store is not open")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin watch alert message save: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(
+		ctx,
+		`INSERT INTO watch_alert_messages (principal_id, telegram_message_id, thread_id, watch_id, watch_label, text, private, external)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT DO NOTHING`,
+		message.PrincipalID, message.MessageID, message.ThreadID, message.WatchID, message.WatchLabel, message.Text, message.Private, message.External,
+	); err != nil {
+		return fmt.Errorf("save watch alert message: %w", err)
+	}
+	if _, err := tx.ExecContext(
+		ctx,
+		`DELETE FROM watch_alert_messages WHERE principal_id = ? AND telegram_message_id NOT IN (
+		     SELECT telegram_message_id FROM watch_alert_messages WHERE principal_id = ?
+		     ORDER BY sent_at DESC, telegram_message_id DESC LIMIT ?
+		 )`,
+		message.PrincipalID, message.PrincipalID, keep,
+	); err != nil {
+		return fmt.Errorf("trim watch alert messages: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit watch alert message save: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) WatchAlertByMessage(ctx context.Context, principalID string, messageID int64) (watch.AlertMessage, bool, error) {
+	if s == nil || s.db == nil {
+		return watch.AlertMessage{}, false, fmt.Errorf("load watch alert message: SQLite store is not open")
+	}
+	message := watch.AlertMessage{PrincipalID: principalID, MessageID: messageID}
+	var sentAt string
+	err := s.db.QueryRowContext(
+		ctx,
+		`SELECT thread_id, watch_id, watch_label, text, private, external, sent_at
+		 FROM watch_alert_messages WHERE principal_id = ? AND telegram_message_id = ?`,
+		principalID, messageID,
+	).Scan(&message.ThreadID, &message.WatchID, &message.WatchLabel, &message.Text, &message.Private, &message.External, &sentAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return watch.AlertMessage{}, false, nil
+	}
+	if err != nil {
+		return watch.AlertMessage{}, false, fmt.Errorf("load watch alert message: %w", err)
+	}
+	if message.SentAt, err = time.Parse(time.RFC3339Nano, sentAt); err != nil {
+		return watch.AlertMessage{}, false, fmt.Errorf("parse watch alert message time: %w", err)
+	}
+	return message, true, nil
 }
 
 func (s *Store) queryWatches(ctx context.Context, query string, arguments ...any) ([]watch.Watch, error) {

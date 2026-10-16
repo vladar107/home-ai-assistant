@@ -40,8 +40,15 @@ type Report struct {
 	// External is true when the run read outside content, so the text may carry it.
 	External    bool
 	DeliveredAt time.Time
-	// MessageIDs are the Telegram messages the report was sent as; only saving uses them.
-	MessageIDs []int64
+	// Messages are the Telegram messages the report was sent as; only saving uses them.
+	Messages []Sent
+}
+
+// Sent is one Telegram message a delivery went out as, with the tab it landed in: zero when it
+// went to the main view, as a send to a tab that is gone falls back there.
+type Sent struct {
+	MessageID int64
+	ThreadID  int64
 }
 
 const reportsGuidance = "Job reports: job_reports lists the reports the user's scheduled jobs and reminders sent them in the last two weeks, optionally for one job, " +
@@ -61,7 +68,7 @@ var reportsDefinition = tools.Definition{
 
 // saveReport keeps a delivered run's report. A failure only costs later turns the report, so it
 // is logged rather than holding the run back, which would send the report again.
-func (s *Service) saveReport(ctx context.Context, run Run, messageIDs []int64) {
+func (s *Service) saveReport(ctx context.Context, run Run, messages []Sent) {
 	report := Report{
 		ID:          run.ID,
 		PrincipalID: run.PrincipalID,
@@ -72,7 +79,7 @@ func (s *Service) saveReport(ctx context.Context, run Run, messageIDs []int64) {
 		Private:     run.Private,
 		External:    run.External,
 		DeliveredAt: s.now(),
-		MessageIDs:  messageIDs,
+		Messages:    messages,
 	}
 	if report.Text == "" {
 		return

@@ -13,6 +13,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/connectors/google"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
+	"github.com/vladar107/home-ai-assistant/internal/thread"
 	"github.com/vladar107/home-ai-assistant/internal/trip"
 )
 
@@ -71,6 +72,9 @@ type TripChats interface {
 type TripNotifier struct {
 	Client *Client
 	Chats  TripChats
+	// Feeds puts trip messages in the reminders tab while the bot has tabs on; nil sends them
+	// under the caller's context.
+	Feeds thread.Feeds
 }
 
 func (n TripNotifier) SendTripCard(ctx context.Context, found trip.Trip) error {
@@ -78,6 +82,7 @@ func (n TripNotifier) SendTripCard(ctx context.Context, found trip.Trip) error {
 	if err != nil {
 		return err
 	}
+	ctx = n.inFeed(ctx, found.PrincipalID, chatID)
 	keyboard := InlineKeyboard{{
 		{Text: "Track", CallbackData: tripPrefix + ":" + tripTrackAction + ":" + found.ID},
 		{Text: "Ignore", CallbackData: tripPrefix + ":" + tripIgnoreAction + ":" + found.ID},
@@ -90,7 +95,20 @@ func (n TripNotifier) Send(ctx context.Context, principalID, text string) error 
 	if err != nil {
 		return err
 	}
-	return n.Client.sendPlain(ctx, chatID, text, nil)
+	return n.Client.sendPlain(n.inFeed(ctx, principalID, chatID), chatID, text, nil)
+}
+
+// inFeed returns a context whose sends go to the reminders tab. A tab that cannot be had leaves the
+// message in the main view; the resolver logs why.
+func (n TripNotifier) inFeed(ctx context.Context, principalID string, chatID int64) context.Context {
+	if n.Feeds == nil {
+		return ctx
+	}
+	threadID, err := n.Feeds.Thread(ctx, principalID, chatID, thread.FeedReminders)
+	if err != nil {
+		threadID = 0
+	}
+	return thread.WithDelivery(ctx, threadID)
 }
 
 func (n TripNotifier) chat(ctx context.Context, principalID string) (int64, error) {

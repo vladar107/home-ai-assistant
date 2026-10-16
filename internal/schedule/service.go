@@ -18,6 +18,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
+	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
 const (
@@ -64,9 +65,9 @@ type SessionPruner interface {
 }
 
 // ReminderDeliverer sends one reminder to its owner's chat with buttons that snooze the job, and
-// returns the sent message's ID.
+// returns the sent message's ID and the tab it landed in.
 type ReminderDeliverer interface {
-	SendReminder(ctx context.Context, chatID int64, jobID, text string) (int64, error)
+	SendReminder(ctx context.Context, chatID int64, jobID, text string) (int64, int64, error)
 }
 
 type Service struct {
@@ -87,6 +88,7 @@ type Service struct {
 	telemetry  Telemetry
 	safety     SafetyChecks
 	travel     Travel
+	feeds      thread.Feeds
 	startedAt  time.Time
 
 	mu       sync.Mutex
@@ -135,6 +137,34 @@ type Travel interface {
 // time; without it nobody is ever traveling.
 func (s *Service) SetTravel(travel Travel) {
 	s.travel = travel
+}
+
+// SetFeeds sets the tabs that runs are delivered to while the bot has tabs on, at wiring time
+// before the scheduler starts; without it every run goes to the main view.
+func (s *Service) SetFeeds(feeds thread.Feeds) {
+	s.feeds = feeds
+}
+
+// feed is the tab of the run's kind: reminders and Trips scans with the reminders, every other
+// job's report with the reports.
+func feed(run Run) string {
+	if run.JobType == TypeReminder || run.JobType == TripScanType {
+		return thread.FeedReminders
+	}
+	return thread.FeedReports
+}
+
+// inFeed returns a context whose sends go to the run's feed tab. A tab that cannot be had leaves
+// the run's messages in the main view, the resolver logs why, and the next delivery tries again.
+func (s *Service) inFeed(ctx context.Context, run Run, chatID int64) context.Context {
+	if s.feeds == nil {
+		return ctx
+	}
+	threadID, err := s.feeds.Thread(ctx, run.PrincipalID, chatID, feed(run))
+	if err != nil {
+		threadID = 0
+	}
+	return thread.WithDelivery(ctx, threadID)
 }
 
 // SetTelemetry sets where run metrics are recorded, at wiring time before the scheduler starts.
@@ -492,7 +522,8 @@ func (s *Service) execute(ctx context.Context, run Run) (Run, bool) {
 		s.skip(ctx, run, StatusQueued, "stale")
 		return run, false
 	}
-	if _, found, err := s.chats.ResolveActiveChat(ctx, run.PrincipalID); err != nil {
+	chatID, found, err := s.chats.ResolveActiveChat(ctx, run.PrincipalID)
+	if err != nil {
 		s.logRunError(ctx, run, "resolve_chat", err)
 		return run, false
 	} else if !found {
@@ -514,7 +545,8 @@ func (s *Service) execute(ctx context.Context, run Run) (Run, bool) {
 	began := time.Now()
 	result := Result{Text: MissedText, ErrorKind: "missed"}
 	if !missed {
-		result, err = jobType.Handler.Run(ctx, Occurrence{
+		// Files and pictures the run sends go to the tab its report will.
+		result, err = jobType.Handler.Run(s.inFeed(ctx, run, chatID), Occurrence{
 			RunID:        run.ID,
 			PrincipalID:  run.PrincipalID,
 			JobID:        run.JobID,
@@ -574,15 +606,16 @@ func (s *Service) deliver(ctx context.Context, run Run) {
 		s.skip(ctx, run, StatusReady, "no_chat")
 		return
 	}
+	sendCtx := s.inFeed(ctx, run, chatID)
 	if run.JobType == TypeReminder && s.reminders != nil && run.ErrorKind == "" {
-		messageID, err := s.reminders.SendReminder(ctx, chatID, run.JobID, deliveryText(run))
-		s.finishDelivery(ctx, run, []int64{messageID}, err)
+		messageID, threadID, err := s.reminders.SendReminder(sendCtx, chatID, run.JobID, deliveryText(run))
+		s.finishDelivery(ctx, run, []Sent{{MessageID: messageID, ThreadID: threadID}}, err)
 		return
 	}
 	chunks := conversation.SplitReply(deliveryText(run))
 	// A failed run's text explains the failure, so a card it staged would illustrate nothing.
 	if s.cards != nil && run.ErrorKind == "" {
-		chunks, _, err = conversation.SendCard(ctx, s.logger, s.cards, s.photos, run.PrincipalID, outbox.ScheduledTurn(run.ID), chatID, 0, chunks)
+		chunks, _, err = conversation.SendCard(sendCtx, s.logger, s.cards, s.photos, run.PrincipalID, outbox.ScheduledTurn(run.ID), chatID, 0, chunks)
 		if err != nil {
 			if ctx.Err() == nil {
 				s.logRunError(ctx, run, "deliver", err)
@@ -590,21 +623,21 @@ func (s *Service) deliver(ctx context.Context, run Run) {
 			return
 		}
 	}
-	messageIDs := make([]int64, 0, len(chunks))
+	messages := make([]Sent, 0, len(chunks))
 	for _, chunk := range chunks {
-		messageID, err := s.deliverer.SendTrackedReply(ctx, chatID, 0, chunk)
+		messageID, threadID, err := s.deliverer.SendTrackedReply(sendCtx, chatID, 0, chunk)
 		if err != nil {
 			s.finishDelivery(ctx, run, nil, err)
 			return
 		}
-		messageIDs = append(messageIDs, messageID)
+		messages = append(messages, Sent{MessageID: messageID, ThreadID: threadID})
 	}
-	s.finishDelivery(ctx, run, messageIDs, nil)
+	s.finishDelivery(ctx, run, messages, nil)
 }
 
 // finishDelivery records how sending a ready run ended, keeping a delivered run's report with the
 // messages it was sent as. A transient failure leaves it ready.
-func (s *Service) finishDelivery(ctx context.Context, run Run, messageIDs []int64, err error) {
+func (s *Service) finishDelivery(ctx context.Context, run Run, messages []Sent, err error) {
 	if err != nil {
 		if isPermanent(err) {
 			if _, err := s.repository.TransitionScheduledRun(ctx, run.ID, StatusReady, StatusFailed, "", "undeliverable", s.now()); err != nil {
@@ -623,7 +656,7 @@ func (s *Service) finishDelivery(ctx context.Context, run Run, messageIDs []int6
 	}
 	// The report is kept before the run is marked delivered, which clears its text, so a crash
 	// between the two cannot lose it.
-	s.saveReport(ctx, run, slices.DeleteFunc(messageIDs, func(id int64) bool { return id <= 0 }))
+	s.saveReport(ctx, run, slices.DeleteFunc(messages, func(message Sent) bool { return message.MessageID <= 0 }))
 	if _, err := s.repository.TransitionScheduledRun(ctx, run.ID, StatusReady, StatusDelivered, "", run.ErrorKind, s.now()); err != nil {
 		s.logRunError(ctx, run, "store_delivery", err)
 		return

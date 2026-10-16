@@ -89,6 +89,7 @@ type App struct {
 	memory        *usermemory.Service
 	backlog       *backlog.Service
 	trips         *trip.Service
+	tripNotifier  *telegram.TripNotifier
 	typeSafe      *judgment.OptInService
 	telegram      *telegram.Service
 	telemetry     *observability.Telemetry
@@ -528,6 +529,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			return err
 		}
 		notices := conversation.Notices{approvals}
+		var reports conversation.Reports = scheduler
 		var tasks *task.Service
 		if a.cfg.Tasks.Enabled {
 			tasks, err = task.NewService(task.Config{Timeout: a.cfg.Tasks.Timeout, Cards: cards, Photos: client}, a.store, a.store, telegram.TaskMessenger{Client: client}, client, a.logger)
@@ -568,6 +570,8 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			// home actions wait. An agent watch's alert is written by a model from web pages or mail,
 			// so it reaches the next turn as outside content, like a scheduled report.
 			notices = append(notices, watches, conversation.OutsideNotice{Notice: watches.AgentNotices()})
+			// A reply to an alert quotes it, marked as the alert's own content is.
+			reports = conversation.ReportSources{scheduler, watches}
 			a.watches = watches
 		}
 		displayNames := make(map[string]string, len(a.cfg.Telegram.Users))
@@ -579,7 +583,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 				TurnTimeout:  a.cfg.Conversation.TurnTimeout,
 				FollowUp:     approvals,
 				Notice:       notices,
-				Reports:      scheduler,
+				Reports:      reports,
 				Jobs:         scheduler,
 				Attachments:  attachments,
 				WebSearch:    webSearch,
@@ -640,7 +644,8 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		}
 		tripState := &tripScanState{schedules: scheduler}
 		tripTools.SetScanState(tripState)
-		tripNotifier := telegram.TripNotifier{Client: client, Chats: a.store}
+		tripNotifier := &telegram.TripNotifier{Client: client, Chats: a.store}
+		a.tripNotifier = tripNotifier
 		if err := scheduler.Register(trip.ScanJobType(tripScanChecker{conversationService}, a.store, tripState, tripService, tripNotifier, tripNotifier, scheduler.Now, a.logger)); err != nil {
 			return err
 		}
@@ -913,6 +918,16 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	}
 	service.SetTabs(a.store)
 	client.ObserveTabs(service)
+	// Messages nobody asked for go to their feed tab while the bot has tabs on.
+	if a.scheduler != nil {
+		a.scheduler.SetFeeds(service.Feeds())
+	}
+	if a.watches != nil {
+		a.watches.SetFeeds(service.Feeds())
+	}
+	if a.tripNotifier != nil {
+		a.tripNotifier.Feeds = service.Feeds()
+	}
 	if a.typeSafe != nil {
 		service.SetTypeSafe(a.typeSafe)
 	}

@@ -105,15 +105,15 @@ type fakeSender struct {
 	failure  error
 }
 
-func (f *fakeSender) SendAlert(_ context.Context, chatID int64, watchID, text string) error {
+func (f *fakeSender) SendAlert(_ context.Context, chatID int64, watchID, text string) (int64, int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.attempts++
 	if f.failure != nil {
-		return f.failure
+		return 0, 0, f.failure
 	}
 	f.sent = append(f.sent, sentAlert{chatID: chatID, watchID: watchID, text: text})
-	return nil
+	return int64(f.attempts), 0, nil
 }
 
 func (f *fakeSender) fail(err error) {

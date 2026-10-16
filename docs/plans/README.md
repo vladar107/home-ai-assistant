@@ -96,7 +96,7 @@ plan that links back to the earlier record.
 | 0084 | [Resume a conversation in its own tab](0084-resume-in-tab.md) | done |
 | 0085 | [Tabs that tell the truth, and closing a tab](0085-tab-fixes.md) | done |
 | 0086 | [Trips that find the bookings in mail and calendar](0086-trips-find-bookings.md) | done |
-| 0087 | [Feed tabs: messages nobody asked for go to a tab of their kind](0087-feed-tabs.md) | proposed |
+| 0087 | [Feed tabs: messages nobody asked for go to a tab of their kind](0087-feed-tabs.md) | done |
 | 0088 | [Tab names and icons by topic](0088-tab-names-and-icons.md) | proposed |
 | 0089 | [A tab for each trip, with its summary pinned](0089-trip-tabs.md) | proposed |
 

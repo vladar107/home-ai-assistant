@@ -158,10 +158,14 @@ type Service struct {
 
 	// topics is the bot's tabs switch as getMe last reported it.
 	topics atomic.Bool
+	// topicsKnown is set once getMe has answered, which may be before Start for a feed delivery.
+	topicsKnown atomic.Bool
 	// confirmedTabs holds the tabs the registry holds as confirmed, so a send there writes nothing.
 	confirmedTabs sync.Map
 	// knownTabs holds the tabs the registry has a row for, so a message there adds none.
 	knownTabs sync.Map
+	// feedLocks holds a lock per principal and feed, so deliveries of one feed at once make one tab.
+	feedLocks sync.Map
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -297,6 +301,7 @@ func (s *Service) Start(ctx context.Context) error {
 		return fmt.Errorf("Telegram getMe returned an invalid bot identity")
 	}
 	s.topics.Store(bot.HasTopicsEnabled)
+	s.topicsKnown.Store(true)
 
 	commands := s.botCommands()
 	// Private chats resolve the all-private-chats scope before the default one, so a stale list there would hide the default registration.
@@ -602,6 +607,9 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 	})
 	if errors.Is(err, conversation.ErrBusy) {
 		return s.sendCommandReply(ctx, message, authorization.Principal.ID, "busy", conversation.BusyReply, nil)
+	}
+	if elsewhere := (*conversation.OpenElsewhereError)(nil); errors.As(err, &elsewhere) {
+		return s.sendCommandReply(ctx, message, authorization.Principal.ID, "elsewhere", SessionOpenIn(elsewhere.ThreadID, elsewhere.TabName), nil)
 	}
 	if err != nil {
 		return processingResult{}, "enqueue_conversation", err

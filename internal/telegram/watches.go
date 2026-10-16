@@ -38,11 +38,12 @@ type WatchAlertSender struct {
 	Client *Client
 }
 
-func (w WatchAlertSender) SendAlert(ctx context.Context, chatID int64, watchID, text string) error {
-	return w.Client.SendKeyboard(ctx, chatID, 0, text, InlineKeyboard{{
+func (w WatchAlertSender) SendAlert(ctx context.Context, chatID int64, watchID, text string) (int64, int64, error) {
+	message, err := w.Client.sendMessage(ctx, chatID, 0, text, InlineKeyboard{{
 		{Text: "Mute today", CallbackData: watchPrefix + ":" + watchMuteAction + ":" + watchID},
 		{Text: "Pause", CallbackData: watchPrefix + ":" + watchPauseAction + ":" + watchID},
 	}})
+	return message.MessageID, message.MessageThreadID, err
 }
 
 // parseWatchCallback accepts only the fixed alert button vocabulary.

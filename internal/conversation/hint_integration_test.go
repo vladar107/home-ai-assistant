@@ -37,8 +37,8 @@ func (d hintDeliverer) SendReply(_ context.Context, _, _ int64, text string) err
 	d.replies <- text
 	return nil
 }
-func (d hintDeliverer) SendTrackedReply(ctx context.Context, chatID, replyTo int64, text string) (int64, error) {
-	return 0, d.SendReply(ctx, chatID, replyTo, text)
+func (d hintDeliverer) SendTrackedReply(ctx context.Context, chatID, replyTo int64, text string) (int64, int64, error) {
+	return 0, 0, d.SendReply(ctx, chatID, replyTo, text)
 }
 func (hintDeliverer) SendTyping(context.Context, int64) error { return nil }
 func (hintDeliverer) SendMessageDraft(context.Context, int64, int64, string, bool) error {

@@ -31,8 +31,8 @@ func (quietHandler) Run(context.Context, schedule.Occurrence) (schedule.Result, 
 type discardingDeliverer struct{}
 
 func (discardingDeliverer) SendReply(context.Context, int64, int64, string) error { return nil }
-func (discardingDeliverer) SendTrackedReply(context.Context, int64, int64, string) (int64, error) {
-	return 1, nil
+func (discardingDeliverer) SendTrackedReply(context.Context, int64, int64, string) (int64, int64, error) {
+	return 1, 0, nil
 }
 func (discardingDeliverer) SendTyping(context.Context, int64) error { return nil }
 func (discardingDeliverer) SendMessageDraft(context.Context, int64, int64, string, bool) error {

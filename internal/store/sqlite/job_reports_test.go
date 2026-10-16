@@ -25,7 +25,11 @@ func TestJobReportsAreKeptPerPrincipal(t *testing.T) {
 		t.Fatalf("create job = %v %v", created, err)
 	}
 	report := func(id string, delivered time.Time, messages ...int64) schedule.Report {
-		return schedule.Report{ID: id, PrincipalID: "alice", JobID: job.ID, JobName: job.Name, JobType: job.Type, Text: "report " + id, DeliveredAt: delivered, MessageIDs: messages}
+		sent := make([]schedule.Sent, 0, len(messages))
+		for _, messageID := range messages {
+			sent = append(sent, schedule.Sent{MessageID: messageID})
+		}
+		return schedule.Report{ID: id, PrincipalID: "alice", JobID: job.ID, JobName: job.Name, JobType: job.Type, Text: "report " + id, DeliveredAt: delivered, Messages: sent}
 	}
 	if err := store.SaveJobReport(ctx, report("aaaaaaaaaaaaaaa1", at, 11, 12), 200); err != nil {
 		t.Fatal(err)
