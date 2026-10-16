@@ -99,6 +99,7 @@ plan that links back to the earlier record.
 | 0087 | [Feed tabs: messages nobody asked for go to a tab of their kind](0087-feed-tabs.md) | done |
 | 0088 | [Tab names and icons by topic](0088-tab-names-and-icons.md) | done |
 | 0089 | [A tab for each trip, with its summary pinned](0089-trip-tabs.md) | done |
+| 0090 | [Commands sent from the main view stay there](0090-commands-from-the-main-view.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

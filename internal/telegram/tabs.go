@@ -231,6 +231,9 @@ func (s *Service) processTopicService(ctx context.Context, bot Bot, message *Mes
 	result := processingResult{event: "telegram.topic.handled", principalID: principalID, command: "topic"}
 	if created := message.ForumTopicCreated; created != nil {
 		s.logTopicService(ctx, principalID, threadID, "created", "message", byBot, created.Name != "", created.IsNameImplicit, created.IconCustomEmojiID != "")
+		if !byBot {
+			s.rememberFreshTab(chatTab{message.Chat.ID, threadID})
+		}
 		if s.tabs == nil {
 			return result, "", nil
 		}
@@ -376,4 +379,56 @@ func (s *Service) processTabPress(ctx context.Context, callback *CallbackQuery, 
 		return processingResult{}, "send_message", err
 	}
 	return result, "", nil
+}
+
+// freshTabWindow is how long after the user opens a tab its first message may still be a command
+// sent from the main view; the client sends the two about a second apart.
+const freshTabWindow = 2 * time.Minute
+
+// rememberFreshTab notes a tab the user just opened, dropping the ones whose window has passed,
+// so tabs that never get a message are not kept.
+func (s *Service) rememberFreshTab(tab chatTab) {
+	now := time.Now()
+	s.freshTabs.Range(func(key, opened any) bool {
+		if now.Sub(opened.(time.Time)) >= freshTabWindow {
+			s.freshTabs.Delete(key)
+		}
+		return true
+	})
+	s.freshTabs.Store(tab, now)
+}
+
+// openedForCommand reports whether a command is the first message of a tab the user just opened.
+// The client opens a tab for every message sent from the main view, commands included, so such a
+// command belongs to the main view. The tab stays fresh until the command is answered, so a
+// retried update is still moved.
+func (s *Service) openedForCommand(chatID, threadID int64) bool {
+	if threadID <= 0 {
+		return false
+	}
+	opened, fresh := s.freshTabs.Load(chatTab{chatID, threadID})
+	return fresh && time.Since(opened.(time.Time)) < freshTabWindow
+}
+
+// processMainViewCommand answers a command the client put in a tab of its own in the main view, as
+// if it had been sent there, and then deletes that tab. The answer is not a reply to the command,
+// because a reply lands in the tab of the message it answers.
+func (s *Service) processMainViewCommand(ctx context.Context, bot Bot, message *Message, principalID, command string, threadID int64) (processingResult, string, error) {
+	moved := *message
+	moved.MessageID, moved.MessageThreadID, moved.ReplyToMessage = 0, 0, nil
+	result, failure, err := s.dispatchCommand(thread.With(ctx, 0), bot, &moved, principalID, command)
+	if err != nil || failure != "" {
+		return result, failure, err
+	}
+	key := chatTab{message.Chat.ID, threadID}
+	s.freshTabs.Delete(key)
+	logger := s.telemetry.ContextLogger(ctx, s.logger)
+	logger.InfoContext(ctx, "telegram.tab.command_moved", "principal_id", principalID, "thread_id", threadID)
+	// A tab Telegram no longer finds is as good as deleted; any other refusal leaves it.
+	if deleteErr := s.client.DeleteForumTopic(ctx, message.Chat.ID, threadID); deleteErr != nil && !isThreadGone(deleteErr) {
+		logger.WarnContext(ctx, "telegram.tab.command_tab_left", "principal_id", principalID, "thread_id", threadID, "error", deleteErr)
+		return result, failure, nil
+	}
+	s.forgetTab(ctx, message.Chat.ID, conversation.Lane{PrincipalID: principalID, ThreadID: threadID})
+	return result, failure, nil
 }

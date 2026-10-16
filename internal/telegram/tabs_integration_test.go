@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
@@ -715,5 +716,80 @@ func TestWithTopicsOffNoTabCallIsMade(t *testing.T) {
 	h.push(textUpdate(4, 101, "/close"))
 	if reply := h.nextMessage(); !strings.HasPrefix(reply.text, HelpReply) || strings.Contains(reply.text, "/close") {
 		t.Fatalf("/close with tabs off = %q", reply.text)
+	}
+}
+
+func TestACommandThatOpensATabIsAnsweredInTheMainView(t *testing.T) {
+	runtime := newControlledRuntime()
+	h, _ := newTabsHarness(t, runtime, true)
+
+	// The client opens a tab for a command sent from the main view and sends the command into it.
+	h.push(implicitTab(1, 70), tabMessage(2, 70, "/sessions"))
+	if answer := h.nextMessage(); answer.threadID != 0 || answer.replyTo != 0 || answer.text != NoSessionsReply {
+		t.Fatalf("answer = %+v, want it in the main view, not as a reply", answer)
+	}
+	if deleted := receive(t, h.ctx, h.tabs.deleted); deleted != 70 {
+		t.Fatalf("deleted tab %d, want 70", deleted)
+	}
+	h.waitOffset(3)
+	if tab, found := h.registryTab(70); found {
+		t.Fatalf("the command's tab is still recorded: %+v", tab)
+	}
+
+	// An ordinary first message keeps its tab, and a command after it is answered there.
+	h.push(implicitTab(3, 71))
+	h.turnInTab(runtime, 4, 71, "about the garden")
+	h.push(tabMessage(5, 71, "/sessions"))
+	if answer := h.nextMessage(); answer.threadID != 71 {
+		t.Fatalf("command in a tab in use answered in %d, want 71", answer.threadID)
+	}
+
+	// A command long after its tab was opened stays in the tab.
+	h.push(implicitTab(6, 72))
+	h.waitOffset(7)
+	h.service.freshTabs.Store(chatTab{101, 72}, time.Now().Add(-3*time.Minute))
+	h.push(tabMessage(7, 72, "/sessions"))
+	if answer := h.nextMessage(); answer.threadID != 72 {
+		t.Fatalf("late command answered in %d, want its tab", answer.threadID)
+	}
+
+	// A tab Telegram refuses to delete stays, and the answer is still in the main view.
+	h.mu.Lock()
+	h.tabs.deleteStatus = 400
+	h.mu.Unlock()
+	h.push(implicitTab(8, 73), tabMessage(9, 73, "/sessions"))
+	if answer := h.nextMessage(); answer.threadID != 0 {
+		t.Fatalf("answer with a refused delete = %+v, want the main view", answer)
+	}
+	if deleted := receive(t, h.ctx, h.tabs.deleted); deleted != 73 {
+		t.Fatalf("deleted tab %d, want 73", deleted)
+	}
+	h.waitOffset(10)
+	if _, found := h.registryTab(73); !found {
+		t.Fatal("a tab Telegram kept was forgotten")
+	}
+	select {
+	case deleted := <-h.tabs.deleted:
+		t.Fatalf("unexpected delete of tab %d", deleted)
+	default:
+	}
+
+	// A command whose answer failed is retried, and the retry still answers in the main view.
+	h.mu.Lock()
+	h.tabs.deleteStatus = 0
+	h.sendStatuses = []int{http.StatusInternalServerError}
+	h.mu.Unlock()
+	h.push(implicitTab(10, 74), tabMessage(11, 74, "/sessions"))
+	if answer := h.nextMessage(); answer.threadID != 0 || answer.status != http.StatusInternalServerError {
+		t.Fatalf("first attempt = %+v, want a failed send to the main view", answer)
+	}
+	// Telegram hands the update over again once the bot asks from the same offset.
+	h.waitOffset(11)
+	h.push(tabMessage(11, 74, "/sessions"))
+	if answer := h.nextMessage(); answer.threadID != 0 || answer.status != http.StatusOK {
+		t.Fatalf("retried attempt = %+v, want it in the main view", answer)
+	}
+	if deleted := receive(t, h.ctx, h.tabs.deleted); deleted != 74 {
+		t.Fatalf("deleted tab %d, want 74", deleted)
 	}
 }

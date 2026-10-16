@@ -179,6 +179,8 @@ type Service struct {
 	// pinFailures holds the trips whose summary could not be pinned since start, so each is logged
 	// once.
 	pinFailures sync.Map
+	// freshTabs holds the tabs the user just opened, with when, until their first message.
+	freshTabs sync.Map
 	// namedTabs holds the conversation each tab was last considered for naming after, so a reply
 	// there asks the registry once per conversation.
 	namedTabs sync.Map
@@ -543,18 +545,12 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 	s.noteTab(ctx, bot, authorization.Principal.ID, message)
 
 	command, isCommand := ParseCommand(message.Text, bot.Username)
+	if threadID := thread.From(ctx); isCommand && s.openedForCommand(message.Chat.ID, threadID) {
+		return s.processMainViewCommand(ctx, bot, message, authorization.Principal.ID, command, threadID)
+	}
+	s.freshTabs.Delete(chatTab{message.Chat.ID, thread.From(ctx)})
 	if isCommand {
-		if command == "backlog" && s.backlog != nil && commandArgument(message.Text) == backlogExportArgument {
-			return s.sendBacklogExport(ctx, message, authorization.Principal.ID)
-		}
-		if command == "close" && bot.HasTopicsEnabled && s.conversation != nil {
-			return s.processCloseCommand(ctx, message, authorization.Principal.ID)
-		}
-		reply, keyboard, err := s.handleCommand(ctx, authorization.Principal.ID, command)
-		if err != nil {
-			return processingResult{}, "handle_command", err
-		}
-		return s.sendCommandReply(ctx, message, authorization.Principal.ID, command, reply, keyboard)
+		return s.dispatchCommand(ctx, bot, message, authorization.Principal.ID, command)
 	}
 	if strings.HasPrefix(strings.TrimSpace(message.Text), "/") {
 		return ignoredResult("command_for_other_bot"), "", nil
@@ -1279,6 +1275,21 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		}
 		return reply, nil, nil
 	}
+}
+
+// dispatchCommand runs one command and answers it in the tab of ctx.
+func (s *Service) dispatchCommand(ctx context.Context, bot Bot, message *Message, principalID, command string) (processingResult, string, error) {
+	if command == "backlog" && s.backlog != nil && commandArgument(message.Text) == backlogExportArgument {
+		return s.sendBacklogExport(ctx, message, principalID)
+	}
+	if command == "close" && bot.HasTopicsEnabled && s.conversation != nil {
+		return s.processCloseCommand(ctx, message, principalID)
+	}
+	reply, keyboard, err := s.handleCommand(ctx, principalID, command)
+	if err != nil {
+		return processingResult{}, "handle_command", err
+	}
+	return s.sendCommandReply(ctx, message, principalID, command, reply, keyboard)
 }
 
 func (s *Service) sendCommandReply(
