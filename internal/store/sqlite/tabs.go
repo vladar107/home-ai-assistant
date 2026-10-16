@@ -19,11 +19,15 @@ const (
 
 // Tab is one tab of a principal's chat as the registry knows it.
 type Tab struct {
-	ThreadID  int64
-	Name      string
-	NamedBy   string
-	Confirmed bool
-	CreatedAt time.Time
+	ThreadID int64
+	Name     string
+	NamedBy  string
+	// IconCustomEmojiID is the icon the bot gave the tab, or "".
+	IconCustomEmojiID string
+	// NamedSessionID is the conversation the bot last named the tab after, or "".
+	NamedSessionID string
+	Confirmed      bool
+	CreatedAt      time.Time
 }
 
 // AddTab records a tab the registry does not know yet and reports whether it did; a known tab is
@@ -111,11 +115,11 @@ func (s *Store) Tab(ctx context.Context, principalID string, threadID int64) (Ta
 	var created string
 	err := s.db.QueryRowContext(
 		ctx,
-		`SELECT name, named_by, confirmed_at IS NOT NULL, created_at FROM telegram_tabs
-		 WHERE principal_id = ? AND thread_id = ?`,
+		`SELECT name, named_by, COALESCE(icon_custom_emoji_id, ''), COALESCE(named_session_id, ''), confirmed_at IS NOT NULL, created_at
+		 FROM telegram_tabs WHERE principal_id = ? AND thread_id = ?`,
 		principalID,
 		threadID,
-	).Scan(&tab.Name, &tab.NamedBy, &tab.Confirmed, &created)
+	).Scan(&tab.Name, &tab.NamedBy, &tab.IconCustomEmojiID, &tab.NamedSessionID, &tab.Confirmed, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Tab{}, false, nil
 	}
@@ -126,6 +130,60 @@ func (s *Store) Tab(ctx context.Context, principalID string, threadID int64) (Ta
 		return Tab{}, false, fmt.Errorf("load tab: invalid creation time")
 	}
 	return tab, true, nil
+}
+
+// ClaimTabName records that the bot names the tab after the session and reports whether it may.
+// Only a tab the bot named may be named by it, and only once per conversation.
+func (s *Store) ClaimTabName(ctx context.Context, principalID string, threadID int64, sessionID string) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("claim tab name: SQLite store is not open")
+	}
+	result, err := s.db.ExecContext(
+		ctx,
+		`UPDATE telegram_tabs SET named_session_id = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+		 WHERE principal_id = ? AND thread_id = ? AND named_by = 'bot' AND named_session_id IS NOT ?`,
+		sessionID,
+		principalID,
+		threadID,
+		sessionID,
+	)
+	if err != nil {
+		return false, fmt.Errorf("claim tab name: %w", err)
+	}
+	claimed, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("claim tab name: %w", err)
+	}
+	return claimed > 0, nil
+}
+
+// NameBotTab records the name and icon the bot gave a tab after the session and reports whether the
+// registry changed. An empty icon keeps the tab's icon, as Telegram does. A tab the user named
+// meanwhile keeps the user's name, and one a later conversation claimed keeps that one's.
+func (s *Store) NameBotTab(ctx context.Context, principalID string, threadID int64, sessionID, name, iconCustomEmojiID string) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("name tab: SQLite store is not open")
+	}
+	result, err := s.db.ExecContext(
+		ctx,
+		`UPDATE telegram_tabs
+		 SET name = ?, icon_custom_emoji_id = COALESCE(NULLIF(?, ''), icon_custom_emoji_id),
+		     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+		 WHERE principal_id = ? AND thread_id = ? AND named_by = 'bot' AND named_session_id = ?`,
+		name,
+		iconCustomEmojiID,
+		principalID,
+		threadID,
+		sessionID,
+	)
+	if err != nil {
+		return false, fmt.Errorf("name tab: %w", err)
+	}
+	named, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("name tab: %w", err)
+	}
+	return named > 0, nil
 }
 
 func (s *Store) DeleteTab(ctx context.Context, principalID string, threadID int64) error {
@@ -202,6 +260,25 @@ func (s *Store) AddSubjectTab(ctx context.Context, principalID string, threadID 
 		subject,
 	); err != nil {
 		return fmt.Errorf("add subject tab: %w", err)
+	}
+	return nil
+}
+
+// SetFixedTabIcon records the icon the bot gave a tab of a fixed kind, such as a feed.
+func (s *Store) SetFixedTabIcon(ctx context.Context, principalID string, threadID int64, iconCustomEmojiID string) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("set tab icon: SQLite store is not open")
+	}
+	if _, err := s.db.ExecContext(
+		ctx,
+		`UPDATE telegram_tabs
+		 SET icon_custom_emoji_id = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+		 WHERE principal_id = ? AND thread_id = ? AND named_by = 'fixed'`,
+		iconCustomEmojiID,
+		principalID,
+		threadID,
+	); err != nil {
+		return fmt.Errorf("set tab icon: %w", err)
 	}
 	return nil
 }

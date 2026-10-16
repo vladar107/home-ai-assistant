@@ -16,6 +16,14 @@ var feedNames = map[string]string{
 	thread.FeedWatches:   "Watches",
 }
 
+// feedIcons are the emoji of the feed tabs' icons, used when Telegram's icon set offers them.
+var feedIcons = map[string]string{
+	thread.FeedReminders: "⏰",
+	thread.FeedReports:   "📰",
+	thread.FeedHome:      "🏠",
+	thread.FeedWatches:   "👀",
+}
+
 // Feeds resolves the feed tabs of each principal's chat from the tab registry, making a feed's tab
 // the first time it is needed.
 type Feeds struct{ service *Service }
@@ -65,6 +73,7 @@ func (f Feeds) Thread(ctx context.Context, principalID string, chatID int64, fee
 		return 0, err
 	}
 	if found {
+		s.giveFeedIcon(ctx, principalID, chatID, threadID, feed)
 		return threadID, nil
 	}
 	threadID, err = s.client.CreateForumTopic(ctx, chatID, name)
@@ -82,5 +91,37 @@ func (f Feeds) Thread(ctx context.Context, principalID string, chatID int64, fee
 	}
 	s.knownTabs.Store(chatTab{chatID, threadID}, struct{}{})
 	logger.InfoContext(ctx, "telegram.feed.created", "principal_id", principalID, "thread_id", threadID, "feed", feed)
+	s.giveFeedIcon(ctx, principalID, chatID, threadID, feed)
 	return threadID, nil
+}
+
+// giveFeedIcon sets a feed tab's fixed icon once Telegram's icon set offers it, so a tab made
+// before the set was read gets it with a later message. A tab that has its icon, or that refused
+// it, is not asked again until a restart; a failure only costs the icon.
+func (s *Service) giveFeedIcon(ctx context.Context, principalID string, chatID, threadID int64, feed string) {
+	key := chatTab{chatID, threadID}
+	if _, done := s.iconedFeeds.Load(key); done {
+		return
+	}
+	iconID, offered := s.IconFor(feedIcons[feed])
+	if !offered {
+		return
+	}
+	logger := s.telemetry.ContextLogger(ctx, s.logger)
+	tab, found, err := s.tabs.Tab(ctx, principalID, threadID)
+	if err != nil {
+		logger.WarnContext(ctx, "telegram.feed.failed", "principal_id", principalID, "thread_id", threadID, "feed", feed, "stage", "icon", "error", err)
+		return
+	}
+	s.iconedFeeds.Store(key, struct{}{})
+	if !found || tab.IconCustomEmojiID == iconID {
+		return
+	}
+	if err := s.client.EditForumTopic(ctx, chatID, threadID, "", iconID); err != nil {
+		logger.WarnContext(ctx, "telegram.feed.failed", "principal_id", principalID, "thread_id", threadID, "feed", feed, "stage", "icon", "error", err)
+		return
+	}
+	if err := s.tabs.SetFixedTabIcon(ctx, principalID, threadID, iconID); err != nil {
+		logger.WarnContext(ctx, "telegram.feed.failed", "principal_id", principalID, "thread_id", threadID, "feed", feed, "stage", "icon", "error", err)
+	}
 }

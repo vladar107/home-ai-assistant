@@ -43,6 +43,24 @@ type tabSimulator struct {
 	deleted      chan int64
 	forwards     chan forwardedMessages
 	refused      chan refusedSend
+	// icons is the icon set Telegram offers, and iconStatus fails reading it when set.
+	icons      []TopicIcon
+	iconStatus int
+	topicEdits chan editedTopic
+}
+
+type editedTopic struct {
+	threadID      int64
+	name, iconID  string
+	named, iconed bool
+}
+
+// testTopicIcons is the icon set the simulator offers. Telegram sends some emoji with a variation
+// selector, as here the clock.
+var testTopicIcons = []TopicIcon{
+	{Emoji: "🌱", CustomEmojiID: "5000000000000000001"},
+	{Emoji: "⏰\uFE0F", CustomEmojiID: "5000000000000000002"},
+	{Emoji: "📚", CustomEmojiID: "5000000000000000003"},
 }
 
 func newTabSimulator(enabled bool) tabSimulator {
@@ -50,6 +68,7 @@ func newTabSimulator(enabled bool) tabSimulator {
 		enabled: enabled, gone: make(map[int64]bool), next: 500,
 		created: make(chan createdTopic, 20), deleted: make(chan int64, 20),
 		forwards: make(chan forwardedMessages, 20), refused: make(chan refusedSend, 50),
+		icons: testTopicIcons, topicEdits: make(chan editedTopic, 20),
 	}
 }
 
@@ -140,6 +159,28 @@ func (h *conversationHarness) serveTabMethod(w http.ResponseWriter, r *http.Requ
 			forwarded[index] = map[string]int64{"message_id": 8000 + int64(index)}
 		}
 		return forwarded, true
+	case "getForumTopicIconStickers":
+		h.mu.Lock()
+		icons, status := h.tabs.icons, h.tabs.iconStatus
+		h.mu.Unlock()
+		if status != 0 {
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_code": status, "description": "Internal Server Error"})
+			return nil, true
+		}
+		stickers := make([]map[string]string, len(icons))
+		for index, icon := range icons {
+			stickers[index] = map[string]string{"file_id": "sticker-" + icon.CustomEmojiID, "type": "custom_emoji", "emoji": icon.Emoji, "custom_emoji_id": icon.CustomEmojiID}
+		}
+		return stickers, true
+	case "editForumTopic":
+		_, named := r.Form["name"]
+		_, iconed := r.Form["icon_custom_emoji_id"]
+		h.tabs.topicEdits <- editedTopic{
+			threadID: h.threadOf(r.Form.Get("message_thread_id")), name: r.Form.Get("name"), iconID: r.Form.Get("icon_custom_emoji_id"),
+			named: named, iconed: iconed,
+		}
+		return true, true
 	}
 	return nil, false
 }

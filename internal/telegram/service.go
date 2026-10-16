@@ -48,6 +48,8 @@ type botAPI interface {
 	DeleteForumTopic(context.Context, int64, int64) error
 	ForwardMessages(context.Context, int64, []int64) error
 	SendInTab(context.Context, int64, string) error
+	EditForumTopic(context.Context, int64, int64, string, string) error
+	GetForumTopicIconStickers(context.Context) ([]TopicIcon, error)
 }
 
 type ConversationController interface {
@@ -66,6 +68,9 @@ type ConversationController interface {
 	// SessionMessages returns the Telegram messages of one of the principal's conversations, oldest
 	// first.
 	SessionMessages(ctx context.Context, principalID, sessionID string) ([]int64, error)
+	// NameTab chooses a tab's name and one of icons from a conversation's first exchange, on the
+	// principal's own subscription.
+	NameTab(ctx context.Context, principalID, message, reply string, icons []string) (conversation.TabName, error)
 	// React records a reaction to one of the principal's replies and starts a reconsider turn for a
 	// first 👎.
 	React(context.Context, conversation.ReactionInput) (conversation.ReactionResult, error)
@@ -166,6 +171,12 @@ type Service struct {
 	knownTabs sync.Map
 	// feedLocks holds a lock per principal and feed, so deliveries of one feed at once make one tab.
 	feedLocks sync.Map
+	// iconedFeeds holds the feed tabs whose fixed icon was settled since start.
+	iconedFeeds sync.Map
+	// namedTabs holds the conversation each tab was last considered for naming after, so a reply
+	// there asks the registry once per conversation.
+	namedTabs sync.Map
+	icons     topicIcons
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -302,6 +313,9 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 	s.topics.Store(bot.HasTopicsEnabled)
 	s.topicsKnown.Store(true)
+	if bot.HasTopicsEnabled {
+		s.refreshTopicIcons(ctx)
+	}
 
 	commands := s.botCommands()
 	// Private chats resolve the all-private-chats scope before the default one, so a stale list there would hide the default registration.

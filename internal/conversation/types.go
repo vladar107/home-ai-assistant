@@ -357,6 +357,21 @@ type FollowUp interface {
 	AfterDelivery(ctx context.Context, principalID string, chatID int64) error
 }
 
+// TabReplies hears of each plain reply delivered in a tab, apart from the lane's worker, so a tab
+// can be named after its conversation without holding back the lane's next turn.
+type TabReplies interface {
+	TabReplied(ctx context.Context, reply TabReply)
+}
+
+// TabReply is one exchange of a conversation in a tab: the user's message and the reply to it.
+type TabReply struct {
+	Lane
+	ChatID    int64
+	SessionID string
+	Message   string
+	Reply     string
+}
+
 // Notice reports what happened to the principal outside a turn, such as the resolution of a
 // confirmation the model asked for, so the next turn starts from the outcome instead of a guess.
 type Notice interface {

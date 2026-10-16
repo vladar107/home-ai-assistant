@@ -41,12 +41,17 @@ type TabStore interface {
 	ConfirmTab(ctx context.Context, principalID string, threadID int64) (bool, error)
 	Tab(ctx context.Context, principalID string, threadID int64) (sqlite.Tab, bool, error)
 	DeleteTab(ctx context.Context, principalID string, threadID int64) error
+	// ClaimTabName reports whether the bot may name the tab after the session, and records it.
+	ClaimTabName(ctx context.Context, principalID string, threadID int64, sessionID string) (bool, error)
+	NameBotTab(ctx context.Context, principalID string, threadID int64, sessionID, name, iconCustomEmojiID string) (bool, error)
 	// LaneLastRequest returns when the lane last took a message, if it ever did.
 	LaneLastRequest(ctx context.Context, lane conversation.Lane) (time.Time, bool, error)
 	// SubjectTab returns the tab recorded as serving the subject, such as a feed.
 	SubjectTab(ctx context.Context, principalID, subject string) (int64, bool, error)
 	// AddSubjectTab records a tab the bot made to serve the subject, under a fixed name.
 	AddSubjectTab(ctx context.Context, principalID string, threadID int64, name, subject string) error
+	// SetFixedTabIcon records the icon the bot gave a tab of a fixed kind.
+	SetFixedTabIcon(ctx context.Context, principalID string, threadID int64, iconCustomEmojiID string) error
 }
 
 // SetTabs gives the service the tab registry; call it before Start.
@@ -145,6 +150,8 @@ func (s *Service) tabSuspect(ctx context.Context, lane conversation.Lane) bool {
 func (s *Service) forgetTab(ctx context.Context, chatID int64, lane conversation.Lane) {
 	s.confirmedTabs.Delete(chatTab{chatID, lane.ThreadID})
 	s.knownTabs.Delete(chatTab{chatID, lane.ThreadID})
+	s.namedTabs.Delete(chatTab{chatID, lane.ThreadID})
+	s.iconedFeeds.Delete(chatTab{chatID, lane.ThreadID})
 	if s.tabs == nil {
 		return
 	}
@@ -185,11 +192,9 @@ func (s *Service) noteTab(ctx context.Context, bot Bot, principalID string, mess
 	_, known := s.knownTabs.Load(key)
 	if root := message.ReplyToMessage; !known && root != nil && root.ForumTopicCreated != nil {
 		if name := topicName(root.ForumTopicCreated.Name); name != "" {
-			namedBy := sqlite.TabNamedByUser
-			if (root.From != nil && root.From.ID == bot.ID) || root.ForumTopicCreated.IsNameImplicit {
-				namedBy = sqlite.TabNamedByBot
-			}
-			added, err := s.tabs.AddTab(ctx, principalID, threadID, name, namedBy)
+			// A tab first seen through the root its messages reply to was open before the bot
+			// recorded it, and a tab that was already there keeps its name.
+			added, err := s.tabs.AddTab(ctx, principalID, threadID, name, sqlite.TabNamedByUser)
 			if err != nil {
 				s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "telegram.tab.record_failed", "principal_id", principalID, "thread_id", threadID, "error", err)
 			} else {
