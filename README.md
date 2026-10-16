@@ -80,8 +80,9 @@ borrowed between users.
 - **Web.** Search, page reading, PDF text, and weather. After the conversation has read
   outside content, each search query is checked, and one that could carry data out waits
   for Confirm.
-- **Trains.** NS trips, departures, and disruptions, and checks of the exact
-  planned departures a user names, one normalized status each.
+- **Trains.** NS trips, departures, and disruptions, checks of the exact
+  planned departures a user names, one normalized status each, and the
+  OV-fiets rental bikes available now at a station.
 - **Home.** Reads and controls the devices exposed to Home Assistant's Assist,
   and answers from their history, as totals or as daily, weekly, or monthly
   trends. Everyday actions run immediately; sensitive devices are confirmed.

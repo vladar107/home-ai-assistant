@@ -41,6 +41,7 @@ var (
 	errNoPlan       = &apiError{"invalid_date", "NS has no travel plan for that date."}
 	errTimeout      = &apiError{"timeout", "NS did not respond in time."}
 	errMalformed    = &apiError{"unexpected_response", "NS returned an unexpected response."}
+	errNoOVFiets    = &apiError{"ovfiets_not_subscribed", "The operator's NS API subscription does not include OV-fiets (the NS places API); the operator needs to add that product."}
 )
 
 type client struct {

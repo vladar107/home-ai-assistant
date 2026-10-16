@@ -19,6 +19,7 @@ const (
 	toolTrips       = "ns_trips"
 	toolDepartures  = "ns_departures"
 	toolDisruptions = "ns_disruptions"
+	toolOVFiets     = "ns_ovfiets"
 
 	// toolTimeout covers a first station list fetch and the request itself, each under the client's
 	// own 15-second limit, so a slow NS is reported before the broker gives up on the call.
@@ -43,6 +44,7 @@ const (
 const guidance = "Trains (NS): ns_trips plans journeys between Dutch railway stations with live delays, cancellations, platform changes, transfers, and crowding; use it for any question about how or when to get from one place to another by train, with arrive_by for questions about being somewhere by a time. " +
 	"When the user asks about particular trains, such as the 08:10 or their usual departures, call ns_trips with departures set to those planned times (and date_time for the day) instead of choosing among the earliest options; it reports exactly those trains, and a departure it does not find is not in the timetable: say so, and never put a nearby or feeder train in its place. " +
 	"ns_departures lists the next departures from one station. ns_disruptions lists disruptions, calamities, and engineering works, nationally or for one station. " +
+	"Questions about OV-fiets, NS's rental bikes, go to ns_ovfiets, which reports the bikes available now at each rental point of one station; OV-fiets is not a Home Assistant device. Its count is the current stock, not a forecast or a reservation: for a later arrival, say that the count can change by then. " +
 	"When a trip's status is not NORMAL or it carries messages, call ns_disruptions once, for the station the message or the affected leg names, before answering. " +
 	"Use these tools, never web search, for NS train times. Times are Dutch local time: give date_time as YYYY-MM-DDTHH:MM, or leave it out for now. " +
 	"Stations can be named in any common form; when a tool answers with several candidate stations, pick the one the user means or ask them. " +
@@ -94,12 +96,22 @@ var definitions = []tools.Definition{
 			dateTimeSchema + `},` +
 			`"additionalProperties":false}`),
 	},
+	{
+		Name:        toolOVFiets,
+		Description: "Report the OV-fiets rental bikes available now at one Dutch station: each rental point with its bike count, staffed or self-service, whether it is open, today's opening hours, and its address.",
+		Risk:        tools.RiskRead,
+		Activity:    tools.ActivityTransit,
+		Timeout:     toolTimeout,
+		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
+			`"station":{"type":"string","description":"Station name or code, such as Utrecht Centraal or UT."}},` +
+			`"required":["station"],"additionalProperties":false}`),
+	},
 }
 
 var _ tools.Provider = (*Service)(nil)
 
 // Contribute offers the tools while the principal's switch is on; a scheduled run receives them
-// too, since all three are reads.
+// too, since all of them are reads.
 func (s *Service) Contribute(ctx context.Context, principalID string) (tools.Contribution, error) {
 	status, err := s.Status(ctx, principalID)
 	if err != nil {
@@ -158,6 +170,12 @@ func (s *Service) Execute(ctx context.Context, principalID string, call tools.Ca
 			return errorResult(err.Error()), nil
 		}
 		return s.disruptions(ctx, principalID, arguments), nil
+	case toolOVFiets:
+		var arguments ovfietsRequest
+		if err := decodeArguments(call.Arguments, &arguments); err != nil {
+			return errorResult(err.Error()), nil
+		}
+		return s.ovfiets(ctx, principalID, arguments), nil
 	default:
 		return errorResult("unknown NS tool"), nil
 	}

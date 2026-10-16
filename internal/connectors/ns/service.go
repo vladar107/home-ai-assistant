@@ -1,6 +1,7 @@
 // Package ns is the NS train information connector: for a principal whose trains switch is on,
 // their turns can plan trips between Dutch stations, list departures, and read disruptions from the
-// NS travel information API, using one operator key for the whole household.
+// NS travel information API, and count OV-fiets rental bikes from the NS places API, using one
+// operator key for the whole household.
 package ns
 
 import (
@@ -24,8 +25,9 @@ const (
 	optOutWorkspaceID   = "ns-trains-off"
 	optOutWorkspaceName = "Trains off"
 
-	defaultBaseURL = "https://gateway.apiportal.ns.nl/reisinformatie-api/api"
-	timeZone       = "Europe/Amsterdam"
+	defaultBaseURL       = "https://gateway.apiportal.ns.nl/reisinformatie-api/api"
+	defaultPlacesBaseURL = "https://gateway.apiportal.ns.nl/places-api"
+	timeZone             = "Europe/Amsterdam"
 )
 
 type Config struct {
@@ -33,6 +35,9 @@ type Config struct {
 	APIKey string
 	// BaseURL overrides the NS travel information gateway; empty means the public one.
 	BaseURL string
+	// PlacesBaseURL overrides the NS places gateway, which reports OV-fiets; empty means the public
+	// one.
+	PlacesBaseURL string
 	// Now is the clock for default times, the station list's age, and the result cache; nil means
 	// time.Now.
 	Now func() time.Time
@@ -45,6 +50,7 @@ type Status struct {
 
 type Service struct {
 	client     *client
+	places     *client
 	repository integration.Repository
 	logger     *slog.Logger
 	now        func() time.Time
@@ -71,13 +77,13 @@ func NewService(cfg Config, repository integration.Repository, logger *slog.Logg
 	if key == "" {
 		return nil, fmt.Errorf("ns API key is required")
 	}
-	base := cfg.BaseURL
-	if base == "" {
-		base = defaultBaseURL
-	}
-	parsed, err := url.Parse(strings.TrimRight(base, "/"))
-	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" {
+	parsed, err := gatewayURL(cfg.BaseURL, defaultBaseURL)
+	if err != nil {
 		return nil, fmt.Errorf("ns base URL must be an http or https address without credentials or query")
+	}
+	places, err := gatewayURL(cfg.PlacesBaseURL, defaultPlacesBaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("ns places base URL must be an http or https address without credentials or query")
 	}
 	location, err := time.LoadLocation(timeZone)
 	if err != nil {
@@ -89,6 +95,7 @@ func NewService(cfg Config, repository integration.Repository, logger *slog.Logg
 	}
 	service := &Service{
 		client:     newClient(parsed, key),
+		places:     newClient(places, key),
 		repository: repository,
 		logger:     logger,
 		now:        now,
@@ -97,6 +104,17 @@ func NewService(cfg Config, repository integration.Repository, logger *slog.Logg
 	}
 	service.stations = &directory{fetch: service.client.stations, now: now}
 	return service, nil
+}
+
+func gatewayURL(value, fallback string) (*url.URL, error) {
+	if value == "" {
+		value = fallback
+	}
+	parsed, err := url.Parse(strings.TrimRight(value, "/"))
+	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" {
+		return nil, fmt.Errorf("invalid gateway URL")
+	}
+	return parsed, nil
 }
 
 func (s *Service) Descriptor() module.Descriptor {
@@ -118,6 +136,7 @@ func (s *Service) Ready(context.Context) error {
 func (s *Service) Shutdown(context.Context) error {
 	s.running.Store(false)
 	s.client.http.CloseIdleConnections()
+	s.places.http.CloseIdleConnections()
 	return nil
 }
 
