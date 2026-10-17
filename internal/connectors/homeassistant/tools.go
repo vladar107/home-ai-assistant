@@ -218,14 +218,28 @@ func (s *Service) callTool(ctx context.Context, remote string, arguments map[str
 	return strings.Join(parts, "\n"), result.IsError, nil
 }
 
-// unwrapResult returns the text of Home Assistant's {"success":true,"result":"..."} envelope, and
-// any other content unchanged.
+// unwrapResult returns the text of Home Assistant's {"success":true,"result":"..."} envelope, or
+// the one string field of a result object such as a script's {"summary":"..."} response, and any
+// other content unchanged.
 func unwrapResult(text string) string {
 	var envelope struct {
-		Result *string `json:"result"`
+		Result json.RawMessage `json:"result"`
 	}
-	if json.Unmarshal([]byte(text), &envelope) == nil && envelope.Result != nil {
-		return *envelope.Result
+	if json.Unmarshal([]byte(text), &envelope) != nil {
+		return text
+	}
+	// A *string stays nil for a JSON null, which keeps the text rather than returning nothing.
+	var plain *string
+	if json.Unmarshal(envelope.Result, &plain) == nil && plain != nil {
+		return *plain
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(envelope.Result, &fields) == nil && len(fields) == 1 {
+		for _, raw := range fields {
+			if json.Unmarshal(raw, &plain) == nil && plain != nil {
+				return *plain
+			}
+		}
 	}
 	return text
 }

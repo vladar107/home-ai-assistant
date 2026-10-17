@@ -28,6 +28,11 @@ const (
 	// ConfirmLabel marks an entity whose actions always need the user's confirmation; it must not
 	// be exposed to Assist, where actions run at once.
 	ConfirmLabel = "assistant-confirm"
+	// ReadLabel marks a script that only reads, so the assistant treats it as a read: no
+	// confirmation, and available to scheduled runs. A script that also carries ConfirmLabel stays
+	// a write. Unlike ConfirmLabel it matches the label's name only, because it grants rather than
+	// restricts, and a renamed label keeps its id.
+	ReadLabel = "assistant-read"
 )
 
 // droppedTools are Home Assistant tools the application answers better itself: every turn already
@@ -46,6 +51,8 @@ var sensitiveDomains = map[string]bool{
 }
 
 var sensitiveCoverClasses = map[string]bool{"door": true, "garage": true, "gate": true}
+
+const writeSuffix = " Runs at once on the household's devices."
 
 var toolNameUnsafe = regexp.MustCompile(`[^a-z0-9_]+`)
 
@@ -211,9 +218,12 @@ func (s *Service) refresh(ctx context.Context, now time.Time) (*snapshot, error)
 	}
 
 	exposed, guardErr := s.liveContext(ctx)
-	confirmed, labelErr := s.labelledEntities(ctx, byID)
+	confirmed, readOnly, labelErr := s.labelledEntities(ctx, byID)
 	fresh.exposed = exposed
 	fresh.confirmed = confirmed
+	if guardErr == nil && labelErr == nil {
+		fresh.markReadScripts(readOnly)
+	}
 	if guardErr != nil || labelErr != nil {
 		s.logger.WarnContext(ctx, "homeassistant.guard.failed", "live_context", guardErr != nil, "labels", labelErr != nil)
 		return fresh, nil
@@ -299,20 +309,35 @@ func yamlValue(raw string) string {
 	return value
 }
 
+type registryLabel struct {
+	LabelID string `json:"label_id"`
+	Name    string `json:"name"`
+}
+
+// markReadScripts turns the scripts labelled ReadLabel, and not ConfirmLabel, into reads.
+func (s *snapshot) markReadScripts(readOnly map[string]bool) {
+	for index, tool := range s.tools {
+		if domainOf(tool.remote) != "script" || !readOnly["script."+intentOf(tool.remote)] {
+			continue
+		}
+		tool.definition.Risk = tools.RiskRead
+		tool.definition.Description = strings.TrimSuffix(tool.definition.Description, writeSuffix)
+		s.tools[index] = tool
+		s.byName[tool.definition.Name] = tool
+	}
+}
+
 // labelledEntities reads the label and entity registries, which a non-admin token may read, and
-// returns the entities carrying ConfirmLabel.
-func (s *Service) labelledEntities(ctx context.Context, states map[string]stateObject) (map[string]confirmedEntity, error) {
+// returns the entities carrying ConfirmLabel and the ids of those carrying ReadLabel without it.
+func (s *Service) labelledEntities(ctx context.Context, states map[string]stateObject) (map[string]confirmedEntity, map[string]bool, error) {
 	results, err := s.client.websocketCommands(ctx,
 		map[string]any{"type": "config/label_registry/list"},
 		map[string]any{"type": "config/entity_registry/list_for_display"},
 	)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var labels []struct {
-		LabelID string `json:"label_id"`
-		Name    string `json:"name"`
-	}
+	var labels []registryLabel
 	var registry struct {
 		Entities []struct {
 			EntityID string   `json:"ei"`
@@ -320,17 +345,25 @@ func (s *Service) labelledEntities(ctx context.Context, states map[string]stateO
 		} `json:"entities"`
 	}
 	if json.Unmarshal(results[0], &labels) != nil || json.Unmarshal(results[1], &registry) != nil {
-		return nil, errMalformed
+		return nil, nil, errMalformed
 	}
-	confirmLabels := make(map[string]bool)
+	confirmLabels := matchingLabels(labels, ConfirmLabel)
+	readLabels := make(map[string]bool)
 	for _, label := range labels {
-		if strings.EqualFold(label.Name, ConfirmLabel) || strings.EqualFold(label.LabelID, ConfirmLabel) || label.LabelID == strings.ReplaceAll(ConfirmLabel, "-", "_") {
-			confirmLabels[label.LabelID] = true
+		if strings.EqualFold(label.Name, ReadLabel) {
+			readLabels[label.LabelID] = true
 		}
 	}
 	confirmed := make(map[string]confirmedEntity)
+	readOnly := make(map[string]bool)
 	for _, entity := range registry.Entities {
-		if !slices.ContainsFunc(entity.Labels, func(id string) bool { return confirmLabels[id] }) {
+		// Both labels are judged from the registry alone, so an entity missing from the states
+		// cannot slip past the confirmation label.
+		confirm := slices.ContainsFunc(entity.Labels, func(id string) bool { return confirmLabels[id] })
+		if !confirm && slices.ContainsFunc(entity.Labels, func(id string) bool { return readLabels[id] }) {
+			readOnly[entity.EntityID] = true
+		}
+		if !confirm {
 			continue
 		}
 		state, found := states[entity.EntityID]
@@ -343,7 +376,18 @@ func (s *Service) labelledEntities(ctx context.Context, states map[string]stateO
 		}
 		confirmed[entity.EntityID] = confirmedEntity{entityID: entity.EntityID, name: name, domain: domainOfEntity(entity.EntityID), state: state.State}
 	}
-	return confirmed, nil
+	return confirmed, readOnly, nil
+}
+
+// matchingLabels returns the ids of the labels named like want, by name or id, with - or _.
+func matchingLabels(labels []registryLabel, want string) map[string]bool {
+	matched := make(map[string]bool)
+	for _, label := range labels {
+		if strings.EqualFold(label.Name, want) || strings.EqualFold(label.LabelID, want) || label.LabelID == strings.ReplaceAll(want, "-", "_") {
+			matched[label.LabelID] = true
+		}
+	}
+	return matched
 }
 
 // conflicts names the exposed entities that need confirmation: a sensitive domain or device class,
@@ -401,7 +445,7 @@ func mapTool(remote, description string, schema json.RawMessage) (mappedTool, bo
 		risk = tools.RiskRead
 	}
 	if risk == tools.RiskWrite {
-		description += " Runs at once on the household's devices."
+		description += writeSuffix
 	}
 	return mappedTool{
 		remote: remote,

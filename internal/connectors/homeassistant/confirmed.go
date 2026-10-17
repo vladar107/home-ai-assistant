@@ -1,6 +1,7 @@
 package homeassistant
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -166,7 +167,16 @@ func (s *Service) propose(ctx context.Context, principalID string, snap *snapsho
 		}
 		sort.Strings(keys)
 		for _, key := range keys {
-			summary += fmt.Sprintf("\n%s: %s", key, arguments.Data[key])
+			var value any
+			decoder := json.NewDecoder(bytes.NewReader(arguments.Data[key]))
+			decoder.UseNumber()
+			rendered := string(arguments.Data[key])
+			if decoder.Decode(&value) == nil {
+				if text, err := renderValue(value); err == nil {
+					rendered = text
+				}
+			}
+			summary += fmt.Sprintf("\n%s: %s", key, rendered)
 		}
 	}
 	intent := approval.Intent{Verb: verb, TargetKind: entity.domain, TargetName: entity.name}

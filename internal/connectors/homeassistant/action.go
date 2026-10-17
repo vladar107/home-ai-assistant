@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
@@ -29,11 +31,13 @@ func (s *Service) proposeAction(ctx context.Context, principalID, name string, t
 		return failure(errMalformed)
 	}
 	rendered, err := renderArguments(arguments)
-	if err != nil || len([]rune(rendered)) > maximumActionArgumentRunes {
+	// The stored arguments are capped too, so whitespace that the rendering collapses cannot hide a
+	// long value behind a short summary.
+	if err != nil || len([]rune(rendered)) > maximumActionArgumentRunes || len(encoded) > maximumDataBytes {
 		return tools.Result{Text: fmt.Sprintf("The arguments are too long to show for confirmation; send them in at most %d characters.", maximumActionArgumentRunes), IsError: true}
 	}
 	description := strings.Join(strings.Fields(tool.definition.Description), " ")
-	summary := fmt.Sprintf("Home Assistant action %s: %s\nArguments: %s\nI read outside content in this conversation, so I need your confirmation. /new starts a fresh conversation where home actions run at once.", name, description, rendered)
+	summary := fmt.Sprintf("Home Assistant action %s: %s\n%s\nI read outside content in this conversation, so I need your confirmation. /new starts a fresh conversation where home actions run at once.", name, description, rendered)
 	target := description
 	if device, ok := arguments["name"].(string); ok && strings.TrimSpace(device) != "" {
 		target = description + " " + device
@@ -101,13 +105,69 @@ func truncateRunes(text string, limit int) string {
 	return string(runes[:limit])
 }
 
-// renderArguments shows the arguments on one line as the user will confirm them; the reply renderer
-// escapes markup, so the JSON is not HTML-escaped as well.
+// renderArguments shows the arguments as the user will confirm them, one field per line in key
+// order; the reply renderer escapes markup, so nothing is HTML-escaped here. Whitespace in keys and
+// strings collapses so model-written text cannot add lines to the summary.
 func renderArguments(arguments map[string]any) (string, error) {
+	if len(arguments) == 0 {
+		return "Arguments: none", nil
+	}
+	keys := make([]string, 0, len(arguments))
+	for key := range arguments {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	lines := make([]string, 0, len(keys)+1)
+	lines = append(lines, "Arguments:")
+	for _, key := range keys {
+		value, err := renderValue(arguments[key])
+		if err != nil {
+			return "", err
+		}
+		lines = append(lines, strings.Join(strings.Fields(key), " ")+": "+value)
+	}
+	return strings.Join(lines, "\n"), nil
+}
+
+// renderValue shows a scalar plainly, a list of scalars comma-separated, quoting a string that
+// holds a comma, and anything else as compact JSON.
+func renderValue(value any) (string, error) {
+	switch typed := value.(type) {
+	case string:
+		return strings.Join(strings.Fields(typed), " "), nil
+	case json.Number:
+		return typed.String(), nil
+	case float64:
+		return strconv.FormatFloat(typed, 'f', -1, 64), nil
+	case bool:
+		return strconv.FormatBool(typed), nil
+	case []any:
+		parts := make([]string, 0, len(typed))
+		for _, element := range typed {
+			switch typedElement := element.(type) {
+			case string:
+				part, _ := renderValue(typedElement)
+				if strings.Contains(part, ",") {
+					part = strconv.Quote(part)
+				}
+				parts = append(parts, part)
+			case json.Number, bool, float64:
+				part, _ := renderValue(typedElement)
+				parts = append(parts, part)
+			default:
+				return compactJSON(value)
+			}
+		}
+		return strings.Join(parts, ", "), nil
+	}
+	return compactJSON(value)
+}
+
+func compactJSON(value any) (string, error) {
 	var rendered bytes.Buffer
 	encoder := json.NewEncoder(&rendered)
 	encoder.SetEscapeHTML(false)
-	if err := encoder.Encode(arguments); err != nil {
+	if err := encoder.Encode(value); err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(rendered.String()), nil

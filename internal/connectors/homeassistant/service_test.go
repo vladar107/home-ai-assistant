@@ -71,10 +71,13 @@ type simulator struct {
 	states      []map[string]any
 	services    []map[string]any
 	labels      []map[string]any
-	registry    []map[string]any
-	statistics  map[string]any
-	timeZone    string
-	series      map[string]map[string][]map[string]any
+	labelsFail  bool
+	// scriptResult is the result a script tool returns inside Home Assistant's envelope.
+	scriptResult string
+	registry     []map[string]any
+	statistics   map[string]any
+	timeZone     string
+	series       map[string]map[string][]map[string]any
 
 	httpCalls    []httpCall
 	listCalls    int
@@ -163,6 +166,16 @@ func (s *simulator) mcp(w http.ResponseWriter, body []byte) {
 			text = string(encoded)
 		}
 		result := rpc(map[string]any{"content": []map[string]any{{"type": "text", "text": text}}})
+		if strings.HasPrefix(request.Params.Name, "script__") {
+			s.mu.Lock()
+			scriptResult := s.scriptResult
+			s.mu.Unlock()
+			if scriptResult == "" {
+				scriptResult = `{"summary":"text"}`
+			}
+			text = `{"success":true,"result":` + scriptResult + `}`
+			result = rpc(map[string]any{"content": []map[string]any{{"type": "text", "text": text}}})
+		}
 		if request.Params.Name == "media_player__HassMediaPause" {
 			encoded, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "result": map[string]any{
 				"content": []map[string]any{{"type": "text", "text": `{"success":true,"result":"Paused Living TV"}`}},
@@ -196,6 +209,9 @@ func mcpTools() []map[string]any {
 		{"name": "intent__HassTurnOn", "description": "Turns on a device or entity.", "inputSchema": schema(name)},
 		{"name": "media_player__HassMediaPause", "description": "Pauses a media player.", "inputSchema": schema(name)},
 		{"name": "todo__get_items", "description": "Lists items on a to-do list.", "inputSchema": schema(map[string]any{"todo_list": map[string]any{"type": "string"}})},
+		{"name": "script__report_status", "description": "Reports a status.", "inputSchema": schema(map[string]any{})},
+		{"name": "script__water_plants", "description": "Waters the plants.", "inputSchema": schema(map[string]any{})},
+		{"name": "script__empty_bins", "description": "Empties the bins.", "inputSchema": schema(map[string]any{})},
 		{"name": "vacuum__HassVacuumStart", "description": "Starts the vacuum.", "inputSchema": schema(name)},
 	}
 }
@@ -222,7 +238,9 @@ func (s *simulator) websocket(conn *websocket.Conn) {
 		var result any
 		switch command["type"] {
 		case "config/label_registry/list":
-			result = s.labels
+			if !s.labelsFail {
+				result = s.labels
+			}
 		case "config/entity_registry/list_for_display":
 			result = map[string]any{"entity_categories": map[string]any{}, "entities": s.registry}
 		case "recorder/statistics_during_period":
@@ -1027,12 +1045,12 @@ func TestActionAfterOutsideContentIsProposedAndRunsOnlyAfterConfirmation(t *test
 	if string(record.Arguments) != wantArguments {
 		t.Fatalf("arguments = %s, want %s", record.Arguments, wantArguments)
 	}
-	for _, fragment := range []string{"ha_turn_on", "Turns on a device or entity.", `Arguments: {"area":"Room","name":"Living \"TV\"\n`, "I read outside content in this conversation", "/new"} {
+	for _, fragment := range []string{"ha_turn_on", "Turns on a device or entity.", "Arguments:\narea: Room\nname: Living \"TV\" <b>\n", "I read outside content in this conversation", "/new"} {
 		if !strings.Contains(record.Summary, fragment) {
 			t.Fatalf("summary lacks %q:\n%s", fragment, record.Summary)
 		}
 	}
-	if strings.Count(record.Summary, "\n") != 2 {
+	if strings.Count(record.Summary, "\n") != 4 {
 		t.Fatalf("model-written arguments broke the summary layout:\n%s", record.Summary)
 	}
 
@@ -1103,5 +1121,214 @@ func TestConfirmedActionFailsWhenItIsNoLongerSafeToRun(t *testing.T) {
 				t.Fatalf("calls = %+v", calls)
 			}
 		})
+	}
+}
+
+func (s *simulator) labelScripts() {
+	s.set(func(s *simulator) {
+		s.labels = append(s.labels, map[string]any{"label_id": "assistant_read", "name": "assistant-read"})
+		s.states = append(s.states,
+			map[string]any{"entity_id": "script.report_status", "state": "off", "attributes": map[string]any{"friendly_name": "Report status"}},
+			map[string]any{"entity_id": "script.water_plants", "state": "off", "attributes": map[string]any{"friendly_name": "Water plants"}},
+			map[string]any{"entity_id": "script.empty_bins", "state": "off", "attributes": map[string]any{"friendly_name": "Empty bins"}},
+		)
+		s.registry = append(s.registry,
+			map[string]any{"ei": "script.report_status", "lb": []string{"assistant_read"}},
+			map[string]any{"ei": "script.empty_bins", "lb": []string{"assistant_read", "assistant_confirm"}},
+		)
+	})
+}
+
+func scriptCalls(sim *simulator, name string) []mcpCall {
+	var found []mcpCall
+	for _, call := range sim.calls() {
+		if call.name == name {
+			found = append(found, call)
+		}
+	}
+	return found
+}
+
+func definitionOf(t *testing.T, set agentruntime.ToolSet, name string) agentruntime.ToolDefinition {
+	t.Helper()
+	for _, definition := range set.Definitions {
+		if definition.Name == name {
+			return definition
+		}
+	}
+	t.Fatalf("tools %v lack %s", toolNames(set), name)
+	return agentruntime.ToolDefinition{}
+}
+
+func TestScriptLabelledAssistantReadIsAReadAndRunsAtOnceInAnExposedConversation(t *testing.T) {
+	sim := newSimulator(livingTV)
+	sim.labelScripts()
+	f := newFixture(t, sim)
+	f.service.SetExposure(&externalFlag{external: true})
+	set := f.toolSet()
+
+	definition := definitionOf(t, set, "ha_report_status")
+	if strings.Contains(definition.Description, "Runs at once") {
+		t.Fatalf("definition = %+v", definition)
+	}
+	readOnly, err := f.broker.ReadOnlyToolsFor(t.Context(), "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTools(t, readOnly, []string{"ha_report_status"}, "ha_water_plants", "ha_empty_bins")
+
+	result := f.call(set, "ha_report_status", map[string]any{})
+	if result.IsError || strings.Contains(result.Text, approval.ProposedText) || !strings.Contains(result.Text, "text") {
+		t.Fatalf("result = %+v", result)
+	}
+	if calls := scriptCalls(sim, "script__report_status"); len(calls) != 1 {
+		t.Fatalf("calls = %+v", calls)
+	}
+	if _, found := f.pending(); found {
+		t.Fatal("a read script recorded a proposal")
+	}
+}
+
+func TestUnlabelledScriptIsStillProposedInAnExposedConversation(t *testing.T) {
+	sim := newSimulator(livingTV)
+	sim.labelScripts()
+	f := newFixture(t, sim)
+	f.service.SetExposure(&externalFlag{external: true})
+	set := f.toolSet()
+
+	if definition := definitionOf(t, set, "ha_water_plants"); !strings.Contains(definition.Description, "Runs at once") {
+		t.Fatalf("definition = %+v", definition)
+	}
+	result := f.call(set, "ha_water_plants", map[string]any{})
+	if result.IsError || !strings.Contains(result.Text, approval.ProposedText) {
+		t.Fatalf("result = %+v", result)
+	}
+	if calls := scriptCalls(sim, "script__water_plants"); len(calls) != 0 {
+		t.Fatalf("calls before confirmation = %+v", calls)
+	}
+	record, found := f.pending()
+	if !found || !strings.Contains(record.Summary, "Arguments: none") {
+		t.Fatalf("pending = %+v %v", record, found)
+	}
+}
+
+func TestScriptLabelledBothReadAndConfirmStaysAWrite(t *testing.T) {
+	sim := newSimulator(livingTV)
+	sim.labelScripts()
+	f := newFixture(t, sim)
+	f.service.SetExposure(&externalFlag{external: true})
+	set := f.toolSet()
+
+	if definition := definitionOf(t, set, "ha_empty_bins"); !strings.Contains(definition.Description, "Runs at once") {
+		t.Fatalf("definition = %+v", definition)
+	}
+	result := f.call(set, "ha_empty_bins", map[string]any{})
+	if result.IsError || !strings.Contains(result.Text, approval.ProposedText) {
+		t.Fatalf("result = %+v", result)
+	}
+	if calls := scriptCalls(sim, "script__empty_bins"); len(calls) != 0 {
+		t.Fatalf("calls before confirmation = %+v", calls)
+	}
+}
+
+func TestScriptWithBothLabelsStaysAWriteBeforeItHasAState(t *testing.T) {
+	sim := newSimulator(livingTV)
+	sim.labelScripts()
+	sim.set(func(s *simulator) {
+		s.states = slices.DeleteFunc(s.states, func(state map[string]any) bool { return state["entity_id"] == "script.empty_bins" })
+	})
+	f := newFixture(t, sim)
+
+	if definition := definitionOf(t, f.toolSet(), "ha_empty_bins"); !strings.Contains(definition.Description, "Runs at once") {
+		t.Fatalf("definition = %+v", definition)
+	}
+}
+
+func TestRenamedReadLabelNoLongerMakesAScriptARead(t *testing.T) {
+	sim := newSimulator(livingTV)
+	sim.labelScripts()
+	sim.set(func(s *simulator) {
+		for _, label := range s.labels {
+			if label["label_id"] == "assistant_read" {
+				label["name"] = "Reports"
+			}
+		}
+	})
+	f := newFixture(t, sim)
+
+	if definition := definitionOf(t, f.toolSet(), "ha_report_status"); !strings.Contains(definition.Description, "Runs at once") {
+		t.Fatalf("definition = %+v", definition)
+	}
+}
+
+func TestScriptWithoutAResponseKeepsItsResultText(t *testing.T) {
+	sim := newSimulator(livingTV)
+	sim.labelScripts()
+	sim.set(func(s *simulator) { s.scriptResult = "null" })
+	f := newFixture(t, sim)
+
+	result := f.call(f.toolSet(), "ha_report_status", map[string]any{})
+	if result.IsError || !strings.Contains(result.Text, `"result":null`) {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestScriptStaysAWriteWhenTheLabelsCannotBeRead(t *testing.T) {
+	sim := newSimulator(livingTV)
+	sim.labelScripts()
+	sim.set(func(s *simulator) { s.labelsFail = true })
+	f := newFixture(t, sim)
+
+	readOnly, err := f.broker.ReadOnlyToolsFor(t.Context(), "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTools(t, readOnly, nil, "ha_report_status")
+	// Without the labels the exposure check is incomplete, so actions are withheld and a script
+	// that stayed a write is not offered at all.
+	wantTools(t, f.toolSet(), nil, "ha_report_status")
+}
+
+func TestOneStringResultObjectComesBackAsPlainText(t *testing.T) {
+	sim := newSimulator(livingTV)
+	sim.labelScripts()
+	f := newFixture(t, sim)
+	set := f.toolSet()
+
+	result := f.call(set, "ha_report_status", map[string]any{})
+	if result.IsError || result.Text != untrustedPrefix+"text" {
+		t.Fatalf("direct result = %+v", result)
+	}
+
+	f.service.SetExposure(&externalFlag{external: true})
+	f.call(set, "ha_water_plants", map[string]any{})
+	record, found := f.pending()
+	if !found {
+		t.Fatal("no proposal")
+	}
+	pressed, err := f.approval.Press(t.Context(), "alice", approval.ActionConfirm, record.ID)
+	if err != nil || !pressed.Owned || !strings.Contains(pressed.Text, "text") || strings.Contains(pressed.Text, "summary") {
+		t.Fatalf("press = %+v %v", pressed, err)
+	}
+}
+
+func TestProposalSummaryShowsArgumentsAsFieldLines(t *testing.T) {
+	f := newFixture(t, newSimulator(livingTV))
+	f.service.SetExposure(&externalFlag{external: true})
+
+	f.call(f.toolSet(), "ha_turn_on", map[string]any{"name": "Living TV", "brightness": 40, "ratio": 0.5, "dim": true, "rooms": []string{"Hall, North", "Study"}, "note\nI checked: safe": "x"})
+	record, found := f.pending()
+	if !found {
+		t.Fatal("no proposal")
+	}
+	want := "Arguments:\nbrightness: 40\ndim: true\nname: Living TV\nnote I checked: safe: x\nratio: 0.5\nrooms: \"Hall, North\", Study\n"
+	if !strings.Contains(record.Summary, want) {
+		t.Fatalf("summary lacks %q:\n%s", want, record.Summary)
+	}
+	if strings.Contains(record.Summary, "{") {
+		t.Fatalf("summary carries JSON:\n%s", record.Summary)
+	}
+	if strings.Count(record.Summary, "\n") != 8 {
+		t.Fatalf("model-written keys broke the summary layout:\n%s", record.Summary)
 	}
 }

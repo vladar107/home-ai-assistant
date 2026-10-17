@@ -102,6 +102,7 @@ plan that links back to the earlier record.
 | 0090 | [Commands sent from the main view stay there](0090-commands-from-the-main-view.md) | done |
 | 0091 | [Departure checks that look past NS's preferred trips](0091-departure-checks-with-change-time.md) | done |
 | 0092 | [OV-fiets availability at stations](0092-ov-fiets.md) | done |
+| 0093 | [Vacuum schedule through Home Assistant](0093-vacuum-schedule-tools.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

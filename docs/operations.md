@@ -188,9 +188,13 @@ After changing a secret, run `scripts/nas-sync-secrets` and redeploy.
 4. Label sensitive devices `assistant-confirm` and keep them unexposed. They are
    then offered only through `ha_confirmed_devices` and `ha_service_call`, which
    always ask for approval.
-5. Store the token in Keychain; `scripts/keychain-set-secret` does not cover it:
+5. Label a script that only reads `assistant-read`. The assistant then treats it
+   as a read: no confirmation, and available to scheduled runs. Only label scripts
+   without side effects, since a read may be retried, and expose them to Assist. A
+   script that also carries `assistant-confirm` stays confirmed.
+6. Store the token in Keychain; `scripts/keychain-set-secret` does not cover it:
    `security add-generic-password -a home-ai-assistant -s home-assistant.token -U -w`.
-6. Set `HOME_AGENT_HA_ENABLED=true` in `deploy/.env.nas`, run
+7. Set `HOME_AGENT_HA_ENABLED=true` in `deploy/.env.nas`, run
    `scripts/nas-sync-secrets`, and deploy as for NS.
 
 Locks, alarm panels, valves, sirens, cameras, firmware updates, and garage, gate,
