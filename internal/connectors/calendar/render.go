@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 )
 
 const (
@@ -76,10 +78,10 @@ func writeEvent(builder *strings.Builder, entry listed, location *time.Location)
 	fmt.Fprintf(builder, "%s\n", eventTitle(event))
 	fmt.Fprintf(builder, "When: %s\n", whenText(entry, location))
 	fmt.Fprintf(builder, "Account: %s\n", entry.account.Address)
-	fmt.Fprintf(builder, "Calendar: %s (id %s)\n", truncateRunes(entry.calendar.Name(), maximumTitleRunes), entry.calendar.ID)
+	fmt.Fprintf(builder, "Calendar: %s (id %s)\n", clip.Runes(entry.calendar.Name(), maximumTitleRunes), entry.calendar.ID)
 	fmt.Fprintf(builder, "Event id: %s\n", event.ID)
 	if place := strings.TrimSpace(event.Location); place != "" {
-		fmt.Fprintf(builder, "Location: %s\n", truncateRunes(oneLine(place), maximumTitleRunes))
+		fmt.Fprintf(builder, "Location: %s\n", clip.Runes(oneLine(place), maximumTitleRunes))
 	}
 	if response := ownResponse(event); response != "" {
 		fmt.Fprintf(builder, "Your response: %s\n", response)
@@ -103,7 +105,7 @@ func renderEvent(entry listed, location *time.Location, offset int) string {
 	}
 	switch {
 	case len(event.Recurrence) > 0:
-		fmt.Fprintf(&builder, "Recurrence: %s\n", truncateRunes(strings.Join(event.Recurrence, "; "), maximumTitleRunes))
+		fmt.Fprintf(&builder, "Recurrence: %s\n", clip.Runes(strings.Join(event.Recurrence, "; "), maximumTitleRunes))
 	case event.RecurringEventID != "":
 		fmt.Fprintf(&builder, "Recurrence: one occurrence of the recurring event %s\n", event.RecurringEventID)
 	}
@@ -144,7 +146,7 @@ func renderEvent(entry listed, location *time.Location, offset int) string {
 
 func eventTitle(event Event) string {
 	if title := strings.TrimSpace(oneLine(event.Summary)); title != "" {
-		return truncateRunes(title, maximumTitleRunes)
+		return clip.Runes(title, maximumTitleRunes)
 	}
 	return "(no title)"
 }
@@ -190,9 +192,9 @@ func personName(person Person) string {
 	name, address := strings.TrimSpace(oneLine(person.DisplayName)), strings.TrimSpace(person.Email)
 	switch {
 	case name != "" && address != "":
-		return truncateRunes(name, 100) + " <" + address + ">"
+		return clip.Runes(name, 100) + " <" + address + ">"
 	case name != "":
-		return truncateRunes(name, 100)
+		return clip.Runes(name, 100)
 	default:
 		return address
 	}
@@ -250,11 +252,4 @@ func descriptionWindow(text string, offset, limit int) (window string, next int,
 
 func oneLine(text string) string {
 	return strings.Join(strings.Fields(text), " ")
-}
-
-func truncateRunes(text string, limit int) string {
-	if utf8.RuneCountInString(text) <= limit {
-		return text
-	}
-	return string([]rune(text)[:limit]) + "…"
 }

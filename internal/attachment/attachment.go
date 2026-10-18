@@ -17,6 +17,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 )
 
@@ -30,7 +31,7 @@ const (
 
 	maximumReadBytes = 12 << 10
 	maximumNameRunes = 200
-	maximumMIMERunes = 100
+	maximumMIMEBytes = 100
 )
 
 type Kind string
@@ -435,7 +436,7 @@ func boundedName(name string) string {
 	if cleaned == "" || !utf8.ValidString(cleaned) {
 		return "file"
 	}
-	return truncateRunes(cleaned, maximumNameRunes)
+	return clip.Runes(cleaned, maximumNameRunes)
 }
 
 func boundedMIME(mimeType string) string {
@@ -445,14 +446,7 @@ func boundedMIME(mimeType string) string {
 	}) >= 0 {
 		return "application/octet-stream"
 	}
-	return truncateRunes(cleaned, maximumMIMERunes)
-}
-
-func truncateRunes(value string, limit int) string {
-	if utf8.RuneCountInString(value) <= limit {
-		return value
-	}
-	return string([]rune(value)[:limit])
+	return clip.Bytes(cleaned, maximumMIMEBytes)
 }
 
 // loggableName keeps a sender-chosen filename out of an error that may be logged.

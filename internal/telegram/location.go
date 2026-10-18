@@ -7,6 +7,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/location"
 )
 
@@ -149,10 +150,7 @@ func clipText(text string, limit int) string {
 	if !utf8.ValidString(text) {
 		text = strings.ToValidUTF8(text, "")
 	}
-	if runes := []rune(text); len(runes) > limit {
-		return string(runes[:limit])
-	}
-	return text
+	return clip.Runes(text, limit)
 }
 
 type locationSection struct {

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 )
 
 const (
@@ -47,7 +49,7 @@ func renderSearch(query string, messages []Message, more bool, failures []string
 		builder.WriteString("\n")
 		writeHeaders(&builder, message)
 		if snippet := strings.TrimSpace(html.UnescapeString(message.Snippet)); snippet != "" {
-			fmt.Fprintf(&builder, "Snippet: %s\n", truncateRunes(snippet, maximumSnippetRunes))
+			fmt.Fprintf(&builder, "Snippet: %s\n", clip.Runes(snippet, maximumSnippetRunes))
 		}
 	}
 	for _, failure := range failures {
@@ -63,7 +65,7 @@ func writeHeaders(builder *strings.Builder, message Message) {
 	}
 	for _, name := range metadataHeaders {
 		if value := header(message.Payload, name); value != "" {
-			fmt.Fprintf(builder, "%s: %s\n", name, truncateRunes(value, maximumHeaderRunes))
+			fmt.Fprintf(builder, "%s: %s\n", name, clip.Runes(value, maximumHeaderRunes))
 		}
 	}
 	if received := receivedAt(message); received != "" {
@@ -166,7 +168,7 @@ func htmlToText(markup string) string {
 
 func collectAttachments(part Part, names *[]string) {
 	if part.Filename != "" {
-		*names = append(*names, fmt.Sprintf("%s (%s)", truncateRunes(part.Filename, 100), formatSize(part.Body.Size)))
+		*names = append(*names, fmt.Sprintf("%s (%s)", clip.Runes(part.Filename, 100), formatSize(part.Body.Size)))
 	}
 	for _, child := range part.Parts {
 		collectAttachments(child, names)
@@ -210,11 +212,4 @@ func wholeRunes(text string) string {
 		text = text[:len(text)-1]
 	}
 	return text
-}
-
-func truncateRunes(text string, limit int) string {
-	if utf8.RuneCountInString(text) <= limit {
-		return text
-	}
-	return string([]rune(text)[:limit]) + "…"
 }

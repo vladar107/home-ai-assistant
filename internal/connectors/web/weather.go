@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -346,7 +347,7 @@ func renderForecast(found place, result forecast, unit windUnit) (string, error)
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "Weather for %s", placeName(found))
 	if result.Timezone != "" {
-		fmt.Fprintf(&builder, " (local time zone %s)", clip(result.Timezone, 64))
+		fmt.Fprintf(&builder, " (local time zone %s)", clip.Bytes(result.Timezone, 64))
 	}
 	builder.WriteString("\n")
 
@@ -404,7 +405,7 @@ func renderHourly(found place, result forecast, window hourWindow, unit windUnit
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "Weather for %s", placeName(found))
 	if result.Timezone != "" {
-		fmt.Fprintf(&builder, " (local time zone %s)", clip(result.Timezone, 64))
+		fmt.Fprintf(&builder, " (local time zone %s)", clip.Bytes(result.Timezone, 64))
 	}
 	fmt.Fprintf(&builder, "\nHourly forecast for %s, %02d:00 to %02d:00 local time:\n", window.date.Format("Mon 2 Jan"), window.from, window.to)
 	rendered := 0
@@ -471,7 +472,7 @@ func placeName(found place) string {
 			parts = append(parts, part)
 		}
 	}
-	return clip(strings.Join(parts, ", "), 300)
+	return clip.Bytes(strings.Join(parts, ", "), 300)
 }
 
 func localTime(value string) string {
@@ -485,7 +486,7 @@ func localTime(value string) string {
 func dayLabel(value string) string {
 	parsed, err := time.Parse(time.DateOnly, value)
 	if err != nil {
-		return clip(value, 20)
+		return clip.Bytes(value, 20)
 	}
 	return parsed.Format("Mon 2 Jan")
 }

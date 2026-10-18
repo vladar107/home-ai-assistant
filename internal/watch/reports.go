@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/localtime"
 )
@@ -25,7 +26,7 @@ func (s *Service) keepMessage(ctx context.Context, alert Alert, sent string, mes
 	if messageID <= 0 {
 		return
 	}
-	label := cut(strings.TrimSpace(alert.Label), maximumLabelRunes)
+	label := clip.Runes(strings.TrimSpace(alert.Label), maximumLabelRunes)
 	if label == "" {
 		label = "Watch"
 	}
@@ -35,7 +36,7 @@ func (s *Service) keepMessage(ctx context.Context, alert Alert, sent string, mes
 		ThreadID:    threadID,
 		WatchID:     alert.WatchID,
 		WatchLabel:  label,
-		Text:        cut(strings.TrimSpace(sent), maximumQuotedRunes),
+		Text:        clip.Runes(strings.TrimSpace(sent), maximumQuotedRunes),
 		Private:     alert.Private,
 		External:    alert.Kind == KindAgent,
 	}
@@ -85,13 +86,4 @@ func (s *Service) forgetNotice(principalID string, messageID int64) {
 		return
 	}
 	s.notices[principalID] = kept
-}
-
-// cut keeps text within limit runes, ending a shortened one with "…".
-func cut(text string, limit int) string {
-	runes := []rune(text)
-	if len(runes) <= limit {
-		return text
-	}
-	return string(runes[:limit-1]) + "…"
 }

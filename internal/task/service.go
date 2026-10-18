@@ -13,6 +13,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
@@ -762,10 +763,7 @@ func firstLines(text string) string {
 		}
 	}
 	joined := strings.Join(kept, "\n")
-	if utf8.RuneCountInString(joined) > maximumNoticeRune {
-		joined = string([]rune(joined)[:maximumNoticeRune]) + "…"
-	}
-	return joined
+	return clip.Runes(joined, maximumNoticeRune)
 }
 
 // inputError is a request the model can correct, returned to it as the tool's result.

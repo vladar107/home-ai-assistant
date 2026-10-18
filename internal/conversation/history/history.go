@@ -15,8 +15,8 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
 
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 )
 
@@ -78,7 +78,7 @@ func (s *Service) Title(_ context.Context, principalID, runtimeSessionID string)
 		if message.role != roleUser {
 			return true
 		}
-		title = shorten(oneLine(message.text), titleRunes)
+		title = clip.Runes(oneLine(message.text), titleRunes)
 		return false
 	})
 	return title, err
@@ -287,12 +287,4 @@ func userText(text string) string {
 
 func oneLine(text string) string {
 	return strings.Join(strings.Fields(text), " ")
-}
-
-func shorten(text string, limit int) string {
-	if utf8.RuneCountInString(text) <= limit {
-		return text
-	}
-	runes := []rune(text)
-	return strings.TrimSpace(string(runes[:limit-1])) + "…"
 }

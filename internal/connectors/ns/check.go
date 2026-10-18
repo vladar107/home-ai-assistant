@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/transit"
 )
 
@@ -182,8 +183,8 @@ func departureFrom(base transit.Departure, item trip, changeTime int, location *
 	result.ActualDeparture = local(first.Origin.ActualDateTime)
 	result.PlannedArrival, result.ActualArrival = local(last.Destination.PlannedDateTime), local(last.Destination.ActualDateTime)
 	result.DelayMinutes = max(transit.DelayMinutes(result.Planned, result.ActualDeparture), transit.DelayMinutes(result.PlannedArrival, result.ActualArrival))
-	result.PlannedPlatform = clip(first.Origin.PlannedTrack, 10)
-	result.Platform = clip(first.Origin.ActualTrack, 10)
+	result.PlannedPlatform = clip.Bytes(first.Origin.PlannedTrack, 10)
+	result.Platform = clip.Bytes(first.Origin.ActualTrack, 10)
 	if result.Platform == "" {
 		result.Platform = result.PlannedPlatform
 	}
@@ -218,10 +219,10 @@ func departureFrom(base transit.Departure, item trip, changeTime int, location *
 			ActualDeparture:        local(part.Origin.ActualDateTime),
 			PlannedArrival:         local(part.Destination.PlannedDateTime),
 			ActualArrival:          local(part.Destination.ActualDateTime),
-			PlannedPlatform:        clip(part.Origin.PlannedTrack, 10),
-			ActualPlatform:         clip(part.Origin.ActualTrack, 10),
-			PlannedArrivalPlatform: clip(part.Destination.PlannedTrack, 10),
-			ActualArrivalPlatform:  clip(part.Destination.ActualTrack, 10),
+			PlannedPlatform:        clip.Bytes(part.Origin.PlannedTrack, 10),
+			ActualPlatform:         clip.Bytes(part.Origin.ActualTrack, 10),
+			PlannedArrivalPlatform: clip.Bytes(part.Destination.PlannedTrack, 10),
+			ActualArrivalPlatform:  clip.Bytes(part.Destination.ActualTrack, 10),
 			Cancelled:              part.Cancelled,
 			PartlyCancelled:        part.PartCancelled,
 		})
@@ -230,7 +231,7 @@ func departureFrom(base transit.Departure, item trip, changeTime int, location *
 		notes = append(notes, message)
 	}
 	if len(notes) > 0 {
-		result.Note = clip("NS: "+strings.Join(notes, "; "), maximumReasonBytes)
+		result.Note = clip.Bytes("NS: "+strings.Join(notes, "; "), maximumReasonBytes)
 	}
 	if changeTime > 0 {
 		result.Note = joinPresent(" ", result.Note, fmt.Sprintf("NS plans this train only with %d extra minutes for each transfer, so a connection shown may be later than the one the user makes.", changeTime))
@@ -279,7 +280,7 @@ func (s *Service) boardFallback(ctx context.Context, principalID string, base tr
 		}
 		result := base
 		result.Status = transit.StatusCancelled
-		result.PlannedPlatform = clip(item.PlannedTrack, 10)
+		result.PlannedPlatform = clip.Bytes(item.PlannedTrack, 10)
 		result.Platform = result.PlannedPlatform
 		result.Live = true
 		result.Legs = []transit.Leg{{Name: joinPresent(" towards ", name, text(item.Direction)), From: from.name, PlannedDeparture: base.Planned, PlannedPlatform: result.PlannedPlatform, Cancelled: true}}

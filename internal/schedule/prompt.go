@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 )
 
@@ -72,5 +73,5 @@ func (s *Service) promptEntry(job Job) string {
 }
 
 func promptExcerpt(text string) string {
-	return truncateRunes(strings.Join(strings.Fields(text), " "), promptExcerptRunes)
+	return clip.Runes(strings.Join(strings.Fields(text), " "), promptExcerptRunes)
 }

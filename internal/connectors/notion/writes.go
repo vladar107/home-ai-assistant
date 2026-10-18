@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -482,7 +483,7 @@ func writeParagraphs(builder *strings.Builder, paragraphs []string) {
 	}
 	fmt.Fprintf(builder, "\nBody (%d paragraph(s)):", len(paragraphs))
 	for index, paragraph := range paragraphs {
-		fmt.Fprintf(builder, "\n%d. %s", index+1, truncateText(paragraph, summaryTextRunes))
+		fmt.Fprintf(builder, "\n%d. %s", index+1, clip.Runes(paragraph, summaryTextRunes))
 	}
 }
 
@@ -525,7 +526,7 @@ func renderInputProperty(raw json.RawMessage) string {
 	if rendered == "" {
 		rendered = compactJSON(raw)
 	}
-	return truncateText(rendered, maximumPropertyText)
+	return clip.Runes(rendered, maximumPropertyText)
 }
 
 // currentPropertyValue renders the value a page already holds for one property, which carries its
@@ -540,7 +541,7 @@ func currentPropertyValue(raw json.RawMessage) string {
 	if json.Unmarshal(raw, &property) != nil {
 		return ""
 	}
-	return truncateText(renderPropertyValue(property.Type, raw), maximumPropertyText)
+	return clip.Runes(renderPropertyValue(property.Type, raw), maximumPropertyText)
 }
 
 // inputPropertyType is the type a property value input names: its "type" field when the model sent

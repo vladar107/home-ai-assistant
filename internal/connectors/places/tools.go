@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -324,7 +325,7 @@ func firstTag(tags map[string]string, keys ...string) string {
 }
 
 func tagText(tags map[string]string, key string) string {
-	return clip(strings.Join(strings.Fields(tags[key]), " "), maximumTagRunes)
+	return clip.Runes(strings.Join(strings.Fields(tags[key]), " "), maximumTagRunes)
 }
 
 func errorResult(text string) tools.Result {

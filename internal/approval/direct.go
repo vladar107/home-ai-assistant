@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
@@ -124,7 +125,7 @@ func (s *Service) Act(ctx context.Context, principalID string, proposal Proposal
 			record.Undo, record.UndoUntil = undo, now.Add(UndoWindow)
 		}
 	}
-	outcome = truncateRunes(outcome, outcomeRunes)
+	outcome = clip.Runes(outcome, outcomeRunes)
 	if _, err := s.repository.FinishDirectApproval(context.WithoutCancel(ctx), id, status, reason, outcome, record.Undo, record.UndoUntil); err != nil {
 		s.logger.ErrorContext(ctx, "approval.finish_failed", "principal_id", principalID, "approval_id", id, "status", status)
 	}
@@ -277,7 +278,7 @@ func (s *Service) directStatus(record Record) string {
 		expired := len(record.Undo) > 0 && !s.now().Before(record.UndoUntil)
 		switch {
 		case record.Reason == ReasonUndoRefused:
-			return "Not undone: " + truncateRunes(record.Outcome, directOutcomeRunes)
+			return "Not undone: " + clip.Runes(record.Outcome, directOutcomeRunes)
 		case record.Reason == ReasonUndoInterrupted && expired:
 			return "A restart interrupted its Undo, and it can no longer be undone; check whether the change still stands."
 		case record.Reason == ReasonUndoInterrupted:
@@ -341,14 +342,14 @@ func (s *Service) Undo(ctx context.Context, principalID, recordID string) (Undid
 	var answer string
 	switch {
 	case err == nil:
-		record.Status, record.Reason, record.Outcome = StatusUndone, "", truncateRunes(result.Text, outcomeRunes)
+		record.Status, record.Reason, record.Outcome = StatusUndone, "", clip.Runes(result.Text, outcomeRunes)
 		if err := s.repository.CompleteUndo(storeCtx, record.ID, record.Outcome); err != nil {
 			return Undid{}, err
 		}
 		answer = "Undone."
 		s.recordStatus(ctx, record, StatusUndone)
 	case errors.As(err, &refusal):
-		reason := truncateRunes(refusal.Reason, outcomeRunes)
+		reason := clip.Runes(refusal.Reason, outcomeRunes)
 		if err := s.repository.ReleaseUndo(storeCtx, record.ID, ReasonUndoRefused, reason, true); err != nil {
 			return Undid{}, err
 		}

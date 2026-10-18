@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
@@ -184,7 +185,7 @@ func (s *Service) executeList(ctx context.Context, principalID string, call tool
 		item := items[index]
 		line := fmt.Sprintf("- [%s] %s (added %s)", item.ID, item.Title, s.Day(item.CreatedAt))
 		if item.Details != "" {
-			line += ": " + shorten(normalizeTitle(item.Details), listedDetailsRunes)
+			line += ": " + clip.Runes(normalizeTitle(item.Details), listedDetailsRunes)
 		}
 		lines = append(lines, line)
 	}
@@ -298,12 +299,4 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 	default:
 		return approval.Outcome{Text: "Updated."}, nil
 	}
-}
-
-func shorten(text string, limit int) string {
-	runes := []rune(text)
-	if len(runes) <= limit {
-		return text
-	}
-	return strings.TrimSpace(string(runes[:limit-1])) + "…"
 }

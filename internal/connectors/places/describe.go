@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 )
 
 const (
@@ -127,15 +129,7 @@ func locality(areas []geocodeArea) string {
 }
 
 func clean(value string) string {
-	return clip(strings.Join(strings.Fields(value), " "), maximumNameRunes)
-}
-
-func clip(value string, limit int) string {
-	runes := []rune(value)
-	if len(runes) <= limit {
-		return value
-	}
-	return string(runes[:limit-1]) + "…"
+	return clip.Runes(strings.Join(strings.Fields(value), " "), maximumNameRunes)
 }
 
 func validPoint(lat, lon float64) bool {

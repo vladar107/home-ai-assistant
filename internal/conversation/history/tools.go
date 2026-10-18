@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
@@ -264,7 +265,7 @@ func (s *Service) read(ctx context.Context, principalID string, arguments json.R
 		if !message.at.IsZero() {
 			line += ", " + message.at.Format(messageTimeLayout)
 		}
-		line += ": " + shorten(message.text, readMessageRunes) + "\n"
+		line += ": " + clip.Runes(message.text, readMessageRunes) + "\n"
 		if body.Len()+len(line) > maximumReadBytes {
 			break
 		}

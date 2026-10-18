@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/ledongthuc/pdf"
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 )
 
 const (
@@ -105,7 +106,7 @@ func extract(data []byte) (text string, err error) {
 		return "", ErrNoText
 	}
 	if stopped != "" {
-		text = truncate(text, MaximumTextBytes) + "\n\n" + stopped
+		text = strings.TrimSpace(clip.Bytes(text, MaximumTextBytes)) + "\n\n" + stopped
 	}
 	return text, nil
 }
@@ -155,15 +156,4 @@ func normalize(text string) string {
 		blank = false
 	}
 	return strings.TrimSpace(strings.Join(kept, "\n"))
-}
-
-func truncate(text string, limit int) string {
-	if len(text) <= limit {
-		return text
-	}
-	cut := limit
-	for cut > 0 && !utf8.RuneStart(text[cut]) {
-		cut--
-	}
-	return strings.TrimSpace(text[:cut])
 }

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/localtime"
 )
@@ -203,24 +203,24 @@ func observe(watch Watch, previous string, reply conversation.ScheduledReply) (O
 		return Observation{}, err
 	}
 	if found.Error != "" {
-		return Observation{}, fmt.Errorf("the check could not be done: %s", truncateRunes(found.Error, maximumHeadlineRunes))
+		return Observation{}, fmt.Errorf("the check could not be done: %s", clip.Runes(found.Error, maximumHeadlineRunes))
 	}
 	met := *found.Met
 	key := agentUnmet
 	if met {
 		key = agentMet
 	}
-	value := truncateRunes(strings.ToLower(strings.Join(strings.Fields(found.Value), " ")), maximumValueRunes)
+	value := clip.Runes(strings.ToLower(strings.Join(strings.Fields(found.Value), " ")), maximumValueRunes)
 	state := key + "|" + value
 	previousKey, _, _ := strings.Cut(previous, "|")
 	observation := Observation{
 		State:     state,
 		Triggered: met,
-		Headline:  truncateRunes(strings.TrimSpace(found.Headline), maximumHeadlineRunes),
+		Headline:  clip.Runes(strings.TrimSpace(found.Headline), maximumHeadlineRunes),
 		Private:   reply.Private,
 		Silent:    previous != "" && previousKey == key && !(met && wanted(watch, TriggerChange)),
 	}
-	if details := truncateRunes(strings.TrimSpace(found.Details), maximumDetailsRunes); details != "" {
+	if details := clip.Runes(strings.TrimSpace(found.Details), maximumDetailsRunes); details != "" {
 		observation.Details = []string{details}
 	}
 	if met && observation.Headline == "" {
@@ -251,11 +251,4 @@ func parseVerdict(text string) (verdict, error) {
 		return found, nil
 	}
 	return verdict{}, errors.New("the check's reply has no valid answer object")
-}
-
-func truncateRunes(text string, limit int) string {
-	if utf8.RuneCountInString(text) <= limit {
-		return text
-	}
-	return string([]rune(text)[:limit]) + "…"
 }

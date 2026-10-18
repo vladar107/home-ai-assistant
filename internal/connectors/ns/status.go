@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/transit"
 )
 
@@ -163,7 +164,7 @@ func classify(result *transit.TripStatus, item trip, location *time.Location) {
 	} else if abnormal {
 		reasons = append(reasons, "status "+strings.ToLower(text(item.Status)))
 	}
-	result.Reason = clip(strings.Join(reasons, "; "), maximumReasonBytes)
+	result.Reason = clip.Bytes(strings.Join(reasons, "; "), maximumReasonBytes)
 }
 
 // troubleMessage is the first thing NS says about the trip's trouble: its own messages, or else the

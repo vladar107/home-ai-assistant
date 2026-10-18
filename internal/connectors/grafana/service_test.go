@@ -640,8 +640,8 @@ func TestLogLinesAreCleanedAndClipped(t *testing.T) {
 	f := newFixture(t, sim)
 
 	text := f.run("grafana_logs", map[string]any{"query": `{container="app"}`})
-	wantContains(t, text, "09:59:00 app: ERROR boom second line", "app: "+strings.Repeat("x", 500)+"…")
-	if strings.Contains(text, "\x1b") || strings.Contains(text, strings.Repeat("x", 501)) {
+	wantContains(t, text, "09:59:00 app: ERROR boom second line", "app: "+strings.Repeat("x", 499)+"…")
+	if strings.Contains(text, "\x1b") || strings.Contains(text, strings.Repeat("x", 500)) {
 		t.Fatalf("lines were not cleaned or clipped:\n%s", text)
 	}
 }

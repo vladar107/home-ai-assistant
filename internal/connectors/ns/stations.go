@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/transit"
 )
 
@@ -175,7 +176,7 @@ func inCountry(list []station, land string) []station {
 func resolutionError(role, query string, match resolution) string {
 	if len(match.candidates) == 0 {
 		text := fmt.Sprintf("No NS station matches %s %q; NS tools only know railway stations, so plan a leg to or from a bus, tram, or metro stop separately.",
-			role, clip(query, maximumStationRunes))
+			role, clip.Runes(query, maximumStationRunes))
 		switch len(match.named) {
 		case 0:
 			return text + " Ask the user for the railway station's name."
@@ -186,7 +187,7 @@ func resolutionError(role, query string, match resolution) string {
 		}
 	}
 	return fmt.Sprintf("%s %q matches several NS stations: %s. Call again with the name or code of the one the user means, or ask them.",
-		role, clip(query, maximumStationRunes), stationNames(match.candidates))
+		role, clip.Runes(query, maximumStationRunes), stationNames(match.candidates))
 }
 
 func stationNames(list []station) string {

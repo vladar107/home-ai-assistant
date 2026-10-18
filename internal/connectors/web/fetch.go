@@ -15,6 +15,7 @@ import (
 
 	"golang.org/x/net/html/charset"
 
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/pdftext"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
@@ -150,7 +151,7 @@ func (s *Service) readPage(ctx context.Context, target *url.URL) (page, error) {
 		if err != nil {
 			return page{}, pageRefusal("The page's HTML could not be read.")
 		}
-		result.title, result.text = clip(strings.ToValidUTF8(title, ""), maximumTitleBytes), strings.ToValidUTF8(text, "")
+		result.title, result.text = clip.Bytes(strings.ToValidUTF8(title, ""), maximumTitleBytes), strings.ToValidUTF8(text, "")
 		if result.text == "" {
 			return page{}, pageRefusal("The page has no readable text; it may need JavaScript to show its content, which cannot be run here.")
 		}
@@ -235,7 +236,7 @@ func renderWindow(result page, offset int) tools.Result {
 	chunk := result.text[offset:]
 	truncated := len(chunk) > maximumReadBytes
 	if truncated {
-		chunk = clip(chunk, maximumReadBytes)
+		chunk = clip.Bytes(chunk, maximumReadBytes)
 	}
 
 	var builder strings.Builder
@@ -261,19 +262,7 @@ func renderWindow(result page, offset int) tools.Result {
 func displayURL(final *url.URL) string {
 	shown := *final
 	shown.User = nil
-	return clip(shown.String(), maximumURLBytes)
-}
-
-// clip cuts text to at most limit bytes on a rune boundary.
-func clip(text string, limit int) string {
-	if len(text) <= limit {
-		return text
-	}
-	cut := limit
-	for cut > 0 && !utf8.RuneStart(text[cut]) {
-		cut--
-	}
-	return text[:cut]
+	return clip.Bytes(shown.String(), maximumURLBytes)
 }
 
 // errorClass names a failure for the log without its text, which can carry the address.

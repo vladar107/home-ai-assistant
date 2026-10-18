@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/transit"
 )
 
@@ -177,8 +178,8 @@ func (s *Service) timetableDeparture(ctx context.Context, principalID string, gr
 		result.ActualDeparture = parseUTC(item.Place.Departure).In(base.Planned.Location())
 	}
 	result.DelayMinutes = transit.DelayMinutes(scheduled, result.ActualDeparture)
-	result.PlannedPlatform = clip(text(item.Place.ScheduledTrack), 10)
-	result.Platform = clip(text(item.Place.Track), 10)
+	result.PlannedPlatform = clip.Bytes(text(item.Place.ScheduledTrack), 10)
+	result.Platform = clip.Bytes(text(item.Place.Track), 10)
 	if result.Platform == "" {
 		result.Platform = result.PlannedPlatform
 	}
@@ -189,7 +190,7 @@ func (s *Service) timetableDeparture(ctx context.Context, principalID string, gr
 		PlannedDeparture: scheduled,
 		ActualDeparture:  result.ActualDeparture,
 		PlannedPlatform:  result.PlannedPlatform,
-		ActualPlatform:   clip(text(item.Place.Track), 10),
+		ActualPlatform:   clip.Bytes(text(item.Place.Track), 10),
 		Cancelled:        cancelled,
 	}}
 	result.Status = transit.StatusOf(cancelled, false, result.DelayMinutes, result.PlatformChanged)

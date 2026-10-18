@@ -6,7 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
+
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 )
 
 const (
@@ -238,7 +239,7 @@ func legEnd(name string, endpoint place) string {
 }
 
 func trackChange(stop planStop) string {
-	planned, actual := clip(text(stop.ScheduledTrack), 10), clip(text(stop.Track), 10)
+	planned, actual := clip.Bytes(text(stop.ScheduledTrack), 10), clip.Bytes(text(stop.Track), 10)
 	switch {
 	case actual != "" && planned != "" && actual != planned:
 		return fmt.Sprintf("track %s (changed from %s)", actual, planned)
@@ -294,7 +295,7 @@ func renderNotices(builder *strings.Builder, v view, notices noticeList) {
 	for _, item := range notices.items {
 		about := joinPresent(", ", prefixed("at ", item.atStop), prefixed("line ", item.line))
 		header := text(item.alert.header)
-		description := clip(strings.Join(strings.Fields(item.alert.description), " "), maximumDescriptionBytes)
+		description := clip.Bytes(strings.Join(strings.Fields(item.alert.description), " "), maximumDescriptionBytes)
 		if strings.HasPrefix(description, header) {
 			header = ""
 		}
@@ -341,18 +342,7 @@ func joinPresent(separator string, parts ...string) string {
 
 // text collapses the whitespace in one field of outside text and bounds it.
 func text(value string) string {
-	return clip(strings.Join(strings.Fields(value), " "), maximumTextBytes)
-}
-
-func clip(value string, limit int) string {
-	if len(value) <= limit {
-		return value
-	}
-	cut := limit
-	for cut > 0 && !utf8.RuneStart(value[cut]) {
-		cut--
-	}
-	return value[:cut]
+	return clip.Bytes(strings.Join(strings.Fields(value), " "), maximumTextBytes)
 }
 
 func sameDay(a, b time.Time) bool {

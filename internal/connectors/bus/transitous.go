@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/transit"
 )
 
@@ -163,7 +164,7 @@ func (s *Service) geocode(ctx context.Context, text string) (place, bool, error)
 	} {
 		for _, match := range matches {
 			if preferred(match) && strings.TrimSpace(match.Name) != "" {
-				chosen = place{name: clip(strings.TrimSpace(match.Name), maximumStopRunes), lat: match.Lat, lon: match.Lon}
+				chosen = place{name: clip.Runes(strings.TrimSpace(match.Name), maximumStopRunes), lat: match.Lat, lon: match.Lon}
 				break
 			}
 		}

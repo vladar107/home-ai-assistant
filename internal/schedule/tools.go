@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
@@ -530,9 +531,9 @@ func applyPromptEdits(prompt string, edits []promptEdit) (string, error) {
 		case 1:
 			prompt = strings.Replace(prompt, edit.Find, edit.Replace, 1)
 		case 0:
-			return "", fmt.Errorf("Edit %d: its find text %q does not occur in the instructions as they are after the edits before it; nothing was proposed. Copy the passage exactly from schedule_get.", index+1, truncateRunes(edit.Find, editQuoteRunes))
+			return "", fmt.Errorf("Edit %d: its find text %q does not occur in the instructions as they are after the edits before it; nothing was proposed. Copy the passage exactly from schedule_get.", index+1, clip.Runes(edit.Find, editQuoteRunes))
 		default:
-			return "", fmt.Errorf("Edit %d: its find text %q occurs %d times in the instructions; nothing was proposed. Include more of the surrounding text so it occurs once.", index+1, truncateRunes(edit.Find, editQuoteRunes), count)
+			return "", fmt.Errorf("Edit %d: its find text %q occurs %d times in the instructions; nothing was proposed. Include more of the surrounding text so it occurs once.", index+1, clip.Runes(edit.Find, editQuoteRunes), count)
 		}
 	}
 	return prompt, nil
@@ -868,7 +869,7 @@ func renderJobs(jobs []Job, zone string) string {
 // renderJob is one job as the model reads it, with its instructions cut to limit runes.
 func renderJob(job Job, zone string, limit int) string {
 	if job.Type == TypeReminder {
-		return fmt.Sprintf("id %s: reminder, %s\nText: %s", job.ID, DescribeJob(job, zone), truncateRunes(ReminderText(job.Config), limit))
+		return fmt.Sprintf("id %s: reminder, %s\nText: %s", job.ID, DescribeJob(job, zone), clip.Runes(ReminderText(job.Config), limit))
 	}
 	state := DescribeJob(job, zone)
 	if !job.OneTime() {
@@ -884,7 +885,7 @@ func renderJob(job Job, zone string, limit int) string {
 	if job.TravelPause {
 		state += ", pauses while traveling"
 	}
-	return fmt.Sprintf("id %s: %q, %s\nInstructions: %s", job.ID, job.Name, state, truncateRunes(ModelTurnPrompt(job.Config), limit))
+	return fmt.Sprintf("id %s: %q, %s\nInstructions: %s", job.ID, job.Name, state, clip.Runes(ModelTurnPrompt(job.Config), limit))
 }
 
 // DescribeJob is a job's schedule as the user reads it, falling back to the default zone for a

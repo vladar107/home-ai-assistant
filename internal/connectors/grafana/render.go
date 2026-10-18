@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 )
 
 const (
@@ -136,7 +138,7 @@ func renderDashboard(uid string, found dashboardDocument) string {
 		title += " (folder " + oneLine(found.Meta.FolderTitle) + ")"
 	}
 	out.add("Dashboard %s: %s", uid, title)
-	if description := clip(found.Dashboard.Description, maximumDescRunes); description != "" {
+	if description := excerpt(found.Dashboard.Description, maximumDescRunes); description != "" {
 		out.add("%s", description)
 	}
 	var variables []string
@@ -166,7 +168,7 @@ func renderPanels(out *text, panels []panel, indent string) {
 			header += ", unit " + p.FieldConfig.Defaults.Unit
 		}
 		out.add("%s)", header)
-		if description := clip(p.Description, maximumDescRunes); description != "" {
+		if description := excerpt(p.Description, maximumDescRunes); description != "" {
 			out.add("%s  %s", indent, description)
 		}
 		for _, t := range p.Targets {
@@ -404,7 +406,7 @@ func (s *Service) renderStreams(response queryResponse, w window, limit int, dir
 		layout = longClockLayout
 	}
 	for _, e := range entries {
-		out.add("%s %s: %s", time.Unix(0, e.at).In(s.location).Format(layout), e.source, clip(ansiEscape.ReplaceAllString(e.line, ""), maximumLineRunes))
+		out.add("%s %s: %s", time.Unix(0, e.at).In(s.location).Format(layout), e.source, excerpt(ansiEscape.ReplaceAllString(e.line, ""), maximumLineRunes))
 	}
 	return out.String(), nil
 }
@@ -480,12 +482,8 @@ func oneLine(value string) string {
 	}), " ")
 }
 
-func clip(value string, limit int) string {
-	value = strings.TrimSpace(oneLine(value))
-	if runes := []rune(value); len(runes) > limit {
-		return string(runes[:limit]) + "…"
-	}
-	return value
+func excerpt(value string, limit int) string {
+	return clip.Runes(strings.TrimSpace(oneLine(value)), limit)
 }
 
 // maximumAlertInstances and maximumAlertHistory bound the alerts and the state changes listed.
@@ -577,7 +575,7 @@ func (s *Service) renderActiveAlerts(response rulesResponse) string {
 		if active, err := time.Parse(time.RFC3339, one.alert.ActiveAt); err == nil {
 			line += " since " + active.In(s.location).Format(longTimeLayout)
 		}
-		if summary := clip(one.alert.Annotations["summary"], maximumDescRunes); summary != "" {
+		if summary := excerpt(one.alert.Annotations["summary"], maximumDescRunes); summary != "" {
 			line += ": " + summary
 		}
 		if labels := alertLabels(one.alert.Labels); labels != "" {
@@ -592,7 +590,7 @@ func (s *Service) renderActiveAlerts(response rulesResponse) string {
 		out.add("Rules that fail to evaluate:")
 		for _, one := range broken {
 			line := fmt.Sprintf("%s: health %s", oneLine(one.name), one.health)
-			if message := clip(addressPattern.ReplaceAllString(one.lastError, "<address>"), maximumDescRunes); message != "" {
+			if message := excerpt(addressPattern.ReplaceAllString(one.lastError, "<address>"), maximumDescRunes); message != "" {
 				line += ", " + message
 			}
 			out.add("%s", line)
@@ -648,10 +646,10 @@ func (s *Service) renderAlertHistory(found []annotation, w window) string {
 		layout = longClockLayout
 	}
 	for _, one := range found {
-		line := fmt.Sprintf("%s %s: %s → %s", time.UnixMilli(one.Time).In(s.location).Format(layout), clip(one.AlertName, maximumDescRunes), oneLine(one.PrevState), oneLine(one.NewState))
+		line := fmt.Sprintf("%s %s: %s → %s", time.UnixMilli(one.Time).In(s.location).Format(layout), excerpt(one.AlertName, maximumDescRunes), oneLine(one.PrevState), oneLine(one.NewState))
 		for _, tag := range one.Tags {
 			if severity, ok := strings.CutPrefix(tag, "severity:"); ok {
-				line += " [" + clip(severity, 40) + "]"
+				line += " [" + excerpt(severity, 40) + "]"
 				break
 			}
 		}

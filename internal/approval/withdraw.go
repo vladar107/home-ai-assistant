@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
@@ -172,5 +173,5 @@ func (s *Service) showWithdrawal(ctx context.Context, bundle []Record, withdrawn
 func itemLabel(record Record) string {
 	summary := strings.TrimPrefix(strings.TrimPrefix(record.Summary, IntentWarning+"\n\n"), DirectIntentWarning+"\n\n")
 	line, _, _ := strings.Cut(summary, "\n")
-	return record.Tool + ": " + truncateRunes(line, withdrawnLabelRunes)
+	return record.Tool + ": " + clip.Runes(line, withdrawnLabelRunes)
 }

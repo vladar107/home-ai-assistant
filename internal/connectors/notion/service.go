@@ -13,8 +13,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/integration"
 	"github.com/vladar107/home-ai-assistant/internal/module"
 )
@@ -218,9 +218,9 @@ func (s *Service) verify(ctx context.Context, principalID, token string) (integr
 		PrincipalID:   principalID,
 		Integration:   Integration,
 		TokenKind:     bot.TokenKind(),
-		WorkspaceID:   truncateRunes(bot.WorkspaceID, 128),
-		WorkspaceName: truncateRunes(bot.WorkspaceName, maximumNameLen),
-		BotName:       truncateRunes(bot.Name, maximumNameLen),
+		WorkspaceID:   clip.Bytes(bot.WorkspaceID, 128),
+		WorkspaceName: clip.Runes(bot.WorkspaceName, maximumNameLen),
+		BotName:       clip.Runes(bot.Name, maximumNameLen),
 	}, nil
 }
 
@@ -319,12 +319,4 @@ func statusOf(record integration.Connection) Status {
 		BotName:       record.BotName,
 		WritesEnabled: record.WritesEnabled,
 	}
-}
-
-func truncateRunes(text string, limit int) string {
-	if utf8.RuneCountInString(text) <= limit {
-		return text
-	}
-	runes := []rune(text)
-	return string(runes[:limit])
 }

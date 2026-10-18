@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/transit"
 )
 
@@ -172,7 +173,7 @@ func buildIndex(tables gtfsTables) (*stopIndex, error) {
 		if code := stops.get(record, "stop_code"); digitsOnly(code) {
 			group.codes = append(group.codes, code)
 			if platform := stops.get(record, "platform_code"); platform != "" {
-				group.platforms[code] = clip(platform, 10)
+				group.platforms[code] = clip.Bytes(platform, 10)
 			}
 		}
 		lat, latErr := strconv.ParseFloat(stops.get(record, "stop_lat"), 64)
@@ -376,12 +377,12 @@ func (i *stopIndex) nearest(lat, lon, radius float64) []nearbyStop {
 // resolutionError is the sentence the model sees when a name does not pick out one stop.
 func resolutionError(role, query string, match resolution) string {
 	if len(match.candidates) == 0 {
-		return fmt.Sprintf("No bus stop matches %s %q; ask the user for the stop's name, written as \"Town, Stop\".", role, clip(query, maximumStopRunes))
+		return fmt.Sprintf("No bus stop matches %s %q; ask the user for the stop's name, written as \"Town, Stop\".", role, clip.Runes(query, maximumStopRunes))
 	}
 	names := make([]string, 0, len(match.candidates))
 	for _, candidate := range match.candidates {
 		names = append(names, candidate.name)
 	}
 	return fmt.Sprintf("%s %q matches several bus stops: %s. Call again with the full name of the one the user means, or ask them.",
-		role, clip(query, maximumStopRunes), strings.Join(names, "; "))
+		role, clip.Runes(query, maximumStopRunes), strings.Join(names, "; "))
 }

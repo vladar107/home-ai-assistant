@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
@@ -152,7 +153,7 @@ func (s *Service) TurnReports(ctx context.Context, principalID string, turn conv
 	}
 	if found {
 		parts = append(parts, fmt.Sprintf("The user is replying to this report (report id %s) from %s, sent %s:\n%s",
-			replied.ID, reportSource(replied), s.formatReportTime(replied.DeliveredAt), truncateRunes(replied.Text, maximumNoticeRunes)))
+			replied.ID, reportSource(replied), s.formatReportTime(replied.DeliveredAt), clip.Runes(replied.Text, maximumNoticeRunes)))
 		outside = outside || replied.External
 		private = private || replied.Private
 	}
@@ -182,7 +183,7 @@ func reportSource(report Report) string {
 
 // reportExcerpt is the start of a report on one line.
 func reportExcerpt(text string) string {
-	return truncateRunes(strings.Join(strings.Fields(text), " "), reportExcerptRunes)
+	return clip.Runes(strings.Join(strings.Fields(text), " "), reportExcerptRunes)
 }
 
 func (s *Service) formatReportTime(at time.Time) string {

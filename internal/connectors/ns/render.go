@@ -5,8 +5,8 @@ import (
 	"math"
 	"strings"
 	"time"
-	"unicode/utf8"
 
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/transit"
 )
 
@@ -192,7 +192,7 @@ func (v view) timed(planned, actual string) string {
 }
 
 func track(planned, actual string) string {
-	planned, actual = clip(planned, 10), clip(actual, 10)
+	planned, actual = clip.Bytes(planned, 10), clip.Bytes(actual, 10)
 	switch {
 	case actual != "" && planned != "" && actual != planned:
 		return fmt.Sprintf("track %s (changed from %s)", actual, planned)
@@ -524,7 +524,7 @@ func renderDisruptions(v view, scope string, at time.Time, entries []disruption)
 			fmt.Fprintf(&builder, "%d more not shown.\n", len(selected)-maximumDisruptions)
 			break
 		}
-		builder.WriteString(clip(renderDisruption(entry, spans[index]), maximumDisruptionBytes))
+		builder.WriteString(clip.Bytes(renderDisruption(entry, spans[index]), maximumDisruptionBytes))
 		builder.WriteString("\n")
 	}
 	return strings.TrimRight(builder.String(), "\n")
@@ -571,18 +571,7 @@ func sentence(value string) string {
 // text collapses the whitespace in one field of NS free text, which is data from outside, and
 // bounds it.
 func text(value string) string {
-	return clip(strings.Join(strings.Fields(value), " "), maximumTextBytes)
-}
-
-func clip(value string, limit int) string {
-	if len(value) <= limit {
-		return value
-	}
-	cut := limit
-	for cut > 0 && !utf8.RuneStart(value[cut]) {
-		cut--
-	}
-	return value[:cut]
+	return clip.Bytes(strings.Join(strings.Fields(value), " "), maximumTextBytes)
 }
 
 func sameDay(a, b time.Time) bool {

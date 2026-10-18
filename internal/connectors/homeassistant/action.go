@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -42,7 +43,7 @@ func (s *Service) proposeAction(ctx context.Context, principalID, name string, t
 	if device, ok := arguments["name"].(string); ok && strings.TrimSpace(device) != "" {
 		target = description + " " + device
 	}
-	intent := approval.Intent{Verb: "run", TargetKind: "home action", TargetName: truncateRunes(target, maximumIntentRunes)}
+	intent := approval.Intent{Verb: "run", TargetKind: "home action", TargetName: clip.Runes(target, maximumIntentRunes)}
 	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: toolAction, Arguments: encoded, Summary: summary, Intent: intent}); err != nil {
 		if approval.Refused(err) {
 			return failure(err)
@@ -95,14 +96,6 @@ func (s *Service) executeApprovedAction(ctx context.Context, record approval.Rec
 		text = "Done."
 	}
 	return approval.Outcome{Text: text}, nil
-}
-
-func truncateRunes(text string, limit int) string {
-	runes := []rune(text)
-	if len(runes) <= limit {
-		return text
-	}
-	return string(runes[:limit])
 }
 
 // renderArguments shows the arguments as the user will confirm them, one field per line in key

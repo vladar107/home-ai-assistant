@@ -9,6 +9,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 )
 
 const (
@@ -55,7 +57,7 @@ func ReminderText(config json.RawMessage) string {
 // ReminderName is the job name of a reminder: its text on one line, shortened to fit.
 func ReminderName(text string) string {
 	name := strings.Join(strings.FieldsFunc(text, unicode.IsControl), " ")
-	return truncateRunes(strings.Join(strings.Fields(name), " "), maximumNameRunes-1)
+	return clip.Runes(strings.Join(strings.Fields(name), " "), maximumNameRunes)
 }
 
 type reminder struct {

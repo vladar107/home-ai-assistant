@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 )
 
 const (
@@ -56,7 +58,7 @@ func entriesHeading(sorts json.RawMessage) string {
 		if direction := strings.TrimSpace(entry.Direction); direction != "" {
 			key += " " + direction
 		}
-		keys = append(keys, truncateText(key, 100))
+		keys = append(keys, clip.Runes(key, 100))
 	}
 	if len(keys) == 0 {
 		return "Data source entries (API order, not the view's order; query with sorts for a defined order)"
@@ -222,7 +224,7 @@ func renderPropertyLines(properties map[string]json.RawMessage, summary bool) []
 		if value == "" {
 			value = "(empty)"
 		}
-		lines = append(lines, name+": "+truncateText(value, maximumPropertyText))
+		lines = append(lines, name+": "+clip.Runes(value, maximumPropertyText))
 	}
 	return lines
 }
@@ -391,7 +393,7 @@ func renderSchema(properties map[string]json.RawMessage) string {
 // schemaOptions lists the option names a select, status, or multi-select property accepts,
 // separated by a pipe because an option name may hold a comma.
 func schemaOptions(propertyType string, raw json.RawMessage) string {
-	return truncateText(strings.Join(schemaOptionNames(propertyType, raw), " | "), maximumOptionsText)
+	return clip.Runes(strings.Join(schemaOptionNames(propertyType, raw), " | "), maximumOptionsText)
 }
 
 // schemaOptionNames returns the options of a select, status, or multi-select property, and nothing
@@ -519,19 +521,4 @@ func renderBlock(block Block, index int) string {
 		}
 		return "[" + block.Type + "]"
 	}
-}
-
-func truncateText(text string, limit int) string {
-	if len(text) <= limit {
-		return text
-	}
-	cut := limit
-	for cut > 0 && !isRuneStart(text[cut]) {
-		cut--
-	}
-	return text[:cut] + "…"
-}
-
-func isRuneStart(b byte) bool {
-	return b&0xC0 != 0x80
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/turnstate"
 )
@@ -47,7 +48,7 @@ func (h *ToolHinter) Hint(ctx context.Context, principalID, message string, earl
 		if tool.Name == hintNone {
 			continue
 		}
-		options[tool.Name] = truncateRunes(tool.Description, hintDescriptionMax)
+		options[tool.Name] = clip.Runes(tool.Description, hintDescriptionMax)
 	}
 	state := map[string]Redacted{"message": Redact(message)}
 	if exchange := redactExchange(earlier); !exchange.Empty() {
@@ -72,12 +73,4 @@ func (h *ToolHinter) Hint(ctx context.Context, principalID, message string, earl
 	}
 	h.client.recordDecision(ctx, principalID, "hint", "hinted")
 	return name, true, nil
-}
-
-func truncateRunes(text string, limit int) string {
-	runes := []rune(text)
-	if len(runes) <= limit {
-		return text
-	}
-	return string(runes[:limit])
 }

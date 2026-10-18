@@ -21,6 +21,7 @@ import (
 	"time"
 	"unicode/utf16"
 
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
@@ -758,7 +759,7 @@ func (s *Service) checkIntent(ctx context.Context, record Record) {
 	if record.Mode == ModeDirect {
 		warning = DirectIntentWarning
 	}
-	summary := truncateRunes(warning+"\n\n"+record.Summary, maximumSummaryRunes)
+	summary := clip.Runes(warning+"\n\n"+record.Summary, maximumSummaryRunes)
 	if err := s.repository.SetApprovalSummary(ctx, record.ID, summary); err != nil {
 		s.logger.WarnContext(ctx, "approval.intent_warning.unsaved", "principal_id", record.PrincipalID, "approval_id", record.ID)
 	}
@@ -1206,7 +1207,7 @@ func finalText(record Record) string {
 
 // statusLine says where a record stands, with its outcome cut to limit runes.
 func statusLine(record Record, limit int) string {
-	outcome := truncateRunes(record.Outcome, limit)
+	outcome := clip.Runes(record.Outcome, limit)
 	switch record.Status {
 	case StatusPending:
 		return "Expires in " + fmtMinutes(record.ExpiresAt.Sub(record.CreatedAt)) + "."
@@ -1328,14 +1329,6 @@ func newID() (string, error) {
 		return "", fmt.Errorf("generate approval identifier: %w", err)
 	}
 	return hex.EncodeToString(value[:]), nil
-}
-
-func truncateRunes(text string, limit int) string {
-	runes := []rune(text)
-	if len(runes) <= limit {
-		return text
-	}
-	return string(runes[:limit]) + "…"
 }
 
 func utf16Units(text string) int {

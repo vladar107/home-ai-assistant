@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 	"github.com/vladar107/home-ai-assistant/internal/transit"
 )
@@ -362,7 +363,7 @@ func (s *Service) findPlace(ctx context.Context, principalID string, index *stop
 		return place{}, &result
 	}
 	if !ok {
-		result := errorResult(fmt.Sprintf("No stop or place matches %s %q; ask the user where exactly they mean.", role, clip(query, maximumStopRunes)))
+		result := errorResult(fmt.Sprintf("No stop or place matches %s %q; ask the user where exactly they mean.", role, clip.Runes(query, maximumStopRunes)))
 		return place{}, &result
 	}
 	return found, nil
@@ -537,7 +538,7 @@ func parenthesised(value string) string {
 	if value == "" {
 		return ""
 	}
-	return "(" + clip(value, 80) + ")"
+	return "(" + clip.Bytes(value, 80) + ")"
 }
 
 // parseDateTime reads a Dutch local time, defaulting to now; explicit tells which. Either way it is

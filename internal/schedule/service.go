@@ -1042,10 +1042,3 @@ func newRunID() (string, error) {
 	}
 	return hex.EncodeToString(value[:]), nil
 }
-
-func truncateRunes(text string, limit int) string {
-	if utf8.RuneCountInString(text) <= limit {
-		return text
-	}
-	return string([]rune(text)[:limit]) + "…"
-}

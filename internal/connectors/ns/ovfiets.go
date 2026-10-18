@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -171,7 +172,7 @@ func hoursText(hours []ovfietsHours, now time.Time) string {
 		if entry.DayOfWeek != today {
 			continue
 		}
-		start, end := clip(text(entry.StartTime), 5), clip(text(entry.EndTime), 5)
+		start, end := clip.Bytes(text(entry.StartTime), 5), clip.Bytes(text(entry.EndTime), 5)
 		switch {
 		case start == "00:00" && end == "24:00":
 			return "open all day today"
