@@ -42,6 +42,7 @@ var movieReadDefinitions = []tools.Definition{
 		Risk:        tools.RiskRead,
 		Activity:    tools.ActivityNotion,
 		Private:     true,
+		ThirdParty:  true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"data_source_id":{"type":"string","description":"The movie table's data source or database ID from an earlier result."}},` +
 			`"required":["data_source_id"],"additionalProperties":false}`),
