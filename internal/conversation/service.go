@@ -611,6 +611,11 @@ func (s *Service) runWorker(ctx context.Context, lane Lane, wake <-chan struct{}
 					if ctx.Err() != nil {
 						return
 					}
+					// Only /cancel, /new or a disconnect cancels a delivery, and each ends the request
+					// in the store first, so the lane moves straight on to its next request.
+					if errors.Is(err, context.Canceled) {
+						continue
+					}
 					s.logWorkerError(ctx, principalID, "deliver_response")
 					if !wait(ctx, deliveryRetryDelay) {
 						return
