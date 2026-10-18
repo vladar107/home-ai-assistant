@@ -755,7 +755,7 @@ routes after jobs and watches, read-only, with a Delete button each.
 | Direct APIs rather than MCP | Fewer layers; MCP only where it adds concrete value |
 | Native source search rather than RAG | Every source already has search; no evidence an index is needed |
 | OpenTelemetry → Alloy → Prometheus and Tempo, Grafana on top | Metrics and traces from day one within the NAS memory budget |
-| Tag-pinned manual deploys; CI builds the image but has no NAS access | The operator stays the only path to production, and each deploy records its digest |
+| Manual deploys of a tag resolved to its digest on the Mac; CI builds the image but has no NAS access | The operator stays the only path to production, and each deploy runs and records the digest it resolved |
 | Secrets in macOS Keychain, only the needed copies on the NAS | Recovery stays with the operator; secrets stay out of Git, CI, images, and env values |
 
 Not built: photo-library, network-controller, and GitHub connectors; local

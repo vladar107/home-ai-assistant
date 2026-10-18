@@ -1,6 +1,6 @@
 # 0101 — Scheduling latency, shutdown robustness and digest-pinned deploys
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
@@ -46,8 +46,11 @@ tag.
   scheduler slot was not chosen, because it would reach into the conversation
   service's lane handling from the scheduler.
 - A run's slot is freed as soon as it has executed, before its report is
-  delivered, and freeing it wakes the scheduler, so a run held back by the bound
-  starts then rather than at the next tick.
+  delivered. When the run produced a report, freeing its slot wakes the
+  scheduler, so a run held back by the bound starts then rather than at the next
+  tick. A run that failed to execute, or ended quiet or skipped, wakes nothing:
+  an immediate tick after a store or chat lookup failure would retry the same
+  run into the same failure in a tight loop.
 - A reverse-geocode failure is remembered for one minute for every point, not
   only the failed grid cell: an outage affects all points, and a moving live
   location would otherwise pay the timeout again in each new cell. A failure
@@ -74,7 +77,8 @@ tag.
 
 1. Add a `Light` flag to job types, set it for reminders, and make the
    scheduler's dispatch skip the bounds for light runs, keep one bounded run per
-   principal, free the slot after execution, and wake itself when it does.
+   principal, free the slot after execution, and wake itself when a run
+   reported.
 2. Remember a failed reverse geocode for a minute in the places connector's
    cache.
 3. Remove the delivery retry wait when the delivery was cancelled.

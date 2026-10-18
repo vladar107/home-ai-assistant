@@ -130,6 +130,13 @@ Once per NAS, log Docker in to GHCR with a `read:packages` token:
 ssh -tt home-nas 'sudo docker login ghcr.io'
 ```
 
+Once per Mac, let the GitHub CLI read packages, so the deployment can resolve a
+tag to its digest:
+
+```sh
+gh auth refresh -h github.com -s read:packages
+```
+
 Push `main`, wait for the "Production image" workflow, stop the local poller, then
 deploy:
 
@@ -139,10 +146,13 @@ gh run list --workflow=image.yml --commit "$(git rev-parse HEAD)"
 scripts/deploy-app-nas home-nas deploy/.env.nas
 ```
 
-The script refuses uncommitted or unpushed state. It writes the Compose file and
-`runtime.env`, copies the users and NAS roots files, and syncs secrets from
-Keychain. It then pulls the commit's release tag, verifies the digest, runs
-`docker compose up -d`, and appends tag, digest, and commit to `deployments.log`.
+The script refuses uncommitted or unpushed state. Before it touches the NAS, it
+resolves the commit's release tag to its digest in GHCR from the Mac and stops if
+the tag is not published. It writes the Compose file and `runtime.env`, which pins
+`HOME_AGENT_IMAGE_DIGEST`, copies the users and NAS roots files, and syncs secrets
+from Keychain. It then pulls that digest, runs `docker compose up -d`, and appends
+tag, digest, and commit to `deployments.log`. A tag that moves after the
+resolution does not change what runs.
 
 ```sh
 ssh -tt home-nas 'cd /volume1/docker/home-ai-assistant/deploy && sudo docker compose --env-file runtime.env -f compose.app.yaml ps'
@@ -304,13 +314,14 @@ ssh -tt home-nas 'cd /volume1/docker/home-ai-assistant/deploy && sudo docker com
 Logs are JSON with trace and span IDs. They never contain message text,
 usernames, Telegram IDs, or tokens, and rotate at 10 MB × 5 files.
 
-To roll back, choose a tag from `deployments.log` (or `scripts/image-tag <commit>`)
-and pin it:
+To roll back, choose a line from `deployments.log`, which gives the tag and the
+`<repository>@sha256:<digest>` it ran, and pin both:
 
 ```sh
 ssh -tt home-nas
 cd /volume1/docker/home-ai-assistant/deploy
-sed -i 's|^HOME_AGENT_IMAGE_TAG=.*|HOME_AGENT_IMAGE_TAG=<tag>|' runtime.env
+sed -i -e 's|^HOME_AGENT_IMAGE_TAG=.*|HOME_AGENT_IMAGE_TAG=<tag>|' \
+  -e 's|^HOME_AGENT_IMAGE_DIGEST=.*|HOME_AGENT_IMAGE_DIGEST=sha256:<digest>|' runtime.env
 sudo docker compose --env-file runtime.env -f compose.app.yaml pull home-agent
 sudo docker compose --env-file runtime.env -f compose.app.yaml up -d home-agent
 ```

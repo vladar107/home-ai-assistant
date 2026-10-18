@@ -118,6 +118,32 @@ git -C "$repo_root" merge-base --is-ancestor HEAD origin/main || {
 revision=$(git -C "$repo_root" rev-parse HEAD)
 release_tag=$("$repo_root/scripts/image-tag" "$revision")
 tag_ref=$HOME_AGENT_IMAGE_REPOSITORY:$release_tag
+
+# The tag is resolved to its digest here, before anything reaches the NAS, and the NAS pulls and
+# runs only that digest, so a tag that moves later cannot change what this deploy runs. The
+# tokens go to curl on stdin, never on its command line.
+scope_hint='the gh token needs the read:packages scope: gh auth refresh -h github.com -s read:packages'
+image_path=${HOME_AGENT_IMAGE_REPOSITORY#ghcr.io/}
+github_token=$(gh auth token 2>/dev/null) || { echo "log in to GitHub first with gh auth login; $scope_hint" >&2; exit 2; }
+registry_token=$(printf 'user = "token:%s"\n' "$github_token" \
+  | curl -fsS -K - "https://ghcr.io/token?service=ghcr.io&scope=repository:$image_path:pull" \
+  | sed -n 's/.*"token":"\([^"]*\)".*/\1/p') || registry_token=
+[[ -n $registry_token ]] || { echo "could not get a GHCR pull token for $HOME_AGENT_IMAGE_REPOSITORY; $scope_hint" >&2; exit 2; }
+manifest_types=application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json
+manifest_headers=$(printf 'header = "Authorization: Bearer %s"\n' "$registry_token" \
+  | curl -sS -K - -I -H "Accept: $manifest_types" -w 'status=%{http_code}\n' "https://ghcr.io/v2/$image_path/manifests/$release_tag") || {
+  echo "could not reach GHCR to resolve $tag_ref" >&2; exit 2;
+}
+case $(sed -n 's/^status=//p' <<<"$manifest_headers") in
+  200) ;;
+  404) echo "$tag_ref is not published; check: gh run list --workflow=image.yml --commit $revision" >&2; exit 2 ;;
+  *) echo "GHCR refused to resolve $tag_ref; $scope_hint" >&2; exit 2 ;;
+esac
+image_digest=$(tr -d '\r' <<<"$manifest_headers" | awk 'tolower($1) == "docker-content-digest:" { print $2; exit }')
+[[ $image_digest =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "GHCR returned no digest for $tag_ref" >&2; exit 2; }
+image_ref=$HOME_AGENT_IMAGE_REPOSITORY@$image_digest
+echo "Resolved $tag_ref to $image_ref" >&2
+
 deploy_dir=$HOME_AGENT_NAS_ROOT/deploy
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/home-agent-deploy.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
@@ -135,11 +161,11 @@ awk '
   /^[[:space:]]*#/ || /^[[:space:]]*$/ { print; next }
   /^[A-Za-z_][A-Za-z0-9_]*=/ {
     key=$0; sub(/=.*/, "", key)
-    if (key == "HOME_AGENT_IMAGE" || key == "HOME_AGENT_IMAGE_TAG" || key == "HOME_AGENT_VERSION" || key == "HOME_AGENT_TELEGRAM_USER_ID" || key == "HOME_AGENT_TELEGRAM_USERS_SOURCE" || key == "HOME_AGENT_NAS_ROOTS_SOURCE") next
+    if (key == "HOME_AGENT_IMAGE" || key == "HOME_AGENT_IMAGE_TAG" || key == "HOME_AGENT_IMAGE_DIGEST" || key == "HOME_AGENT_VERSION" || key == "HOME_AGENT_TELEGRAM_USER_ID" || key == "HOME_AGENT_TELEGRAM_USERS_SOURCE" || key == "HOME_AGENT_NAS_ROOTS_SOURCE") next
   }
   { print }
 ' "$env_file" > "$tmp/runtime.env"
-printf 'HOME_AGENT_IMAGE_TAG=%s\nHOME_AGENT_TELEGRAM_USERS_FILE=/etc/home-agent/telegram-users.json\n' "$release_tag" >> "$tmp/runtime.env"
+printf 'HOME_AGENT_IMAGE_TAG=%s\nHOME_AGENT_IMAGE_DIGEST=%s\nHOME_AGENT_TELEGRAM_USERS_FILE=/etc/home-agent/telegram-users.json\n' "$release_tag" "$image_digest" >> "$tmp/runtime.env"
 chmod 600 "$tmp/runtime.env"
 scp -O -q "$tmp/runtime.env" "$host:$deploy_dir/.runtime.env.deploy"
 ssh -o BatchMode=yes "$host" "chmod 600 '$deploy_dir/.runtime.env.deploy' && mv -f '$deploy_dir/.runtime.env.deploy' '$deploy_dir/runtime.env'"
@@ -155,21 +181,18 @@ sudo chmod 700 '$HOME_AGENT_NAS_ROOT' '$deploy_dir' '$HOME_AGENT_CONFIG_PATH' '$
 test -f '$HOME_AGENT_CONFIG_PATH/telegram-users.json' && test ! -L '$HOME_AGENT_CONFIG_PATH/telegram-users.json' && chmod 600 '$HOME_AGENT_CONFIG_PATH/telegram-users.json'
 cd '$deploy_dir'
 sudo docker network inspect home-observability >/dev/null
-if ! sudo docker pull '$tag_ref'; then
-  echo 'could not pull $tag_ref' >&2
-  echo 'if the image is not published yet, check: gh run list --workflow=image.yml --commit $revision' >&2
+if ! sudo docker pull '$image_ref'; then
+  echo 'could not pull $image_ref' >&2
   echo 'if the registry login expired, run on the NAS: sudo docker login ghcr.io' >&2
   exit 1
 fi
-digest=\$(sudo docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' '$tag_ref' | grep -m1 '^$HOME_AGENT_IMAGE_REPOSITORY@sha256:' || true)
-[ -n "\$digest" ] || { echo 'no $HOME_AGENT_IMAGE_REPOSITORY digest recorded for $tag_ref' >&2; exit 1; }
 sudo docker compose -p home-ai-assistant --env-file runtime.env ${compose_files[*]} up -d home-agent
 sudo docker compose -p home-ai-assistant --env-file runtime.env ${compose_files[*]} ps
-printf '%s %s %s %s\\n' "\$(date -u +%Y-%m-%dT%H:%M:%SZ)" '$release_tag' "\$digest" '$revision' >> '$HOME_AGENT_NAS_ROOT/deployments.log'
+printf '%s %s %s %s\\n' "\$(date -u +%Y-%m-%dT%H:%M:%SZ)" '$release_tag' '$image_ref' '$revision' >> '$HOME_AGENT_NAS_ROOT/deployments.log'
 chmod 600 '$HOME_AGENT_NAS_ROOT/deployments.log'
-echo "deployed \$digest"
+echo 'deployed $image_ref'
 REMOTE
 )
 ssh -tt "$host" "$remote_command"
 
-echo "Deployed $tag_ref from $deploy_dir on $host; the resolved digest is recorded in $HOME_AGENT_NAS_ROOT/deployments.log." >&2
+echo "Deployed $tag_ref as $image_ref from $deploy_dir on $host; it is recorded in $HOME_AGENT_NAS_ROOT/deployments.log." >&2
