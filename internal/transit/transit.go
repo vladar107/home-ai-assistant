@@ -1,6 +1,7 @@
-// Package transit is the shared vocabulary of exact-departure checks: one normalized status for
-// each planned train or bus departure, worded the same wherever it is shown, so a reply can copy
-// it instead of describing the departure in its own words.
+// Package transit is the shared vocabulary of the train and bus services: one normalized status for
+// each planned departure, worded the same wherever it is shown, so a reply can copy it instead of
+// describing the departure in its own words; the interfaces watches, routes, and the day card ask
+// the services through; and what the services share in matching names. It imports no connector.
 package transit
 
 import (

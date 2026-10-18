@@ -20,72 +20,48 @@ const (
 	checkStopTimes = 20
 )
 
-// RefusalError is a check the caller is told instead, such as buses being off for the principal or
-// a stop name that fits several stops.
-type RefusalError struct {
-	Text string
-	// Unavailable marks a refusal about the services themselves rather than about the query.
-	Unavailable bool
-}
-
-func (e *RefusalError) Error() string { return e.Text }
-
-// DepartureQuery asks how fixed planned departures of a line leave one stop on one day.
-type DepartureQuery struct {
-	// Stop is a stop name or timing point code; empty means the household's home stop.
-	Stop string
-	// Line is the line's public number; empty takes any line leaving at the planned minute.
-	Line string
-	// Towards narrows the line to one direction by a part of its destination's name, for a stop
-	// served both ways.
-	Towards string
-	// Date's calendar day is the day of the departures, whatever its location.
-	Date  time.Time
-	Times []transit.Clock
-}
-
 // CheckDepartures checks each planned departure under the principal's own buses switch: the call
 // at the stop planned for exactly that minute, live from OVapi within the next hour and otherwise
 // from the Transitous timetable, never a nearby one.
-func (s *Service) CheckDepartures(ctx context.Context, principalID string, query DepartureQuery) ([]transit.Departure, error) {
+func (s *Service) CheckDepartures(ctx context.Context, principalID string, query transit.DepartureQuery) ([]transit.Departure, error) {
 	if len(query.Times) == 0 || len(query.Times) > MaximumCheckedDepartures {
-		return nil, &RefusalError{Text: fmt.Sprintf("give 1 to %d planned departures.", MaximumCheckedDepartures)}
+		return nil, &transit.RefusalError{Text: fmt.Sprintf("give 1 to %d planned departures.", MaximumCheckedDepartures)}
 	}
 	status, err := s.Status(ctx, principalID)
 	if err != nil {
 		return nil, err
 	}
 	if !status.Enabled {
-		return nil, &RefusalError{Text: DisabledText, Unavailable: true}
+		return nil, &transit.RefusalError{Text: DisabledText, Unavailable: true, Disabled: true}
 	}
 	index, failure := s.index(ctx, principalID)
 	if failure != nil {
-		return nil, &RefusalError{Text: failure.Text, Unavailable: true}
+		return nil, &transit.RefusalError{Text: failure.Text, Unavailable: true}
 	}
-	group, failure := s.findStop(index, "stop", query.Stop, true)
+	group, failure := s.findStop(index, "stop", query.From, true)
 	if failure != nil {
-		return nil, &RefusalError{Text: failure.Text}
+		return nil, &transit.RefusalError{Text: failure.Text}
 	}
 	return s.checkDepartures(ctx, principalID, group, query.Line, query.Towards, query.Date, query.Times), nil
 }
 
-// ResolveStop checks that a name means one stop, under the principal's own buses switch, and
-// returns the stop's name.
-func (s *Service) ResolveStop(ctx context.Context, principalID, query string) (string, error) {
+// ResolvePlace checks that a name means one stop, under the principal's own buses switch, and
+// returns the stop's name; role names the field in a refusal, such as "stop".
+func (s *Service) ResolvePlace(ctx context.Context, principalID, role, query string) (string, error) {
 	status, err := s.Status(ctx, principalID)
 	if err != nil {
 		return "", err
 	}
 	if !status.Enabled {
-		return "", &RefusalError{Text: DisabledText, Unavailable: true}
+		return "", &transit.RefusalError{Text: DisabledText, Unavailable: true, Disabled: true}
 	}
 	index, failure := s.index(ctx, principalID)
 	if failure != nil {
-		return "", &RefusalError{Text: failure.Text, Unavailable: true}
+		return "", &transit.RefusalError{Text: failure.Text, Unavailable: true}
 	}
-	group, failure := s.findStop(index, "stop", query, false)
+	group, failure := s.findStop(index, role, query, false)
 	if failure != nil {
-		return "", &RefusalError{Text: failure.Text}
+		return "", &transit.RefusalError{Text: failure.Text}
 	}
 	return group.name, nil
 }
@@ -237,8 +213,8 @@ func lineMatches(want, number string) bool {
 }
 
 func towardsMatches(want, destination string) bool {
-	want = normalize(want)
-	return want == "" || strings.Contains(normalize(destination), want)
+	want = transit.Normalize(want)
+	return want == "" || strings.Contains(transit.Normalize(destination), want)
 }
 
 func renderDepartureCheck(v view, group *stopGroup, departures []transit.Departure, notices noticeList) string {

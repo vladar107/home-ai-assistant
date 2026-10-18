@@ -9,8 +9,6 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
-	"github.com/vladar107/home-ai-assistant/internal/connectors/bus"
-	"github.com/vladar107/home-ai-assistant/internal/connectors/ns"
 	"github.com/vladar107/home-ai-assistant/internal/transit"
 )
 
@@ -29,18 +27,6 @@ type Repository interface {
 	DeleteUnchangedRoute(ctx context.Context, principalID, routeID string, updatedAt time.Time) (bool, error)
 }
 
-// Trains is the NS connector as routes use it.
-type Trains interface {
-	ResolveStation(ctx context.Context, principalID, role, query string) (string, error)
-	CheckDepartures(ctx context.Context, principalID string, query ns.DepartureQuery) ([]transit.Departure, error)
-}
-
-// Buses is the bus connector as routes use it.
-type Buses interface {
-	ResolveStop(ctx context.Context, principalID, query string) (string, error)
-	CheckDepartures(ctx context.Context, principalID string, query bus.DepartureQuery) ([]transit.Departure, error)
-}
-
 // Proposer is the core approval service as the routes service sees it.
 type Proposer interface {
 	Propose(context.Context, string, approval.Proposal) (approval.Record, error)
@@ -51,16 +37,16 @@ type Config struct {
 	// Location is the household's time zone, for today and the arrival target.
 	Location *time.Location
 	// Trains and Buses check train and bus legs; nil leaves that kind of leg out.
-	Trains Trains
-	Buses  Buses
+	Trains transit.Departures
+	Buses  transit.Departures
 	Now    func() time.Time
 }
 
 type Service struct {
 	repository Repository
 	proposer   Proposer
-	trains     Trains
-	buses      Buses
+	trains     transit.Departures
+	buses      transit.Departures
 	location   *time.Location
 	now        func() time.Time
 	logger     *slog.Logger
@@ -148,6 +134,9 @@ type LegResult struct {
 	Start, End time.Time
 	// Failed reports that a departure of the leg could not be checked.
 	Failed bool
+	// Disabled reports that the leg's service refused because the owner switched it off, so none
+	// of its departures was checked.
+	Disabled bool
 	// Status is the leg's normalized status phrase, which replies copy word for word.
 	Status string
 	Note   string
@@ -217,7 +206,7 @@ func (s *Service) Check(ctx context.Context, principalID, name string, date time
 			result.Legs = append(result.Legs, item)
 			continue
 		}
-		if item.Departures, item.Note, err = s.checkLeg(ctx, principalID, leg, day); err != nil {
+		if item.Departures, item.Disabled, item.Note, err = s.checkLeg(ctx, principalID, leg, day); err != nil {
 			return Result{}, err
 		}
 		for _, departure := range item.Departures {
@@ -340,53 +329,51 @@ func listNames(routes []Route) string {
 }
 
 // checkLeg checks a train or bus leg's fixed departures. A service that is not set up, turned
-// off, or refusing the leg makes each departure a failed check, so the other legs still answer.
-func (s *Service) checkLeg(ctx context.Context, principalID string, leg Leg, day time.Time) ([]transit.Departure, string, error) {
+// off, or refusing the leg makes each departure a failed check, so the other legs still answer;
+// disabled reports that the refusal was the owner's switch.
+func (s *Service) checkLeg(ctx context.Context, principalID string, leg Leg, day time.Time) ([]transit.Departure, bool, string, error) {
 	if len(leg.Departures) == 0 {
-		return nil, "No fixed departures are saved for this leg.", nil
+		return nil, false, "No fixed departures are saved for this leg.", nil
 	}
 	clocks := make([]transit.Clock, 0, len(leg.Departures))
 	for _, value := range leg.Departures {
 		clock, err := transit.ParseClock(value)
 		if err != nil {
-			return nil, "", err
+			return nil, false, "", err
 		}
 		clocks = append(clocks, clock)
 	}
 	var departures []transit.Departure
 	var err error
-	unavailable := ""
+	unavailable, disabled := "", false
 	from, to := leg.From, leg.To
 	switch {
 	case leg.Mode == ModeTrain && s.trains != nil:
-		departures, err = s.trains.CheckDepartures(ctx, principalID, ns.DepartureQuery{From: leg.From, To: leg.To, Via: leg.Via, Date: day, Times: clocks})
+		departures, err = s.trains.CheckDepartures(ctx, principalID, transit.DepartureQuery{From: leg.From, To: leg.To, Via: leg.Via, Date: day, Times: clocks})
 	case leg.Mode == ModeTrain:
 		unavailable = "Train information is not set up."
 	case s.buses != nil:
 		from, to = leg.Stop, ""
-		departures, err = s.buses.CheckDepartures(ctx, principalID, bus.DepartureQuery{Stop: leg.Stop, Line: leg.Line, Towards: leg.Towards, Date: day, Times: clocks})
+		departures, err = s.buses.CheckDepartures(ctx, principalID, transit.DepartureQuery{From: leg.Stop, Line: leg.Line, Towards: leg.Towards, Date: day, Times: clocks})
 	default:
 		from, to = leg.Stop, ""
 		unavailable = "Bus information is not set up."
 	}
-	var trainRefusal *ns.RefusalError
-	var busRefusal *bus.RefusalError
+	var refusal *transit.RefusalError
 	switch {
-	case errors.As(err, &trainRefusal):
-		unavailable = trainRefusal.Text
-	case errors.As(err, &busRefusal):
-		unavailable = busRefusal.Text
+	case errors.As(err, &refusal):
+		unavailable, disabled = refusal.Text, refusal.Disabled
 	case err != nil:
-		return nil, "", err
+		return nil, false, "", err
 	}
 	if unavailable == "" {
-		return departures, "", nil
+		return departures, false, "", nil
 	}
 	failed := make([]transit.Departure, 0, len(clocks))
 	for _, clock := range clocks {
 		failed = append(failed, transit.Departure{Planned: clock.On(day, s.location), From: from, To: to, Status: transit.StatusCheckFailed, Note: unavailable})
 	}
-	return failed, "", nil
+	return failed, disabled, "", nil
 }
 
 // take picks the first departure that runs and leaves no earlier than ready, when ready is known,

@@ -26,73 +26,62 @@ const (
 // that a later one with a transfer beats, and a longer change time lets it win again.
 var changeTimeSteps = []int{0, 10, 20, 30}
 
-// DepartureQuery asks how fixed planned departures between two stations run on one day.
-type DepartureQuery struct {
-	From string
-	To   string
-	// Via is an optional station to travel through.
-	Via string
-	// Date's calendar day is the day of the departures, whatever its location.
-	Date  time.Time
-	Times []transit.Clock
-}
-
 // CheckDepartures checks each planned departure under the principal's own trains switch: the trip
 // whose first train leaves From at exactly that time, never a nearby one. A departure NS could not
 // be asked about comes back as a failed check, so the others still answer.
-func (s *Service) CheckDepartures(ctx context.Context, principalID string, query DepartureQuery) ([]transit.Departure, error) {
+func (s *Service) CheckDepartures(ctx context.Context, principalID string, query transit.DepartureQuery) ([]transit.Departure, error) {
 	if len(query.Times) == 0 || len(query.Times) > MaximumCheckedDepartures {
-		return nil, &RefusalError{Text: fmt.Sprintf("give 1 to %d planned departures.", MaximumCheckedDepartures)}
+		return nil, &transit.RefusalError{Text: fmt.Sprintf("give 1 to %d planned departures.", MaximumCheckedDepartures)}
 	}
 	status, err := s.Status(ctx, principalID)
 	if err != nil {
 		return nil, err
 	}
 	if !status.Enabled {
-		return nil, &RefusalError{Text: DisabledText, Unavailable: true}
+		return nil, &transit.RefusalError{Text: DisabledText, Unavailable: true, Disabled: true}
 	}
 	list, failure := s.stationList(ctx, principalID)
 	if failure != nil {
-		return nil, &RefusalError{Text: failure.Text, Unavailable: true}
+		return nil, &transit.RefusalError{Text: failure.Text, Unavailable: true}
 	}
 	from, failure := pickStation(list, "from", query.From)
 	if failure != nil {
-		return nil, &RefusalError{Text: failure.Text}
+		return nil, &transit.RefusalError{Text: failure.Text}
 	}
 	to, failure := pickStation(list, "to", query.To)
 	if failure != nil {
-		return nil, &RefusalError{Text: failure.Text}
+		return nil, &transit.RefusalError{Text: failure.Text}
 	}
 	if from.code == to.code {
-		return nil, &RefusalError{Text: fmt.Sprintf("from and to are both %s.", from.name)}
+		return nil, &transit.RefusalError{Text: fmt.Sprintf("from and to are both %s.", from.name)}
 	}
 	var via station
 	hasVia := strings.TrimSpace(query.Via) != ""
 	if hasVia {
 		if via, failure = pickStation(list, "via", query.Via); failure != nil {
-			return nil, &RefusalError{Text: failure.Text}
+			return nil, &transit.RefusalError{Text: failure.Text}
 		}
 	}
 	return s.checkDepartures(ctx, principalID, from, to, via, hasVia, query.Date, query.Times), nil
 }
 
-// ResolveStation finds the one station a name means, under the principal's own trains switch, and
+// ResolvePlace finds the one station a name means, under the principal's own trains switch, and
 // returns its full name; role names the field in a refusal, such as "from".
-func (s *Service) ResolveStation(ctx context.Context, principalID, role, query string) (string, error) {
+func (s *Service) ResolvePlace(ctx context.Context, principalID, role, query string) (string, error) {
 	status, err := s.Status(ctx, principalID)
 	if err != nil {
 		return "", err
 	}
 	if !status.Enabled {
-		return "", &RefusalError{Text: DisabledText, Unavailable: true}
+		return "", &transit.RefusalError{Text: DisabledText, Unavailable: true, Disabled: true}
 	}
 	list, failure := s.stationList(ctx, principalID)
 	if failure != nil {
-		return "", &RefusalError{Text: failure.Text, Unavailable: true}
+		return "", &transit.RefusalError{Text: failure.Text, Unavailable: true}
 	}
 	found, failure := pickStation(list, role, query)
 	if failure != nil {
-		return "", &RefusalError{Text: failure.Text}
+		return "", &transit.RefusalError{Text: failure.Text}
 	}
 	return found.name, nil
 }
@@ -176,7 +165,7 @@ func atStation(at stop, want station) bool {
 	if at.StationCode != "" {
 		return strings.EqualFold(at.StationCode, want.code)
 	}
-	return slices.Contains(want.forms, normalize(at.Name))
+	return slices.Contains(want.forms, transit.Normalize(at.Name))
 }
 
 func departureFrom(base transit.Departure, item trip, changeTime int, location *time.Location) transit.Departure {
@@ -301,9 +290,9 @@ func (s *Service) boardFallback(ctx context.Context, principalID string, base tr
 }
 
 func serves(item departure, to, via station, hasVia bool) bool {
-	names := []string{normalize(item.Direction)}
+	names := []string{transit.Normalize(item.Direction)}
 	for _, stop := range item.RouteStations {
-		names = append(names, normalize(stop.MediumName))
+		names = append(names, transit.Normalize(stop.MediumName))
 	}
 	for _, name := range names {
 		if slices.Contains(to.forms, name) || (hasVia && slices.Contains(via.forms, name)) {

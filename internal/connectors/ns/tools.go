@@ -390,7 +390,7 @@ func (s *Service) view(at time.Time) view {
 }
 
 func (s *Service) stationList(ctx context.Context, principalID string) ([]station, *tools.Result) {
-	list, err := s.stations.load(ctx)
+	list, err := s.stations.Load(ctx)
 	if err != nil {
 		s.logger.InfoContext(ctx, "ns.stations.refresh_failed", "principal_id", principalID, "error_class", errorClass(err), "stale", list != nil)
 	}

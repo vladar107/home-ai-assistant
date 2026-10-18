@@ -32,7 +32,6 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/web"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/conversation/history"
-	"github.com/vladar107/home-ai-assistant/internal/daycard"
 	"github.com/vladar107/home-ai-assistant/internal/delivery"
 	"github.com/vladar107/home-ai-assistant/internal/exposure"
 	"github.com/vladar107/home-ai-assistant/internal/health"
@@ -54,6 +53,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/task"
 	"github.com/vladar107/home-ai-assistant/internal/telegram"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
+	"github.com/vladar107/home-ai-assistant/internal/transit"
 	"github.com/vladar107/home-ai-assistant/internal/trip"
 	"github.com/vladar107/home-ai-assistant/internal/turnstate"
 	"github.com/vladar107/home-ai-assistant/internal/watch"
@@ -458,13 +458,13 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		}
 		scheduler.SetTravel(tripService)
 		var nsService *ns.Service
-		var trains web.Trains
+		var trains transit.Trips
 		if a.cfg.NS.Enabled() {
 			nsService, err = ns.NewService(ns.Config{APIKey: a.cfg.NS.APIKey}, a.store, a.logger)
 			if err != nil {
 				return fmt.Errorf("initialize NS connector: %w", err)
 			}
-			trains = nsTrains{nsService}
+			trains = nsService
 		}
 		location, err := time.LoadLocation(a.cfg.Timezone)
 		if err != nil {
@@ -1112,7 +1112,15 @@ func registerWatchKinds(watches *watch.Service, trains *ns.Service, buses *bus.S
 	if trains == nil && buses == nil {
 		return nil
 	}
-	departures, err := watch.NewDepartureEvaluator(trains, buses)
+	// A nil connector must reach the evaluator as a nil interface, not a typed nil.
+	var trainDepartures, busDepartures transit.Departures
+	if trains != nil {
+		trainDepartures = trains
+	}
+	if buses != nil {
+		busDepartures = buses
+	}
+	departures, err := watch.NewDepartureEvaluator(trainDepartures, busDepartures)
 	if err != nil {
 		return fmt.Errorf("initialize departure watches: %w", err)
 	}
@@ -1136,62 +1144,4 @@ func registerWatchKinds(watches *watch.Service, trains *ns.Service, buses *bus.S
 		return fmt.Errorf("initialize disruption watches: %w", err)
 	}
 	return watches.Register(watch.KindDisruptions, disruptions)
-}
-
-// nsTrains lets the web connector's day card ask the NS connector for train statuses, so neither
-// connector depends on the other.
-type nsTrains struct {
-	service *ns.Service
-}
-
-var trainLevels = map[ns.Level]daycard.TrainStatus{
-	ns.LevelOnTime:    daycard.TrainOnTime,
-	ns.LevelSlower:    daycard.TrainSlower,
-	ns.LevelDisrupted: daycard.TrainDisrupted,
-}
-
-var trainCauses = map[ns.Cause]web.TrainCause{
-	ns.CauseNone:             web.TrainCauseNone,
-	ns.CauseDelay:            web.TrainCauseDelay,
-	ns.CauseLonger:           web.TrainCauseLonger,
-	ns.CauseCancelled:        web.TrainCauseCancelled,
-	ns.CauseAlternative:      web.TrainCauseAlternative,
-	ns.CauseMissedConnection: web.TrainCauseMissedConnection,
-	ns.CauseDisruption:       web.TrainCauseDisruption,
-	ns.CauseNoTrip:           web.TrainCauseNoTrip,
-}
-
-func (t nsTrains) Enabled(ctx context.Context, principalID string) (bool, error) {
-	status, err := t.service.Status(ctx, principalID)
-	if err != nil {
-		return false, err
-	}
-	return status.Enabled, nil
-}
-
-func (t nsTrains) TripStatus(ctx context.Context, principalID string, query web.TrainQuery) (web.TrainReport, error) {
-	status, err := t.service.TripStatus(ctx, principalID, ns.StatusQuery{From: query.From, To: query.To, At: query.At, ArriveBy: query.ArriveBy})
-	if err != nil {
-		var refusal *ns.RefusalError
-		if errors.As(err, &refusal) {
-			return web.TrainReport{}, &web.TrainRefusal{Text: refusal.Text, Unavailable: refusal.Unavailable}
-		}
-		return web.TrainReport{}, err
-	}
-	return web.TrainReport{
-		Level:            trainLevels[status.Level],
-		Cause:            trainCauses[status.Cause],
-		From:             status.From,
-		To:               status.To,
-		Found:            status.Found,
-		Cancelled:        status.Cancelled,
-		PlannedDeparture: status.PlannedDeparture,
-		ActualDeparture:  status.ActualDeparture,
-		PlannedArrival:   status.PlannedArrival,
-		ActualArrival:    status.ActualArrival,
-		DelayMinutes:     status.DelayMinutes,
-		ExtraMinutes:     status.ExtraMinutes,
-		Transfers:        status.Transfers,
-		Reason:           status.Reason,
-	}, nil
 }

@@ -11,8 +11,6 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
-	"github.com/vladar107/home-ai-assistant/internal/connectors/bus"
-	"github.com/vladar107/home-ai-assistant/internal/connectors/ns"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 	"github.com/vladar107/home-ai-assistant/internal/transit"
 )
@@ -486,17 +484,12 @@ func (s *Service) act(ctx context.Context, principalID string, call tools.Call, 
 // resolveLeg looks a train leg's stations or a bus leg's stop up, so the route keeps the names the
 // checks will find again. A refusal is text for the model.
 func (s *Service) resolveLeg(ctx context.Context, principalID string, leg Leg) (Leg, string, error) {
-	var trainRefusal *ns.RefusalError
-	var busRefusal *bus.RefusalError
 	refused := func(err error) (string, error) {
-		switch {
-		case errors.As(err, &trainRefusal):
-			return trainRefusal.Text, nil
-		case errors.As(err, &busRefusal):
-			return busRefusal.Text, nil
-		default:
-			return "", err
+		var refusal *transit.RefusalError
+		if errors.As(err, &refusal) {
+			return refusal.Text, nil
 		}
+		return "", err
 	}
 	switch leg.Mode {
 	case ModeTrain:
@@ -510,7 +503,7 @@ func (s *Service) resolveLeg(ctx context.Context, principalID string, leg Leg) (
 			if *field.value == "" {
 				continue
 			}
-			name, err := s.trains.ResolveStation(ctx, principalID, field.role, *field.value)
+			name, err := s.trains.ResolvePlace(ctx, principalID, field.role, *field.value)
 			if err != nil {
 				refusal, err := refused(err)
 				return Leg{}, refusal, err
@@ -524,7 +517,7 @@ func (s *Service) resolveLeg(ctx context.Context, principalID string, leg Leg) (
 		if s.buses == nil {
 			return Leg{}, "Bus legs cannot be saved: bus information is not set up.", nil
 		}
-		name, err := s.buses.ResolveStop(ctx, principalID, leg.Stop)
+		name, err := s.buses.ResolvePlace(ctx, principalID, "stop", leg.Stop)
 		if err != nil {
 			refusal, err := refused(err)
 			return Leg{}, refusal, err

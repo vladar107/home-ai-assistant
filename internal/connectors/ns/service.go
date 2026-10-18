@@ -16,6 +16,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/integration"
 	"github.com/vladar107/home-ai-assistant/internal/module"
+	"github.com/vladar107/home-ai-assistant/internal/transit"
 )
 
 const (
@@ -56,7 +57,7 @@ type Service struct {
 	now        func() time.Time
 	location   *time.Location
 
-	stations *directory
+	stations *transit.Directory[[]station]
 
 	cacheMu sync.Mutex
 	cache   map[string]cachedResult
@@ -64,7 +65,12 @@ type Service struct {
 	running atomic.Bool
 }
 
-var _ module.Module = (*Service)(nil)
+var (
+	_ module.Module       = (*Service)(nil)
+	_ transit.Departures  = (*Service)(nil)
+	_ transit.Disruptions = (*Service)(nil)
+	_ transit.Trips       = (*Service)(nil)
+)
 
 func NewService(cfg Config, repository integration.Repository, logger *slog.Logger) (*Service, error) {
 	if repository == nil {
@@ -102,7 +108,13 @@ func NewService(cfg Config, repository integration.Repository, logger *slog.Logg
 		location:   location,
 		cache:      make(map[string]cachedResult),
 	}
-	service.stations = &directory{fetch: service.client.stations, now: now}
+	service.stations = &transit.Directory[[]station]{
+		Fetch:       service.fetchStations,
+		Now:         now,
+		Lifetime:    stationListLifetime,
+		RetryDelay:  stationRetryDelay,
+		Interrupted: transportError,
+	}
 	return service, nil
 }
 
@@ -148,6 +160,12 @@ func (s *Service) Status(ctx context.Context, principalID string) (Status, error
 		return Status{}, err
 	}
 	return Status{Enabled: !optedOut}, nil
+}
+
+// Enabled reports whether the principal's trains switch is on.
+func (s *Service) Enabled(ctx context.Context, principalID string) (bool, error) {
+	status, err := s.Status(ctx, principalID)
+	return status.Enabled, err
 }
 
 // SetEnabled turns the principal's trains on or off. Turning them off takes effect on the next tool

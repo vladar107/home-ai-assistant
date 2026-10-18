@@ -8,8 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vladar107/home-ai-assistant/internal/connectors/bus"
-	"github.com/vladar107/home-ai-assistant/internal/connectors/ns"
 	"github.com/vladar107/home-ai-assistant/internal/transit"
 )
 
@@ -24,11 +22,11 @@ const (
 	dutchZone = "Europe/Amsterdam"
 )
 
-// DepartureEvaluator checks departure watches: one planned train through NS or bus through OVapi
-// and Transitous, each under the owner's own trains or buses switch.
+// DepartureEvaluator checks departure watches: one planned train or bus through the train or bus
+// service, each under the owner's own trains or buses switch.
 type DepartureEvaluator struct {
-	trains *ns.Service
-	buses  *bus.Service
+	trains transit.Departures
+	buses  transit.Departures
 	dutch  *time.Location
 }
 
@@ -39,9 +37,9 @@ var (
 
 // NewDepartureEvaluator checks trains with trains and buses with buses; either may be nil, and a
 // watch of that mode then fails its checks and cannot be proposed.
-func NewDepartureEvaluator(trains *ns.Service, buses *bus.Service) (*DepartureEvaluator, error) {
+func NewDepartureEvaluator(trains, buses transit.Departures) (*DepartureEvaluator, error) {
 	if trains == nil && buses == nil {
-		return nil, fmt.Errorf("departure watches need the NS or the bus connector")
+		return nil, fmt.Errorf("departure watches need a train or a bus service")
 	}
 	dutch, err := time.LoadLocation(dutchZone)
 	if err != nil {
@@ -66,7 +64,7 @@ func (e *DepartureEvaluator) Resolve(ctx context.Context, principalID string, sp
 			if *field.value == "" {
 				continue
 			}
-			name, err := e.trains.ResolveStation(ctx, principalID, field.role, *field.value)
+			name, err := e.trains.ResolvePlace(ctx, principalID, field.role, *field.value)
 			if err != nil {
 				return Spec{}, err
 			}
@@ -79,7 +77,7 @@ func (e *DepartureEvaluator) Resolve(ctx context.Context, principalID string, sp
 		if e.buses == nil {
 			return Spec{}, fmt.Errorf("bus departures cannot be watched here")
 		}
-		if _, err := e.buses.ResolveStop(ctx, principalID, target.Stop); err != nil {
+		if _, err := e.buses.ResolvePlace(ctx, principalID, "stop", target.Stop); err != nil {
 			return Spec{}, err
 		}
 	}
@@ -102,26 +100,27 @@ func (e *DepartureEvaluator) check(ctx context.Context, principalID string, targ
 	clock := transit.Clock{Hour: planned.Hour(), Minute: planned.Minute()}
 	var service string
 	var parts []string
-	var fetch func(context.Context) ([]transit.Departure, error)
+	var checker transit.Checker
+	var query transit.DepartureQuery
 	switch target.Mode {
 	case ModeTrain:
 		if e.trains == nil {
 			return transit.Departure{}, fmt.Errorf("train departures cannot be checked here")
 		}
-		service, parts = serviceNS, []string{target.From, target.To, target.Via}
-		fetch = func(ctx context.Context) ([]transit.Departure, error) {
-			return e.trains.CheckDepartures(ctx, principalID, ns.DepartureQuery{From: target.From, To: target.To, Via: target.Via, Date: planned, Times: []transit.Clock{clock}})
-		}
+		service, parts, checker = serviceNS, []string{target.From, target.To, target.Via}, e.trains
+		query = transit.DepartureQuery{From: target.From, To: target.To, Via: target.Via}
 	case ModeBus:
 		if e.buses == nil {
 			return transit.Departure{}, fmt.Errorf("bus departures cannot be checked here")
 		}
-		service, parts = serviceBus, []string{target.Stop, target.Line}
-		fetch = func(ctx context.Context) ([]transit.Departure, error) {
-			return e.buses.CheckDepartures(ctx, principalID, bus.DepartureQuery{Stop: target.Stop, Line: target.Line, Date: planned, Times: []transit.Clock{clock}})
-		}
+		service, parts, checker = serviceBus, []string{target.Stop, target.Line}, e.buses
+		query = transit.DepartureQuery{From: target.Stop, Line: target.Line}
 	default:
 		return transit.Departure{}, fmt.Errorf("unknown departure mode %q", target.Mode)
+	}
+	query.Date, query.Times = planned, []transit.Clock{clock}
+	fetch := func(ctx context.Context) ([]transit.Departure, error) {
+		return checker.CheckDepartures(ctx, principalID, query)
 	}
 	key := strings.Join(append([]string{KindDeparture, target.Mode, principalID, planned.Format(time.RFC3339)}, parts...), "\x00")
 	departures, err := Cached(ctx, occurrence.Cache, key, fetch)
@@ -138,20 +137,12 @@ func (e *DepartureEvaluator) check(ctx context.Context, principalID string, targ
 	return departure, nil
 }
 
-// connectorError marks a connector's refusal about the service itself as an upstream failure; a
-// switch the owner turned off, or a name that no longer resolves, fails the check as it is.
+// connectorError marks a service's refusal about itself as an upstream failure; a switch the
+// owner turned off, or a name that no longer resolves, fails the check as it is.
 func connectorError(service string, err error) error {
-	var trains *ns.RefusalError
-	var buses *bus.RefusalError
-	switch {
-	case errors.As(err, &trains):
-		if trains.Unavailable && trains.Text != ns.DisabledText {
-			return &UpstreamError{Service: service, Err: err}
-		}
-	case errors.As(err, &buses):
-		if buses.Unavailable && buses.Text != bus.DisabledText {
-			return &UpstreamError{Service: service, Err: err}
-		}
+	var refusal *transit.RefusalError
+	if errors.As(err, &refusal) && refusal.Unavailable && !refusal.Disabled {
+		return &UpstreamError{Service: service, Err: err}
 	}
 	return err
 }

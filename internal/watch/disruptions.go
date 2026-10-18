@@ -9,15 +9,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vladar107/home-ai-assistant/internal/connectors/ns"
+	"github.com/vladar107/home-ai-assistant/internal/transit"
 )
 
 const noDisruptions = "none"
 
-// DisruptionsEvaluator checks disruption watches: the NS disruptions and engineering works that
-// touch the watch's stations, under the owner's own trains switch.
+// DisruptionsEvaluator checks disruption watches: the disruptions and engineering works the train
+// service reports at the watch's stations, under the owner's own trains switch.
 type DisruptionsEvaluator struct {
-	trains *ns.Service
+	trains transit.Disruptions
 }
 
 var (
@@ -25,9 +25,9 @@ var (
 	_ Resolver  = (*DisruptionsEvaluator)(nil)
 )
 
-func NewDisruptionsEvaluator(trains *ns.Service) (*DisruptionsEvaluator, error) {
+func NewDisruptionsEvaluator(trains transit.Disruptions) (*DisruptionsEvaluator, error) {
 	if trains == nil {
-		return nil, fmt.Errorf("disruption watches need the NS connector")
+		return nil, fmt.Errorf("disruption watches need a train service")
 	}
 	return &DisruptionsEvaluator{trains: trains}, nil
 }
@@ -37,7 +37,7 @@ func NewDisruptionsEvaluator(trains *ns.Service) (*DisruptionsEvaluator, error) 
 func (e *DisruptionsEvaluator) Resolve(ctx context.Context, principalID string, spec Spec) (Spec, error) {
 	stations := make([]string, 0, len(spec.Target.Stations))
 	for _, query := range spec.Target.Stations {
-		name, err := e.trains.ResolveStation(ctx, principalID, "station", query)
+		name, err := e.trains.ResolvePlace(ctx, principalID, "station", query)
 		if err != nil {
 			return Spec{}, err
 		}
@@ -55,13 +55,13 @@ func (e *DisruptionsEvaluator) Resolve(ctx context.Context, principalID string, 
 // by its ID and a fingerprint of what the user reads, so a new expected end or advice is a change
 // and reordering or spacing is not.
 func (e *DisruptionsEvaluator) Evaluate(ctx context.Context, principalID string, watch Watch, occurrence Occurrence) (Observation, error) {
-	var current []ns.Disruption
+	var current []transit.Disruption
 	seen := make(map[string]bool)
 	// What is in effect now comes first, so an entry is described by its current timespan.
 	for _, moment := range []time.Time{{}, occurrence.End} {
 		for _, station := range watch.Target.Stations {
 			key := strings.Join([]string{KindDisruptions, principalID, station, moment.Format(time.RFC3339)}, "\x00")
-			entries, err := Cached(ctx, occurrence.Cache, key, func(ctx context.Context) ([]ns.Disruption, error) {
+			entries, err := Cached(ctx, occurrence.Cache, key, func(ctx context.Context) ([]transit.Disruption, error) {
 				return e.trains.Disruptions(ctx, principalID, station, moment)
 			})
 			if err != nil {
@@ -78,7 +78,7 @@ func (e *DisruptionsEvaluator) Evaluate(ctx context.Context, principalID string,
 	return disruptionObservation(watch.Spec, current, previousFingerprints(occurrence.Previous), occurrence.End.Location()), nil
 }
 
-func disruptionObservation(spec Spec, current []ns.Disruption, previous map[string]string, location *time.Location) Observation {
+func disruptionObservation(spec Spec, current []transit.Disruption, previous map[string]string, location *time.Location) Observation {
 	if len(current) == 0 {
 		return Observation{State: noDisruptions, Headline: "NS reports no disruptions or engineering works at " + strings.Join(spec.Target.Stations, ", ") + "."}
 	}
@@ -113,7 +113,7 @@ func disruptionObservation(spec Spec, current []ns.Disruption, previous map[stri
 
 // describeDisruption is one entry as alert lines: what it is, then NS's situation, advice, and
 // expected end.
-func describeDisruption(change string, entry ns.Disruption, location *time.Location) []string {
+func describeDisruption(change string, entry transit.Disruption, location *time.Location) []string {
 	what := "disruption"
 	if entry.Kind == "maintenance" {
 		what = "engineering work"
@@ -135,7 +135,7 @@ func describeDisruption(change string, entry ns.Disruption, location *time.Locat
 }
 
 // fingerprint covers what an alert tells about an entry, compared without case or spacing.
-func fingerprint(entry ns.Disruption) string {
+func fingerprint(entry transit.Disruption) string {
 	var end string
 	if !entry.End.IsZero() {
 		end = entry.End.UTC().Format(time.RFC3339)

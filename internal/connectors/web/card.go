@@ -11,6 +11,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/daycard"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
+	"github.com/vladar107/home-ai-assistant/internal/transit"
 )
 
 const (
@@ -75,6 +76,12 @@ var cardLanguages = map[string]cardWords{
 		wind:   map[windUnit]string{windKilometres: "км/ч", windMetres: "м/с", windKnots: "уз", windBeaufort: "Бфт"},
 		onTime: "вовремя", minutesLate: "+%d мин", cancelled: "отменён", bus: "автобус", noConnection: "нет пересадки",
 		disruption: "помехи", disrupted: "сбой", noTrain: "нет поезда"},
+}
+
+var cardLevels = map[transit.Level]daycard.TrainStatus{
+	transit.LevelOnTime:    daycard.TrainOnTime,
+	transit.LevelSlower:    daycard.TrainSlower,
+	transit.LevelDisrupted: daycard.TrainDisrupted,
 }
 
 var trainLevels = map[daycard.TrainStatus]string{
@@ -166,7 +173,7 @@ func (s *Service) weatherCard(ctx context.Context, principalID string, request c
 	if len(request.Trains) > maximumTrains {
 		return errorResult(fmt.Sprintf("A card shows at most %d trains.", maximumTrains)), nil
 	}
-	queries := make([]TrainQuery, 0, len(request.Trains))
+	queries := make([]transit.TripQuery, 0, len(request.Trains))
 	for index, requested := range request.Trains {
 		query, err := parseCardTrain(requested)
 		if err != nil {
@@ -255,11 +262,11 @@ func (s *Service) weatherCard(ctx context.Context, principalID string, request c
 		fmt.Fprintf(&report, "; the tile reads %q.\n", detail)
 	}
 
-	var reports []TrainReport
+	var reports []transit.TripStatus
 	if trains != nil {
 		outcome := <-trains
 		if outcome.err != nil {
-			var refusal *TrainRefusal
+			var refusal *transit.RefusalError
 			if !errors.As(outcome.err, &refusal) {
 				return tools.Result{}, outcome.err
 			}
@@ -275,7 +282,7 @@ func (s *Service) weatherCard(ctx context.Context, principalID string, request c
 	for index, train := range reports {
 		row := daycard.Train{
 			Label:  strings.TrimSpace(request.Trains[index].Label),
-			Status: train.Level,
+			Status: cardLevels[train.Level],
 			Badge:  trainBadge(train, words),
 			Times:  trainTimes(train),
 		}
@@ -439,21 +446,21 @@ func (r legReading) detail(words cardWords, unit windUnit) string {
 	return text
 }
 
-func parseCardTrain(requested cardTrainRequest) (TrainQuery, error) {
+func parseCardTrain(requested cardTrainRequest) (transit.TripQuery, error) {
 	label := strings.TrimSpace(requested.Label)
 	if label == "" {
-		return TrainQuery{}, errors.New("give the row a label, such as There or Back")
+		return transit.TripQuery{}, errors.New("give the row a label, such as There or Back")
 	}
 	if len([]rune(label)) > maximumTrainLabelRunes {
-		return TrainQuery{}, fmt.Errorf("label must be at most %d characters", maximumTrainLabelRunes)
+		return transit.TripQuery{}, fmt.Errorf("label must be at most %d characters", maximumTrainLabelRunes)
 	}
-	query := TrainQuery{From: strings.TrimSpace(requested.From), To: strings.TrimSpace(requested.To), ArriveBy: requested.ArriveBy}
+	query := transit.TripQuery{From: strings.TrimSpace(requested.From), To: strings.TrimSpace(requested.To), ArriveBy: requested.ArriveBy}
 	if query.From == "" || query.To == "" {
-		return TrainQuery{}, errors.New("give the from and to stations")
+		return transit.TripQuery{}, errors.New("give the from and to stations")
 	}
 	at, err := time.Parse("2006-01-02T15:04", strings.TrimSpace(requested.DateTime))
 	if err != nil {
-		return TrainQuery{}, errors.New("date_time must be Dutch local time written as YYYY-MM-DDTHH:MM, such as 2026-09-29T08:10")
+		return transit.TripQuery{}, errors.New("date_time must be Dutch local time written as YYYY-MM-DDTHH:MM, such as 2026-09-29T08:10")
 	}
 	query.At = at
 	return query, nil
@@ -461,14 +468,14 @@ func parseCardTrain(requested cardTrainRequest) (TrainQuery, error) {
 
 // trainOutcome is every train's report, or the first failure in the card's order with its index.
 type trainOutcome struct {
-	reports []TrainReport
+	reports []transit.TripStatus
 	failed  int
 	err     error
 }
 
 // trainReports asks for every train at once, so the slowest one bounds the wait.
-func (s *Service) trainReports(ctx context.Context, principalID string, queries []TrainQuery) trainOutcome {
-	reports := make([]TrainReport, len(queries))
+func (s *Service) trainReports(ctx context.Context, principalID string, queries []transit.TripQuery) trainOutcome {
+	reports := make([]transit.TripStatus, len(queries))
 	failures := make([]error, len(queries))
 	var group sync.WaitGroup
 	for index, query := range queries {
@@ -487,25 +494,25 @@ func (s *Service) trainReports(ctx context.Context, principalID string, queries 
 
 // trainBadge names the dominant cause, so a row that is red for a cancelled leg never reads as a
 // few minutes late.
-func trainBadge(report TrainReport, words cardWords) string {
+func trainBadge(report transit.TripStatus, words cardWords) string {
 	switch report.Cause {
-	case TrainCauseNoTrip:
+	case transit.CauseNoTrip:
 		return words.noTrain
-	case TrainCauseCancelled:
+	case transit.CauseCancelled:
 		return words.cancelled
-	case TrainCauseAlternative:
+	case transit.CauseAlternative:
 		return words.bus
-	case TrainCauseMissedConnection:
+	case transit.CauseMissedConnection:
 		return words.noConnection
-	case TrainCauseDelay, TrainCauseLonger:
+	case transit.CauseDelay, transit.CauseLonger:
 		if minutes := max(report.DelayMinutes, report.ExtraMinutes); minutes > 0 {
 			return fmt.Sprintf(words.minutesLate, minutes)
 		}
 	}
 	switch report.Level {
-	case daycard.TrainOnTime:
+	case transit.LevelOnTime:
 		return words.onTime
-	case daycard.TrainSlower:
+	case transit.LevelSlower:
 		return words.disruption
 	default:
 		return words.disrupted
@@ -515,7 +522,7 @@ func trainBadge(report TrainReport, words cardWords) string {
 // trainTimes is the live departure → arrival where NS has live times, else the planned ones; the
 // pill beside it already says how late that is, and a card row has no room for both spans. A
 // cancelled train shows its plan.
-func trainTimes(report TrainReport) string {
+func trainTimes(report transit.TripStatus) string {
 	if !report.Found || report.PlannedDeparture.IsZero() || report.PlannedArrival.IsZero() {
 		return ""
 	}

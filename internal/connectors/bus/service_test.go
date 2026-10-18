@@ -876,8 +876,8 @@ func TestDepartureChecksUseTheTimetableBeyondLiveData(t *testing.T) {
 		return parsed
 	}
 	day := time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC)
-	departures, err := f.service.CheckDepartures(t.Context(), "alice", bus.DepartureQuery{
-		Stop: "Hoevelaken, Centrum", Line: "102", Date: day, Times: []transit.Clock{clock("18:21"), clock("20:20"), clock("20:21")},
+	departures, err := f.service.CheckDepartures(t.Context(), "alice", transit.DepartureQuery{
+		From: "Hoevelaken, Centrum", Line: "102", Date: day, Times: []transit.Clock{clock("18:21"), clock("20:20"), clock("20:21")},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -902,7 +902,7 @@ func TestDepartureChecksUseTheTimetableBeyondLiveData(t *testing.T) {
 	f.server.mu.Lock()
 	f.server.planCode = http.StatusBadGateway
 	f.server.mu.Unlock()
-	departures, err = f.service.CheckDepartures(t.Context(), "alice", bus.DepartureQuery{Stop: "Hoevelaken, Centrum", Line: "102", Date: day, Times: []transit.Clock{clock("20:20")}})
+	departures, err = f.service.CheckDepartures(t.Context(), "alice", transit.DepartureQuery{From: "Hoevelaken, Centrum", Line: "102", Date: day, Times: []transit.Clock{clock("20:20")}})
 	if err != nil || departures[0].Status != transit.StatusCheckFailed || departures[0].Note == "" {
 		t.Fatalf("departures with Transitous down = %+v %v", departures, err)
 	}
@@ -910,8 +910,8 @@ func TestDepartureChecksUseTheTimetableBeyondLiveData(t *testing.T) {
 	if _, err := f.service.SetEnabled(t.Context(), "alice", false); err != nil {
 		t.Fatal(err)
 	}
-	var refused *bus.RefusalError
-	if _, err := f.service.CheckDepartures(t.Context(), "alice", bus.DepartureQuery{Line: "3", Date: day, Times: []transit.Clock{clock("18:18")}}); !errors.As(err, &refused) || !refused.Unavailable {
+	var refused *transit.RefusalError
+	if _, err := f.service.CheckDepartures(t.Context(), "alice", transit.DepartureQuery{Line: "3", Date: day, Times: []transit.Clock{clock("18:18")}}); !errors.As(err, &refused) || !refused.Unavailable || !refused.Disabled {
 		t.Fatalf("check with buses off = %v", err)
 	}
 }

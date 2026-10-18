@@ -7,8 +7,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/vladar107/home-ai-assistant/internal/connectors/bus"
-	"github.com/vladar107/home-ai-assistant/internal/connectors/ns"
 	"github.com/vladar107/home-ai-assistant/internal/routes"
 	"github.com/vladar107/home-ai-assistant/internal/transit"
 )
@@ -66,6 +64,7 @@ func (e *RouteEvaluator) Evaluate(ctx context.Context, principalID string, watch
 // checked, unless that is only because the owner switched trains and buses off.
 func allLegsFailed(result routes.Result) error {
 	var notes []string
+	disabled := true
 	for _, leg := range result.Legs {
 		for _, departure := range leg.Departures {
 			if departure.Status != transit.StatusCheckFailed {
@@ -73,11 +72,14 @@ func allLegsFailed(result routes.Result) error {
 			}
 			notes = append(notes, departure.Note)
 		}
+		if len(leg.Departures) > 0 && !leg.Disabled {
+			disabled = false
+		}
 	}
 	if len(notes) == 0 {
 		return nil
 	}
-	if !slices.ContainsFunc(notes, func(note string) bool { return note != ns.DisabledText && note != bus.DisabledText }) {
+	if disabled {
 		return errors.New(notes[0])
 	}
 	return &UpstreamError{Service: "routes", Err: fmt.Errorf("no leg of the route %q could be checked", result.Route.Name)}

@@ -12,9 +12,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
-	"unicode"
+
+	"github.com/vladar107/home-ai-assistant/internal/transit"
 )
 
 const (
@@ -66,77 +66,13 @@ type stopIndex struct {
 	routes   map[string]route
 }
 
-// directory is the stop index, fetched on first use and at most once a day after that.
-type directory struct {
-	fetch func(context.Context) (gtfsTables, error)
-	now   func() time.Time
-
-	mu         sync.Mutex
-	index      *stopIndex
-	fetchedAt  time.Time
-	retryAfter time.Time
-	refresh    *refresh
-}
-
-// refresh is one fetch of the directory that concurrent callers wait on instead of repeating.
-type refresh struct {
-	done  chan struct{}
-	index *stopIndex
-	err   error
-	// abandoned marks a fetch that failed because its caller gave up, which says nothing about the
-	// feed, so waiters try again themselves.
-	abandoned bool
-}
-
-// load returns the stop index. A refresh that fails while an older index is at hand returns that
-// index together with the refresh error, so the caller can log it and carry on.
-func (d *directory) load(ctx context.Context) (*stopIndex, error) {
-	for {
-		d.mu.Lock()
-		now := d.now()
-		if d.index != nil && (now.Sub(d.fetchedAt) < directoryLifetime || now.Before(d.retryAfter)) {
-			index := d.index
-			d.mu.Unlock()
-			return index, nil
-		}
-		if running := d.refresh; running != nil {
-			stale := d.index
-			d.mu.Unlock()
-			select {
-			case <-running.done:
-				if running.abandoned {
-					continue
-				}
-				return running.index, running.err
-			case <-ctx.Done():
-				return stale, transportError(ctx.Err())
-			}
-		}
-		running := &refresh{done: make(chan struct{})}
-		d.refresh = running
-		d.mu.Unlock()
-
-		tables, err := d.fetch(ctx)
-		var index *stopIndex
-		if err == nil {
-			index, err = buildIndex(tables)
-		}
-
-		d.mu.Lock()
-		switch {
-		case err == nil:
-			d.index, d.fetchedAt, d.retryAfter = index, now, time.Time{}
-		case ctx.Err() != nil:
-			running.abandoned = true
-		case d.index != nil:
-			d.retryAfter = now.Add(directoryRetryDelay)
-		}
-		running.index, running.err = d.index, err
-		d.refresh = nil
-		d.mu.Unlock()
-		close(running.done)
-		return running.index, running.err
+// fetchStops builds the stop index for the directory.
+func (s *Service) fetchStops(ctx context.Context) (*stopIndex, error) {
+	tables, err := s.gtfs.directoryTables(ctx)
+	if err != nil {
+		return nil, err
 	}
+	return buildIndex(tables)
 }
 
 type gtfsTables struct {
@@ -309,9 +245,9 @@ func (c columnIndex) get(record []string, name string) string {
 // nameForms are the ways a stop can be asked for: GTFS writes "Town, Stop name",
 // people say "Town Stop name", or just "Stop name" when the town is obvious.
 func nameForms(name string) []string {
-	forms := []string{normalize(name)}
+	forms := []string{transit.Normalize(name)}
 	if town, rest, found := strings.Cut(name, ","); found {
-		town, rest = normalize(town), normalize(rest)
+		town, rest = transit.Normalize(town), transit.Normalize(rest)
 		if rest != "" {
 			forms = append(forms, rest)
 			if !strings.HasPrefix(rest, town+" ") && rest != town {
@@ -334,7 +270,7 @@ func (i *stopIndex) resolve(query string) resolution {
 	if group, found := i.byCode[trimmed]; found {
 		return resolution{group: group}
 	}
-	normalized := normalize(trimmed)
+	normalized := transit.Normalize(trimmed)
 	if normalized == "" {
 		return resolution{}
 	}
@@ -449,54 +385,3 @@ func resolutionError(role, query string, match resolution) string {
 	return fmt.Sprintf("%s %q matches several bus stops: %s. Call again with the full name of the one the user means, or ask them.",
 		role, clip(query, maximumStopRunes), strings.Join(names, "; "))
 }
-
-// normalize folds a stop name for matching: lower case, no accents, and punctuation as spaces, so
-// "'s-Hertogenbosch" and "s Hertogenbosch" meet.
-func normalize(name string) string {
-	var builder strings.Builder
-	space := false
-	for _, r := range strings.ToLower(name) {
-		if folded, found := accentFolds[r]; found {
-			if space && builder.Len() > 0 {
-				builder.WriteByte(' ')
-			}
-			builder.WriteString(folded)
-			space = false
-			continue
-		}
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			if space && builder.Len() > 0 {
-				builder.WriteByte(' ')
-			}
-			builder.WriteRune(r)
-			space = false
-			continue
-		}
-		space = true
-	}
-	return builder.String()
-}
-
-var accentFolds = func() map[rune]string {
-	folds := map[rune]string{'æ': "ae", 'œ': "oe", 'ß': "ss", 'ø': "o", 'ł': "l", 'đ': "d"}
-	for base, accented := range map[string]string{
-		"a": "àáâãäåāăą",
-		"c": "çćĉċč",
-		"e": "èéêëēĕėęě",
-		"g": "ĝğġģ",
-		"i": "ìíîïĩīĭįı",
-		"n": "ñńņňŉ",
-		"o": "òóôõöōŏő",
-		"r": "ŕŗř",
-		"s": "śŝşš",
-		"t": "ţťŧ",
-		"u": "ùúûüũūŭůűų",
-		"y": "ýÿŷ",
-		"z": "źżž",
-	} {
-		for _, r := range accented {
-			folds[r] = base
-		}
-	}
-	return folds
-}()

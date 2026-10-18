@@ -20,6 +20,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
+	"github.com/vladar107/home-ai-assistant/internal/transit"
 )
 
 const turnID = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
@@ -275,7 +276,7 @@ func TestWeatherCardFollowsTheWebSwitch(t *testing.T) {
 // each direction, keyed by its from station, and records what it was asked.
 type fakeTrains struct {
 	mu       sync.Mutex
-	reports  map[string]web.TrainReport
+	reports  map[string]transit.TripStatus
 	failures map[string]error
 	off      map[string]bool
 	asked    []string
@@ -287,12 +288,12 @@ func (f *fakeTrains) Enabled(_ context.Context, principalID string) (bool, error
 	return !f.off[principalID], nil
 }
 
-func (f *fakeTrains) TripStatus(_ context.Context, principalID string, query web.TrainQuery) (web.TrainReport, error) {
+func (f *fakeTrains) TripStatus(_ context.Context, principalID string, query transit.TripQuery) (transit.TripStatus, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.asked = append(f.asked, fmt.Sprintf("%s %s→%s %s arrive_by=%t", principalID, query.From, query.To, query.At.Format("2006-01-02 15:04"), query.ArriveBy))
 	if err := f.failures[query.From]; err != nil {
-		return web.TrainReport{}, err
+		return transit.TripStatus{}, err
 	}
 	return f.reports[query.From], nil
 }
@@ -319,9 +320,9 @@ func dutch(t *testing.T, clock string) time.Time {
 	return parsed
 }
 
-func trainReport(t *testing.T, level daycard.TrainStatus, planned, actual [2]string) web.TrainReport {
+func trainReport(t *testing.T, level transit.Level, planned, actual [2]string) transit.TripStatus {
 	t.Helper()
-	report := web.TrainReport{
+	report := transit.TripStatus{
 		Level: level, From: "Den Haag", To: "Zwolle", Found: true, Transfers: 1,
 		PlannedDeparture: dutch(t, planned[0]), PlannedArrival: dutch(t, planned[1]),
 	}
@@ -342,37 +343,37 @@ func trainsCard(language string, trains ...map[string]any) map[string]any {
 }
 
 func TestWeatherCardShowsTrainStatuses(t *testing.T) {
-	onTime := trainReport(t, daycard.TrainOnTime, [2]string{"08:10", "09:02"}, [2]string{"08:10", "09:02"})
+	onTime := trainReport(t, transit.LevelOnTime, [2]string{"08:10", "09:02"}, [2]string{"08:10", "09:02"})
 	onTime.Reason = "on time"
-	late := trainReport(t, daycard.TrainSlower, [2]string{"08:10", "09:02"}, [2]string{"08:22", "09:14"})
+	late := trainReport(t, transit.LevelSlower, [2]string{"08:10", "09:02"}, [2]string{"08:22", "09:14"})
 	late.From = "Dordrecht"
-	late.Cause, late.DelayMinutes, late.Reason = web.TrainCauseDelay, 12, "12 min late; Disruption: fewer trains between Dordrecht and Utrecht"
-	cancelled := trainReport(t, daycard.TrainDisrupted, [2]string{"17:31", "18:20"}, [2]string{"17:35", "18:24"})
+	late.Cause, late.DelayMinutes, late.Reason = transit.CauseDelay, 12, "12 min late; Disruption: fewer trains between Dordrecht and Utrecht"
+	cancelled := trainReport(t, transit.LevelDisrupted, [2]string{"17:31", "18:20"}, [2]string{"17:35", "18:24"})
 	cancelled.From, cancelled.To = "Zwolle", "Den Haag"
-	cancelled.Cause, cancelled.Cancelled, cancelled.DelayMinutes, cancelled.Transfers, cancelled.Reason = web.TrainCauseCancelled, true, 4, 0, "IC 3027 cancelled; 4 min late"
-	longer := trainReport(t, daycard.TrainSlower, [2]string{"08:10", "09:02"}, [2]string{"08:10", "09:08"})
-	longer.Cause, longer.ExtraMinutes, longer.Transfers, longer.Reason = web.TrainCauseLonger, 6, 2, "6 min longer than planned"
-	bus := web.TrainReport{Level: daycard.TrainDisrupted, Cause: web.TrainCauseAlternative, From: "Dordrecht", To: "Utrecht Centraal", Found: true,
+	cancelled.Cause, cancelled.Cancelled, cancelled.DelayMinutes, cancelled.Transfers, cancelled.Reason = transit.CauseCancelled, true, 4, 0, "IC 3027 cancelled; 4 min late"
+	longer := trainReport(t, transit.LevelSlower, [2]string{"08:10", "09:02"}, [2]string{"08:10", "09:08"})
+	longer.Cause, longer.ExtraMinutes, longer.Transfers, longer.Reason = transit.CauseLonger, 6, 2, "6 min longer than planned"
+	bus := transit.TripStatus{Level: transit.LevelDisrupted, Cause: transit.CauseAlternative, From: "Dordrecht", To: "Utrecht Centraal", Found: true,
 		PlannedDeparture: dutch(t, "07:40"), PlannedArrival: dutch(t, "07:47"), DelayMinutes: 3, Reason: "alternative transport; 3 min late"}
-	missing := web.TrainReport{Level: daycard.TrainDisrupted, Cause: web.TrainCauseNoTrip, From: "Zwolle", To: "Den Haag", Reason: "no trip found"}
-	unreachable := trainReport(t, daycard.TrainDisrupted, [2]string{"08:10", "09:02"}, [2]string{"08:13", "09:05"})
-	unreachable.Cause, unreachable.DelayMinutes, unreachable.Reason = web.TrainCauseMissedConnection, 3, "a connection cannot be made; 3 min late"
-	troubled := trainReport(t, daycard.TrainSlower, [2]string{"08:10", "09:02"}, [2]string{"08:10", "09:02"})
-	troubled.From, troubled.Cause, troubled.Reason = "Dordrecht", web.TrainCauseDisruption, "Disruption: fewer trains"
-	delayed := trainReport(t, daycard.TrainDisrupted, [2]string{"17:31", "18:20"}, [2]string{"17:31", "18:40"})
+	missing := transit.TripStatus{Level: transit.LevelDisrupted, Cause: transit.CauseNoTrip, From: "Zwolle", To: "Den Haag", Reason: "no trip found"}
+	unreachable := trainReport(t, transit.LevelDisrupted, [2]string{"08:10", "09:02"}, [2]string{"08:13", "09:05"})
+	unreachable.Cause, unreachable.DelayMinutes, unreachable.Reason = transit.CauseMissedConnection, 3, "a connection cannot be made; 3 min late"
+	troubled := trainReport(t, transit.LevelSlower, [2]string{"08:10", "09:02"}, [2]string{"08:10", "09:02"})
+	troubled.From, troubled.Cause, troubled.Reason = "Dordrecht", transit.CauseDisruption, "Disruption: fewer trains"
+	delayed := trainReport(t, transit.LevelDisrupted, [2]string{"17:31", "18:20"}, [2]string{"17:31", "18:40"})
 	delayed.From, delayed.To = "Zwolle", "Den Haag"
-	delayed.Cause, delayed.DelayMinutes, delayed.Reason = web.TrainCauseDelay, 20, "20 min late"
+	delayed.Cause, delayed.DelayMinutes, delayed.Reason = transit.CauseDelay, 20, "20 min late"
 
 	for _, test := range []struct {
 		name     string
 		language string
-		reports  map[string]web.TrainReport
+		reports  map[string]transit.TripStatus
 		want     []string
 	}{
 		{
 			name:     "english",
 			language: "en",
-			reports:  map[string]web.TrainReport{"Den Haag": onTime, "Dordrecht": late, "Zwolle": cancelled},
+			reports:  map[string]transit.TripStatus{"Den Haag": onTime, "Dordrecht": late, "Zwolle": cancelled},
 			want: []string{
 				"Trains:\n",
 				`- "There", Den Haag → Zwolle: green; the row reads "on time" and "08:10 → 09:02", 1 transfer; on time.`,
@@ -383,7 +384,7 @@ func TestWeatherCardShowsTrainStatuses(t *testing.T) {
 		{
 			name:     "russian",
 			language: "ru",
-			reports:  map[string]web.TrainReport{"Den Haag": longer, "Dordrecht": bus, "Zwolle": missing},
+			reports:  map[string]transit.TripStatus{"Den Haag": longer, "Dordrecht": bus, "Zwolle": missing},
 			want: []string{
 				`- "There", Den Haag → Zwolle: yellow; the row reads "+6 мин" and "08:10 → 09:08", 2 transfers; 6 min longer than planned.`,
 				`- "Via Dordrecht", Dordrecht → Utrecht Centraal: red; the row reads "автобус" and "07:40 → 07:47", direct; alternative transport; 3 min late.`,
@@ -393,7 +394,7 @@ func TestWeatherCardShowsTrainStatuses(t *testing.T) {
 		{
 			name:     "connection, disruption, and delay",
 			language: "en",
-			reports:  map[string]web.TrainReport{"Den Haag": unreachable, "Dordrecht": troubled, "Zwolle": delayed},
+			reports:  map[string]transit.TripStatus{"Den Haag": unreachable, "Dordrecht": troubled, "Zwolle": delayed},
 			want: []string{
 				`- "There", Den Haag → Zwolle: red; the row reads "no connection" and "08:13 → 09:05", 1 transfer; a connection cannot be made; 3 min late.`,
 				`- "Via Dordrecht", Dordrecht → Zwolle: yellow; the row reads "disruption" and "08:10 → 09:02", 1 transfer; Disruption: fewer trains.`,
@@ -403,7 +404,7 @@ func TestWeatherCardShowsTrainStatuses(t *testing.T) {
 		{
 			name:     "russian disruption",
 			language: "ru",
-			reports:  map[string]web.TrainReport{"Den Haag": onTime, "Dordrecht": troubled, "Zwolle": cancelled},
+			reports:  map[string]transit.TripStatus{"Den Haag": onTime, "Dordrecht": troubled, "Zwolle": cancelled},
 			want: []string{
 				`- "Via Dordrecht", Dordrecht → Zwolle: yellow; the row reads "помехи" and "08:10 → 09:02", 1 transfer; Disruption: fewer trains.`,
 				`- "Back", Zwolle → Den Haag: red; the row reads "отменён" and "17:31 → 18:20", direct; IC 3027 cancelled; 4 min late.`,
@@ -520,9 +521,9 @@ func TestWeatherCardTrainRefusals(t *testing.T) {
 	}
 
 	back := map[string]any{"label": "Back", "from": "Zwolle", "to": "Den Haag", "date_time": "2026-09-28T18:30"}
-	trains.failures = map[string]error{"Zwolle": &web.TrainRefusal{Text: `No NS station matches to "Zwolle".`}}
+	trains.failures = map[string]error{"Zwolle": &transit.RefusalError{Text: `No NS station matches to "Zwolle".`}}
 	wantError(t, f.callInTurn(turn, trainsCard("en", train, back)), `Train 2: No NS station matches to "Zwolle".`)
-	trains.failures = map[string]error{"Den Haag": &web.TrainRefusal{Text: "Train information is off for this user; they can turn it on in /settings.", Unavailable: true}}
+	trains.failures = map[string]error{"Den Haag": &transit.RefusalError{Text: "Train information is off for this user; they can turn it on in /settings.", Unavailable: true}}
 	wantError(t, f.callInTurn(turn, trainsCard("en", back, train)),
 		"Train 2: Train information is off for this user; they can turn it on in /settings; call weather_card again without trains.")
 	if _, found, err := box.Card("alice", turn); err != nil || found {

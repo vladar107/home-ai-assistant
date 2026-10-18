@@ -15,6 +15,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/integration"
 	"github.com/vladar107/home-ai-assistant/internal/module"
+	"github.com/vladar107/home-ai-assistant/internal/transit"
 )
 
 const (
@@ -63,7 +64,7 @@ type Service struct {
 	location   *time.Location
 	homeStop   string
 
-	stops  *directory
+	stops  *transit.Directory[*stopIndex]
 	alerts *alertFeed
 
 	cacheMu sync.Mutex
@@ -72,7 +73,10 @@ type Service struct {
 	running atomic.Bool
 }
 
-var _ module.Module = (*Service)(nil)
+var (
+	_ module.Module      = (*Service)(nil)
+	_ transit.Departures = (*Service)(nil)
+)
 
 func NewService(cfg Config, repository integration.Repository, logger *slog.Logger) (*Service, error) {
 	if repository == nil {
@@ -125,7 +129,13 @@ func NewService(cfg Config, repository integration.Repository, logger *slog.Logg
 		transitousAgent = "HomeAgent/" + moduleVersion + " (+" + contact + ")"
 	}
 	service.transitous = newClient(transitousBase, transitousAgent)
-	service.stops = &directory{fetch: service.gtfs.directoryTables, now: now}
+	service.stops = &transit.Directory[*stopIndex]{
+		Fetch:       service.fetchStops,
+		Now:         now,
+		Lifetime:    directoryLifetime,
+		RetryDelay:  directoryRetryDelay,
+		Interrupted: transportError,
+	}
 	service.alerts = &alertFeed{fetch: service.gtfs.alerts, now: now}
 	return service, nil
 }

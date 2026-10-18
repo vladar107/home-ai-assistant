@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/vladar107/home-ai-assistant/internal/transit"
 )
 
 const (
@@ -144,7 +146,7 @@ func (s *Service) stopTimes(ctx context.Context, group *stopGroup, at time.Time,
 // geocode finds a place the stop directory does not know, such as a railway station or an address,
 // preferring a Dutch stop.
 func (s *Service) geocode(ctx context.Context, text string) (place, bool, error) {
-	key := "geocode|" + normalize(text)
+	key := "geocode|" + transit.Normalize(text)
 	if cached, found := s.cached(key); found {
 		match := cached.(place)
 		return match, match.name != "", nil

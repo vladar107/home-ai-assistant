@@ -912,56 +912,56 @@ func TestTripStatusClassifiesTheTripTheUserWouldTake(t *testing.T) {
 		body         []byte
 		at           string
 		arriveBy     bool
-		level        ns.Level
-		cause        ns.Cause
+		level        transit.Level
+		cause        transit.Cause
 		cancelled    bool
 		found        bool
 		times        string
 		delay, extra int
 		reason       string
 	}{
-		{name: "normal", body: fixtureBytes(t, "trips.json"), at: "07:50", level: ns.LevelOnTime, found: true,
+		{name: "normal", body: fixtureBytes(t, "trips.json"), at: "07:50", level: transit.LevelOnTime, found: true,
 			times: "07:56 CEST 07:56 CEST 08:23 CEST 08:23 CEST", reason: "on time"},
-		{name: "skips a trip that left before the time", body: fixtureBytes(t, "trips.json"), at: "08:05", level: ns.LevelOnTime, found: true,
+		{name: "skips a trip that left before the time", body: fixtureBytes(t, "trips.json"), at: "08:05", level: transit.LevelOnTime, found: true,
 			times: "08:12 CEST 08:12 CEST 08:39 CEST 08:39 CEST", reason: "on time"},
 		{name: "two minutes late is on time", body: tripsVariant(t, func(_ map[string]any, legs []map[string]any) {
 			late(t, legs[0]["origin"], 2)
-		}), at: "07:50", level: ns.LevelOnTime, found: true, delay: 2, times: "07:56 CEST 07:58 CEST 08:23 CEST 08:23 CEST", reason: "on time"},
+		}), at: "07:50", level: transit.LevelOnTime, found: true, delay: 2, times: "07:56 CEST 07:58 CEST 08:23 CEST 08:23 CEST", reason: "on time"},
 		{name: "twelve minutes late", body: tripsVariant(t, func(_ map[string]any, legs []map[string]any) {
 			late(t, legs[0]["origin"], 12)
 			late(t, legs[1]["destination"], 12)
-		}), at: "07:50", level: ns.LevelSlower, cause: ns.CauseDelay, found: true, delay: 12, times: "07:56 CEST 08:08 CEST 08:23 CEST 08:35 CEST", reason: "12 min late"},
+		}), at: "07:50", level: transit.LevelSlower, cause: transit.CauseDelay, found: true, delay: 12, times: "07:56 CEST 08:08 CEST 08:23 CEST 08:35 CEST", reason: "12 min late"},
 		{name: "fifteen minutes late at arrival", body: tripsVariant(t, func(_ map[string]any, legs []map[string]any) {
 			late(t, legs[1]["destination"], 15)
-		}), at: "07:50", level: ns.LevelDisrupted, cause: ns.CauseDelay, found: true, delay: 15, times: "07:56 CEST 07:56 CEST 08:23 CEST 08:38 CEST", reason: "15 min late"},
+		}), at: "07:50", level: transit.LevelDisrupted, cause: transit.CauseDelay, found: true, delay: 15, times: "07:56 CEST 07:56 CEST 08:23 CEST 08:38 CEST", reason: "15 min late"},
 		{name: "longer than planned", body: tripsVariant(t, func(trip map[string]any, _ []map[string]any) {
 			trip["actualDurationInMinutes"] = 32
-		}), at: "07:50", level: ns.LevelSlower, cause: ns.CauseLonger, found: true, extra: 5, times: "07:56 CEST 07:56 CEST 08:23 CEST 08:23 CEST", reason: "5 min longer than planned"},
+		}), at: "07:50", level: transit.LevelSlower, cause: transit.CauseLonger, found: true, extra: 5, times: "07:56 CEST 07:56 CEST 08:23 CEST 08:23 CEST", reason: "5 min longer than planned"},
 		{name: "status not normal", body: tripsVariant(t, func(trip map[string]any, legs []map[string]any) {
 			trip["status"] = "DISRUPTION"
 			legs[0]["notes"] = []any{map[string]any{"value": "Disruption: fewer trains between Amersfoort and Utrecht"}}
-		}), at: "07:50", level: ns.LevelSlower, cause: ns.CauseDisruption, found: true, times: "07:56 CEST 07:56 CEST 08:23 CEST 08:23 CEST",
+		}), at: "07:50", level: transit.LevelSlower, cause: transit.CauseDisruption, found: true, times: "07:56 CEST 07:56 CEST 08:23 CEST 08:23 CEST",
 			reason: "Disruption: fewer trains between Amersfoort and Utrecht"},
 		{name: "a connection cannot be made", body: tripsVariant(t, func(_ map[string]any, legs []map[string]any) {
 			legs[1]["reachable"] = false
-		}), at: "07:50", level: ns.LevelDisrupted, cause: ns.CauseMissedConnection, found: true, times: "07:56 CEST 07:56 CEST 08:23 CEST 08:23 CEST", reason: "a connection cannot be made"},
+		}), at: "07:50", level: transit.LevelDisrupted, cause: transit.CauseMissedConnection, found: true, times: "07:56 CEST 07:56 CEST 08:23 CEST 08:23 CEST", reason: "a connection cannot be made"},
 		{name: "part cancelled", body: tripsVariant(t, func(_ map[string]any, legs []map[string]any) {
 			legs[0]["partCancelled"] = true
-		}), at: "07:50", level: ns.LevelDisrupted, cause: ns.CauseCancelled, cancelled: true, found: true, times: "07:56 CEST 07:56 CEST 08:23 CEST 08:23 CEST", reason: "SPR 5822 partly cancelled"},
-		{name: "cancelled with alternative transport", body: fixtureBytes(t, "trips_disrupted.json"), at: "07:50", level: ns.LevelDisrupted, cause: ns.CauseCancelled, cancelled: true, found: true,
+		}), at: "07:50", level: transit.LevelDisrupted, cause: transit.CauseCancelled, cancelled: true, found: true, times: "07:56 CEST 07:56 CEST 08:23 CEST 08:23 CEST", reason: "SPR 5822 partly cancelled"},
+		{name: "cancelled with alternative transport", body: fixtureBytes(t, "trips_disrupted.json"), at: "07:50", level: transit.LevelDisrupted, cause: transit.CauseCancelled, cancelled: true, found: true,
 			delay: 3, extra: 6, times: "07:56 CEST 07:59 CEST 08:23 CEST 08:23 CEST",
 			reason: "IC 1722 cancelled; alternative transport; 3 min late; 6 min longer than planned; Disruption: fewer trains"},
-		{name: "no trip after the time", body: fixtureBytes(t, "trips.json"), at: "09:00", level: ns.LevelDisrupted, cause: ns.CauseNoTrip, times: "- - - -", reason: "no trip found"},
-		{name: "arrive by", body: fixtureBytes(t, "trips_arrival.json"), at: "09:10", arriveBy: true, level: ns.LevelOnTime, found: true,
+		{name: "no trip after the time", body: fixtureBytes(t, "trips.json"), at: "09:00", level: transit.LevelDisrupted, cause: transit.CauseNoTrip, times: "- - - -", reason: "no trip found"},
+		{name: "arrive by", body: fixtureBytes(t, "trips_arrival.json"), at: "09:10", arriveBy: true, level: transit.LevelOnTime, found: true,
 			times: "08:42 CEST 08:42 CEST 09:09 CEST 09:09 CEST", reason: "on time"},
-		{name: "arrive by takes the last of equal arrivals", body: fixtureBytes(t, "trips_arrival.json"), at: "09:30", arriveBy: true, level: ns.LevelOnTime, found: true,
+		{name: "arrive by takes the last of equal arrivals", body: fixtureBytes(t, "trips_arrival.json"), at: "09:30", arriveBy: true, level: transit.LevelOnTime, found: true,
 			times: "09:04 CEST 09:04 CEST 09:23 CEST 09:23 CEST", reason: "on time"},
-		{name: "nothing arrives by the time", body: fixtureBytes(t, "trips_arrival.json"), at: "08:50", arriveBy: true, level: ns.LevelDisrupted, cause: ns.CauseNoTrip, times: "- - - -", reason: "no trip found"},
+		{name: "nothing arrives by the time", body: fixtureBytes(t, "trips_arrival.json"), at: "08:50", arriveBy: true, level: transit.LevelDisrupted, cause: transit.CauseNoTrip, times: "- - - -", reason: "no trip found"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			f.clock.advance(time.Minute)
 			f.server.serve("v3/trips", test.body)
-			status, err := f.service.TripStatus(t.Context(), "alice", ns.StatusQuery{From: "Amersfoort Schothorst", To: "Utrecht Centraal", At: at(test.at), ArriveBy: test.arriveBy})
+			status, err := f.service.TripStatus(t.Context(), "alice", transit.TripQuery{From: "Amersfoort Schothorst", To: "Utrecht Centraal", At: at(test.at), ArriveBy: test.arriveBy})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -985,20 +985,20 @@ func TestTripStatusSharesTheTripsCacheAndRefuses(t *testing.T) {
 	f := newFixture(t)
 	f.server.serve("v3/trips", fixtureBytes(t, "trips.json"))
 	ctx := t.Context()
-	query := ns.StatusQuery{From: "Amersfoort Schothorst", To: "Utrecht Centraal", At: time.Date(2026, 10, 5, 8, 0, 0, 0, time.UTC)}
+	query := transit.TripQuery{From: "Amersfoort Schothorst", To: "Utrecht Centraal", At: time.Date(2026, 10, 5, 8, 0, 0, 0, time.UTC)}
 
 	wantText(t, f.call("ns_trips", map[string]any{"from": "AMFS", "to": "UT", "date_time": "2026-10-05T08:00"}), "SPR 5822")
-	if status, err := f.service.TripStatus(ctx, "alice", query); err != nil || status.Level != ns.LevelOnTime {
+	if status, err := f.service.TripStatus(ctx, "alice", query); err != nil || status.Level != transit.LevelOnTime {
 		t.Fatalf("status = %+v %v", status, err)
 	}
 	if got := len(f.server.seen("v3/trips")); got != 1 {
 		t.Fatalf("NS asked %d times for the same trip within 30 seconds, want once", got)
 	}
 
-	refusal := func(principalID string, query ns.StatusQuery, fragment string, unavailable bool) {
+	refusal := func(principalID string, query transit.TripQuery, fragment string, unavailable bool) {
 		t.Helper()
 		_, err := f.service.TripStatus(ctx, principalID, query)
-		var refused *ns.RefusalError
+		var refused *transit.RefusalError
 		if !errors.As(err, &refused) || !strings.Contains(refused.Text, fragment) || refused.Unavailable != unavailable {
 			t.Fatalf("error = %+v, want a refusal containing %q with unavailable %t", err, fragment, unavailable)
 		}
@@ -1090,7 +1090,7 @@ func TestDepartureChecksNormalizeTheStatus(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			f.clock.advance(time.Minute)
 			f.server.serve("v3/trips", test.body)
-			departures, err := f.service.CheckDepartures(t.Context(), "alice", ns.DepartureQuery{From: "AMFS", To: "Utrecht", Date: day, Times: []transit.Clock{clock("07:56")}})
+			departures, err := f.service.CheckDepartures(t.Context(), "alice", transit.DepartureQuery{From: "AMFS", To: "Utrecht", Date: day, Times: []transit.Clock{clock("07:56")}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1108,7 +1108,7 @@ func TestDepartureChecksNormalizeTheStatus(t *testing.T) {
 	f.clock.advance(time.Minute)
 	f.server.serve("v3/trips", fixtureBytes(t, "trips.json"))
 	f.server.serve("v2/departures", fixtureBytes(t, "departures.json"))
-	departures, err := f.service.CheckDepartures(t.Context(), "alice", ns.DepartureQuery{From: "Amersfoort", To: "Amsterdam Centraal", Date: day, Times: []transit.Clock{clock("08:19"), clock("08:21")}})
+	departures, err := f.service.CheckDepartures(t.Context(), "alice", transit.DepartureQuery{From: "Amersfoort", To: "Amsterdam Centraal", Date: day, Times: []transit.Clock{clock("08:19"), clock("08:21")}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1119,7 +1119,7 @@ func TestDepartureChecksNormalizeTheStatus(t *testing.T) {
 	// A failed request is a failed check for that departure, never a status.
 	f.clock.advance(time.Minute)
 	f.server.fail("v3/trips", http.StatusServiceUnavailable, "{}")
-	departures, err = f.service.CheckDepartures(t.Context(), "alice", ns.DepartureQuery{From: "AMFS", To: "UT", Date: day, Times: []transit.Clock{clock("07:56")}})
+	departures, err = f.service.CheckDepartures(t.Context(), "alice", transit.DepartureQuery{From: "AMFS", To: "UT", Date: day, Times: []transit.Clock{clock("07:56")}})
 	if err != nil || departures[0].Status != transit.StatusCheckFailed || departures[0].Note != "NS travel information is unavailable right now." {
 		t.Fatalf("departures = %+v %v", departures, err)
 	}
@@ -1129,8 +1129,8 @@ func TestDepartureChecksNormalizeTheStatus(t *testing.T) {
 	if _, err := f.service.SetEnabled(t.Context(), "alice", false); err != nil {
 		t.Fatal(err)
 	}
-	var refused *ns.RefusalError
-	if _, err := f.service.CheckDepartures(t.Context(), "alice", ns.DepartureQuery{From: "AMFS", To: "UT", Date: day, Times: []transit.Clock{clock("07:56")}}); !errors.As(err, &refused) || !refused.Unavailable {
+	var refused *transit.RefusalError
+	if _, err := f.service.CheckDepartures(t.Context(), "alice", transit.DepartureQuery{From: "AMFS", To: "UT", Date: day, Times: []transit.Clock{clock("07:56")}}); !errors.As(err, &refused) || !refused.Unavailable || !refused.Disabled {
 		t.Fatalf("check with trains off = %v", err)
 	}
 }
@@ -1195,7 +1195,7 @@ func TestDepartureChecksLookPastTrainsALaterOneBeats(t *testing.T) {
 
 	asked := len(f.server.seen("v3/trips"))
 	plans(map[string][]byte{"": hidden, "10": hidden, "20": full})
-	departures, err := f.service.CheckDepartures(t.Context(), "alice", ns.DepartureQuery{From: "AMFS", To: "UT", Date: day, Times: []transit.Clock{clock("07:56")}})
+	departures, err := f.service.CheckDepartures(t.Context(), "alice", transit.DepartureQuery{From: "AMFS", To: "UT", Date: day, Times: []transit.Clock{clock("07:56")}})
 	if err != nil || departures[0].Status != transit.StatusOnTime || departures[0].Legs[0].Name != "SPR 5822" || !strings.Contains(departures[0].Note, "20 extra minutes") {
 		t.Fatalf("departures = %+v %v", departures, err)
 	}
@@ -1206,7 +1206,7 @@ func TestDepartureChecksLookPastTrainsALaterOneBeats(t *testing.T) {
 	// A train no step finds is looked up on the board, and stays not in the timetable.
 	asked = len(f.server.seen("v3/trips"))
 	plans(map[string][]byte{"": hidden, "10": hidden, "20": hidden, "30": hidden})
-	departures, err = f.service.CheckDepartures(t.Context(), "alice", ns.DepartureQuery{From: "AMFS", To: "UT", Date: day, Times: []transit.Clock{clock("07:56")}})
+	departures, err = f.service.CheckDepartures(t.Context(), "alice", transit.DepartureQuery{From: "AMFS", To: "UT", Date: day, Times: []transit.Clock{clock("07:56")}})
 	if err != nil || departures[0].Status != transit.StatusNotInTimetable || len(departures[0].Legs) != 0 {
 		t.Fatalf("departures = %+v %v", departures, err)
 	}
@@ -1217,7 +1217,7 @@ func TestDepartureChecksLookPastTrainsALaterOneBeats(t *testing.T) {
 	// A retry that fails leaves the train unknown, so the check failed.
 	asked = len(f.server.seen("v3/trips"))
 	plans(map[string][]byte{"": hidden})
-	departures, err = f.service.CheckDepartures(t.Context(), "alice", ns.DepartureQuery{From: "AMFS", To: "UT", Date: day, Times: []transit.Clock{clock("07:56")}})
+	departures, err = f.service.CheckDepartures(t.Context(), "alice", transit.DepartureQuery{From: "AMFS", To: "UT", Date: day, Times: []transit.Clock{clock("07:56")}})
 	if err != nil || departures[0].Status != transit.StatusCheckFailed || departures[0].Note != "NS travel information is unavailable right now." {
 		t.Fatalf("departures = %+v %v", departures, err)
 	}
@@ -1240,7 +1240,7 @@ func TestDisruptionsAreStructuredWithTheirStations(t *testing.T) {
 	first := entries[0]
 	if first.Kind != "disruption" || first.ID != "7008343" || first.Title != "Roosendaal - Vlissingen." || first.Cause != "defect spoor" ||
 		first.End.Format(time.RFC3339) != "2026-10-05T00:00:00+02:00" || len(first.Stations) != 11 ||
-		first.Stations[0] != (ns.AffectedStation{Code: "RSD", Name: "Roosendaal"}) {
+		first.Stations[0] != (transit.AffectedStation{Code: "RSD", Name: "Roosendaal"}) {
 		t.Fatalf("first disruption = %+v", first)
 	}
 	if sent := f.server.seen("v3/disruptions"); len(sent) != 0 && sent[0].Get("isActive") != "" {

@@ -112,6 +112,7 @@ plan that links back to the earlier record.
 | 0100 | [Connector and tool correctness fixes](0100-connector-correctness-fixes.md) | done |
 | 0101 | [Scheduling latency, shutdown robustness and digest-pinned deploys](0101-latency-shutdown-and-digest-deploys.md) | done |
 | 0102 | [Pi runtime limits, session retention, and photo privacy](0102-pi-runtime-limits-and-session-retention.md) | done |
+| 0103 | [Watches and routes on transit abstractions](0103-transit-abstractions.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

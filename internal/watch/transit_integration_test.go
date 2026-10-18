@@ -748,3 +748,22 @@ func TestRouteWatchTellsWhenTheRouteIsGone(t *testing.T) {
 		t.Fatalf("NS asked %d times, metrics = %v", requests, e.telemetry.events)
 	}
 }
+
+// A route watch whose owner turned trains off fails its checks as they are, while every leg
+// failing because NS is down is an upstream failure.
+func TestRouteWatchTellsTrainsOffApartFromNSFailing(t *testing.T) {
+	e := newTransitEngine(t)
+	e.saveRoute("alice", "0000000000000001", "work", "07:56")
+	e.saveRoute("bob", "0000000000000002", "work", "07:56")
+	e.create("alice", watchID, routeSpec("work"))
+	e.create("bob", "0000000000000003", routeSpec("work"))
+	if _, err := e.trains.SetEnabled(e.ctx, "bob", false); err != nil {
+		t.Fatal(err)
+	}
+	e.gateway.fail("/ns/v3/trips", http.StatusServiceUnavailable)
+
+	e.at("2026-10-05 06:30")
+	if e.telemetry.count("check alice route failed") != 1 || e.telemetry.count("check bob route failed") != 1 || e.telemetry.count("upstream route routes") != 1 {
+		t.Fatalf("checks = %v", e.telemetry.events)
+	}
+}

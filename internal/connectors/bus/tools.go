@@ -573,7 +573,7 @@ func (s *Service) view(at time.Time) view {
 }
 
 func (s *Service) index(ctx context.Context, principalID string) (*stopIndex, *tools.Result) {
-	index, err := s.stops.load(ctx)
+	index, err := s.stops.Load(ctx)
 	if err != nil {
 		s.logger.InfoContext(ctx, "bus.stops.refresh_failed", "principal_id", principalID, "error_class", errorClass(err), "stale", index != nil)
 	}
