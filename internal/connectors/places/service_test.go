@@ -49,6 +49,7 @@ type simulator struct {
 	overpass     string
 	overpassCode int
 	geocode      string
+	geocodeCode  int
 	requests     []request
 }
 
@@ -56,7 +57,7 @@ func (s *simulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	s.mu.Lock()
 	s.requests = append(s.requests, request{method: r.Method, path: r.URL.Path, agent: r.UserAgent(), query: r.URL.RawQuery, form: string(body)})
-	overpass, code, geocode := s.overpass, s.overpassCode, s.geocode
+	overpass, code, geocode, geocodeCode := s.overpass, s.overpassCode, s.geocode, s.geocodeCode
 	s.mu.Unlock()
 	switch r.URL.Path {
 	case "/overpass":
@@ -66,6 +67,10 @@ func (s *simulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		_, _ = w.Write([]byte(overpass))
 	case "/transitous/v1/reverse-geocode":
+		if geocodeCode != 0 {
+			w.WriteHeader(geocodeCode)
+			return
+		}
 		_, _ = w.Write([]byte(geocode))
 	default:
 		w.WriteHeader(http.StatusNotFound)
@@ -359,6 +364,32 @@ func TestDescribeNamesThePositionAndCachesByGrid(t *testing.T) {
 	}
 	if sim.count("/transitous/v1/reverse-geocode") != 3 {
 		t.Fatalf("expected a refetch after a day")
+	}
+}
+
+func TestDescribeRemembersAFailureBriefly(t *testing.T) {
+	sim := &simulator{geocode: geocodeBody, geocodeCode: http.StatusServiceUnavailable}
+	c := &clock{now: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)}
+	service := newService(t, sim, c.Now)
+
+	if _, err := service.Describe(context.Background(), 52.0, 4.5); err == nil {
+		t.Fatal("expected the failure")
+	}
+	failed := sim.count("/transitous/v1/reverse-geocode")
+	if _, err := service.Describe(context.Background(), 52.01, 4.5); err == nil {
+		t.Fatal("expected the remembered failure")
+	}
+	if got := sim.count("/transitous/v1/reverse-geocode"); got != failed {
+		t.Fatalf("a failure should spare the next point a request, got %d requests after %d", got, failed)
+	}
+
+	sim.mu.Lock()
+	sim.geocodeCode = 0
+	sim.mu.Unlock()
+	c.advance(time.Minute)
+	name, err := service.Describe(context.Background(), 52.0, 4.5)
+	if err != nil || name != "Stationsplein 1, Leiden" {
+		t.Fatalf("after the pause: %q, %v", name, err)
 	}
 }
 

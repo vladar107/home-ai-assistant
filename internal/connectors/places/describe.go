@@ -15,6 +15,9 @@ const (
 	describeLifetime = 24 * time.Hour
 	describeGridM    = 50
 
+	describeFailedKey       = "describe|failed"
+	describeFailureLifetime = time.Minute
+
 	municipalityLevel = 8
 	maximumNameRunes  = 80
 )
@@ -46,12 +49,20 @@ func (s *Service) Describe(ctx context.Context, lat, lon float64) (string, error
 	if cached, found := s.cached(key); found {
 		return cached.(string), nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, describeTimeout)
+	if failed, found := s.cached(describeFailedKey); found {
+		return "", failed.(error)
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, describeTimeout)
 	defer cancel()
 	var matches []geocodeMatch
 	query := url.Values{"place": {coordinates(lat, lon)}}
-	if err := s.getJSON(ctx, s.transitous, "v1/reverse-geocode", query, &matches); err != nil {
+	if err := s.getJSON(requestCtx, s.transitous, "v1/reverse-geocode", query, &matches); err != nil {
 		s.logger.InfoContext(ctx, "places.describe.failed", "error_class", errorClass(err))
+		// Every turn names the user's position before the model starts, so while the service is
+		// down a failure is remembered for every point, and turns do not each wait out the timeout.
+		if ctx.Err() == nil {
+			s.store(describeFailedKey, err, describeFailureLifetime)
+		}
 		return "", err
 	}
 	text := describeMatches(matches)
