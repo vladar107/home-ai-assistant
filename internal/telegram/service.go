@@ -631,6 +631,7 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 		Message:           text,
 		Attachments:       attachments,
 		ReplyToMessageID:  repliedTo(message),
+		Forwarded:         message.Forwarded(),
 	})
 	if errors.Is(err, conversation.ErrBusy) {
 		return s.sendCommandReply(ctx, message, authorization.Principal.ID, "busy", conversation.BusyReply, nil)

@@ -1,6 +1,6 @@
 # 0099 — Close the gaps where outside text passes as the user's own
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 

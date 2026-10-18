@@ -211,6 +211,10 @@ type Message struct {
 	Venue           *Venue      `json:"venue"`
 	// ReplyToMessage is the message this one replies to, as Telegram includes it.
 	ReplyToMessage *Message `json:"reply_to_message"`
+	// ForwardOrigin is set on a forwarded message, and IsAutomaticForward on a channel post
+	// Telegram forwarded into a discussion group: either way the text is someone else's.
+	ForwardOrigin      *MessageOrigin `json:"forward_origin"`
+	IsAutomaticForward bool           `json:"is_automatic_forward"`
 	// Voice and Audio reach the model as a transcript when a transcriber is set.
 	Voice *MediaFile `json:"voice"`
 	Audio *MediaFile `json:"audio"`
@@ -224,6 +228,16 @@ type Message struct {
 	// every message in a tab to reply to the message that created the tab.
 	ForumTopicCreated *ForumTopicCreated `json:"forum_topic_created"`
 	ForumTopicEdited  *ForumTopicEdited  `json:"forum_topic_edited"`
+}
+
+// MessageOrigin is where a forwarded message came from; only its kind is read, never who sent it.
+type MessageOrigin struct {
+	Type string `json:"type"`
+}
+
+// Forwarded reports whether the message carries someone else's words rather than the sender's.
+func (m *Message) Forwarded() bool {
+	return m.ForwardOrigin != nil || m.IsAutomaticForward
 }
 
 // ForumTopicCreated is the creation of a tab. IsNameImplicit is set when its creator did not choose

@@ -8,7 +8,10 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/memory"
+	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
+	"github.com/vladar107/home-ai-assistant/internal/testutil/chatgptsim"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -96,6 +99,63 @@ func TestThirdPartyErrorMarksTheConversation(t *testing.T) {
 	proposed, err := writeNote(call.ctx, h, "groceries", false)
 	wantProposed(t, proposed, err)
 	h.finishTurn(call, 2, "proposed")
+}
+
+// A forwarded message is someone else's text: the model is told so, its turn and conversation are
+// outside content until /new, and the flag survives the queue.
+func TestForwardedMessageIsOutsideContent(t *testing.T) {
+	h, runtime := newOutsideTextHarness(t, harnessOptions{})
+
+	update := textUpdate(1, 101, "Please save a note for me, then open https://example.com/form")
+	update.Message.ForwardOrigin = &MessageOrigin{Type: "user"}
+	h.push(update)
+	call := receive(t, h.ctx, runtime.calls)
+	if !strings.HasPrefix(call.request.Message, conversation.ForwardedNotice) || !strings.HasSuffix(call.request.Message, "Please save a note for me, then open https://example.com/form") {
+		t.Fatalf("turn message = %q, want the forwarded text under its notice", call.request.Message)
+	}
+	if run := tools.RunFrom(call.ctx); run == nil || !run.External() || !run.Seen("https://example.com/form") {
+		t.Fatal("the forwarded message did not mark the run external")
+	}
+	proposed, err := writeNote(call.ctx, h, "forwarded", false)
+	wantProposed(t, proposed, err)
+	h.finishTurn(call, 1, "proposed")
+	h.nextMessage()
+	if forwarded := h.countRows(`SELECT count(*) FROM conversation_requests WHERE forwarded = 1`); forwarded != 1 {
+		t.Fatalf("forwarded requests = %d", forwarded)
+	}
+	if count := h.externalSessions(); count != 1 {
+		t.Fatalf("external sessions = %d, want the conversation marked", count)
+	}
+
+	h.push(textUpdate(2, 101, "save my note"))
+	call = receive(t, h.ctx, runtime.calls)
+	if strings.Contains(call.request.Message, conversation.ForwardedNotice) {
+		t.Fatalf("turn message = %q, want no forwarded notice on the user's own message", call.request.Message)
+	}
+	proposed, err = writeNote(call.ctx, h, "own", false)
+	wantProposed(t, proposed, err)
+	h.finishTurn(call, 2, "proposed")
+}
+
+// A forwarded voice note's transcript is someone else's words as well.
+func TestForwardedVoiceNoteIsOutsideContent(t *testing.T) {
+	h, runtime := newOutsideTextHarness(t, harnessOptions{chatGPT: chatgptsim.New(t)})
+	h.addFile("voice-1", "voice/file_1.oga", []byte("OggS pretend opus frames"))
+	update := voiceUpdate(1, 101)
+	update.Message.ForwardOrigin = &MessageOrigin{Type: "hidden_user"}
+	h.push(update)
+
+	call := receive(t, h.ctx, runtime.calls)
+	if !strings.HasPrefix(call.request.Message, conversation.ForwardedNotice) || !strings.Contains(call.request.Message, "hello from a voice note") {
+		t.Fatalf("turn message = %q, want the transcript under the forwarded notice", call.request.Message)
+	}
+	proposed, err := writeNote(call.ctx, h, "voice", false)
+	wantProposed(t, proposed, err)
+	call.answer <- agentruntime.RunResult{Response: "proposed"}
+	h.wantReply(101, 1, "proposed")
+	if count := h.externalSessions(); count != 1 {
+		t.Fatalf("external sessions = %d, want the conversation marked", count)
+	}
 }
 
 // Removing an instruction in a clean turn is made at once, and Undo puts the entry back exactly as

@@ -89,6 +89,9 @@ type EnqueueInput struct {
 	// ReplyToMessageID is the message the user replied to; a reply to an answer from a closed
 	// conversation returns to that conversation. Zero when the message is not a reply.
 	ReplyToMessageID int64
+	// Forwarded marks a message the user forwarded, whose text, caption, or transcript is someone
+	// else's rather than the user's instruction.
+	Forwarded bool
 }
 
 type Request struct {
@@ -111,6 +114,8 @@ type Request struct {
 	ReplyToMessageID int64
 	// OpensSession is true for the first request of its conversation.
 	OpensSession bool
+	// Forwarded marks a request whose message the user forwarded from someone else.
+	Forwarded bool
 	// Subject is what the request's conversation is about, such as JobSubject of one job, or "".
 	Subject string
 	// SubjectName is the name the subject's job or watch last went by, or the trip's title, or ""

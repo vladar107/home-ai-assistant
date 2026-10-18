@@ -653,7 +653,9 @@ routes after jobs and watches, read-only, with a Delete button each.
   too, since it can quote the service.
   Text from the household's own devices through Home Assistant does not count.
   A file or photo the user sends counts as outside content, and so does
-  `read_attachment`. A run is marked when such a read starts, so a write
+  `read_attachment`. So does a forwarded message, or a forwarded voice note's
+  transcript; the model is told it is someone else's text, not the user's
+  instruction. A run is marked when such a read starts, so a write
   running beside it in the same batch proposes too.
   In a marked conversation, or a run that has read such text:
   - home actions, `reminder_set`, `task_start`, and every act-and-tell tool

@@ -128,6 +128,7 @@ func (s *Store) EnqueueConversation(
 		Message:           input.Message,
 		State:             conversation.RequestStateQueued,
 		SubjectLabel:      subjectLabel,
+		Forwarded:         input.Forwarded,
 	}
 	var replyTo any
 	if input.ReplyToMessageID > 0 {
@@ -143,8 +144,8 @@ func (s *Store) EnqueueConversation(
 		ctx,
 		`INSERT INTO conversation_requests (
 		    id, bot_user_id, telegram_update_id, telegram_message_id, principal_id, chat_id, session_id, message,
-		    resumed_from, reply_to_message_id, thread_id, subject_label
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''))`,
+		    resumed_from, reply_to_message_id, thread_id, subject_label, forwarded
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?)`,
 		request.ID,
 		input.BotUserID,
 		input.TelegramUpdateID,
@@ -157,6 +158,7 @@ func (s *Store) EnqueueConversation(
 		replyTo,
 		request.ThreadID,
 		subjectLabel,
+		request.Forwarded,
 	); err != nil {
 		return conversation.EnqueueResult{}, fmt.Errorf("create conversation request: %w", err)
 	}
@@ -227,7 +229,7 @@ func (s *Store) NextConversationRequest(ctx context.Context, lane conversation.L
 		        COALESCE(request.response_text, ''), COALESCE(request.error_kind, ''), request.created_at,
 		        COALESCE(request.resumed_from, ''), COALESCE(request.reply_to_message_id, 0),
 		        request.thread_id, `+requestOpensSession+`,
-		        COALESCE(session.subject, ''), COALESCE(request.subject_label, ''), request.delivered_chunks
+		        COALESCE(session.subject, ''), COALESCE(request.subject_label, ''), request.delivered_chunks, request.forwarded
 		 FROM conversation_requests AS request
 		 JOIN conversation_sessions AS session
 		   ON session.id = request.session_id AND session.principal_id = request.principal_id
@@ -767,7 +769,7 @@ func loadConversationByUpdate(ctx context.Context, db queryRower, botUserID, upd
 		        COALESCE(request.response_text, ''), COALESCE(request.error_kind, ''), request.created_at,
 		        COALESCE(request.resumed_from, ''), COALESCE(request.reply_to_message_id, 0),
 		        request.thread_id, `+requestOpensSession+`,
-		        COALESCE(session.subject, ''), COALESCE(request.subject_label, ''), request.delivered_chunks
+		        COALESCE(session.subject, ''), COALESCE(request.subject_label, ''), request.delivered_chunks, request.forwarded
 		 FROM conversation_requests AS request
 		 JOIN conversation_sessions AS session
 		   ON session.id = request.session_id AND session.principal_id = request.principal_id
@@ -841,6 +843,7 @@ func scanConversationRequest(row *sql.Row) (conversation.Request, error) {
 		&request.Subject,
 		&request.SubjectLabel,
 		&request.DeliveredChunks,
+		&request.Forwarded,
 	)
 	if err != nil {
 		return request, err
