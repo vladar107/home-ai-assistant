@@ -426,6 +426,9 @@ func (s *Service) NewSession(ctx context.Context, lane Lane) (bool, error) {
 			return false, err
 		}
 	}
+	if reset {
+		s.forgetImages(ctx, lane.PrincipalID, sessionID)
+	}
 	s.mu.Lock()
 	cancel := s.inflight[lane]
 	s.dropCaptures(lane)
@@ -520,15 +523,33 @@ func (s *Service) SessionMessages(ctx context.Context, principalID, sessionID st
 	return s.repository.SessionMessageIDs(ctx, principalID, sessionID)
 }
 
-// leaveSession removes the files a conversation held once another one replaced it, as /new does.
-// The switch is already committed, and the start-up purge removes the files of every closed
-// session, so a failure here is only logged.
+// leaveSession removes the files and photos a conversation held once another one replaced it, as
+// /new does. The switch is already committed, and the start-up purge removes the files of every
+// closed session, so a failure here is only logged.
 func (s *Service) leaveSession(ctx context.Context, principalID, sessionID string) {
-	if sessionID == "" || s.config.Attachments == nil {
+	if sessionID == "" {
 		return
 	}
-	if err := s.config.Attachments.CloseSession(ctx, principalID, sessionID); err != nil {
-		s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "conversation.attachments.close_failed", "principal_id", principalID, "error", err)
+	if s.config.Attachments != nil {
+		if err := s.config.Attachments.CloseSession(ctx, principalID, sessionID); err != nil {
+			s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "conversation.attachments.close_failed", "principal_id", principalID, "error", err)
+		}
+	}
+	s.forgetImages(ctx, principalID, sessionID)
+}
+
+// forgetImages removes a closed conversation's photos from the runtime's history. The session
+// prune strips every closed conversation too, so a failure here is only logged.
+func (s *Service) forgetImages(ctx context.Context, principalID, sessionID string) {
+	if s.config.Transcripts == nil {
+		return
+	}
+	runtimeSessionID, found, err := s.repository.ConversationRuntimeSession(ctx, principalID, sessionID)
+	if err == nil && found {
+		err = s.config.Transcripts.ForgetImages(ctx, principalID, runtimeSessionID)
+	}
+	if err != nil {
+		s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "conversation.transcript.forget_failed", "principal_id", principalID, "error", err)
 	}
 }
 
@@ -753,6 +774,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 			Jobs:        s.jobsText(turnCtx, request.PrincipalID),
 			WebSearch:   webSearch,
 			SearchCheck: s.searchCheck(request.PrincipalID, webSearch, true),
+			Kind:        agentruntime.RunChat,
 		}, sink)
 		modelTime = time.Since(runStarted)
 		runErr = err

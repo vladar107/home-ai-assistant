@@ -131,8 +131,13 @@ func TestProcessConfigurationAndSessionContinuity(t *testing.T) {
 		}
 	}
 	index := slices.Index(report.Args, "--system-prompt")
-	if index < 0 || index+1 >= len(report.Args) || report.Args[index+1] == "" {
-		t.Error("missing application system prompt")
+	if index < 0 || index+1 >= len(report.Args) || !strings.HasPrefix(report.Args[index+1], agentDir(cfg, testPrincipal)+string(filepath.Separator)+"turn-") {
+		t.Errorf("system prompt is not passed as a file in the turn directory: %#v", report.Args)
+	} else if _, err := os.Stat(filepath.Dir(report.Args[index+1])); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("turn directory left behind: %v", err)
+	}
+	if !strings.HasPrefix(report.SystemPrompt, "You are a private personal home assistant.") || report.SystemPromptMode != 0o600 {
+		t.Errorf("system prompt file = %q with mode %v", report.SystemPrompt, report.SystemPromptMode)
 	}
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -590,7 +595,7 @@ func TestWebSearchTurnLoadsOnlyTheSearchExtension(t *testing.T) {
 	if len(report.BridgeFiles) != 0 || len(report.Files) != 0 {
 		t.Errorf("web search turn wrote files: bridge=%v workspace=%v", report.BridgeFiles, report.Files)
 	}
-	if prompt := report.Args[slices.Index(report.Args, "--system-prompt")+1]; !strings.Contains(prompt, "web_search") || strings.Contains(prompt, "no integrations or tools") {
+	if prompt := report.SystemPrompt; !strings.Contains(prompt, "web_search") || strings.Contains(prompt, "no integrations or tools") {
 		t.Errorf("system prompt did not describe web search: %q", prompt)
 	}
 	assertProcessStopped(t, report)
@@ -659,45 +664,5 @@ func TestUnavailableWebSearchExtensionFailsStartup(t *testing.T) {
 				t.Fatalf("error = %v", err)
 			}
 		})
-	}
-}
-
-type sessionReferences map[string]struct{}
-
-func (r sessionReferences) ReferencedSessions(context.Context) (map[string]struct{}, error) {
-	return r, nil
-}
-
-func TestPrunerRemovesOnlyOldUnreferencedSessions(t *testing.T) {
-	cfg := config(t)
-	r := newRuntime(t, cfg)
-	directory := sessionDir(cfg, testPrincipal)
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	cutoff := time.Now().Add(-30 * 24 * time.Hour)
-	files := map[string]time.Time{
-		"2026-01-01T00-00-00-000Z_chat-session.jsonl": cutoff.Add(-time.Hour),
-		"2026-01-01T00-00-00-000Z_old-run.jsonl":      cutoff.Add(-time.Hour),
-		"2026-01-01T00-00-00-000Z_recent-run.jsonl":   cutoff.Add(time.Hour),
-	}
-	for name, modified := range files {
-		path := filepath.Join(directory, name)
-		if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Chtimes(path, modified, modified); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	if err := r.SessionPruner(sessionReferences{"chat-session": {}}).PruneSessions(context.Background(), cutoff); err != nil {
-		t.Fatal(err)
-	}
-	for name := range files {
-		_, err := os.Stat(filepath.Join(directory, name))
-		if removed := errors.Is(err, fs.ErrNotExist); removed != strings.Contains(name, "old-run") {
-			t.Errorf("%s removed = %v", name, removed)
-		}
 	}
 }

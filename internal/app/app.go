@@ -583,6 +583,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 				Reports:      reports,
 				Jobs:         scheduler,
 				Attachments:  attachments,
+				Transcripts:  runtime,
 				WebSearch:    webSearch,
 				Cards:        cards,
 				Photos:       client,

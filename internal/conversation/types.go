@@ -301,6 +301,9 @@ type Repository interface {
 	// SwitchConversation makes the principal's own session the lane's active one unless the lane has
 	// a turn pending or another tab holds it, closing the lane's previously active session as switched.
 	SwitchConversation(ctx context.Context, lane Lane, sessionID string) (SwitchResult, error)
+	// ConversationRuntimeSession returns the runtime session of one of the principal's
+	// conversations.
+	ConversationRuntimeSession(ctx context.Context, principalID, sessionID string) (string, bool, error)
 	// SessionMessageIDs returns the Telegram message IDs of the session's requests and recorded
 	// replies, ascending and without repeats.
 	SessionMessageIDs(ctx context.Context, principalID, sessionID string) ([]int64, error)
@@ -535,6 +538,12 @@ type Attachments interface {
 	Purge(ctx context.Context) error
 }
 
+// Transcripts is the runtime's own record of a conversation, which keeps the photos a turn carried.
+type Transcripts interface {
+	// ForgetImages removes the photos from a runtime session's history and keeps its text.
+	ForgetImages(ctx context.Context, principalID, runtimeSessionID string) error
+}
+
 // WebSearch reports whether a principal has web access on, so the runtime offers its own web
 // search in their turns; nil never offers it.
 type WebSearch interface {
@@ -588,6 +597,9 @@ type Config struct {
 	Reports     Reports
 	Recent      Exchange
 	Attachments Attachments
+	// Transcripts loses a conversation's photos wherever Attachments loses its files; nil leaves
+	// them in the runtime's history.
+	Transcripts Transcripts
 	WebSearch   WebSearch
 	ToolHint    ToolHinter
 	// SafetyChecks labels the turn's metrics; nil labels every turn "unavailable".

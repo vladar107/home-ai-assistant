@@ -26,8 +26,24 @@ type RunRequest struct {
 	// SearchCheck decides each web search of the turn before the runtime runs it; a nil check
 	// refuses every search.
 	SearchCheck SearchCheck
-	Metadata    map[string]string
+	// Kind says who is waiting on the request, which decides how it shares the runtime's capacity.
+	Kind     RunKind
+	Metadata map[string]string
 }
+
+// RunKind is what a request is for. A chat turn is never held up by more than the others' fair
+// share; every other kind waits behind chat turns when capacity runs out.
+type RunKind string
+
+const (
+	// RunBackground is work nobody watches as it runs, such as scheduled runs, checks, tab names,
+	// and rewrites. It is the zero value, so a new caller never takes a chat turn's place.
+	RunBackground RunKind = ""
+	// RunChat is a chat turn a user is waiting on.
+	RunChat RunKind = "chat"
+	// RunTask is a background task a user asked for, which can run for an hour.
+	RunTask RunKind = "task"
+)
 
 // SearchVerdict is what a search check decided about one query.
 type SearchVerdict string

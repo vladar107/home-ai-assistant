@@ -783,8 +783,13 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	if options.recent != nil {
 		recent = options.recent
 	}
+	// The application hands the Pi runtime over as the transcripts too.
+	var transcripts conversation.Transcripts
+	if runtime, ok := runtime.(conversation.Transcripts); ok {
+		transcripts = runtime
+	}
 	h.conversation, err = conversation.NewService(
-		conversation.Config{Recent: recent, Memory: memoryTurns, Exposure: exposures, SearchChecks: searchChecks, Locations: locationTurns, TurnTimeout: turnTimeout, FollowUp: h.approvals, Notice: notices, Reports: reports, Jobs: jobs, Attachments: h.attachments, WebSearch: webSearch, Cards: cards, Photos: photos, Location: options.location, Now: now, History: conversationHistory, Reactions: reactions,
+		conversation.Config{Recent: recent, Memory: memoryTurns, Exposure: exposures, SearchChecks: searchChecks, Locations: locationTurns, TurnTimeout: turnTimeout, FollowUp: h.approvals, Notice: notices, Reports: reports, Jobs: jobs, Attachments: h.attachments, Transcripts: transcripts, WebSearch: webSearch, Cards: cards, Photos: photos, Location: options.location, Now: now, History: conversationHistory, Reactions: reactions,
 			TypingInterval: options.typingInterval, DraftDelay: options.draftDelay, DraftInterval: options.draftInterval},
 		h.store, runtime, h.client, broker, h.connections, logger, integrationTelemetry{turns: h.turns, indicatorFailure: h.recordIndicatorFailure, feedback: h.recordFeedback},
 	)

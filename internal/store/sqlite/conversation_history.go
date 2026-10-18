@@ -22,28 +22,68 @@ const sessionColumns = `session.id, session.runtime_session_id, session.status =
 	COALESCE((SELECT tab.name FROM telegram_tabs AS tab
 	          WHERE tab.principal_id = session.principal_id AND tab.thread_id = session.thread_id), '')`
 
-// ReferencedSessions returns the runtime session IDs of every conversation and every task kept.
-func (s *Store) ReferencedSessions(ctx context.Context) (map[string]struct{}, error) {
+// ReferencedSessions maps the runtime session ID of every conversation and every task kept to
+// whether its conversation is closed; a task's session never is.
+func (s *Store) ReferencedSessions(ctx context.Context) (map[string]bool, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("list referenced sessions: SQLite store is not open")
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT runtime_session_id FROM conversation_sessions UNION SELECT session_id FROM tasks`)
+	rows, err := s.db.QueryContext(ctx, `SELECT runtime_session_id, status = 'closed' FROM conversation_sessions
+		 UNION ALL SELECT session_id, 0 FROM tasks`)
 	if err != nil {
 		return nil, fmt.Errorf("list referenced sessions: %w", err)
 	}
 	defer rows.Close()
-	referenced := make(map[string]struct{})
+	referenced := make(map[string]bool)
 	for rows.Next() {
 		var id string
-		if err := rows.Scan(&id); err != nil {
+		var closed bool
+		if err := rows.Scan(&id, &closed); err != nil {
 			return nil, fmt.Errorf("scan referenced session: %w", err)
 		}
-		referenced[id] = struct{}{}
+		referenced[id] = closed
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list referenced sessions: %w", err)
 	}
 	return referenced, nil
+}
+
+// DeleteClosedConversations deletes the conversations that closed before the cutoff, and with them
+// their requests, reply messages, feedback, and attachment rows.
+func (s *Store) DeleteClosedConversations(ctx context.Context, closedBefore time.Time) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("delete closed conversations: SQLite store is not open")
+	}
+	if _, err := s.db.ExecContext(
+		ctx,
+		`DELETE FROM conversation_sessions WHERE status = 'closed' AND closed_at < ?`,
+		closedBefore.UTC().Format(conversationTimeLayout),
+	); err != nil {
+		return fmt.Errorf("delete closed conversations: %w", err)
+	}
+	return nil
+}
+
+// ConversationRuntimeSession returns the runtime session of one of the principal's conversations.
+func (s *Store) ConversationRuntimeSession(ctx context.Context, principalID, sessionID string) (string, bool, error) {
+	if s == nil || s.db == nil {
+		return "", false, fmt.Errorf("query conversation runtime session: SQLite store is not open")
+	}
+	var runtimeSessionID string
+	err := s.db.QueryRowContext(
+		ctx,
+		`SELECT runtime_session_id FROM conversation_sessions WHERE id = ? AND principal_id = ?`,
+		sessionID,
+		principalID,
+	).Scan(&runtimeSessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("query conversation runtime session: %w", err)
+	}
+	return runtimeSessionID, true, nil
 }
 
 func (s *Store) ConversationSessions(ctx context.Context, principalID string, limit int) ([]conversation.SessionRecord, error) {

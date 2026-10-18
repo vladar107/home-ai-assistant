@@ -1,6 +1,7 @@
 package telegram
 
 import (
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -120,6 +121,27 @@ func TestSessionsResumeContinuesTheEarlierPiSession(t *testing.T) {
 	}
 	if id, _ := h.activeSession("alice"); id != earlierID {
 		t.Fatalf("Bob's press changed Alice's conversation to %s", id)
+	}
+}
+
+func TestNewDeletesThePhotoFromTheConversationHistory(t *testing.T) {
+	h, profiles := newHistoryHarness(t)
+	picture := []byte("\xff\xd8\xff\xe0 pretend JPEG bytes")
+	encoded := base64.StdEncoding.EncodeToString(picture)
+	h.addFile("photo-1", "photos/file_1.jpg", picture)
+	h.push(photoUpdate(1, 101, "what is on this label?", "photo-1", int64(len(picture))))
+	h.nextMessage()
+	h.waitState(1, "delivered")
+	_, runtimeID := h.activeSession("alice")
+	if _, history := sessionFiles(t, profiles, "alice", runtimeID); !strings.Contains(history, encoded) {
+		t.Fatal("the Pi session did not record the photo")
+	}
+
+	h.push(textUpdate(2, 101, "/new"))
+	h.wantReply(101, 2, NewSessionReply)
+	files, history := sessionFiles(t, profiles, "alice", runtimeID)
+	if files != 1 || strings.Contains(history, encoded) || !strings.Contains(history, "what is on this label?") {
+		t.Fatalf("history after /new keeps the photo or lost its text: %d files: %s", files, history)
 	}
 }
 

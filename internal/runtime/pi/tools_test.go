@@ -161,7 +161,7 @@ func TestToolTurnBridgesCallsThroughTheBroker(t *testing.T) {
 		listed[0].Description != "Echo the text back." || string(listed[0].Parameters) != echoSchema {
 		t.Errorf("tools.json = %s (%v)", report.Tools, err)
 	}
-	if prompt := report.Args[slices.Index(report.Args, "--system-prompt")+1]; !strings.Contains(prompt, "Use echo_tool to repeat text.") || strings.Contains(prompt, "no integrations") {
+	if prompt := report.SystemPrompt; !strings.Contains(prompt, "Use echo_tool to repeat text.") || strings.Contains(prompt, "no integrations") {
 		t.Errorf("system prompt did not carry the tool guidance: %q", prompt)
 	}
 	if environmentValue(report, "HOME_AGENT_TOOL_BRIDGE_URL") == "" || environmentValue(report, "HOME_AGENT_TOOL_BRIDGE_TOKEN") == "" ||
@@ -330,8 +330,13 @@ func TestMemoryFollowsTheToolGuidanceInTheSystemPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 	report := readReport(t, cfg, testPrincipal, "memory")
-	prompt := report.Args[slices.Index(report.Args, "--system-prompt")+1]
+	prompt := report.SystemPrompt
 	if !strings.HasSuffix(prompt, "Use echo_tool to repeat text.\n\n"+request.Memory) {
 		t.Fatalf("system prompt does not end with the guidance and then the memory: %q", prompt)
+	}
+	for _, arg := range report.Args {
+		if strings.Contains(arg, "likes tea") {
+			t.Fatalf("memory reached the command line: %q", arg)
+		}
 	}
 }

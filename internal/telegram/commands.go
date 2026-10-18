@@ -13,7 +13,7 @@ const (
 	StatusReply              = "Home Agent is online. Telegram access is active. This command does not use a model."
 	ConversationStatusReply  = StatusReply + " Natural-language conversation is enabled."
 	PrivacyReply             = "Privacy mode is strict-local. Local file and photo content stays on the home system unless you explicitly approve a scoped disclosure. This command does not use a model."
-	ConversationPrivacyReply = "Your messages go to your own model subscription. Conversation history stays on the home system, readable only by your assistant; /new starts fresh. Integrations can be turned off in /settings."
+	ConversationPrivacyReply = "Your messages go to your own model subscription. Conversation history stays on the home system, readable only by your assistant, and is deleted 90 days after the conversation ends; /new starts fresh. Integrations can be turned off in /settings."
 	CancelledReply           = "Stopped the current response."
 	NothingToCancelReply     = "There is no response to cancel."
 	NewSessionReply          = "Started a fresh conversation."
@@ -25,7 +25,7 @@ const (
 	// privacyItem starts each line /privacy adds below its opening paragraph.
 	privacyItem = "\n• "
 
-	AttachmentPrivacyLine = "Photos and files you send are kept until /new."
+	AttachmentPrivacyLine = "Photos and files you send are deleted, from the history too, when their conversation ends: on /new, on a switch to another, or when you close its tab."
 	// Asking for a file uploads the whole file to Telegram, which reading one as text does not.
 	SentFilePrivacyLine = "A NAS file reaches Telegram only when you ask for it."
 	// Only the search stays with the provider the conversation already uses, so each other place a

@@ -329,9 +329,26 @@ history: titles in `/sessions` and the model's `conversation_search` and
 `conversation_read` tools read the principal's own files on demand, user and
 assistant text only, and nothing is indexed or copied into SQLite. A restart
 during a turn keeps the session, since Pi resumes a file that ends in an
-unanswered message. Chat session files are kept; the files of scheduled runs and
-finished tasks, which no conversation refers to, are deleted 30 days after they
-were last written.
+unanswered message. When a conversation ends through `/new`, a switch, or a tab
+the user closed, its attachments are deleted and the runtime strips its photos
+from the Pi session file, replacing each image block with a short text note. A
+turn holds its session's gate, so a session in use is stripped as its turn
+ends, and the hourly session prune strips any closed conversation it finds
+still holding one. A closed conversation stays resumable and searchable for 90
+days. After that, its row is deleted along with its requests, reply messages,
+feedback, and attachment rows, and the prune deletes its file. The files of
+scheduled runs and finished tasks, which no conversation refers to, are deleted
+30 days after they were last written.
+
+At most 5 Pi processes run at once, shared by `RunRequest.Kind`. Background
+tasks (`RunTask`) may hold at most 2 slots, and so may other background work
+(`RunBackground`: scheduled runs, checks, tab naming, and rewrites). A chat
+turn (`RunChat`) therefore always gets a slot once one ends. A freed slot goes
+first to a waiting chat turn, then to a task, then to other work. A turn waits
+for its slot before its process starts, so the wait respects cancellation and
+never counts toward the stall timer. Pi receives the system prompt, with the user's
+memory and jobs, through a `0600` file in a per-turn directory, never on its
+command line.
 
 ### Quiet runs and Heads-up
 

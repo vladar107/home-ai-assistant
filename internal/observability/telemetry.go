@@ -64,6 +64,7 @@ type Telemetry struct {
 	modelCallDuration            metric.Float64Histogram
 	modelCalls                   metric.Int64Counter
 	modelStalls                  metric.Int64Counter
+	modelProcesses               metric.Int64UpDownCounter
 	modelTokens                  metric.Int64Counter
 	modelCallsPerTurn            metric.Int64Histogram
 	modelTurnTokens              metric.Int64Histogram
@@ -359,6 +360,13 @@ func (t *Telemetry) createBusinessInstruments(meter metric.Meter) error {
 	}
 	if t.modelStalls, err = counter("home_agent.model.stalls", "Model turns that produced no output for too long, by outcome.", "{stall}"); err != nil {
 		return err
+	}
+	if t.modelProcesses, err = meter.Int64UpDownCounter(
+		"home_agent.model.processes",
+		metric.WithDescription("Model runtime processes, by kind (interactive or background) and state (running or waiting for a slot)."),
+		metric.WithUnit("{process}"),
+	); err != nil {
+		return fmt.Errorf("create model process counter: %w", err)
 	}
 	if t.modelTokens, err = counter("home_agent.model.tokens", "Model tokens reported by the runtime.", "{token}"); err != nil {
 		return err
@@ -712,6 +720,11 @@ func (t *Telemetry) RecordTab(ctx context.Context, principal, outcome string) {
 // RecordModelStall counts a turn whose model went silent: retried_ok, retried_failed, or not_retried.
 func (t *Telemetry) RecordModelStall(ctx context.Context, principal, outcome string) {
 	t.modelStalls.Add(ctx, 1, metric.WithAttributes(principalAttr(principal), labelAttr("home_agent.outcome", outcome, "unknown")))
+}
+
+// RecordModelProcesses changes the count of model runtime processes of a kind in a state.
+func (t *Telemetry) RecordModelProcesses(ctx context.Context, kind, state string, delta int64) {
+	t.modelProcesses.Add(ctx, delta, metric.WithAttributes(labelAttr("home_agent.kind", kind, "unknown"), labelAttr("home_agent.state", state, "unknown")))
 }
 
 func (t *Telemetry) RecordModelTokens(ctx context.Context, principal, provider, model string, input, output, cacheRead, cacheWrite int64) {

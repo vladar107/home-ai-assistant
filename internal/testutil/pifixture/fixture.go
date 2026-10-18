@@ -28,6 +28,11 @@ type Report struct {
 	PromptID    string   `json:"prompt_id"`
 	Message     string   `json:"message"`
 	Images      []Image  `json:"images"`
+	// SystemPrompt is the prompt Pi would use: the contents of the --system-prompt file when the
+	// argument names one, as Pi 1.0.0 reads it, and the argument itself otherwise.
+	// SystemPromptMode is that file's permission bits, zero when it is not a file.
+	SystemPrompt     string      `json:"system_prompt"`
+	SystemPromptMode os.FileMode `json:"system_prompt_mode"`
 	// BridgeFiles lists the directory of the --extension argument and Tools holds the tools.json
 	// beside it, both captured while the turn is running because the adapter removes them after.
 	BridgeFiles []string        `json:"bridge_files"`
@@ -113,6 +118,14 @@ func run() error {
 		return err
 	}
 	report := Report{Args: os.Args[1:], Environment: os.Environ(), Directory: directory, PID: os.Getpid(), PromptID: prompt.ID, Message: prompt.Message, Images: prompt.Images}
+	report.SystemPrompt = args["--system-prompt"]
+	if info, err := os.Stat(report.SystemPrompt); err == nil && info.Mode().IsRegular() {
+		contents, err := os.ReadFile(report.SystemPrompt)
+		if err != nil {
+			return err
+		}
+		report.SystemPrompt, report.SystemPromptMode = string(contents), info.Mode().Perm()
+	}
 	for _, entry := range entries {
 		report.Files = append(report.Files, entry.Name())
 	}
@@ -317,7 +330,7 @@ func run() error {
 			if err := os.WriteFile(marker, nil, 0o600); err != nil {
 				return err
 			}
-			if err := recordExchange(args["--session-dir"], args["--session-id"], directory, prompt.Message, ""); err != nil {
+			if err := recordExchange(args["--session-dir"], args["--session-id"], directory, prompt.Message, nil, ""); err != nil {
 				return err
 			}
 			ack()
@@ -325,7 +338,7 @@ func run() error {
 				time.Sleep(time.Hour)
 			}
 		}
-		if err := recordExchange(args["--session-dir"], args["--session-id"], directory, prompt.Message, "recovered"); err != nil {
+		if err := recordExchange(args["--session-dir"], args["--session-id"], directory, prompt.Message, nil, "recovered"); err != nil {
 			return err
 		}
 		ack()
@@ -349,8 +362,19 @@ func run() error {
 		for {
 			time.Sleep(time.Hour)
 		}
+	case "fixture:busy":
+		// A turn that keeps working: its events keep the stall timer from firing.
+		ack()
+		for {
+			emit(map[string]string{"type": "message_update"})
+			time.Sleep(100 * time.Millisecond)
+		}
 	case "fixture:exit":
 		return nil
+	case "fixture:crash":
+		fmt.Fprintln(os.Stderr, "Error: synthetic startup failure")
+		fmt.Fprintln(os.Stderr, "    at loadAuth (/opt/pi/dist/core/auth.js:12:3) token=synthetic-private-token")
+		os.Exit(3)
 	case "fixture:malformed":
 		fmt.Fprintln(os.Stdout, "not-json synthetic-private-text")
 	case "fixture:oversized-event":
@@ -433,7 +457,7 @@ func run() error {
 				return err
 			}
 		}
-		if err := recordExchange(args["--session-dir"], args["--session-id"], directory, prompt.Message, answer); err != nil {
+		if err := recordExchange(args["--session-dir"], args["--session-id"], directory, prompt.Message, prompt.Images, answer); err != nil {
 			return err
 		}
 		ack()
@@ -448,8 +472,9 @@ func run() error {
 
 // recordExchange appends the turn to the session file the way Pi 1.0.0 does: a JSONL file named
 // <timestamp>_<session id>.jsonl, resumed only when its header records the same working directory,
-// with the prompt and the answer as message entries chained by parentId.
-func recordExchange(sessionDir, sessionID, cwd, message, answer string) error {
+// with the prompt and the answer as message entries chained by parentId. A prompt's images follow
+// its text in the user message's content, as base64 image blocks.
+func recordExchange(sessionDir, sessionID, cwd, message string, images []Image, answer string) error {
 	matches, err := filepath.Glob(filepath.Join(sessionDir, "*_"+sessionID+".jsonl"))
 	if err != nil {
 		return err
@@ -486,9 +511,17 @@ func recordExchange(sessionDir, sessionID, cwd, message, answer string) error {
 	if parent != "" {
 		parentID = parent
 	}
+	var content any = message
+	if len(images) > 0 {
+		blocks := []any{map[string]string{"type": "text", "text": message}}
+		for _, image := range images {
+			blocks = append(blocks, image)
+		}
+		content = blocks
+	}
 	lines = append(lines,
 		map[string]any{"type": "message", "id": userID, "parentId": parentID, "timestamp": now.Format(time.RFC3339Nano),
-			"message": map[string]any{"role": "user", "content": message, "timestamp": now.UnixMilli()}})
+			"message": map[string]any{"role": "user", "content": content, "timestamp": now.UnixMilli()}})
 	if answer == "" {
 		return appendLines(path, lines)
 	}

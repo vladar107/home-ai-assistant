@@ -89,6 +89,7 @@ func (s *Service) RunTask(ctx context.Context, run TaskRun) (TaskReply, error) {
 		Jobs:        s.jobsText(runCtx, run.PrincipalID),
 		WebSearch:   webSearch,
 		SearchCheck: s.searchCheck(run.PrincipalID, webSearch, false),
+		Kind:        agentruntime.RunTask,
 	}, sink)
 	switch {
 	case ctx.Err() != nil:

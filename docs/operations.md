@@ -269,6 +269,17 @@ reply text is stopped, its model call ending as `stalled`, and run once more
 on its restored session. A silence after that point waits for the turn's own
 deadline. Both are counted in `home_agent_model_stalls` by outcome
 (`retried_ok`, `retried_failed`, `not_retried`) and log `pi.turn.stalled`.
+`home_agent_model_processes` shows how many Pi processes are running and how
+many are waiting for one of the 5 slots, by `kind` and `state` (`running`,
+`waiting`). The kinds are `chat` for chat turns, `task` for background tasks
+(at most 2 at a time), and `background` for everything else (also at most 2).
+If chat turns keep waiting while memory stays well below the container limit,
+raise the limits in `internal/runtime/pi/limit.go`. When Pi exits or closes its
+output before a turn completes, `pi.process.exited_early` logs the exit code
+and the scrubbed last kilobyte of its stderr. A conversation's photos are
+stripped from its Pi session file when it closes. The scheduler's hourly
+session prune deletes closed conversations and their files 90 days after
+they close.
 
 Add a Telegram contact point `Hearthwatch` with the alert bot token and chat ID
 from Keychain. Start with an alert on an absent `home_agent_application_running`

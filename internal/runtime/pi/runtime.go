@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
@@ -26,6 +27,8 @@ const (
 	// defaultStallTimeout is how long a turn may hear nothing from Pi before it counts as stalled.
 	// Pi's own retry events count as activity, so its backoff does not trip it.
 	defaultStallTimeout = 45 * time.Second
+	turnDirectoryPrefix = "turn-"
+	systemPromptFile    = "system-prompt.md"
 )
 
 const (
@@ -74,6 +77,10 @@ type Runtime struct {
 	logger             *slog.Logger
 	telemetry          Telemetry
 	stallTimeout       time.Duration
+	processes          *processLimiter
+
+	gatesMu sync.Mutex
+	gates   map[string]*sessionGate
 }
 
 // Telemetry receives one record per assistant message, timed from its message_start, and one span
@@ -88,6 +95,9 @@ type Telemetry interface {
 	// RecordModelStall counts a turn that went silent, by outcome: retried_ok, retried_failed, or
 	// not_retried.
 	RecordModelStall(ctx context.Context, principal, outcome string)
+	// RecordModelProcesses changes the count of Pi processes of a kind, chat, task, or background,
+	// in a state, running or waiting for a slot.
+	RecordModelProcesses(ctx context.Context, kind, state string, delta int64)
 }
 
 // SetTelemetry must be called before the first turn.
@@ -158,13 +168,13 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
-	removeStaleBridges(profilesDir, logger)
+	removeStaleTurnDirectories(profilesDir, logger)
 	stallTimeout := cfg.StallTimeout
 	if stallTimeout <= 0 {
 		stallTimeout = defaultStallTimeout
 	}
 
-	return &Runtime{
+	r := &Runtime{
 		binary:             binary,
 		argsPrefix:         argsPrefix,
 		environment:        environment,
@@ -174,19 +184,29 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 		webSearchExtension: cfg.WebSearchExtension,
 		logger:             logger,
 		stallTimeout:       stallTimeout,
-	}, nil
+		processes:          newProcessLimiter(maximumProcesses, processCaps),
+		gates:              map[string]*sessionGate{},
+	}
+	r.processes.report = func(kind, state string, delta int64) {
+		if r.telemetry != nil {
+			r.telemetry.RecordModelProcesses(context.Background(), kind, state, delta)
+		}
+	}
+	return r, nil
 }
 
-// removeStaleBridges deletes the per-turn bridge directories a killed process left behind. It runs
-// before the runtime exists, when no turn can be using one.
-func removeStaleBridges(profilesDir string, logger *slog.Logger) {
-	directories, err := filepath.Glob(filepath.Join(profilesDir, "*", "bridge-*"))
-	if err != nil {
-		return
-	}
-	for _, directory := range directories {
-		if err := os.RemoveAll(directory); err != nil {
-			logger.Warn("pi.bridge.cleanup_failed", "error", err)
+// removeStaleTurnDirectories deletes the per-turn bridge and prompt directories a killed process
+// left behind. It runs before the runtime exists, when no turn can be using one.
+func removeStaleTurnDirectories(profilesDir string, logger *slog.Logger) {
+	for _, pattern := range []string{"bridge-*", turnDirectoryPrefix + "*"} {
+		directories, err := filepath.Glob(filepath.Join(profilesDir, "*", pattern))
+		if err != nil {
+			continue
+		}
+		for _, directory := range directories {
+			if err := os.RemoveAll(directory); err != nil {
+				logger.Warn("pi.bridge.cleanup_failed", "error", err)
+			}
 		}
 	}
 }
@@ -209,13 +229,33 @@ func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink
 	if err != nil {
 		return agentruntime.RunResult{}, err
 	}
+	unlock, err := r.lockSession(ctx, request.PrincipalID, sessionDir, request.SessionID)
+	if err != nil {
+		return agentruntime.RunResult{}, err
+	}
+	defer unlock()
+	// The wait for a slot comes before the process starts, so it never counts as a stall.
+	release, err := r.processes.acquire(ctx, request.Kind)
+	if err != nil {
+		return agentruntime.RunResult{}, err
+	}
+	defer release()
+	turnDir, err := os.MkdirTemp(agentDir, turnDirectoryPrefix)
+	if err != nil {
+		return agentruntime.RunResult{}, fmt.Errorf("create Pi turn directory: %w", err)
+	}
+	defer os.RemoveAll(turnDir)
+	promptPath, err := writeSystemPrompt(turnDir, withSections(systemPrompt(request.Tools, request.WebSearch), request.Memory, request.Jobs))
+	if err != nil {
+		return agentruntime.RunResult{}, err
+	}
 
 	args := append(append([]string(nil), r.argsPrefix...),
 		"--mode", "rpc",
 		"--provider", r.provider,
 		"--session-id", request.SessionID,
 		"--session-dir", sessionDir,
-		"--system-prompt", withSections(systemPrompt(request.Tools, request.WebSearch), request.Memory, request.Jobs),
+		"--system-prompt", promptPath,
 	)
 	environment := append(append([]string(nil), r.environment...), "PI_CODING_AGENT_DIR="+agentDir)
 	toolsEnabled := !request.Tools.Empty() || request.WebSearch
@@ -298,12 +338,32 @@ func (e *stallError) Unwrap() error {
 	return agentruntime.ErrStalled
 }
 
+// writeSystemPrompt keeps the prompt, which carries the principal's memory and jobs, off Pi's
+// command line, where any user of the host could read it. Pi reads --system-prompt as a file when
+// the path exists.
+func writeSystemPrompt(turnDir, prompt string) (string, error) {
+	path := filepath.Join(turnDir, systemPromptFile)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return "", fmt.Errorf("create Pi system prompt: %w", err)
+	}
+	if _, err := file.WriteString(prompt); err != nil {
+		_ = file.Close()
+		return "", fmt.Errorf("write Pi system prompt: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return "", fmt.Errorf("write Pi system prompt: %w", err)
+	}
+	return path, nil
+}
+
 // attempt runs one Pi process for the turn.
 func (r *Runtime) attempt(ctx context.Context, request agentruntime.RunRequest, sink agentruntime.EventSink, args, environment []string, workDir string, toolsEnabled bool) (agentruntime.RunResult, error) {
 	cmd := exec.CommandContext(ctx, r.binary, args...)
 	cmd.Dir = workDir
 	cmd.Env = environment
-	cmd.Stderr = io.Discard
+	stderr := &tailBuffer{limit: stderrTailBytes}
+	cmd.Stderr = stderr
 	cmd.WaitDelay = processStopGrace
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
@@ -364,8 +424,8 @@ func (r *Runtime) attempt(ctx context.Context, request agentruntime.RunRequest, 
 		case event, ok := <-events:
 			silence.Reset(r.stallTimeout)
 			if !ok {
-				stopProcess(cmd, stdin, waitResult)
-				return agentruntime.RunResult{}, fmt.Errorf("read Pi output: event stream ended early")
+				exited, waitErr := stopProcess(cmd, stdin, waitResult)
+				return agentruntime.RunResult{}, r.exitedEarly(ctx, request.PrincipalID, "read Pi output: event stream ended early", waitErr, exited, stderr)
 			}
 			state.trackModelCall(ctx, event)
 			if category, actionable := providerFailure(event); actionable {
@@ -394,14 +454,14 @@ func (r *Runtime) attempt(ctx context.Context, request agentruntime.RunRequest, 
 				return agentruntime.RunResult{Response: result, Final: strings.TrimSpace(state.message.String()), Usage: state.usage}, nil
 			}
 		case err := <-scanErrors:
-			stopProcess(cmd, stdin, waitResult)
+			exited, waitErr := stopProcess(cmd, stdin, waitResult)
 			if err != nil {
 				return agentruntime.RunResult{}, fmt.Errorf("read Pi output: invalid event stream")
 			}
-			return agentruntime.RunResult{}, fmt.Errorf("read Pi output: event stream ended early")
-		case <-waitResult:
+			return agentruntime.RunResult{}, r.exitedEarly(ctx, request.PrincipalID, "read Pi output: event stream ended early", waitErr, exited, stderr)
+		case waitErr := <-waitResult:
 			_ = stdin.Close()
-			return agentruntime.RunResult{}, fmt.Errorf("Pi runtime exited before completing the turn")
+			return agentruntime.RunResult{}, r.exitedEarly(ctx, request.PrincipalID, "Pi runtime exited before completing the turn", waitErr, true, stderr)
 		case <-silence.C:
 			if state.toolStarted || state.response.Len() > 0 {
 				// A second run would repeat a tool call or text the user already has, and a long
@@ -514,50 +574,6 @@ func (r *Runtime) SessionDirectory(principalID string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(r.profilesDir, name, "sessions"), nil
-}
-
-// SessionReferences names every session a stored conversation or task still refers to.
-type SessionReferences interface {
-	ReferencedSessions(ctx context.Context) (map[string]struct{}, error)
-}
-
-// SessionPruner removes the session files of scheduled runs and tasks once they are old: those
-// sessions are written once and never resumed, while chat sessions stay for /sessions.
-type SessionPruner struct {
-	runtime    *Runtime
-	references SessionReferences
-}
-
-func (r *Runtime) SessionPruner(references SessionReferences) SessionPruner {
-	return SessionPruner{runtime: r, references: references}
-}
-
-// PruneSessions removes every principal's session files that no stored conversation or task
-// refers to and that were last written before the cutoff, so a run still writing its file is kept.
-func (p SessionPruner) PruneSessions(ctx context.Context, before time.Time) error {
-	keep, err := p.references.ReferencedSessions(ctx)
-	if err != nil {
-		return err
-	}
-	paths, err := filepath.Glob(filepath.Join(p.runtime.profilesDir, "*", "sessions", "*_*.jsonl"))
-	if err != nil {
-		return err
-	}
-	var errs []error
-	for _, path := range paths {
-		name := strings.TrimSuffix(filepath.Base(path), ".jsonl")
-		if _, referenced := keep[name[strings.LastIndex(name, "_")+1:]]; referenced {
-			continue
-		}
-		info, err := os.Lstat(path)
-		if err != nil || !info.Mode().IsRegular() || !info.ModTime().Before(before) {
-			continue
-		}
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			errs = append(errs, err)
-		}
-	}
-	return errors.Join(errs...)
 }
 
 func restrictedEnvironment(binary string) ([]string, error) {
@@ -997,28 +1013,31 @@ func (s sessionSnapshot) restore(sessionDir, sessionID string) error {
 	return nil
 }
 
-func stopProcess(cmd *exec.Cmd, stdin io.Closer, waitResult <-chan error) {
+// stopProcess ends Pi and reports whether it was reaped in time, with what its wait returned.
+func stopProcess(cmd *exec.Cmd, stdin io.Closer, waitResult <-chan error) (bool, error) {
 	_ = stdin.Close()
 	select {
-	case <-waitResult:
-		return
+	case err := <-waitResult:
+		return true, err
 	case <-time.After(processStopGrace):
 	}
 	if cmd.Process != nil {
 		_ = cmd.Process.Signal(os.Interrupt)
 	}
 	select {
-	case <-waitResult:
-		return
+	case err := <-waitResult:
+		return true, err
 	case <-time.After(processStopGrace):
 	}
 	if cmd.Process != nil {
 		_ = cmd.Process.Kill()
 	}
 	select {
-	case <-waitResult:
+	case err := <-waitResult:
+		return true, err
 	case <-time.After(processStopGrace):
 	}
+	return false, nil
 }
 
 func preparePrivateDirectory(path, purpose string) error {
