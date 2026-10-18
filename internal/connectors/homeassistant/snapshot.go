@@ -413,8 +413,16 @@ func conflicts(exposed []exposedEntity, confirmed map[string]confirmedEntity) []
 	return found
 }
 
-// mapTool turns an MCP tool into a broker definition. A tool is a read when its intent starts with
-// Get; every other one, including tools Home Assistant adds later, acts on the home.
+// readTools are the Home Assistant tools known to only read. A name alone proves nothing, because a
+// script's tool is named after the script, so a script is a read only through ReadLabel.
+var readTools = map[string]bool{
+	liveContextTool:        true,
+	"todo__get_items":      true,
+	"calendar__get_events": true,
+}
+
+// mapTool turns an MCP tool into a broker definition. A tool is a read when it is one of readTools;
+// every other one, including scripts and tools Home Assistant adds later, acts on the home.
 func mapTool(remote, description string, schema json.RawMessage) (mappedTool, bool) {
 	var object map[string]json.RawMessage
 	if json.Unmarshal(schema, &object) != nil || object == nil {
@@ -441,7 +449,7 @@ func mapTool(remote, description string, schema json.RawMessage) (mappedTool, bo
 		return mappedTool{}, false
 	}
 	risk := tools.RiskWrite
-	if strings.HasPrefix(intent, "Get") || strings.HasPrefix(intent, "get_") {
+	if readTools[remote] {
 		risk = tools.RiskRead
 	}
 	if risk == tools.RiskWrite {

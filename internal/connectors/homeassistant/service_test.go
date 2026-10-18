@@ -212,6 +212,7 @@ func mcpTools() []map[string]any {
 		{"name": "script__report_status", "description": "Reports a status.", "inputSchema": schema(map[string]any{})},
 		{"name": "script__water_plants", "description": "Waters the plants.", "inputSchema": schema(map[string]any{})},
 		{"name": "script__empty_bins", "description": "Empties the bins.", "inputSchema": schema(map[string]any{})},
+		{"name": "script__get_coffee", "description": "Gets a coffee brewing.", "inputSchema": schema(map[string]any{})},
 		{"name": "vacuum__HassVacuumStart", "description": "Starts the vacuum.", "inputSchema": schema(name)},
 	}
 }
@@ -1209,6 +1210,32 @@ func TestUnlabelledScriptIsStillProposedInAnExposedConversation(t *testing.T) {
 	record, found := f.pending()
 	if !found || !strings.Contains(record.Summary, "Arguments: none") {
 		t.Fatalf("pending = %+v %v", record, found)
+	}
+}
+
+// A script's name is chosen by whoever wrote it, so one named like a read still acts until it
+// carries the read label.
+func TestUnlabelledScriptNamedLikeAReadStaysAWrite(t *testing.T) {
+	sim := newSimulator(livingTV)
+	sim.labelScripts()
+	f := newFixture(t, sim)
+	f.service.SetExposure(&externalFlag{external: true})
+	set := f.toolSet()
+
+	if definition := definitionOf(t, set, "ha_get_coffee"); !strings.Contains(definition.Description, "Runs at once") {
+		t.Fatalf("definition = %+v", definition)
+	}
+	readOnly, err := f.broker.ReadOnlyToolsFor(t.Context(), "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTools(t, readOnly, []string{"ha_get_items", "ha_get_live_context"}, "ha_get_coffee")
+	result := f.call(set, "ha_get_coffee", map[string]any{})
+	if result.IsError || !strings.Contains(result.Text, approval.ProposedText) {
+		t.Fatalf("result = %+v", result)
+	}
+	if calls := scriptCalls(sim, "script__get_coffee"); len(calls) != 0 {
+		t.Fatalf("calls before confirmation = %+v", calls)
 	}
 }
 

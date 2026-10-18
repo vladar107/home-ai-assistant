@@ -191,7 +191,9 @@ After changing a secret, run `scripts/nas-sync-secrets` and redeploy.
 5. Label a script that only reads `assistant-read`. The assistant then treats it
    as a read: no confirmation, and available to scheduled runs. Only label scripts
    without side effects, since a read may be retried, and expose them to Assist. A
-   script that also carries `assistant-confirm` stays confirmed.
+   script that also carries `assistant-confirm` stays confirmed. Without the
+   label every script is a write, whatever its name; only the live context,
+   to-do item, and calendar event reads are reads by name.
 6. Store the token in Keychain; `scripts/keychain-set-secret` does not cover it:
    `security add-generic-password -a home-ai-assistant -s home-assistant.token -U -w`.
 7. Set `HOME_AGENT_HA_ENABLED=true` in `deploy/.env.nas`, run
