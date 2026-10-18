@@ -224,6 +224,16 @@ func run() error {
 		return err
 	}
 	switch prompt.Message {
+	case "fixture:model":
+		// The answering model is the one the command line named, as Pi reports it per message.
+		ack()
+		emit(map[string]any{"type": "message_start", "message": map[string]string{"role": "assistant", "provider": args["--provider"], "model": args["--model"]}})
+		delta("answered by " + args["--model"] + ":" + args["--thinking"])
+		emit(map[string]any{"type": "message_end", "message": map[string]any{
+			"role": "assistant", "provider": args["--provider"], "model": args["--model"], "stopReason": "stop",
+			"usage": map[string]int{"input": 40, "output": 7, "cacheRead": 30, "cacheWrite": 3, "totalTokens": 80},
+		}})
+		settle()
 	case "fixture:usage", "fixture:usage-missing":
 		// Two assistant messages around a web_search call, as Pi reports model usage per message.
 		ack()

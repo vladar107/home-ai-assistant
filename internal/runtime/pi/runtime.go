@@ -33,10 +33,11 @@ const (
 )
 
 type Config struct {
-	Binary          string
-	NodeBinary      string
-	Provider        string
-	Model           string
+	Binary     string
+	NodeBinary string
+	Provider   string
+	// Model is the default pair, for runs whose request names none.
+	Model           agentruntime.ModelEffort
 	ExpectedVersion string
 	ProfilesDir     string
 	// WebSearchExtension is the entry file of the vendored search extension; empty disables web
@@ -53,7 +54,7 @@ type Runtime struct {
 	argsPrefix         []string
 	environment        []string
 	provider           string
-	model              string
+	model              agentruntime.ModelEffort
 	profilesDir        string
 	webSearchExtension string
 	logger             *slog.Logger
@@ -68,8 +69,8 @@ type Runtime struct {
 // Telemetry receives one record per assistant message, timed from its message_start, and one span
 // per model call, which also covers calls that never finish.
 type Telemetry interface {
-	RecordModelCall(ctx context.Context, principal, provider, model, stopReason string, duration time.Duration)
-	RecordModelTokens(ctx context.Context, principal, provider, model string, input, output, cacheRead, cacheWrite int64)
+	RecordModelCall(ctx context.Context, principal, provider, model, effort, stopReason string, duration time.Duration)
+	RecordModelTokens(ctx context.Context, principal, provider, model, effort string, input, output, cacheRead, cacheWrite int64)
 	// StartModelCall returns the call's span context, a function that records one Pi retry by
 	// category, and one that ends the call with its outcome.
 	StartModelCall(ctx context.Context, principal string) (context.Context, func(string), func(string))
@@ -204,6 +205,9 @@ func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink
 	if request.WebSearch && r.webSearchExtension == "" {
 		return agentruntime.RunResult{}, fmt.Errorf("Pi runtime web search requires the extension to be configured")
 	}
+	if request.Effort != "" && !agentruntime.ValidEffort(request.Effort) {
+		return agentruntime.RunResult{}, fmt.Errorf("Pi runtime effort %q is not a known level", request.Effort)
+	}
 	if sink == nil {
 		return agentruntime.RunResult{}, fmt.Errorf("Pi runtime event sink is required")
 	}
@@ -270,15 +274,26 @@ func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink
 		"--no-context-files",
 		"--no-approve",
 	)
-	if r.model != "" {
-		args = append(args, "--model", r.model)
+	chosen := r.model
+	if request.Model != "" {
+		chosen = agentruntime.ModelEffort{Model: request.Model, Effort: request.Effort}
+		if chosen.Effort == "" {
+			chosen.Effort = agentruntime.DefaultEffort
+		}
+	}
+	// Pi restores a resumed session's last model and level unless the command line names both.
+	if chosen.Model != "" {
+		args = append(args, "--model", chosen.Model)
+	}
+	if chosen.Effort != "" {
+		args = append(args, "--thinking", chosen.Effort)
 	}
 
 	snapshot, err := snapshotSession(sessionDir, request.SessionID)
 	if err != nil {
 		return agentruntime.RunResult{}, err
 	}
-	result, err := r.attempt(ctx, request, sink, args, environment, workDir, toolsEnabled)
+	result, err := r.attempt(ctx, request, sink, args, environment, workDir, toolsEnabled, chosen.Effort)
 	var stall *stallError
 	if !errors.As(err, &stall) {
 		return result, err
@@ -293,7 +308,7 @@ func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink
 		return agentruntime.RunResult{}, err
 	}
 	logger.Warn("pi.turn.stalled", "principal_id", request.PrincipalID, "retried", true)
-	result, err = r.attempt(ctx, request, sink, args, environment, workDir, toolsEnabled)
+	result, err = r.attempt(ctx, request, sink, args, environment, workDir, toolsEnabled, chosen.Effort)
 	if err != nil {
 		r.recordStall(ctx, request.PrincipalID, "retried_failed")
 		return agentruntime.RunResult{}, err
@@ -340,7 +355,7 @@ func writeSystemPrompt(turnDir, prompt string) (string, error) {
 }
 
 // attempt runs one Pi process for the turn.
-func (r *Runtime) attempt(ctx context.Context, request agentruntime.RunRequest, sink agentruntime.EventSink, args, environment []string, workDir string, toolsEnabled bool) (agentruntime.RunResult, error) {
+func (r *Runtime) attempt(ctx context.Context, request agentruntime.RunRequest, sink agentruntime.EventSink, args, environment []string, workDir string, toolsEnabled bool, effort string) (agentruntime.RunResult, error) {
 	cmd := exec.CommandContext(ctx, r.binary, args...)
 	cmd.Dir = workDir
 	cmd.Env = environment
@@ -380,7 +395,7 @@ func (r *Runtime) attempt(ctx context.Context, request agentruntime.RunRequest, 
 		waitResult <- cmd.Wait()
 	}()
 
-	state := &turnState{toolsEnabled: toolsEnabled, sink: sink, telemetry: r.telemetry, logger: r.logger, principal: request.PrincipalID}
+	state := &turnState{toolsEnabled: toolsEnabled, sink: sink, telemetry: r.telemetry, logger: r.logger, principal: request.PrincipalID, effort: effort}
 	prompt := map[string]any{
 		"id":      request.SessionID,
 		"type":    "prompt",
@@ -433,7 +448,7 @@ func (r *Runtime) attempt(ctx context.Context, request agentruntime.RunRequest, 
 				if result == "" {
 					return agentruntime.RunResult{}, fmt.Errorf("Pi runtime returned an empty response")
 				}
-				return agentruntime.RunResult{Response: result, Final: strings.TrimSpace(state.message.String()), Usage: state.usage}, nil
+				return agentruntime.RunResult{Response: result, Final: strings.TrimSpace(state.message.String()), Usage: state.usage, Model: state.model, Tokens: state.tokens}, nil
 			}
 		case err := <-scanErrors:
 			exited, waitErr := stopProcess(cmd, stdin, waitResult)
@@ -724,6 +739,9 @@ type turnState struct {
 	telemetry          Telemetry
 	logger             *slog.Logger
 	principal          string
+	effort             string
+	model              string
+	tokens             agentruntime.TokenCounts
 	messageStarted     time.Time
 	usage              agentruntime.Usage
 	modelCall          *modelCall
@@ -882,16 +900,23 @@ func (s *turnState) recordAssistantMessage(ctx context.Context, message *rpcMess
 		s.closeModelCall("completed")
 	}
 	if s.telemetry != nil && !started.IsZero() {
-		s.telemetry.RecordModelCall(ctx, s.principal, message.Provider, message.Model, message.StopReason, time.Since(started))
+		s.telemetry.RecordModelCall(ctx, s.principal, message.Provider, message.Model, s.effort, message.StopReason, time.Since(started))
+	}
+	if message.Model != "" {
+		s.model = message.Model
 	}
 	usage := message.Usage
 	if usage == nil {
 		return
 	}
+	s.tokens.Input += usage.Input
+	s.tokens.Output += usage.Output
+	s.tokens.CacheRead += usage.CacheRead
+	s.tokens.CacheWrite += usage.CacheWrite
 	s.usage.PromptTokens += usage.Input + usage.CacheRead + usage.CacheWrite
 	s.usage.OutputTokens += usage.Output
 	if s.telemetry != nil {
-		s.telemetry.RecordModelTokens(ctx, s.principal, message.Provider, message.Model, usage.Input, usage.Output, usage.CacheRead, usage.CacheWrite)
+		s.telemetry.RecordModelTokens(ctx, s.principal, message.Provider, message.Model, s.effort, usage.Input, usage.Output, usage.CacheRead, usage.CacheWrite)
 	}
 }
 

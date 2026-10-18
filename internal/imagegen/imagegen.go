@@ -73,7 +73,7 @@ type Attachments interface {
 }
 
 type Config struct {
-	// Model is the conversation model that carries the hosted image tool.
+	// Model is the id of the conversation model that carries the hosted image tool.
 	Model string
 }
 
@@ -91,18 +91,11 @@ func NewService(cfg Config, generator Generator, sender Sender, attachments Atta
 	if generator == nil || sender == nil || attachments == nil || logger == nil {
 		return nil, fmt.Errorf("image generation dependencies are required")
 	}
-	model := carrierModel(cfg.Model)
+	model := cfg.Model
 	if model == "" {
 		return nil, fmt.Errorf("image generation model is required")
 	}
 	return &Service{model: model, generator: generator, sender: sender, attachments: attachments, logger: logger}, nil
-}
-
-// carrierModel drops the thinking level Pi accepts after the model id, which the Responses
-// endpoint does not.
-func carrierModel(model string) string {
-	id, _, _ := strings.Cut(strings.TrimSpace(model), ":")
-	return id
 }
 
 func (s *Service) Contribute(context.Context, string) (tools.Contribution, error) {

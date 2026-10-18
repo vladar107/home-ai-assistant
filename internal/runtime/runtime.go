@@ -27,7 +27,11 @@ type RunRequest struct {
 	// refuses every search.
 	SearchCheck SearchCheck
 	// Kind says who is waiting on the request, which decides how it shares the runtime's capacity.
-	Kind     RunKind
+	Kind RunKind
+	// Model and Effort say which model answers and how hard it reasons. Callers pass both; a
+	// request with no Model runs on the runtime's default pair.
+	Model    string
+	Effort   string
 	Metadata map[string]string
 }
 
@@ -131,6 +135,19 @@ type RunResult struct {
 	// Final is the text of the last assistant message alone, empty when that message had none.
 	Final string
 	Usage Usage
+	// Model is the id of the model that wrote the turn's last assistant message, empty when the
+	// runtime did not report one.
+	Model string
+	// Tokens adds up what every assistant message of the turn reported.
+	Tokens TokenCounts
+}
+
+// TokenCounts splits a turn's tokens the way the provider bills them.
+type TokenCounts struct {
+	Input      int64
+	Output     int64
+	CacheRead  int64
+	CacheWrite int64
 }
 
 // Usage is what the model reported for one turn; zero values mean the runtime did not report it.

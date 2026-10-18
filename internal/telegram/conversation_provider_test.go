@@ -26,7 +26,7 @@ func newFixtureRuntime(t *testing.T, profilesDir string) *pi.Runtime {
 		t.Fatal(err)
 	}
 	runtime, err := pi.New(t.Context(), pi.Config{
-		Binary: binary, Provider: "fixture-provider", Model: "fixture-model:low",
+		Binary: binary, Provider: "fixture-provider", Model: agentruntime.ModelEffort{Model: "fixture-model", Effort: "low"},
 		ExpectedVersion: pifixture.Version, ProfilesDir: profilesDir,
 	})
 	if err != nil {

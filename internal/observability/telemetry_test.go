@@ -23,8 +23,8 @@ func TestBusinessMetricsAreRecordedWithNormalizedLabels(t *testing.T) {
 	end("success", "")
 	telemetry.RecordReply(ctx, "alice", "chat", "delivered", "", time.Second)
 	telemetry.RecordReplyStage(ctx, "alice", "model", time.Second)
-	telemetry.RecordModelCall(ctx, "alice", "", "m1", "stop", time.Second)
-	telemetry.RecordModelTokens(ctx, "alice", "p", "m1", 10, 0, 5, 0)
+	telemetry.RecordModelCall(ctx, "alice", "", "m1", "high", "stop", time.Second)
+	telemetry.RecordModelTokens(ctx, "alice", "p", "m1", "high", 10, 0, 5, 0)
 	telemetry.RecordModelTurn(ctx, "alice", "on", 2, 100, 20)
 	telemetry.RecordToolCall(ctx, "alice", "calendar", "", time.Millisecond)
 	telemetry.RecordToolCallsPerTurn(ctx, "alice", "on", 1)
@@ -72,7 +72,7 @@ func TestBusinessMetricsAreRecordedWithNormalizedLabels(t *testing.T) {
 		{"home_agent.conversation.turns", map[string]string{"home_agent.principal": "unknown", "home_agent.safety_checks": "unavailable"}, 1},
 		{"home_agent.reply.duration", map[string]string{"home_agent.principal": "alice", "home_agent.kind": "chat", "home_agent.outcome": "delivered", "home_agent.safety_checks": "unavailable"}, 1},
 		{"home_agent.reply.stage.duration", map[string]string{"home_agent.stage": "model"}, 1},
-		{"home_agent.model.call.duration", map[string]string{"home_agent.provider": "unknown", "home_agent.model": "m1", "home_agent.stop_reason": "stop"}, 1},
+		{"home_agent.model.call.duration", map[string]string{"home_agent.provider": "unknown", "home_agent.model": "m1", "home_agent.effort": "high", "home_agent.stop_reason": "stop"}, 1},
 		{"home_agent.model.tokens", map[string]string{"home_agent.type": "input", "home_agent.provider": "p"}, 2},
 		{"home_agent.model.calls_per_turn", map[string]string{"home_agent.safety_checks": "on"}, 1},
 		{"home_agent.model.turn_tokens", map[string]string{"home_agent.direction": "prompt"}, 2},

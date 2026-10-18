@@ -9,12 +9,15 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 )
 
 const (
 	defaultPiBinary             = "pi"
 	defaultPiProvider           = "openai-codex"
 	defaultPiVersion            = "1.0.0"
+	defaultPiTaskModel          = "gpt-6.1-sol:medium"
 	defaultPiWebSearchExtension = "/usr/local/lib/home-agent/pi-web-search/src/index.ts"
 	defaultConversationTimeout  = 2 * time.Minute
 	minimumConversationTimeout  = 5 * time.Second
@@ -27,8 +30,11 @@ type ConversationConfig struct {
 	PiBinary     string
 	PiNodeBinary string
 	PiProvider   string
-	PiModel      string
-	PiVersion    string
+	// PiModel is the chat default and PiTaskModel the background task default, each parsed from
+	// "<model>[:<effort>]".
+	PiModel     agentruntime.ModelEffort
+	PiTaskModel agentruntime.ModelEffort
+	PiVersion   string
 	// PiWebSearchExtension is the vendored search extension's entry file, loaded only for
 	// principals with web access on.
 	PiWebSearchExtension string
@@ -60,7 +66,13 @@ func loadConversationConfig(cfg *ConversationConfig) error {
 	cfg.PiBinary = envOrDefault("HOME_AGENT_PI_BINARY", defaultPiBinary)
 	cfg.PiNodeBinary = os.Getenv("HOME_AGENT_PI_NODE_BINARY")
 	cfg.PiProvider = envOrDefault("HOME_AGENT_PI_PROVIDER", defaultPiProvider)
-	cfg.PiModel = os.Getenv("HOME_AGENT_PI_MODEL")
+	var err error
+	if cfg.PiModel, err = parseModelSetting("HOME_AGENT_PI_MODEL", os.Getenv("HOME_AGENT_PI_MODEL")); err != nil {
+		return err
+	}
+	if cfg.PiTaskModel, err = parseModelSetting("HOME_AGENT_PI_TASK_MODEL", envOrDefault("HOME_AGENT_PI_TASK_MODEL", defaultPiTaskModel)); err != nil {
+		return err
+	}
 	cfg.PiVersion = envOrDefault("HOME_AGENT_PI_VERSION", defaultPiVersion)
 	cfg.PiWebSearchExtension = envOrDefault("HOME_AGENT_PI_WEB_SEARCH_EXTENSION", defaultPiWebSearchExtension)
 
@@ -75,6 +87,25 @@ func loadConversationConfig(cfg *ConversationConfig) error {
 	return cfg.validate()
 }
 
+func parseModelSetting(name, value string) (agentruntime.ModelEffort, error) {
+	if err := validateRuntimeValue(name, value); err != nil {
+		return agentruntime.ModelEffort{}, err
+	}
+	parsed, err := agentruntime.ParseModelEffort(value)
+	if err != nil {
+		return agentruntime.ModelEffort{}, fmt.Errorf("%s: %w", name, err)
+	}
+	return parsed, nil
+}
+
+func validateRuntimeValue(name, value string) error {
+	if value != strings.TrimSpace(value) || !utf8.ValidString(value) || utf8.RuneCountInString(value) < 1 ||
+		utf8.RuneCountInString(value) > maximumRuntimeValueRunes || strings.IndexFunc(value, unicode.IsControl) >= 0 {
+		return fmt.Errorf("%s: must be trimmed, valid UTF-8, and between 1 and 200 characters", name)
+	}
+	return nil
+}
+
 func (c ConversationConfig) validate() error {
 	if !c.Enabled {
 		return nil
@@ -82,12 +113,10 @@ func (c ConversationConfig) validate() error {
 	for name, value := range map[string]string{
 		"HOME_AGENT_PI_BINARY":   c.PiBinary,
 		"HOME_AGENT_PI_PROVIDER": c.PiProvider,
-		"HOME_AGENT_PI_MODEL":    c.PiModel,
 		"HOME_AGENT_PI_VERSION":  c.PiVersion,
 	} {
-		if value != strings.TrimSpace(value) || !utf8.ValidString(value) || utf8.RuneCountInString(value) < 1 ||
-			utf8.RuneCountInString(value) > maximumRuntimeValueRunes || strings.IndexFunc(value, unicode.IsControl) >= 0 {
-			return fmt.Errorf("%s: must be trimmed, valid UTF-8, and between 1 and 200 characters", name)
+		if err := validateRuntimeValue(name, value); err != nil {
+			return err
 		}
 	}
 	if c.PiNodeBinary != "" {

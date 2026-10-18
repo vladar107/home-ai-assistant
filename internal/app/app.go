@@ -337,7 +337,8 @@ func (a *App) buildAssembly(ctx context.Context, client *telegram.Client, config
 		Core: wiring.CoreConfig{
 			TurnTimeout: cfg.Conversation.TurnTimeout,
 			TurnZone:    location,
-			ImageModel:  cfg.Conversation.PiModel,
+			ChatModel:   cfg.Conversation.PiModel,
+			TaskModel:   cfg.Conversation.PiTaskModel,
 			Connection: connection.Config{
 				ProfilesDir: profilesDir,
 				Provider:    cfg.Conversation.PiProvider,

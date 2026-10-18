@@ -613,11 +613,12 @@ func (t *Telemetry) RecordReplyStage(ctx context.Context, principal, stage strin
 	))
 }
 
-func (t *Telemetry) RecordModelCall(ctx context.Context, principal, provider, model, stopReason string, duration time.Duration) {
+func (t *Telemetry) RecordModelCall(ctx context.Context, principal, provider, model, effort, stopReason string, duration time.Duration) {
 	t.modelCallDuration.Record(ctx, duration.Seconds(), metric.WithAttributes(
 		principalAttr(principal),
 		labelAttr("home_agent.provider", provider, "unknown"),
 		labelAttr("home_agent.model", model, "unknown"),
+		labelAttr("home_agent.effort", effort, "unknown"),
 		labelAttr("home_agent.stop_reason", stopReason, "unknown"),
 	))
 }
@@ -727,7 +728,7 @@ func (t *Telemetry) RecordModelProcesses(ctx context.Context, kind, state string
 	t.modelProcesses.Add(ctx, delta, metric.WithAttributes(labelAttr("home_agent.kind", kind, "unknown"), labelAttr("home_agent.state", state, "unknown")))
 }
 
-func (t *Telemetry) RecordModelTokens(ctx context.Context, principal, provider, model string, input, output, cacheRead, cacheWrite int64) {
+func (t *Telemetry) RecordModelTokens(ctx context.Context, principal, provider, model, effort string, input, output, cacheRead, cacheWrite int64) {
 	for _, tokens := range []struct {
 		kind  string
 		count int64
@@ -739,6 +740,7 @@ func (t *Telemetry) RecordModelTokens(ctx context.Context, principal, provider, 
 			principalAttr(principal),
 			labelAttr("home_agent.provider", provider, "unknown"),
 			labelAttr("home_agent.model", model, "unknown"),
+			labelAttr("home_agent.effort", effort, "unknown"),
 			attribute.String("home_agent.type", tokens.kind),
 		))
 	}

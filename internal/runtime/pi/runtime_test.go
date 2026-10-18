@@ -47,7 +47,7 @@ func config(t *testing.T) pi.Config {
 		t.Fatal(err)
 	}
 	return pi.Config{
-		Binary: binary, Provider: "fixture-provider", Model: "fixture-model:low",
+		Binary: binary, Provider: "fixture-provider", Model: agentruntime.ModelEffort{Model: "fixture-model", Effort: "low"},
 		ExpectedVersion: pifixture.Version, ProfilesDir: filepath.Join(t.TempDir(), "profiles"),
 	}
 }
@@ -124,7 +124,7 @@ func TestProcessConfigurationAndSessionContinuity(t *testing.T) {
 			t.Errorf("missing lockdown flag %s", flag)
 		}
 	}
-	for flag, want := range map[string]string{"--mode": "rpc", "--provider": cfg.Provider, "--model": cfg.Model, "--session-id": "session-one", "--session-dir": sessionDir(cfg, testPrincipal)} {
+	for flag, want := range map[string]string{"--mode": "rpc", "--provider": cfg.Provider, "--model": cfg.Model.Model, "--thinking": cfg.Model.Effort, "--session-id": "session-one", "--session-dir": sessionDir(cfg, testPrincipal)} {
 		index := slices.Index(report.Args, flag)
 		if index < 0 || index+1 >= len(report.Args) || report.Args[index+1] != want {
 			t.Errorf("%s not forwarded as %q: %#v", flag, want, report.Args)
