@@ -45,6 +45,10 @@ func (hintDeliverer) SendMessageDraft(context.Context, int64, int64, string, boo
 	return nil
 }
 
+type alwaysConnected struct{}
+
+func (alwaysConnected) Ready(context.Context, string) (bool, error) { return true, nil }
+
 type hintTools struct{ names []string }
 
 func (h hintTools) ToolsFor(context.Context, string) (agentruntime.ToolSet, error) {
@@ -164,7 +168,7 @@ func newHintEnv(t *testing.T, answer string, delay time.Duration, tools []string
 	env.runtime = recordingRuntime{messages: make(chan string, 1), reply: reply}
 	env.deliverer = hintDeliverer{replies: make(chan string, 1)}
 	env.service, err = conversation.NewService(
-		config, store, env.runtime, env.deliverer, hintTools{names: tools}, conversation.AlwaysConnected{},
+		config, store, env.runtime, env.deliverer, hintTools{names: tools}, alwaysConnected{},
 		logger, quietTelemetry{},
 	)
 	if err != nil {

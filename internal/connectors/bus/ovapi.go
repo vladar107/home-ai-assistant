@@ -56,8 +56,6 @@ func (c call) cancelled() bool { return strings.EqualFold(c.pass.TripStopStatus,
 
 func (c call) departureDelay() int { return delayMinutes(c.plannedDeparture, c.expectedDeparture) }
 
-func (c call) arrivalDelay() int { return delayMinutes(c.plannedArrival, c.expectedArrival) }
-
 // leaving is when the vehicle is expected to leave, falling back to the plan.
 func (c call) leaving() time.Time {
 	if !c.expectedDeparture.IsZero() {

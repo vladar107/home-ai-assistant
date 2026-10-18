@@ -44,7 +44,7 @@ func metricTotal(t *testing.T, reader sdkmetric.Reader, name string, want map[st
 	matches := func(set attribute.Set) bool {
 		for key, value := range want {
 			got, ok := set.Value(attribute.Key(key))
-			if !ok || got.Emit() != value {
+			if !ok || got.String() != value {
 				return false
 			}
 		}

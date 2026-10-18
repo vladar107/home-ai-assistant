@@ -185,7 +185,7 @@ func anyMatches(sets []attribute.Set, want map[string]string) bool {
 		matched := true
 		for key, value := range want {
 			got, ok := set.Value(attribute.Key(key))
-			if !ok || got.Emit() != value {
+			if !ok || got.String() != value {
 				matched = false
 				break
 			}

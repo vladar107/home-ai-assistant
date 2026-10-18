@@ -85,7 +85,7 @@ func (e *metricsEnv) service(t *testing.T, runtime agentruntime.AgentRuntime, co
 	config.TurnTimeout = 10 * time.Second
 	service, err := conversation.NewService(
 		config, e.store, runtime, hintDeliverer{replies: e.replies},
-		hintTools{names: []string{"nas_search", "gmail_search"}}, conversation.AlwaysConnected{},
+		hintTools{names: []string{"nas_search", "gmail_search"}}, alwaysConnected{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)), e.telemetry,
 	)
 	if err != nil {
@@ -348,7 +348,7 @@ func TestToolCallsAndHintFollowThroughAreCountedFromRuntimeEvents(t *testing.T) 
 func attributesMatch(set attribute.Set, want map[string]string) bool {
 	for key, value := range want {
 		got, ok := set.Value(attribute.Key(key))
-		if !ok || got.Emit() != value {
+		if !ok || got.String() != value {
 			return false
 		}
 	}

@@ -99,7 +99,6 @@ func New(t *testing.T, accountFor func(accessToken string) (account string, ok b
 	return sim
 }
 
-func (s *Simulator) URL() string          { return s.server.URL }
 func (s *Simulator) APIBaseURL() string   { return s.server.URL + apiPrefix }
 func (s *Simulator) Client() *http.Client { return s.server.Client() }
 

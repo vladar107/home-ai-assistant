@@ -92,16 +92,6 @@ func parseLocation(raw string) (Location, error) {
 	return Location{Root: segments[0], Path: strings.Join(segments[1:], "/")}, nil
 }
 
-// parseRelative resolves a path inside an already-chosen root, which is how a save names its
-// target when the user did not name a folder: the root comes from configuration, not the model.
-func parseRelative(root, raw string) (Location, error) {
-	segments, err := parseSegments(raw)
-	if err != nil {
-		return Location{}, err
-	}
-	return Location{Root: root, Path: strings.Join(segments, "/")}, nil
-}
-
 func parseSegments(raw string) ([]string, error) {
 	trimmed := strings.TrimSpace(raw)
 	switch {

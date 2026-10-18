@@ -66,7 +66,7 @@ func (e *metricsEnv) deliveryService(t *testing.T, runtime agentruntime.AgentRun
 	t.Helper()
 	service, err := conversation.NewService(
 		conversation.Config{TurnTimeout: 10 * time.Second}, e.store, runtime, deliverer,
-		hintTools{}, conversation.AlwaysConnected{},
+		hintTools{}, alwaysConnected{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)), e.telemetry,
 	)
 	if err != nil {

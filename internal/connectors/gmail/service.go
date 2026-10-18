@@ -36,7 +36,7 @@ func NewService(cfg Config, grants Grants, logger *slog.Logger) (*Service, error
 	if logger == nil {
 		return nil, fmt.Errorf("Gmail logger is required")
 	}
-	client, err := NewClient(ClientConfig{APIBaseURL: cfg.APIBaseURL, HTTPClient: cfg.HTTPClient})
+	client, err := NewClient(ClientConfig(cfg))
 	if err != nil {
 		return nil, err
 	}

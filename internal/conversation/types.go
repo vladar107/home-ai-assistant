@@ -165,8 +165,6 @@ func JobSubject(jobID string) string { return SubjectJob + ":" + jobID }
 
 func WatchSubject(watchID string) string { return SubjectWatch + ":" + watchID }
 
-func TripSubject(tripID string) string { return SubjectTrip + ":" + tripID }
-
 // SplitSubject returns a subject's kind and ID.
 func SplitSubject(subject string) (kind, id string) {
 	kind, id, _ = strings.Cut(subject, ":")
@@ -340,10 +338,6 @@ type History interface {
 type ConnectionGate interface {
 	Ready(context.Context, string) (bool, error)
 }
-
-type AlwaysConnected struct{}
-
-func (AlwaysConnected) Ready(context.Context, string) (bool, error) { return true, nil }
 
 // ToolProvider returns the tools a principal may use in one turn, with the executor bound to that
 // principal; an empty set runs the turn without tools.

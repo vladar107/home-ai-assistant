@@ -44,21 +44,6 @@ func TestParseLocationResolvesRootAndPath(t *testing.T) {
 	}
 }
 
-// parseRelative must apply the same rules, because a save's path is model input too; only the
-// root is out of the model's reach.
-func TestParseRelativeKeepsTheConfiguredRoot(t *testing.T) {
-	location, err := parseRelative("inbox", "receipts/2026/scan.pdf")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if location.Root != "inbox" || location.Path != "receipts/2026/scan.pdf" {
-		t.Fatalf("parseRelative = %+v", location)
-	}
-	if _, err := parseRelative("inbox", "../home/notes.md"); err == nil {
-		t.Fatal("parseRelative accepted a traversal")
-	}
-}
-
 func TestAncestorsParentAndName(t *testing.T) {
 	location := Location{Root: "inbox", Path: "receipts/2026/scan.pdf"}
 	ancestors := location.Ancestors()

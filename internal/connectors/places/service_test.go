@@ -95,11 +95,6 @@ func (s *simulator) last() request {
 	return s.requests[len(s.requests)-1]
 }
 
-const (
-	homeLat = 52.0
-	homeLon = 4.5
-)
-
 // Offsets of 0.001 degrees of latitude are about 111 m.
 const overpassBody = `{"elements":[
  {"type":"node","id":1,"lat":52.003,"lon":4.5,"tags":{"amenity":"pharmacy","name":"Far Apotheek","opening_hours":"Mo-Fr 09:00-18:00"}},

@@ -47,7 +47,7 @@ func TestCancelledDeliveryLetsTheNextMessageThroughAtOnce(t *testing.T) {
 	}}
 	service, err := conversation.NewService(
 		conversation.Config{TurnTimeout: 10 * time.Second}, env.store, runtime, deliverer,
-		hintTools{}, conversation.AlwaysConnected{},
+		hintTools{}, alwaysConnected{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)), env.telemetry,
 	)
 	if err != nil {

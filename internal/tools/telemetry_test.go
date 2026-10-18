@@ -140,7 +140,7 @@ func TestExecuteTracesEachToolCallUnderTheTurnSpan(t *testing.T) {
 		seen++
 		attrs := map[string]string{}
 		for _, kv := range span.Attributes() {
-			attrs[string(kv.Key)] = kv.Value.Emit()
+			attrs[string(kv.Key)] = kv.Value.String()
 		}
 		expected, ok := want[attrs["home_agent.tool"]]
 		if !ok {
@@ -173,7 +173,7 @@ func metricTotal(t *testing.T, reader sdkmetric.Reader, name string, want map[st
 	matches := func(set attribute.Set) bool {
 		for key, value := range want {
 			got, ok := set.Value(attribute.Key(key))
-			if !ok || got.Emit() != value {
+			if !ok || got.String() != value {
 				return false
 			}
 		}
