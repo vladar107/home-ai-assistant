@@ -69,6 +69,12 @@ Research on the pinned Pi 1.0.0 found:
   `/status` says so. A missing or unreadable catalog, or no cached usage, is not a reason to fall
   back. A task queued before this change and not yet started takes the task default, with this
   check, at its first run.
+- **Task fallback bookkeeping.** Migration 042 adds `tasks.model_fallback` (`catalog` or `usage`,
+  NULL when the task did not fall back), so `/status` can say a fallback happened after a restart.
+  `task.Service.EffectiveModel` is the one place the check lives; it also answers for a task
+  created now. A cached usage read counts for 30 minutes. A task whose model is NULL and which has
+  already started stores the chat default on its next run; a queued one stores the checked task
+  default before it starts.
 - **The catalog is Pi's.** Choices are validated against the principal's cached catalog for the
   configured provider, read
   under Pi's lock or treated as missing when unreadable; a missing catalog offers only the models

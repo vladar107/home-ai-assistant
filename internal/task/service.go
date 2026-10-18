@@ -7,14 +7,17 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/vladar107/home-ai-assistant/internal/chatgpt"
 	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/modelcatalog"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
@@ -27,6 +30,8 @@ const (
 	DefaultToolBudget       = 100
 	DefaultModelBudget      = 150
 	DefaultProgressInterval = time.Minute
+	// usageMaxAge is how old a cached usage read may be and still mark the task model unavailable.
+	usageMaxAge = 30 * time.Minute
 
 	// maximumOpen is one running task and three queued behind it.
 	maximumOpen = 4
@@ -76,6 +81,20 @@ type Config struct {
 	// Cards and Photos send the card a task staged with its report; nil leaves reports text only.
 	Cards  conversation.Cards
 	Photos conversation.PhotoDeliverer
+	// TaskModel is the default a task copies when it is created, and ChatModel what it falls back
+	// to when the principal's subscription cannot run it. Without a TaskModel tasks run on the
+	// runtime's default.
+	TaskModel agentruntime.ModelEffort
+	ChatModel agentruntime.ModelEffort
+	// Models and Usage tell whether the subscription offers the task model; both are optional and
+	// neither is consulted over the network.
+	Models modelcatalog.Reader
+	Usage  CachedUsage
+}
+
+// CachedUsage is the last subscription usage read of a principal, never fetched on demand.
+type CachedUsage interface {
+	CachedUsage(principalID string, maxAge time.Duration) (chatgpt.Usage, bool)
 }
 
 type Service struct {
@@ -251,9 +270,11 @@ func (s *Service) Create(ctx context.Context, principalID, requestID, title, bri
 	if err != nil {
 		return Task{}, err
 	}
+	pair, fallback := s.EffectiveModel(ctx, principalID)
 	task := Task{
 		ID: id, PrincipalID: principalID, ChatID: chatID, ThreadID: thread.From(ctx), RequestMessageID: messageID,
 		Title: title, Brief: brief, SessionID: sessionID, Status: StatusQueued, CreatedAt: time.Now(),
+		Model: pair.Model, Effort: pair.Effort, ModelFallback: fallback,
 	}
 	ahead, err := s.repository.CreateTask(ctx, task, maximumOpen)
 	if err != nil {
@@ -272,6 +293,58 @@ func (s *Service) Create(ctx context.Context, principalID, requestID, title, bri
 		task.StatusMessageID = statusID
 	}
 	s.notify(principalID)
+	return task, nil
+}
+
+// EffectiveModel is the pair a task created now for the principal would copy, and why it is the
+// chat default when it is: FallbackCatalog when the principal's readable catalog lacks the task
+// model or its effort, FallbackUsage when the cached usage read marks the model unavailable. An
+// unreadable catalog and a missing usage read are no reason to fall back.
+func (s *Service) EffectiveModel(ctx context.Context, principalID string) (agentruntime.ModelEffort, string) {
+	task, chat := s.config.TaskModel, s.config.ChatModel
+	if task.Model == "" || task == chat || chat.Model == "" {
+		return task, ""
+	}
+	if s.config.Models != nil {
+		models, err := s.config.Models.Models(ctx, principalID)
+		switch {
+		case errors.Is(err, modelcatalog.ErrUnavailable):
+		case err != nil:
+			s.logger.WarnContext(ctx, "task.model_catalog.failed", "principal_id", principalID, "error", err)
+		default:
+			index := slices.IndexFunc(models, func(m modelcatalog.Model) bool { return m.ID == task.Model })
+			if index < 0 || !models[index].Supports(task.Effort) {
+				return chat, FallbackCatalog
+			}
+		}
+	}
+	if s.config.Usage != nil {
+		if usage, ok := s.config.Usage.CachedUsage(principalID, usageMaxAge); ok {
+			if available, marked := usage.ModelAvailable[task.Model]; marked && !available {
+				return chat, FallbackUsage
+			}
+		}
+	}
+	return task, ""
+}
+
+// settleModel gives a task from before the pair was stored the one it runs on: the chat default
+// when it had already started, the task default with the usual check when it is yet to start.
+func (s *Service) settleModel(ctx context.Context, task Task) (Task, error) {
+	if task.Model != "" || s.config.TaskModel.Model == "" {
+		return task, nil
+	}
+	pair, fallback := s.config.ChatModel, ""
+	if task.Attempts == 0 {
+		pair, fallback = s.EffectiveModel(ctx, task.PrincipalID)
+	}
+	if pair.Model == "" {
+		return task, nil
+	}
+	if err := s.repository.SetTaskModel(ctx, task.ID, pair.Model, pair.Effort, fallback); err != nil {
+		return task, err
+	}
+	task.Model, task.Effort, task.ModelFallback = pair.Model, pair.Effort, fallback
 	return task, nil
 }
 
@@ -449,6 +522,10 @@ func (s *Service) execute(ctx context.Context, task Task) error {
 		s.mu.Unlock()
 	}()
 
+	task, err := s.settleModel(ctx, task)
+	if err != nil {
+		return err
+	}
 	now := time.Now()
 	started, ok, err := s.repository.StartTask(ctx, task.ID, now.Add(s.config.Timeout), now)
 	if err != nil || !ok {
@@ -517,6 +594,7 @@ func (s *Service) run(ctx context.Context, task Task, sink *progressSink) (Outco
 		reply, err := s.runner.RunTask(mainCtx, conversation.TaskRun{
 			PrincipalID: task.PrincipalID, Turn: outbox.TaskTurn(task.ID), SessionID: task.SessionID,
 			Message: message, Instruction: s.firstMessage(task), Continued: task.Attempts > 1, CallBudget: callBudget, Sink: sink,
+			Model: task.Model, Effort: task.Effort,
 		})
 		cause := context.Cause(mainCtx)
 		partial := sink.end(callBudget)
@@ -541,7 +619,7 @@ func (s *Service) run(ctx context.Context, task Task, sink *progressSink) (Outco
 	sink.begin(nil)
 	reply, err := s.runner.RunTask(reportCtx, conversation.TaskRun{
 		PrincipalID: task.PrincipalID, Turn: outbox.TaskTurn(task.ID), SessionID: task.SessionID,
-		Message: prompt.BackgroundTaskLimit(limit), Instruction: s.firstMessage(task), Continued: true, Report: true, Sink: sink,
+		Message: prompt.BackgroundTaskLimit(limit), Instruction: s.firstMessage(task), Continued: true, Report: true, Sink: sink, Model: task.Model, Effort: task.Effort,
 	})
 	switch {
 	case ctx.Err() != nil:

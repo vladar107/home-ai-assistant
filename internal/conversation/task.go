@@ -29,6 +29,9 @@ type TaskRun struct {
 	// Report asks only for a write-up of what the session holds, so the runtime's own web search,
 	// which no call budget reaches, is left off as well.
 	Report bool
+	// Model and Effort are the pair the task copied when it was created.
+	Model  string
+	Effort string
 	// Sink hears the run's events, in addition to the turn's own tool call log.
 	Sink agentruntime.EventSink
 }
@@ -90,6 +93,8 @@ func (s *Service) RunTask(ctx context.Context, run TaskRun) (TaskReply, error) {
 		WebSearch:   webSearch,
 		SearchCheck: s.searchCheck(run.PrincipalID, webSearch, false),
 		Kind:        agentruntime.RunTask,
+		Model:       run.Model,
+		Effort:      run.Effort,
 	}, sink)
 	switch {
 	case ctx.Err() != nil:

@@ -50,6 +50,13 @@ type Task struct {
 	DeliveredAt time.Time
 	// DeliveredChunks is how many of the report's chunks an earlier delivery attempt already sent.
 	DeliveredChunks int
+	// Model and Effort are the pair the task runs on, copied when it was created; empty on a task
+	// from before they were stored, until its first run settles them.
+	Model  string
+	Effort string
+	// ModelFallback says why the task runs on the chat default instead of the task default; empty
+	// when it did not fall back.
+	ModelFallback string
 }
 
 // Open reports whether the task has yet to finish.
@@ -108,7 +115,15 @@ type Repository interface {
 	// turn has been told about yet, and marks them told.
 	TakeTaskNotices(ctx context.Context, principalID string, since time.Time) ([]Task, error)
 	PruneTasks(ctx context.Context, before time.Time) error
+	// SetTaskModel stores the pair of a task that has none yet; a task that has one is left as it is.
+	SetTaskModel(ctx context.Context, taskID, model, effort, fallback string) error
 }
+
+// Why a task runs on the chat default instead of the task default.
+const (
+	FallbackCatalog = "catalog"
+	FallbackUsage   = "usage"
+)
 
 // Chats resolves the principal's own private chat; a principal without one gets no task run.
 type Chats interface {

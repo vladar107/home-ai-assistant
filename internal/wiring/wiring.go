@@ -589,6 +589,8 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	if in.Core.Tasks != nil {
 		taskConfig := *in.Core.Tasks
 		taskConfig.Cards, taskConfig.Photos = cards, in.Chat
+		taskConfig.TaskModel, taskConfig.ChatModel = a.TaskModel, a.ChatModel
+		taskConfig.Models, taskConfig.Usage = a.Models, a.ChatGPT
 		tasks, err := task.NewService(taskConfig, in.Store, in.Store, in.TaskMessages, in.Chat, in.Logger)
 		if err != nil {
 			return fmt.Errorf("initialize background tasks: %w", err)

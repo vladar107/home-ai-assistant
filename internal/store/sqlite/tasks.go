@@ -16,7 +16,8 @@ var _ task.Repository = (*Store)(nil)
 const taskColumns = `id, principal_id, chat_id, request_message_id, title, brief, session_id, status, partial,
 	COALESCE(error_kind, ''), COALESCE(result, ''), COALESCE(status_message_id, 0), attempts,
 	tool_calls, web_searches, model_calls, prompt_tokens, output_tokens,
-	deadline, created_at, started_at, finished_at, delivered_at, thread_id, delivered_chunks`
+	deadline, created_at, started_at, finished_at, delivered_at, thread_id, delivered_chunks,
+	COALESCE(model, ''), COALESCE(effort, ''), COALESCE(model_fallback, '')`
 
 // taskOpenWork is a task that still needs its worker: one to run, or a report to deliver.
 const taskOpenWork = `(status IN ('queued', 'running') OR (finished_at IS NOT NULL AND delivered_at IS NULL))`
@@ -44,9 +45,10 @@ func (s *Store) CreateTask(ctx context.Context, created task.Task, maximumOpen i
 	now := formatTime(created.CreatedAt)
 	if _, err := tx.ExecContext(
 		ctx,
-		`INSERT INTO tasks (id, principal_id, chat_id, request_message_id, title, brief, session_id, status, created_at, updated_at, thread_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)`,
+		`INSERT INTO tasks (id, principal_id, chat_id, request_message_id, title, brief, session_id, status, created_at, updated_at, thread_id, model, effort, model_fallback)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''))`,
 		created.ID, created.PrincipalID, created.ChatID, created.RequestMessageID, created.Title, created.Brief, created.SessionID, now, now, created.ThreadID,
+		created.Model, created.Effort, created.ModelFallback,
 	); err != nil {
 		return 0, fmt.Errorf("insert task: %w", err)
 	}
@@ -54,6 +56,20 @@ func (s *Store) CreateTask(ctx context.Context, created task.Task, maximumOpen i
 		return 0, fmt.Errorf("commit task creation: %w", err)
 	}
 	return open, nil
+}
+
+func (s *Store) SetTaskModel(ctx context.Context, taskID, model, effort, fallback string) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("store task model: SQLite store is not open")
+	}
+	if _, err := s.db.ExecContext(
+		ctx,
+		`UPDATE tasks SET model = ?, effort = ?, model_fallback = NULLIF(?, '') WHERE id = ? AND model IS NULL`,
+		model, effort, fallback, taskID,
+	); err != nil {
+		return fmt.Errorf("store task model: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) TaskOrigin(ctx context.Context, principalID, requestID string) (int64, int64, bool, error) {
@@ -326,6 +342,7 @@ func scanTask(row rowScanner) (task.Task, error) {
 		&loaded.Status, &loaded.Partial, &loaded.ErrorKind, &loaded.Result, &loaded.StatusMessageID, &loaded.Attempts,
 		&loaded.Progress.ToolCalls, &loaded.Progress.WebSearches, &loaded.Progress.ModelCalls, &loaded.Progress.PromptTokens, &loaded.Progress.OutputTokens,
 		&deadline, &createdAt, &startedAt, &finishedAt, &deliveredAt, &loaded.ThreadID, &loaded.DeliveredChunks,
+		&loaded.Model, &loaded.Effort, &loaded.ModelFallback,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return task.Task{}, err

@@ -60,7 +60,7 @@ func newLaneEnv(t *testing.T) *laneEnv {
 		env.mu.Lock()
 		env.runs = append(env.runs, request)
 		env.mu.Unlock()
-		return agentruntime.RunResult{Response: "answer", Model: request.Model, Tokens: agentruntime.TokenCounts{Input: 10, Output: 5}}, nil
+		return agentruntime.RunResult{Response: "answer", Final: "answer", Model: request.Model, Tokens: agentruntime.TokenCounts{Input: 10, Output: 5}}, nil
 	}}, conversation.Config{ChatModel: chatDefault, TaskModel: strongHigh, Models: env.catalog})
 	return env
 }
@@ -291,4 +291,27 @@ func TestStaleLaneChoiceFallsBackAndIsReported(t *testing.T) {
 
 	env.catalog.set(nil, modelcatalog.ErrUnavailable)
 	env.expect(t, main, strongHigh)
+}
+
+func TestTaskRunPassesItsStoredPairToTheRuntime(t *testing.T) {
+	env := newLaneEnv(t)
+	for _, report := range []bool{false, true} {
+		reply, err := env.service.RunTask(env.ctx, conversation.TaskRun{
+			PrincipalID: "alice", Turn: "task:one", SessionID: "55555555-5555-4555-8555-555555555555",
+			Message: "work", Report: report, Model: strongHigh.Model, Effort: strongHigh.Effort,
+		})
+		if err != nil || reply.ErrorKind != "" {
+			t.Fatalf("reply = %+v %v", reply, err)
+		}
+	}
+	env.mu.Lock()
+	defer env.mu.Unlock()
+	if len(env.runs) != 2 {
+		t.Fatalf("runs = %d", len(env.runs))
+	}
+	for _, run := range env.runs {
+		if run.Kind != agentruntime.RunTask || run.Model != strongHigh.Model || run.Effort != strongHigh.Effort {
+			t.Fatalf("run = %+v", run)
+		}
+	}
 }
