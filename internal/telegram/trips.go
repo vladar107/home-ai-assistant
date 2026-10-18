@@ -385,6 +385,12 @@ func (s *Service) editPlain(ctx context.Context, chatID, messageID int64, text s
 	return s.client.EditKeyboard(ctx, chatID, messageID, text, nil)
 }
 
+// NewTripsSection is the page that turns the principal's Trips scan of Google mail and calendar on
+// and off.
+func NewTripsSection(schedules ScheduleController, google GoogleController, logger *slog.Logger, telemetry Telemetry) Section {
+	return tripsSection{schedules: schedules, google: google, logger: logger, telemetry: telemetryOrNoop(telemetry)}
+}
+
 type tripsSection struct {
 	schedules ScheduleController
 	google    GoogleController
@@ -393,6 +399,8 @@ type tripsSection struct {
 }
 
 func (t tripsSection) prefix() string { return tripsSectionPrefix }
+
+func (t tripsSection) helpTopic() string { return "trips" }
 
 func (t tripsSection) enabled(ctx context.Context, principalID string) (bool, error) {
 	jobs, err := t.schedules.Jobs(ctx, principalID)

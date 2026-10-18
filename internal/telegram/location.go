@@ -144,6 +144,11 @@ func clipText(text string, limit int) string {
 	return clip.Runes(text, limit)
 }
 
+// NewLocationSection is the page that shows and forgets the principal's shared location.
+func NewLocationSection(locations LocationController, logger *slog.Logger, telemetry Telemetry) Section {
+	return locationSection{locations: locations, logger: logger, telemetry: telemetryOrNoop(telemetry)}
+}
+
 type locationSection struct {
 	locations LocationController
 	logger    *slog.Logger
@@ -151,6 +156,12 @@ type locationSection struct {
 }
 
 func (l locationSection) prefix() string { return locationSectionPrefix }
+
+func (l locationSection) helpTopic() string { return "location" }
+
+func (l locationSection) privacy(context.Context, string) ([]string, error) {
+	return []string{LocationPrivacyLine}, nil
+}
 
 func (l locationSection) summary(ctx context.Context, principalID string) (settingsSummary, error) {
 	_, shared, err := l.locations.Summary(ctx, principalID)

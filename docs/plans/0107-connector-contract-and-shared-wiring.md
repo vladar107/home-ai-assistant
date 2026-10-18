@@ -39,7 +39,37 @@ everything sent to the model stays byte-identical.
 
 ## Decisions
 
-- To be recorded as the work proceeds.
+- `telegram.Dependencies` replaces the positional parameters and the
+  setters. Its required fields are validated as before; every other field
+  may be nil. The calls left after construction are the real cycles: the
+  client observing the service's tabs, the feeds handed to the scheduler,
+  the watches, and the trip notifier, and the conversation's tab replies.
+- `telegram.Section` is the one extension point of `/settings`. Optional
+  facets, found by type assertion, add `/privacy` lines (`privacySection`),
+  name an `app_help` topic (`helpSection`), or consume messages
+  (`messageInterceptor`). The caller passes the sections in
+  `Dependencies.Sections`, in the order `app_help` lists their topics, so
+  that order stays the model-facing order it was. `settingsGroups` still
+  places the pages, and `privacyOrder` places the `/privacy` lines, core
+  ones (attachments, jobs, tasks, voice) and section ones in one fixed list.
+  `NewService` refuses a duplicated section, one in no settings group, and
+  one with `/privacy` lines but no place in `privacyOrder`.
+- One switch section serves trains, buses, web access, the home, Grafana,
+  and safety checks: a `SwitchPage` value per integration holds its text,
+  buttons, log event, help topic, and `/privacy` line. `SwitchSettings`
+  pairs a page with the principal's switch, an optional `SwitchDetails`, and
+  an optional `Allowed` for the Grafana allowlist. The exported `*Line`
+  constants stay. A `/privacy` line is one string, because the bus line is
+  two sentences in one item.
+- The home page's exposure lines are built in Telegram by `HomeDetails`,
+  which takes the check as a plain function, so the composition root only
+  adapts `homeassistant.Exposure` to it and Telegram no longer imports the
+  Home Assistant connector. The Notion, NAS, and Google sections keep their
+  connectors' status types, which they render in full.
+- The bespoke sections (model, Notion, NAS, Google, heads-up, Trips,
+  location, memory) get exported constructors and stay as they are. The
+  model connection controller is no longer a field of `Dependencies`: only
+  the model section uses it.
 
 ## Approach
 

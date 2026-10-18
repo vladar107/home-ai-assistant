@@ -26,9 +26,11 @@ const (
 
 var errUnknownSettingsAction = errors.New("unknown settings action")
 
-// settingsSection renders one part of a principal's settings and performs the actions behind
-// the buttons it rendered. Callback data is "<prefix>:<action>".
-type settingsSection interface {
+// Section is one /settings page: it renders a principal's settings and performs the actions behind
+// the buttons it rendered. Callback data is "<prefix>:<action>", and settingsGroups places the page
+// by its prefix. A section may also add lines to /privacy (privacySection), name an app_help topic
+// (helpSection), or consume messages (messageInterceptor).
+type Section interface {
 	prefix() string
 	// summary is the section's state in a few words, for the overview and its group page.
 	summary(context.Context, string) (settingsSummary, error)
@@ -50,6 +52,16 @@ func pressTriggerFrom(ctx context.Context) string {
 	return trigger
 }
 
+// privacySection adds its lines to /privacy, in the place privacyOrder gives its prefix.
+type privacySection interface {
+	privacy(ctx context.Context, principalID string) ([]string, error)
+}
+
+// helpSection names the app_help topic that explains the section's page.
+type helpSection interface {
+	helpTopic() string
+}
+
 // restrictedSection is a section only some principals may see, such as one the operator configured
 // for themselves alone.
 type restrictedSection interface {
@@ -58,8 +70,8 @@ type restrictedSection interface {
 
 // sectionsFor is the sections the principal may see; a restricted section is absent for everyone
 // else, so its buttons resolve to nothing even when forged.
-func sectionsFor(sections []settingsSection, principalID string) []settingsSection {
-	visible := make([]settingsSection, 0, len(sections))
+func sectionsFor(sections []Section, principalID string) []Section {
+	visible := make([]Section, 0, len(sections))
 	for _, section := range sections {
 		if restricted, ok := section.(restrictedSection); ok && !restricted.availableTo(principalID) {
 			continue
@@ -136,8 +148,8 @@ var settingsGroups = []settingsGroup{
 	{id: "safety", title: "Safety & privacy", inline: true, members: []string{typeSafeSectionPrefix}},
 }
 
-func settingsMembers(sections []settingsSection, group settingsGroup) []settingsSection {
-	var members []settingsSection
+func settingsMembers(sections []Section, group settingsGroup) []Section {
+	var members []Section
 	for _, prefix := range group.members {
 		for _, section := range sections {
 			if section.prefix() == prefix {
@@ -150,12 +162,12 @@ func settingsMembers(sections []settingsSection, group settingsGroup) []settings
 
 // showsInline reports whether a group page carries its sections' controls; a group with a single
 // configured section needs no page in between.
-func showsInline(group settingsGroup, members []settingsSection) bool {
+func showsInline(group settingsGroup, members []Section) bool {
 	return group.inline || len(members) == 1
 }
 
 // settingsPageOf is the page that holds a section's controls, shown again after its actions.
-func settingsPageOf(sections []settingsSection, prefix string) string {
+func settingsPageOf(sections []Section, prefix string) string {
 	for _, group := range settingsGroups {
 		if !slices.Contains(group.members, prefix) {
 			continue
@@ -191,7 +203,7 @@ func crumbs(titles ...string) string {
 }
 
 // renderSettings renders a page; an unknown page falls back to the overview.
-func renderSettings(ctx context.Context, principalID string, sections []settingsSection, page, note string) (string, InlineKeyboard, error) {
+func renderSettings(ctx context.Context, principalID string, sections []Section, page, note string) (string, InlineKeyboard, error) {
 	groupID, sectionPrefix, _ := strings.Cut(page, ".")
 	for _, group := range settingsGroups {
 		if group.id != groupID {
@@ -213,7 +225,7 @@ func renderSettings(ctx context.Context, principalID string, sections []settings
 	return renderSettingsOverview(ctx, principalID, sections)
 }
 
-func renderSettingsOverview(ctx context.Context, principalID string, sections []settingsSection) (string, InlineKeyboard, error) {
+func renderSettingsOverview(ctx context.Context, principalID string, sections []Section) (string, InlineKeyboard, error) {
 	var attention, overview []string
 	var buttons []InlineButton
 	for _, group := range settingsGroups {
@@ -253,7 +265,7 @@ func renderSettingsOverview(ctx context.Context, principalID string, sections []
 	return strings.Join(lines, "\n"), keyboard, nil
 }
 
-func renderSettingsGroup(ctx context.Context, principalID string, group settingsGroup, members []settingsSection, note string) (string, InlineKeyboard, error) {
+func renderSettingsGroup(ctx context.Context, principalID string, group settingsGroup, members []Section, note string) (string, InlineKeyboard, error) {
 	lines := []string{crumbs(group.title), ""}
 	var keyboard InlineKeyboard
 	if showsInline(group, members) {
@@ -286,7 +298,7 @@ func renderSettingsGroup(ctx context.Context, principalID string, group settings
 	return finishPage(lines, keyboard, note, settingsRootPage)
 }
 
-func renderSettingsSection(ctx context.Context, principalID string, group settingsGroup, section settingsSection, note string) (string, InlineKeyboard, error) {
+func renderSettingsSection(ctx context.Context, principalID string, group settingsGroup, section Section, note string) (string, InlineKeyboard, error) {
 	summary, err := section.summary(ctx, principalID)
 	if err != nil {
 		return "", nil, err
@@ -325,7 +337,7 @@ func settingsNavFor(data string) (string, bool) {
 
 // settingsSectionFor resolves callback data to its section and action; anything outside the fixed
 // vocabulary resolves to nothing so a stale or forged button only refreshes the view.
-func settingsSectionFor(sections []settingsSection, data string) (settingsSection, string, bool) {
+func settingsSectionFor(sections []Section, data string) (Section, string, bool) {
 	if len(data) > maximumCallbackDataBytes {
 		return nil, "", false
 	}
@@ -347,6 +359,12 @@ const (
 	modelDisconnectAction = "disconnect"
 )
 
+// NewModelSection is the page that connects and disconnects the principal's model subscription;
+// disconnecting stops the principal's running turns first when conversation is set.
+func NewModelSection(connections ConnectionController, conversation ConversationController, logger *slog.Logger, telemetry Telemetry) Section {
+	return modelSection{connections: connections, conversation: conversation, logger: logger, telemetry: telemetryOrNoop(telemetry)}
+}
+
 type modelSection struct {
 	connections  ConnectionController
 	conversation ConversationController
@@ -355,6 +373,8 @@ type modelSection struct {
 }
 
 func (m modelSection) prefix() string { return modelSectionPrefix }
+
+func (m modelSection) helpTopic() string { return "model" }
 
 func (m modelSection) summary(ctx context.Context, principalID string) (settingsSummary, error) {
 	status, err := m.connections.Status(ctx, principalID)
@@ -459,6 +479,12 @@ func NotionConnectedReply(status notion.Status) string {
 	return fmt.Sprintf("Notion is connected to workspace %q as %q (%s).", status.WorkspaceName, status.BotName, notionKind(status))
 }
 
+// NewNotionSection is the page that connects Notion; it also takes the token pasted after Connect
+// Notion and keeps any token-looking message from the model.
+func NewNotionSection(notion NotionController, logger *slog.Logger, telemetry Telemetry) Section {
+	return notionSection{notion: notion, logger: logger, telemetry: telemetryOrNoop(telemetry)}
+}
+
 type notionSection struct {
 	notion    NotionController
 	logger    *slog.Logger
@@ -466,6 +492,12 @@ type notionSection struct {
 }
 
 func (n notionSection) prefix() string { return notionSectionPrefix }
+
+func (n notionSection) helpTopic() string { return "notion" }
+
+func (n notionSection) privacy(context.Context, string) ([]string, error) {
+	return []string{NotionPrivacyLine}, nil
+}
 
 func (n notionSection) summary(ctx context.Context, principalID string) (settingsSummary, error) {
 	status, err := n.notion.Status(ctx, principalID)
@@ -603,6 +635,11 @@ func NASConnectedLine(status nas.Status) string {
 
 // nasSection renders the NAS folders. There is nothing to connect or disconnect: access is the
 // set of directories mounted for this user, which only the operator can change.
+// NewNASSection is the page that shows the principal's NAS folders and turns saving on and off.
+func NewNASSection(nas NASController, logger *slog.Logger, telemetry Telemetry) Section {
+	return nasSection{nas: nas, logger: logger, telemetry: telemetryOrNoop(telemetry)}
+}
+
 type nasSection struct {
 	nas       NASController
 	logger    *slog.Logger
@@ -610,6 +647,12 @@ type nasSection struct {
 }
 
 func (n nasSection) prefix() string { return nasSectionPrefix }
+
+func (n nasSection) helpTopic() string { return "nas" }
+
+func (n nasSection) privacy(context.Context, string) ([]string, error) {
+	return []string{SentFilePrivacyLine}, nil
+}
 
 func (n nasSection) summary(ctx context.Context, principalID string) (settingsSummary, error) {
 	status, err := n.nas.Status(ctx, principalID)

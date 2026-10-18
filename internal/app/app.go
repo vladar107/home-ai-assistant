@@ -885,10 +885,12 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		Telemetry:  a.telemetry,
 		Tabs:       a.store,
 	}
+	section := func(page telegram.SwitchPage, of integration.Switch) telegram.Section {
+		return telegram.NewSwitchSection(telegram.SwitchSettings{Page: page, Toggle: a.switches.Toggle(of)}, a.logger, a.telemetry)
+	}
 	if a.conversation != nil {
 		deps.Conversation = a.conversation
 		deps.Attachments = a.attachments
-		deps.Connections = a.connections
 		deps.Approvals = a.approvals
 		deps.Schedules = a.scheduler
 		deps.Trips = a.trips
@@ -896,36 +898,55 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		deps.Memory = a.memory
 		deps.Backlog = a.backlog
 		deps.Transcriber = a.chatGPT
+		deps.Sections = append(deps.Sections, telegram.NewModelSection(a.connections, a.conversation, a.logger, a.telemetry))
 	}
 	if a.notion != nil {
-		deps.Notion = a.notion
+		deps.Sections = append(deps.Sections, telegram.NewNotionSection(a.notion, a.logger, a.telemetry))
 	}
 	if a.nas != nil {
-		deps.NAS = a.nas
+		deps.Sections = append(deps.Sections, telegram.NewNASSection(a.nas, a.logger, a.telemetry))
 	}
 	if a.google != nil {
-		deps.Google = a.google
+		deps.Sections = append(deps.Sections, telegram.NewGoogleSection(a.google, a.logger, a.telemetry))
 	}
 	if a.web != nil {
-		deps.Web = a.switches.Toggle(web.Switch)
+		deps.Sections = append(deps.Sections, section(telegram.WebPage, web.Switch))
 	}
 	if a.ns != nil {
-		deps.NS = a.switches.Toggle(ns.Switch)
+		deps.Sections = append(deps.Sections, section(telegram.NSPage, ns.Switch))
 	}
 	if a.homeAssistant != nil {
-		deps.HomeAssistant = homeSettings{Toggle: a.switches.Toggle(homeassistant.Switch), home: a.homeAssistant}
+		deps.Sections = append(deps.Sections, telegram.NewSwitchSection(telegram.SwitchSettings{
+			Page:    telegram.HomePage,
+			Toggle:  a.switches.Toggle(homeassistant.Switch),
+			Details: telegram.HomeDetails(homeExposure(a.homeAssistant)),
+		}, a.logger, a.telemetry))
 	}
 	if a.bus != nil {
-		deps.Bus = a.switches.Toggle(bus.Switch)
+		deps.Sections = append(deps.Sections, section(telegram.BusPage, bus.Switch))
+	}
+	if a.scheduler != nil {
+		deps.Sections = append(deps.Sections, telegram.NewHeadsUpSection(a.scheduler, a.logger, a.telemetry))
 	}
 	if a.typeSafe {
-		deps.TypeSafe = a.switches.Toggle(judgment.OptInSwitch)
+		deps.Sections = append(deps.Sections, section(telegram.TypeSafePage, judgment.OptInSwitch))
 	}
 	if a.locations != nil {
 		deps.Locations = a.locations
+		deps.Sections = append(deps.Sections, telegram.NewLocationSection(a.locations, a.logger, a.telemetry))
 	}
 	if a.grafana != nil {
-		deps.Grafana = grafanaSettings{Toggle: a.switches.Toggle(grafana.Switch), grafana: a.grafana}
+		deps.Sections = append(deps.Sections, telegram.NewSwitchSection(telegram.SwitchSettings{
+			Page:    telegram.GrafanaPage,
+			Toggle:  a.switches.Toggle(grafana.Switch),
+			Allowed: a.grafana.Allowed,
+		}, a.logger, a.telemetry))
+	}
+	if a.memory != nil {
+		deps.Sections = append(deps.Sections, telegram.NewMemorySection(a.memory, a.logger, a.telemetry))
+	}
+	if a.trips != nil && a.scheduler != nil && a.google != nil {
+		deps.Sections = append(deps.Sections, telegram.NewTripsSection(a.scheduler, a.google, a.logger, a.telemetry))
 	}
 	if a.tasks != nil {
 		deps.Tasks = a.tasks
@@ -1137,24 +1158,10 @@ func registerWatchKinds(watches *watch.Service, trains *ns.Service, buses *bus.S
 	return watches.Register(watch.KindDisruptions, disruptions)
 }
 
-// homeSettings is what the home settings section reads: the principal's home switch and the
-// connector's exposure check.
-type homeSettings struct {
-	integration.Toggle
-	home *homeassistant.Service
-}
-
-func (h homeSettings) Exposure(ctx context.Context) homeassistant.Exposure {
-	return h.home.Exposure(ctx)
-}
-
-// grafanaSettings is what the monitoring settings section reads: the principal's Grafana switch and
-// the operator's allowlist.
-type grafanaSettings struct {
-	integration.Toggle
-	grafana *grafana.Service
-}
-
-func (g grafanaSettings) Allowed(principalID string) bool {
-	return g.grafana.Allowed(principalID)
+// homeExposure hands the Home Assistant connector's exposure check to the home settings page.
+func homeExposure(home *homeassistant.Service) func(context.Context) (bool, []string) {
+	return func(ctx context.Context) (bool, []string) {
+		exposure := home.Exposure(ctx)
+		return exposure.Checked, exposure.Conflicts
+	}
 }

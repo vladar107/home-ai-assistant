@@ -54,6 +54,11 @@ type MemoryController interface {
 	SetLearnFromFeedback(context.Context, string, bool) error
 }
 
+// NewMemorySection is the page that turns the principal's memory and learning from 👎 on and off.
+func NewMemorySection(memory MemoryController, logger *slog.Logger, telemetry Telemetry) Section {
+	return memorySection{memory: memory, logger: logger, telemetry: telemetryOrNoop(telemetry)}
+}
+
 type memorySection struct {
 	memory    MemoryController
 	logger    *slog.Logger
@@ -61,6 +66,12 @@ type memorySection struct {
 }
 
 func (m memorySection) prefix() string { return memorySectionPrefix }
+
+func (m memorySection) helpTopic() string { return "memory" }
+
+func (m memorySection) privacy(context.Context, string) ([]string, error) {
+	return []string{MemoryPrivacyLine}, nil
+}
 
 func (m memorySection) summary(ctx context.Context, principalID string) (settingsSummary, error) {
 	enabled, err := m.memory.Enabled(ctx, principalID)

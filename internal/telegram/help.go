@@ -30,24 +30,6 @@ const webSearchHelp = "Web search is offered while web access is on for the user
 	"If that content looked like an attempt to instruct the assistant, every search needs confirmation. " +
 	"Scheduled jobs and background tasks have no one to ask, so such a search is skipped there. /new starts a fresh conversation that has read nothing yet, so its searches run freely until it does."
 
-// helpTopics names a settings section for the model; the pages themselves supply the help text.
-var helpTopics = map[string]string{
-	modelSectionPrefix:         "model",
-	googleSectionPrefix:        "google",
-	notionSectionPrefix:        "notion",
-	homeAssistantSectionPrefix: "home_assistant",
-	nasSectionPrefix:           "nas",
-	webSectionPrefix:           "web",
-	nsSectionPrefix:            "trains",
-	busSectionPrefix:           "buses",
-	headsUpSectionPrefix:       "heads_up",
-	tripsSectionPrefix:         "trips",
-	locationSectionPrefix:      "location",
-	memorySectionPrefix:        "memory",
-	grafanaSectionPrefix:       "grafana",
-	typeSafeSectionPrefix:      "safety_checks",
-}
-
 // pressMessages are what a button sends as a message of its own, such as sign-in steps, keyed by
 // the button's callback data.
 var pressMessages = map[string]string{
@@ -88,7 +70,7 @@ func (h helpProvider) topics(principalID string) []string {
 	}
 	topics = append(topics, helpTopicWebSearch)
 	for _, section := range sectionsFor(h.service.sections, principalID) {
-		if topic, found := helpTopics[section.prefix()]; found {
+		if topic := helpTopicOf(section); topic != "" {
 			topics = append(topics, topic)
 		}
 	}
@@ -130,7 +112,7 @@ func (s *Service) helpText(ctx context.Context, principalID, topic string) (stri
 		builder.WriteString(webSearchHelp)
 	default:
 		for _, section := range sections {
-			if helpTopics[section.prefix()] != topic {
+			if helpTopicOf(section) != topic {
 				continue
 			}
 			summary, err := section.summary(ctx, principalID)
@@ -156,6 +138,15 @@ func (s *Service) helpText(ctx context.Context, principalID, topic string) (stri
 		}
 	}
 	return builder.String(), nil
+}
+
+// helpTopicOf is the app_help topic a section's page answers, or "" for none; the page itself
+// supplies the help text.
+func helpTopicOf(section Section) string {
+	if help, ok := section.(helpSection); ok {
+		return help.helpTopic()
+	}
+	return ""
 }
 
 // pathTo names the buttons that lead from the overview to a section's page.

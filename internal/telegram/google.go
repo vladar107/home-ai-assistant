@@ -31,7 +31,8 @@ const (
 	GoogleSignInGuardReply   = "That looked like a Google sign-in address, so I deleted it and did not send it to the model. To finish signing in, send the address on its own as a text message."
 )
 
-// GoogleController is implemented by the Google connector; nil disables the Google settings section.
+// GoogleController is implemented by the Google connector, for the Google and Trips settings
+// sections.
 type GoogleController interface {
 	Status(context.Context, string) ([]google.AccountStatus, error)
 	BeginSignIn(string) (string, error)
@@ -64,6 +65,12 @@ func GoogleConnectedReply(status google.AccountStatus) string {
 		productState(status.MailGranted, status.MailEnabled), productState(status.CalendarGranted, status.CalendarEnabled))
 }
 
+// NewGoogleSection is the page that connects Google accounts; it also takes the sign-in address
+// pasted back and keeps any sign-in address from the model.
+func NewGoogleSection(google GoogleController, logger *slog.Logger, telemetry Telemetry) Section {
+	return googleSection{google: google, logger: logger, telemetry: telemetryOrNoop(telemetry)}
+}
+
 type googleSection struct {
 	google    GoogleController
 	logger    *slog.Logger
@@ -71,6 +78,12 @@ type googleSection struct {
 }
 
 func (g googleSection) prefix() string { return googleSectionPrefix }
+
+func (g googleSection) helpTopic() string { return "google" }
+
+func (g googleSection) privacy(context.Context, string) ([]string, error) {
+	return []string{GooglePrivacyLine}, nil
+}
 
 func (g googleSection) summary(ctx context.Context, principalID string) (settingsSummary, error) {
 	statuses, err := g.google.Status(ctx, principalID)

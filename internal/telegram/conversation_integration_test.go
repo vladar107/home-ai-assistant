@@ -515,7 +515,6 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		reactions = provider
 	}
 	h.credentialsDir = filepath.Join(t.TempDir(), "integrations")
-	var notionController NotionController
 	if options.notion != nil {
 		h.notion, err = notion.NewService(notion.Config{
 			CredentialsDir: h.credentialsDir, APIBaseURL: options.notion.URL(), ChatConnect: options.notionChatConnect,
@@ -530,9 +529,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		if err := h.approvals.RegisterExecutor(h.notion); err != nil {
 			t.Fatal(err)
 		}
-		notionController = h.notion
 	}
-	var nasController NASController
 	if len(options.nasRoots) > 0 {
 		files, err := delivery.NewService(h.store, h.client, logger)
 		if err != nil {
@@ -548,9 +545,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		if err := h.approvals.RegisterExecutor(h.nas); err != nil {
 			t.Fatal(err)
 		}
-		nasController = h.nas
 	}
-	var googleController GoogleController
 	if sim := options.google; sim != nil {
 		h.google, err = google.NewService(google.Config{
 			CredentialsDir: h.credentialsDir, ClientID: googlesim.ClientID, ClientSecret: googlesim.ClientSecret,
@@ -578,9 +573,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 				t.Fatal(err)
 			}
 		}
-		googleController = h.google
 	}
-	var webController SwitchController
 	var webSearch conversation.WebSearch
 	if options.web {
 		h.web, err = web.NewService(web.Config{}, h.switches, logger)
@@ -591,9 +584,8 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		if err := broker.Register(h.web); err != nil {
 			t.Fatal(err)
 		}
-		webController, webSearch = h.switches.Toggle(web.Switch), h.web
+		webSearch = h.web
 	}
-	var nsController SwitchController
 	if options.ns != "" {
 		h.ns, err = ns.NewService(ns.Config{APIKey: "test-key", BaseURL: options.ns}, h.switches, logger)
 		if err != nil {
@@ -602,9 +594,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		if err := broker.Register(h.ns); err != nil {
 			t.Fatal(err)
 		}
-		nsController = h.switches.Toggle(ns.Switch)
 	}
-	var homeAssistantController HomeAssistantController
 	if options.homeAssistant != "" {
 		h.homeAssistant, err = homeassistant.NewService(homeassistant.Config{Token: "test-token", BaseURL: options.homeAssistant}, h.switches, h.approvals, logger)
 		if err != nil {
@@ -614,7 +604,6 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		if err := broker.Register(h.homeAssistant); err != nil {
 			t.Fatal(err)
 		}
-		homeAssistantController = homeSettings{Toggle: h.switches.Toggle(homeassistant.Switch), Service: h.homeAssistant}
 	}
 	if options.grafana != "" {
 		h.grafana, err = grafana.NewService(grafana.Config{Token: "test-token", BaseURL: options.grafana, Principals: []string{"alice"}}, logger)
@@ -625,7 +614,6 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 			t.Fatal(err)
 		}
 	}
-	var busController SwitchController
 	if options.bus != "" {
 		h.bus, err = bus.NewService(bus.Config{
 			HomeStop: "50420100", Contact: options.busContact,
@@ -637,7 +625,6 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		if err := broker.Register(h.bus); err != nil {
 			t.Fatal(err)
 		}
-		busController = h.switches.Toggle(bus.Switch)
 	}
 	var cards conversation.Cards
 	var photos conversation.PhotoDeliverer
@@ -659,7 +646,6 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	notices := conversation.Notices{h.approvals}
 	var reports conversation.Reports
 	var jobs conversation.Jobs
-	var scheduleController ScheduleController
 	if options.schedules != nil {
 		h.scheduler, err = schedule.NewService(schedule.Config{Zone: "Europe/Amsterdam", TickInterval: 10 * time.Millisecond, Now: options.schedules.Now, Cards: cards, Photos: photos, Reminders: ReminderSender{Client: h.client}},
 			h.store, h.store, h.client, h.approvals, logger)
@@ -673,7 +659,6 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		if err := h.approvals.RegisterExecutor(h.scheduler); err != nil {
 			t.Fatal(err)
 		}
-		scheduleController = h.scheduler
 		reports = h.scheduler
 		jobs = h.scheduler
 	}
@@ -821,22 +806,59 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	}
 	deps := Dependencies{
 		Client: h.client, Identities: identities, Cursors: h.store, Logger: logger, Tabs: h.store,
-		Conversation: h.conversation, Attachments: h.attachments, Connections: h.connections, Approvals: h.approvals,
-		Notion: notionController, NAS: nasController, Google: googleController,
-		Web: webController, NS: nsController, HomeAssistant: homeAssistantController, Bus: busController,
-		Schedules: scheduleController,
+		Conversation: h.conversation, Attachments: h.attachments, Approvals: h.approvals,
+		Sections: []Section{NewModelSection(h.connections, h.conversation, logger, nil)},
+	}
+	switchSection := func(page SwitchPage, of integration.Switch) Section {
+		return NewSwitchSection(SwitchSettings{Page: page, Toggle: h.switches.Toggle(of)}, logger, nil)
+	}
+	if h.notion != nil {
+		deps.Sections = append(deps.Sections, NewNotionSection(h.notion, logger, nil))
+	}
+	if h.nas != nil {
+		deps.Sections = append(deps.Sections, NewNASSection(h.nas, logger, nil))
+	}
+	if h.google != nil {
+		deps.Sections = append(deps.Sections, NewGoogleSection(h.google, logger, nil))
+	}
+	if h.web != nil {
+		deps.Sections = append(deps.Sections, switchSection(WebPage, web.Switch))
+	}
+	if h.ns != nil {
+		deps.Sections = append(deps.Sections, switchSection(NSPage, ns.Switch))
+	}
+	if h.homeAssistant != nil {
+		home := h.homeAssistant
+		deps.Sections = append(deps.Sections, NewSwitchSection(SwitchSettings{
+			Page: HomePage, Toggle: h.switches.Toggle(homeassistant.Switch),
+			Details: HomeDetails(func(ctx context.Context) (bool, []string) {
+				exposure := home.Exposure(ctx)
+				return exposure.Checked, exposure.Conflicts
+			}),
+		}, logger, nil))
+	}
+	if h.bus != nil {
+		deps.Sections = append(deps.Sections, switchSection(BusPage, bus.Switch))
+	}
+	if h.scheduler != nil {
+		deps.Schedules = h.scheduler
+		deps.Sections = append(deps.Sections, NewHeadsUpSection(h.scheduler, logger, nil))
 	}
 	if options.typeSafe {
-		deps.TypeSafe = h.switches.Toggle(judgment.OptInSwitch)
+		deps.Sections = append(deps.Sections, switchSection(TypeSafePage, judgment.OptInSwitch))
 	}
 	if h.locations != nil {
 		deps.Locations = h.locations
+		deps.Sections = append(deps.Sections, NewLocationSection(h.locations, logger, nil))
 	}
 	if h.grafana != nil {
-		deps.Grafana = grafanaSettings{Toggle: h.switches.Toggle(grafana.Switch), Service: h.grafana}
+		deps.Sections = append(deps.Sections, NewSwitchSection(SwitchSettings{
+			Page: GrafanaPage, Toggle: h.switches.Toggle(grafana.Switch), Allowed: h.grafana.Allowed,
+		}, logger, nil))
 	}
 	if h.memory != nil {
 		deps.Memory = h.memory
+		deps.Sections = append(deps.Sections, NewMemorySection(h.memory, logger, nil))
 	}
 	if h.backlog != nil {
 		deps.Backlog = h.backlog
@@ -854,6 +876,9 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 			t.Fatal(err)
 		}
 		deps.Trips = h.trips
+		if h.google != nil {
+			deps.Sections = append(deps.Sections, NewTripsSection(h.scheduler, h.google, logger, nil))
+		}
 	}
 	if h.routes != nil {
 		deps.Routes = h.routes
@@ -1858,15 +1883,4 @@ func TestBotCommandRegistrationFailureKeepsPolling(t *testing.T) {
 	if strings.Contains(logs, "test-token") {
 		t.Fatal("logs contain the Telegram token")
 	}
-}
-
-// homeSettings and grafanaSettings pair a switch with its connector, as the application does.
-type homeSettings struct {
-	integration.Toggle
-	*homeassistant.Service
-}
-
-type grafanaSettings struct {
-	integration.Toggle
-	*grafana.Service
 }

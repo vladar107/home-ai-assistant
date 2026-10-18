@@ -19,6 +19,11 @@ const (
 	HeadsUpTooManyNote = "You already have the maximum number of scheduled jobs. Remove one in /jobs, then turn Heads-up on."
 )
 
+// NewHeadsUpSection is the page that turns the principal's twice-daily heads-up job on and off.
+func NewHeadsUpSection(schedules ScheduleController, logger *slog.Logger, telemetry Telemetry) Section {
+	return headsUpSection{schedules: schedules, logger: logger, telemetry: telemetryOrNoop(telemetry)}
+}
+
 type headsUpSection struct {
 	schedules ScheduleController
 	logger    *slog.Logger
@@ -26,6 +31,8 @@ type headsUpSection struct {
 }
 
 func (h headsUpSection) prefix() string { return headsUpSectionPrefix }
+
+func (h headsUpSection) helpTopic() string { return "heads_up" }
 
 // enabled is true while the principal's Heads-up job exists and is not paused.
 func (h headsUpSection) enabled(ctx context.Context, principalID string) (bool, error) {

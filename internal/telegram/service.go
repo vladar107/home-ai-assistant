@@ -85,22 +85,22 @@ type AttachmentStore interface {
 	Room(context.Context, string) (attachment.Room, error)
 }
 
-// ConnectionController is implemented by the model connection service; nil disables the model settings section.
+// ConnectionController is implemented by the model connection service, for the model settings
+// section.
 type ConnectionController interface {
 	Connect(context.Context, string, int64) (connection.Ceremony, error)
 	Status(context.Context, string) (connection.Status, error)
 	Disconnect(context.Context, string) (bool, error)
 }
 
-// SwitchController is one integration's per-principal switch, implemented by integration.Toggle.
-// The web access, trains, buses, and safety checks sections take one each; nil disables that
-// section.
+// SwitchController is one integration's per-principal switch, implemented by integration.Toggle,
+// for its on/off page in /settings.
 type SwitchController interface {
 	Enabled(context.Context, string) (bool, error)
 	SetEnabled(context.Context, string, bool) error
 }
 
-// NotionController is implemented by the Notion connector; nil disables the Notion settings section.
+// NotionController is implemented by the Notion connector, for the Notion settings section.
 type NotionController interface {
 	Status(context.Context, string) (notion.Status, error)
 	Connect(context.Context, string, string) (notion.Status, error)
@@ -111,7 +111,7 @@ type NotionController interface {
 	ChatConnectEnabled() bool
 }
 
-// NASController is implemented by the NAS connector; nil disables the NAS settings section.
+// NASController is implemented by the NAS connector, for the NAS settings section.
 type NASController interface {
 	Status(context.Context, string) (nas.Status, error)
 	SetWrites(context.Context, string, bool) (nas.Status, error)
@@ -141,36 +141,26 @@ type cursorStore interface {
 }
 
 type Service struct {
-	client        botAPI
-	identities    identityResolver
-	cursors       cursorStore
-	conversation  ConversationController
-	attachments   AttachmentStore
-	connections   ConnectionController
-	notion        NotionController
-	nas           NASController
-	google        GoogleController
-	web           SwitchController
-	typeSafe      SwitchController
-	ns            SwitchController
-	homeAssistant HomeAssistantController
-	bus           SwitchController
-	approvals     ApprovalController
-	schedules     ScheduleController
-	locations     LocationController
-	grafana       GrafanaController
-	memory        MemoryController
-	backlog       BacklogController
-	tasks         TaskController
-	watches       WatchController
-	trips         TripController
-	routes        RouteController
-	transcriber   Transcriber
-	tabs          TabStore
-	sections      []settingsSection
-	interceptors  []messageInterceptor
-	logger        *slog.Logger
-	telemetry     Telemetry
+	client       botAPI
+	identities   identityResolver
+	cursors      cursorStore
+	conversation ConversationController
+	attachments  AttachmentStore
+	approvals    ApprovalController
+	schedules    ScheduleController
+	locations    LocationController
+	memory       MemoryController
+	backlog      BacklogController
+	tasks        TaskController
+	watches      WatchController
+	trips        TripController
+	routes       RouteController
+	transcriber  Transcriber
+	tabs         TabStore
+	sections     []Section
+	interceptors []messageInterceptor
+	logger       *slog.Logger
+	telemetry    Telemetry
 
 	// topics is the bot's tabs switch as getMe last reported it.
 	topics atomic.Bool
@@ -210,29 +200,23 @@ type Dependencies struct {
 	Logger     *slog.Logger
 	Telemetry  Telemetry
 
-	Tabs          TabStore
-	Conversation  ConversationController
-	Attachments   AttachmentStore
-	Connections   ConnectionController
-	Notion        NotionController
-	NAS           NASController
-	Google        GoogleController
-	Web           SwitchController
-	NS            SwitchController
-	HomeAssistant HomeAssistantController
-	Bus           SwitchController
-	Approvals     ApprovalController
-	Schedules     ScheduleController
-	TypeSafe      SwitchController
-	Locations     LocationController
-	Grafana       GrafanaController
-	Memory        MemoryController
-	Backlog       BacklogController
-	Tasks         TaskController
-	Watches       WatchController
-	Trips         TripController
-	Routes        RouteController
-	Transcriber   Transcriber
+	Tabs         TabStore
+	Conversation ConversationController
+	Attachments  AttachmentStore
+	Approvals    ApprovalController
+	Schedules    ScheduleController
+	Locations    LocationController
+	Memory       MemoryController
+	Backlog      BacklogController
+	Tasks        TaskController
+	Watches      WatchController
+	Trips        TripController
+	Routes       RouteController
+	Transcriber  Transcriber
+
+	// Sections are the /settings pages, in the order app_help lists their topics; settingsGroups
+	// places the pages themselves, and privacyOrder their /privacy lines.
+	Sections []Section
 }
 
 func NewService(deps Dependencies) (*Service, error) {
@@ -248,87 +232,60 @@ func NewService(deps Dependencies) (*Service, error) {
 	if deps.Logger == nil {
 		return nil, fmt.Errorf("Telegram logger is required")
 	}
+	if err := validateSections(deps.Sections); err != nil {
+		return nil, err
+	}
 
-	logger, telemetry := deps.Logger, telemetryOrNoop(deps.Telemetry)
 	service := &Service{
-		client:        deps.Client,
-		identities:    deps.Identities,
-		cursors:       deps.Cursors,
-		conversation:  deps.Conversation,
-		attachments:   deps.Attachments,
-		connections:   deps.Connections,
-		notion:        deps.Notion,
-		nas:           deps.NAS,
-		google:        deps.Google,
-		web:           deps.Web,
-		typeSafe:      deps.TypeSafe,
-		ns:            deps.NS,
-		homeAssistant: deps.HomeAssistant,
-		bus:           deps.Bus,
-		approvals:     deps.Approvals,
-		schedules:     deps.Schedules,
-		locations:     deps.Locations,
-		grafana:       deps.Grafana,
-		memory:        deps.Memory,
-		backlog:       deps.Backlog,
-		tasks:         deps.Tasks,
-		watches:       deps.Watches,
-		trips:         deps.Trips,
-		routes:        deps.Routes,
-		transcriber:   deps.Transcriber,
-		tabs:          deps.Tabs,
-		logger:        logger,
-		telemetry:     telemetry,
+		client:       deps.Client,
+		identities:   deps.Identities,
+		cursors:      deps.Cursors,
+		conversation: deps.Conversation,
+		attachments:  deps.Attachments,
+		approvals:    deps.Approvals,
+		schedules:    deps.Schedules,
+		locations:    deps.Locations,
+		memory:       deps.Memory,
+		backlog:      deps.Backlog,
+		tasks:        deps.Tasks,
+		watches:      deps.Watches,
+		trips:        deps.Trips,
+		routes:       deps.Routes,
+		transcriber:  deps.Transcriber,
+		tabs:         deps.Tabs,
+		sections:     slices.Clone(deps.Sections),
+		logger:       deps.Logger,
+		telemetry:    telemetryOrNoop(deps.Telemetry),
 	}
-	if deps.Connections != nil {
-		service.sections = append(service.sections, modelSection{
-			connections: deps.Connections, conversation: deps.Conversation, logger: logger, telemetry: telemetry,
-		})
-	}
-	if deps.Notion != nil {
-		section := notionSection{notion: deps.Notion, logger: logger, telemetry: telemetry}
-		service.sections = append(service.sections, section)
-		service.interceptors = append(service.interceptors, section)
-	}
-	if deps.NAS != nil {
-		service.sections = append(service.sections, nasSection{nas: deps.NAS, logger: logger, telemetry: telemetry})
-	}
-	if deps.Google != nil {
-		section := googleSection{google: deps.Google, logger: logger, telemetry: telemetry}
-		service.sections = append(service.sections, section)
-		service.interceptors = append(service.interceptors, section)
-	}
-	if deps.Web != nil {
-		service.sections = append(service.sections, webSection{web: deps.Web, logger: logger, telemetry: telemetry})
-	}
-	if deps.NS != nil {
-		service.sections = append(service.sections, nsSection{ns: deps.NS, logger: logger, telemetry: telemetry})
-	}
-	if deps.HomeAssistant != nil {
-		service.sections = append(service.sections, homeAssistantSection{homeAssistant: deps.HomeAssistant, logger: logger, telemetry: telemetry})
-	}
-	if deps.Bus != nil {
-		service.sections = append(service.sections, busSection{bus: deps.Bus, logger: logger, telemetry: telemetry})
-	}
-	if deps.Schedules != nil {
-		service.sections = append(service.sections, headsUpSection{schedules: deps.Schedules, logger: logger, telemetry: telemetry})
-	}
-	if deps.TypeSafe != nil {
-		service.sections = append(service.sections, typeSafeSection{typeSafe: deps.TypeSafe})
-	}
-	if deps.Locations != nil {
-		service.sections = append(service.sections, locationSection{locations: deps.Locations, logger: logger, telemetry: telemetry})
-	}
-	if deps.Grafana != nil {
-		service.sections = append(service.sections, grafanaSection{grafana: deps.Grafana, logger: logger, telemetry: telemetry})
-	}
-	if deps.Memory != nil {
-		service.sections = append(service.sections, memorySection{memory: deps.Memory, logger: logger, telemetry: telemetry})
-	}
-	if deps.Trips != nil && deps.Schedules != nil && deps.Google != nil {
-		service.sections = append(service.sections, tripsSection{schedules: deps.Schedules, google: deps.Google, logger: logger, telemetry: telemetry})
+	for _, section := range deps.Sections {
+		if interceptor, ok := section.(messageInterceptor); ok {
+			service.interceptors = append(service.interceptors, interceptor)
+		}
 	}
 	return service, nil
+}
+
+// validateSections refuses a page /settings could not place or reach, and a /privacy line without
+// a place, so a new section cannot silently go missing.
+func validateSections(sections []Section) error {
+	seen := make(map[string]bool, len(sections))
+	for _, section := range sections {
+		if section == nil {
+			return fmt.Errorf("Telegram settings section is nil")
+		}
+		prefix := section.prefix()
+		if seen[prefix] {
+			return fmt.Errorf("Telegram settings section %q is duplicated", prefix)
+		}
+		seen[prefix] = true
+		if !slices.ContainsFunc(settingsGroups, func(group settingsGroup) bool { return slices.Contains(group.members, prefix) }) {
+			return fmt.Errorf("Telegram settings section %q is in no settings group", prefix)
+		}
+		if _, private := section.(privacySection); private && !slices.Contains(privacyOrder, prefix) {
+			return fmt.Errorf("Telegram settings section %q has privacy lines without a place in /privacy", prefix)
+		}
+	}
+	return nil
 }
 
 func (s *Service) botCommands() []BotCommand {
@@ -1187,92 +1144,8 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		}
 		return StatusReply, nil, nil
 	case "privacy":
-		if s.conversation == nil {
-			return PrivacyReply, nil, nil
-		}
-		reply := ConversationPrivacyReply
-		if s.attachments != nil {
-			reply += privacyItem + AttachmentPrivacyLine
-		}
-		if s.nas != nil {
-			reply += privacyItem + SentFilePrivacyLine
-		}
-		if s.notion != nil {
-			reply += privacyItem + NotionPrivacyLine
-		}
-		if s.google != nil {
-			reply += privacyItem + GooglePrivacyLine
-		}
-		if s.schedules != nil {
-			reply += privacyItem + SchedulePrivacyLine
-		}
-		if s.tasks != nil {
-			reply += privacyItem + TaskPrivacyLine
-		}
-		if s.web != nil {
-			enabled, err := s.web.Enabled(ctx, principalID)
-			if err != nil {
-				return "", nil, err
-			}
-			if enabled {
-				reply += privacyItem + WebPrivacyLine
-			}
-		}
-		if s.ns != nil {
-			enabled, err := s.ns.Enabled(ctx, principalID)
-			if err != nil {
-				return "", nil, err
-			}
-			if enabled {
-				reply += privacyItem + NSPrivacyLine
-			}
-		}
-		if s.homeAssistant != nil {
-			enabled, err := s.homeAssistant.Enabled(ctx, principalID)
-			if err != nil {
-				return "", nil, err
-			}
-			if enabled {
-				reply += privacyItem + HomeAssistantPrivacyLine
-			}
-		}
-		if s.bus != nil {
-			enabled, err := s.bus.Enabled(ctx, principalID)
-			if err != nil {
-				return "", nil, err
-			}
-			if enabled {
-				reply += privacyItem + BusPrivacyLine + " " + BusPlanningPrivacyLine
-			}
-		}
-		if s.locations != nil {
-			reply += privacyItem + LocationPrivacyLine
-		}
-		if s.transcriber != nil {
-			reply += privacyItem + VoicePrivacyLine
-		}
-		if s.grafana != nil && s.grafana.Allowed(principalID) {
-			enabled, err := s.grafana.Enabled(ctx, principalID)
-			if err != nil {
-				return "", nil, err
-			}
-			if enabled {
-				reply += privacyItem + GrafanaPrivacyLine
-			}
-		}
-		if s.memory != nil {
-			reply += privacyItem + MemoryPrivacyLine
-		}
-		if s.typeSafe != nil {
-			enabled, err := s.typeSafe.Enabled(ctx, principalID)
-			if err != nil {
-				return "", nil, err
-			}
-			if enabled {
-				reply += privacyItem + TypeSafePrivacyLine
-			}
-		}
-		return reply, nil, nil
+		reply, err := s.privacyReply(ctx, principalID)
+		return reply, nil, err
 	case "cancel":
 		if s.conversation == nil {
 			return NothingToCancelReply, nil, nil
