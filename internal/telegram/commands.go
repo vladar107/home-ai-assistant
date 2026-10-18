@@ -57,7 +57,7 @@ type menuCommand struct {
 // typedCommands answer when typed but are left out of the slash menu; the help reply and /settings
 // name them.
 var typedCommands = []BotCommand{
-	{Command: "status", Description: "Show whether Home Agent is online"},
+	{Command: "status", Description: "Show whether Home Agent is online, your model, and your subscription usage"},
 	{Command: "privacy", Description: "Show the current privacy mode"},
 }
 

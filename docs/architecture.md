@@ -523,6 +523,27 @@ principal's turn slot, with read tools only and its own time, tool, and model-ca
 budgets. A task that reaches a limit is asked once, briefly, to report what it has.
 The report goes out as a reply to the request, and the next chat turn learns of it.
 A restart resumes a running task in its session; a second interruption fails it.
+A task copies the task default (`HOME_AGENT_PI_TASK_MODEL`) when it is created, and its
+report run uses the same pair; if the principal's catalog lacks that model, or the
+last cached usage read marks it unavailable, it runs on the chat default instead.
+
+### Model and effort per tab
+
+Chat turns run on `HOME_AGENT_PI_MODEL`. A lane (the main view or one tab) can hold its
+own model and effort, stored per principal and thread by `/model` until `/new` or the
+tab is closed. Every run passes `--model` and `--thinking` to Pi; each turn rechecks
+the lane's choice against the principal's catalog and runs on the default when it has
+gone stale. The catalog is Pi's own `models-store.json` for the principal's profile,
+read by `internal/modelcatalog` under Pi's lock, with levels taken from each model's
+`thinkingLevelMap`. The model that answered the last turn and its tokens are kept in
+memory per lane.
+
+`/status` shows the pair in use, the task default, that last turn, and the subscription
+usage. `internal/chatgpt` reads the usage with a read-only GET using the requesting
+principal's own credential, decodes only the plan, the two windows, the limit flag,
+and per-model availability, caches it for about a minute, and bounds it to two
+seconds including any token refresh. Only `/status` reads it live; `/model` and task
+creation use the cached result. Account identifiers in the response are never decoded.
 
 ### A watch
 
@@ -604,7 +625,8 @@ check that saw it hold.
 
 `telegram` offers `app_help` on every turn: for a topic, the `/settings` page of an
 integration rendered for that principal with its buttons and the messages they
-send, the command list, `/jobs`, or how web search is checked. The text comes from
+send, the command list, `/jobs`, or how web search is checked; the model topic also
+explains `/model`. The text comes from
 the same rendering and strings as the pages themselves, so the model's setup
 instructions cannot drift from the app. Turns therefore always carry the tool
 bridge; web search is still offered only while the principal's web access is on, and its extension asks the bridge to check each query.

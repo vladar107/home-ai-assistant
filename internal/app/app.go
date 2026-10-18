@@ -397,6 +397,10 @@ func (a *App) buildTelegram(ctx context.Context, client *telegram.Client, config
 	}
 	asm := a.assembly
 	if asm != nil {
+		location, err := time.LoadLocation(a.cfg.Timezone)
+		if err != nil {
+			return fmt.Errorf("load household time zone: %w", err)
+		}
 		// Interface values are set only for what was built, so none of them is a typed nil.
 		deps.Conversation = asm.Conversation
 		deps.Attachments = asm.Attachments
@@ -410,6 +414,10 @@ func (a *App) buildTelegram(ctx context.Context, client *telegram.Client, config
 		deps.Model = &telegram.ModelCommand{
 			Lanes: asm.Conversation, Catalog: asm.Models, Usage: asm.ChatGPT,
 			ChatDefault: asm.ChatModel, TaskDefault: asm.TaskModel,
+			Turns: asm.Conversation, Location: location,
+		}
+		if asm.Tasks != nil {
+			deps.Model.Tasks = asm.Tasks
 		}
 		if asm.Locations != nil {
 			deps.Locations = asm.Locations

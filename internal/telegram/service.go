@@ -1160,7 +1160,8 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 	switch command {
 	case "status":
 		if s.conversation != nil {
-			return ConversationStatusReply, nil, nil
+			reply, err := s.statusReply(ctx, principalID)
+			return reply, nil, err
 		}
 		return StatusReply, nil, nil
 	case "privacy":

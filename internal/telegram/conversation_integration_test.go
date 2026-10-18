@@ -561,7 +561,7 @@ func (h *conversationHarness) telegramService(identities *identity.Service, logg
 	}
 	deps.Model = &ModelCommand{
 		Lanes: asm.Conversation, Catalog: asm.Models, Usage: asm.ChatGPT,
-		ChatDefault: asm.ChatModel, TaskDefault: asm.TaskModel,
+		ChatDefault: asm.ChatModel, TaskDefault: asm.TaskModel, Turns: asm.Conversation,
 	}
 	deps.Sections = []Section{NewModelSection(asm.Connections, asm.Conversation, logger, nil)}
 	if asm.Notion != nil {
@@ -1174,6 +1174,16 @@ func (h *conversationHarness) wantReply(chatID, updateID int64, text string) {
 	}
 }
 
+// wantStatusReply expects /status to answer with its fixed first line, whatever the model lines
+// below it say.
+func (h *conversationHarness) wantStatusReply(chatID, updateID int64) {
+	h.t.Helper()
+	message := h.nextMessage()
+	if message.chatID != chatID || message.replyTo != requestMessageID(updateID) || !strings.HasPrefix(message.text, ConversationStatusReply) {
+		h.t.Fatalf("message = %+v, want chat %d a /status reply quoting message %d", message, chatID, requestMessageID(updateID))
+	}
+}
+
 func (h *conversationHarness) waitState(updateID int64, state string) {
 	h.t.Helper()
 	ticker := time.NewTicker(5 * time.Millisecond)
@@ -1268,7 +1278,7 @@ func TestCommandsRemainResponsiveAndCancelSuppressesLateAnswer(t *testing.T) {
 	call := receive(t, h.ctx, runtime.calls)
 	h.push(textUpdate(2, 101, "second request"), textUpdate(3, 101, "/status"), textUpdate(4, 101, "/privacy"), textUpdate(5, 101, "/cancel"))
 	h.wantReply(101, 2, conversation.BusyReply)
-	h.wantReply(101, 3, ConversationStatusReply)
+	h.wantStatusReply(101, 3)
 	h.wantReply(101, 4, privacyLines(AttachmentPrivacyLine, SchedulePrivacyLine, VoicePrivacyLine, MemoryPrivacyLine))
 	h.wantReply(101, 5, CancelledReply)
 	receive(t, h.ctx, call.ctx.Done())
@@ -1315,7 +1325,7 @@ func TestUnauthorizedAndNonPrivateUpdatesAreIgnoredAndCursorSurvivesRestart(t *t
 	h.start()
 	h.waitOffset(7)
 	h.push(textUpdate(6, 101, "accepted"), textUpdate(7, 101, "/status"))
-	h.wantReply(101, 7, ConversationStatusReply)
+	h.wantStatusReply(101, 7)
 	h.waitOffset(8)
 	h.stop()
 	select {
@@ -1526,7 +1536,7 @@ func TestBotCommandsRegisteredOnceAtStartup(t *testing.T) {
 		}
 	}
 	h.push(textUpdate(1, 101, "/status"), textUpdate(2, 101, "/privacy"))
-	h.wantReply(101, 1, ConversationStatusReply)
+	h.wantStatusReply(101, 1)
 	h.wantReply(101, 2, privacyLines(AttachmentPrivacyLine, SchedulePrivacyLine, VoicePrivacyLine, MemoryPrivacyLine))
 	h.waitOffset(3)
 	select {
@@ -1543,7 +1553,7 @@ func TestBotCommandRegistrationFailureKeepsPolling(t *testing.T) {
 	receive(t, h.ctx, h.registrations)
 	receive(t, h.ctx, h.registrations)
 	h.push(textUpdate(1, 101, "/status"))
-	h.wantReply(101, 1, ConversationStatusReply)
+	h.wantStatusReply(101, 1)
 	logs := h.logs.String()
 	if !strings.Contains(logs, "telegram.commands.register_failed") {
 		t.Fatalf("registration failure was not logged: %s", logs)

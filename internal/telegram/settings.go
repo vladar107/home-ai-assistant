@@ -17,6 +17,7 @@ const (
 	SettingsTitle         = "Settings"
 	SettingsPrivacyLine   = "Privacy mode: strict-local. Use /privacy for details and /status to check that I am online."
 	ModelNotConnectedLine = "Model subscription: not connected."
+	ModelCommandLine      = "Choose the model and effort of a conversation with /model."
 
 	maximumCallbackDataBytes = 64
 	// labelCallbackData marks a button that only labels the rows below it; pressing it changes
@@ -395,6 +396,10 @@ func (m modelSection) prefix() string { return modelSectionPrefix }
 
 func (m modelSection) helpTopic() string { return "model" }
 
+func (m modelSection) privacy(context.Context, string) ([]string, error) {
+	return []string{modelUsagePrivacyLine}, nil
+}
+
 func (m modelSection) summary(ctx context.Context, principalID string) (settingsSummary, error) {
 	status, err := m.connections.Status(ctx, principalID)
 	if err != nil {
@@ -418,7 +423,7 @@ func (m modelSection) render(ctx context.Context, principalID string) (settingsV
 		}, nil
 	}
 	return settingsView{
-		lines:   []string{ModelConnectedLine(status)},
+		lines:   []string{ModelConnectedLine(status), ModelCommandLine},
 		buttons: []InlineButton{{Text: "Disconnect model", CallbackData: modelSectionPrefix + ":" + modelDisconnectAction}},
 	}, nil
 }

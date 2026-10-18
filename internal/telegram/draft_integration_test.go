@@ -306,7 +306,7 @@ func TestDraftStopCancelsOnlyTheTurnItShows(t *testing.T) {
 	draft := h.draftRequests()[shown].draftID
 
 	h.push(stopUpdate(2, private, draft+1), textUpdate(3, 101, "/status"))
-	h.wantReply(101, 3, ConversationStatusReply)
+	h.wantStatusReply(101, 3)
 	if call.ctx.Err() != nil {
 		t.Fatal("a stale draft stopped the turn")
 	}
@@ -321,7 +321,7 @@ func TestDraftStopCancelsOnlyTheTurnItShows(t *testing.T) {
 	h.wantIndicatorsQuiet()
 
 	h.push(stopUpdate(5, private, draft), textUpdate(6, 101, "/status"))
-	h.wantReply(101, 6, ConversationStatusReply)
+	h.wantStatusReply(101, 6)
 	h.push(textUpdate(7, 101, "next request"))
 	next := receive(t, h.ctx, runtime.calls)
 	next.answer <- agentruntime.RunResult{Response: "next answer"}

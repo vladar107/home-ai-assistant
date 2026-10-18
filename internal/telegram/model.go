@@ -48,6 +48,22 @@ type ModelCommand struct {
 	// principal's catalog cannot be read.
 	ChatDefault agentruntime.ModelEffort
 	TaskDefault agentruntime.ModelEffort
+	// Turns, Tasks and Location add the last turn, the task model, and the household time zone to
+	// /status; each is optional.
+	Turns    LaneTurns
+	Tasks    TaskModels
+	Location *time.Location
+}
+
+// LaneTurns reports the latest chat turn of a lane, implemented by conversation.Service.
+type LaneTurns interface {
+	LaneTurn(lane conversation.Lane) conversation.LaneTurn
+}
+
+// TaskModels reports the pair a task created now would run on and why it is the chat default when
+// it is, implemented by task.Service.
+type TaskModels interface {
+	EffectiveModel(ctx context.Context, principalID string) (agentruntime.ModelEffort, string)
 }
 
 // modelCatalog is the models to offer for one request.

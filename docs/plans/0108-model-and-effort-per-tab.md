@@ -1,6 +1,6 @@
 # 0108 — Model and effort per tab, and subscription usage in /status
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 

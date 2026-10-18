@@ -117,7 +117,7 @@ plan that links back to the earlier record.
 | 0105 | [The model-facing prompt scaffolding in one place](0105-prompt-scaffolding.md) | done |
 | 0106 | [One per-user switch for each integration](0106-integration-switches.md) | done |
 | 0107 | [One connector contract and wiring shared with the tests](0107-connector-contract-and-shared-wiring.md) | done |
-| 0108 | [Model and effort per tab, and subscription usage in /status](0108-model-and-effort-per-tab.md) | in-progress |
+| 0108 | [Model and effort per tab, and subscription usage in /status](0108-model-and-effort-per-tab.md) | done |
 | 0109 | [One ordered lifecycle and a module registry without unused parts](0109-module-lifecycle.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`

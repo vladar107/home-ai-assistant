@@ -13,6 +13,7 @@ const (
 // privacyOrder orders the lines /privacy adds below its opening paragraph. An entry is a core line
 // above or the prefix of a section that adds lines of its own.
 var privacyOrder = []string{
+	modelSectionPrefix,
 	privacyAttachments,
 	nasSectionPrefix,
 	notionSectionPrefix,

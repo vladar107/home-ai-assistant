@@ -15,7 +15,7 @@ borrowed between users.
 
 - **Conversation.** Natural-language chat with per-user context, backed by the
   [Pi](https://github.com/badlogic/pi-mono) agent runtime on the user's own model
-  subscription. `/backlog`, `/cancel`, `/jobs`, `/memory`, `/new`, `/sessions`,
+  subscription. `/backlog`, `/cancel`, `/jobs`, `/memory`, `/model`, `/new`, `/sessions`,
   `/settings`, and `/tasks` are deterministic shortcuts in the slash menu, with
   `/close` there too while tabs are on, and
   `/status` and `/privacy` answer when typed. Asked how to
