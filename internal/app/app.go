@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -240,16 +241,12 @@ func (a *App) Run(ctx context.Context) (runErr error) {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), a.cfg.ShutdownTimeout)
 	defer cancel()
 
-	if err := a.shutdownTelegram(shutdownCtx); err != nil {
-		runErr = errors.Join(runErr, err)
-	}
-	if err := a.shutdownConversation(shutdownCtx); err != nil {
-		runErr = errors.Join(runErr, err)
-	}
-	if err := a.server.Shutdown(shutdownCtx); err != nil {
-		runErr = errors.Join(runErr, fmt.Errorf("shutdown HTTP server: %w", err))
-	}
-	if err := a.shutdownModules(shutdownCtx, started); err != nil {
+	if err := shutdownTogether(shutdownCtx,
+		a.shutdownTelegram,
+		a.shutdownConversation,
+		labelled("shutdown HTTP server", a.server.Shutdown),
+		func(ctx context.Context) error { return a.shutdownModules(ctx, started) },
+	); err != nil {
 		runErr = errors.Join(runErr, err)
 	}
 	if err := a.closeStore(); err != nil {
@@ -999,25 +996,42 @@ func (a *App) shutdownConversation(ctx context.Context) error {
 	if a.conversation == nil {
 		return nil
 	}
-	var errs []error
+	steps := []func(context.Context) error{
+		labelled("shutdown scheduler", a.scheduler.Shutdown),
+		labelled("shutdown conversation service", a.conversation.Shutdown),
+		labelled("shutdown approvals", a.approvals.Shutdown),
+		labelled("shutdown model connections", a.connections.Shutdown),
+	}
 	if a.tasks != nil {
-		if err := a.tasks.Shutdown(ctx); err != nil {
-			errs = append(errs, fmt.Errorf("shutdown background tasks: %w", err))
-		}
+		steps = append(steps, labelled("shutdown background tasks", a.tasks.Shutdown))
 	}
-	if err := a.scheduler.Shutdown(ctx); err != nil {
-		errs = append(errs, fmt.Errorf("shutdown scheduler: %w", err))
+	return shutdownTogether(ctx, steps...)
+}
+
+// shutdownTogether runs every shutdown at once and waits for all of them. Each one cancels its own
+// work before it waits, so running them in turn would let one slow service spend the whole budget
+// before the next had even been told to stop.
+func shutdownTogether(ctx context.Context, steps ...func(context.Context) error) error {
+	errs := make([]error, len(steps))
+	var wg sync.WaitGroup
+	for i, step := range steps {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs[i] = step(ctx)
+		}()
 	}
-	if err := a.conversation.Shutdown(ctx); err != nil {
-		errs = append(errs, fmt.Errorf("shutdown conversation service: %w", err))
-	}
-	if err := a.approvals.Shutdown(ctx); err != nil {
-		errs = append(errs, fmt.Errorf("shutdown approvals: %w", err))
-	}
-	if err := a.connections.Shutdown(ctx); err != nil {
-		errs = append(errs, fmt.Errorf("shutdown model connections: %w", err))
-	}
+	wg.Wait()
 	return errors.Join(errs...)
+}
+
+func labelled(label string, shutdown func(context.Context) error) func(context.Context) error {
+	return func(ctx context.Context) error {
+		if err := shutdown(ctx); err != nil {
+			return fmt.Errorf("%s: %w", label, err)
+		}
+		return nil
+	}
 }
 
 func (a *App) startTelegram(ctx context.Context) error {
@@ -1065,17 +1079,12 @@ func (a *App) startModules(ctx context.Context) ([]module.Module, error) {
 }
 
 func (a *App) shutdownModules(ctx context.Context, started []module.Module) error {
-	var shutdownErr error
+	steps := make([]func(context.Context) error, 0, len(started))
 	for i := len(started) - 1; i >= 0; i-- {
 		registeredModule := started[i]
-		if err := registeredModule.Shutdown(ctx); err != nil {
-			shutdownErr = errors.Join(
-				shutdownErr,
-				fmt.Errorf("shutdown module %q: %w", registeredModule.Descriptor().ID, err),
-			)
-		}
+		steps = append(steps, labelled(fmt.Sprintf("shutdown module %q", registeredModule.Descriptor().ID), registeredModule.Shutdown))
 	}
-	return shutdownErr
+	return shutdownTogether(ctx, steps...)
 }
 
 // nasRoots translates the configured NAS view into the connector's own shape, so the connector
