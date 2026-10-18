@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/transit"
+	"github.com/vladar107/home-ai-assistant/internal/weekday"
 )
 
 const (
@@ -39,11 +40,6 @@ var (
 	// ErrNameTaken reports that another of the principal's routes has the name.
 	ErrNameTaken = errors.New("the principal already has a route with that name")
 )
-
-// weekdays are in the order they are shown, Monday first.
-var weekdays = []string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
-
-func weekdayName(day time.Weekday) string { return weekdays[(int(day)+6)%7] }
 
 // Leg is one part of a route. A walk or bike leg has the minutes the user stated. A train leg has
 // From and To stations and an optional Via; a bus leg has a Stop, a Line, an optional Towards, and
@@ -80,7 +76,7 @@ type Route struct {
 
 // AppliesOn reports whether the route's weekdays include day's.
 func (s Spec) AppliesOn(day time.Weekday) bool {
-	return slices.Contains(s.Days, weekdayName(day))
+	return slices.Contains(s.Days, weekday.Name(day))
 }
 
 // normalize checks a spec's shape and puts it in canonical form. It does not look station or stop
@@ -136,20 +132,13 @@ func normalizeName(value string) (string, error) {
 }
 
 func normalizeDays(values []string) ([]string, error) {
-	var days []string
-	for _, value := range values {
-		day := strings.ToLower(strings.TrimSpace(value))
-		if !slices.Contains(weekdays, day) {
-			return nil, fmt.Errorf("days must be among mon, tue, wed, thu, fri, sat, sun")
-		}
-		if !slices.Contains(days, day) {
-			days = append(days, day)
-		}
+	days, err := weekday.Normalize(values)
+	if err != nil {
+		return nil, err
 	}
 	if len(days) == 0 {
 		return nil, fmt.Errorf("a route needs the weekdays it applies to; ask the user")
 	}
-	slices.SortFunc(days, func(a, b string) int { return slices.Index(weekdays, a) - slices.Index(weekdays, b) })
 	return days, nil
 }
 
@@ -266,21 +255,7 @@ func departuresText(departures []string) string {
 }
 
 // DescribeDays is the route's weekdays, such as "Mon–Fri" or "Mon, Wed".
-func (s Spec) DescribeDays() string {
-	switch {
-	case slices.Equal(s.Days, weekdays):
-		return "every day"
-	case slices.Equal(s.Days, weekdays[:5]):
-		return "Mon–Fri"
-	case slices.Equal(s.Days, weekdays[5:]):
-		return "Sat–Sun"
-	}
-	names := make([]string, 0, len(s.Days))
-	for _, day := range s.Days {
-		names = append(names, strings.ToUpper(day[:1])+day[1:])
-	}
-	return strings.Join(names, ", ")
-}
+func (s Spec) DescribeDays() string { return weekday.Describe(s.Days) }
 
 // Heading is the route's name, weekdays, and arrival target in one line.
 func (s Spec) Heading() string {

@@ -172,7 +172,7 @@ func TestWatchIsProposedConfirmedAndManagedByItsOwnerOnly(t *testing.T) {
 	proposal := h.nextMessage()
 	for _, want := range []string{
 		"Watch 08:30 train Utrecht Centraal → Amsterdam Centraal",
-		"Days: weekdays",
+		"Days: Mon–Fri",
 		"Window: 07:00–08:30 (Europe/Amsterdam)",
 		"Tells you about: a cancellation, a partial cancellation, a delay of 5 minutes or more, a platform change",
 	} {
@@ -216,7 +216,7 @@ func TestWatchIsProposedConfirmedAndManagedByItsOwnerOnly(t *testing.T) {
 	}
 
 	jobs := h.requestJobs(8)
-	if !strings.Contains(jobs.text, "1. 👁 08:30 train Utrecht Centraal → Amsterdam Centraal\nweekdays, 07:00–08:30") {
+	if !strings.Contains(jobs.text, "1. 👁 08:30 train Utrecht Centraal → Amsterdam Centraal\nMon–Fri, 07:00–08:30") {
 		t.Fatalf("jobs = %q", jobs.text)
 	}
 	if data := buttonData(jobs.keyboard); !slices.Equal(data, []string{"jobs:wpause:" + id + ":1", "jobs:wtpause:" + id + ":1", "jobs:wdelete:" + id + ":1"}) {
@@ -234,7 +234,7 @@ func TestWatchIsProposedConfirmedAndManagedByItsOwnerOnly(t *testing.T) {
 	}
 
 	flagged := h.pressJob(10, jobs.messageID, "jobs:wtpause:"+id+":1")
-	if !strings.Contains(flagged.text, "weekdays, 07:00–08:30, pauses while traveling") || !slices.Contains(buttonData(flagged.keyboard), "jobs:wtresume:"+id+":1") {
+	if !strings.Contains(flagged.text, "Mon–Fri, 07:00–08:30, pauses while traveling") || !slices.Contains(buttonData(flagged.keyboard), "jobs:wtresume:"+id+":1") {
 		t.Fatalf("after the travel pause = %+v", flagged)
 	}
 	if count := h.countRows(`SELECT count(*) FROM watches WHERE travel_pause = 1`); count != 1 {
@@ -245,7 +245,7 @@ func TestWatchIsProposedConfirmedAndManagedByItsOwnerOnly(t *testing.T) {
 	}
 
 	paused := h.pressJob(12, jobs.messageID, "jobs:wpause:"+id+":1")
-	if !strings.Contains(paused.text, "weekdays, 07:00–08:30, paused") || buttonData(paused.keyboard)[0] != "jobs:wresume:"+id+":1" {
+	if !strings.Contains(paused.text, "Mon–Fri, 07:00–08:30, paused") || buttonData(paused.keyboard)[0] != "jobs:wresume:"+id+":1" {
 		t.Fatalf("after pause = %+v", paused)
 	}
 	if deleted := h.pressJob(13, jobs.messageID, "jobs:wdelete:"+id+":1"); deleted.text != NoJobsReply {

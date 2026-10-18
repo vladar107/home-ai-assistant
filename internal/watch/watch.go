@@ -19,6 +19,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/localtime"
+	"github.com/vladar107/home-ai-assistant/internal/weekday"
 )
 
 const (
@@ -134,11 +135,6 @@ var triggerDescriptions = map[string]string{
 	TriggerClear:           "the condition ending",
 	TriggerChange:          "the value changing while it holds",
 }
-
-// weekdays are in the order they are shown, Monday first.
-var weekdays = []string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
-
-func weekdayName(day time.Weekday) string { return weekdays[(int(day)+6)%7] }
 
 // Target is what a watch looks at. A departure watch is a train (From, To, optional Via) or a bus
 // (Stop, Line); a disruption watch has Stations; a route watch names a saved route; a home watch
@@ -427,7 +423,7 @@ func (s Spec) Label() string {
 	}
 }
 
-// DescribeDays is when a watch runs, such as "weekdays" or "once, Mon 5 Oct".
+// DescribeDays is when a watch runs, such as "Mon–Fri" or "once, Mon 5 Oct".
 func (s Spec) DescribeDays() string {
 	days := s.describeDays()
 	if s.Check != nil && s.Check.Until != "" {
@@ -448,19 +444,7 @@ func (s Spec) describeDays() string {
 		}
 		return "once, " + day.Format("Mon 2 Jan")
 	}
-	switch strings.Join(s.Days, ",") {
-	case "mon,tue,wed,thu,fri":
-		return "weekdays"
-	case "mon,tue,wed,thu,fri,sat,sun":
-		return "every day"
-	case "sat,sun":
-		return "weekends"
-	}
-	names := make([]string, 0, len(s.Days))
-	for _, day := range s.Days {
-		names = append(names, strings.ToUpper(day[:1])+day[1:])
-	}
-	return strings.Join(names, ", ")
+	return weekday.Describe(s.Days)
 }
 
 // DescribeTriggers lists what the watch alerts on.
@@ -526,7 +510,7 @@ func (s Spec) OccurrenceAt(now time.Time) (Occurrence, bool) {
 		if s.Date != date {
 			return Occurrence{}, false
 		}
-	} else if !slices.Contains(s.Days, weekdayName(local.Weekday())) {
+	} else if !slices.Contains(s.Days, weekday.Name(local.Weekday())) {
 		return Occurrence{}, false
 	}
 	if s.Check != nil && s.Check.Until != "" && date > s.Check.Until {
@@ -651,7 +635,7 @@ func normalize(spec Spec, now time.Time) (Spec, error) {
 	}
 
 	if allDay(spec.Kind) && len(spec.Days) == 0 && spec.Date == "" {
-		spec.Days = slices.Clone(weekdays)
+		spec.Days = weekday.All()
 	}
 	switch hasDays, hasDate := len(spec.Days) > 0, spec.Date != ""; {
 	case hasDays == hasDate:
@@ -666,15 +650,9 @@ func normalize(spec Spec, now time.Time) (Spec, error) {
 			return Spec{}, fmt.Errorf("that window is already over")
 		}
 	default:
-		given := uniqueStrings(spec.Days)
-		days := make([]string, 0, len(weekdays))
-		for _, day := range weekdays {
-			if slices.Contains(given, day) {
-				days = append(days, day)
-			}
-		}
-		if len(days) != len(given) {
-			return Spec{}, fmt.Errorf("days must be mon, tue, wed, thu, fri, sat, or sun")
+		days, err := weekday.Normalize(spec.Days)
+		if err != nil {
+			return Spec{}, err
 		}
 		spec.Days = days
 	}
