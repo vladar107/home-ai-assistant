@@ -48,12 +48,16 @@ everything sent to the model stays byte-identical.
   facets, found by type assertion, add `/privacy` lines (`privacySection`),
   name an `app_help` topic (`helpSection`), or consume messages
   (`messageInterceptor`). The caller passes the sections in
-  `Dependencies.Sections`, in the order `app_help` lists their topics, so
-  that order stays the model-facing order it was. `settingsGroups` still
-  places the pages, and `privacyOrder` places the `/privacy` lines, core
-  ones (attachments, jobs, tasks, voice) and section ones in one fixed list.
-  `NewService` refuses a duplicated section, one in no settings group, and
-  one with `/privacy` lines but no place in `privacyOrder`.
+  `Dependencies.Sections` in any order. `settingsGroups` still places the
+  pages; `sectionOrder` fixes the order `app_help` lists their topics in,
+  which the model reads, and the order the message interceptors run in; and
+  `privacyOrder` places the `/privacy` lines, core ones (attachments, jobs,
+  tasks, voice) and section ones in one fixed list. The connectors register
+  in an order the model's tool list depends on, which differs from the
+  topic order, so the composition root cannot simply pass the sections in
+  registration order. `NewService` refuses a duplicated section and one
+  missing from `settingsGroups`, `sectionOrder`, or, with `/privacy` lines,
+  `privacyOrder`.
 - One switch section serves trains, buses, web access, the home, Grafana,
   and safety checks: a `SwitchPage` value per integration holds its text,
   buttons, log event, help topic, and `/privacy` line. `SwitchSettings`
@@ -75,6 +79,29 @@ everything sent to the model stays byte-identical.
   update ID as an `int64`. The store keeps implementing `telegram.TabStore`;
   the composition root handing the store to `Dependencies.Tabs` is the
   compile-time check, so no separate assertion is added.
+- A connector bundle names what one integration adds: its module, its tool
+  providers, the executor of its confirmed actions, the watch evaluators by
+  kind, and its on/off page. One `register` call adds a bundle to the module
+  registry, the broker, the approval service, and the watch service (and
+  zeroes the watch outcome series of the kinds it registers), and keeps its
+  on/off page. Every field is typed and optional, filled inside the
+  integration's configuration check, so nothing is registered through
+  reflection and no typed nil is handed on. Google is one bundle with two
+  tool providers (mail and calendar), so the tools field is a list; the
+  transit watches (departures, saved routes, disruptions) are a bundle with
+  watches only, built once trains, buses, and routes exist.
+- Registration keeps today's order, because the broker lists tools to the
+  model in it: web access and the places connector still register among the
+  core services.
+- The departure, route, and disruption watch outcomes are now zeroed only
+  where those evaluators are registered, as the home and agent ones already
+  were.
+- A bundle's on/off page holds what the page needs beyond its switch, free of
+  Telegram types: the integration's switch, the Grafana allowlist, and the
+  home's exposure check. The composition root finds the Telegram page by the
+  integration's name (`telegram.SwitchPageFor`) and fails to start for an
+  integration without one. The safety checks switch is registered as a
+  bundle with only its page when TypeSafe is configured.
 
 ## Approach
 

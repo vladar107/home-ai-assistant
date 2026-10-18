@@ -136,6 +136,25 @@ type settingsGroup struct {
 	members []string
 }
 
+// sectionOrder is the order of the sections whatever order they were passed in: app_help lists
+// their topics in it, and the message interceptors run in it.
+var sectionOrder = []string{
+	modelSectionPrefix,
+	notionSectionPrefix,
+	nasSectionPrefix,
+	googleSectionPrefix,
+	webSectionPrefix,
+	nsSectionPrefix,
+	homeAssistantSectionPrefix,
+	busSectionPrefix,
+	headsUpSectionPrefix,
+	typeSafeSectionPrefix,
+	locationSectionPrefix,
+	grafanaSectionPrefix,
+	memorySectionPrefix,
+	tripsSectionPrefix,
+}
+
 // settingsGroups orders the overview; a section missing from it is never shown.
 var settingsGroups = []settingsGroup{
 	{id: "model", title: "Model", members: []string{modelSectionPrefix}},

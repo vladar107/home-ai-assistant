@@ -42,36 +42,46 @@ const (
 // The on/off pages of the integrations that run on an operator key or are opt-in.
 var (
 	WebPage = SwitchPage{
-		Prefix: webSectionPrefix, Name: "Web", OnLine: WebOnLine, OffLine: WebOffLine,
+		Integration: "web", Prefix: webSectionPrefix, Name: "Web", OnLine: WebOnLine, OffLine: WebOffLine,
 		OnButton: "Turn on web access", OffButton: "Turn off web access",
 		Event: "web.access.changed", HelpTopic: "web", PrivacyLine: WebPrivacyLine,
 	}
 	NSPage = SwitchPage{
-		Prefix: nsSectionPrefix, Name: "Trains", OnLine: NSOnLine, OffLine: NSOffLine,
+		Integration: "ns", Prefix: nsSectionPrefix, Name: "Trains", OnLine: NSOnLine, OffLine: NSOffLine,
 		OnButton: "Turn on trains", OffButton: "Turn off trains",
 		Event: "ns.trains.changed", HelpTopic: "trains", PrivacyLine: NSPrivacyLine,
 	}
 	BusPage = SwitchPage{
-		Prefix: busSectionPrefix, Name: "Buses", OnLine: BusOnLine, ExtraOnLines: []string{BusPlanningLine}, OffLine: BusOffLine,
+		Integration: "bus", Prefix: busSectionPrefix, Name: "Buses", OnLine: BusOnLine, ExtraOnLines: []string{BusPlanningLine}, OffLine: BusOffLine,
 		OnButton: "Turn on buses", OffButton: "Turn off buses",
 		Event: "bus.changed", HelpTopic: "buses", PrivacyLine: BusPrivacyLine + " " + BusPlanningPrivacyLine,
 	}
 	// HomePage takes HomeDetails for the exposure check.
 	HomePage = SwitchPage{
-		Prefix: homeAssistantSectionPrefix, Name: "Home", OnLine: HomeAssistantOnLine, OffLine: HomeAssistantOffLine,
+		Integration: "homeassistant", Prefix: homeAssistantSectionPrefix, Name: "Home", OnLine: HomeAssistantOnLine, OffLine: HomeAssistantOffLine,
 		OnButton: "Turn on home", OffButton: "Turn off home",
 		Event: "homeassistant.home.changed", HelpTopic: "home_assistant", PrivacyLine: HomeAssistantPrivacyLine,
 	}
 	// GrafanaPage is shown only to the principals the operator allowed.
 	GrafanaPage = SwitchPage{
-		Prefix: grafanaSectionPrefix, Name: "Grafana", OnLine: GrafanaOnLine, OffLine: GrafanaOffLine,
+		Integration: "grafana", Prefix: grafanaSectionPrefix, Name: "Grafana", OnLine: GrafanaOnLine, OffLine: GrafanaOffLine,
 		OnButton: "Turn on monitoring", OffButton: "Turn off monitoring",
 		Event: "grafana.changed", HelpTopic: "grafana", PrivacyLine: GrafanaPrivacyLine,
 	}
 	TypeSafePage = SwitchPage{
-		Prefix: typeSafeSectionPrefix, Name: "Safety checks", OnLine: TypeSafeOnLine, OffLine: TypeSafeOffLine,
+		Integration: "typesafe", Prefix: typeSafeSectionPrefix, Name: "Safety checks", OnLine: TypeSafeOnLine, OffLine: TypeSafeOffLine,
 		OnButton: "Turn on safety checks", OffButton: "Turn off safety checks",
 		HelpTopic: "safety_checks", PrivacyLine: TypeSafePrivacyLine,
 		SummaryState: func(on bool) string { return "safety checks " + onOff(on) },
 	}
 )
+
+// SwitchPageFor is the on/off page of the named integration.
+func SwitchPageFor(integration string) (SwitchPage, bool) {
+	for _, page := range []SwitchPage{WebPage, NSPage, BusPage, HomePage, GrafanaPage, TypeSafePage} {
+		if page.Integration == integration {
+			return page, true
+		}
+	}
+	return SwitchPage{}, false
+}

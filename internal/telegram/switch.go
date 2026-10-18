@@ -13,6 +13,8 @@ const (
 
 // SwitchPage is the text of an integration's on/off page in /settings.
 type SwitchPage struct {
+	// Integration is the name of the integration the page switches, as its integration.Switch has it.
+	Integration string
 	// Prefix starts the page's callback data and places it in settingsGroups.
 	Prefix string
 	// Name labels the page in the overview and in its group.

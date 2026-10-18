@@ -214,8 +214,8 @@ type Dependencies struct {
 	Routes       RouteController
 	Transcriber  Transcriber
 
-	// Sections are the /settings pages, in the order app_help lists their topics; settingsGroups
-	// places the pages themselves, and privacyOrder their /privacy lines.
+	// Sections are the /settings pages, in any order: settingsGroups places the pages, sectionOrder
+	// their app_help topics, and privacyOrder their /privacy lines.
 	Sections []Section
 }
 
@@ -253,16 +253,24 @@ func NewService(deps Dependencies) (*Service, error) {
 		routes:       deps.Routes,
 		transcriber:  deps.Transcriber,
 		tabs:         deps.Tabs,
-		sections:     slices.Clone(deps.Sections),
+		sections:     inSectionOrder(deps.Sections),
 		logger:       deps.Logger,
 		telemetry:    telemetryOrNoop(deps.Telemetry),
 	}
-	for _, section := range deps.Sections {
+	for _, section := range service.sections {
 		if interceptor, ok := section.(messageInterceptor); ok {
 			service.interceptors = append(service.interceptors, interceptor)
 		}
 	}
 	return service, nil
+}
+
+func inSectionOrder(sections []Section) []Section {
+	ordered := slices.Clone(sections)
+	slices.SortStableFunc(ordered, func(left, right Section) int {
+		return slices.Index(sectionOrder, left.prefix()) - slices.Index(sectionOrder, right.prefix())
+	})
+	return ordered
 }
 
 // validateSections refuses a page /settings could not place or reach, and a /privacy line without
@@ -280,6 +288,9 @@ func validateSections(sections []Section) error {
 		seen[prefix] = true
 		if !slices.ContainsFunc(settingsGroups, func(group settingsGroup) bool { return slices.Contains(group.members, prefix) }) {
 			return fmt.Errorf("Telegram settings section %q is in no settings group", prefix)
+		}
+		if !slices.Contains(sectionOrder, prefix) {
+			return fmt.Errorf("Telegram settings section %q has no place in the section order", prefix)
 		}
 		if _, private := section.(privacySection); private && !slices.Contains(privacyOrder, prefix) {
 			return fmt.Errorf("Telegram settings section %q has privacy lines without a place in /privacy", prefix)
