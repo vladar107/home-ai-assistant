@@ -53,12 +53,21 @@ func (m Model) Supports(effort string) bool {
 	return ok
 }
 
-// Canonical returns the effort the level runs as on this model, and false when it does not
-// support the level.
+// Canonical returns the level to use for the requested one: the entry of Efforts that runs the
+// same effort, always a name Pi accepts and never the provider's own string. It returns false
+// when the model does not support the level.
 func (m Model) Canonical(effort string) (string, bool) {
 	if m.mapped != nil {
-		canonical, ok := m.mapped[effort]
-		return canonical, ok
+		runs, ok := m.mapped[effort]
+		if !ok {
+			return "", false
+		}
+		for _, level := range m.Efforts {
+			if m.mapped[level] == runs {
+				return level, true
+			}
+		}
+		return "", false
 	}
 	return effort, slices.Contains(m.Efforts, effort)
 }

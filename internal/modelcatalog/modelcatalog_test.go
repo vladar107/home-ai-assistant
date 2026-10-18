@@ -266,3 +266,20 @@ func TestModelsReclaimAStaleLock(t *testing.T) {
 		t.Fatalf("stale lock was not reclaimed: %v", err)
 	}
 }
+
+func TestCanonicalNeverReturnsTheProvidersEffortString(t *testing.T) {
+	catalog, _ := catalogWith(t, `{"test-provider": {"models": [
+      {"id": "acme-7", "name": "Acme 7", "reasoning": true, "contextWindow": 1000,
+       "cost": {"input": 1, "output": 2},
+       "thinkingLevelMap": {"off": "none", "minimal": "low", "xhigh": "xhigh"}}]}}`)
+	models, err := catalog.Models(context.Background(), "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := models[0]
+	for level, want := range map[string]string{"off": "off", "minimal": "low", "low": "low", "medium": "medium", "xhigh": "xhigh"} {
+		if got, ok := m.Canonical(level); !ok || got != want {
+			t.Errorf("Canonical(%s) = %q, %v, want %q", level, got, ok, want)
+		}
+	}
+}

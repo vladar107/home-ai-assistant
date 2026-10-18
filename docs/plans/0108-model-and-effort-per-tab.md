@@ -45,6 +45,11 @@ Research on the pinned Pi 1.0.0 found:
   looked gone and comes back keeps it. A conversation resumed into a new tab starts on the
   defaults. As with every command, `/model` sent as the first message of a tab created moments
   before is answered in the main view and sets the main view's choice.
+- **Storage.** Migration 041 adds `conversation_lane_models` (one row per principal and thread)
+  and nullable `model`/`effort` columns on `tasks`. `/new` and a tab the user closes delete the
+  lane's row in the same transaction as the session change; a tab taken for gone does not. Setting
+  a choice stores an alias level as the effort the model runs, and is refused when a readable
+  catalog does not offer the pair; with no readable catalog the pair is stored as given.
 - **A stale choice falls back.** Each turn rechecks the lane's choice against the catalog when it
   is readable; a model that left the catalog or a level it no longer supports runs on the default,
   and `/status` says so.
@@ -138,6 +143,8 @@ Research on the pinned Pi 1.0.0 found:
 ## Risks and open questions
 
 - The first turn after a model switch misses the prompt cache.
+- A chat turn in a lane with a choice reads the catalog under Pi's lock every turn (up to the
+  two-second wait); a lane without one never touches it.
 - `/wham/usage` is not a documented API; if it changes, `/status` shows "usage unavailable" and
   nothing else breaks.
 - Pi's cached catalog can lag the backend; a model missing from it cannot be chosen until Pi

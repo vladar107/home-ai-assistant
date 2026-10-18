@@ -73,6 +73,11 @@ type Service struct {
 	// captures holds what a finished chat turn measured until its reply is delivered; a restart
 	// in between loses it, and that reply is then counted as recovered.
 	captures map[string]replyCapture
+	// laneTurns holds each lane's latest chat turn for /status; a restart forgets it.
+	laneTurns map[Lane]LaneTurn
+	// laneEpochs counts the changes of each lane's choice, so a turn that started before a change
+	// does not report itself against the new choice.
+	laneEpochs map[Lane]int
 }
 
 type runningDraft struct {
@@ -153,6 +158,8 @@ func NewService(
 		telemetry:    telemetry,
 		startedAt:    time.Now().Truncate(time.Millisecond),
 		captures:     make(map[string]replyCapture),
+		laneTurns:    make(map[Lane]LaneTurn),
+		laneEpochs:   make(map[Lane]int),
 		workers:      make(map[Lane]chan struct{}),
 		inflight:     make(map[Lane]context.CancelFunc),
 		turns:        make(map[Lane]chan struct{}),
@@ -408,6 +415,7 @@ func (s *Service) NewSession(ctx context.Context, lane Lane) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	s.resetLane(lane)
 	if reset && s.config.Attachments != nil {
 		if err := s.config.Attachments.CloseSession(ctx, lane.PrincipalID, sessionID); err != nil {
 			return false, err
@@ -445,6 +453,9 @@ func (s *Service) CloseLane(ctx context.Context, lane Lane, reason string) (bool
 	sessionID, closed, err := s.repository.CloseLane(ctx, lane, reason)
 	if err != nil {
 		return false, err
+	}
+	if reason == CloseTabClosed {
+		s.resetLane(lane)
 	}
 	if closed && reason == CloseTabClosed {
 		s.leaveSession(ctx, lane.PrincipalID, sessionID)
@@ -697,6 +708,9 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 	var memory string
 	var attachments attachment.Turn
 	var hint toolHint
+	var choice agentruntime.ModelEffort
+	var passedOver agentruntime.ModelEffort
+	var epoch int
 	var activity *turnActivity
 	defer func() {
 		activity.stop()
@@ -719,6 +733,11 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		}
 		if runErr != nil {
 			errorKind = ErrorKindToolProvider
+		}
+		if runErr == nil {
+			if choice, passedOver, epoch, runErr = s.resolveChoice(turnCtx, lane); runErr != nil {
+				errorKind = ErrorKindRuntime
+			}
 		}
 		if runErr == nil && s.config.Attachments != nil {
 			attachments, runErr = s.config.Attachments.Turn(turnCtx, request.PrincipalID, request.ID)
@@ -762,9 +781,12 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 			WebSearch:   webSearch,
 			SearchCheck: s.searchCheck(request.PrincipalID, webSearch, true),
 			Kind:        agentruntime.RunChat,
+			Model:       choice.Model,
+			Effort:      choice.Effort,
 		}, sink)
 		modelTime = time.Since(runStarted)
 		runErr = err
+		s.recordLaneTurn(lane, epoch, passedOver, result, err == nil)
 		activity.stop()
 		notes := s.memoryNotes(request.PrincipalID, outbox.ChatTurn(request.ID))
 		if err == nil && !errors.Is(turnCtx.Err(), context.Canceled) {

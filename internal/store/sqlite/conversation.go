@@ -434,6 +434,9 @@ func (s *Store) ResetConversation(ctx context.Context, lane conversation.Lane) (
 	); err != nil {
 		return "", false, fmt.Errorf("record tab reset: %w", err)
 	}
+	if err := clearLaneModel(ctx, tx, lane); err != nil {
+		return "", false, err
+	}
 	if err := tx.Commit(); err != nil {
 		return "", false, fmt.Errorf("commit conversation reset: %w", err)
 	}
@@ -447,8 +450,13 @@ func (s *Store) CloseLane(ctx context.Context, lane conversation.Lane, reason st
 	if reason != conversation.CloseTabGone && reason != conversation.CloseTabClosed {
 		return "", false, fmt.Errorf("close conversation lane: unknown reason %q", reason)
 	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", false, fmt.Errorf("begin conversation lane close: %w", err)
+	}
+	defer tx.Rollback()
 	var sessionID string
-	err := s.db.QueryRowContext(
+	err = tx.QueryRowContext(
 		ctx,
 		`UPDATE conversation_sessions
 		 SET status = 'closed', close_reason = ?,
@@ -460,13 +468,19 @@ func (s *Store) CloseLane(ctx context.Context, lane conversation.Lane, reason st
 		lane.PrincipalID,
 		lane.ThreadID,
 	).Scan(&sessionID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", false, nil
-	}
-	if err != nil {
+	closed := err == nil
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return "", false, fmt.Errorf("close conversation lane: %w", err)
 	}
-	return sessionID, true, nil
+	if reason == conversation.CloseTabClosed {
+		if err := clearLaneModel(ctx, tx, lane); err != nil {
+			return "", false, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return "", false, fmt.Errorf("commit conversation lane close: %w", err)
+	}
+	return sessionID, closed, nil
 }
 
 // reopenGoneTab makes the lane's most recent conversation closed as tab_gone active again, so a

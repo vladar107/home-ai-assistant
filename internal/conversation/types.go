@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
+	"github.com/vladar107/home-ai-assistant/internal/modelcatalog"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
@@ -284,7 +285,14 @@ type Repository interface {
 	// CancelPrincipalConversations cancels the pending turns of every lane of the principal.
 	CancelPrincipalConversations(context.Context, string) (bool, error)
 	// ResetConversation closes the lane's active session and returns its ID.
+	// It also clears the lane's model choice, in the same transaction.
 	ResetConversation(context.Context, Lane) (string, bool, error)
+	// LaneModel returns the lane's own model choice, and false when it has none.
+	LaneModel(context.Context, Lane) (agentruntime.ModelEffort, bool, error)
+	// SaveLaneModel replaces the lane's model choice.
+	SaveLaneModel(context.Context, Lane, agentruntime.ModelEffort) error
+	// ClearLaneModel removes the lane's model choice, so it runs on the chat default.
+	ClearLaneModel(context.Context, Lane) error
 	// CloseLane closes the lane's active session with CloseTabGone or CloseTabClosed and returns
 	// its ID. It leaves the lane's requests as they are.
 	CloseLane(ctx context.Context, lane Lane, reason string) (string, bool, error)
@@ -578,8 +586,15 @@ type Memory interface {
 
 type Config struct {
 	TurnTimeout time.Duration
-	FollowUp    FollowUp
-	Notice      Notice
+	// ChatModel is the model and effort a chat turn runs on when its lane has no choice of its own.
+	ChatModel agentruntime.ModelEffort
+	// TaskModel is the task default; with ChatModel it is what a choice may name while the
+	// catalog cannot be read.
+	TaskModel agentruntime.ModelEffort
+	// Models is the catalog a lane's choice is checked against; nil trusts every stored choice.
+	Models   modelcatalog.Reader
+	FollowUp FollowUp
+	Notice   Notice
 	// Reports tells each chat turn about the scheduled job reports it should know of; nil leaves
 	// them out.
 	Reports     Reports

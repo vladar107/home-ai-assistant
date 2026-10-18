@@ -638,6 +638,9 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	conversationService, err := conversation.NewService(
 		conversation.Config{
 			TurnTimeout:    in.Core.TurnTimeout,
+			ChatModel:      a.ChatModel,
+			TaskModel:      a.TaskModel,
+			Models:         a.Models,
 			FollowUp:       approvals,
 			Notice:         notices,
 			Reports:        reports,
