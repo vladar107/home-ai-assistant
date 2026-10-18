@@ -11,57 +11,30 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/connectors/google"
 	"github.com/vladar107/home-ai-assistant/internal/httpretry"
 )
 
 const (
 	DefaultAPIBaseURL = "https://www.googleapis.com/calendar/v3"
 
+	product = "Google Calendar"
+
 	requestTimeout    = 10 * time.Second
 	responseBodyLimit = 4 << 20
 	maximumListPages  = 10
 )
 
-type ErrorClass string
-
-const (
-	ErrorUnauthorized ErrorClass = "unauthorized"
-	ErrorForbidden    ErrorClass = "forbidden"
-	ErrorNotFound     ErrorClass = "not_found"
-	ErrorRateLimited  ErrorClass = "rate_limited"
-	ErrorInvalid      ErrorClass = "invalid"
-	ErrorUnavailable  ErrorClass = "unavailable"
-)
-
-// Error is a normalized Google failure. It carries the class and HTTP status only, so Google's
-// message text, which can echo a token or a query, never reaches a log or the model.
-type Error struct {
-	Class  ErrorClass
-	Status int
+func apiError(class google.ErrorClass, status int) error {
+	return &google.Error{Product: product, Class: class, Status: status}
 }
 
-func (e *Error) Error() string {
-	if e.Status != 0 {
-		return fmt.Sprintf("Google Calendar request failed: %s (HTTP status %d)", e.Class, e.Status)
+// errorClass is the class of a failed Calendar API request, and empty for any other error.
+func errorClass(err error) google.ErrorClass {
+	if calendarErr, ok := google.ProductError(err, product); ok {
+		return calendarErr.Class
 	}
-	return fmt.Sprintf("Google Calendar request failed: %s", e.Class)
-}
-
-func classify(status int) ErrorClass {
-	switch {
-	case status == 400:
-		return ErrorInvalid
-	case status == 401:
-		return ErrorUnauthorized
-	case status == 403:
-		return ErrorForbidden
-	case status == 404:
-		return ErrorNotFound
-	case status == 429:
-		return ErrorRateLimited
-	default:
-		return ErrorUnavailable
-	}
+	return ""
 }
 
 // Client talks to the Calendar API with an access token passed on every call; it holds no
@@ -100,24 +73,24 @@ func (c *Client) get(ctx context.Context, access, path string, query url.Values,
 	}
 	request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, target, nil)
 	if err != nil {
-		return &Error{Class: ErrorUnavailable}
+		return apiError(google.ErrorUnavailable, 0)
 	}
 	request.Header.Set("Authorization", "Bearer "+access)
 	request.Header.Set("Accept", "application/json")
 	response, err := c.httpClient.Do(request)
 	if err != nil {
-		return &Error{Class: ErrorUnavailable}
+		return apiError(google.ErrorUnavailable, 0)
 	}
 	defer response.Body.Close()
 	contents, err := io.ReadAll(io.LimitReader(response.Body, responseBodyLimit+1))
 	if err != nil || len(contents) > responseBodyLimit {
-		return &Error{Class: ErrorUnavailable, Status: response.StatusCode}
+		return apiError(google.ErrorUnavailable, response.StatusCode)
 	}
 	if response.StatusCode != http.StatusOK {
-		return &Error{Class: classify(response.StatusCode), Status: response.StatusCode}
+		return apiError(google.Classify(response.StatusCode), response.StatusCode)
 	}
 	if err := json.Unmarshal(contents, out); err != nil {
-		return &Error{Class: ErrorUnavailable, Status: response.StatusCode}
+		return apiError(google.ErrorUnavailable, response.StatusCode)
 	}
 	return nil
 }

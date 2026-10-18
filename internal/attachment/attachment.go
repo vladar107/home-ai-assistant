@@ -148,8 +148,18 @@ func (s *Service) Room(ctx context.Context, principalID string) (Room, error) {
 
 // Stage writes one request's bytes to disk and returns the rows that describe them. The rows are
 // recorded by the transaction that enqueues the request, so a turn never starts between the
-// request becoming visible and its files being stored.
+// request becoming visible and its files being stored. When one file fails, the files already
+// written are removed, since no row will ever name them.
 func (s *Service) Stage(principalID, requestID string, files []Incoming) ([]Record, error) {
+	records, err := s.stage(principalID, requestID, files)
+	if err != nil {
+		s.Discard(records)
+		return nil, err
+	}
+	return records, nil
+}
+
+func (s *Service) stage(principalID, requestID string, files []Incoming) ([]Record, error) {
 	if len(files) == 0 {
 		return nil, nil
 	}
@@ -164,15 +174,13 @@ func (s *Service) Stage(principalID, requestID string, files []Incoming) ([]Reco
 	records := make([]Record, 0, len(files))
 	for position, file := range files {
 		if len(file.Data) == 0 {
-			return nil, fmt.Errorf("attachment %q is empty", loggableName(file.FileName))
+			return records, fmt.Errorf("attachment %q is empty", loggableName(file.FileName))
 		}
 		id, err := newID()
 		if err != nil {
-			return nil, err
+			return records, err
 		}
-		if err := os.WriteFile(filepath.Join(directory, id), file.Data, 0o600); err != nil {
-			return nil, fmt.Errorf("write attachment: %w", err)
-		}
+		// The record comes first, so a write that fails halfway is removed with the others.
 		records = append(records, Record{
 			ID:          id,
 			PrincipalID: principalID,
@@ -183,6 +191,9 @@ func (s *Service) Stage(principalID, requestID string, files []Incoming) ([]Reco
 			MimeType:    boundedMIME(file.MimeType),
 			SizeBytes:   int64(len(file.Data)),
 		})
+		if err := os.WriteFile(filepath.Join(directory, id), file.Data, 0o600); err != nil {
+			return records, fmt.Errorf("write attachment: %w", err)
+		}
 	}
 	return records, nil
 }

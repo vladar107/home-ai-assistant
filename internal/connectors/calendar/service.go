@@ -7,7 +7,6 @@ package calendar
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -61,8 +60,7 @@ func (s *Service) withAccess(ctx context.Context, principalID string, account go
 		return err
 	}
 	err = run(access)
-	var calendarErr *Error
-	if errors.As(err, &calendarErr) && calendarErr.Class == ErrorUnauthorized {
+	if errorClass(err) == google.ErrorUnauthorized {
 		if access, err = s.grants.AccessToken(ctx, principalID, account.ID, google.ProductCalendar, true); err != nil {
 			return err
 		}

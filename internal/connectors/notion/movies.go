@@ -143,6 +143,11 @@ func (s *Service) movies(ctx context.Context, principalID, token string, call to
 	if err != nil {
 		return "", err
 	}
+	// The unread rows are the newest, which hold the latest date, the undated films, and the most
+	// recent row of a film, so a write computed from the rows that were read could land wrongly.
+	if table.truncated && call.Name != toolMoviesNext {
+		return "", fmt.Errorf("the movie table has more rows than can be read (over %d), so its newest rows are unknown; nothing was proposed", movieRowPages*apiPageSizeLimit)
+	}
 	switch call.Name {
 	case toolMoviesNext:
 		return s.nextMovie(table), nil
@@ -192,7 +197,7 @@ func (s *Service) movieTable(ctx context.Context, token, id string) (movieTable,
 	cursor := ""
 	for range movieRowPages {
 		list, err := s.client.QueryDataSource(ctx, token, dataSource.ID, QueryRequest{
-			Sorts: json.RawMessage(`[{"timestamp":"created_time","direction":"ascending"}]`), PageSize: MaximumPageSize, Cursor: cursor,
+			Sorts: json.RawMessage(`[{"timestamp":"created_time","direction":"ascending"}]`), PageSize: apiPageSizeLimit, Cursor: cursor,
 		})
 		if err != nil {
 			return movieTable{}, err

@@ -21,7 +21,10 @@ const (
 	apiVersion        = "2026-03-11"
 	requestTimeout    = 10 * time.Second
 	maximumRetryAfter = 5 * time.Second
+	// MaximumPageSize caps a page the model asks for; the connector's own reads may use up to
+	// apiPageSizeLimit, Notion's maximum.
 	MaximumPageSize   = 25
+	apiPageSizeLimit  = 100
 	responseBodyLimit = 1 << 20
 )
 
@@ -258,8 +261,11 @@ func (c *Client) QueryDataSource(ctx context.Context, token, dataSourceID string
 }
 
 func pageSize(requested int) int {
-	if requested <= 0 || requested > MaximumPageSize {
+	switch {
+	case requested <= 0:
 		return MaximumPageSize
+	case requested > apiPageSizeLimit:
+		return apiPageSizeLimit
 	}
 	return requested
 }

@@ -27,6 +27,9 @@ type Calendar struct {
 	// Hidden is a calendar the user unticked in Google Calendar: listed, but not selected.
 	Hidden     bool
 	AccessRole string
+	// Forbidden is a calendar still listed whose events Google refuses with 403, as a shared
+	// calendar whose owner withdrew the share is.
+	Forbidden bool
 }
 
 type Attendee struct {
@@ -186,6 +189,9 @@ func (s *Simulator) respond(r *http.Request, token, account string, known bool, 
 		}
 		if found == nil {
 			return failure(http.StatusNotFound)
+		}
+		if found.calendar.Forbidden {
+			return failure(http.StatusForbidden)
 		}
 		if len(segments) == 3 {
 			return s.listEvents(r.URL.Query(), found)

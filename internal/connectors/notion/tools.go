@@ -304,7 +304,7 @@ func limit(requested int) int {
 	if requested <= 0 {
 		return 10
 	}
-	return requested
+	return min(requested, MaximumPageSize)
 }
 
 func failureText(class ErrorClass) string {

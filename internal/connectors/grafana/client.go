@@ -36,6 +36,7 @@ var (
 	errUnauthorized = &apiError{"unauthorized", "Grafana refused the assistant's service-account token; the operator needs to check it."}
 	errForbidden    = &apiError{"forbidden", "The assistant's Grafana service account is not allowed to read that."}
 	errNotFound     = &apiError{"not_found", "Grafana does not know that dashboard or data source."}
+	errRateLimited  = &apiError{"rate_limited", "Grafana is limiting requests right now; try again shortly."}
 	errUnavailable  = &apiError{"unavailable", "Grafana is unavailable right now."}
 	errTimeout      = &apiError{"timeout", "Grafana did not answer in time; try a shorter range or a narrower query."}
 	errMalformed    = &apiError{"unexpected_response", "Grafana returned an unexpected response."}
@@ -76,7 +77,8 @@ func newClient(base *url.URL, token string) *client {
 }
 
 // get sends one GET under the fixed base and decodes a 200 answer into into. A 400 or 422 from a
-// data source is a query error and keeps the data source's own message.
+// data source is a query error and keeps the data source's own message. The status is classified
+// before the size, so an oversized error page still reads as the failure it reports.
 func (c *client) get(ctx context.Context, path string, query url.Values, into any) error {
 	target := *c.base
 	target.Path = path
@@ -96,15 +98,18 @@ func (c *client) get(ctx context.Context, path string, query url.Values, into an
 	if err != nil {
 		return transportError(err)
 	}
-	if len(payload) > maximumAPIBytes {
-		return errTooLarge
-	}
 	switch response.StatusCode {
 	case http.StatusOK:
 	case http.StatusBadRequest, http.StatusUnprocessableEntity:
+		if len(payload) > maximumAPIBytes {
+			return queryError("")
+		}
 		return queryError(dataSourceMessage(payload))
 	default:
 		return statusError(response.StatusCode)
+	}
+	if len(payload) > maximumAPIBytes {
+		return errTooLarge
 	}
 	if err := json.Unmarshal(payload, into); err != nil {
 		return errMalformed
@@ -136,6 +141,8 @@ func statusError(status int) error {
 		return errForbidden
 	case status == http.StatusNotFound:
 		return errNotFound
+	case status == http.StatusTooManyRequests:
+		return errRateLimited
 	case status >= 500:
 		return errUnavailable
 	default:

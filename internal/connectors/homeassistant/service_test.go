@@ -778,6 +778,23 @@ func TestHistoryPointsReturnsATrendWithFirstLastAndChange(t *testing.T) {
 	}
 }
 
+func TestHistoryPointsOfAMeterReportTheTotal(t *testing.T) {
+	f := newFixture(t, newSimulator(livingTV, solarToday))
+	f.sim.set(func(s *simulator) {
+		s.timeZone = "Europe/Berlin"
+		points := make([]map[string]any, 3)
+		for i, change := range []float64{10, 12, 9} {
+			points[i] = map[string]any{"start": time.Date(2026, 9, 29+i, 0, 0, 0, 0, time.FixedZone("", 2*3600)).UnixMilli(), "change": change}
+		}
+		s.series = map[string]map[string][]map[string]any{"sensor.solar_production_today": {"day": points}}
+	})
+	result := f.call(f.toolSet(), "ha_history", map[string]any{"name": "Solar production today", "period": "last_7_days", "points": "day"})
+	want := "2026-09-29: 10 kWh\n2026-09-30: 12 kWh\n2026-10-01: 9 kWh\ntotal: 31 kWh"
+	if result.IsError || !strings.HasSuffix(result.Text, want) || strings.Contains(result.Text, "change:") {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
 func TestHistoryPointsUseACoarserBucketAboveSixtyPoints(t *testing.T) {
 	f := newFixture(t, newSimulator(solarToday))
 	f.sim.set(func(s *simulator) {

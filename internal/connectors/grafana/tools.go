@@ -151,14 +151,17 @@ func (s *Service) Execute(ctx context.Context, principalID string, call tools.Ca
 		return tools.Result{Text: "This Grafana tool is not available.", IsError: true}, nil
 	}
 	if err != nil {
-		return failure(err), nil
+		return s.failure(ctx, principalID, call.Name, err), nil
 	}
 	return tools.Result{Text: text}, nil
 }
 
-func failure(err error) tools.Result {
+// failure turns an error into the model's text. A failed Grafana request is logged by its class;
+// an argument the tool refused is not, since nothing was sent.
+func (s *Service) failure(ctx context.Context, principalID, tool string, err error) tools.Result {
 	var apiErr *apiError
 	if errors.As(err, &apiErr) {
+		s.logger.InfoContext(ctx, "grafana.request.failed", "principal_id", principalID, "tool", tool, "error_class", apiErr.class)
 		return tools.Result{Text: apiErr.text, IsError: true}
 	}
 	return tools.Result{Text: err.Error(), IsError: true}

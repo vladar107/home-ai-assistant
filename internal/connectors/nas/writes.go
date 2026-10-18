@@ -173,6 +173,9 @@ func (s *Service) destination(status Status, arguments saveArguments, record att
 
 	name := safeName(record.FileName)
 	if chosen := strings.TrimSpace(arguments.Name); chosen != "" {
+		if strings.ContainsAny(chosen, `/\`) {
+			return Location{}, fmt.Errorf("name is the file name only and cannot contain / or \\; put the folders in folder")
+		}
 		if err := validateSegment(chosen); err != nil {
 			return Location{}, err
 		}

@@ -310,6 +310,22 @@ func TestAFailingAccountIsReportedWithoutFailingTheCall(t *testing.T) {
 	requireText(t, result, true, "Could not read the calendars of "+home, "Could not read the calendars of "+work)
 }
 
+func TestARefusedCalendarIsReportedWithoutHidingTheOthers(t *testing.T) {
+	h := newHarness(t, work, home)
+	h.sim.AddCalendar(work, calendarsim.Calendar{ID: work, Summary: "Work"})
+	h.sim.AddCalendar(work, calendarsim.Calendar{ID: "shared@group.calendar.google.com", Summary: "Shared", Forbidden: true})
+	h.sim.AddCalendar(home, calendarsim.Calendar{ID: "family@group.calendar.google.com", Summary: "Family", Forbidden: true})
+	h.sim.AddEvents(work, work, calendarsim.Event{ID: "w", Summary: "Planning", Start: utc(5, 8, 0), End: utc(5, 9, 0)})
+
+	result := h.events(map[string]any{"start": "2026-10-05", "end": "2026-10-05"})
+	requireText(t, result, false, "Planning",
+		"Could not read the calendar Shared of "+work+": Google Calendar refused access to a calendar.",
+		"Could not read the calendar Family of "+home+": Google Calendar refused access to a calendar.")
+
+	result = h.events(map[string]any{"start": "2026-10-05", "end": "2026-10-05", "account": home})
+	requireText(t, result, true, "Could not read the calendar Family of "+home)
+}
+
 func TestAnExpiredTokenIsRefreshedOnce(t *testing.T) {
 	h := newHarness(t, work)
 	h.sim.AddCalendar(work, calendarsim.Calendar{ID: work, Summary: "Work"})

@@ -184,22 +184,22 @@ func (s *Service) ProfileDir(principalID string) (string, error) {
 	return filepath.Join(s.profilesDir, name), nil
 }
 
-// Ready satisfies the conversation gate: Pi must have a refreshable credential and the
-// application must know which account it belongs to.
+// Ready satisfies the conversation gate: Pi must have a refreshable credential, and it must belong
+// to the account the application bound to the principal, as Credential requires.
 func (s *Service) Ready(ctx context.Context, principalID string) (bool, error) {
 	profileDir, err := s.ProfileDir(principalID)
 	if err != nil {
 		return false, err
 	}
-	_, found, err := readCredential(profileDir, s.provider)
+	credential, found, err := readCredential(profileDir, s.provider)
 	if err != nil || !found {
 		return false, err
 	}
-	_, bound, err := s.repository.LoadModelConnection(ctx, principalID)
+	record, bound, err := s.repository.LoadModelConnection(ctx, principalID)
 	if err != nil {
 		return false, err
 	}
-	return bound, nil
+	return bound && credential.AccountID == record.AccountID, nil
 }
 
 func (s *Service) Status(ctx context.Context, principalID string) (Status, error) {
@@ -216,7 +216,7 @@ func (s *Service) Status(ctx context.Context, principalID string) (Status, error
 		return Status{}, err
 	}
 	return Status{
-		Connected: found && bound,
+		Connected: found && bound && credential.AccountID == record.AccountID,
 		Provider:  s.provider,
 		AccountID: record.AccountID,
 		ExpiresAt: credential.expiresAt(),

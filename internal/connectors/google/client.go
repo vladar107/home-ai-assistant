@@ -3,6 +3,7 @@ package google
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -34,6 +35,8 @@ type ErrorClass string
 
 const (
 	ErrorUnauthorized ErrorClass = "unauthorized"
+	ErrorForbidden    ErrorClass = "forbidden"
+	ErrorNotFound     ErrorClass = "not_found"
 	// ErrorInvalidGrant is the token endpoint refusing a code or a refresh token for good.
 	ErrorInvalidGrant ErrorClass = "invalid_grant"
 	ErrorRateLimited  ErrorClass = "rate_limited"
@@ -41,26 +44,49 @@ const (
 	ErrorUnavailable  ErrorClass = "unavailable"
 )
 
-// Error is a normalized Google failure. It carries the class and HTTP status only, so Google's
-// message text, which can echo a token, never reaches a log or the model.
+// Error is a normalized failure of a Google API, shared by the OAuth client and the product
+// connectors. It carries the product, the class, and the HTTP status only, so Google's message
+// text, which can echo a token or a query, never reaches a log or the model.
 type Error struct {
-	Class  ErrorClass
-	Status int
+	// Product names the API in the error text, such as Gmail; empty means Google itself.
+	Product string
+	Class   ErrorClass
+	Status  int
 }
 
 func (e *Error) Error() string {
-	if e.Status != 0 {
-		return fmt.Sprintf("Google request failed: %s (HTTP status %d)", e.Class, e.Status)
+	product := e.Product
+	if product == "" {
+		product = "Google"
 	}
-	return fmt.Sprintf("Google request failed: %s", e.Class)
+	if e.Status != 0 {
+		return fmt.Sprintf("%s request failed: %s (HTTP status %d)", product, e.Class, e.Status)
+	}
+	return fmt.Sprintf("%s request failed: %s", product, e.Class)
 }
 
-func classify(status int) ErrorClass {
+// ProductError finds a failure of the named product's API in err. A failure of Google's own
+// endpoints, such as a token refresh, is left out, because its class says nothing about the
+// product's request.
+func ProductError(err error, product string) (*Error, bool) {
+	var googleErr *Error
+	if !errors.As(err, &googleErr) || googleErr.Product != product {
+		return nil, false
+	}
+	return googleErr, true
+}
+
+// Classify maps an HTTP status from any Google API to its error class.
+func Classify(status int) ErrorClass {
 	switch {
 	case status == 400:
 		return ErrorInvalid
 	case status == 401:
 		return ErrorUnauthorized
+	case status == 403:
+		return ErrorForbidden
+	case status == 404:
+		return ErrorNotFound
 	case status == 429:
 		return ErrorRateLimited
 	default:
@@ -207,7 +233,7 @@ func (c *Client) token(ctx context.Context, form url.Values) (Tokens, error) {
 		if body.Error == "invalid_grant" {
 			return Tokens{}, &Error{Class: ErrorInvalidGrant, Status: status}
 		}
-		return Tokens{}, &Error{Class: classify(status), Status: status}
+		return Tokens{}, &Error{Class: Classify(status), Status: status}
 	}
 	if body.AccessToken == "" || body.ExpiresIn <= 0 {
 		return Tokens{}, &Error{Class: ErrorUnavailable, Status: status}
@@ -228,7 +254,7 @@ func (c *Client) Revoke(ctx context.Context, token string) error {
 		return err
 	}
 	if status != http.StatusOK {
-		return &Error{Class: classify(status), Status: status}
+		return &Error{Class: Classify(status), Status: status}
 	}
 	return nil
 }
@@ -257,7 +283,7 @@ func (c *Client) UserInfo(ctx context.Context, access string) (Identity, error) 
 		return Identity{}, err
 	}
 	if status != http.StatusOK {
-		return Identity{}, &Error{Class: classify(status), Status: status}
+		return Identity{}, &Error{Class: Classify(status), Status: status}
 	}
 	return Identity{Subject: body.Subject, Email: body.Email}, nil
 }

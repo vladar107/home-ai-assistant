@@ -2,6 +2,7 @@ package notion_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -175,4 +176,36 @@ func TestScheduleContinuesWeeklyFromTheLatestDateInTableOrder(t *testing.T) {
 
 	f.refuse("movies_schedule", `{"data_source_id":"ds-films","date":"2026-10-31"}`, "date requires film")
 	f.refuse("movies_schedule", `{"data_source_id":"ds-films","film":"Паразиты","date":"31.10.2026"}`, "date must be YYYY-MM-DD")
+}
+
+// Rows are read oldest first, so a table longer than the read leaves out the newest evenings; the
+// writes that depend on them refuse instead of acting on a partial table.
+func TestMovieWritesRefuseATableTooLongToRead(t *testing.T) {
+	f := newFixture(t)
+	shareMovieTable(f)
+	f.enableWrites()
+	f.displayNames["alice"] = "Kim"
+	addFilms := func(from, to int) {
+		for index := from; index < to; index++ {
+			id := fmt.Sprintf("row-extra-%04d", index)
+			f.sim.SharePage(token, notionsim.Page{
+				ID: id, URL: "https://notion.so/" + id, LastEdited: "2026-09-01T00:00:00.000Z", DataSourceID: "ds-films",
+				Properties: map[string]any{"Фильм": notionsim.RichTextProperty(fmt.Sprintf("Film %04d", index))},
+			})
+		}
+	}
+
+	// A diary of several hundred evenings is still read whole.
+	addFilms(0, 494)
+	if result := f.execute("movies_set_score", `{"data_source_id":"ds-films","film":"Film 0493","score":8}`); result.IsError {
+		t.Fatalf("score in a table of 500 rows = %+v", result)
+	}
+
+	addFilms(494, 995)
+	if next := f.execute("movies_next", `{"data_source_id":"ds-films"}`); next.IsError || !strings.Contains(next.Text, "later evenings may be missing") {
+		t.Fatalf("next movie of a long table = %+v", next)
+	}
+	f.refuse("movies_schedule", `{"data_source_id":"ds-films"}`, "more rows than can be read (over 1000)")
+	f.refuse("movies_schedule", `{"data_source_id":"ds-films","film":"Паразиты","date":"2026-10-31"}`, "more rows than can be read")
+	f.refuse("movies_set_score", `{"data_source_id":"ds-films","film":"Дюна","score":8}`, "more rows than can be read")
 }

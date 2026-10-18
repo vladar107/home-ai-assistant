@@ -60,6 +60,7 @@ type simulator struct {
 	rules       string
 	annotations func(query url.Values) string
 	alertStatus int
+	alertBody   string
 }
 
 const (
@@ -112,7 +113,11 @@ func (s *simulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	case r.URL.Path == "/api/prometheus/grafana/api/v1/rules", r.URL.Path == "/api/annotations":
 		if s.alertStatus != 0 {
-			http.Error(w, "boom", s.alertStatus)
+			body := s.alertBody
+			if body == "" {
+				body = "boom"
+			}
+			http.Error(w, body, s.alertStatus)
 			return
 		}
 		if r.URL.Path == "/api/annotations" {
@@ -179,6 +184,7 @@ type fixture struct {
 	broker  *tools.Broker
 	sim     *simulator
 	server  *httptest.Server
+	logs    *bytes.Buffer
 }
 
 func newFixture(t *testing.T, sim *simulator) *fixture {
@@ -200,11 +206,11 @@ func newFixtureWithToken(t *testing.T, sim *simulator, serviceToken string) *fix
 	}); err != nil {
 		t.Fatal(err)
 	}
-	f := &fixture{t: t, sim: sim}
+	f := &fixture{t: t, sim: sim, logs: &bytes.Buffer{}}
 	f.server = httptest.NewServer(sim)
 	t.Cleanup(f.server.Close)
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.NewTextHandler(f.logs, nil))
 	f.service, err = grafana.NewService(grafana.Config{
 		Token:      serviceToken,
 		BaseURL:    f.server.URL,
@@ -887,6 +893,18 @@ func TestAlertsMapGrafanaFailuresToErrorClasses(t *testing.T) {
 	f.fail("grafana_alerts", map[string]any{"view": "history"}, "unavailable")
 	sim.alertStatus = http.StatusForbidden
 	f.fail("grafana_alerts", map[string]any{}, "not allowed")
+	sim.alertStatus = http.StatusTooManyRequests
+	f.fail("grafana_alerts", map[string]any{}, "limiting requests")
+
+	// An error page larger than any answer still reads as the failure its status reports.
+	sim.alertStatus, sim.alertBody = http.StatusForbidden, strings.Repeat("x", 9<<20)
+	f.fail("grafana_alerts", map[string]any{}, "not allowed")
+
+	for _, class := range []string{"unavailable", "forbidden", "rate_limited"} {
+		if !strings.Contains(f.logs.String(), "msg=grafana.request.failed principal_id=alice tool=grafana_alerts error_class="+class) {
+			t.Fatalf("the %s failure was not logged:\n%s", class, f.logs)
+		}
+	}
 }
 
 // Alert names and summaries come from the household's own rules, so reading them must not make

@@ -145,18 +145,27 @@ func (s *Service) events(ctx context.Context, principalID string, raw json.RawMe
 
 	var all []listed
 	var problems []string
+	failed := 0
 	truncated := false
 	for _, account := range accounts {
-		found, more, err := s.accountEvents(ctx, principalID, account, start, end, query)
+		read, err := s.accountEvents(ctx, principalID, account, start, end, query)
 		if err != nil {
 			s.logFailure(ctx, principalID, toolEvents, err)
 			problems = append(problems, fmt.Sprintf("Could not read the calendars of %s: %s", account.Address, describe(err)))
+			failed++
 			continue
 		}
-		all = append(all, found...)
-		truncated = truncated || more
+		for _, failure := range read.failures {
+			s.logFailure(ctx, principalID, toolEvents, failure.err)
+			problems = append(problems, fmt.Sprintf("Could not read the calendar %s of %s: %s", failure.calendar.Name(), account.Address, describe(failure.err)))
+		}
+		if len(read.failures) > 0 && read.calendarsRead == 0 {
+			failed++
+		}
+		all = append(all, read.events...)
+		truncated = truncated || read.truncated
 	}
-	if len(problems) == len(accounts) {
+	if failed == len(accounts) {
 		return tools.Result{Text: strings.Join(problems, "\n"), IsError: true}
 	}
 	sort.SliceStable(all, func(i, j int) bool {
@@ -174,14 +183,28 @@ func (s *Service) events(ctx context.Context, principalID string, raw json.RawMe
 	return tools.Result{Text: renderEvents(all, start, end, s.location, query, truncated, problems)}
 }
 
+// accountRead is what one account gave: its events, whether any calendar had more, how many
+// calendars were read, and the calendars that could not be.
+type accountRead struct {
+	events        []listed
+	truncated     bool
+	calendarsRead int
+	failures      []calendarFailure
+}
+
+type calendarFailure struct {
+	calendar Calendar
+	err      error
+}
+
 // accountEvents reads the selected calendars of one account. Each calendar's page holds its
 // first events by start, so the first page of every calendar is enough to find the overall first
-// maximumEvents.
-func (s *Service) accountEvents(ctx context.Context, principalID string, account google.Account, start, end time.Time, query string) ([]listed, bool, error) {
-	var found []listed
-	truncated := false
+// maximumEvents. A calendar that cannot be read is recorded and the others are still read; a
+// rejected token fails the whole account, so it can be refreshed and read again.
+func (s *Service) accountEvents(ctx context.Context, principalID string, account google.Account, start, end time.Time, query string) (accountRead, error) {
+	var read accountRead
 	err := s.withAccess(ctx, principalID, account, func(access string) error {
-		found, truncated = nil, false
+		read = accountRead{}
 		calendars, err := s.client.ListCalendars(ctx, access)
 		if err != nil {
 			return err
@@ -194,9 +217,14 @@ func (s *Service) accountEvents(ctx context.Context, principalID string, account
 				Min: start, Max: end, TimeZone: s.location.String(), Text: query, Limit: maximumEvents,
 			})
 			if err != nil {
-				return err
+				if errorClass(err) == google.ErrorUnauthorized {
+					return err
+				}
+				read.failures = append(read.failures, calendarFailure{calendar: calendar, err: err})
+				continue
 			}
-			truncated = truncated || next != ""
+			read.calendarsRead++
+			read.truncated = read.truncated || next != ""
 			for _, event := range events {
 				if event.Status == "cancelled" {
 					continue
@@ -205,12 +233,12 @@ func (s *Service) accountEvents(ctx context.Context, principalID string, account
 				if !ok {
 					continue
 				}
-				found = append(found, listed{account: account, calendar: calendar, event: event, start: from, end: to, allDay: allDay})
+				read.events = append(read.events, listed{account: account, calendar: calendar, event: event, start: from, end: to, allDay: allDay})
 			}
 		}
 		return nil
 	})
-	return found, truncated, err
+	return read, err
 }
 
 func (s *Service) readEvent(ctx context.Context, principalID string, raw json.RawMessage) tools.Result {
@@ -303,16 +331,14 @@ func hasControl(value string) bool {
 }
 
 func (s *Service) logFailure(ctx context.Context, principalID, tool string, err error) {
-	var calendarErr *Error
-	if errors.As(err, &calendarErr) {
-		s.logger.InfoContext(ctx, "calendar.tool.failed", "principal_id", principalID, "tool", tool, "error_class", calendarErr.Class)
+	if class := errorClass(err); class != "" {
+		s.logger.InfoContext(ctx, "calendar.tool.failed", "principal_id", principalID, "tool", tool, "error_class", class)
 	}
 }
 
 func (s *Service) failure(ctx context.Context, principalID, tool string, err error) tools.Result {
 	s.logFailure(ctx, principalID, tool, err)
-	var calendarErr *Error
-	if errors.As(err, &calendarErr) && calendarErr.Class == ErrorNotFound {
+	if errorClass(err) == google.ErrorNotFound {
 		return tools.Result{Text: "No event with that id is in that calendar.", IsError: true}
 	}
 	return tools.Result{Text: describe(err), IsError: true}
@@ -323,16 +349,13 @@ func describe(err error) string {
 	if errors.Is(err, google.ErrNotConnected) {
 		return NotConnectedText
 	}
-	var calendarErr *Error
-	if errors.As(err, &calendarErr) {
-		switch calendarErr.Class {
-		case ErrorInvalid:
-			return "Google Calendar did not accept that request."
-		case ErrorForbidden:
-			return "Google Calendar refused access to a calendar."
-		case ErrorRateLimited:
-			return "Google Calendar is limiting requests right now; try again shortly."
-		}
+	switch errorClass(err) {
+	case google.ErrorInvalid:
+		return "Google Calendar did not accept that request."
+	case google.ErrorForbidden:
+		return "Google Calendar refused access to a calendar."
+	case google.ErrorRateLimited:
+		return "Google Calendar is limiting requests right now; try again shortly."
 	}
 	return unavailableText
 }

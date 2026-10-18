@@ -226,11 +226,11 @@ func pdfFailure(err error) error {
 // renderWindow serves one window of a page's text with a header saying where it came from and
 // how to continue. For a PDF the offsets count bytes of the extracted text, not of the file.
 func renderWindow(result page, offset int) tools.Result {
+	for offset > 0 && offset < len(result.text) && !utf8.RuneStart(result.text[offset]) {
+		offset++
+	}
 	if offset >= len(result.text) {
 		return errorResult(fmt.Sprintf("The page's text ends before that position; it is %d bytes.", len(result.text)))
-	}
-	for offset > 0 && !utf8.RuneStart(result.text[offset]) {
-		offset++
 	}
 	chunk := result.text[offset:]
 	truncated := len(chunk) > maximumReadBytes

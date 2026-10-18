@@ -102,10 +102,12 @@ func (s *Service) historyPoints(ctx context.Context, snap *snapshot, arguments h
 	}
 
 	pick := func(point statisticPoint) *float64 { return point.Mean }
+	changes := false
 	switch {
 	case points[0].Mean != nil:
 	case points[0].Change != nil:
 		pick = func(point statisticPoint) *float64 { return point.Change }
+		changes = true
 	default:
 		pick = func(point statisticPoint) *float64 { return point.State }
 	}
@@ -137,8 +139,18 @@ func (s *Service) historyPoints(ctx context.Context, snap *snapshot, arguments h
 	for index, value := range values {
 		lines = append(lines, days[index]+": "+format(value))
 	}
-	first, last := values[0], values[len(values)-1]
-	lines = append(lines, "first: "+format(first), "last: "+format(last), "change: "+format(last-first))
+	// Each value of a change series is what its bucket added, so the period's figure is their sum;
+	// the difference between the first and last bucket would mean nothing.
+	if changes {
+		total := 0.0
+		for _, value := range values {
+			total += value
+		}
+		lines = append(lines, "total: "+format(total))
+	} else {
+		first, last := values[0], values[len(values)-1]
+		lines = append(lines, "first: "+format(first), "last: "+format(last), "change: "+format(last-first))
+	}
 	header := fmt.Sprintf("%s, %s by %s:", arguments.Name, label, bucket)
 	if trimmed {
 		header = fmt.Sprintf("%s, %s by %s (only the latest %d are shown):", arguments.Name, label, bucket, maximumHistoryPoints)

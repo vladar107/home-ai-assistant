@@ -3,7 +3,6 @@ package gmail
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -17,47 +16,22 @@ import (
 const (
 	DefaultAPIBaseURL = "https://gmail.googleapis.com"
 
+	product = "Gmail"
+
 	requestTimeout    = 10 * time.Second
 	responseBodyLimit = 4 << 20
 )
 
-type ErrorClass string
-
-const (
-	ErrorUnauthorized ErrorClass = "unauthorized"
-	ErrorNotFound     ErrorClass = "not_found"
-	ErrorRateLimited  ErrorClass = "rate_limited"
-	ErrorInvalid      ErrorClass = "invalid"
-	ErrorUnavailable  ErrorClass = "unavailable"
-)
-
-// Error is a normalized Google failure. It carries the class and HTTP status only, so Google's
-// message text, which can echo a query, never reaches a log or the model.
-type Error struct {
-	Class  ErrorClass
-	Status int
+func apiError(class google.ErrorClass, status int) error {
+	return &google.Error{Product: product, Class: class, Status: status}
 }
 
-func (e *Error) Error() string {
-	if e.Status != 0 {
-		return fmt.Sprintf("Gmail request failed: %s (HTTP status %d)", e.Class, e.Status)
+// errorClass is the class of a failed Gmail API request, and empty for any other error.
+func errorClass(err error) google.ErrorClass {
+	if gmailErr, ok := google.ProductError(err, product); ok {
+		return gmailErr.Class
 	}
-	return fmt.Sprintf("Gmail request failed: %s", e.Class)
-}
-
-func classify(status int) ErrorClass {
-	switch {
-	case status == 400:
-		return ErrorInvalid
-	case status == 401:
-		return ErrorUnauthorized
-	case status == 404:
-		return ErrorNotFound
-	case status == 429:
-		return ErrorRateLimited
-	default:
-		return ErrorUnavailable
-	}
+	return ""
 }
 
 type ClientConfig struct {
@@ -87,15 +61,15 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 func (c *Client) send(request *http.Request, out any) (int, error) {
 	response, err := c.httpClient.Do(request)
 	if err != nil {
-		return 0, &Error{Class: ErrorUnavailable}
+		return 0, apiError(google.ErrorUnavailable, 0)
 	}
 	defer response.Body.Close()
 	contents, err := io.ReadAll(io.LimitReader(response.Body, responseBodyLimit+1))
 	if err != nil || len(contents) > responseBodyLimit {
-		return response.StatusCode, &Error{Class: ErrorUnavailable, Status: response.StatusCode}
+		return response.StatusCode, apiError(google.ErrorUnavailable, response.StatusCode)
 	}
 	if len(contents) > 0 && json.Unmarshal(contents, out) != nil && response.StatusCode == http.StatusOK {
-		return response.StatusCode, &Error{Class: ErrorUnavailable, Status: response.StatusCode}
+		return response.StatusCode, apiError(google.ErrorUnavailable, response.StatusCode)
 	}
 	return response.StatusCode, nil
 }
@@ -109,7 +83,7 @@ func (c *Client) get(ctx context.Context, access, path string, query url.Values,
 	}
 	request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, target, nil)
 	if err != nil {
-		return &Error{Class: ErrorUnavailable}
+		return apiError(google.ErrorUnavailable, 0)
 	}
 	request.Header.Set("Authorization", "Bearer "+access)
 	request.Header.Set("Accept", "application/json")
@@ -119,10 +93,10 @@ func (c *Client) get(ctx context.Context, access, path string, query url.Values,
 		return err
 	}
 	if status != http.StatusOK {
-		return &Error{Class: classify(status), Status: status}
+		return apiError(google.Classify(status), status)
 	}
 	if err := json.Unmarshal(raw, out); err != nil {
-		return &Error{Class: ErrorUnavailable, Status: status}
+		return apiError(google.ErrorUnavailable, status)
 	}
 	return nil
 }

@@ -26,6 +26,7 @@ const (
 
 	NotConnectedText = "Gmail is not connected for this user, switched off, or Google no longer accepts the connection; they can manage it in /settings."
 	unavailableText  = "Gmail is unavailable right now."
+	forbiddenText    = "Google refused access to this mailbox: the Gmail permission may have been withdrawn, or a usage limit reached; the user can check the connection in /settings."
 )
 
 const guidance = "Gmail: this user's own mailboxes, read-only; there may be several, and every message says which account it is in. gmail_search takes Gmail's search syntax, such as is:unread newer_than:2d, from:someone@example.com, or subject:invoice, searches every mailbox unless account names one, and returns headers and Gmail's snippet for each message. " +
@@ -171,8 +172,7 @@ func (s *Service) withAccess(ctx context.Context, principalID string, account go
 		return err
 	}
 	err = run(access)
-	var gmailErr *Error
-	if errors.As(err, &gmailErr) && gmailErr.Class == ErrorUnauthorized {
+	if errorClass(err) == google.ErrorUnauthorized {
 		if access, err = s.grants.AccessToken(ctx, principalID, account.ID, google.ProductMail, true); err != nil {
 			return err
 		}
@@ -185,15 +185,16 @@ func (s *Service) failure(ctx context.Context, principalID, tool string, err err
 	if errors.Is(err, google.ErrNotConnected) {
 		return tools.Result{Text: NotConnectedText, IsError: true}
 	}
-	var gmailErr *Error
-	if errors.As(err, &gmailErr) {
-		s.logger.InfoContext(ctx, "gmail.tool.failed", "principal_id", principalID, "tool", tool, "error_class", gmailErr.Class)
-		switch gmailErr.Class {
-		case ErrorNotFound:
+	if class := errorClass(err); class != "" {
+		s.logger.InfoContext(ctx, "gmail.tool.failed", "principal_id", principalID, "tool", tool, "error_class", class)
+		switch class {
+		case google.ErrorNotFound:
 			return tools.Result{Text: "No message with that id is in this mailbox.", IsError: true}
-		case ErrorInvalid:
+		case google.ErrorInvalid:
 			return tools.Result{Text: "Gmail did not accept that request; check the search syntax.", IsError: true}
-		case ErrorRateLimited:
+		case google.ErrorForbidden:
+			return tools.Result{Text: forbiddenText, IsError: true}
+		case google.ErrorRateLimited:
 			return tools.Result{Text: "Gmail is limiting requests right now; try again shortly.", IsError: true}
 		}
 	}
@@ -201,33 +202,41 @@ func (s *Service) failure(ctx context.Context, principalID, tool string, err err
 }
 
 // searchAll searches each mailbox up to the limit and keeps the newest messages overall. A mailbox
-// that fails is reported in the result unless every one did, so one account's trouble does not
-// hide the others.
+// that fails, or messages in it that could not be read, are reported in the result unless every
+// mailbox failed, so one account's trouble does not hide the others.
 func (s *Service) searchAll(ctx context.Context, principalID string, accounts []google.Account, query string, limit int) tools.Result {
 	var messages []Message
 	var failures []string
 	more := false
+	failed := 0
 	var last error
 	for _, account := range accounts {
-		var found []Message
-		var truncated bool
+		var found mailboxSearch
 		err := s.withAccess(ctx, principalID, account, func(access string) (err error) {
-			found, truncated, err = s.search(ctx, access, query, limit)
+			found, err = s.search(ctx, access, query, limit)
 			return err
 		})
+		if err == nil && found.skipped > 0 && len(found.messages) == 0 {
+			err = found.reason
+		}
 		if err != nil {
+			failed++
 			last = err
 			text := s.failure(ctx, principalID, toolSearch, err).Text
 			failures = append(failures, fmt.Sprintf("%s could not be searched: %s", account.Address, text))
 			continue
 		}
-		for index := range found {
-			found[index].Account = account.Address
+		if found.skipped > 0 {
+			text := s.failure(ctx, principalID, toolSearch, found.reason).Text
+			failures = append(failures, fmt.Sprintf("%d of the matching messages in %s could not be read: %s", found.skipped, account.Address, text))
 		}
-		messages = append(messages, found...)
-		more = more || truncated
+		for index := range found.messages {
+			found.messages[index].Account = account.Address
+		}
+		messages = append(messages, found.messages...)
+		more = more || found.more
 	}
-	if len(failures) == len(accounts) {
+	if failed == len(accounts) {
 		return s.failure(ctx, principalID, toolSearch, last)
 	}
 	slices.SortStableFunc(messages, func(a, b Message) int { return compareReceived(b, a) })
@@ -250,26 +259,46 @@ func compareReceived(a, b Message) int {
 	}
 }
 
+// mailboxSearch is what one mailbox gave: the messages read, whether more match, and how many
+// matching messages could not be read, with the last reason.
+type mailboxSearch struct {
+	messages []Message
+	more     bool
+	skipped  int
+	reason   error
+}
+
 // search lists the matching message ids in one mailbox and reads each one's headers and snippet.
-// Gmail's list call returns ids only, so this is one request per message, bounded by the limit.
-func (s *Service) search(ctx context.Context, access, query string, limit int) ([]Message, bool, error) {
+// Gmail's list call returns ids only, so this is one request per message, bounded by the limit. A
+// message that cannot be read is skipped and counted. A rejected token fails the whole search, so
+// it can be refreshed and run again, and a rate limit skips the rest, which would fail as well.
+func (s *Service) search(ctx context.Context, access, query string, limit int) (mailboxSearch, error) {
 	list, err := s.client.ListMessages(ctx, access, query, limit)
 	if err != nil {
-		return nil, false, err
+		return mailboxSearch{}, err
 	}
-	messages := make([]Message, 0, len(list.Messages))
-	for _, reference := range list.Messages {
+	found := mailboxSearch{messages: make([]Message, 0, len(list.Messages)), more: list.NextPageToken != ""}
+	for index, reference := range list.Messages {
 		message, err := s.client.MessageMetadata(ctx, access, reference.ID)
-		if err != nil {
-			var gmailErr *Error
-			if errors.As(err, &gmailErr) && gmailErr.Class == ErrorNotFound {
-				continue
-			}
-			return nil, false, err
+		if err == nil {
+			found.messages = append(found.messages, message)
+			continue
 		}
-		messages = append(messages, message)
+		class := errorClass(err)
+		if class == google.ErrorUnauthorized {
+			return mailboxSearch{}, err
+		}
+		if class == google.ErrorNotFound {
+			continue
+		}
+		found.skipped++
+		found.reason = err
+		if class == google.ErrorRateLimited {
+			found.skipped += len(list.Messages) - index - 1
+			break
+		}
 	}
-	return messages, list.NextPageToken != "", nil
+	return found, nil
 }
 
 func decodeArguments(raw json.RawMessage, into any) error {

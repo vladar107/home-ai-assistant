@@ -383,6 +383,11 @@ func TestFetchPageReadsInWindows(t *testing.T) {
 	last := f.fetch(map[string]any{"url": "http://public.test/long.txt", "offset_bytes": 24576})
 	wantText(t, last, "the end of the page", strings.TrimSpace(body[len(body)-30:]))
 	wantError(t, f.fetch(map[string]any{"url": "http://public.test/long.txt", "offset_bytes": len(body)}), "ends before that position")
+
+	short := "a short page that ends in €"
+	f.serve("public.test/short.txt", "text/plain; charset=utf-8", []byte(short))
+	wantError(t, f.fetch(map[string]any{"url": "http://public.test/short.txt", "offset_bytes": len(short) - 1}), "ends before that position")
+	wantText(t, f.fetch(map[string]any{"url": "http://public.test/short.txt", "offset_bytes": len(short) - 4}), "€")
 }
 
 func TestFetchPageLimitsAndRefusals(t *testing.T) {

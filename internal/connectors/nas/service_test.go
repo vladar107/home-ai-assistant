@@ -518,6 +518,12 @@ func TestSaveRefusesReadOnlyFoldersAndExistingNames(t *testing.T) {
 	if !taken.IsError || !strings.Contains(taken.Text, "already exists") {
 		t.Fatalf("save over an existing name = %+v", taken)
 	}
+	for _, name := range []string{"../escape.pdf", "Finance/scan.pdf", `Finance\scan.pdf`} {
+		nested := f.execute("nas_save_attachment", fmt.Sprintf(`{"attachment_id":"att1","name":%q}`, name))
+		if !nested.IsError || !strings.Contains(nested.Text, "put the folders in folder") {
+			t.Fatalf("save with the name %q = %+v", name, nested)
+		}
+	}
 	if len(f.proposals.proposals) != 0 {
 		t.Fatalf("a refused save recorded %d proposal(s)", len(f.proposals.proposals))
 	}

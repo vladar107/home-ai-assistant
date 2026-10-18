@@ -84,6 +84,7 @@ type Simulator struct {
 
 	mu        sync.Mutex
 	mailboxes map[string][]Message
+	failing   map[string]int
 	codes     map[string]grant
 	refreshes map[string]token
 	accesses  map[string]token
@@ -98,6 +99,7 @@ func New(t *testing.T) *Simulator {
 	sim := &Simulator{
 		t:         t,
 		mailboxes: make(map[string][]Message),
+		failing:   make(map[string]int),
 		codes:     make(map[string]grant),
 		refreshes: make(map[string]token),
 		accesses:  make(map[string]token),
@@ -143,6 +145,14 @@ func (s *Simulator) AddMailbox(account string, messages ...Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.mailboxes[account] = append(s.mailboxes[account], messages...)
+}
+
+// FailMessage makes every read of the message with the id fail with the status, while it is
+// still listed by a search.
+func (s *Simulator) FailMessage(id string, status int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failing[id] = status
 }
 
 // Consent plays the user on Google's consent screen for the given link: it checks the link the
@@ -295,6 +305,7 @@ func (s *Simulator) serveGmail(w http.ResponseWriter, r *http.Request) {
 	account := issued.account
 	s.requests = append(s.requests, Request{Method: r.Method, Path: r.URL.Path, Query: r.URL.Query(), Account: account})
 	mailbox := append([]Message(nil), s.mailboxes[account]...)
+	failing := s.failing[strings.TrimPrefix(r.URL.Path, "/gmail/v1/users/me/messages/")]
 	s.mu.Unlock()
 	if account == "" {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": map[string]any{"code": 401}})
@@ -327,6 +338,10 @@ func (s *Simulator) serveGmail(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, body)
 	case strings.HasPrefix(path, "messages/"):
 		id := strings.TrimPrefix(path, "messages/")
+		if failing != 0 {
+			writeJSON(w, failing, map[string]any{"error": map[string]any{"code": failing}})
+			return
+		}
 		for _, message := range mailbox {
 			if message.ID == id {
 				writeJSON(w, http.StatusOK, resource(message, r.URL.Query().Get("format")))
