@@ -57,7 +57,7 @@ func TestBusesSwitchControlsToolsPerUser(t *testing.T) {
 
 	wantBuses(offered(1, 101), true)
 	h.push(textUpdate(2, 101, "/privacy"))
-	h.wantReply(101, 2, ConversationPrivacyReply+privacyItem+AttachmentPrivacyLine+privacyItem+BusPrivacyLine+" "+BusPlanningPrivacyLine)
+	h.wantReply(101, 2, privacyLines(AttachmentPrivacyLine, SchedulePrivacyLine, BusPrivacyLine+" "+BusPlanningPrivacyLine, VoicePrivacyLine, MemoryPrivacyLine))
 
 	overview := h.requestSettings(3, 101)
 	if !strings.Contains(overview.text, "Everyday tools: Buses on") || !slices.Contains(buttonData(overview.keyboard), "nav:tools") {
@@ -75,7 +75,7 @@ func TestBusesSwitchControlsToolsPerUser(t *testing.T) {
 	}
 	wantBuses(offered(6, 101), false)
 	h.push(textUpdate(7, 101, "/privacy"))
-	h.wantReply(101, 7, ConversationPrivacyReply+privacyItem+AttachmentPrivacyLine)
+	h.wantReply(101, 7, privacyLines(AttachmentPrivacyLine, SchedulePrivacyLine, VoicePrivacyLine, MemoryPrivacyLine))
 
 	wantBuses(offered(8, 202), true)
 

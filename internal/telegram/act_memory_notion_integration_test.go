@@ -17,7 +17,7 @@ import (
 
 func newActMemoryHarness(t *testing.T, runtime *controlledRuntime) *conversationHarness {
 	t.Helper()
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{memory: true, providers: []tools.Provider{readingTools{}}})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{providers: []tools.Provider{readingTools{}}})
 	h.provision("alice", "acct-alice")
 	h.start()
 	return h

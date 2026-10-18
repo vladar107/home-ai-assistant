@@ -135,7 +135,7 @@ func TestNotionWritesAreProposedConfirmedAndExecutedOnce(t *testing.T) {
 	// Writes off: no write tool is offered, and an injected write call creates no record.
 	h.push(textUpdate(1, 101, "add a task"))
 	call := receive(t, h.ctx, runtime.calls)
-	if len(call.request.Tools.Definitions) != 6 {
+	if len(call.request.Tools.Definitions) != len(chatTools(nil))+5 {
 		t.Fatalf("tools with writes off = %+v", call.request.Tools.Definitions)
 	}
 	result, err := call.request.Tools.Executor.Execute(call.ctx, agentruntime.ToolCall{Name: "notion_create_page", Arguments: json.RawMessage(`{"parent_type":"data_source","parent_id":"ds-tasks","title":"Sneaky"}`)})
@@ -157,7 +157,7 @@ func TestNotionWritesAreProposedConfirmedAndExecutedOnce(t *testing.T) {
 
 	h.push(textUpdate(4, 101, "add a milk task"))
 	call = receive(t, h.ctx, runtime.calls)
-	if len(call.request.Tools.Definitions) != 11 || !strings.Contains(call.request.Tools.Guidance, "notion_create_page") {
+	if len(call.request.Tools.Definitions) != len(chatTools(nil))+10 || !strings.Contains(call.request.Tools.Guidance, "notion_create_page") {
 		t.Fatalf("tools with writes on = %d guidance=%q", len(call.request.Tools.Definitions), call.request.Tools.Guidance)
 	}
 	result, err = call.request.Tools.Executor.Execute(call.ctx, agentruntime.ToolCall{Name: "notion_create_page", Arguments: json.RawMessage(
@@ -303,7 +303,7 @@ func TestNotionWritesAreProposedConfirmedAndExecutedOnce(t *testing.T) {
 	}
 	h.push(textUpdate(22, 101, "read only again"))
 	call = receive(t, h.ctx, runtime.calls)
-	if len(call.request.Tools.Definitions) != 6 {
+	if len(call.request.Tools.Definitions) != len(chatTools(nil))+5 {
 		t.Fatalf("tools after writes off = %d", len(call.request.Tools.Definitions))
 	}
 	call.answer <- agentruntime.RunResult{Response: "ok"}

@@ -32,7 +32,7 @@ func newTripTabHarness(t *testing.T, topics bool) *tripTabHarness {
 	t.Helper()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, topics: topics, trips: true})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, topics: topics})
 	h.tabs.icons = append(slices.Clone(testTopicIcons), TopicIcon{Emoji: "✈️", CustomEmojiID: tripIconID})
 	h.provision("alice", "account-alice")
 	trips := h.trips

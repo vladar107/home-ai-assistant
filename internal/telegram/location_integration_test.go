@@ -263,7 +263,7 @@ func TestPrivacyMentionsLocationsWhenEnabled(t *testing.T) {
 	h, _, _ := locationHarness(t, nil)
 	h.start()
 	h.push(textUpdate(1, 101, "/privacy"))
-	if reply := h.nextMessage(); !strings.HasSuffix(reply.text, LocationPrivacyLine) {
+	if reply := h.nextMessage(); !strings.Contains(reply.text, privacyItem+LocationPrivacyLine) {
 		t.Fatalf("privacy = %q", reply.text)
 	}
 }

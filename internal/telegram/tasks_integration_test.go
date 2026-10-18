@@ -416,7 +416,7 @@ func TestBackgroundTaskQueueAndRunningLimits(t *testing.T) {
 	h.push(textUpdate(1, 101, "check everything"))
 	chat := receive(t, h.ctx, runtime.calls)
 	for call := 1; call <= 9; call++ {
-		result := h.callTool(chat, "task_result", `{}`)
+		result := h.callTool(chat, "schedule_list", `{}`)
 		if call == 9 && (!result.IsError || !strings.Contains(result.Text, "hand the rest to task_start")) {
 			t.Fatalf("call %d = %+v", call, result)
 		}
@@ -502,7 +502,7 @@ func TestBackgroundTaskStatusShowsProgress(t *testing.T) {
 // having read outside content: a fact it saves to memory needs Confirm.
 func TestBackgroundTaskNoticeMakesMemoryWritesNeedConfirm(t *testing.T) {
 	runtime := newControlledRuntime()
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{tasks: testTasks(), memory: true})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{tasks: testTasks()})
 	h.provision("alice", "account-alice")
 	h.start()
 

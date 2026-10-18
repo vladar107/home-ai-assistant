@@ -36,7 +36,7 @@ func stationsGateway(t *testing.T) string {
 // owner.
 func TestRouteIsSavedChangedAndRemovedOnConfirm(t *testing.T) {
 	runtime := newControlledRuntime()
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: newTestClock(t, mondayMorning), ns: stationsGateway(t), routes: true, providers: []tools.Provider{outsideProvider{}}})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: newTestClock(t, mondayMorning), ns: stationsGateway(t), providers: []tools.Provider{outsideProvider{}}})
 	h.provision("alice", "account-alice")
 	h.provision("bob", "account-bob")
 	h.start()
@@ -120,7 +120,7 @@ func TestRouteIsSavedChangedAndRemovedOnConfirm(t *testing.T) {
 
 func TestRouteDeletesFromJobs(t *testing.T) {
 	runtime := newControlledRuntime()
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: newTestClock(t, mondayMorning), ns: stationsGateway(t), routes: true})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: newTestClock(t, mondayMorning), ns: stationsGateway(t)})
 	h.provision("alice", "account-alice")
 	h.start()
 

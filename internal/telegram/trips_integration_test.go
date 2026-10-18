@@ -1,30 +1,30 @@
 package telegram
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
-	"io"
-	"log/slog"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/googlesim"
 	"github.com/vladar107/home-ai-assistant/internal/trip"
 )
 
-// scanReply is the model's answer to a Trips scan, which finds nothing until a test sets it. While
-// hold is set, a scan waits for it to close.
+// scanReply is the model, which answers each Trips scan with nothing found until a test sets the
+// answer. While hold is set, a scan waits for it to close.
 type scanReply struct {
 	mu   sync.Mutex
 	text string
 	hold chan struct{}
 }
 
-func (r *scanReply) RunCheck(ctx context.Context, _, _ string) (string, string, error) {
+func (r *scanReply) Run(ctx context.Context, _ agentruntime.RunRequest, _ agentruntime.EventSink) (agentruntime.RunResult, error) {
 	r.mu.Lock()
 	text, hold := r.text, r.hold
 	r.mu.Unlock()
@@ -32,13 +32,10 @@ func (r *scanReply) RunCheck(ctx context.Context, _, _ string) (string, string, 
 		select {
 		case <-hold:
 		case <-ctx.Done():
-			return "", "", ctx.Err()
+			return agentruntime.RunResult{}, ctx.Err()
 		}
 	}
-	if text == "" {
-		return `{"trips":[]}`, "", nil
-	}
-	return text, "", nil
+	return agentruntime.RunResult{Final: cmp.Or(text, `{"trips":[]}`)}, nil
 }
 
 func (r *scanReply) holdScans() chan struct{} {
@@ -54,10 +51,6 @@ func (r *scanReply) set(text string) {
 	r.text = text
 }
 
-type readableMail struct{}
-
-func (readableMail) MailReadable(context.Context, string) (bool, error) { return true, nil }
-
 type tripHarness struct {
 	*conversationHarness
 	clock *testClock
@@ -69,15 +62,10 @@ func newTripHarness(t *testing.T) (*tripHarness, *googlesim.Simulator) {
 	t.Helper()
 	clock := newTestClock(t, mondayMorning)
 	sim := googleSimulator(t)
-	h := newConversationHarnessWithOptions(t, newControlledRuntime(), harnessOptions{schedules: clock, google: sim, calendar: calendarSimulator(t, sim), trips: true})
+	reply := &scanReply{}
+	h := newConversationHarnessWithOptions(t, reply, harnessOptions{schedules: clock, google: sim, calendar: calendarSimulator(t, sim)})
 	h.provision("alice", "account-alice")
 	h.provision("bob", "account-bob")
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	notifier := TripNotifier{Client: h.client, Chats: h.store}
-	reply := &scanReply{}
-	if err := h.scheduler.Register(trip.ScanJobType(reply, h.store, readableMail{}, h.trips, notifier, notifier, clock.Now, logger)); err != nil {
-		t.Fatal(err)
-	}
 	h.start()
 	return &tripHarness{conversationHarness: h, clock: clock, trips: h.trips, scan: reply}, sim
 }

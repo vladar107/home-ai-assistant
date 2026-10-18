@@ -30,7 +30,7 @@ func react(t *testing.T, call runtimeCall, emoji string) {
 func TestReactOnlyTurnSendsNothingAndStillRunsTheFollowUp(t *testing.T) {
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, reactions: true})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
 	h.provision("alice", "account-alice")
 	h.start()
 
@@ -66,7 +66,7 @@ func TestReactOnlyTurnSendsNothingAndStillRunsTheFollowUp(t *testing.T) {
 // A reaction can go with a reply; a later reaction replaces it, and only the curated emoji are set.
 func TestReactionWithReplySendsBoth(t *testing.T) {
 	runtime := newControlledRuntime()
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{reactions: true})
+	h := newConversationHarness(t, runtime)
 	h.provision("alice", "account-alice")
 	h.start()
 
@@ -91,7 +91,7 @@ func TestReactionWithReplySendsBoth(t *testing.T) {
 // marks the return.
 func TestReactOnlyTurnInAResumedConversationSendsNothing(t *testing.T) {
 	runtime := newControlledRuntime()
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{reactions: true})
+	h := newConversationHarness(t, runtime)
 	h.provision("alice", "account-alice")
 	h.start()
 
@@ -130,7 +130,7 @@ func TestReactOnlyTurnInAResumedConversationSendsNothing(t *testing.T) {
 func TestContinuationAndScheduledRunsAreNotOfferedReact(t *testing.T) {
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, reactions: true, providers: []tools.Provider{outsideProvider{}}})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, providers: []tools.Provider{outsideProvider{}}})
 	h.provision("alice", "account-alice")
 	h.start()
 
@@ -258,7 +258,7 @@ func TestReactionsToRepliesAreKeptAsFeedback(t *testing.T) {
 func TestFirstThumbsDownStartsOneReconsiderTurn(t *testing.T) {
 	runtime := newControlledRuntime()
 	registry := turnstate.New(time.Now)
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{reactions: true, recent: registry})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{recent: registry})
 	h.provision("alice", "account-alice")
 	h.start()
 
@@ -434,7 +434,7 @@ func TestThumbsDownOnAnEarlierConversationReturnsToIt(t *testing.T) {
 // curated set and a reply with words are sent as written.
 func TestEmojiOnlyRepliesBecomeReactions(t *testing.T) {
 	runtime := newControlledRuntime()
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{reactions: true})
+	h := newConversationHarness(t, runtime)
 	h.provision("alice", "account-alice")
 	h.start()
 
@@ -485,7 +485,7 @@ func TestEmojiOnlyRepliesBecomeReactions(t *testing.T) {
 // reply is sent as text.
 func TestEmojiOnlyReplyToOurOwnMessageIsSent(t *testing.T) {
 	runtime := newControlledRuntime()
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{reactions: true})
+	h := newConversationHarness(t, runtime)
 	h.provision("alice", "account-alice")
 	h.start()
 

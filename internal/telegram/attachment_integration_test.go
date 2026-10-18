@@ -202,8 +202,10 @@ func TestUnsupportedAndOversizedMediaAreAnswered(t *testing.T) {
 	h.provision("alice", "acct-alice")
 	h.start()
 
-	h.push(voiceUpdate(1, 101))
-	h.wantReply(101, 1, UnsupportedAudioReply)
+	video := textUpdate(1, 101, "")
+	video.Message.Video = &MediaFile{FileID: "video-1", MimeType: "video/mp4", FileSize: 4096}
+	h.push(video)
+	h.wantReply(101, 1, UnsupportedVideoReply)
 
 	h.push(documentUpdate(2, 101, "", MediaFile{
 		FileID: "doc-huge", FileName: "backup.zip", MimeType: "application/zip", FileSize: 21 << 20,

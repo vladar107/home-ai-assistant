@@ -17,7 +17,7 @@ func newHistoryHarness(t *testing.T) (*conversationHarness, string) {
 	t.Helper()
 	profiles := filepath.Join(t.TempDir(), "profiles")
 	runtime := newFixtureRuntime(t, profiles)
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{profilesDir: profiles, history: runtime, memory: true})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{profilesDir: profiles})
 	h.provision("alice", "acct-alice")
 	h.provision("bob", "acct-bob")
 	h.start()

@@ -122,7 +122,7 @@ func TestNotionOperatorTokenIsAdoptedAndDisconnected(t *testing.T) {
 	h.start()
 
 	overview := h.requestSettings(1, 101)
-	if !strings.Contains(overview.text, "Accounts: Notion writes off") || !slices.Equal(buttonData(overview.keyboard), []string{"nav:model", "nav:accounts"}) {
+	if !strings.Contains(overview.text, "Accounts: Notion writes off") || !slices.Equal(buttonData(overview.keyboard), []string{"nav:model", "nav:accounts", "nav:tools", "nav:memory"}) {
 		t.Fatalf("settings overview after adoption = %+v", overview)
 	}
 	settings := h.openSettingsPage(2, 101, settingsMessageID(1), "accounts")
@@ -159,7 +159,7 @@ func TestNotionOperatorTokenIsAdoptedAndDisconnected(t *testing.T) {
 	}
 	h.wantMessage(101, NotionTokenGuardReply)
 	h.push(textUpdate(7, 101, "/privacy"))
-	h.wantReply(101, 7, ConversationPrivacyReply+privacyItem+AttachmentPrivacyLine+privacyItem+NotionPrivacyLine)
+	h.wantReply(101, 7, privacyLines(AttachmentPrivacyLine, NotionPrivacyLine, SchedulePrivacyLine, VoicePrivacyLine, MemoryPrivacyLine))
 	select {
 	case call := <-runtime.calls:
 		t.Fatalf("a token-looking message reached the model: %+v", call.request)
@@ -190,7 +190,7 @@ func TestNotionChatConnectIntake(t *testing.T) {
 	h.start()
 
 	overview := h.requestSettings(1, 101)
-	if !strings.Contains(overview.text, "Accounts: Notion not connected") || !slices.Equal(buttonData(overview.keyboard), []string{"nav:model", "nav:accounts"}) {
+	if !strings.Contains(overview.text, "Accounts: Notion not connected") || !slices.Equal(buttonData(overview.keyboard), []string{"nav:model", "nav:accounts", "nav:tools", "nav:memory"}) {
 		t.Fatalf("settings overview before connect = %+v", overview)
 	}
 	settings := h.openSettingsPage(2, 101, settingsMessageID(1), "accounts")
@@ -252,7 +252,7 @@ func TestNotionChatConnectIntake(t *testing.T) {
 	time.Sleep(400 * time.Millisecond)
 	h.push(textUpdate(14, 202, "hello model"))
 	call := receive(t, h.ctx, runtime.calls)
-	if call.request.PrincipalID != "bob" || call.request.Message != "hello model" || !onlyHelp(call.request.Tools) {
+	if call.request.PrincipalID != "bob" || call.request.Message != "hello model" || !onlyCoreTools(call.request.Tools) {
 		t.Fatalf("expired intake request = %+v", call.request)
 	}
 	call.answer <- agentruntime.RunResult{Response: "hi bob"}
@@ -309,7 +309,7 @@ func TestNotionToolsAreScopedToTheConnectedPrincipal(t *testing.T) {
 	for _, definition := range alice.request.Tools.Definitions {
 		names = append(names, definition.Name)
 	}
-	if !slices.Equal(names, []string{"notion_search", "notion_get_page", "notion_query_data_source", "notion_get_block_children", "movies_next", "app_help"}) || !strings.Contains(alice.request.Tools.Guidance, "notion_search") {
+	if !slices.Equal(names, chatTools(nil, "notion_search", "notion_get_page", "notion_query_data_source", "notion_get_block_children", "movies_next")) || !strings.Contains(alice.request.Tools.Guidance, "notion_search") {
 		t.Fatalf("Alice's tools = %v guidance=%q", names, alice.request.Tools.Guidance)
 	}
 	execute := func(name, arguments string) agentruntime.ToolResult {
@@ -355,7 +355,7 @@ func TestNotionToolsAreScopedToTheConnectedPrincipal(t *testing.T) {
 
 	h.push(textUpdate(2, 202, "hi"))
 	bob := receive(t, h.ctx, runtime.calls)
-	if !onlyHelp(bob.request.Tools) {
+	if !onlyCoreTools(bob.request.Tools) {
 		t.Fatalf("Bob received tools without a connection: %+v", bob.request.Tools)
 	}
 	bob.answer <- agentruntime.RunResult{Response: "hello"}
@@ -366,7 +366,7 @@ func TestNotionToolsAreScopedToTheConnectedPrincipal(t *testing.T) {
 	before := len(sim.Requests())
 	h.push(textUpdate(3, 202, "search my pages"))
 	bob = receive(t, h.ctx, runtime.calls)
-	if len(bob.request.Tools.Definitions) != 6 {
+	if len(bob.request.Tools.Definitions) != len(chatTools(nil))+5 {
 		t.Fatalf("Bob's tools after connecting = %+v", bob.request.Tools)
 	}
 	result, err := bob.request.Tools.Executor.Execute(bob.ctx, agentruntime.ToolCall{Name: "notion_search", Arguments: json.RawMessage(`{"query":"bob"}`)})
@@ -385,7 +385,7 @@ func TestNotionToolsAreScopedToTheConnectedPrincipal(t *testing.T) {
 	// Disconnecting during a turn makes the next execution fail closed without a request.
 	h.push(textUpdate(4, 101, "again"))
 	alice = receive(t, h.ctx, runtime.calls)
-	if len(alice.request.Tools.Definitions) != 6 {
+	if len(alice.request.Tools.Definitions) != len(chatTools(nil))+5 {
 		t.Fatalf("Alice's tools = %+v", alice.request.Tools)
 	}
 	h.requestSettings(5, 101)

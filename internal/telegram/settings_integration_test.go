@@ -36,7 +36,7 @@ func TestSettingsCallbacksAreAuthorizedAnsweredAndRefreshed(t *testing.T) {
 			if !strings.HasPrefix(edit.text, "Settings › Model") || !strings.Contains(edit.text, "ending in 1111") || !slices.Equal(buttonData(edit.keyboard), []string{"model:disconnect", "nav:root"}) {
 				t.Fatalf("unknown action %d rendered %+v", id, edit)
 			}
-		} else if !strings.Contains(edit.text, "Model: connected") || !slices.Equal(buttonData(edit.keyboard), []string{"nav:model"}) {
+		} else if !strings.Contains(edit.text, "Model: connected") || !slices.Equal(buttonData(edit.keyboard), []string{"nav:model", "nav:tools", "nav:memory"}) {
 			t.Fatalf("unknown action %d rendered %+v", id, edit)
 		}
 	}

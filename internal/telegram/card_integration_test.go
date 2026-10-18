@@ -31,8 +31,8 @@ type sentPhoto struct {
 }
 
 // cardProvider stands in for a tool that renders a card: it stages bytes naming the principal for
-// the turn the broker says the call belongs to.
-type cardProvider struct{ box *outbox.Box }
+// the turn the broker says the call belongs to, in the harness's outbox.
+type cardProvider struct{ h *conversationHarness }
 
 func (cardProvider) Contribute(context.Context, string) (tools.Contribution, error) {
 	return tools.Contribution{Definitions: []tools.Definition{{
@@ -46,7 +46,7 @@ func (p cardProvider) Execute(ctx context.Context, principalID string, _ tools.C
 	if turn == "" {
 		return tools.Result{Text: "no turn", IsError: true}, nil
 	}
-	if err := p.box.Stage(principalID, turn, cardBytes(principalID)); err != nil {
+	if err := p.h.outbox.Stage(principalID, turn, cardBytes(principalID)); err != nil {
 		return tools.Result{}, err
 	}
 	return tools.Result{Text: "staged"}, nil

@@ -87,7 +87,7 @@ func (h *conversationHarness) seedMemory(principalID, id, kind, text string) {
 
 func newMemoryHarness(t *testing.T, runtime *controlledRuntime) *conversationHarness {
 	t.Helper()
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{memory: true, providers: []tools.Provider{outsideProvider{}}})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{providers: []tools.Provider{outsideProvider{}}})
 	h.provision("alice", "acct-alice")
 	h.provision("bob", "acct-bob")
 	h.start()
@@ -528,7 +528,7 @@ func TestMemoryPrivacyLineAndCommandRegistration(t *testing.T) {
 	h := newMemoryHarness(t, runtime)
 
 	h.push(textUpdate(1, 101, "/privacy"))
-	h.wantReply(101, 1, ConversationPrivacyReply+privacyItem+AttachmentPrivacyLine+privacyItem+MemoryPrivacyLine)
+	h.wantReply(101, 1, privacyLines(AttachmentPrivacyLine, SchedulePrivacyLine, VoicePrivacyLine, MemoryPrivacyLine))
 
 	registration := receive(t, h.ctx, h.registrations)
 	if !slices.ContainsFunc(registration.commands, func(command BotCommand) bool { return command.Command == "memory" }) {

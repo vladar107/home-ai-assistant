@@ -10,9 +10,34 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/testutil/notionsim"
 )
 
-// onlyHelp tells whether a turn carries app_help alone, as one without any granted integration does.
-func onlyHelp(set agentruntime.ToolSet) bool {
-	return slices.Equal(toolNames(set), []string{"app_help"})
+// coreToolNames are the tools every chat turn is offered without an integration, in the order the
+// application registers them: pictures, withdrawing a proposal, reactions, jobs and reminders,
+// memory, trips, and the backlog.
+var coreToolNames = []string{
+	"generate_image", "proposal_withdraw", "react",
+	"schedule_list", "schedule_get", "reminder_set", "reminder_cancel", "schedule_propose", "schedule_update", "schedule_remove",
+	"memory_add", "memory_replace", "memory_remove",
+	"trip_list", "trip_add", "trip_update",
+	"backlog_add", "backlog_list", "backlog_update",
+}
+
+// chatTools is a chat turn's tool list: a test's own tools first, then the core tools, then the
+// integrations' tools, and app_help last.
+func chatTools(own []string, integrations ...string) []string {
+	return slices.Concat(own, coreToolNames, integrations, []string{"app_help"})
+}
+
+// privacyLines is the /privacy answer of a conversation with these lines below the opening
+// paragraph. Attachments, jobs, voice, and memory are always among them, as the application always
+// runs them.
+func privacyLines(lines ...string) string {
+	return ConversationPrivacyReply + privacyItem + strings.Join(lines, privacyItem)
+}
+
+// onlyCoreTools tells whether a turn carries the core tools alone, as one without any granted
+// integration does.
+func onlyCoreTools(set agentruntime.ToolSet) bool {
+	return slices.Equal(toolNames(set), chatTools(nil))
 }
 
 // /help and an unknown command list exactly what is registered, plus the commands answered only
@@ -26,7 +51,7 @@ func TestHelpListsTheRegisteredCommands(t *testing.T) {
 	for _, command := range append(registration.commands, typedCommands...) {
 		want += "\n/" + command.Command + ": " + command.Description
 	}
-	want += "\n\n" + HelpConversationLine
+	want += "\n" + BacklogHelpLine + "\n\n" + HelpConversationLine
 	if !strings.Contains(want, "\n/jobs: ") {
 		t.Fatalf("registered commands = %+v, want /jobs among them", registration.commands)
 	}

@@ -66,7 +66,7 @@ func TestTrainsSwitchControlsToolsPerUser(t *testing.T) {
 
 	wantTrains(offered(1, 101), true)
 	h.push(textUpdate(2, 101, "/privacy"))
-	h.wantReply(101, 2, ConversationPrivacyReply+privacyItem+AttachmentPrivacyLine+privacyItem+NSPrivacyLine)
+	h.wantReply(101, 2, privacyLines(AttachmentPrivacyLine, SchedulePrivacyLine, NSPrivacyLine, VoicePrivacyLine, MemoryPrivacyLine))
 
 	overview := h.requestSettings(3, 101)
 	if !strings.Contains(overview.text, "Everyday tools: Trains on") || !slices.Contains(buttonData(overview.keyboard), "nav:tools") {
@@ -83,11 +83,11 @@ func TestTrainsSwitchControlsToolsPerUser(t *testing.T) {
 	}
 	wantTrains(offered(6, 101), false)
 	h.push(textUpdate(7, 101, "/privacy"))
-	h.wantReply(101, 7, ConversationPrivacyReply+privacyItem+AttachmentPrivacyLine)
+	h.wantReply(101, 7, privacyLines(AttachmentPrivacyLine, SchedulePrivacyLine, VoicePrivacyLine, MemoryPrivacyLine))
 
 	wantTrains(offered(8, 202), true)
 	h.push(textUpdate(9, 202, "/privacy"))
-	h.wantReply(202, 9, ConversationPrivacyReply+privacyItem+AttachmentPrivacyLine+privacyItem+NSPrivacyLine)
+	h.wantReply(202, 9, privacyLines(AttachmentPrivacyLine, SchedulePrivacyLine, NSPrivacyLine, VoicePrivacyLine, MemoryPrivacyLine))
 
 	h.requestSettings(10, 101)
 	if edit := h.press(11, 101, settingsMessageID(10), "ns:on"); !strings.Contains(edit.text, NSOnLine) || !slices.Contains(buttonData(edit.keyboard), "ns:off") {

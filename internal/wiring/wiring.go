@@ -105,7 +105,8 @@ type Inputs struct {
 	// Runtime runs the model. Where it implements conversation.Transcripts it also forgets a
 	// finished conversation's photos.
 	Runtime agentruntime.AgentRuntime
-	// SessionFiles locates the runtime's session files, for the conversation history tools.
+	// SessionFiles locates the runtime's session files, for the conversation history tools and the
+	// titles in /sessions; nil leaves the history out, for a runtime that keeps no session files.
 	SessionFiles history.Directories
 	// Sessions removes old runtime sessions of finished runs; nil keeps them.
 	Sessions schedule.SessionPruner
@@ -235,8 +236,6 @@ func Build(ctx context.Context, in Inputs) (*Assembly, error) {
 		return nil, errors.New("wiring: telemetry is required")
 	case in.Runtime == nil:
 		return nil, errors.New("wiring: model runtime is required")
-	case in.SessionFiles == nil:
-		return nil, errors.New("wiring: session files are required")
 	case in.Chat == nil || in.Reminders == nil || in.Alerts == nil || in.TaskMessages == nil || in.TripNotices == nil:
 		return nil, errors.New("wiring: the chat and its senders are required")
 	case len(in.Principals) == 0:
@@ -536,12 +535,16 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		a.Locations = locationService
 		turnLocations = locationService
 	}
-	conversationHistory, err := history.NewService(in.Store, in.SessionFiles, a.location, telemetry)
-	if err != nil {
-		return fmt.Errorf("initialize conversation history: %w", err)
-	}
-	if err := broker.Register(conversationHistory); err != nil {
-		return err
+	var conversationHistory conversation.History
+	if in.SessionFiles != nil {
+		reader, err := history.NewService(in.Store, in.SessionFiles, a.location, telemetry)
+		if err != nil {
+			return fmt.Errorf("initialize conversation history: %w", err)
+		}
+		if err := broker.Register(reader); err != nil {
+			return err
+		}
+		conversationHistory = reader
 	}
 	notices := conversation.Notices{approvals}
 	var reports conversation.Reports = scheduler

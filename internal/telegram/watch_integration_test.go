@@ -279,14 +279,18 @@ func agentWatch() watch.Spec {
 func TestAgentWatchChecksInAReadOnlyTurnAndAlertsAsOutsideContent(t *testing.T) {
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, watches: &stubEvaluator{}, agentWatches: true})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, watches: &stubEvaluator{}})
 	h.provision("alice", "account-alice")
 	h.provision("bob", "account-bob")
 	h.start()
 	const id = "00000000000000c1"
 	h.createWatch("alice", id, agentWatch())
 
-	h.watches.Cycle(h.ctx)
+	// The watch loop checks the watch at once and, woken by the check's end, sends its alert.
+	if err := h.watches.Start(h.ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = h.watches.Shutdown(context.Background()) })
 	check := receive(t, h.ctx, runtime.calls)
 	if check.request.PrincipalID != "alice" || !strings.Contains(check.request.Message, `watch "Release date"`) ||
 		!strings.Contains(check.request.Message, "Check: Read the release notes page of the example project") {
@@ -297,8 +301,6 @@ func TestAgentWatchChecksInAReadOnlyTurnAndAlertsAsOutsideContent(t *testing.T) 
 		t.Fatalf("check tools = %v", names)
 	}
 	check.answer <- agentruntime.RunResult{Final: "The page names a date.\n" + `{"met": true, "value": "1 December", "headline": "The next release is on 1 December.", "details": "Found on the release notes page."}`}
-	receive(t, h.ctx, h.agentChecked)
-	h.watches.Cycle(h.ctx)
 	alert := h.nextMessage()
 	if alert.chatID != 101 || !strings.Contains(alert.text, "Release date") || !strings.Contains(alert.text, "The next release is on 1 December.") ||
 		!slices.Equal(buttonData(alert.keyboard), []string{"watch:mute:" + id, "watch:pause:" + id}) {

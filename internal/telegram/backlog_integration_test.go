@@ -15,7 +15,7 @@ import (
 
 func newBacklogHarness(t *testing.T, runtime *controlledRuntime) *conversationHarness {
 	t.Helper()
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{backlog: true, providers: []tools.Provider{outsideProvider{}}})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{providers: []tools.Provider{outsideProvider{}}})
 	h.provision("alice", "acct-alice")
 	h.provision("bob", "acct-bob")
 	h.start()
@@ -51,7 +51,7 @@ func TestBacklogDatesFollowTheHouseholdCalendar(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtime := newControlledRuntime()
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{backlog: true, location: home})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{location: home})
 	h.provision("alice", "acct-alice")
 	h.start()
 	h.seedBacklog("alice", "aaaaaaa1", "Idea", "Details.", time.Date(2026, 10, 1, 18, 0, 0, 0, time.UTC))

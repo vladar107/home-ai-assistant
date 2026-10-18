@@ -64,7 +64,7 @@ func (h *conversationHarness) openSettingsPage(updateID, userID, messageID int64
 func (h *conversationHarness) requestConnect(firstUpdateID, userID int64) string {
 	h.t.Helper()
 	settings := h.requestSettings(firstUpdateID, userID)
-	if !strings.Contains(settings.text, "Model: not connected") || !slices.Equal(buttonData(settings.keyboard), []string{"nav:model"}) {
+	if !strings.Contains(settings.text, "Model: not connected") || !slices.Equal(buttonData(settings.keyboard), []string{"nav:model", "nav:tools", "nav:memory"}) {
 		h.t.Fatalf("settings before connect = %+v", settings)
 	}
 	page := h.openSettingsPage(firstUpdateID+1, userID, settingsMessageID(firstUpdateID), "model")
@@ -179,7 +179,7 @@ func TestConnectCeremonyBindsSubscription(t *testing.T) {
 	}
 
 	settings := h.requestSettings(4, 101)
-	if !strings.Contains(settings.text, "Model: connected") || !slices.Equal(buttonData(settings.keyboard), []string{"nav:model"}) {
+	if !strings.Contains(settings.text, "Model: connected") || !slices.Equal(buttonData(settings.keyboard), []string{"nav:model", "nav:tools", "nav:memory"}) {
 		t.Fatalf("settings after connect = %+v", settings)
 	}
 	if page := h.openSettingsPage(5, 101, settingsMessageID(4), "model"); !strings.Contains(page.text, "ending in 1234") || !slices.Equal(buttonData(page.keyboard), []string{"model:disconnect", "nav:root"}) {
@@ -207,7 +207,7 @@ func TestConnectOutcomes(t *testing.T) {
 			t.Fatal("denied ceremony wrote a credential")
 		}
 		settings := h.requestSettings(4, 101)
-		if !strings.Contains(settings.text, "Model: not connected") || !slices.Equal(buttonData(settings.keyboard), []string{"nav:model"}) {
+		if !strings.Contains(settings.text, "Model: not connected") || !slices.Equal(buttonData(settings.keyboard), []string{"nav:model", "nav:tools", "nav:memory"}) {
 			t.Fatalf("settings after denial = %+v", settings)
 		}
 		if page := h.openSettingsPage(5, 101, settingsMessageID(4), "model"); !slices.Equal(buttonData(page.keyboard), []string{"model:connect", "nav:root"}) {
@@ -316,7 +316,7 @@ func TestDisconnectCancelsRunningTurnAndBlocksQueuedWork(t *testing.T) {
 	h.push(textUpdate(1, 101, "long request"))
 	call := receive(t, h.ctx, runtime.calls)
 	settings := h.requestSettings(2, 101)
-	if !strings.Contains(settings.text, "Model: connected") || !slices.Equal(buttonData(settings.keyboard), []string{"nav:model"}) {
+	if !strings.Contains(settings.text, "Model: connected") || !slices.Equal(buttonData(settings.keyboard), []string{"nav:model", "nav:tools", "nav:memory"}) {
 		t.Fatalf("settings while connected = %+v", settings)
 	}
 	if page := h.openSettingsPage(3, 101, settingsMessageID(2), "model"); !strings.Contains(page.text, "ending in lice") || !slices.Equal(buttonData(page.keyboard), []string{"model:disconnect", "nav:root"}) {

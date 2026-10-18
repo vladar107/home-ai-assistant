@@ -66,7 +66,7 @@ func TestTurnsCarryOnlyThePrincipalsGrantedTools(t *testing.T) {
 	h.push(textUpdate(1, 101, "what did I note?"))
 	alice := receive(t, h.ctx, runtime.calls)
 	set := alice.request.Tools
-	if !slices.Equal(toolNames(set), []string{"lookup_note", "app_help"}) || !strings.HasPrefix(set.Guidance, "Use lookup_note to read the user's notes.\n") || set.Executor == nil {
+	if !slices.Equal(toolNames(set), chatTools([]string{"lookup_note"})) || !strings.HasPrefix(set.Guidance, "Use lookup_note to read the user's notes.\n") || set.Executor == nil {
 		t.Fatalf("Alice's turn tools = %+v", set)
 	}
 	result, err := set.Executor.Execute(alice.ctx, agentruntime.ToolCall{Name: "lookup_note", Arguments: json.RawMessage(`{"title":"groceries"}`)})
@@ -82,7 +82,7 @@ func TestTurnsCarryOnlyThePrincipalsGrantedTools(t *testing.T) {
 
 	h.push(textUpdate(2, 202, "what did I note?"))
 	bob := receive(t, h.ctx, runtime.calls)
-	if !onlyHelp(bob.request.Tools) {
+	if !onlyCoreTools(bob.request.Tools) {
 		t.Fatalf("Bob received Alice's tools: %+v", bob.request.Tools)
 	}
 	bob.answer <- agentruntime.RunResult{Response: "no notes"}

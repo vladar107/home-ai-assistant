@@ -185,7 +185,7 @@ func TestIntentCheckSeesTheAssistantQuestionButNeverTheTurnsOwnReply(t *testing.
 	stub := newTypeSafeStub(t, 0.9, http.StatusOK)
 	checker, registry := newIntentChecker(t, stub, true)
 	runtime := newControlledRuntime()
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{notion: writableNotionSimulator(t), memory: true, providers: []tools.Provider{outsideProvider{}}, recent: registry})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{notion: writableNotionSimulator(t), providers: []tools.Provider{outsideProvider{}}, recent: registry})
 	h.provision("alice", "acct-alice-1111")
 	h.installNotionToken("alice", aliceNotionToken)
 	h.start()

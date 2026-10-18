@@ -45,8 +45,8 @@ const (
 	TripsBusyNote        = "A scan is already running; any trips it finds arrive here as cards."
 )
 
-// TripController is implemented by the trip service; nil leaves the Trips switch, the buttons of
-// trip cards, and trip tabs out.
+// TripController is implemented by the trip service; nil leaves the buttons of trip cards and
+// trip tabs out. The Trips switch is NewTripsSection's.
 type TripController interface {
 	Track(ctx context.Context, principalID, id string) (trip.Result, error)
 	Dismiss(ctx context.Context, principalID, id string) (trip.Result, error)

@@ -22,7 +22,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
-	"github.com/vladar107/home-ai-assistant/internal/approval/withdrawal"
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
 	"github.com/vladar107/home-ai-assistant/internal/backlog"
 	"github.com/vladar107/home-ai-assistant/internal/chatgpt"
@@ -36,19 +35,17 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/ns"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/places"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/web"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/conversation/history"
-	"github.com/vladar107/home-ai-assistant/internal/delivery"
-	"github.com/vladar107/home-ai-assistant/internal/exposure"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
-	"github.com/vladar107/home-ai-assistant/internal/imagegen"
 	"github.com/vladar107/home-ai-assistant/internal/integration"
 	"github.com/vladar107/home-ai-assistant/internal/judgment"
 	"github.com/vladar107/home-ai-assistant/internal/location"
 	"github.com/vladar107/home-ai-assistant/internal/memory"
+	"github.com/vladar107/home-ai-assistant/internal/observability"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
-	"github.com/vladar107/home-ai-assistant/internal/reaction"
 	"github.com/vladar107/home-ai-assistant/internal/routes"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
@@ -64,6 +61,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/trip"
 	"github.com/vladar107/home-ai-assistant/internal/turnstate"
 	"github.com/vladar107/home-ai-assistant/internal/watch"
+	"github.com/vladar107/home-ai-assistant/internal/wiring"
 )
 
 // integrationTimeout bounds a whole test, not one exchange, and the longest tests here run more
@@ -161,8 +159,12 @@ func (b *lockedBuffer) String() string {
 	return b.buffer.String()
 }
 
+// harnessOptions configure the application a test runs, as the operator's settings do: each names
+// a connector or optional feature to add, against its simulator, or a timing or clock to replace.
+// Everything production always runs, such as memory, the backlog, trips, routes, and reactions,
+// runs in every test, and so does the conversation history with a runtime that keeps session files.
 type harnessOptions struct {
-	// chatGPT adds voice transcription and the image tool against the given backend.
+	// chatGPT is the backend for voice transcription and pictures; nil gives an idle one.
 	chatGPT             *chatgptsim.Simulator
 	profilesDir         string
 	codeTimeout         time.Duration
@@ -173,10 +175,11 @@ type harnessOptions struct {
 	approvalLifetime    time.Duration
 	approvalSweep       time.Duration
 	nasRoots            []nas.PrincipalRoots
-	// schedules adds the scheduler, its tools, and /jobs, on the given clock.
+	// schedules runs the scheduler, the watches, the routes, and the trips on the given clock, and
+	// ticks the scheduler quickly.
 	schedules *testClock
 	google    *googlesim.Simulator
-	// calendar serves the Calendar API for the google simulator's tokens; nil leaves Calendar out.
+	// calendar serves the Calendar API for the google simulator's tokens.
 	calendar *calendarsim.Simulator
 	// web adds the web connector and its settings section, as HOME_AGENT_WEB_ENABLED does.
 	web bool
@@ -190,57 +193,30 @@ type harnessOptions struct {
 	// busContact as the operator's Transitous contact.
 	bus        string
 	busContact string
-	// cards adds the outbox and the stage_card test tool that stages a card for the turn's reply.
+	// cards adds the stage_card test tool that stages a card for the turn's reply.
 	cards       bool
 	turnTimeout time.Duration
-	// location turns on the current-time line, read from clock when one is given.
+	// location is the household's time zone, Europe/Amsterdam without it, and turns on the
+	// current-time line, read from clock when one is given.
 	location *time.Location
 	clock    *testClock
 	// locations enables shared locations on the clock, naming every place locationName.
 	locations    bool
 	locationName string
 	pinTTL       time.Duration
-	// memory adds per-user memory with its tools, /memory, and its settings switch, with third-party
-	// exposure recorded on the conversation.
-	memory bool
-	// history reads Pi's session files from these directories for /sessions and the history tools.
-	history history.Directories
 	// tasks adds background tasks with this configuration, as HOME_AGENT_TASKS_ENABLED does.
 	tasks *task.Config
 	// watches adds the watch service, on the schedules clock, checking departures with this
 	// evaluator; tests run its cycles themselves.
 	watches watch.Evaluator
-	// agentWatches adds agent watches checked by the conversation's own check turns, signalling
-	// agentChecked as each check ends, and passes watch alerts to the next turn as the
-	// application does.
-	agentWatches bool
-	// routes adds saved routes with their tools and /jobs entries, checked through the ns and bus
-	// connectors where those are set.
-	routes bool
-	// search adds the web search check, as the application does, so a query after outside content
-	// is allowed, held for confirmation, or denied.
-	search bool
 	// recent keeps each chat turn's message and plain reply for the guards, as a TypeSafe key does.
 	recent *turnstate.Registry
 	// typingInterval, draftDelay, and draftInterval replace the turn indicator's timings.
 	typingInterval, draftDelay, draftInterval time.Duration
-	// reactions adds the react tool, as the application always does.
-	reactions bool
-	// backlog adds the backlog with its tools and /backlog, with outside content checked on the
-	// conversation.
-	backlog bool
 	// topics turns the bot's tabs on, as BotFather's switch does.
 	topics bool
-	// typeSafe adds the safety checks section to /settings and /privacy, as a TypeSafe key does.
+	// typeSafe configures a TypeSafe key, which nothing in the test calls.
 	typeSafe bool
-	// trips adds trips on the schedules clock, with the Trips section where Google is set up too.
-	trips bool
-}
-
-type fixedDescriber string
-
-func (d fixedDescriber) Describe(context.Context, float64, float64) (string, error) {
-	return string(d), nil
 }
 
 // testFile is one attachment the Telegram simulator will hand out through getFile.
@@ -279,9 +255,10 @@ type conversationHarness struct {
 	scheduler      *schedule.Service
 	tasks          *task.Service
 	watches        *watch.Service
-	agentChecked   chan struct{}
 	routes         *routes.Service
 	trips          *trip.Service
+	assembly       *wiring.Assembly
+	tripNotifier   *TripNotifier
 	auth           *codexauth.Simulator
 	profilesDir    string
 	credentialsDir string
@@ -339,49 +316,42 @@ type draftRequest struct {
 
 type turnOutcome struct{ outcome, errorKind string }
 
+// integrationTelemetry records nothing but what the tests read: turn outcomes, failed turn
+// indicators, reactions, and reply feedback.
 type integrationTelemetry struct {
-	turns chan turnOutcome
-	// indicatorFailure, when set, receives each failed typing or draft call by method.
-	indicatorFailure func(method string)
-	// feedback, when set, receives each user reaction class and reconsider outcome as "kind:value".
-	feedback func(counted string)
+	*observability.Telemetry
+	h *conversationHarness
 }
 
-func (integrationTelemetry) ContextLogger(_ context.Context, logger *slog.Logger) *slog.Logger {
-	return logger
-}
-func (i integrationTelemetry) StartConversationTurn(ctx context.Context, _, _ string) (context.Context, func(string, string)) {
+func (i *integrationTelemetry) StartConversationTurn(ctx context.Context, _, _ string) (context.Context, func(string, string)) {
 	return ctx, func(outcome, errorKind string) {
 		select {
-		case i.turns <- turnOutcome{outcome: outcome, errorKind: errorKind}:
+		case i.h.turns <- turnOutcome{outcome: outcome, errorKind: errorKind}:
 		default:
 		}
 	}
 }
 
-func (integrationTelemetry) RecordReply(context.Context, string, string, string, string, time.Duration) {
+func (i *integrationTelemetry) RecordTurnIndicatorFailure(_ context.Context, _, method string) {
+	i.h.recordIndicatorFailure(method)
 }
-func (integrationTelemetry) RecordReplyStage(context.Context, string, string, time.Duration) {}
-func (integrationTelemetry) RecordModelTurn(context.Context, string, string, int, int64, int64) {
+
+func (i *integrationTelemetry) RecordReplyFeedback(_ context.Context, _, class string) {
+	i.h.recordFeedback("class:" + class)
 }
-func (integrationTelemetry) RecordToolCallsPerTurn(context.Context, string, string, int) {}
-func (integrationTelemetry) RecordHintFollowThrough(context.Context, string, string)     {}
-func (integrationTelemetry) RecordConversationResume(context.Context, string, string)    {}
-func (i integrationTelemetry) RecordTurnIndicatorFailure(_ context.Context, _, method string) {
-	if i.indicatorFailure != nil {
-		i.indicatorFailure(method)
-	}
+
+func (i *integrationTelemetry) RecordReconsider(_ context.Context, _, outcome string) {
+	i.h.recordFeedback("reconsider:" + outcome)
 }
-func (integrationTelemetry) RecordConversationSearch(context.Context, string, string) {}
-func (i integrationTelemetry) RecordReplyFeedback(_ context.Context, _, class string) {
-	if i.feedback != nil {
-		i.feedback("class:" + class)
-	}
+
+func (i *integrationTelemetry) RecordReaction(_ context.Context, _, emoji string) {
+	i.h.mu.Lock()
+	defer i.h.mu.Unlock()
+	i.h.reactionCounts[emoji]++
 }
-func (i integrationTelemetry) RecordReconsider(_ context.Context, _, outcome string) {
-	if i.feedback != nil {
-		i.feedback("reconsider:" + outcome)
-	}
+
+func (i *integrationTelemetry) RecordReactionConversion(_ context.Context, _, outcome string) {
+	i.h.recordFeedback("converted:" + outcome)
 }
 
 func newConversationHarness(t *testing.T, runtime agentruntime.AgentRuntime) *conversationHarness {
@@ -417,10 +387,11 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = h.db.Close() })
-	identities, err := identity.NewService(h.store, []identity.ConfiguredPrincipal{
+	principals := []identity.ConfiguredPrincipal{
 		{ID: "alice", DisplayName: "Alice", TelegramUserID: 101},
 		{ID: "bob", DisplayName: "Bob", TelegramUserID: 202},
-	})
+	}
+	identities, err := identity.NewService(h.store, principals)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,488 +403,221 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(h.logs, nil))
-	h.profilesDir = options.profilesDir
-	if h.profilesDir == "" {
-		h.profilesDir = filepath.Join(t.TempDir(), "profiles")
-	}
+	h.profilesDir = cmp.Or(options.profilesDir, filepath.Join(t.TempDir(), "profiles"))
 	h.auth = codexauth.New(t)
-	h.connections, err = connection.NewService(connection.Config{
-		ProfilesDir: h.profilesDir, AuthBaseURL: h.auth.URL(), HTTPClient: h.auth.Client(),
-		CodeTimeout: options.codeTimeout, Principals: []string{"alice", "bob"},
-	}, h.store, h.client, logger)
+	dataDir := t.TempDir()
+	h.attachmentsDir = filepath.Join(dataDir, "attachments")
+	h.credentialsDir = filepath.Join(dataDir, "integrations")
+	h.outboxDir = filepath.Join(dataDir, "outbox")
+	in := h.wiringInputs(t, runtime, options, logger, principals)
+	asm, err := wiring.Build(ctx, in)
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.switches, err = integration.NewSwitches(h.store, logger)
-	if err != nil {
-		t.Fatal(err)
+	h.assembly = asm
+	h.switches, h.connections, h.attachments, h.outbox = asm.Switches, asm.Connections, asm.Attachments, asm.Outbox
+	h.conversation, h.approvals, h.searches, h.scheduler, h.tasks, h.watches = asm.Conversation, asm.Approvals, asm.SearchChecks, asm.Scheduler, asm.Tasks, asm.Watches
+	h.notion, h.nas, h.google, h.web, h.ns, h.homeAssistant, h.grafana, h.bus = asm.Notion, asm.NAS, asm.Google, asm.Web, asm.NS, asm.HomeAssistant, asm.Grafana, asm.Bus
+	h.routes, h.locations, h.memory, h.backlog, h.trips = asm.Routes, asm.Locations, asm.Memory, asm.Backlog, asm.Trips
+	h.service = h.telegramService(identities, logger)
+	t.Cleanup(h.stop)
+	return h
+}
+
+// wiringInputs is the application's configuration as each test sets it: every connector the
+// options name, against its simulator, and the clocks and timings the options replace.
+func (h *conversationHarness) wiringInputs(t *testing.T, runtime agentruntime.AgentRuntime, options harnessOptions, logger *slog.Logger, principals []identity.ConfiguredPrincipal) wiring.Inputs {
+	t.Helper()
+	// The application always holds ChatGPT for voice and pictures; a test that brings no backend of
+	// its own gets one nobody calls.
+	chatGPT := options.chatGPT
+	if chatGPT == nil {
+		chatGPT = chatgptsim.New(t)
 	}
-	broker, err := tools.NewBroker(logger)
-	if err != nil {
-		t.Fatal(err)
+	// The application's runtime keeps session files, which the history reads; the history runs here
+	// only with a runtime that keeps them too.
+	sessionFiles, _ := runtime.(history.Directories)
+	clock := options.clock
+	if clock == nil {
+		clock = options.schedules
 	}
-	broker.SetSwitches(h.switches)
-	exposures, err := exposure.NewService(h.store, logger)
-	if err != nil {
-		t.Fatal(err)
+	var now func() time.Time
+	if clock != nil {
+		now = clock.Now
 	}
-	broker.SetTurnExposure(exposures)
-	broker.SetTurnPrivacy(exposures)
-	for _, provider := range options.providers {
-		if err := broker.Register(provider); err != nil {
-			t.Fatal(err)
-		}
+	// The application starts every turn's message with the time and with the user's name. Here a
+	// turn carries the time only with the location option and never the name, so tests compare the
+	// message the user sent.
+	unnamed := make([]identity.ConfiguredPrincipal, 0, len(principals))
+	for _, principal := range principals {
+		principal.DisplayName = ""
+		unnamed = append(unnamed, principal)
 	}
-	h.attachmentsDir = filepath.Join(t.TempDir(), "attachments")
-	h.attachments, err = attachment.NewService(attachment.Config{Directory: h.attachmentsDir}, h.store, logger)
-	if err != nil {
-		t.Fatal(err)
+	zone := "Europe/Amsterdam"
+	if options.location != nil {
+		zone = options.location.String()
 	}
-	if err := broker.Register(h.attachments); err != nil {
-		t.Fatal(err)
+	h.tripNotifier = &TripNotifier{Client: h.client, Chats: h.store}
+	in := wiring.Inputs{
+		Store: h.store, Logger: logger, Telemetry: &integrationTelemetry{Telemetry: observability.Noop(), h: h},
+		Runtime: runtime, SessionFiles: sessionFiles,
+		Chat: h.client, Reminders: ReminderSender{Client: h.client}, Alerts: WatchAlertSender{Client: h.client},
+		TaskMessages: TaskMessenger{Client: h.client}, TripNotices: h.tripNotifier,
+		Principals: unnamed, DataDir: filepath.Dir(h.attachmentsDir), Zone: zone,
+		Core: wiring.CoreConfig{
+			TurnTimeout: cmp.Or(options.turnTimeout, 10*time.Second), TurnZone: options.location, Now: now,
+			TypingInterval: options.typingInterval, DraftDelay: options.draftDelay, DraftInterval: options.draftInterval,
+			ImageModel: "gpt-test:medium",
+			ChatGPT:    chatgpt.Config{BaseURL: chatGPT.URL(), HTTPClient: chatGPT.Client()},
+			Connection: connection.Config{
+				ProfilesDir: h.profilesDir, AuthBaseURL: h.auth.URL(), HTTPClient: h.auth.Client(),
+				CodeTimeout: options.codeTimeout, Principals: []string{"alice", "bob"},
+			},
+			Approval: approval.Config{Lifetime: options.approvalLifetime, SweepInterval: options.approvalSweep},
+			Recent:   options.recent,
+			Tasks:    options.tasks,
+			Watches:  options.watches != nil,
+		},
+		ExtraProviders: options.providers,
 	}
-	var transcriber Transcriber
-	if sim := options.chatGPT; sim != nil {
-		client, err := chatgpt.New(chatgpt.Config{BaseURL: sim.URL(), HTTPClient: sim.Client()}, h.connections)
-		if err != nil {
-			t.Fatal(err)
-		}
-		files, err := delivery.NewService(h.store, h.client, logger)
-		if err != nil {
-			t.Fatal(err)
-		}
-		images, err := imagegen.NewService(imagegen.Config{Model: "gpt-test:medium"}, client, files, h.attachments, logger)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := broker.Register(images); err != nil {
-			t.Fatal(err)
-		}
-		transcriber = client
-	}
-	h.approvals, err = approval.NewService(approval.Config{Lifetime: options.approvalLifetime, SweepInterval: options.approvalSweep}, h.store, h.client, logger)
-	if err != nil {
-		t.Fatal(err)
-	}
-	h.approvals.SetExposure(exposures)
-	h.approvals.SetSwitches(h.switches)
-	// Tests that assert a turn's exact tools leave the withdraw tool out by not using the scheduler.
 	if options.schedules != nil {
-		if err := broker.Register(withdrawal.Provider{Withdrawer: h.approvals}); err != nil {
-			t.Fatal(err)
+		in.Core.ScheduleTick = 10 * time.Millisecond
+	}
+	if options.cards {
+		in.ExtraProviders = append(slices.Clone(in.ExtraProviders), cardProvider{h: h})
+	}
+	if options.watches != nil {
+		in.WatchEvaluators = map[string]watch.Evaluator{watch.KindDeparture: options.watches}
+	}
+	if options.typeSafe {
+		in.Core.TypeSafe = judgment.Config{APIKey: "test-key", Endpoint: "http://127.0.0.1:1/judge"}
+	}
+	if options.locations {
+		in.Core.Location = &wiring.LocationConfig{
+			Policy:        location.Policy{PinTTL: cmp.Or(options.pinTTL, time.Hour), LiveSilence: time.Hour, LiveGrace: 15 * time.Minute},
+			PruneInterval: time.Hour,
+			Places:        places.Config{TransitousURL: placeNamer(t, cmp.Or(options.locationName, "Stationsplein 1, Leiden"))},
 		}
 	}
-	var reactions conversation.Reactions
-	if options.reactions {
-		provider, err := reaction.NewProvider(h.store, h.client, reactionTelemetry{h})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := broker.Register(provider); err != nil {
-			t.Fatal(err)
-		}
-		reactions = provider
-	}
-	h.credentialsDir = filepath.Join(t.TempDir(), "integrations")
 	if options.notion != nil {
-		h.notion, err = notion.NewService(notion.Config{
-			CredentialsDir: h.credentialsDir, APIBaseURL: options.notion.URL(), ChatConnect: options.notionChatConnect,
+		in.Notion = &notion.Config{
+			APIBaseURL: options.notion.URL(), ChatConnect: options.notionChatConnect,
 			HTTPClient: options.notion.Client(), IntakeLifetime: options.notionIntakeTimeout,
-		}, h.store, h.approvals, logger)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := broker.Register(h.notion); err != nil {
-			t.Fatal(err)
-		}
-		if err := h.approvals.RegisterExecutor(h.notion); err != nil {
-			t.Fatal(err)
 		}
 	}
 	if len(options.nasRoots) > 0 {
-		files, err := delivery.NewService(h.store, h.client, logger)
-		if err != nil {
-			t.Fatal(err)
-		}
-		h.nas, err = nas.NewService(nas.Config{Roots: options.nasRoots}, h.store, h.approvals, h.attachments, files, logger)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := broker.Register(h.nas); err != nil {
-			t.Fatal(err)
-		}
-		if err := h.approvals.RegisterExecutor(h.nas); err != nil {
-			t.Fatal(err)
-		}
+		in.NAS = &nas.Config{Roots: options.nasRoots}
 	}
 	if sim := options.google; sim != nil {
-		h.google, err = google.NewService(google.Config{
-			CredentialsDir: h.credentialsDir, ClientID: googlesim.ClientID, ClientSecret: googlesim.ClientSecret,
-			RedirectURL: googlesim.RedirectURL, AuthURL: sim.AuthURL(), TokenURL: sim.TokenURL(), RevokeURL: sim.RevokeURL(),
-			UserInfoURL: sim.UserInfoURL(), HTTPClient: sim.Client(),
-		}, h.store, logger)
-		if err != nil {
-			t.Fatal(err)
-		}
-		mail, err := gmail.NewService(gmail.Config{APIBaseURL: sim.URL(), HTTPClient: sim.Client()}, h.google, logger)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := broker.Register(mail); err != nil {
-			t.Fatal(err)
+		in.Google = &wiring.GoogleConfig{
+			Accounts: google.Config{
+				ClientID: googlesim.ClientID, ClientSecret: googlesim.ClientSecret, RedirectURL: googlesim.RedirectURL,
+				AuthURL: sim.AuthURL(), TokenURL: sim.TokenURL(), RevokeURL: sim.RevokeURL(), UserInfoURL: sim.UserInfoURL(), HTTPClient: sim.Client(),
+			},
+			Mail: gmail.Config{APIBaseURL: sim.URL(), HTTPClient: sim.Client()},
+			// Calendar is read in UTC, and nowhere unless the test serves it.
+			Calendar: calendar.Config{Location: time.UTC, APIBaseURL: "http://127.0.0.1:1"},
 		}
 		if calendarSim := options.calendar; calendarSim != nil {
-			calendars, err := calendar.NewService(calendar.Config{
-				Location: time.UTC, APIBaseURL: calendarSim.APIBaseURL(), HTTPClient: calendarSim.Client(),
-			}, h.google, logger)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := broker.Register(calendars); err != nil {
-				t.Fatal(err)
-			}
+			in.Google.Calendar.APIBaseURL, in.Google.Calendar.HTTPClient = calendarSim.APIBaseURL(), calendarSim.Client()
 		}
 	}
-	var webSearch conversation.WebSearch
 	if options.web {
-		h.web, err = web.NewService(web.Config{}, h.switches, logger)
-		if err != nil {
-			t.Fatal(err)
-		}
-		h.web.SetExposure(exposures)
-		if err := broker.Register(h.web); err != nil {
-			t.Fatal(err)
-		}
-		webSearch = h.web
+		in.Web = &web.Config{}
 	}
 	if options.ns != "" {
-		h.ns, err = ns.NewService(ns.Config{APIKey: "test-key", BaseURL: options.ns}, h.switches, logger)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := broker.Register(h.ns); err != nil {
-			t.Fatal(err)
-		}
+		in.NS = &ns.Config{APIKey: "test-key", BaseURL: options.ns}
 	}
 	if options.homeAssistant != "" {
-		h.homeAssistant, err = homeassistant.NewService(homeassistant.Config{Token: "test-token", BaseURL: options.homeAssistant}, h.switches, h.approvals, logger)
-		if err != nil {
-			t.Fatal(err)
-		}
-		h.homeAssistant.SetExposure(exposures)
-		if err := broker.Register(h.homeAssistant); err != nil {
-			t.Fatal(err)
-		}
+		in.HA = &homeassistant.Config{Token: "test-token", BaseURL: options.homeAssistant}
 	}
 	if options.grafana != "" {
-		h.grafana, err = grafana.NewService(grafana.Config{Token: "test-token", BaseURL: options.grafana, Principals: []string{"alice"}}, logger)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := broker.Register(h.grafana); err != nil {
-			t.Fatal(err)
-		}
+		in.Grafana = &grafana.Config{Token: "test-token", BaseURL: options.grafana, Principals: []string{"alice"}}
 	}
 	if options.bus != "" {
-		h.bus, err = bus.NewService(bus.Config{
-			HomeStop: "50420100", Contact: options.busContact,
-			OVapiURL: options.bus, GTFSURL: options.bus, TransitousURL: options.bus,
-		}, h.switches, logger)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := broker.Register(h.bus); err != nil {
-			t.Fatal(err)
-		}
+		in.Bus = &bus.Config{HomeStop: "50420100", Contact: options.busContact, OVapiURL: options.bus, GTFSURL: options.bus, TransitousURL: options.bus}
 	}
-	var cards conversation.Cards
-	var photos conversation.PhotoDeliverer
-	if options.cards {
-		h.outboxDir = filepath.Join(t.TempDir(), "outbox")
-		h.outbox, err = outbox.New(h.outboxDir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := broker.Register(cardProvider{box: h.outbox}); err != nil {
-			t.Fatal(err)
-		}
-		cards, photos = h.outbox, h.client
-	}
-	turnTimeout := options.turnTimeout
-	if turnTimeout == 0 {
-		turnTimeout = 10 * time.Second
-	}
-	notices := conversation.Notices{h.approvals}
-	var reports conversation.Reports
-	var jobs conversation.Jobs
-	if options.schedules != nil {
-		h.scheduler, err = schedule.NewService(schedule.Config{Zone: "Europe/Amsterdam", TickInterval: 10 * time.Millisecond, Now: options.schedules.Now, Cards: cards, Photos: photos, Reminders: ReminderSender{Client: h.client}},
-			h.store, h.store, h.client, h.approvals, logger)
-		if err != nil {
-			t.Fatal(err)
-		}
-		h.scheduler.SetExposure(exposures)
-		if err := broker.Register(h.scheduler); err != nil {
-			t.Fatal(err)
-		}
-		if err := h.approvals.RegisterExecutor(h.scheduler); err != nil {
-			t.Fatal(err)
-		}
-		reports = h.scheduler
-		jobs = h.scheduler
-	}
-	if options.watches != nil {
-		h.watches, err = watch.NewService(watch.Config{Zone: "Europe/Amsterdam", Now: options.schedules.Now}, h.store, h.store, WatchAlertSender{Client: h.client}, h.approvals, logger)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := h.watches.Register(watch.KindDeparture, options.watches); err != nil {
-			t.Fatal(err)
-		}
-		if err := broker.Register(h.watches); err != nil {
-			t.Fatal(err)
-		}
-		if err := h.approvals.RegisterExecutor(h.watches); err != nil {
-			t.Fatal(err)
-		}
-		if options.agentWatches {
-			notices = append(notices, h.watches, conversation.OutsideNotice{Notice: h.watches.AgentNotices()})
-			reports = conversation.ReportSources{h.scheduler, h.watches}
-		}
-	}
-	if options.routes {
-		amsterdam, err := time.LoadLocation("Europe/Amsterdam")
-		if err != nil {
-			t.Fatal(err)
-		}
-		routeConfig := routes.Config{Location: amsterdam, Now: options.schedules.Now}
-		if h.ns != nil {
-			routeConfig.Trains = h.ns
-		}
-		if h.bus != nil {
-			routeConfig.Buses = h.bus
-		}
-		h.routes, err = routes.NewService(routeConfig, h.store, h.approvals, logger)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := broker.Register(h.routes); err != nil {
-			t.Fatal(err)
-		}
-		if err := h.approvals.RegisterExecutor(h.routes); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if options.tasks != nil {
-		taskConfig := *options.tasks
-		taskConfig.Cards, taskConfig.Photos = cards, photos
-		h.tasks = h.newTaskService(taskConfig)
-		if err := broker.Register(h.tasks); err != nil {
-			t.Fatal(err)
-		}
-		notices = append(notices, conversation.OutsideNotice{Notice: h.tasks})
-	}
-	var now func() time.Time
-	if options.clock != nil {
-		now = options.clock.Now
-	}
-	var locationTurns conversation.Locations
-	if options.locations {
-		ttl := cmp.Or(options.pinTTL, time.Hour)
-		h.locations, err = location.NewService(location.Config{
-			Policy:        location.Policy{PinTTL: ttl, LiveSilence: time.Hour, LiveGrace: 15 * time.Minute},
-			PruneInterval: time.Hour, Describer: fixedDescriber(cmp.Or(options.locationName, "Stationsplein 1, Leiden")),
-			Zone: cmp.Or(options.location, time.UTC), Now: now,
-		}, h.store, logger)
-		if err != nil {
-			t.Fatal(err)
-		}
-		locationTurns = h.locations
-	}
-	var memoryTurns conversation.Memory
-	if options.memory {
-		h.memory, err = memory.NewService(memory.Config{}, h.store, h.approvals, logger)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := broker.Register(h.memory); err != nil {
-			t.Fatal(err)
-		}
-		if err := h.approvals.RegisterExecutor(h.memory); err != nil {
-			t.Fatal(err)
-		}
-		memoryTurns = h.memory
-	}
-	if options.backlog {
-		h.backlog, err = backlog.NewService(backlog.Config{Location: options.location}, h.store, h.approvals, logger)
-		if err != nil {
-			t.Fatal(err)
-		}
-		h.backlog.SetExposure(exposures)
-		if err := broker.Register(h.backlog); err != nil {
-			t.Fatal(err)
-		}
-		if err := h.approvals.RegisterExecutor(h.backlog); err != nil {
-			t.Fatal(err)
-		}
-	}
-	var searchChecks conversation.SearchChecks
-	if options.search {
-		h.searches, err = searchcheck.NewService(exposures, h.approvals, logger, now)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := h.approvals.RegisterExecutor(h.searches); err != nil {
-			t.Fatal(err)
-		}
-		searchChecks = h.searches
-	}
-	var conversationHistory conversation.History
-	if options.history != nil {
-		reader, err := history.NewService(h.store, options.history, options.location, integrationTelemetry{turns: h.turns})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := broker.Register(reader); err != nil {
-			t.Fatal(err)
-		}
-		conversationHistory = reader
-	}
-	var recent conversation.Exchange
-	if options.recent != nil {
-		recent = options.recent
-	}
-	// The application hands the Pi runtime over as the transcripts too.
-	var transcripts conversation.Transcripts
-	if runtime, ok := runtime.(conversation.Transcripts); ok {
-		transcripts = runtime
-	}
-	h.conversation, err = conversation.NewService(
-		conversation.Config{Recent: recent, Memory: memoryTurns, Exposure: exposures, SearchChecks: searchChecks, Locations: locationTurns, TurnTimeout: turnTimeout, FollowUp: h.approvals, Notice: notices, Reports: reports, Jobs: jobs, Attachments: h.attachments, Transcripts: transcripts, WebSearch: webSearch, Cards: cards, Photos: photos, Location: options.location, Now: now, History: conversationHistory, Reactions: reactions,
-			TypingInterval: options.typingInterval, DraftDelay: options.draftDelay, DraftInterval: options.draftInterval},
-		h.store, runtime, h.client, broker, h.connections, logger, integrationTelemetry{turns: h.turns, indicatorFailure: h.recordIndicatorFailure, feedback: h.recordFeedback},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if h.scheduler != nil {
-		if err := h.scheduler.Register(schedule.ModelTurn(h.conversation)); err != nil {
-			t.Fatal(err)
-		}
-		if err := h.scheduler.Register(schedule.Reminder(h.scheduler.Now)); err != nil {
-			t.Fatal(err)
-		}
-	}
+	return in
+}
+
+// telegramService builds the Telegram service on the assembly as the application does.
+func (h *conversationHarness) telegramService(identities *identity.Service, logger *slog.Logger) *Service {
+	h.t.Helper()
+	asm := h.assembly
 	deps := Dependencies{
 		Client: h.client, Identities: identities, Cursors: h.store, Logger: logger, Tabs: h.store,
-		Conversation: h.conversation, Attachments: h.attachments, Approvals: h.approvals,
-		Sections: []Section{NewModelSection(h.connections, h.conversation, logger, nil)},
+		Conversation: asm.Conversation, Attachments: asm.Attachments, Approvals: asm.Approvals, Schedules: asm.Scheduler,
+		Trips: asm.Trips, Routes: asm.Routes, Memory: asm.Memory, Backlog: asm.Backlog, Transcriber: asm.ChatGPT,
 	}
-	switchSection := func(page SwitchPage, of integration.Switch) Section {
-		return NewSwitchSection(SwitchSettings{Page: page, Toggle: h.switches.Toggle(of)}, logger, nil)
+	if asm.Locations != nil {
+		deps.Locations = asm.Locations
 	}
-	if h.notion != nil {
-		deps.Sections = append(deps.Sections, NewNotionSection(h.notion, logger, nil))
+	if asm.Tasks != nil {
+		deps.Tasks = asm.Tasks
 	}
-	if h.nas != nil {
-		deps.Sections = append(deps.Sections, NewNASSection(h.nas, logger, nil))
+	if asm.Watches != nil {
+		deps.Watches = asm.Watches
 	}
-	if h.google != nil {
-		deps.Sections = append(deps.Sections, NewGoogleSection(h.google, logger, nil))
+	deps.Sections = []Section{NewModelSection(asm.Connections, asm.Conversation, logger, nil)}
+	if asm.Notion != nil {
+		deps.Sections = append(deps.Sections, NewNotionSection(asm.Notion, logger, nil))
 	}
-	if h.web != nil {
-		deps.Sections = append(deps.Sections, switchSection(WebPage, web.Switch))
+	if asm.NAS != nil {
+		deps.Sections = append(deps.Sections, NewNASSection(asm.NAS, logger, nil))
 	}
-	if h.ns != nil {
-		deps.Sections = append(deps.Sections, switchSection(NSPage, ns.Switch))
+	if asm.Google != nil {
+		deps.Sections = append(deps.Sections, NewGoogleSection(asm.Google, logger, nil))
 	}
-	if h.homeAssistant != nil {
-		home := h.homeAssistant
-		deps.Sections = append(deps.Sections, NewSwitchSection(SwitchSettings{
-			Page: HomePage, Toggle: h.switches.Toggle(homeassistant.Switch),
-			Details: HomeDetails(func(ctx context.Context) (bool, []string) {
-				exposure := home.Exposure(ctx)
-				return exposure.Checked, exposure.Conflicts
-			}),
-		}, logger, nil))
-	}
-	if h.bus != nil {
-		deps.Sections = append(deps.Sections, switchSection(BusPage, bus.Switch))
-	}
-	if h.scheduler != nil {
-		deps.Schedules = h.scheduler
-		deps.Sections = append(deps.Sections, NewHeadsUpSection(h.scheduler, logger, nil))
-	}
-	if options.typeSafe {
-		deps.Sections = append(deps.Sections, switchSection(TypeSafePage, judgment.OptInSwitch))
-	}
-	if h.locations != nil {
-		deps.Locations = h.locations
-		deps.Sections = append(deps.Sections, NewLocationSection(h.locations, logger, nil))
-	}
-	if h.grafana != nil {
-		deps.Sections = append(deps.Sections, NewSwitchSection(SwitchSettings{
-			Page: GrafanaPage, Toggle: h.switches.Toggle(grafana.Switch), Allowed: h.grafana.Allowed,
-		}, logger, nil))
-	}
-	if h.memory != nil {
-		deps.Memory = h.memory
-		deps.Sections = append(deps.Sections, NewMemorySection(h.memory, logger, nil))
-	}
-	if h.backlog != nil {
-		deps.Backlog = h.backlog
-	}
-	if h.tasks != nil {
-		h.tasks.SetRunner(h.conversation)
-		deps.Tasks = h.tasks
-	}
-	if h.watches != nil {
-		deps.Watches = h.watches
-	}
-	if options.trips {
-		h.trips, err = trip.NewService(trip.Config{Now: options.schedules.Now}, h.store, trip.NewScheduleReminders(h.scheduler), logger)
-		if err != nil {
-			t.Fatal(err)
+	for _, page := range asm.SwitchPages {
+		settings := SwitchSettings{Toggle: asm.Switches.Toggle(page.Switch), Allowed: page.Allowed}
+		if page.Exposure != nil {
+			settings.Details = HomeDetails(page.Exposure)
 		}
-		deps.Trips = h.trips
-		if h.google != nil {
-			deps.Sections = append(deps.Sections, NewTripsSection(h.scheduler, h.google, logger, nil))
+		found, ok := SwitchPageFor(page.Switch.Integration)
+		if !ok {
+			h.t.Fatalf("integration %q has no settings page", page.Switch.Integration)
 		}
+		settings.Page = found
+		deps.Sections = append(deps.Sections, NewSwitchSection(settings, logger, nil))
 	}
-	if h.routes != nil {
-		deps.Routes = h.routes
+	deps.Sections = append(deps.Sections, NewHeadsUpSection(asm.Scheduler, logger, nil))
+	if asm.Locations != nil {
+		deps.Sections = append(deps.Sections, NewLocationSection(asm.Locations, logger, nil))
 	}
-	if transcriber != nil {
-		deps.Transcriber = transcriber
+	deps.Sections = append(deps.Sections, NewMemorySection(asm.Memory, logger, nil))
+	if asm.Google != nil {
+		deps.Sections = append(deps.Sections, NewTripsSection(asm.Scheduler, asm.Google, logger, nil))
 	}
-	h.service, err = NewService(deps)
+	service, err := NewService(deps)
 	if err != nil {
-		t.Fatal(err)
+		h.t.Fatal(err)
 	}
-	h.client.ObserveTabs(h.service)
-	if h.scheduler != nil {
-		h.scheduler.SetFeeds(h.service.Feeds())
+	h.client.ObserveTabs(service)
+	asm.Scheduler.SetFeeds(service.Feeds())
+	if asm.Watches != nil {
+		asm.Watches.SetFeeds(service.Feeds())
 	}
-	if h.watches != nil {
-		h.watches.SetFeeds(h.service.Feeds())
+	h.tripNotifier.Feeds = service.Feeds()
+	asm.Conversation.SetTabReplies(service)
+	if err := asm.Tools.Register(service.Help()); err != nil {
+		h.t.Fatal(err)
 	}
-	h.conversation.SetTabReplies(h.service)
-	if err := broker.Register(h.service.Help()); err != nil {
-		t.Fatal(err)
-	}
-	if options.agentWatches {
-		h.agentChecked = make(chan struct{}, 16)
-		agent, err := watch.NewAgentEvaluator(h.conversation, watch.AgentConfig{Now: options.schedules.Now, Finished: func() { h.agentChecked <- struct{}{} }})
-		if err != nil {
-			t.Fatal(err)
+	return service
+}
+
+// placeNamer serves Transitous's reverse geocoding, naming every point name.
+func placeNamer(t *testing.T, name string) string {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/reverse-geocode" {
+			http.NotFound(w, r)
+			return
 		}
-		if err := h.watches.Register(watch.KindAgent, agent); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = agent.Stop(context.Background()) })
-	}
-	t.Cleanup(h.stop)
-	return h
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]map[string]string{{"type": "PLACE", "name": name}})
+	}))
+	t.Cleanup(server.Close)
+	return server.URL
 }
 
 func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) {
@@ -1259,26 +963,13 @@ func (h *conversationHarness) parseKeyboard(raw string) InlineKeyboard {
 	return markup.InlineKeyboard
 }
 
+// start starts what the application starts before it polls: the assembly, then the Notion and
+// Google modules the tests use, then the poller. The other modules' loops stay off, so tests run
+// their cycles themselves.
 func (h *conversationHarness) start() {
 	h.t.Helper()
-	if err := h.connections.Start(h.ctx); err != nil {
+	if err := h.assembly.Start(h.ctx); err != nil {
 		h.t.Fatal(err)
-	}
-	if err := h.approvals.Start(h.ctx); err != nil {
-		h.t.Fatal(err)
-	}
-	if err := h.conversation.Start(h.ctx); err != nil {
-		h.t.Fatal(err)
-	}
-	if h.scheduler != nil {
-		if err := h.scheduler.Start(h.ctx); err != nil {
-			h.t.Fatal(err)
-		}
-	}
-	if h.tasks != nil {
-		if err := h.tasks.Start(h.ctx); err != nil {
-			h.t.Fatal(err)
-		}
 	}
 	if h.notion != nil {
 		if err := h.notion.Start(h.ctx); err != nil {
@@ -1302,23 +993,7 @@ func (h *conversationHarness) stop() {
 	if err := h.service.Shutdown(ctx); err != nil {
 		h.t.Error(err)
 	}
-	if h.scheduler != nil {
-		if err := h.scheduler.Shutdown(ctx); err != nil {
-			h.t.Error(err)
-		}
-	}
-	if h.tasks != nil {
-		if err := h.tasks.Shutdown(ctx); err != nil {
-			h.t.Error(err)
-		}
-	}
-	if err := h.conversation.Shutdown(ctx); err != nil {
-		h.t.Error(err)
-	}
-	if err := h.approvals.Shutdown(ctx); err != nil {
-		h.t.Error(err)
-	}
-	if err := h.connections.Shutdown(ctx); err != nil {
+	if err := h.assembly.Shutdown(ctx); err != nil {
 		h.t.Error(err)
 	}
 	if h.notion != nil {
@@ -1388,18 +1063,6 @@ func (h *conversationHarness) feedbackCount(counted string) int {
 }
 
 // reactionTelemetry counts what the react tool reports on the harness.
-type reactionTelemetry struct{ h *conversationHarness }
-
-func (r reactionTelemetry) RecordReaction(_ context.Context, _, emoji string) {
-	r.h.mu.Lock()
-	defer r.h.mu.Unlock()
-	r.h.reactionCounts[emoji]++
-}
-
-func (r reactionTelemetry) RecordReactionConversion(_ context.Context, _, outcome string) {
-	r.h.recordFeedback("converted:" + outcome)
-}
-
 func (h *conversationHarness) sentTexts() []string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -1550,7 +1213,7 @@ func TestConversationSessionsAndUserIsolation(t *testing.T) {
 	h.start()
 	h.push(textUpdate(1, 101, "remember amber"))
 	alice := receive(t, h.ctx, runtime.calls)
-	if alice.request.PrincipalID != "alice" || alice.request.Message != "remember amber" || !onlyHelp(alice.request.Tools) {
+	if alice.request.PrincipalID != "alice" || alice.request.Message != "remember amber" || !onlyCoreTools(alice.request.Tools) {
 		t.Fatalf("unexpected runtime request: %+v", alice.request)
 	}
 	h.push(textUpdate(2, 202, "remember blue"))
@@ -1601,7 +1264,7 @@ func TestCommandsRemainResponsiveAndCancelSuppressesLateAnswer(t *testing.T) {
 	h.push(textUpdate(2, 101, "second request"), textUpdate(3, 101, "/status"), textUpdate(4, 101, "/privacy"), textUpdate(5, 101, "/cancel"))
 	h.wantReply(101, 2, conversation.BusyReply)
 	h.wantReply(101, 3, ConversationStatusReply)
-	h.wantReply(101, 4, ConversationPrivacyReply+privacyItem+AttachmentPrivacyLine)
+	h.wantReply(101, 4, privacyLines(AttachmentPrivacyLine, SchedulePrivacyLine, VoicePrivacyLine, MemoryPrivacyLine))
 	h.wantReply(101, 5, CancelledReply)
 	receive(t, h.ctx, call.ctx.Done())
 	h.waitState(1, "cancelled")
@@ -1842,7 +1505,7 @@ func TestBusyWhileResponseIsBeingDelivered(t *testing.T) {
 func TestBotCommandsRegisteredOnceAtStartup(t *testing.T) {
 	h := newConversationHarness(t, newControlledRuntime())
 	h.start()
-	want := []string{"cancel", "new", "sessions", "settings"}
+	want := []string{"backlog", "cancel", "jobs", "memory", "new", "sessions", "settings"}
 	for _, wantScope := range [][]string{nil, {`{"type":"all_private_chats"}`}} {
 		registration := receive(t, h.ctx, h.registrations)
 		if !slices.Equal(registration.scope, wantScope) {
@@ -1859,7 +1522,7 @@ func TestBotCommandsRegisteredOnceAtStartup(t *testing.T) {
 	}
 	h.push(textUpdate(1, 101, "/status"), textUpdate(2, 101, "/privacy"))
 	h.wantReply(101, 1, ConversationStatusReply)
-	h.wantReply(101, 2, ConversationPrivacyReply+privacyItem+AttachmentPrivacyLine)
+	h.wantReply(101, 2, privacyLines(AttachmentPrivacyLine, SchedulePrivacyLine, VoicePrivacyLine, MemoryPrivacyLine))
 	h.waitOffset(3)
 	select {
 	case extra := <-h.registrations:

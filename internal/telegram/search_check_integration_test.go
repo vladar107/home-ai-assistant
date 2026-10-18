@@ -26,7 +26,7 @@ const heldQuery = "see https://example.com/page?id=7"
 
 func newSearchHarness(t *testing.T, runtime agentruntime.AgentRuntime, options harnessOptions) *conversationHarness {
 	t.Helper()
-	options.web, options.search = true, true
+	options.web = true
 	options.providers = append(options.providers, outsideProvider{})
 	h := newConversationHarnessWithOptions(t, runtime, options)
 	h.provision("alice", "acct-alice")
@@ -301,7 +301,7 @@ func TestRejectedSearchStaysHeld(t *testing.T) {
 func TestScheduledRunDeniesWhatAChatTurnWouldHold(t *testing.T) {
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, web: true, search: true, providers: []tools.Provider{outsideProvider{}}})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, web: true, providers: []tools.Provider{outsideProvider{}}})
 	h.provision("alice", "account-alice")
 	h.start()
 	job := h.createJob("alice", "00000000000000ee", "News", "0 9 * * *", "Summarise the news.")

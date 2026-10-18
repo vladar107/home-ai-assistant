@@ -126,7 +126,7 @@ func TestGoogleAccountsSearchSwitchesAndDisconnect(t *testing.T) {
 		t.Fatal("a grant was not stored")
 	}
 	overview := h.requestSettings(7, 101)
-	if !strings.Contains(overview.text, "Accounts: Google 2 accounts") || !slices.Equal(buttonData(overview.keyboard), []string{"nav:model", "nav:accounts"}) {
+	if !strings.Contains(overview.text, "Accounts: Google 2 accounts") || !slices.Equal(buttonData(overview.keyboard), []string{"nav:model", "nav:accounts", "nav:tools", "nav:memory"}) {
 		t.Fatalf("settings overview = %+v", overview)
 	}
 	settings := h.openSettingsPage(8, 101, settingsMessageID(7), "accounts")
@@ -290,7 +290,7 @@ func TestGoogleSignInRefusalsAndRevokedGrant(t *testing.T) {
 	h.wantReply(101, 19, "reconnect please")
 	h.waitState(19, "delivered")
 	settings := h.requestSettings(20, 101)
-	if !strings.Contains(settings.text, "Reconnect alice@example.com in Accounts › Google.") || !slices.Equal(buttonData(settings.keyboard), []string{"nav:model", "nav:accounts"}) {
+	if !strings.Contains(settings.text, "Reconnect alice@example.com in Accounts › Google.") || !slices.Equal(buttonData(settings.keyboard), []string{"nav:model", "nav:accounts", "nav:tools", "nav:memory"}) {
 		t.Fatalf("settings overview after revocation = %+v", settings)
 	}
 	page := h.openSettingsPage(21, 101, settingsMessageID(20), "accounts")

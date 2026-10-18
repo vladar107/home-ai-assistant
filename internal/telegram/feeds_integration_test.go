@@ -21,7 +21,7 @@ import (
 func newFeedHarness(t *testing.T, runtime agentruntime.AgentRuntime, evaluator watch.Evaluator, topics bool) (*conversationHarness, *testClock) {
 	t.Helper()
 	clock := newTestClock(t, mondayMorning)
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, watches: evaluator, agentWatches: evaluator != nil, topics: topics})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, watches: evaluator, topics: topics})
 	if evaluator != nil {
 		if err := h.watches.Register(watch.KindHome, evaluator); err != nil {
 			t.Fatal(err)

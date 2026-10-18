@@ -134,6 +134,38 @@ everything sent to the model stays byte-identical.
   keeps turn exchanges for the guards without TypeSafe's judge. Two fields
   exist for tests only: `ExtraProviders`, offered ahead of every other tool,
   and `WatchEvaluators`, which replace or add evaluators by kind.
+- `Inputs.SessionFiles` may be nil, which leaves the conversation history
+  out: the history reads the runtime's session files, and a test runtime
+  that keeps none has nothing to read. Production always passes the Pi
+  runtime's.
+- The Telegram test harness builds on `wiring.Build` and then builds the
+  Telegram service the way `internal/app` does. Where the harness differed
+  from production, it now matches production: the withdraw, react, picture,
+  memory, backlog, trips, routes, and search check services and tools run in
+  every test, with the outbox and an idle ChatGPT simulator; the background
+  tasks, watches, and scheduler get the exposure, proposer, travel, and
+  rewriter production gives them; the agent watch kind is always registered
+  with watches; and places are named by the places connector against a fake
+  reverse geocoder instead of a stand-in describer. The options that only
+  turned on what production always runs are gone. `harnessOptions` keep the
+  connectors, simulators, clocks, and timings.
+- Two production lines stay out of the harness's turn messages: the
+  current time, which a test turns on with the location option, and the
+  user's name, because the harness gives the wiring principals without
+  display names. Both are prefix lines on every message, and keeping them
+  out lets the tests compare the message the user sent.
+- The harness starts the assembly, the Notion and Google modules, and the
+  poller, as before; the other modules' loops stay off, so tests run watch
+  cycles themselves. The agent watch test starts the watch loop, which the
+  check's end wakes, as production does, instead of a test-only signal.
+- The Trips tests answer scans as the model, through the runtime, instead
+  of replacing the scan's checker, because production registers the scan
+  job itself.
+- Tests that asserted exact tool lists, `/privacy` answers, settings
+  overview buttons, and the command list now expect production's: shared
+  helpers list the core tools (`coreToolNames`, `chatTools`,
+  `onlyCoreTools`) and build a `/privacy` answer from its lines
+  (`privacyLines`).
 
 ## Approach
 

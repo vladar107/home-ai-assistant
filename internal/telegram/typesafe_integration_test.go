@@ -27,7 +27,7 @@ func TestTypeSafeSettingsToggleThroughTheSettingsFlow(t *testing.T) {
 		t.Fatal("safety checks are on by default")
 	}
 	overview := h.requestSettings(1, 101)
-	if !strings.Contains(overview.text, "Safety &amp; privacy: safety checks off") || !slices.Equal(buttonData(overview.keyboard), []string{"nav:model", "nav:safety"}) {
+	if !strings.Contains(overview.text, "Safety &amp; privacy: safety checks off") || !slices.Equal(buttonData(overview.keyboard), []string{"nav:model", "nav:tools", "nav:memory", "nav:safety"}) {
 		t.Fatalf("settings overview = %+v", overview)
 	}
 	settings := h.openSettingsPage(2, 101, settingsMessageID(1), "safety")

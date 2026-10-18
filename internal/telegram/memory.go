@@ -41,8 +41,8 @@ const (
 	deletesPerRow   = 4
 )
 
-// MemoryController is implemented by the memory service; nil leaves /memory, its /settings
-// switch, and its /privacy line out.
+// MemoryController is implemented by the memory service; nil leaves /memory out. Its /settings
+// switch and /privacy line are NewMemorySection's.
 type MemoryController interface {
 	Entries(context.Context, string) ([]memory.Entry, error)
 	Remove(context.Context, string, string) (bool, error)

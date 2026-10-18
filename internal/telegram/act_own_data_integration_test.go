@@ -267,7 +267,7 @@ func TestWatchesAreChangedAtOnceAndUndone(t *testing.T) {
 // changed since is refused, and after outside content the same call is only proposed.
 func TestRoutesAreChangedAtOnceAndUndone(t *testing.T) {
 	runtime := newControlledRuntime()
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: newTestClock(t, mondayMorning), ns: stationsGateway(t), routes: true, providers: []tools.Provider{outsideProvider{}}})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: newTestClock(t, mondayMorning), ns: stationsGateway(t), providers: []tools.Provider{outsideProvider{}}})
 	h.provision("alice", "account-alice")
 	h.start()
 	legs := func() string {
