@@ -7,35 +7,52 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"sync"
+	"path/filepath"
 	"sync/atomic"
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/backlog"
 	"github.com/vladar107/home-ai-assistant/internal/config"
+	"github.com/vladar107/home-ai-assistant/internal/connection"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/bus"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/google"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/grafana"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/homeassistant"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/ns"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/places"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/web"
 	"github.com/vladar107/home-ai-assistant/internal/health"
 	"github.com/vladar107/home-ai-assistant/internal/httpretry"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
+	"github.com/vladar107/home-ai-assistant/internal/judgment"
+	userlocation "github.com/vladar107/home-ai-assistant/internal/location"
 	"github.com/vladar107/home-ai-assistant/internal/module"
 	"github.com/vladar107/home-ai-assistant/internal/observability"
+	piruntime "github.com/vladar107/home-ai-assistant/internal/runtime/pi"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
+	"github.com/vladar107/home-ai-assistant/internal/task"
 	"github.com/vladar107/home-ai-assistant/internal/telegram"
+	"github.com/vladar107/home-ai-assistant/internal/wiring"
 )
 
 const telemetryShutdownTimeout = 3 * time.Second
 
 type App struct {
-	cfg       config.Config
-	logger    *slog.Logger
-	registry  *module.Registry
-	modules   []module.Module
-	server    *http.Server
-	store     *sqlite.Store
-	assembly  *assembly
-	telegram  *telegram.Service
-	telemetry *observability.Telemetry
-	ready     atomic.Bool
+	cfg      config.Config
+	logger   *slog.Logger
+	registry *module.Registry
+	modules  []module.Module
+	server   *http.Server
+	store    *sqlite.Store
+	assembly *wiring.Assembly
+	// tripNotifier is the assembly's trip notices, which reach the Telegram feeds once the service
+	// exists.
+	tripNotifier *telegram.TripNotifier
+	telegram     *telegram.Service
+	telemetry    *observability.Telemetry
+	ready        atomic.Bool
 }
 
 func New(cfg config.Config, registry *module.Registry, logger *slog.Logger) (*App, error) {
@@ -143,7 +160,7 @@ func (a *App) Run(ctx context.Context) (runErr error) {
 	// The backlog service exists only after initialization; the listener is not open yet.
 	var backlogService *backlog.Service
 	if a.assembly != nil {
-		backlogService = a.assembly.backlog
+		backlogService = a.assembly.Backlog
 	}
 	a.server.Handler = httpHandler(a, telemetry, backlogService)
 	_, endListen := telemetry.StartLifecycle(ctx, "http_listen")
@@ -186,10 +203,10 @@ func (a *App) Run(ctx context.Context) (runErr error) {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), a.cfg.ShutdownTimeout)
 	defer cancel()
 
-	if err := shutdownTogether(shutdownCtx,
+	if err := wiring.ShutdownTogether(shutdownCtx,
 		a.shutdownTelegram,
 		a.shutdownConversation,
-		labelled("shutdown HTTP server", a.server.Shutdown),
+		wiring.Labelled("shutdown HTTP server", a.server.Shutdown),
 		func(ctx context.Context) error { return a.shutdownModules(ctx, started) },
 	); err != nil {
 		runErr = errors.Join(runErr, err)
@@ -258,27 +275,128 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	}
 
 	if a.cfg.Conversation.Enabled {
-		assembled := &assembly{
-			cfg:          a.cfg,
-			store:        a.store,
-			registry:     a.registry,
-			logger:       a.logger,
-			telemetry:    a.telemetry,
-			displayNames: make(map[string]string, len(configured)),
-		}
-		for _, principal := range configured {
-			assembled.principals = append(assembled.principals, principal.ID)
-			assembled.displayNames[principal.ID] = principal.DisplayName
-		}
-		if err := assembled.buildCore(ctx, client); err != nil {
-			return err
-		}
-		if err := assembled.buildConnectors(ctx); err != nil {
+		assembled, err := a.buildAssembly(ctx, client, configured)
+		if err != nil {
 			return err
 		}
 		a.assembly = assembled
 	}
 	return a.buildTelegram(ctx, client, configured)
+}
+
+// buildAssembly translates the configuration into the wiring's inputs and builds everything but the
+// Telegram service.
+func (a *App) buildAssembly(ctx context.Context, client *telegram.Client, configured []identity.ConfiguredPrincipal) (*wiring.Assembly, error) {
+	cfg := a.cfg
+	profilesDir := filepath.Join(cfg.DataDir, "pi")
+	principals := make([]string, 0, len(configured))
+	for _, principal := range configured {
+		principals = append(principals, principal.ID)
+	}
+	location, err := time.LoadLocation(cfg.Timezone)
+	if err != nil {
+		return nil, fmt.Errorf("load household time zone: %w", err)
+	}
+	// The extension file is required only where web access can be turned on, so a local run
+	// without the vendored checkout still starts.
+	var webSearchExtension string
+	if cfg.Web.Enabled {
+		webSearchExtension = cfg.Conversation.PiWebSearchExtension
+	}
+	runtime, err := piruntime.New(ctx, piruntime.Config{
+		Binary:             cfg.Conversation.PiBinary,
+		NodeBinary:         cfg.Conversation.PiNodeBinary,
+		Provider:           cfg.Conversation.PiProvider,
+		Model:              cfg.Conversation.PiModel,
+		ExpectedVersion:    cfg.Conversation.PiVersion,
+		ProfilesDir:        profilesDir,
+		WebSearchExtension: webSearchExtension,
+		Logger:             a.logger,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("initialize Pi runtime: %w", err)
+	}
+	runtime.SetTelemetry(a.telemetry)
+	a.tripNotifier = &telegram.TripNotifier{Client: client, Chats: a.store}
+	in := wiring.Inputs{
+		Store:        a.store,
+		Registry:     a.registry,
+		Logger:       a.logger,
+		Telemetry:    a.telemetry,
+		Runtime:      runtime,
+		SessionFiles: runtime,
+		Sessions:     runtime.SessionPruner(a.store),
+		Chat:         client,
+		Reminders:    telegram.ReminderSender{Client: client},
+		Alerts:       telegram.WatchAlertSender{Client: client},
+		TaskMessages: telegram.TaskMessenger{Client: client},
+		TripNotices:  a.tripNotifier,
+		Principals:   configured,
+		DataDir:      cfg.DataDir,
+		Zone:         cfg.Timezone,
+		Core: wiring.CoreConfig{
+			TurnTimeout: cfg.Conversation.TurnTimeout,
+			TurnZone:    location,
+			ImageModel:  cfg.Conversation.PiModel,
+			Connection: connection.Config{
+				ProfilesDir: profilesDir,
+				Provider:    cfg.Conversation.PiProvider,
+				Principals:  principals,
+			},
+			TypeSafe: judgment.Config{APIKey: cfg.TypeSafe.APIKey},
+			Watches:  cfg.Watches.Enabled,
+		},
+	}
+	if cfg.Tasks.Enabled {
+		in.Core.Tasks = &task.Config{Timeout: cfg.Tasks.Timeout}
+	}
+	if cfg.Location.Enabled {
+		in.Core.Location = &wiring.LocationConfig{
+			Policy: userlocation.Policy{
+				PinTTL:      cfg.Location.PinTTL,
+				LiveSilence: cfg.Location.LiveSilence,
+				LiveGrace:   cfg.Location.LiveGrace,
+			},
+			PruneInterval: cfg.Location.PruneInterval,
+			Places:        places.Config{Contact: cfg.Location.Contact},
+		}
+	}
+	if cfg.Notion.Enabled {
+		in.Notion = &notion.Config{APIBaseURL: cfg.Notion.APIBaseURL, ChatConnect: cfg.Notion.ChatConnect}
+	}
+	if cfg.NAS.Enabled {
+		in.NAS = &nas.Config{Roots: nasRoots(cfg.NAS.Roots)}
+	}
+	if cfg.Google.Enabled {
+		secret := cfg.Google.ClientSecret
+		if secret == "" {
+			secret, err = google.LoadClientSecretFile(cfg.Google.ClientSecretFile)
+			if err != nil {
+				return nil, err
+			}
+		}
+		in.Google = &wiring.GoogleConfig{Accounts: google.Config{
+			ClientID:     cfg.Google.ClientID,
+			ClientSecret: secret,
+			RedirectURL:  cfg.Google.RedirectURL,
+		}}
+	}
+	if cfg.Web.Enabled {
+		in.Web = &web.Config{WeatherHome: cfg.Web.WeatherHome}
+	}
+	if cfg.NS.Enabled() {
+		in.NS = &ns.Config{APIKey: cfg.NS.APIKey}
+	}
+	if cfg.HA.Enabled() {
+		in.HA = &homeassistant.Config{Token: cfg.HA.Token, BaseURL: cfg.HA.URL}
+	}
+	if cfg.Grafana.Enabled() {
+		in.Grafana = &grafana.Config{Token: cfg.Grafana.Token, BaseURL: cfg.Grafana.URL, Principals: cfg.Grafana.Principals}
+	}
+	if cfg.Bus.Enabled {
+		in.Bus = &bus.Config{HomeStop: cfg.Bus.HomeStop, Contact: cfg.Bus.Contact}
+	}
+	return wiring.Build(ctx, in)
 }
 
 // buildTelegram builds the Telegram service over what the assembly built, and closes the cycles
@@ -306,23 +424,23 @@ func (a *App) buildTelegram(ctx context.Context, client *telegram.Client, config
 	asm := a.assembly
 	if asm != nil {
 		// Interface values are set only for what was built, so none of them is a typed nil.
-		deps.Conversation = asm.conversation
-		deps.Attachments = asm.attachments
-		deps.Approvals = asm.approvals
-		deps.Schedules = asm.scheduler
-		deps.Trips = asm.trips
-		deps.Routes = asm.routes
-		deps.Memory = asm.memory
-		deps.Backlog = asm.backlog
-		deps.Transcriber = asm.chatGPT
-		if asm.locations != nil {
-			deps.Locations = asm.locations
+		deps.Conversation = asm.Conversation
+		deps.Attachments = asm.Attachments
+		deps.Approvals = asm.Approvals
+		deps.Schedules = asm.Scheduler
+		deps.Trips = asm.Trips
+		deps.Routes = asm.Routes
+		deps.Memory = asm.Memory
+		deps.Backlog = asm.Backlog
+		deps.Transcriber = asm.ChatGPT
+		if asm.Locations != nil {
+			deps.Locations = asm.Locations
 		}
-		if asm.tasks != nil {
-			deps.Tasks = asm.tasks
+		if asm.Tasks != nil {
+			deps.Tasks = asm.Tasks
 		}
-		if asm.watches != nil {
-			deps.Watches = asm.watches
+		if asm.Watches != nil {
+			deps.Watches = asm.Watches
 		}
 		deps.Sections, err = a.settingsSections(asm)
 		if err != nil {
@@ -336,13 +454,13 @@ func (a *App) buildTelegram(ctx context.Context, client *telegram.Client, config
 	client.ObserveTabs(service)
 	if asm != nil {
 		// Messages nobody asked for go to their feed tab while the bot has tabs on.
-		asm.scheduler.SetFeeds(service.Feeds())
-		if asm.watches != nil {
-			asm.watches.SetFeeds(service.Feeds())
+		asm.Scheduler.SetFeeds(service.Feeds())
+		if asm.Watches != nil {
+			asm.Watches.SetFeeds(service.Feeds())
 		}
-		asm.tripNotifier.Feeds = service.Feeds()
-		asm.conversation.SetTabReplies(service)
-		if err := asm.tools.Register(service.Help()); err != nil {
+		a.tripNotifier.Feeds = service.Feeds()
+		asm.Conversation.SetTabReplies(service)
+		if err := asm.Tools.Register(service.Help()); err != nil {
 			return err
 		}
 	}
@@ -351,106 +469,52 @@ func (a *App) buildTelegram(ctx context.Context, client *telegram.Client, config
 }
 
 // settingsSections are the /settings pages of what the assembly built.
-func (a *App) settingsSections(asm *assembly) ([]telegram.Section, error) {
-	sections := []telegram.Section{telegram.NewModelSection(asm.connections, asm.conversation, a.logger, a.telemetry)}
-	if asm.notion != nil {
-		sections = append(sections, telegram.NewNotionSection(asm.notion, a.logger, a.telemetry))
+func (a *App) settingsSections(asm *wiring.Assembly) ([]telegram.Section, error) {
+	sections := []telegram.Section{telegram.NewModelSection(asm.Connections, asm.Conversation, a.logger, a.telemetry)}
+	if asm.Notion != nil {
+		sections = append(sections, telegram.NewNotionSection(asm.Notion, a.logger, a.telemetry))
 	}
-	if asm.nas != nil {
-		sections = append(sections, telegram.NewNASSection(asm.nas, a.logger, a.telemetry))
+	if asm.NAS != nil {
+		sections = append(sections, telegram.NewNASSection(asm.NAS, a.logger, a.telemetry))
 	}
-	if asm.google != nil {
-		sections = append(sections, telegram.NewGoogleSection(asm.google, a.logger, a.telemetry))
+	if asm.Google != nil {
+		sections = append(sections, telegram.NewGoogleSection(asm.Google, a.logger, a.telemetry))
 	}
-	for _, page := range asm.switchPages {
-		settings := telegram.SwitchSettings{Toggle: asm.switches.Toggle(page.integration), Allowed: page.allowed}
-		if page.exposure != nil {
-			settings.Details = telegram.HomeDetails(page.exposure)
+	for _, page := range asm.SwitchPages {
+		settings := telegram.SwitchSettings{Toggle: asm.Switches.Toggle(page.Switch), Allowed: page.Allowed}
+		if page.Exposure != nil {
+			settings.Details = telegram.HomeDetails(page.Exposure)
 		}
-		found, ok := telegram.SwitchPageFor(page.integration.Integration)
+		found, ok := telegram.SwitchPageFor(page.Switch.Integration)
 		if !ok {
-			return nil, fmt.Errorf("integration %q has no settings page", page.integration.Integration)
+			return nil, fmt.Errorf("integration %q has no settings page", page.Switch.Integration)
 		}
 		settings.Page = found
 		sections = append(sections, telegram.NewSwitchSection(settings, a.logger, a.telemetry))
 	}
-	sections = append(sections, telegram.NewHeadsUpSection(asm.scheduler, a.logger, a.telemetry))
-	if asm.locations != nil {
-		sections = append(sections, telegram.NewLocationSection(asm.locations, a.logger, a.telemetry))
+	sections = append(sections, telegram.NewHeadsUpSection(asm.Scheduler, a.logger, a.telemetry))
+	if asm.Locations != nil {
+		sections = append(sections, telegram.NewLocationSection(asm.Locations, a.logger, a.telemetry))
 	}
-	sections = append(sections, telegram.NewMemorySection(asm.memory, a.logger, a.telemetry))
-	if asm.google != nil {
-		sections = append(sections, telegram.NewTripsSection(asm.scheduler, asm.google, a.logger, a.telemetry))
+	sections = append(sections, telegram.NewMemorySection(asm.Memory, a.logger, a.telemetry))
+	if asm.Google != nil {
+		sections = append(sections, telegram.NewTripsSection(asm.Scheduler, asm.Google, a.logger, a.telemetry))
 	}
 	return sections, nil
 }
 
 func (a *App) startConversation(ctx context.Context) error {
-	asm := a.assembly
-	if asm == nil {
+	if a.assembly == nil {
 		return nil
 	}
-	if err := asm.connections.Start(ctx); err != nil {
-		return fmt.Errorf("start model connections: %w", err)
-	}
-	if err := asm.approvals.Start(ctx); err != nil {
-		return errors.Join(fmt.Errorf("start approvals: %w", err), asm.connections.Shutdown(ctx))
-	}
-	if err := asm.conversation.Start(ctx); err != nil {
-		return errors.Join(fmt.Errorf("start conversation service: %w", err), asm.approvals.Shutdown(ctx), asm.connections.Shutdown(ctx))
-	}
-	if err := asm.scheduler.Start(ctx); err != nil {
-		return errors.Join(fmt.Errorf("start scheduler: %w", err), asm.conversation.Shutdown(ctx), asm.approvals.Shutdown(ctx), asm.connections.Shutdown(ctx))
-	}
-	if asm.tasks != nil {
-		if err := asm.tasks.Start(ctx); err != nil {
-			return errors.Join(fmt.Errorf("start background tasks: %w", err), asm.scheduler.Shutdown(ctx), asm.conversation.Shutdown(ctx), asm.approvals.Shutdown(ctx), asm.connections.Shutdown(ctx))
-		}
-	}
-	return nil
+	return a.assembly.Start(ctx)
 }
 
 func (a *App) shutdownConversation(ctx context.Context) error {
-	asm := a.assembly
-	if asm == nil {
+	if a.assembly == nil {
 		return nil
 	}
-	steps := []func(context.Context) error{
-		labelled("shutdown scheduler", asm.scheduler.Shutdown),
-		labelled("shutdown conversation service", asm.conversation.Shutdown),
-		labelled("shutdown approvals", asm.approvals.Shutdown),
-		labelled("shutdown model connections", asm.connections.Shutdown),
-	}
-	if asm.tasks != nil {
-		steps = append(steps, labelled("shutdown background tasks", asm.tasks.Shutdown))
-	}
-	return shutdownTogether(ctx, steps...)
-}
-
-// shutdownTogether runs every shutdown at once and waits for all of them. Each one cancels its own
-// work before it waits, so running them in turn would let one slow service spend the whole budget
-// before the next had even been told to stop.
-func shutdownTogether(ctx context.Context, steps ...func(context.Context) error) error {
-	errs := make([]error, len(steps))
-	var wg sync.WaitGroup
-	for i, step := range steps {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			errs[i] = step(ctx)
-		}()
-	}
-	wg.Wait()
-	return errors.Join(errs...)
-}
-
-func labelled(label string, shutdown func(context.Context) error) func(context.Context) error {
-	return func(ctx context.Context) error {
-		if err := shutdown(ctx); err != nil {
-			return fmt.Errorf("%s: %w", label, err)
-		}
-		return nil
-	}
+	return a.assembly.Shutdown(ctx)
 }
 
 func (a *App) startTelegram(ctx context.Context) error {
@@ -501,9 +565,9 @@ func (a *App) shutdownModules(ctx context.Context, started []module.Module) erro
 	steps := make([]func(context.Context) error, 0, len(started))
 	for i := len(started) - 1; i >= 0; i-- {
 		registeredModule := started[i]
-		steps = append(steps, labelled(fmt.Sprintf("shutdown module %q", registeredModule.Descriptor().ID), registeredModule.Shutdown))
+		steps = append(steps, wiring.Labelled(fmt.Sprintf("shutdown module %q", registeredModule.Descriptor().ID), registeredModule.Shutdown))
 	}
-	return shutdownTogether(ctx, steps...)
+	return wiring.ShutdownTogether(ctx, steps...)
 }
 
 // nasRoots translates the configured NAS view into the connector's own shape, so the connector

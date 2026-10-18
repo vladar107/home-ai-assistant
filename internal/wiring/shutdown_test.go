@@ -1,4 +1,4 @@
-package app
+package wiring
 
 import (
 	"context"
@@ -22,7 +22,7 @@ func TestShutdownTogetherStopsEveryServiceWithinTheBudget(t *testing.T) {
 		return nil
 	}
 
-	err := shutdownTogether(ctx, labelled("shutdown stuck", stuck), winding)
+	err := ShutdownTogether(ctx, Labelled("shutdown stuck", stuck), winding)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err = %v, want the stuck service's deadline", err)
 	}

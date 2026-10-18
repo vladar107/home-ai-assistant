@@ -102,6 +102,38 @@ everything sent to the model stays byte-identical.
   integration's name (`telegram.SwitchPageFor`) and fails to start for an
   integration without one. The safety checks switch is registered as a
   bundle with only its page when TypeSafe is configured.
+- `internal/wiring` builds everything except the Telegram service and does
+  not import `telegram`. `wiring.Build` takes `wiring.Inputs`: the store,
+  the module registry, the logger, a narrow `wiring.Telemetry` interface
+  (the union of what the services record), the model runtime with its
+  session files and pruner, the chat as `wiring.Chat` (the delivery
+  interfaces the Telegram client implements) with the reminder, alert,
+  task, and trip senders, the principals, the data directory, the household
+  zone, a `CoreConfig`, and one configuration per connector, nil when not
+  configured. Build fills the connector fields the caller leaves empty that
+  it knows: the household zone, the credentials directory, the display
+  names, the outbox, and the trains web access reads. `Assembly` holds the
+  concrete services, the module registry, the switches, and the on/off
+  pages. `Assembly.Start` and `Shutdown` start and stop the conversation and
+  the services it runs on, still concurrently on shutdown; the modules stay
+  started and stopped by `internal/app`, which keeps the started-slice
+  rollback as it was.
+- `internal/app` translates the configuration into `wiring.Inputs` (the
+  environment's meaning, the NAS roots, the token and secret files, and the
+  Pi runtime stay there), calls `wiring.Build`, and builds the Telegram
+  service on the result: the dependencies, the settings sections, and the
+  cycles (feeds, tab replies, `app_help`).
+- The trip scan state moves to `internal/wiring` with its test. The test
+  still builds the scan by hand, because it checks the state before the
+  Google connector is set up, which `Build` never produces.
+- `CoreConfig` carries the seams the tests need that production leaves at
+  their defaults: the clock, the scheduler's tick, the approval lifetimes,
+  the connection settings, the ChatGPT endpoint, and the turn indicator's
+  timings. `TurnZone` is the zone of the time line each turn's message
+  starts with; production always sets it to the household zone. `Recent`
+  keeps turn exchanges for the guards without TypeSafe's judge. Two fields
+  exist for tests only: `ExtraProviders`, offered ahead of every other tool,
+  and `WatchEvaluators`, which replace or add evaluators by kind.
 
 ## Approach
 
