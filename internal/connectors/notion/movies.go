@@ -107,7 +107,7 @@ func (s *Service) movies(ctx context.Context, principalID, token string, call to
 		Score        *float64 `json:"score"`
 		Date         string   `json:"date"`
 	}
-	if err := decodeArguments(call.Arguments, &arguments); err != nil {
+	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return "", err
 	}
 	if strings.TrimSpace(arguments.DataSourceID) == "" {

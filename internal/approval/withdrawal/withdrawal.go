@@ -3,7 +3,6 @@
 package withdrawal
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 
@@ -56,11 +55,9 @@ func (p Provider) Execute(ctx context.Context, principalID string, call tools.Ca
 	if call.Name != toolWithdraw {
 		return tools.Result{Text: "unknown approval tool", IsError: true}, nil
 	}
-	decoder := json.NewDecoder(bytes.NewReader(call.Arguments))
-	decoder.DisallowUnknownFields()
 	var given arguments
-	if err := decoder.Decode(&given); err != nil {
-		return tools.Result{Text: "the arguments do not match the tool's schema", IsError: true}, nil
+	if err := tools.DecodeArguments(call.Arguments, &given); err != nil {
+		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
 	if given.All == (len(given.Items) > 0) {
 		return tools.Result{Text: "Give either items or all; nothing was withdrawn.", IsError: true}, nil

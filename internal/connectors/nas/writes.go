@@ -101,7 +101,7 @@ func (s *Service) executeSave(ctx context.Context, principalID string, call tool
 	}
 
 	var arguments saveArguments
-	if err := decodeArguments(call.Arguments, &arguments); err != nil {
+	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
 	record, found, err := s.attachments.Describe(ctx, principalID, arguments.AttachmentID)

@@ -157,7 +157,7 @@ func (s *Service) Execute(ctx context.Context, principalID string, call tools.Ca
 		return tools.Result{Text: renderRoutes(routes)}, nil
 	case toolGet:
 		var arguments nameArguments
-		if err := decodeArguments(call.Arguments, &arguments); err != nil {
+		if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 			return errorResult(err.Error()), nil
 		}
 		route, refusal, err := s.named(ctx, principalID, arguments.Name)
@@ -262,7 +262,7 @@ type confirmedRemoval struct {
 
 func (s *Service) check(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
 	var arguments checkArguments
-	if err := decodeArguments(call.Arguments, &arguments); err != nil {
+	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return errorResult(err.Error()), nil
 	}
 	var date time.Time
@@ -305,7 +305,7 @@ func (s *Service) proposeSave(ctx context.Context, principalID string, call tool
 		return errorResult("Routes cannot be saved here."), nil
 	}
 	var arguments saveArguments
-	if err := decodeArguments(call.Arguments, &arguments); err != nil {
+	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return errorResult(err.Error()), nil
 	}
 	spec := Spec{Name: arguments.Name, Days: arguments.Days, ArriveBy: arguments.ArriveBy}
@@ -349,7 +349,7 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 		return errorResult("Routes cannot be changed here."), nil
 	}
 	var arguments updateArguments
-	if err := decodeArguments(call.Arguments, &arguments); err != nil {
+	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return errorResult(err.Error()), nil
 	}
 	route, refusal, err := s.named(ctx, principalID, arguments.Name)
@@ -450,7 +450,7 @@ func (s *Service) proposeRemoval(ctx context.Context, principalID string, call t
 		return errorResult("Routes cannot be removed here."), nil
 	}
 	var arguments nameArguments
-	if err := decodeArguments(call.Arguments, &arguments); err != nil {
+	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return errorResult(err.Error()), nil
 	}
 	route, refusal, err := s.named(ctx, principalID, arguments.Name)
@@ -749,18 +749,6 @@ func (s *Service) Render(result Result) string {
 		builder.WriteString(strings.Join(numbers, ", ") + ".")
 	}
 	return builder.String()
-}
-
-func decodeArguments(raw json.RawMessage, into any) error {
-	if len(raw) == 0 {
-		raw = json.RawMessage("{}")
-	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(into); err != nil {
-		return fmt.Errorf("the arguments do not match the tool's schema")
-	}
-	return nil
 }
 
 func errorResult(text string) tools.Result {

@@ -408,7 +408,7 @@ func (s *Service) proposeWatch(ctx context.Context, principalID string, call too
 		return tools.Result{Text: "Watches cannot be set up here.", IsError: true}, nil
 	}
 	var arguments proposeArguments
-	if err := decodeArguments(call.Arguments, &arguments); err != nil {
+	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
 	spec, err := s.prepare(ctx, principalID, strings.TrimSpace(arguments.Kind), arguments.specArguments)
@@ -447,7 +447,7 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 		return tools.Result{Text: "Watches cannot be changed here.", IsError: true}, nil
 	}
 	var arguments updateArguments
-	if err := decodeArguments(call.Arguments, &arguments); err != nil {
+	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
 	watch, found, err := s.repository.LoadWatch(ctx, principalID, strings.TrimSpace(arguments.WatchID))
@@ -488,7 +488,7 @@ func (s *Service) proposeRemoval(ctx context.Context, principalID string, call t
 		return tools.Result{Text: "Watches cannot be removed here.", IsError: true}, nil
 	}
 	var arguments removeArguments
-	if err := decodeArguments(call.Arguments, &arguments); err != nil {
+	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
 	watch, found, err := s.repository.LoadWatch(ctx, principalID, strings.TrimSpace(arguments.WatchID))
@@ -741,13 +741,4 @@ func (s *Service) renderWatches(watches []Watch) string {
 		rendered = append(rendered, heading+"\n"+watch.Describe())
 	}
 	return strings.Join(rendered, "\n\n")
-}
-
-func decodeArguments(raw json.RawMessage, into any) error {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(into); err != nil {
-		return fmt.Errorf("the arguments do not match the tool's schema")
-	}
-	return nil
 }

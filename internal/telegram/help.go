@@ -102,7 +102,7 @@ func (h helpProvider) Execute(ctx context.Context, principalID string, call tool
 	var arguments struct {
 		Topic string `json:"topic"`
 	}
-	if err := json.Unmarshal(call.Arguments, &arguments); err != nil || !slices.Contains(h.topics(principalID), arguments.Topic) {
+	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil || !slices.Contains(h.topics(principalID), arguments.Topic) {
 		return tools.Result{Text: "topic must be one of " + strings.Join(h.topics(principalID), ", "), IsError: true}, nil
 	}
 	text, err := h.service.helpText(ctx, principalID, arguments.Topic)

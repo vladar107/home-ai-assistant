@@ -1,7 +1,6 @@
 package places
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -132,7 +131,7 @@ func (s *Service) Execute(ctx context.Context, principalID string, call tools.Ca
 		return errorResult("unknown places tool"), nil
 	}
 	var request nearbyRequest
-	if err := decodeArguments(call.Arguments, &request); err != nil {
+	if err := tools.DecodeArguments(call.Arguments, &request); err != nil {
 		return errorResult(err.Error()), nil
 	}
 	return s.nearby(ctx, principalID, request), nil
@@ -326,18 +325,6 @@ func firstTag(tags map[string]string, keys ...string) string {
 
 func tagText(tags map[string]string, key string) string {
 	return clip(strings.Join(strings.Fields(tags[key]), " "), maximumTagRunes)
-}
-
-func decodeArguments(raw json.RawMessage, into any) error {
-	if len(raw) == 0 {
-		raw = json.RawMessage("{}")
-	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(into); err != nil {
-		return fmt.Errorf("the arguments do not match the tool's schema")
-	}
-	return nil
 }
 
 func errorResult(text string) tools.Result {

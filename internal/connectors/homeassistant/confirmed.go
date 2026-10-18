@@ -115,7 +115,7 @@ func (s *Service) confirmedDevices(ctx context.Context, snap *snapshot) tools.Re
 // returns it re-encoded, with the entity it targets.
 func (s *Service) validateServiceCall(ctx context.Context, snap *snapshot, raw json.RawMessage) (serviceCallArguments, confirmedEntity, error) {
 	var arguments serviceCallArguments
-	if err := decodeArguments(raw, &arguments); err != nil {
+	if err := tools.DecodeArguments(raw, &arguments); err != nil {
 		return arguments, confirmedEntity{}, err
 	}
 	if !entityIDPattern.MatchString(arguments.EntityID) || !servicePattern.MatchString(arguments.Service) {

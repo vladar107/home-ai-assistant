@@ -1,7 +1,6 @@
 package ns
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -154,25 +153,25 @@ func (s *Service) Execute(ctx context.Context, principalID string, call tools.Ca
 	switch call.Name {
 	case toolTrips:
 		var arguments tripsRequest
-		if err := decodeArguments(call.Arguments, &arguments); err != nil {
+		if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 			return errorResult(err.Error()), nil
 		}
 		return s.trips(ctx, principalID, arguments), nil
 	case toolDepartures:
 		var arguments departuresRequest
-		if err := decodeArguments(call.Arguments, &arguments); err != nil {
+		if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 			return errorResult(err.Error()), nil
 		}
 		return s.departures(ctx, principalID, arguments), nil
 	case toolDisruptions:
 		var arguments disruptionsRequest
-		if err := decodeArguments(call.Arguments, &arguments); err != nil {
+		if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 			return errorResult(err.Error()), nil
 		}
 		return s.disruptions(ctx, principalID, arguments), nil
 	case toolOVFiets:
 		var arguments ovfietsRequest
-		if err := decodeArguments(call.Arguments, &arguments); err != nil {
+		if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 			return errorResult(err.Error()), nil
 		}
 		return s.ovfiets(ctx, principalID, arguments), nil
@@ -449,18 +448,6 @@ func (s *Service) store(key string, value any) {
 		}
 	}
 	s.cache[key] = cachedResult{value: value, expires: now.Add(cacheLifetime)}
-}
-
-func decodeArguments(raw json.RawMessage, into any) error {
-	if len(raw) == 0 {
-		raw = json.RawMessage("{}")
-	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(into); err != nil {
-		return fmt.Errorf("the arguments do not match the tool's schema")
-	}
-	return nil
 }
 
 func errorResult(text string) tools.Result {

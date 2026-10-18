@@ -143,7 +143,7 @@ func (s *Service) run(ctx context.Context, token string, call tools.Call) (strin
 			Limit      int    `json:"limit"`
 			Cursor     string `json:"cursor"`
 		}
-		if err := decodeArguments(call.Arguments, &arguments); err != nil {
+		if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 			return "", err
 		}
 		if arguments.ObjectType != "" && arguments.ObjectType != "page" && arguments.ObjectType != "data_source" {
@@ -161,7 +161,7 @@ func (s *Service) run(ctx context.Context, token string, call tools.Call) (strin
 			PageID         string `json:"page_id"`
 			IncludeContent *bool  `json:"include_content"`
 		}
-		if err := decodeArguments(call.Arguments, &arguments); err != nil {
+		if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 			return "", err
 		}
 		if strings.TrimSpace(arguments.PageID) == "" {
@@ -187,7 +187,7 @@ func (s *Service) run(ctx context.Context, token string, call tools.Call) (strin
 			Limit        int             `json:"limit"`
 			Cursor       string          `json:"cursor"`
 		}
-		if err := decodeArguments(call.Arguments, &arguments); err != nil {
+		if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 			return "", err
 		}
 		if strings.TrimSpace(arguments.DataSourceID) == "" {
@@ -205,7 +205,7 @@ func (s *Service) run(ctx context.Context, token string, call tools.Call) (strin
 		var arguments struct {
 			BlockID string `json:"block_id"`
 		}
-		if err := decodeArguments(call.Arguments, &arguments); err != nil {
+		if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 			return "", err
 		}
 		if strings.TrimSpace(arguments.BlockID) == "" {
@@ -281,16 +281,6 @@ func (s *Service) blockContent(ctx context.Context, token, blockID string) (stri
 		}
 		cursor = list.NextCursor
 	}
-}
-
-func decodeArguments(raw json.RawMessage, into any) error {
-	if len(raw) == 0 {
-		raw = json.RawMessage("{}")
-	}
-	if err := json.Unmarshal(raw, into); err != nil {
-		return fmt.Errorf("tool arguments are malformed")
-	}
-	return nil
 }
 
 func nullToEmpty(raw json.RawMessage) json.RawMessage {

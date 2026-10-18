@@ -1,7 +1,6 @@
 package gmail
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -95,7 +94,7 @@ func (s *Service) Execute(ctx context.Context, principalID string, call tools.Ca
 			Account string `json:"account"`
 			Limit   int    `json:"limit"`
 		}
-		if err := decodeArguments(call.Arguments, &arguments); err != nil {
+		if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 			return tools.Result{Text: err.Error(), IsError: true}, nil
 		}
 		query := strings.TrimSpace(arguments.Query)
@@ -120,7 +119,7 @@ func (s *Service) Execute(ctx context.Context, principalID string, call tools.Ca
 			ID          string `json:"id"`
 			OffsetBytes int    `json:"offset_bytes"`
 		}
-		if err := decodeArguments(call.Arguments, &arguments); err != nil {
+		if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 			return tools.Result{Text: err.Error(), IsError: true}, nil
 		}
 		account, found := findAccount(accounts, arguments.Account)
@@ -299,13 +298,4 @@ func (s *Service) search(ctx context.Context, access, query string, limit int) (
 		}
 	}
 	return found, nil
-}
-
-func decodeArguments(raw json.RawMessage, into any) error {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(into); err != nil {
-		return fmt.Errorf("the arguments do not match the tool's schema")
-	}
-	return nil
 }

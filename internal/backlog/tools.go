@@ -1,7 +1,6 @@
 package backlog
 
 import (
-	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -123,7 +122,7 @@ func (s *Service) external(ctx context.Context, principalID string) bool {
 
 func (s *Service) executeAdd(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
 	var arguments addArguments
-	if err := decodeArguments(call.Arguments, &arguments); err != nil {
+	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
 	title, details := normalizeTitle(arguments.Title), normalizeDetails(arguments.Details)
@@ -153,7 +152,7 @@ func (s *Service) executeAdd(ctx context.Context, principalID string, call tools
 
 func (s *Service) executeList(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
 	var arguments listArguments
-	if err := decodeArguments(call.Arguments, &arguments); err != nil {
+	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
 	if id := strings.TrimSpace(arguments.ID); id != "" {
@@ -197,7 +196,7 @@ func (s *Service) executeList(ctx context.Context, principalID string, call tool
 
 func (s *Service) executeUpdate(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
 	var arguments updateArguments
-	if err := decodeArguments(call.Arguments, &arguments); err != nil {
+	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
 	if arguments.Title == nil && arguments.Details == nil && arguments.Status == nil {
@@ -307,13 +306,4 @@ func shorten(text string, limit int) string {
 		return text
 	}
 	return strings.TrimSpace(string(runes[:limit-1])) + "…"
-}
-
-func decodeArguments(raw json.RawMessage, into any) error {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(into); err != nil {
-		return fmt.Errorf("the arguments do not match the tool's schema")
-	}
-	return nil
 }

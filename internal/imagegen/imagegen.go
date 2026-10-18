@@ -127,7 +127,7 @@ func (s *Service) Execute(ctx context.Context, principalID string, call tools.Ca
 		Prompt       string   `json:"prompt"`
 		ReferenceIDs []string `json:"reference_attachment_ids"`
 	}
-	if err := json.Unmarshal(call.Arguments, &input); err != nil {
+	if err := tools.DecodeArguments(call.Arguments, &input); err != nil {
 		return tools.Result{Text: "The arguments could not be read.", IsError: true}, nil
 	}
 	prompt := strings.TrimSpace(input.Prompt)

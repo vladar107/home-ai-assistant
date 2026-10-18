@@ -1,7 +1,6 @@
 package trip
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -248,7 +247,7 @@ func (t *Tools) Execute(ctx context.Context, principalID string, call tools.Call
 
 func (t *Tools) executeAdd(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
 	var arguments addArguments
-	if err := decodeArguments(call.Arguments, &arguments); err != nil {
+	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
 	if strings.TrimSpace(arguments.Timezone) == "" {
@@ -276,7 +275,7 @@ func (t *Tools) executeAdd(ctx context.Context, principalID string, call tools.C
 
 func (t *Tools) executeUpdate(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
 	var arguments updateArguments
-	if err := decodeArguments(call.Arguments, &arguments); err != nil {
+	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
 	id := strings.TrimSpace(arguments.ID)
@@ -353,7 +352,7 @@ func (t *Tools) executeList(ctx context.Context, principalID string, call tools.
 	var arguments struct {
 		ID string `json:"id"`
 	}
-	if err := decodeArguments(call.Arguments, &arguments); err != nil {
+	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
 	now := t.service.Now()
@@ -544,7 +543,7 @@ func (t *Tools) ExecuteApproved(ctx context.Context, record approval.Record) (ap
 	switch record.Tool {
 	case toolAdd:
 		var confirmed addArguments
-		if decodeArguments(record.Arguments, &confirmed) != nil {
+		if tools.DecodeArguments(record.Arguments, &confirmed) != nil {
 			return approval.Outcome{}, malformed
 		}
 		draft, reason := draftFromAdd(confirmed)
@@ -556,7 +555,7 @@ func (t *Tools) ExecuteApproved(ctx context.Context, record approval.Record) (ap
 		}
 	case toolUpdate:
 		var confirmed updateRecord
-		if decodeArguments(record.Arguments, &confirmed) != nil {
+		if tools.DecodeArguments(record.Arguments, &confirmed) != nil {
 			return approval.Outcome{}, malformed
 		}
 		var expected time.Time
@@ -788,13 +787,4 @@ func parseLocal(value string, location *time.Location, endOfDay bool) (time.Time
 		day = day.AddDate(0, 0, 1)
 	}
 	return day.UTC(), nil
-}
-
-func decodeArguments(raw json.RawMessage, into any) error {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(into); err != nil {
-		return fmt.Errorf("the arguments do not match the tool's schema")
-	}
-	return nil
 }

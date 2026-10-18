@@ -1,7 +1,6 @@
 package task
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -103,7 +102,7 @@ func (s *Service) executeStart(ctx context.Context, principalID string, argument
 		Title string `json:"title"`
 		Brief string `json:"brief"`
 	}
-	if err := decode(arguments, &input); err != nil {
+	if err := tools.DecodeArguments(arguments, &input); err != nil {
 		return tools.Result{Text: "The arguments could not be read; give a title and a brief.", IsError: true}, nil
 	}
 	requestID, fromChat := strings.CutPrefix(tools.TurnFrom(ctx), outbox.ChatTurn(""))
@@ -182,7 +181,7 @@ func (s *Service) executeResult(ctx context.Context, principalID string, argumen
 	var input struct {
 		TaskID string `json:"task_id"`
 	}
-	if err := decode(arguments, &input); err != nil {
+	if err := tools.DecodeArguments(arguments, &input); err != nil {
 		return tools.Result{Text: "The arguments could not be read.", IsError: true}, nil
 	}
 	now := time.Now()
@@ -216,13 +215,4 @@ func (s *Service) executeResult(ctx context.Context, principalID string, argumen
 	}
 	heading := fmt.Sprintf("Background task %q, %s:\n\n", task.Title, Summary(task, now))
 	return tools.Result{Text: heading + report}, nil
-}
-
-func decode(arguments json.RawMessage, target any) error {
-	if len(bytes.TrimSpace(arguments)) == 0 {
-		arguments = json.RawMessage(`{}`)
-	}
-	decoder := json.NewDecoder(bytes.NewReader(arguments))
-	decoder.DisallowUnknownFields()
-	return decoder.Decode(target)
 }

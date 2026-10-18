@@ -99,7 +99,7 @@ func (s *Service) executeRead(ctx context.Context, principalID string, arguments
 		AttachmentID string `json:"attachment_id"`
 		OffsetBytes  int64  `json:"offset_bytes"`
 	}
-	if err := json.Unmarshal(arguments, &input); err != nil {
+	if err := tools.DecodeArguments(arguments, &input); err != nil {
 		return tools.Result{Text: "The arguments could not be read.", IsError: true}, nil
 	}
 	if !idPattern.MatchString(input.AttachmentID) || input.OffsetBytes < 0 {

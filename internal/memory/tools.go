@@ -1,7 +1,6 @@
 package memory
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -131,7 +130,7 @@ func (s *Service) exposed(ctx context.Context, principalID string) bool {
 
 func (s *Service) add(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
 	var arguments addArguments
-	if err := decodeArguments(call.Arguments, &arguments); err != nil {
+	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
 	text := normalize(arguments.Text)
@@ -198,7 +197,7 @@ func (s *Service) writeFact(ctx context.Context, principalID, text string) (tool
 
 func (s *Service) replace(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
 	var arguments replaceArguments
-	if err := decodeArguments(call.Arguments, &arguments); err != nil {
+	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
 	text := normalize(arguments.Text)
@@ -265,7 +264,7 @@ func (s *Service) writeReplacement(ctx context.Context, principalID, id, text st
 
 func (s *Service) remove(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
 	var arguments removeArguments
-	if err := decodeArguments(call.Arguments, &arguments); err != nil {
+	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
 	entry, found, err := s.repository.LoadMemory(ctx, principalID, strings.TrimSpace(arguments.ID))
@@ -692,13 +691,4 @@ func validText(text string) string {
 		return fmt.Sprintf("text is %d characters; an entry holds at most %d. Shorten it.", utf8.RuneCountInString(text), MaximumEntryRunes)
 	}
 	return ""
-}
-
-func decodeArguments(raw json.RawMessage, into any) error {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(into); err != nil {
-		return fmt.Errorf("the arguments do not match the tool's schema")
-	}
-	return nil
 }

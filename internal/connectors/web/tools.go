@@ -1,7 +1,6 @@
 package web
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -165,7 +164,7 @@ func (s *Service) Execute(ctx context.Context, principalID string, call tools.Ca
 			URL         string `json:"url"`
 			OffsetBytes int    `json:"offset_bytes"`
 		}
-		if err := decodeArguments(call.Arguments, &arguments); err != nil {
+		if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 			return errorResult(err.Error()), nil
 		}
 		if arguments.OffsetBytes < 0 {
@@ -174,7 +173,7 @@ func (s *Service) Execute(ctx context.Context, principalID string, call tools.Ca
 		return s.fetchPage(ctx, principalID, arguments.URL, arguments.OffsetBytes), nil
 	case toolWeather:
 		var arguments weatherRequest
-		if err := decodeArguments(call.Arguments, &arguments); err != nil {
+		if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 			return errorResult(err.Error()), nil
 		}
 		return s.weatherForecast(ctx, principalID, arguments), nil
@@ -183,23 +182,11 @@ func (s *Service) Execute(ctx context.Context, principalID string, call tools.Ca
 			return errorResult("unknown web tool"), nil
 		}
 		var arguments cardRequest
-		if err := decodeArguments(call.Arguments, &arguments); err != nil {
+		if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 			return errorResult(err.Error()), nil
 		}
 		return s.weatherCard(ctx, principalID, arguments)
 	default:
 		return errorResult("unknown web tool"), nil
 	}
-}
-
-func decodeArguments(raw json.RawMessage, into any) error {
-	if len(raw) == 0 {
-		raw = json.RawMessage("{}")
-	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(into); err != nil {
-		return fmt.Errorf("the arguments do not match the tool's schema")
-	}
-	return nil
 }

@@ -158,12 +158,12 @@ func (s *Service) record(ctx context.Context, principalID, token, tool string, a
 	return text, nil
 }
 
-// validateWrite checks the model's arguments and returns them re-encoded without unknown fields.
+// validateWrite checks the model's arguments and returns them re-encoded in canonical form.
 func validateWrite(call tools.Call) (json.RawMessage, error) {
 	switch call.Name {
 	case toolCreatePage:
 		var arguments createArguments
-		if err := decodeArguments(call.Arguments, &arguments); err != nil {
+		if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 			return nil, err
 		}
 		if arguments.ParentType != "page" && arguments.ParentType != "data_source" {
@@ -188,7 +188,7 @@ func validateWrite(call tools.Call) (json.RawMessage, error) {
 		return json.Marshal(arguments)
 	case toolUpdatePage:
 		var arguments updateArguments
-		if err := decodeArguments(call.Arguments, &arguments); err != nil {
+		if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 			return nil, err
 		}
 		if strings.TrimSpace(arguments.PageID) == "" {
@@ -203,7 +203,7 @@ func validateWrite(call tools.Call) (json.RawMessage, error) {
 		return json.Marshal(arguments)
 	case toolAppendBlocks:
 		var arguments appendArguments
-		if err := decodeArguments(call.Arguments, &arguments); err != nil {
+		if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 			return nil, err
 		}
 		if strings.TrimSpace(arguments.PageID) == "" {

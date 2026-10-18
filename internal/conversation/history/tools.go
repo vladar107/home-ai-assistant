@@ -144,7 +144,7 @@ func (s *Service) search(ctx context.Context, principalID string, arguments json
 	var input struct {
 		Query string `json:"query"`
 	}
-	if err := json.Unmarshal(arguments, &input); err != nil {
+	if err := tools.DecodeArguments(arguments, &input); err != nil {
 		return tools.Result{Text: "The arguments could not be read.", IsError: true}, nil
 	}
 	words := queryWords(input.Query)
@@ -220,7 +220,7 @@ func (s *Service) read(ctx context.Context, principalID string, arguments json.R
 		SessionID string `json:"session_id"`
 		Position  int    `json:"position"`
 	}
-	if err := json.Unmarshal(arguments, &input); err != nil {
+	if err := tools.DecodeArguments(arguments, &input); err != nil {
 		return tools.Result{Text: "The arguments could not be read.", IsError: true}, nil
 	}
 	if len(input.SessionID) != sessionIDLength || input.Position < 1 {

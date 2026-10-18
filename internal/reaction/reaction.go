@@ -3,7 +3,6 @@
 package reaction
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -123,10 +122,8 @@ func (p *Provider) Execute(ctx context.Context, principalID string, call tools.C
 	if call.Name != toolReact {
 		return tools.Result{Text: "This tool is not available.", IsError: true}, nil
 	}
-	decoder := json.NewDecoder(bytes.NewReader(call.Arguments))
-	decoder.DisallowUnknownFields()
 	var given arguments
-	if err := decoder.Decode(&given); err != nil || !slices.Contains(emojis, given.Emoji) {
+	if err := tools.DecodeArguments(call.Arguments, &given); err != nil || !slices.Contains(emojis, given.Emoji) {
 		return tools.Result{Text: "the arguments do not match the tool's schema", IsError: true}, nil
 	}
 	set, err := p.set(ctx, principalID, given.Emoji)

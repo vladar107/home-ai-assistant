@@ -1,7 +1,6 @@
 package grafana
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -167,23 +166,11 @@ func (s *Service) failure(ctx context.Context, principalID, tool string, err err
 	return tools.Result{Text: err.Error(), IsError: true}
 }
 
-func decodeArguments(raw json.RawMessage, into any) error {
-	if len(bytes.TrimSpace(raw)) == 0 {
-		raw = json.RawMessage(`{}`)
-	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(into); err != nil {
-		return fmt.Errorf("the arguments do not match the tool's schema")
-	}
-	return nil
-}
-
 func (s *Service) dashboards(ctx context.Context, raw json.RawMessage) (string, error) {
 	var arguments struct {
 		UID string `json:"uid"`
 	}
-	if err := decodeArguments(raw, &arguments); err != nil {
+	if err := tools.DecodeArguments(raw, &arguments); err != nil {
 		return "", err
 	}
 	if arguments.UID == "" {
@@ -212,7 +199,7 @@ type metricsArguments struct {
 
 func (s *Service) metrics(ctx context.Context, raw json.RawMessage) (string, error) {
 	var arguments metricsArguments
-	if err := decodeArguments(raw, &arguments); err != nil {
+	if err := tools.DecodeArguments(raw, &arguments); err != nil {
 		return "", err
 	}
 	query, err := checkQuery(arguments.Query)
@@ -260,7 +247,7 @@ type logsArguments struct {
 
 func (s *Service) logs(ctx context.Context, raw json.RawMessage) (string, error) {
 	var arguments logsArguments
-	if err := decodeArguments(raw, &arguments); err != nil {
+	if err := tools.DecodeArguments(raw, &arguments); err != nil {
 		return "", err
 	}
 	query, err := checkQuery(arguments.Query)
@@ -318,7 +305,7 @@ type alertsArguments struct {
 
 func (s *Service) alerts(ctx context.Context, raw json.RawMessage) (string, error) {
 	var arguments alertsArguments
-	if err := decodeArguments(raw, &arguments); err != nil {
+	if err := tools.DecodeArguments(raw, &arguments); err != nil {
 		return "", err
 	}
 	switch arguments.View {

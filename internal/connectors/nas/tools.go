@@ -127,7 +127,7 @@ func (s *Service) run(ctx context.Context, connection Session, call tools.Call) 
 		var arguments struct {
 			Path string `json:"path"`
 		}
-		if err := decodeArguments(call.Arguments, &arguments); err != nil {
+		if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 			return "", err
 		}
 		if strings.TrimSpace(arguments.Path) == "" {
@@ -148,7 +148,7 @@ func (s *Service) run(ctx context.Context, connection Session, call tools.Call) 
 			Path  string `json:"path"`
 			Limit int    `json:"limit"`
 		}
-		if err := decodeArguments(call.Arguments, &arguments); err != nil {
+		if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 			return "", err
 		}
 		if strings.TrimSpace(arguments.Query) == "" {
@@ -168,7 +168,7 @@ func (s *Service) run(ctx context.Context, connection Session, call tools.Call) 
 			Path        string `json:"path"`
 			OffsetBytes int64  `json:"offset_bytes"`
 		}
-		if err := decodeArguments(call.Arguments, &arguments); err != nil {
+		if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 			return "", err
 		}
 		location, err := parseLocation(arguments.Path)
@@ -251,16 +251,6 @@ func readPDF(ctx context.Context, connection Session, location Location, offset 
 		return "", fmt.Errorf("%s has no text at that position; continue from an offset_bytes a previous read gave", location)
 	}
 	return renderPDFRead(location, chunk, offset, int64(len(text)), size), nil
-}
-
-func decodeArguments(raw json.RawMessage, into any) error {
-	if len(raw) == 0 {
-		raw = json.RawMessage("{}")
-	}
-	if err := json.Unmarshal(raw, into); err != nil {
-		return fmt.Errorf("tool arguments are malformed")
-	}
-	return nil
 }
 
 func limit(requested int) int {

@@ -64,7 +64,7 @@ func (s *Service) executeSend(ctx context.Context, principalID string, connectio
 	var arguments struct {
 		Path string `json:"path"`
 	}
-	if err := decodeArguments(call.Arguments, &arguments); err != nil {
+	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return s.toolFailure(ctx, principalID, call.Name, err)
 	}
 	location, err := parseLocation(arguments.Path)

@@ -278,7 +278,7 @@ var historyPeriods = map[string]map[string]any{
 // the limit of what the assistant can read.
 func (s *Service) history(ctx context.Context, snap *snapshot, raw json.RawMessage) tools.Result {
 	var arguments historyArguments
-	if err := decodeArguments(raw, &arguments); err != nil {
+	if err := tools.DecodeArguments(raw, &arguments); err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}
 	}
 	period, known := historyPeriods[arguments.Period]
@@ -380,13 +380,4 @@ func (s *snapshot) resolveExposed(name, domain string) (string, []string) {
 
 func formatNumber(value float64) string {
 	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.3f", value), "0"), ".")
-}
-
-func decodeArguments(raw json.RawMessage, into any) error {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(into); err != nil {
-		return fmt.Errorf("the arguments do not match the tool's schema")
-	}
-	return nil
 }

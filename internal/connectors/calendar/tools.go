@@ -1,7 +1,6 @@
 package calendar
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -106,7 +105,7 @@ func (s *Service) events(ctx context.Context, principalID string, raw json.RawMe
 		Query   string `json:"query"`
 		Account string `json:"account"`
 	}
-	if err := decodeArguments(raw, &arguments); err != nil {
+	if err := tools.DecodeArguments(raw, &arguments); err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}
 	}
 	start, err := s.parseBoundary(arguments.Start, false)
@@ -248,7 +247,7 @@ func (s *Service) readEvent(ctx context.Context, principalID string, raw json.Ra
 		EventID     string `json:"event_id"`
 		OffsetBytes int    `json:"offset_bytes"`
 	}
-	if err := decodeArguments(raw, &arguments); err != nil {
+	if err := tools.DecodeArguments(raw, &arguments); err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}
 	}
 	calendarID, eventID := strings.TrimSpace(arguments.CalendarID), strings.TrimSpace(arguments.EventID)
@@ -358,13 +357,4 @@ func describe(err error) string {
 		return "Google Calendar is limiting requests right now; try again shortly."
 	}
 	return unavailableText
-}
-
-func decodeArguments(raw json.RawMessage, into any) error {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(into); err != nil {
-		return fmt.Errorf("the arguments do not match the tool's schema")
-	}
-	return nil
 }

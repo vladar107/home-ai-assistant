@@ -1,7 +1,6 @@
 package schedule
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -274,7 +273,7 @@ type reminderArguments struct {
 
 func (s *Service) setReminder(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
 	var arguments reminderArguments
-	if err := decodeArguments(call.Arguments, &arguments); err != nil {
+	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
 	config, err := ReminderConfig(arguments.Text)
@@ -326,7 +325,7 @@ func (s *Service) proposeReminder(ctx context.Context, principalID string, call 
 
 func (s *Service) cancelReminder(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
 	var arguments removeArguments
-	if err := decodeArguments(call.Arguments, &arguments); err != nil {
+	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
 	job, found, err := s.repository.LoadScheduledJob(ctx, principalID, strings.TrimSpace(arguments.JobID))
@@ -347,7 +346,7 @@ func (s *Service) proposeJob(ctx context.Context, principalID string, call tools
 		return tools.Result{Text: "Scheduling is not available.", IsError: true}, nil
 	}
 	var arguments proposeArguments
-	if err := decodeArguments(call.Arguments, &arguments); err != nil {
+	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
 	config, err := ModelTurnConfig(arguments.Prompt)
@@ -405,7 +404,7 @@ func (s *Service) act(ctx context.Context, principalID string, call tools.Call, 
 
 func (s *Service) getJob(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
 	var arguments removeArguments
-	if err := decodeArguments(call.Arguments, &arguments); err != nil {
+	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
 	job, found, err := s.repository.LoadScheduledJob(ctx, principalID, strings.TrimSpace(arguments.JobID))
@@ -423,7 +422,7 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 		return tools.Result{Text: "Scheduling is not available.", IsError: true}, nil
 	}
 	var arguments updateArguments
-	if err := decodeArguments(call.Arguments, &arguments); err != nil {
+	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
 	job, found, err := s.repository.LoadScheduledJob(ctx, principalID, strings.TrimSpace(arguments.JobID))
@@ -550,7 +549,7 @@ func (s *Service) proposeRemoval(ctx context.Context, principalID string, call t
 		return tools.Result{Text: "Scheduling is not available.", IsError: true}, nil
 	}
 	var arguments removeArguments
-	if err := decodeArguments(call.Arguments, &arguments); err != nil {
+	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
 	job, found, err := s.repository.LoadScheduledJob(ctx, principalID, strings.TrimSpace(arguments.JobID))
@@ -902,13 +901,4 @@ func DescribeJob(job Job, zone string) string {
 // FormatOccurrence renders an occurrence in the job's own zone, as the user reads it.
 func FormatOccurrence(at time.Time, location *time.Location) string {
 	return at.In(location).Format("Mon 2 Jan 15:04 MST")
-}
-
-func decodeArguments(raw json.RawMessage, into any) error {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(into); err != nil {
-		return fmt.Errorf("the arguments do not match the tool's schema")
-	}
-	return nil
 }

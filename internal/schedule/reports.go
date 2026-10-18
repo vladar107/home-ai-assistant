@@ -209,7 +209,7 @@ func (s *Service) executeReports(ctx context.Context, principalID string, call t
 		ReportID string `json:"report_id"`
 		Job      string `json:"job"`
 	}
-	if err := decodeArguments(call.Arguments, &arguments); err != nil {
+	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
 	if id := strings.TrimSpace(arguments.ReportID); id != "" {
