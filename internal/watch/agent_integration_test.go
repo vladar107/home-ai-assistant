@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -294,7 +295,8 @@ func TestAgentChecksRunInTheBackground(t *testing.T) {
 	a.at("2026-09-28 10:00")
 	a.wantAlert("Balcony door has been open for 10 minutes.")
 	a.waitStarted(2)
-	if principals := a.checks.ran(); len(principals) != 2 || principals[0] != "alice" || principals[1] != "bob" {
+	// Each check starts in its own goroutine, so a wave's checks start in either order.
+	if principals := a.checks.ran(); len(principals) != 2 || !sameStarts(principals, "alice", "bob") {
 		t.Fatalf("checks started for %v, want one of alice's and bob's", principals)
 	}
 	a.at("2026-09-28 10:01")
@@ -311,9 +313,17 @@ func TestAgentChecksRunInTheBackground(t *testing.T) {
 	if len(sent) != 2 || sent[0].chatID != 101 || sent[1].chatID != 202 || !strings.Contains(sent[1].text, "Down to €140.") {
 		t.Fatalf("sent = %+v, want alice's and bob's alerts", sent)
 	}
-	if principals := a.checks.ran(); len(principals) != 4 || principals[2] != "alice" || principals[3] != "carol" {
+	if principals := a.checks.ran(); len(principals) != 4 || !sameStarts(principals[2:], "alice", "carol") {
 		t.Fatalf("checks started for %v, want alice's second and carol's next", principals)
 	}
+}
+
+func sameStarts(principals []string, want ...string) bool {
+	got := slices.Clone(principals)
+	slices.Sort(got)
+	want = slices.Clone(want)
+	slices.Sort(want)
+	return slices.Equal(got, want)
 }
 
 // A check that finishes after its watch was edited is thrown away, and the edited watch is checked
