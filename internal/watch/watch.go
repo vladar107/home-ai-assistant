@@ -17,6 +17,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/vladar107/home-ai-assistant/internal/localtime"
 )
 
 const (
@@ -514,7 +516,7 @@ func (s Spec) Describe() string {
 
 // OccurrenceAt returns the window of the local day that contains now, if the watch runs that day.
 func (s Spec) OccurrenceAt(now time.Time) (Occurrence, bool) {
-	location, err := loadZone(s.Zone)
+	location, err := localtime.LoadZone(s.Zone)
 	if err != nil {
 		return Occurrence{}, false
 	}
@@ -548,7 +550,7 @@ func (s Spec) Expired(now time.Time) bool {
 	if last == "" {
 		return false
 	}
-	location, err := loadZone(s.Zone)
+	location, err := localtime.LoadZone(s.Zone)
 	if err != nil {
 		return false
 	}
@@ -614,7 +616,7 @@ func normalize(spec Spec, now time.Time) (Spec, error) {
 		spec.DelayMinutes = 0
 	}
 
-	location, err := loadZone(spec.Zone)
+	location, err := localtime.LoadZone(spec.Zone)
 	if err != nil {
 		return Spec{}, err
 	}
@@ -884,17 +886,6 @@ func uniqueStrings(values []string) []string {
 		}
 	}
 	return unique
-}
-
-func loadZone(zone string) (*time.Location, error) {
-	if zone == "" || zone == "Local" {
-		return nil, fmt.Errorf("the time zone must be an IANA name such as Europe/Amsterdam")
-	}
-	location, err := time.LoadLocation(zone)
-	if err != nil {
-		return nil, fmt.Errorf("the time zone %q is not known", zone)
-	}
-	return location, nil
 }
 
 // clockOn is the local HH:MM time on the day of the given instant, in that instant's zone; 24:00

@@ -16,6 +16,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/vladar107/home-ai-assistant/internal/localtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
@@ -502,10 +503,10 @@ func (s *Service) TurnLine(ctx context.Context, principalID string) (string, err
 	for index := range planned {
 		trip := planned[index]
 		if trip.Active(now) {
-			location := loadZone(trip.Zone)
+			location := localtime.SavedZone(trip.Zone)
 			return fmt.Sprintf("User is traveling: %q, destination %q, %s to %s (%s); local time there is %s.",
 				trip.Title, trip.Destination, trip.StartsAt.In(location).Format("Mon 2006-01-02"),
-				trip.EndLabel(turnDateLayout, turnDateLayout), trip.Zone, now.In(location).Format("Mon 2006-01-02 15:04")), nil
+				trip.EndLabel(turnDateLayout, turnDateLayout), location, now.In(location).Format("Mon 2006-01-02 15:04")), nil
 		}
 		if trip.StartsAt.After(now) && trip.StartsAt.Sub(now) <= turnLineHorizon && (next == nil || trip.StartsAt.Before(next.StartsAt)) {
 			next = &planned[index]
@@ -514,10 +515,10 @@ func (s *Service) TurnLine(ctx context.Context, principalID string) (string, err
 	if next == nil {
 		return "", nil
 	}
-	location := loadZone(next.Zone)
+	location := localtime.SavedZone(next.Zone)
 	return fmt.Sprintf("User's next trip: %q, destination %q, %s to %s (%s).",
 		next.Title, next.Destination, next.StartsAt.In(location).Format("Mon 2006-01-02"),
-		next.EndLabel(turnDateLayout, turnDateLayout), next.Zone), nil
+		next.EndLabel(turnDateLayout, turnDateLayout), location), nil
 }
 
 // DueNotices returns the notices owed at now across all principals: a start notice for a planned
@@ -991,14 +992,6 @@ func withIDs(bookings []Booking) ([]Booking, error) {
 		assigned[index] = booking
 	}
 	return assigned, nil
-}
-
-func loadZone(zone string) *time.Location {
-	location, err := schedule.LoadZone(zone)
-	if err != nil {
-		return time.UTC
-	}
-	return location
 }
 
 func newID() (string, error) {

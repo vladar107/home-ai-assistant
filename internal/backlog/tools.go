@@ -164,7 +164,7 @@ func (s *Service) executeList(ctx context.Context, principalID string, call tool
 		if !found {
 			return tools.Result{Text: string(unknownItemText), IsError: true}, nil
 		}
-		return tools.Result{Text: fmt.Sprintf("[%s] %s (%s, added %s)\n%s", item.ID, item.Title, item.Status, item.CreatedAt.UTC().Format("2006-01-02"), item.Details)}, nil
+		return tools.Result{Text: fmt.Sprintf("[%s] %s (%s, added %s)\n%s", item.ID, item.Title, item.Status, s.Day(item.CreatedAt), item.Details)}, nil
 	}
 	status := arguments.Status
 	if status == "" {
@@ -183,7 +183,7 @@ func (s *Service) executeList(ctx context.Context, principalID string, call tool
 	lines := []string{fmt.Sprintf("%d %s backlog items, newest first:", len(items), status)}
 	for index := len(items) - 1; index >= 0 && len(items)-index <= listedItems; index-- {
 		item := items[index]
-		line := fmt.Sprintf("- [%s] %s (added %s)", item.ID, item.Title, item.CreatedAt.UTC().Format("2006-01-02"))
+		line := fmt.Sprintf("- [%s] %s (added %s)", item.ID, item.Title, s.Day(item.CreatedAt))
 		if item.Details != "" {
 			line += ": " + shorten(normalizeTitle(item.Details), listedDetailsRunes)
 		}

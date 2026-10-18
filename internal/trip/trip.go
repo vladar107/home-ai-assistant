@@ -8,6 +8,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/vladar107/home-ai-assistant/internal/localtime"
 )
 
 const (
@@ -91,7 +93,7 @@ func (t Trip) Ended(now time.Time) bool {
 // EndLabel is the trip's end in its zone. An end at local midnight is the start of the next day,
 // so it reads as the previous day, as a date alone with dateLayout; any other end uses layout.
 func (t Trip) EndLabel(layout, dateLayout string) string {
-	return endLabel(t.StartsAt, t.EndsAt, loadZone(t.Zone), layout, dateLayout)
+	return endLabel(t.StartsAt, t.EndsAt, localtime.SavedZone(t.Zone), layout, dateLayout)
 }
 
 func endLabel(start, end time.Time, location *time.Location, layout, dateLayout string) string {

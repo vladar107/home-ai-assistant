@@ -184,13 +184,13 @@ const (
 )
 
 // Check checks the principal's route called name, or with no name the one whose weekdays include
-// date's, on date's calendar day; a zero date means today. Train and bus legs are checked through
-// their fixed departures and timed in order through the walk and bike legs, with no buffer added.
+// date's, on the calendar day date has in its own zone; a zero date means today here. Train and
+// bus legs are checked through their fixed departures and timed in order through the walk and bike
+// legs, with no buffer added.
 func (s *Service) Check(ctx context.Context, principalID, name string, date time.Time) (Result, error) {
 	if date.IsZero() {
-		date = s.now()
+		date = s.now().In(s.location)
 	}
-	date = date.In(s.location)
 	day := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, s.location)
 	route, err := s.choose(ctx, principalID, name, day)
 	if err != nil {

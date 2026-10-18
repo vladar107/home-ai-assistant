@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/localtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
@@ -149,9 +150,9 @@ func (s scan) Run(ctx context.Context, occurrence schedule.Occurrence) (schedule
 		return schedule.Result{}, err
 	}
 	ctx = tools.WithCallBudget(ctx, budget)
-	at := occurrence.ScheduledFor.In(occurrence.Location).Format("Monday 2 January 2006, 15:04 MST")
-	message := fmt.Sprintf("[system] This is the user's scheduled job %q, running for %s. The user is not watching this turn and cannot answer questions, "+
-		"and only read-only tools are available. Do the task below.\n\n%s", occurrence.JobName, at, ScanPrompt(days))
+	message := fmt.Sprintf("[system] This is the user's scheduled job %q, scheduled for %s; it can run late, so go by the current local time above. "+
+		"The user is not watching this turn and cannot answer questions, and only read-only tools are available. Do the task below.\n\n%s",
+		occurrence.JobName, localtime.Format(occurrence.ScheduledFor, occurrence.Location), ScanPrompt(days))
 	text, errorKind, err := s.checker.RunCheck(ctx, occurrence.PrincipalID, message)
 	if err != nil {
 		return schedule.Result{}, err
@@ -316,7 +317,7 @@ func parseInstant(value string) (time.Time, bool) {
 // updateLine says what a repeated find changed on a known trip.
 func updateLine(result Result) string {
 	trip := result.Trip
-	location := loadZone(trip.Zone)
+	location := localtime.SavedZone(trip.Zone)
 	line := fmt.Sprintf("Updated trip %q", trip.Title)
 	if previous := result.Previous; previous != nil && (!previous.StartsAt.Equal(trip.StartsAt) || !previous.EndsAt.Equal(trip.EndsAt)) {
 		line += fmt.Sprintf(": now %s, was %s", span(trip, location), span(*previous, location))

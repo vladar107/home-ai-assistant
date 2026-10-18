@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/localtime"
 	"github.com/vladar107/home-ai-assistant/internal/module"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
@@ -157,7 +158,7 @@ func NewService(cfg Config, repository Repository, chats Chats, sender Sender, p
 	if logger == nil {
 		return nil, fmt.Errorf("watch logger is required")
 	}
-	if _, err := loadZone(cfg.Zone); err != nil {
+	if _, err := localtime.LoadZone(cfg.Zone); err != nil {
 		return nil, fmt.Errorf("watch default zone: %w", err)
 	}
 	tick := cfg.TickInterval
@@ -876,7 +877,7 @@ func (s *Service) Mute(ctx context.Context, principalID, watchID string) (bool, 
 	if err != nil || !found {
 		return false, err
 	}
-	location, err := loadZone(watch.Zone)
+	location, err := localtime.LoadZone(watch.Zone)
 	if err != nil {
 		return false, err
 	}

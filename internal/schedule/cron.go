@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/robfig/cron/v3"
+
+	"github.com/vladar107/home-ai-assistant/internal/localtime"
 )
 
 const (
@@ -49,14 +51,7 @@ func ParseSchedule(expression, zone string) (Schedule, error) {
 
 // LoadZone resolves an IANA zone name; the binary embeds the zone database.
 func LoadZone(zone string) (*time.Location, error) {
-	if zone == "" || zone == "Local" {
-		return nil, fmt.Errorf("the time zone must be an IANA name such as Europe/Amsterdam")
-	}
-	location, err := time.LoadLocation(zone)
-	if err != nil {
-		return nil, fmt.Errorf("the time zone %q is not known", zone)
-	}
-	return location, nil
+	return localtime.LoadZone(zone)
 }
 
 // Next returns the first occurrence strictly after the given instant, or the zero time when the

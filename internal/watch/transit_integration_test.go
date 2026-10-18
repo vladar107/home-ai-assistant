@@ -684,6 +684,24 @@ func TestRouteWatchAlertsOnLegsAndTheArrivalTarget(t *testing.T) {
 	e.wantSentAnyOrder(101, "Route \"work\": leg 2 delayed +6 min", "Route \"short\": leg 2 delayed +6 min")
 }
 
+// A route watch kept in a zone ahead of the household's checks the route on its own day. Its
+// Monday window in Tokyo ends before midnight at home, so read in the household's zone the window
+// would check Sunday's trains instead of Monday's.
+func TestRouteWatchInAnotherZoneChecksItsOwnDay(t *testing.T) {
+	e := newTransitEngine(t)
+	e.saveRoute("alice", "0000000000000001", "work", "07:56")
+	spec := routeSpec("work")
+	spec.Days = []string{"mon"}
+	spec.Start, spec.End, spec.Zone = "05:00", "06:30", "Asia/Tokyo"
+	e.create("alice", watchID, spec)
+
+	e.at("2026-10-04 22:30")
+	e.wantSent(101)
+	if e.gateway.count("/ns/v3/trips") == 0 || e.telemetry.count("check alice route normal") != 1 {
+		t.Fatalf("NS asked %d times, metrics = %v", e.gateway.count("/ns/v3/trips"), e.telemetry.events)
+	}
+}
+
 // Route names are looked up among the owner's own routes when a watch is proposed, whatever the
 // case, and the saved name is kept; no one can watch another user's route.
 func TestRouteWatchProposalNeedsTheOwnersRoute(t *testing.T) {

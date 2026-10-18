@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/localtime"
 )
 
 const (
@@ -165,23 +166,19 @@ func (e *AgentEvaluator) Stop(ctx context.Context) error {
 // checkMessage is the check turn's instruction: what to look at, when the user wants to hear, the
 // value last reported so the model can say what changed, and how to answer.
 func checkMessage(watch Watch, previous string, now time.Time) string {
-	at := now.Format("Monday 2 January 2006, 15:04 MST")
-	if location, err := loadZone(watch.Zone); err == nil {
-		at = now.In(location).Format("Monday 2 January 2006, 15:04 MST") + " (" + watch.Zone + ")"
-	}
 	last := "none yet"
 	if _, value, found := strings.Cut(previous, "|"); found && value != "" {
 		last = value
 	}
 	return fmt.Sprintf(
-		"[system] This is one check of the user's watch %q, at %s. The user is not watching this turn and cannot answer questions, "+
+		"[system] This is one check of the user's watch %q, whose times are local to its zone, where it is now %s. The user is not watching this turn and cannot answer questions, "+
 			"and only read-only tools are available, so nothing can be created, changed, or saved. "+
 			"Do the check below with the tools you have, and never report a value that no tool returned in this run.\n\n"+
 			"Check: %s\nTell the user when: %s\nValue last reported: %s\n\n"+
 			"End your reply with one JSON object and nothing after it: "+
 			`{"met": true or false, "value": "the short value the condition is about, such as a price, a sender, or a date", "headline": "one line for the user saying what you found", "details": "optional short text, such as where you found it"}. `+
 			`If you cannot do the check, such as when a tool is missing or a page does not load, end instead with {"error": "what failed"}.`,
-		watch.Target.Name, at, watch.Check.Instruction, watch.Check.Condition, last,
+		watch.Target.Name, localtime.Format(now, localtime.SavedZone(watch.Zone)), watch.Check.Instruction, watch.Check.Condition, last,
 	)
 }
 

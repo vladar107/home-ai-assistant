@@ -469,9 +469,13 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			}
 			trains = nsTrains{nsService}
 		}
+		location, err := time.LoadLocation(a.cfg.Timezone)
+		if err != nil {
+			return fmt.Errorf("load household time zone: %w", err)
+		}
 		var webSearch conversation.WebSearch
 		if a.cfg.Web.Enabled {
-			webService, err := web.NewService(web.Config{WeatherHome: a.cfg.Web.WeatherHome, Cards: cards, Trains: trains}, a.store, a.logger)
+			webService, err := web.NewService(web.Config{WeatherHome: a.cfg.Web.WeatherHome, Location: location, Cards: cards, Trains: trains}, a.store, a.logger)
 			if err != nil {
 				return fmt.Errorf("initialize web connector: %w", err)
 			}
@@ -485,10 +489,6 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			}
 			a.web = webService
 			webSearch = webService
-		}
-		location, err := time.LoadLocation(a.cfg.Timezone)
-		if err != nil {
-			return fmt.Errorf("load household time zone: %w", err)
 		}
 		var turnLocations conversation.Locations
 		if a.cfg.Location.Enabled {
@@ -662,7 +662,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			return err
 		}
 		a.trips = tripService
-		backlogService, err := backlog.NewService(backlog.Config{}, a.store, approvals, a.logger)
+		backlogService, err := backlog.NewService(backlog.Config{Location: location}, a.store, approvals, a.logger)
 		if err != nil {
 			return fmt.Errorf("initialize backlog: %w", err)
 		}

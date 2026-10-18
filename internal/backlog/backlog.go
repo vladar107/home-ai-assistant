@@ -52,6 +52,8 @@ type Repository interface {
 type Config struct {
 	// Now is the clock for item timestamps; nil means time.Now.
 	Now func() time.Time
+	// Location is the household's time zone, the calendar items are dated in; nil means UTC.
+	Location *time.Location
 }
 
 type Service struct {
@@ -60,6 +62,7 @@ type Service struct {
 	exposure   Exposure
 	logger     *slog.Logger
 	now        func() time.Time
+	location   *time.Location
 
 	// mu serialises writes so the cap on open items holds when a turn's tool calls run in
 	// parallel. It is never held while proposing, because an approval executes under its own locks
@@ -78,13 +81,20 @@ func NewService(cfg Config, repository Repository, proposer Proposer, logger *sl
 	if now == nil {
 		now = time.Now
 	}
-	return &Service{repository: repository, proposer: proposer, logger: logger, now: now}, nil
+	location := cfg.Location
+	if location == nil {
+		location = time.UTC
+	}
+	return &Service{repository: repository, proposer: proposer, logger: logger, now: now, location: location}, nil
 }
 
 // SetExposure sets who answers whether a conversation has read outside content, at wiring time.
 func (s *Service) SetExposure(exposure Exposure) { s.exposure = exposure }
 
 func (s *Service) Now() time.Time { return s.now() }
+
+// Day is the household's calendar date of an instant, as YYYY-MM-DD.
+func (s *Service) Day(at time.Time) string { return at.In(s.location).Format(time.DateOnly) }
 
 // Items returns the principal's open items, oldest first.
 func (s *Service) Items(ctx context.Context, principalID string) ([]Item, error) {

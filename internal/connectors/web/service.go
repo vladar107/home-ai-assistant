@@ -44,6 +44,9 @@ type Config struct {
 	Dial     DialFunc
 	// Now is the clock that bounds an hourly forecast's date; nil means time.Now.
 	Now func() time.Time
+	// Location is the household's time zone, the calendar that bounds an hourly forecast's date
+	// for coordinates, which come without a zone of their own; nil means UTC.
+	Location *time.Location
 	// Cards keeps a day card for the reply of the turn that drew it; nil leaves weather_card out.
 	Cards Cards
 	// Trains reports train statuses for a day card's trains; nil leaves trains off the card.
@@ -132,6 +135,7 @@ type Service struct {
 	forecastURL  *url.URL
 	logger       *slog.Logger
 	now          func() time.Time
+	location     *time.Location
 	cards        Cards
 	trains       Trains
 	telemetry    Telemetry
@@ -187,8 +191,13 @@ func NewService(cfg Config, repository integration.Repository, logger *slog.Logg
 	if now == nil {
 		now = time.Now
 	}
+	location := cfg.Location
+	if location == nil {
+		location = time.UTC
+	}
 	return &Service{
 		now:          now,
+		location:     location,
 		cards:        cfg.Cards,
 		trains:       cfg.Trains,
 		guard:        newGuard(cfg.Resolver, cfg.Dial),

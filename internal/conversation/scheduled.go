@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/vladar107/home-ai-assistant/internal/localtime"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
@@ -79,7 +80,7 @@ func (s *Service) runUnwatched(ctx context.Context, principalID, turn, message s
 	result, runErr := s.runtime.Run(turnCtx, agentruntime.RunRequest{
 		PrincipalID: principalID,
 		SessionID:   sessionID,
-		Message:     s.withUser(principalID, withPlace(s.placeLines(turnCtx, principalID), message)),
+		Message:     s.withTime(s.withUser(principalID, withPlace(s.placeLines(turnCtx, principalID), message))),
 		Tools:       tools,
 		Memory:      memory,
 		WebSearch:   webSearch,
@@ -111,4 +112,12 @@ func (s *Service) withUser(principalID, message string) string {
 		return message
 	}
 	return "[system] The user is " + name + ".\n\n" + message
+}
+
+// withTime starts a turn's message with the current local time in the household zone.
+func (s *Service) withTime(message string) string {
+	if s.config.Location == nil {
+		return message
+	}
+	return localtime.Line(s.config.Now(), s.config.Location) + "\n\n" + message
 }

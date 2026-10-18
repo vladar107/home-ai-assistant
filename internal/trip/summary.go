@@ -3,6 +3,8 @@ package trip
 import (
 	"strings"
 	"time"
+
+	"github.com/vladar107/home-ai-assistant/internal/localtime"
 )
 
 const (
@@ -22,7 +24,7 @@ const (
 // cancelled says so first, where the pinned bar shows it. It is built from the validated fields of
 // the trip only.
 func Summary(trip Trip, now time.Time) string {
-	location := loadZone(trip.Zone)
+	location := localtime.SavedZone(trip.Zone)
 	var lines []string
 	switch {
 	case trip.Status == StatusCancelled:
@@ -32,7 +34,7 @@ func Summary(trip Trip, now time.Time) string {
 	}
 	lines = append(lines,
 		trip.Title+" ("+trip.Destination+")",
-		trip.StartsAt.In(location).Format(summaryDateLayout)+" to "+trip.EndLabel(summaryDateLayout, summaryDateLayout)+", times in "+trip.Zone,
+		trip.StartsAt.In(location).Format(summaryDateLayout)+" to "+trip.EndLabel(summaryDateLayout, summaryDateLayout)+", times in "+location.String(),
 	)
 	if len(trip.Bookings) > 0 {
 		lines = append(lines, "")

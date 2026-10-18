@@ -118,7 +118,9 @@ func newFixtureWith(t *testing.T, cfg web.Config) *fixture {
 	cfg.GeocodingURL = "http://geocoding.test/v1/search"
 	cfg.ForecastURL = "http://forecast.test/v1/forecast"
 	cfg.Resolver = resolver{}
-	cfg.Now = func() time.Time { return time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC) }
+	if cfg.Now == nil {
+		cfg.Now = func() time.Time { return time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC) }
+	}
 	cfg.Dial = func(ctx context.Context, network, address string) (net.Conn, error) {
 		f.mu.Lock()
 		f.dialed = append(f.dialed, address)
@@ -632,6 +634,35 @@ func TestWeatherForecastHourByHourForADay(t *testing.T) {
 		{map[string]any{"location": "Amsterdam", "from_hour": 9}, "from_hour and to_hour need a date"},
 	} {
 		wantError(t, f.call("alice", "weather_forecast", tc.arguments), tc.want)
+	}
+}
+
+// Coordinates come without a zone, so just after midnight at home, while UTC is still on the day
+// before, the hourly bound follows the household's calendar: yesterday is refused and the
+// furthest day ahead reaches Open-Meteo.
+func TestWeatherHourlyForCoordinatesFollowsTheHouseholdCalendar(t *testing.T) {
+	home, err := time.LoadLocation("Europe/Amsterdam")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := newFixtureWith(t, web.Config{Location: home, Now: func() time.Time { return time.Date(2026, 9, 27, 22, 30, 0, 0, time.UTC) }})
+	var mu sync.Mutex
+	var dates []string
+	f.route("forecast.test/v1/forecast", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		dates = append(dates, r.URL.Query().Get("start_date"))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, hourlyAmsterdam())
+	})
+
+	wantError(t, f.call("alice", "weather_forecast", map[string]any{"latitude": 52.1, "longitude": 4.4, "date": "2026-09-27"}),
+		"date must be between 2026-09-28 and 2026-10-13")
+	f.call("alice", "weather_forecast", map[string]any{"latitude": 52.1, "longitude": 4.4, "date": "2026-10-13"})
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Equal(dates, []string{"2026-10-13"}) {
+		t.Fatalf("forecast dates asked = %v", dates)
 	}
 }
 

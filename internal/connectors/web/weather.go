@@ -204,10 +204,11 @@ func parseHourWindow(request weatherRequest) (hourWindow, bool, error) {
 	return window, true, nil
 }
 
-// checkHourlyDate bounds the date by today in the place's own calendar, falling back to UTC when
-// the place's time zone is unknown.
+// checkHourlyDate bounds the date by today in the place's own calendar. A place without a known
+// zone, such as one given by coordinates, is taken to be near home, so the household's calendar
+// stands in for it.
 func (s *Service) checkHourlyDate(found place, date time.Time) error {
-	zone := time.UTC
+	zone := s.location
 	if found.Timezone != "" {
 		if loaded, err := time.LoadLocation(found.Timezone); err == nil {
 			zone = loaded

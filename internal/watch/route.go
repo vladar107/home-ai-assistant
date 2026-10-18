@@ -44,13 +44,14 @@ func (e *RouteEvaluator) Resolve(ctx context.Context, principalID string, spec S
 	return spec, nil
 }
 
-// Evaluate checks the route for the occurrence's day. A route that is gone fails the check as it
+// Evaluate checks the route for the occurrence's day, the calendar day of its window in the
+// watch's zone, whatever the routes service's zone. A route that is gone fails the check as it
 // is, while every train and bus leg failing to check is an upstream failure; a partial failure is
 // told in the details and leaves the state of an alert already sent as it was.
 func (e *RouteEvaluator) Evaluate(ctx context.Context, principalID string, watch Watch, occurrence Occurrence) (Observation, error) {
 	key := strings.Join([]string{KindRoute, principalID, strings.ToLower(watch.Target.Route), occurrence.Date}, "\x00")
 	result, err := Cached(ctx, occurrence.Cache, key, func(ctx context.Context) (routes.Result, error) {
-		return e.routes.Check(ctx, principalID, watch.Target.Route, occurrence.End)
+		return e.routes.Check(ctx, principalID, watch.Target.Route, occurrence.Start)
 	})
 	if err != nil {
 		return Observation{}, err

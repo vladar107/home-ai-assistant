@@ -745,7 +745,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		memoryTurns = h.memory
 	}
 	if options.backlog {
-		h.backlog, err = backlog.NewService(backlog.Config{}, h.store, h.approvals, logger)
+		h.backlog, err = backlog.NewService(backlog.Config{Location: options.location}, h.store, h.approvals, logger)
 		if err != nil {
 			t.Fatal(err)
 		}

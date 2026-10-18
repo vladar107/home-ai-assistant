@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/localtime"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -652,7 +653,13 @@ func (s *Service) nextWindow(spec Spec) string {
 	if allDay(spec.Kind) && spec.Start == startOfDay && spec.End == endOfDay {
 		return "Checking all day, " + spec.DescribeDays() + ", " + spec.checkEvery() + "."
 	}
-	now := s.now()
+	location, err := localtime.LoadZone(spec.Zone)
+	if err != nil {
+		return ""
+	}
+	// Days are stepped in the watch's zone: stepped in another, a day can be skipped where a
+	// change of clocks moves midnight.
+	now := s.now().In(location)
 	for days := 0; days < 8; days++ {
 		occurrence, active := spec.OccurrenceAt(now.AddDate(0, 0, days))
 		if active && occurrence.End.After(now) {

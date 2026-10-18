@@ -34,6 +34,7 @@ type BacklogController interface {
 	MarkDone(context.Context, string, string) (bool, error)
 	Remove(context.Context, string, string) (bool, error)
 	Now() time.Time
+	Day(time.Time) string
 }
 
 // SetBacklog adds /backlog; call it before Start.
@@ -106,14 +107,14 @@ func backlogAge(created, now time.Time) string {
 
 // backlogExport is the open items as Markdown, written to be pasted into a development session.
 // Headings stay literal in Telegram, so a copied message keeps its structure.
-func backlogExport(items []backlog.Item) string {
+func backlogExport(items []backlog.Item, day func(time.Time) string) string {
 	if len(items) == 0 {
 		return NoBacklogReply
 	}
 	var builder strings.Builder
 	builder.WriteString(BacklogExportHead)
 	for _, item := range items {
-		fmt.Fprintf(&builder, "\n\n## %s\nAdded %s.", item.Title, item.CreatedAt.UTC().Format("2006-01-02"))
+		fmt.Fprintf(&builder, "\n\n## %s\nAdded %s.", item.Title, day(item.CreatedAt))
 		if item.Details != "" {
 			builder.WriteString("\n\n" + item.Details)
 		}
@@ -127,7 +128,7 @@ func (s *Service) sendBacklogExport(ctx context.Context, message *Message, princ
 	if err != nil {
 		return processingResult{}, "handle_command", err
 	}
-	chunks := conversation.SplitReply(backlogExport(items))
+	chunks := conversation.SplitReply(backlogExport(items, s.backlog.Day))
 	for _, chunk := range chunks[:len(chunks)-1] {
 		if err := s.client.SendReply(ctx, message.Chat.ID, message.MessageID, chunk); err != nil {
 			if isPermanentAPIError(err) {

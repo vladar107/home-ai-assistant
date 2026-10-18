@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/localtime"
 )
 
 const (
@@ -65,10 +65,7 @@ func (s *Service) TurnReports(ctx context.Context, principalID string, turn conv
 		return "", false, false
 	}
 	s.forgetNotice(principalID, message.MessageID)
-	location, err := loadZone(s.zone)
-	if err != nil {
-		location = time.UTC
-	}
+	location := localtime.SavedZone(s.zone)
 	text := fmt.Sprintf("The user is replying to this message from their watch %q (watch id %s), sent %s:\n%s",
 		message.WatchLabel, message.WatchID, message.SentAt.In(location).Format(quotedAlertTimeForm), message.Text)
 	return text, message.External, message.Private

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 	"github.com/vladar107/home-ai-assistant/internal/watch"
 )
@@ -529,5 +530,26 @@ func TestHomeKindIsOfferedOnlyWithAnEvaluator(t *testing.T) {
 	result, err := service.Execute(e.ctx, "alice", tools.Call{Name: "watch_propose", Arguments: raw})
 	if err != nil || !result.IsError {
 		t.Fatalf("home proposal without an evaluator = %+v %v", result, err)
+	}
+}
+
+// The first check is found by stepping through the watch's own days, whatever zone the clock
+// reads in. Late on the Saturday before clocks go forward, the server's UTC day is still Saturday
+// while each later UTC evening is already the next local day, so stepping in UTC passed over
+// Sunday.
+func TestWatchNamesItsFirstCheckAcrossAClockChange(t *testing.T) {
+	h := newHomeEngine(t)
+	h.clock.mu.Lock()
+	h.clock.now = time.Date(2026, 3, 28, 22, 30, 0, 0, time.UTC)
+	h.clock.mu.Unlock()
+	spec := homeSpec("09:00", "10:00")
+	spec.Days = []string{"sun"}
+	raw, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := h.service.ExecuteApproved(h.ctx, approval.Record{ID: "00000000000000c1", PrincipalID: "alice", Tool: "watch_propose", Arguments: raw})
+	if err != nil || outcome.Text != "Watching. First check: Sun 29 Mar 09:00 CEST." {
+		t.Fatalf("outcome = %+v %v", outcome, err)
 	}
 }

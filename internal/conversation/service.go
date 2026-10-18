@@ -995,12 +995,7 @@ func (s *Service) turnMessage(request Request, notice, attachments, hint, place 
 	if line := subjectContext(request.Subject, request.SubjectName); line != "" {
 		message = line + "\n\n" + message
 	}
-	if s.config.Location != nil {
-		// The time goes in the message rather than the system prompt, so the prompt stays
-		// cacheable and the session history keeps when each message was sent.
-		now := s.config.Now().In(s.config.Location).Format("Monday 2 January 2006, 15:04 MST")
-		message = "[system] Current local time: " + now + " (" + s.config.Location.String() + ").\n\n" + message
-	}
+	message = s.withTime(message)
 	if attachments == "" {
 		return message
 	}

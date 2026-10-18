@@ -43,6 +43,29 @@ func (h *conversationHarness) seedBacklog(principalID, id, title, details string
 	}
 }
 
+// An item is dated by the household's calendar, in the tools and in the export alike: added in
+// the UTC evening, it is already the next day at home.
+func TestBacklogDatesFollowTheHouseholdCalendar(t *testing.T) {
+	home, err := time.LoadLocation("Pacific/Auckland")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := newControlledRuntime()
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{backlog: true, location: home})
+	h.provision("alice", "acct-alice")
+	h.start()
+	h.seedBacklog("alice", "aaaaaaa1", "Idea", "Details.", time.Date(2026, 10, 1, 18, 0, 0, 0, time.UTC))
+
+	_, results := h.memoryTurn(runtime, 1, 101, "ok", memoryCall("backlog_list", `{}`), memoryCall("backlog_list", `{"id":"aaaaaaa1"}`))
+	if len(results) != 2 || !strings.Contains(results[0].Text, "[aaaaaaa1] Idea (added 2026-10-02)") || !strings.Contains(results[1].Text, "(open, added 2026-10-02)") {
+		t.Fatalf("list results = %+v", results)
+	}
+	h.push(textUpdate(2, 101, "/backlog export"))
+	if message := h.nextMessage(); !strings.Contains(message.text, "## Idea\nAdded 2026-10-02.") {
+		t.Fatalf("export = %q", message.text)
+	}
+}
+
 func TestBacklogToolsKeepEachUsersItemsAndStayOutOfThePrompt(t *testing.T) {
 	runtime := newControlledRuntime()
 	h := newBacklogHarness(t, runtime)

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/localtime"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
@@ -404,14 +405,14 @@ func (t *Tools) executeList(ctx context.Context, principalID string, call tools.
 }
 
 func renderTrip(trip Trip, now time.Time) string {
-	location := loadZone(trip.Zone)
+	location := localtime.SavedZone(trip.Zone)
 	state := trip.Status
 	if trip.Active(now) {
 		state = "active"
 	}
 	origin := "source: " + trip.Source
 	lines := []string{fmt.Sprintf("[%s] %q, %q (%s; %s): %s to %s, %s", trip.ID, trip.Title, trip.Destination, state, origin,
-		trip.StartsAt.In(location).Format(localLayout), trip.EndLabel(localLayout, dateLayout), trip.Zone)}
+		trip.StartsAt.In(location).Format(localLayout), trip.EndLabel(localLayout, dateLayout), location)}
 	for _, booking := range trip.Bookings {
 		line := fmt.Sprintf("  - [%s] %s: %q", booking.ID, booking.Kind, booking.Title)
 		if booking.Reference != "" {
@@ -479,9 +480,9 @@ func unsetText(reason string) string {
 // describeDraft renders a draft for a proposal and for the model: the trip and each booking in the
 // trip's zone.
 func describeDraft(draft Draft) string {
-	location := loadZone(draft.Zone)
+	location := localtime.SavedZone(draft.Zone)
 	lines := []string{fmt.Sprintf("%s, %s: %s to %s (%s)", draft.Title, draft.Destination,
-		draft.StartsAt.In(location).Format(localLayout), endLabel(draft.StartsAt, draft.EndsAt, location, localLayout, dateLayout), draft.Zone)}
+		draft.StartsAt.In(location).Format(localLayout), endLabel(draft.StartsAt, draft.EndsAt, location, localLayout, dateLayout), location)}
 	for _, booking := range draft.Bookings {
 		line := fmt.Sprintf("- %s: %s", booking.Kind, booking.Title)
 		if booking.Reference != "" {
@@ -499,13 +500,13 @@ func describeDraft(draft Draft) string {
 // describeSaved tells what a write stored, which reminders were set, and which bookings got none.
 func describeSaved(verb string, result Result) string {
 	trip := result.Trip
-	location := loadZone(trip.Zone)
+	location := localtime.SavedZone(trip.Zone)
 	unset := make(map[string]string, len(result.Unset))
 	for _, item := range result.Unset {
 		unset[item.BookingID] = unsetText(item.Reason)
 	}
 	parts := []string{fmt.Sprintf("%s the trip [%s] %s, %s: %s to %s (%s).", verb, trip.ID, trip.Title, trip.Destination,
-		trip.StartsAt.In(location).Format(localLayout), trip.EndLabel(localLayout, dateLayout), trip.Zone)}
+		trip.StartsAt.In(location).Format(localLayout), trip.EndLabel(localLayout, dateLayout), location)}
 	var set, missed, none []string
 	for _, booking := range trip.Bookings {
 		switch {
@@ -645,7 +646,7 @@ func bookingsFrom(arguments []bookingArguments, location *time.Location) ([]Book
 // addFromDraft is the canonical argument form of a validated draft; booking IDs are kept for the
 // caller to use or drop.
 func addFromDraft(draft Draft) addArguments {
-	location := loadZone(draft.Zone)
+	location := localtime.SavedZone(draft.Zone)
 	arguments := addArguments{
 		Title: draft.Title, Destination: draft.Destination, Timezone: draft.Zone,
 		StartsAt: draft.StartsAt.In(location).Format(localLayout), EndsAt: draft.EndsAt.In(location).Format(localLayout),
