@@ -8,7 +8,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
-	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
+	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
 // implicitTab is the service message of a tab Alice opened without naming it.
@@ -73,7 +73,7 @@ func TestABotNamedTabIsNamedOncePerConversationWithAnIcon(t *testing.T) {
 		t.Fatalf("tab edit = %+v", edit)
 	}
 	h.waitTabName(40, "Watering tomatoes")
-	if tab, _ := h.registryTab(40); tab.NamedBy != sqlite.TabNamedByBot || tab.IconCustomEmojiID != "5000000000000000001" || tab.NamedSessionID != sessionID {
+	if tab, _ := h.registryTab(40); tab.NamedBy != thread.NamedByBot || tab.IconCustomEmojiID != "5000000000000000001" || tab.NamedSessionID != sessionID {
 		t.Fatalf("named tab in the registry = %+v", tab)
 	}
 
@@ -122,10 +122,10 @@ func TestABotNamedTabIsNamedOncePerConversationWithAnIcon(t *testing.T) {
 func TestUserFixedAndMainViewTabsAreNeverRenamed(t *testing.T) {
 	runtime := newControlledRuntime()
 	h, _ := newTabsHarness(t, runtime, true)
-	if _, err := h.store.AddTab(h.ctx, "alice", 42, "Reports", sqlite.TabNamedByFixed); err != nil {
+	if _, err := h.store.AddTab(h.ctx, "alice", 42, "Reports", thread.NamedByFixed); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.store.AddTab(h.ctx, "alice", 41, "Conversation from 1 October", sqlite.TabNamedByBot); err != nil {
+	if _, err := h.store.AddTab(h.ctx, "alice", 41, "Conversation from 1 October", thread.NamedByBot); err != nil {
 		t.Fatal(err)
 	}
 	// A tab opened without a name that the user then named keeps the user's name.
@@ -154,11 +154,11 @@ func TestUserFixedAndMainViewTabsAreNeverRenamed(t *testing.T) {
 	h.waitTabName(41, "Book club")
 	h.turnInTab(runtime, 9, 50, "more about the trip")
 
-	for threadID, want := range map[int64]sqlite.Tab{
-		50: {Name: "Trip notes", NamedBy: sqlite.TabNamedByUser},
-		42: {Name: "Reports", NamedBy: sqlite.TabNamedByFixed},
-		43: {Name: "Vegetables", NamedBy: sqlite.TabNamedByUser},
-		44: {Name: "Old tab", NamedBy: sqlite.TabNamedByUser},
+	for threadID, want := range map[int64]thread.Tab{
+		50: {Name: "Trip notes", NamedBy: thread.NamedByUser},
+		42: {Name: "Reports", NamedBy: thread.NamedByFixed},
+		43: {Name: "Vegetables", NamedBy: thread.NamedByUser},
+		44: {Name: "Old tab", NamedBy: thread.NamedByUser},
 	} {
 		if tab, found := h.registryTab(threadID); !found || tab.Name != want.Name || tab.NamedBy != want.NamedBy || tab.NamedSessionID != "" {
 			t.Fatalf("tab %d = %+v %v, want %+v", threadID, tab, found, want)
@@ -170,7 +170,7 @@ func TestATabNameOutsideTheRulesIsNotUsed(t *testing.T) {
 	runtime := newControlledRuntime()
 	h, _ := newTabsHarness(t, runtime, true)
 	for _, threadID := range []int64{61, 62, 63, 64, 65} {
-		if _, err := h.store.AddTab(h.ctx, "alice", threadID, "Made by the bot", sqlite.TabNamedByBot); err != nil {
+		if _, err := h.store.AddTab(h.ctx, "alice", threadID, "Made by the bot", thread.NamedByBot); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -296,7 +296,7 @@ func TestTabIconsAreFoundByEmoji(t *testing.T) {
 func TestWithTopicsOffNoTabIsNamed(t *testing.T) {
 	runtime := newControlledRuntime()
 	h, _ := newTabsHarness(t, runtime, false)
-	if _, err := h.store.AddTab(h.ctx, "alice", 40, "Made by the bot", sqlite.TabNamedByBot); err != nil {
+	if _, err := h.store.AddTab(h.ctx, "alice", 40, "Made by the bot", thread.NamedByBot); err != nil {
 		t.Fatal(err)
 	}
 	h.turnInTab(runtime, 1, 0, "groceries")

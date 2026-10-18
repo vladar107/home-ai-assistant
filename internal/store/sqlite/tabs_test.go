@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
 // Migration 032 rebuilds the conversation tables again; everything stored before it must survive
@@ -146,7 +147,7 @@ func TestMigrationExistingTabNamesKeepsTabsAlreadyOpen(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := &Store{db: db}
-	for threadID, want := range map[int64]string{1: TabNamedByUser, 2: TabNamedByUser, 3: TabNamedByFixed} {
+	for threadID, want := range map[int64]string{1: thread.NamedByUser, 2: thread.NamedByUser, 3: thread.NamedByFixed} {
 		if tab, found, err := store.Tab(ctx, "alice", threadID); err != nil || !found || tab.NamedBy != want {
 			t.Fatalf("tab %d after migration = %+v %v %v, want named by %s", threadID, tab, found, err, want)
 		}
@@ -197,7 +198,7 @@ func TestGoneTabConversationComesBackWithTheNextMessage(t *testing.T) {
 	main := conversation.Lane{PrincipalID: "alice"}
 	tabMessage(t, store, main, 1)
 	gone := tabMessage(t, store, tab, 2)
-	if added, err := store.AddTab(ctx, "alice", 7, "Trip notes", TabNamedByBot); err != nil || !added {
+	if added, err := store.AddTab(ctx, "alice", 7, "Trip notes", thread.NamedByBot); err != nil || !added {
 		t.Fatalf("add tab = %v %v", added, err)
 	}
 	if record := sessionRecord(t, store, gone); !record.Active || record.ThreadID != 7 || record.TabName != "Trip notes" {
@@ -270,10 +271,10 @@ func TestGoneTabConversationStaysClosedWhileAnotherTabHoldsItsSubject(t *testing
 
 func TestTabRegistryKeepsFixedNamesAndConfirmsOnce(t *testing.T) {
 	store, ctx := openTestStore(t)
-	if added, err := store.AddTab(ctx, "alice", 7, "Reports", TabNamedByFixed); err != nil || !added {
+	if added, err := store.AddTab(ctx, "alice", 7, "Reports", thread.NamedByFixed); err != nil || !added {
 		t.Fatalf("add fixed tab = %v %v", added, err)
 	}
-	if added, err := store.AddTab(ctx, "alice", 7, "Something else", TabNamedByUser); err != nil || added {
+	if added, err := store.AddTab(ctx, "alice", 7, "Something else", thread.NamedByUser); err != nil || added {
 		t.Fatalf("adding a known tab = %v %v", added, err)
 	}
 	if renamed, err := store.RenameTab(ctx, "alice", 7, "Mine"); err != nil || renamed {
@@ -294,11 +295,11 @@ func TestTabRegistryKeepsFixedNamesAndConfirmsOnce(t *testing.T) {
 		t.Fatalf("confirm an unknown tab = %v %v", confirmed, err)
 	}
 	fixed, found, err := store.Tab(ctx, "alice", 7)
-	if err != nil || !found || fixed.Name != "Reports" || fixed.NamedBy != TabNamedByFixed || !fixed.Confirmed {
+	if err != nil || !found || fixed.Name != "Reports" || fixed.NamedBy != thread.NamedByFixed || !fixed.Confirmed {
 		t.Fatalf("fixed tab = %+v %v %v", fixed, found, err)
 	}
 	renamed, found, err := store.Tab(ctx, "alice", 8)
-	if err != nil || !found || renamed.Name != "Groceries" || renamed.NamedBy != TabNamedByUser || renamed.Confirmed {
+	if err != nil || !found || renamed.Name != "Groceries" || renamed.NamedBy != thread.NamedByUser || renamed.Confirmed {
 		t.Fatalf("renamed tab = %+v %v %v", renamed, found, err)
 	}
 	if _, found, err := store.Tab(ctx, "bob", 7); err != nil || found {

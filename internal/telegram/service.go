@@ -22,7 +22,6 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
-	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 	oteltrace "go.opentelemetry.io/otel/trace"
 )
@@ -136,7 +135,8 @@ type identityResolver interface {
 }
 
 type cursorStore interface {
-	LoadTelegramCursor(context.Context, int64) (sqlite.TelegramCursor, bool, error)
+	// LoadTelegramCursor returns the last update the bot committed, and whether it committed one.
+	LoadTelegramCursor(context.Context, int64) (int64, bool, error)
 	AdvanceTelegramCursor(context.Context, int64, int64) error
 }
 
@@ -333,17 +333,17 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 
 	loadCursorCtx, endLoadCursor := s.telemetry.StartStore(ctx, "telegram_cursor_load")
-	cursor, found, err := s.cursors.LoadTelegramCursor(loadCursorCtx, bot.ID)
+	committed, found, err := s.cursors.LoadTelegramCursor(loadCursorCtx, bot.ID)
 	endLoadCursor(err)
 	if err != nil {
 		return fmt.Errorf("load Telegram polling cursor: %w", err)
 	}
 	lastCommittedUpdateID := int64(-1)
 	if found {
-		if cursor.LastCommittedUpdateID == math.MaxInt64 {
+		if committed == math.MaxInt64 {
 			return fmt.Errorf("Telegram polling cursor cannot advance")
 		}
-		lastCommittedUpdateID = cursor.LastCommittedUpdateID
+		lastCommittedUpdateID = committed
 	}
 
 	pollerCtx := oteltrace.ContextWithSpanContext(ctx, oteltrace.SpanContext{})

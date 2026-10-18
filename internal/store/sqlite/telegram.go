@@ -9,10 +9,6 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 )
 
-type TelegramCursor struct {
-	LastCommittedUpdateID int64
-}
-
 var _ identity.Repository = (*Store)(nil)
 
 func (s *Store) BootstrapConfiguredPrincipals(ctx context.Context, configured []identity.ConfiguredPrincipal) error {
@@ -195,24 +191,25 @@ func (s *Store) ResolveActiveChat(ctx context.Context, principalID string) (int6
 	return chats[0], true, nil
 }
 
-func (s *Store) LoadTelegramCursor(ctx context.Context, botUserID int64) (TelegramCursor, bool, error) {
+// LoadTelegramCursor returns the last update the bot committed, and whether it committed one.
+func (s *Store) LoadTelegramCursor(ctx context.Context, botUserID int64) (int64, bool, error) {
 	if s == nil || s.db == nil {
-		return TelegramCursor{}, false, fmt.Errorf("load Telegram cursor: SQLite store is not open")
+		return 0, false, fmt.Errorf("load Telegram cursor: SQLite store is not open")
 	}
 
-	var cursor TelegramCursor
+	var lastCommittedUpdateID int64
 	err := s.db.QueryRowContext(
 		ctx,
 		`SELECT last_committed_update_id FROM telegram_polling_cursors WHERE bot_user_id = ?`,
 		botUserID,
-	).Scan(&cursor.LastCommittedUpdateID)
+	).Scan(&lastCommittedUpdateID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return TelegramCursor{}, false, nil
+		return 0, false, nil
 	}
 	if err != nil {
-		return TelegramCursor{}, false, fmt.Errorf("query Telegram cursor: %w", err)
+		return 0, false, fmt.Errorf("query Telegram cursor: %w", err)
 	}
-	return cursor, true, nil
+	return lastCommittedUpdateID, true, nil
 }
 
 func (s *Store) AdvanceTelegramCursor(ctx context.Context, botUserID, updateID int64) error {

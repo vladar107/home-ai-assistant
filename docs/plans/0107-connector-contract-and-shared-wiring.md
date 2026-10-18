@@ -70,6 +70,11 @@ everything sent to the model stays byte-identical.
   location, memory) get exported constructors and stay as they are. The
   model connection controller is no longer a field of `Dependencies`: only
   the model section uses it.
+- The tab record and who named it move to `internal/thread` as `thread.Tab`
+  and `thread.NamedBy*`, and `LoadTelegramCursor` returns the last committed
+  update ID as an `int64`. The store keeps implementing `telegram.TabStore`;
+  the composition root handing the store to `Dependencies.Tabs` is the
+  compile-time check, so no separate assertion is added.
 
 ## Approach
 

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
-	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
+	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
 const (
@@ -127,7 +127,7 @@ func (s *Service) TabReplied(ctx context.Context, reply conversation.TabReply) {
 		logger.WarnContext(ctx, "telegram.tab.name_failed", "principal_id", reply.PrincipalID, "thread_id", reply.ThreadID, "reason", "read", "error", err)
 		return
 	}
-	if !known || tab.NamedBy != sqlite.TabNamedByBot || tab.NamedSessionID != reply.SessionID {
+	if !known || tab.NamedBy != thread.NamedByBot || tab.NamedSessionID != reply.SessionID {
 		logger.InfoContext(ctx, "telegram.tab.name_failed", "principal_id", reply.PrincipalID, "thread_id", reply.ThreadID, "reason", "superseded")
 		return
 	}

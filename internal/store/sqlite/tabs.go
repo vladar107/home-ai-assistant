@@ -11,26 +11,6 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
-// Who chose a tab's name. A fixed name never follows the tab's topic.
-const (
-	TabNamedByBot   = "bot"
-	TabNamedByUser  = "user"
-	TabNamedByFixed = "fixed"
-)
-
-// Tab is one tab of a principal's chat as the registry knows it.
-type Tab struct {
-	ThreadID int64
-	Name     string
-	NamedBy  string
-	// IconCustomEmojiID is the icon the bot gave the tab, or "".
-	IconCustomEmojiID string
-	// NamedSessionID is the conversation the bot last named the tab after, or "".
-	NamedSessionID string
-	Confirmed      bool
-	CreatedAt      time.Time
-}
-
 // AddTab records a tab the registry does not know yet and reports whether it did; a known tab is
 // left as it is.
 func (s *Store) AddTab(ctx context.Context, principalID string, threadID int64, name, namedBy string) (bool, error) {
@@ -108,11 +88,11 @@ func (s *Store) ConfirmTab(ctx context.Context, principalID string, threadID int
 	return known > 0, nil
 }
 
-func (s *Store) Tab(ctx context.Context, principalID string, threadID int64) (Tab, bool, error) {
+func (s *Store) Tab(ctx context.Context, principalID string, threadID int64) (thread.Tab, bool, error) {
 	if s == nil || s.db == nil {
-		return Tab{}, false, fmt.Errorf("load tab: SQLite store is not open")
+		return thread.Tab{}, false, fmt.Errorf("load tab: SQLite store is not open")
 	}
-	tab := Tab{ThreadID: threadID}
+	tab := thread.Tab{ThreadID: threadID}
 	var created string
 	err := s.db.QueryRowContext(
 		ctx,
@@ -122,13 +102,13 @@ func (s *Store) Tab(ctx context.Context, principalID string, threadID int64) (Ta
 		threadID,
 	).Scan(&tab.Name, &tab.NamedBy, &tab.IconCustomEmojiID, &tab.NamedSessionID, &tab.Confirmed, &created)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Tab{}, false, nil
+		return thread.Tab{}, false, nil
 	}
 	if err != nil {
-		return Tab{}, false, fmt.Errorf("load tab: %w", err)
+		return thread.Tab{}, false, fmt.Errorf("load tab: %w", err)
 	}
 	if tab.CreatedAt, err = time.Parse(conversationTimeLayout, created); err != nil {
-		return Tab{}, false, fmt.Errorf("load tab: invalid creation time")
+		return thread.Tab{}, false, fmt.Errorf("load tab: invalid creation time")
 	}
 	return tab, true, nil
 }

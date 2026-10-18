@@ -11,7 +11,6 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
-	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 	"github.com/vladar107/home-ai-assistant/internal/trip"
 )
@@ -107,7 +106,7 @@ func (h *tripTabHarness) wantTripTab(name, tripID string) int64 {
 	// The icon is recorded once Telegram has answered its edit.
 	for {
 		tab, _ := h.registryTab(created.threadID)
-		if tab.NamedBy != sqlite.TabNamedByFixed || tab.Name != name {
+		if tab.NamedBy != thread.NamedByFixed || tab.Name != name {
 			h.t.Fatalf("trip tab in the registry = %+v", tab)
 		}
 		if tab.IconCustomEmojiID == tripIconID {
@@ -280,7 +279,7 @@ func TestATripsSummaryFollowsItsTrip(t *testing.T) {
 	if edit := h.nextEdit(); edit.messageID != first.messageID || !strings.HasPrefix(edit.text, "Example weekend (Example City)") {
 		t.Fatalf("summary after a new title = %+v", edit)
 	}
-	if registered, _ := h.registryTab(tab); registered.Name != "Example weekend" || registered.NamedBy != sqlite.TabNamedByFixed {
+	if registered, _ := h.registryTab(tab); registered.Name != "Example weekend" || registered.NamedBy != thread.NamedByFixed {
 		t.Fatalf("renamed tab in the registry = %+v", registered)
 	}
 	// A write that leaves the title alone does not rename the tab.

@@ -252,7 +252,7 @@ func TestFeedTabReplyToAConversationOpenElsewhereIsRefused(t *testing.T) {
 	if _, _, err := env.store.ResetConversation(env.ctx, conversation.Lane{PrincipalID: "alice", ThreadID: reportsTab}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.store.AddTab(env.ctx, "alice", 60, "Garden", TabNamedByUser); err != nil {
+	if _, err := env.store.AddTab(env.ctx, "alice", 60, "Garden", thread.NamedByUser); err != nil {
 		t.Fatal(err)
 	}
 	if moved, err := env.store.SwitchConversation(env.ctx, conversation.Lane{PrincipalID: "alice", ThreadID: 60}, bins); err != nil || !moved.Switched {

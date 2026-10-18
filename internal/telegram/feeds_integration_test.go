@@ -12,7 +12,6 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
-	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 	"github.com/vladar107/home-ai-assistant/internal/watch"
 )
@@ -74,7 +73,7 @@ func (h *conversationHarness) wantFeedTab(name, feed string) int64 {
 			h.t.Fatalf("feed %s was never recorded", feed)
 		}
 	}
-	if tab, _ := h.registryTab(created.threadID); tab.NamedBy != sqlite.TabNamedByFixed || tab.Name != name {
+	if tab, _ := h.registryTab(created.threadID); tab.NamedBy != thread.NamedByFixed || tab.Name != name {
 		h.t.Fatalf("feed tab in the registry = %+v", tab)
 	}
 	return created.threadID
@@ -350,7 +349,7 @@ func TestAReplyToAConversationOpenElsewhereNamesItsTab(t *testing.T) {
 	}, 200); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.store.AddTab(h.ctx, "alice", 60, "Garden", sqlite.TabNamedByUser); err != nil {
+	if _, err := h.store.AddTab(h.ctx, "alice", 60, "Garden", thread.NamedByUser); err != nil {
 		t.Fatal(err)
 	}
 	h.write(`INSERT INTO conversation_sessions (id, principal_id, runtime_session_id, thread_id, subject)

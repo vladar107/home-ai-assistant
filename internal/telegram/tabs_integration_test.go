@@ -13,7 +13,6 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
-	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
@@ -316,7 +315,7 @@ func (h *conversationHarness) write(statement string, args ...any) {
 	}
 }
 
-func (h *conversationHarness) registryTab(threadID int64) (sqlite.Tab, bool) {
+func (h *conversationHarness) registryTab(threadID int64) (thread.Tab, bool) {
 	h.t.Helper()
 	tab, found, err := h.store.Tab(h.ctx, "alice", threadID)
 	if err != nil {
@@ -398,7 +397,7 @@ func TestATabTheUserWroteInLatelyIsSuspectAndLaterGone(t *testing.T) {
 	h, _ := newTabsHarness(t, runtime, true)
 	h.turnInTab(runtime, 1, 50, "about the trip")
 	sessionID, _, _ := h.laneSession(50)
-	if tab, found := h.registryTab(50); !found || tab.Name != "Trip notes" || tab.NamedBy != sqlite.TabNamedByUser || !tab.Confirmed {
+	if tab, found := h.registryTab(50); !found || tab.Name != "Trip notes" || tab.NamedBy != thread.NamedByUser || !tab.Confirmed {
 		t.Fatalf("tab learned from the message = %+v %v", tab, found)
 	}
 
@@ -518,7 +517,7 @@ func TestOpenOnAGoneTabMovesTheConversationToANewTab(t *testing.T) {
 	if id, status, _ := h.laneSession(created.threadID); id != tabSession || status != "active" {
 		t.Fatalf("new tab holds %s (%s), want %s", id, status, tabSession)
 	}
-	if tab, found := h.registryTab(created.threadID); !found || tab.NamedBy != sqlite.TabNamedByBot {
+	if tab, found := h.registryTab(created.threadID); !found || tab.NamedBy != thread.NamedByBot {
 		t.Fatalf("new tab in the registry = %+v %v", tab, found)
 	}
 }
@@ -621,7 +620,7 @@ func TestATabIsConfirmedOnceTheRegistryKnowsIt(t *testing.T) {
 	if _, found := h.registryTab(60); found {
 		t.Fatal("a send added a tab to the registry")
 	}
-	if _, err := h.store.AddTab(h.ctx, "alice", 60, "Made by the bot", sqlite.TabNamedByBot); err != nil {
+	if _, err := h.store.AddTab(h.ctx, "alice", 60, "Made by the bot", thread.NamedByBot); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.client.SendReply(thread.With(h.ctx, 60), 101, 0, "after the row"); err != nil {
@@ -638,7 +637,7 @@ func TestATabIsConfirmedOnceTheRegistryKnowsIt(t *testing.T) {
 	}
 	h.nextMessage()
 	h.turnInTab(runtime, 1, 61, "a question")
-	if tab, found := h.registryTab(61); !found || tab.NamedBy != sqlite.TabNamedByUser || !tab.Confirmed {
+	if tab, found := h.registryTab(61); !found || tab.NamedBy != thread.NamedByUser || !tab.Confirmed {
 		t.Fatalf("tab after the user's message = %+v %v, want confirmed", tab, found)
 	}
 }
@@ -656,7 +655,7 @@ func TestTopicServiceMessagesNameTabsWithoutUndoingThem(t *testing.T) {
 
 	h.push(service(1, 40, 101, &ForumTopicCreated{Name: "Garden", IsNameImplicit: true}, nil))
 	h.push(service(2, 41, 999, &ForumTopicCreated{Name: "Made by the bot"}, nil))
-	if _, err := h.store.AddTab(h.ctx, "alice", 42, "Reports", sqlite.TabNamedByFixed); err != nil {
+	if _, err := h.store.AddTab(h.ctx, "alice", 42, "Reports", thread.NamedByFixed); err != nil {
 		t.Fatal(err)
 	}
 	h.push(service(3, 41, 999, nil, &ForumTopicEdited{Name: name("Renamed by the bot")}))
@@ -667,10 +666,10 @@ func TestTopicServiceMessagesNameTabsWithoutUndoingThem(t *testing.T) {
 	h.turnInTab(runtime, 6, 42, "a report question")
 	h.turnInTab(runtime, 7, 41, "a question in the bot's tab")
 
-	for threadID, want := range map[int64]sqlite.Tab{
-		40: {Name: "Vegetables", NamedBy: sqlite.TabNamedByUser},
-		41: {Name: "Made by the bot", NamedBy: sqlite.TabNamedByBot},
-		42: {Name: "Reports", NamedBy: sqlite.TabNamedByFixed},
+	for threadID, want := range map[int64]thread.Tab{
+		40: {Name: "Vegetables", NamedBy: thread.NamedByUser},
+		41: {Name: "Made by the bot", NamedBy: thread.NamedByBot},
+		42: {Name: "Reports", NamedBy: thread.NamedByFixed},
 	} {
 		if tab, found := h.registryTab(threadID); !found || tab.Name != want.Name || tab.NamedBy != want.NamedBy {
 			t.Fatalf("tab %d = %+v %v, want %+v", threadID, tab, found, want)

@@ -8,7 +8,6 @@ import (
 	"unicode"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
-	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
@@ -38,7 +37,7 @@ type TabStore interface {
 	RenameTab(ctx context.Context, principalID string, threadID int64, name string) (bool, error)
 	// ConfirmTab confirms a known tab and reports whether the registry now holds it confirmed.
 	ConfirmTab(ctx context.Context, principalID string, threadID int64) (bool, error)
-	Tab(ctx context.Context, principalID string, threadID int64) (sqlite.Tab, bool, error)
+	Tab(ctx context.Context, principalID string, threadID int64) (thread.Tab, bool, error)
 	DeleteTab(ctx context.Context, principalID string, threadID int64) error
 	// ClaimTabName reports whether the bot may name the tab after the session, and records it.
 	ClaimTabName(ctx context.Context, principalID string, threadID int64, sessionID string) (bool, error)
@@ -170,7 +169,7 @@ func (s *Service) recordBotTab(ctx context.Context, principalID string, threadID
 	if s.tabs == nil {
 		return
 	}
-	if _, err := s.tabs.AddTab(ctx, principalID, threadID, name, sqlite.TabNamedByBot); err != nil {
+	if _, err := s.tabs.AddTab(ctx, principalID, threadID, name, thread.NamedByBot); err != nil {
 		s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "telegram.tab.record_failed", "principal_id", principalID, "thread_id", threadID, "error", err)
 	}
 }
@@ -190,7 +189,7 @@ func (s *Service) noteTab(ctx context.Context, bot Bot, principalID string, mess
 		if name := topicName(root.ForumTopicCreated.Name); name != "" {
 			// A tab first seen through the root its messages reply to was open before the bot
 			// recorded it, and a tab that was already there keeps its name.
-			added, err := s.tabs.AddTab(ctx, principalID, threadID, name, sqlite.TabNamedByUser)
+			added, err := s.tabs.AddTab(ctx, principalID, threadID, name, thread.NamedByUser)
 			if err != nil {
 				s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "telegram.tab.record_failed", "principal_id", principalID, "thread_id", threadID, "error", err)
 			} else {
@@ -232,9 +231,9 @@ func (s *Service) processTopicService(ctx context.Context, bot Bot, message *Mes
 			return result, "", nil
 		}
 		if name := topicName(created.Name); name != "" {
-			namedBy := sqlite.TabNamedByUser
+			namedBy := thread.NamedByUser
 			if byBot || created.IsNameImplicit {
-				namedBy = sqlite.TabNamedByBot
+				namedBy = thread.NamedByBot
 			}
 			if _, err := s.tabs.AddTab(ctx, principalID, threadID, name, namedBy); err != nil {
 				return processingResult{}, "record_tab", err
