@@ -19,6 +19,8 @@
 - Commit the completed plan together with the implementation it describes.
 - Clearly label retrospective plans; do not present reconstructed history as plan-first work.
 - Add every plan to `docs/plans/README.md`, never reuse a plan number, and run `scripts/check-plans` before committing.
+- Plans are as public as the code: never write household device makes or models, the integrations that identify them, device calibration data, or network layout (segments, firewall rules, VPN clients) into a plan. Describe them neutrally and keep the specifics in ignored local files.
+- Private data in a terminal plan is removed only by an operator-approved history rewrite (plans 0050 and 0094), never by editing the plan in a new commit.
 
 ## Development Workflow
 
