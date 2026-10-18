@@ -199,7 +199,8 @@ Monitoring (Alloy, Prometheus, Tempo, and Grafana) lives in the separate
 
 ```text
 cmd/home-agent/        entry point
-internal/app/          wiring
+internal/app/          configuration, Telegram assembly, and lifecycle
+internal/wiring/       builds and connects every service but Telegram
 internal/telegram/     Telegram client, poller, commands, /settings
 internal/conversation/ turn coordination
 internal/runtime/pi/   Pi subprocess and tool bridge

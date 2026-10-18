@@ -206,9 +206,21 @@ flowchart TB
     identity & conv & approval & schedule & connection & integration & loc & mem & backlog & trip --> store
 ```
 
-`internal/app` wires these together. Each connector registers with the module
-registry (lifecycle and readiness), the tool broker (the tools it offers), and, if
-it can write, the approval service (the executor for confirmed proposals).
+`internal/wiring` builds and connects everything except the Telegram service, and
+does not import `telegram`. Each connector is one typed bundle: its module (lifecycle
+and readiness), the tool providers it offers, the executor for its confirmed
+proposals if it can write, the watch evaluators it checks, and its on/off page if it
+has a per-user switch. One `register` call adds the bundle to the module registry,
+the tool broker, the approval service, and the watch service, in the order the
+model's tool list follows. `internal/app` translates the configuration into the
+wiring's inputs, builds the Telegram service on the result, and runs the module
+lifecycle; the Telegram tests build through the same wiring.
+
+The Telegram service takes a `Dependencies` struct. Each `/settings` page is a
+`Section`, which may also add `/privacy` lines and name an `app_help` topic. The
+on/off integrations share one switch page, described by a `SwitchPage` value per
+integration, so adding one takes a bundle in the wiring, a page value, and its place
+in the settings groups and orders.
 
 Every external HTTP client except Telegram and the model-connection flow wraps its
 transport in `internal/httpretry`, which retries transient failures: at most 4

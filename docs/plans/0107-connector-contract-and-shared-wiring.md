@@ -1,6 +1,6 @@
 # 0107 — One connector contract and wiring shared with the tests
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
@@ -195,7 +195,7 @@ everything sent to the model stays byte-identical.
 - `internal/app`
 - `internal/wiring` (new)
 - `internal/thread`, `internal/store/sqlite`
-- `docs/architecture.md`
+- `docs/architecture.md`, `README.md`
 
 ## Validation
 
