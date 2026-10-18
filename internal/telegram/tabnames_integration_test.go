@@ -256,7 +256,13 @@ func TestAnEarlierConversationsNameDoesNotReplaceALaterOne(t *testing.T) {
 	h.push(tabMessage(3, 40, "/new"))
 	h.wantReply(101, 3, NewSessionReply)
 	h.turnInTab(runtime, 4, 40, "which seeds to order")
-	later, _, _ := h.laneSession(40)
+	// The closed conversation can share the new one's updated_at, so the newest row is not enough.
+	var later string
+	if err := h.db.QueryRowContext(h.ctx,
+		`SELECT id FROM conversation_sessions WHERE principal_id = 'alice' AND thread_id = 40 AND status = 'active'`,
+	).Scan(&later); err != nil {
+		t.Fatal(err)
+	}
 	h.namingCall(runtime, "which seeds to order", `{"name":"Seed order","icon":"📚"}`)
 	receive(t, h.ctx, h.tabs.topicEdits)
 	h.waitTabName(40, "Seed order")
