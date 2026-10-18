@@ -5,17 +5,14 @@ import "context"
 type Kind string
 
 const (
-	KindSystem     Kind = "system"
-	KindConnector  Kind = "connector"
-	KindAutomation Kind = "automation"
-	KindEdgeWorker Kind = "edge-worker"
+	KindSystem    Kind = "system"
+	KindConnector Kind = "connector"
 )
 
 type Descriptor struct {
-	ID           string
-	Version      string
-	Kind         Kind
-	Dependencies []string
+	ID      string
+	Version string
+	Kind    Kind
 }
 
 type Module interface {

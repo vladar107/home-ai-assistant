@@ -270,7 +270,7 @@ func (s *Service) SetTelemetry(telemetry Telemetry) {
 }
 
 func (s *Service) Descriptor() module.Descriptor {
-	return module.Descriptor{ID: "watch", Version: moduleVersion, Kind: module.KindAutomation}
+	return module.Descriptor{ID: "watch", Version: moduleVersion, Kind: module.KindSystem}
 }
 
 // Start begins the check loop. Alerts a previous process left ready are sent, or dropped once

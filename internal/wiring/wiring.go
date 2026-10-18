@@ -279,41 +279,68 @@ func Build(ctx context.Context, in Inputs) (*Assembly, error) {
 	return a, nil
 }
 
-// Start starts the conversation and the services it runs on; the modules in Registry are started
-// by the caller.
-func (a *Assembly) Start(ctx context.Context) error {
-	if err := a.Connections.Start(ctx); err != nil {
-		return fmt.Errorf("start model connections: %w", err)
-	}
-	if err := a.Approvals.Start(ctx); err != nil {
-		return errors.Join(fmt.Errorf("start approvals: %w", err), a.Connections.Shutdown(ctx))
-	}
-	if err := a.Conversation.Start(ctx); err != nil {
-		return errors.Join(fmt.Errorf("start conversation service: %w", err), a.Approvals.Shutdown(ctx), a.Connections.Shutdown(ctx))
-	}
-	if err := a.Scheduler.Start(ctx); err != nil {
-		return errors.Join(fmt.Errorf("start scheduler: %w", err), a.Conversation.Shutdown(ctx), a.Approvals.Shutdown(ctx), a.Connections.Shutdown(ctx))
+// Steps are the conversation and the services it runs on, in the order they start; the modules in
+// Registry are the caller's.
+func (a *Assembly) Steps() []Step {
+	steps := []Step{
+		{Name: "model connections", Start: a.Connections.Start, Shutdown: a.Connections.Shutdown},
+		{Name: "approvals", Start: a.Approvals.Start, Shutdown: a.Approvals.Shutdown},
+		{Name: "conversation service", Start: a.Conversation.Start, Shutdown: a.Conversation.Shutdown},
+		{Name: "scheduler", Start: a.Scheduler.Start, Shutdown: a.Scheduler.Shutdown},
 	}
 	if a.Tasks != nil {
-		if err := a.Tasks.Start(ctx); err != nil {
-			return errors.Join(fmt.Errorf("start background tasks: %w", err), a.Scheduler.Shutdown(ctx), a.Conversation.Shutdown(ctx), a.Approvals.Shutdown(ctx), a.Connections.Shutdown(ctx))
-		}
+		steps = append(steps, Step{Name: "background tasks", Start: a.Tasks.Start, Shutdown: a.Tasks.Shutdown})
+	}
+	return steps
+}
+
+// Start starts the steps; when one fails, it stops those already started.
+func (a *Assembly) Start(ctx context.Context) error {
+	var lifecycle Lifecycle
+	if err := lifecycle.Start(ctx, a.Steps()...); err != nil {
+		return errors.Join(err, lifecycle.Shutdown(ctx))
 	}
 	return nil
 }
 
-// Shutdown stops what Start started, all at once.
+// Shutdown stops every step, all at once.
 func (a *Assembly) Shutdown(ctx context.Context) error {
-	steps := []func(context.Context) error{
-		Labelled("shutdown scheduler", a.Scheduler.Shutdown),
-		Labelled("shutdown conversation service", a.Conversation.Shutdown),
-		Labelled("shutdown approvals", a.Approvals.Shutdown),
-		Labelled("shutdown model connections", a.Connections.Shutdown),
+	lifecycle := Lifecycle{started: a.Steps()}
+	return lifecycle.Shutdown(ctx)
+}
+
+// Step is one service the application starts in turn and stops together with the others.
+type Step struct {
+	Name     string
+	Start    func(context.Context) error
+	Shutdown func(context.Context) error
+}
+
+// Lifecycle remembers the steps it started, so a failed start and the end of the run stop exactly
+// those.
+type Lifecycle struct {
+	started []Step
+}
+
+// Start starts the steps in order and stops at the first one that fails, which is not counted as
+// started. The steps started before it, in this call or an earlier one, are left for Shutdown.
+func (l *Lifecycle) Start(ctx context.Context, steps ...Step) error {
+	for _, step := range steps {
+		if err := step.Start(ctx); err != nil {
+			return fmt.Errorf("start %s: %w", step.Name, err)
+		}
+		l.started = append(l.started, step)
 	}
-	if a.Tasks != nil {
-		steps = append(steps, Labelled("shutdown background tasks", a.Tasks.Shutdown))
+	return nil
+}
+
+// Shutdown stops every started step and runs the other shutdowns, all at once.
+func (l *Lifecycle) Shutdown(ctx context.Context, others ...func(context.Context) error) error {
+	shutdowns := make([]func(context.Context) error, 0, len(l.started)+len(others))
+	for _, step := range l.started {
+		shutdowns = append(shutdowns, Labelled("shutdown "+step.Name, step.Shutdown))
 	}
-	return ShutdownTogether(ctx, steps...)
+	return ShutdownTogether(ctx, append(shutdowns, others...)...)
 }
 
 // ShutdownTogether runs every shutdown at once and waits for all of them. Each one cancels its own

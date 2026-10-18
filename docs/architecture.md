@@ -213,8 +213,10 @@ proposals if it can write, the watch evaluators it checks, and its on/off page i
 has a per-user switch. One `register` call adds the bundle to the module registry,
 the tool broker, the approval service, and the watch service, in the order the
 model's tool list follows. `internal/app` translates the configuration into the
-wiring's inputs, builds the Telegram service on the result, and runs the module
-lifecycle; the Telegram tests build through the same wiring.
+wiring's inputs, builds the Telegram service on the result, and runs the
+lifecycle: the modules in registration order, then the core services the
+assembly lists, then Telegram, each a step that starts in turn, while everything
+started stops together; the Telegram tests build through the same wiring.
 
 The Telegram service takes a `Dependencies` struct. Each `/settings` page is a
 `Section`, which may also add `/privacy` lines and name an `app_help` topic. The

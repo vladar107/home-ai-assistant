@@ -83,7 +83,7 @@ func NewLoop(cfg LoopConfig, notices Notices, paused []Paused, sender Sender, lo
 }
 
 func (l *Loop) Descriptor() module.Descriptor {
-	return module.Descriptor{ID: "trip", Version: loopModuleVersion, Kind: module.KindAutomation}
+	return module.Descriptor{ID: "trip", Version: loopModuleVersion, Kind: module.KindSystem}
 }
 
 func (l *Loop) Start(context.Context) error {

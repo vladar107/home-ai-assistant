@@ -66,16 +66,11 @@ func New(cfg config.Config, registry *module.Registry, logger *slog.Logger) (*Ap
 		return nil, fmt.Errorf("logger is required")
 	}
 
-	modules, err := registry.Ordered()
-	if err != nil {
-		return nil, err
-	}
-
 	application := &App{
 		cfg:       cfg,
 		logger:    logger,
 		registry:  registry,
-		modules:   modules,
+		modules:   registry.Ordered(),
 		telemetry: observability.Noop(),
 	}
 	application.server = &http.Server{
@@ -123,38 +118,32 @@ func (a *App) Run(ctx context.Context) (runErr error) {
 		return errors.Join(err, a.closeStore())
 	}
 	// Connectors register during initialization, so the module order is settled only now.
-	a.modules, err = a.registry.Ordered()
-	if err != nil {
-		return errors.Join(err, a.closeStore())
-	}
+	a.modules = a.registry.Ordered()
 
+	// Everything started stops together, however far the start got.
+	var lifecycle wiring.Lifecycle
+	abort := func(err error) error {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), a.cfg.ShutdownTimeout)
+		defer cancel()
+		return errors.Join(err, lifecycle.Shutdown(shutdownCtx), a.closeStore())
+	}
 	startModulesCtx, endStartModules := telemetry.StartLifecycle(ctx, "modules_start")
-	started, err := a.startModules(startModulesCtx)
+	err = lifecycle.Start(startModulesCtx, a.moduleSteps()...)
 	endStartModules(err)
 	if err != nil {
-		return errors.Join(err, a.closeStore())
+		return abort(err)
 	}
 	startConversationCtx, endStartConversation := telemetry.StartLifecycle(ctx, "conversation_start")
-	err = a.startConversation(startConversationCtx)
+	err = lifecycle.Start(startConversationCtx, a.conversationSteps()...)
 	endStartConversation(err)
 	if err != nil {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), a.cfg.ShutdownTimeout)
-		shutdownErr := a.shutdownModules(shutdownCtx, started)
-		cancel()
-		return errors.Join(err, shutdownErr, a.closeStore())
+		return abort(err)
 	}
 	startTelegramCtx, endStartTelegram := telemetry.StartLifecycle(ctx, "telegram_start")
-	err = a.startTelegram(startTelegramCtx)
+	err = lifecycle.Start(startTelegramCtx, a.telegramSteps()...)
 	endStartTelegram(err)
 	if err != nil {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), a.cfg.ShutdownTimeout)
-		shutdownErr := errors.Join(
-			a.shutdownTelegram(shutdownCtx),
-			a.shutdownConversation(shutdownCtx),
-			a.shutdownModules(shutdownCtx, started),
-		)
-		cancel()
-		return errors.Join(err, shutdownErr, a.closeStore())
+		return abort(err)
 	}
 
 	// The backlog service exists only after initialization; the listener is not open yet.
@@ -167,18 +156,7 @@ func (a *App) Run(ctx context.Context) (runErr error) {
 	listener, err := net.Listen("tcp", a.cfg.ListenAddress)
 	endListen(err)
 	if err != nil {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), a.cfg.ShutdownTimeout)
-		shutdownErr := errors.Join(
-			a.shutdownTelegram(shutdownCtx),
-			a.shutdownConversation(shutdownCtx),
-			a.shutdownModules(shutdownCtx, started),
-		)
-		cancel()
-		return errors.Join(
-			fmt.Errorf("listen on %s: %w", a.cfg.ListenAddress, err),
-			shutdownErr,
-			a.closeStore(),
-		)
+		return abort(fmt.Errorf("listen on %s: %w", a.cfg.ListenAddress, err))
 	}
 
 	a.ready.Store(true)
@@ -203,12 +181,7 @@ func (a *App) Run(ctx context.Context) (runErr error) {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), a.cfg.ShutdownTimeout)
 	defer cancel()
 
-	if err := wiring.ShutdownTogether(shutdownCtx,
-		a.shutdownTelegram,
-		a.shutdownConversation,
-		wiring.Labelled("shutdown HTTP server", a.server.Shutdown),
-		func(ctx context.Context) error { return a.shutdownModules(ctx, started) },
-	); err != nil {
+	if err := lifecycle.Shutdown(shutdownCtx, wiring.Labelled("shutdown HTTP server", a.server.Shutdown)); err != nil {
 		runErr = errors.Join(runErr, err)
 	}
 	if err := a.closeStore(); err != nil {
@@ -504,38 +477,30 @@ func (a *App) settingsSections(asm *wiring.Assembly) ([]telegram.Section, error)
 	return sections, nil
 }
 
-func (a *App) startConversation(ctx context.Context) error {
+func (a *App) moduleSteps() []wiring.Step {
+	steps := make([]wiring.Step, 0, len(a.modules))
+	for _, registeredModule := range a.modules {
+		steps = append(steps, wiring.Step{
+			Name:     fmt.Sprintf("module %q", registeredModule.Descriptor().ID),
+			Start:    registeredModule.Start,
+			Shutdown: registeredModule.Shutdown,
+		})
+	}
+	return steps
+}
+
+func (a *App) conversationSteps() []wiring.Step {
 	if a.assembly == nil {
 		return nil
 	}
-	return a.assembly.Start(ctx)
+	return a.assembly.Steps()
 }
 
-func (a *App) shutdownConversation(ctx context.Context) error {
-	if a.assembly == nil {
-		return nil
-	}
-	return a.assembly.Shutdown(ctx)
-}
-
-func (a *App) startTelegram(ctx context.Context) error {
+func (a *App) telegramSteps() []wiring.Step {
 	if a.telegram == nil {
 		return nil
 	}
-	if err := a.telegram.Start(ctx); err != nil {
-		return fmt.Errorf("start Telegram service: %w", err)
-	}
-	return nil
-}
-
-func (a *App) shutdownTelegram(ctx context.Context) error {
-	if a.telegram == nil {
-		return nil
-	}
-	if err := a.telegram.Shutdown(ctx); err != nil {
-		return fmt.Errorf("shutdown Telegram service: %w", err)
-	}
-	return nil
+	return []wiring.Step{{Name: "Telegram service", Start: a.telegram.Start, Shutdown: a.telegram.Shutdown}}
 }
 
 func (a *App) closeStore() error {
@@ -543,32 +508,6 @@ func (a *App) closeStore() error {
 		return nil
 	}
 	return a.store.Close()
-}
-
-func (a *App) startModules(ctx context.Context) ([]module.Module, error) {
-	started := make([]module.Module, 0, len(a.modules))
-	for _, registeredModule := range a.modules {
-		if err := registeredModule.Start(ctx); err != nil {
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), a.cfg.ShutdownTimeout)
-			shutdownErr := a.shutdownModules(shutdownCtx, started)
-			cancel()
-			return nil, errors.Join(
-				fmt.Errorf("start module %q: %w", registeredModule.Descriptor().ID, err),
-				shutdownErr,
-			)
-		}
-		started = append(started, registeredModule)
-	}
-	return started, nil
-}
-
-func (a *App) shutdownModules(ctx context.Context, started []module.Module) error {
-	steps := make([]func(context.Context) error, 0, len(started))
-	for i := len(started) - 1; i >= 0; i-- {
-		registeredModule := started[i]
-		steps = append(steps, wiring.Labelled(fmt.Sprintf("shutdown module %q", registeredModule.Descriptor().ID), registeredModule.Shutdown))
-	}
-	return wiring.ShutdownTogether(ctx, steps...)
 }
 
 // nasRoots translates the configured NAS view into the connector's own shape, so the connector
