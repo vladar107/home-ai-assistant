@@ -33,6 +33,37 @@ type Credential struct {
 	AccountID   string
 }
 
+// ErrCredentialStale reports that the stored access token is expired or due for a refresh.
+var ErrCredentialStale = errors.New("model credential needs a refresh")
+
+// CurrentCredential returns the principal's access token only while it is not due for a refresh.
+// It never refreshes, so a caller on a short deadline cannot cancel a refresh after the token
+// endpoint rotated the refresh token.
+func (s *Service) CurrentCredential(ctx context.Context, principalID string) (Credential, error) {
+	profileDir, err := s.ProfileDir(principalID)
+	if err != nil {
+		return Credential{}, err
+	}
+	record, bound, err := s.repository.LoadModelConnection(ctx, principalID)
+	if err != nil {
+		return Credential{}, err
+	}
+	if !bound {
+		return Credential{}, ErrNotConnected
+	}
+	credential, found, err := readCredential(profileDir, s.provider)
+	if err != nil {
+		return Credential{}, err
+	}
+	if !found || credential.AccountID != record.AccountID {
+		return Credential{}, ErrNotConnected
+	}
+	if !current(credential) {
+		return Credential{}, ErrCredentialStale
+	}
+	return Credential{AccessToken: credential.Access, AccountID: credential.AccountID}, nil
+}
+
 // Credential returns the principal's own access token, refreshing it first when it is about to
 // expire. Pi refreshes the same file, so the refresh happens under Pi's lock and is skipped when
 // Pi got there first.

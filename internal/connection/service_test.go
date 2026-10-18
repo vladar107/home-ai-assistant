@@ -76,3 +76,39 @@ func TestACredentialForAnotherAccountIsNotReady(t *testing.T) {
 		t.Fatalf("credential with another account: %v", err)
 	}
 }
+
+func TestCurrentCredentialNeverRefreshes(t *testing.T) {
+	ctx := t.Context()
+	store, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	if err := store.BootstrapConfiguredPrincipals(ctx, []identity.ConfiguredPrincipal{{ID: "alice", DisplayName: "Alice", TelegramUserID: 101}}); err != nil {
+		t.Fatal(err)
+	}
+	profilesDir := filepath.Join(t.TempDir(), "profiles")
+	service, err := connection.NewService(connection.Config{ProfilesDir: profilesDir, Principals: []string{"alice"}},
+		store, silentDeliverer{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bound, err := store.BindModelConnection(ctx, "alice", "openai-codex", "account-a"); err != nil || !bound {
+		t.Fatalf("bind: bound=%v err=%v", bound, err)
+	}
+
+	writeCredential(t, profilesDir, "account-a")
+	credential, err := service.CurrentCredential(ctx, "alice")
+	if err != nil || credential.AccessToken != "access-token" {
+		t.Fatalf("fresh credential = %+v %v", credential, err)
+	}
+
+	record := fmt.Sprintf(`{"openai-codex":{"type":"oauth","access":"access-token","refresh":"refresh-token","expires":%d,"accountId":"account-a"}}`,
+		time.Now().Add(time.Minute).UnixMilli())
+	if err := os.WriteFile(filepath.Join(profilesDir, "alice", "auth.json"), []byte(record), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.CurrentCredential(ctx, "alice"); !errors.Is(err, connection.ErrCredentialStale) {
+		t.Fatalf("credential due for refresh: %v", err)
+	}
+}

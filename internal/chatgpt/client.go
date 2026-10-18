@@ -20,6 +20,7 @@ import (
 	"net/textproto"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/connection"
@@ -58,6 +59,8 @@ var (
 // Credentials resolves a principal's own subscription; it never falls back to anyone else's.
 type Credentials interface {
 	Credential(ctx context.Context, principalID string) (connection.Credential, error)
+	// CurrentCredential never refreshes: it fails with connection.ErrCredentialStale instead.
+	CurrentCredential(ctx context.Context, principalID string) (connection.Credential, error)
 }
 
 type Config struct {
@@ -69,6 +72,10 @@ type Client struct {
 	baseURL     string
 	httpClient  *http.Client
 	credentials Credentials
+	now         func() time.Time
+
+	usageMu    sync.Mutex
+	usageCache map[string]usageEntry
 }
 
 func New(cfg Config, credentials Credentials) (*Client, error) {
@@ -84,7 +91,7 @@ func New(cfg Config, credentials Credentials) (*Client, error) {
 		// Callers bound each request with their context; image generation alone can take a minute.
 		httpClient = &http.Client{Timeout: 3 * time.Minute}
 	}
-	return &Client{baseURL: baseURL, httpClient: httpClient, credentials: credentials}, nil
+	return &Client{baseURL: baseURL, httpClient: httpClient, credentials: credentials, now: time.Now, usageCache: make(map[string]usageEntry)}, nil
 }
 
 func normalizeBaseURL(value string) (string, error) {
