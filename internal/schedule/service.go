@@ -98,8 +98,10 @@ type Service struct {
 	wake     chan struct{}
 	inflight map[string]bool
 	running  int
-	pruned   time.Time
-	workers  sync.WaitGroup
+	// executing holds the principals that have a bounded run executing.
+	executing map[string]bool
+	pruned    time.Time
+	workers   sync.WaitGroup
 }
 
 // Run outcomes recorded in metrics, matching the chat reply outcomes: the scheduler delivered the
@@ -274,6 +276,7 @@ func NewService(cfg Config, repository Repository, chats Chats, deliverer conver
 		proposer:   proposer,
 		wake:       make(chan struct{}, 1),
 		inflight:   make(map[string]bool),
+		executing:  make(map[string]bool),
 	}, nil
 }
 
@@ -462,17 +465,21 @@ func (s *Service) travelingAt(ctx context.Context, job Job, at time.Time) bool {
 }
 
 // dispatch starts one run in the background unless it is already in flight or, for a run still to
-// execute, the household's concurrent-run bound is reached.
+// execute that asks the model, the household's concurrent-run bound is reached or its owner already
+// has one executing. A principal's scheduled turns wait behind their chat and each other, so a
+// second one would only hold a slot another principal's run could use.
 func (s *Service) dispatch(ctx context.Context, run Run) {
 	s.mu.Lock()
-	if s.inflight[run.ID] || (run.Status == StatusQueued && s.running >= maximumConcurrentRuns) {
+	executing := run.Status == StatusQueued
+	bounded := executing && !s.types[run.JobType].Light
+	if s.inflight[run.ID] || (bounded && (s.running >= maximumConcurrentRuns || s.executing[run.PrincipalID])) {
 		s.mu.Unlock()
 		return
 	}
 	s.inflight[run.ID] = true
-	executing := run.Status == StatusQueued
-	if executing {
+	if bounded {
 		s.running++
+		s.executing[run.PrincipalID] = true
 	}
 	s.workers.Add(1)
 	s.mu.Unlock()
@@ -481,15 +488,16 @@ func (s *Service) dispatch(ctx context.Context, run Run) {
 		defer func() {
 			s.mu.Lock()
 			delete(s.inflight, run.ID)
-			if executing {
-				s.running--
-			}
 			s.mu.Unlock()
 			s.workers.Done()
 		}()
 		if executing {
 			var ok bool
-			if run, ok = s.execute(ctx, run); !ok {
+			run, ok = s.execute(ctx, run)
+			if bounded {
+				s.releaseSlot(run.PrincipalID, ok)
+			}
+			if !ok {
 				return
 			}
 		} else {
@@ -508,6 +516,20 @@ func (s *Service) dispatch(ctx context.Context, run Run) {
 		}
 		s.deliver(ctx, run)
 	}()
+}
+
+// releaseSlot frees an executed run's place under the bounds before its report is delivered. After
+// a report it asks for a tick, so a run held back by the bounds starts now rather than at the next
+// interval. A run that failed to execute is left to the next interval, since an immediate tick
+// would only retry it into the same failure.
+func (s *Service) releaseSlot(principalID string, reported bool) {
+	s.mu.Lock()
+	s.running--
+	delete(s.executing, principalID)
+	s.mu.Unlock()
+	if reported {
+		s.Wake()
+	}
 }
 
 // stillReady rereads a ready run once it is claimed and returns it as stored. The tick's snapshot

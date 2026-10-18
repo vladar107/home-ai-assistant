@@ -110,6 +110,7 @@ plan that links back to the earlier record.
 | 0098 | [The current local time on every model turn, and time zones that hold](0098-local-time-on-every-turn.md) | done |
 | 0099 | [Close the gaps where outside text passes as the user's own](0099-outside-text-gaps.md) | done |
 | 0100 | [Connector and tool correctness fixes](0100-connector-correctness-fixes.md) | done |
+| 0101 | [Scheduling latency, shutdown robustness and digest-pinned deploys](0101-latency-shutdown-and-digest-deploys.md) | in-progress |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

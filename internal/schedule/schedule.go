@@ -202,4 +202,7 @@ type JobType struct {
 	MinimumInterval time.Duration
 	// Once refuses cron schedules, for a type whose jobs only make sense a single time.
 	Once bool
+	// Light marks a type whose runs never ask the model, such as a reminder. Its runs skip the
+	// bounds on concurrent runs, so they never wait behind model turns.
+	Light bool
 }

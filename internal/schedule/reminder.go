@@ -34,6 +34,7 @@ func Reminder(now func() time.Time) JobType {
 		CatchUp:         reminderCatchUp,
 		MinimumInterval: time.Minute,
 		Once:            true,
+		Light:           true,
 	}
 }
 
