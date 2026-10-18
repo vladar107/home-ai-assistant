@@ -29,6 +29,7 @@ const (
 	maximumNoticeRunes    = 2000
 	runRetention          = 30 * 24 * time.Hour
 	pruneInterval         = time.Hour
+	deliveryStoreTimeout  = 5 * time.Second
 
 	InterruptedText = "This run was interrupted by a restart and was not retried. It will run again at its next scheduled time."
 	FailedText      = "This run could not be completed."
@@ -491,8 +492,12 @@ func (s *Service) dispatch(ctx context.Context, run Run) {
 			if run, ok = s.execute(ctx, run); !ok {
 				return
 			}
-		} else if !s.stillReady(ctx, run) {
-			return
+		} else {
+			current, ready := s.stillReady(ctx, run)
+			if !ready {
+				return
+			}
+			run = current
 		}
 		if !executing {
 			// Whether a run executed before a restart or a failed delivery read private content
@@ -505,15 +510,20 @@ func (s *Service) dispatch(ctx context.Context, run Run) {
 	}()
 }
 
-// stillReady rereads a ready run once it is claimed. The tick's snapshot can predate a delivery
-// that finished in the meantime, and delivering from it would send the report twice.
-func (s *Service) stillReady(ctx context.Context, run Run) bool {
+// stillReady rereads a ready run once it is claimed and returns it as stored. The tick's snapshot
+// can predate a delivery that finished or sent some of its chunks in the meantime, and delivering
+// from it would send them twice.
+func (s *Service) stillReady(ctx context.Context, run Run) (Run, bool) {
 	ready, err := s.repository.ScheduledRuns(ctx, StatusReady)
 	if err != nil {
 		s.logRunError(ctx, run, "reload_run", err)
-		return false
+		return run, false
 	}
-	return slices.ContainsFunc(ready, func(current Run) bool { return current.ID == run.ID })
+	index := slices.IndexFunc(ready, func(current Run) bool { return current.ID == run.ID })
+	if index < 0 {
+		return run, false
+	}
+	return ready[index], true
 }
 
 // execute runs one queued occurrence and stores its reply, returning the ready run.
@@ -620,26 +630,40 @@ func (s *Service) deliver(ctx context.Context, run Run) {
 		return
 	}
 	chunks := conversation.SplitReply(deliveryText(run))
-	// A failed run's text explains the failure, so a card it staged would illustrate nothing.
-	if s.cards != nil && run.ErrorKind == "" {
-		chunks, _, err = conversation.SendCard(sendCtx, s.logger, s.cards, s.photos, run.PrincipalID, outbox.ScheduledTurn(run.ID), chatID, 0, chunks)
+	// The card goes before the first chunk, so a delivery that already sent a chunk is past it. A
+	// failed run's text explains the failure, so a card it staged would illustrate nothing.
+	sent := min(run.DeliveredChunks, len(chunks))
+	if sent == 0 && s.cards != nil && run.ErrorKind == "" {
+		remaining, _, err := conversation.SendCard(sendCtx, s.logger, s.cards, s.photos, run.PrincipalID, outbox.ScheduledTurn(run.ID), chatID, 0, chunks)
 		if err != nil {
 			if ctx.Err() == nil {
 				s.logRunError(ctx, run, "deliver", err)
 			}
 			return
 		}
+		sent = len(chunks) - len(remaining)
 	}
-	messages := make([]Sent, 0, len(chunks))
-	for _, chunk := range chunks {
-		messageID, threadID, err := s.deliverer.SendTrackedReply(sendCtx, chatID, 0, chunk)
+	messages := slices.Clone(run.Delivered)
+	for index := sent; index < len(chunks); index++ {
+		messageID, threadID, err := s.deliverer.SendTrackedReply(sendCtx, chatID, 0, chunks[index])
 		if err != nil {
 			s.finishDelivery(ctx, run, nil, err)
 			return
 		}
 		messages = append(messages, Sent{MessageID: messageID, ThreadID: threadID})
+		storeCtx, cancel := deliveryStoreContext(ctx)
+		if err := s.repository.SaveScheduledRunProgress(storeCtx, run.ID, index+1, messages, s.now()); err != nil {
+			s.logRunError(ctx, run, "store_progress", err)
+		}
+		cancel()
 	}
 	s.finishDelivery(ctx, run, messages, nil)
+}
+
+// deliveryStoreContext records what a delivery already sent. It outlives a shutdown that has begun,
+// because a send that went through but was not recorded is sent again by the next process.
+func deliveryStoreContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), deliveryStoreTimeout)
 }
 
 // finishDelivery records how sending a ready run ended, keeping a delivered run's report with the
@@ -661,10 +685,12 @@ func (s *Service) finishDelivery(ctx context.Context, run Run, messages []Sent, 
 		}
 		return
 	}
+	storeCtx, cancel := deliveryStoreContext(ctx)
+	defer cancel()
 	// The report is kept before the run is marked delivered, which clears its text, so a crash
 	// between the two cannot lose it.
-	s.saveReport(ctx, run, slices.DeleteFunc(messages, func(message Sent) bool { return message.MessageID <= 0 }))
-	if _, err := s.repository.TransitionScheduledRun(ctx, run.ID, StatusReady, StatusDelivered, "", run.ErrorKind, s.now()); err != nil {
+	s.saveReport(storeCtx, run, slices.DeleteFunc(messages, func(message Sent) bool { return message.MessageID <= 0 }))
+	if _, err := s.repository.TransitionScheduledRun(storeCtx, run.ID, StatusReady, StatusDelivered, "", run.ErrorKind, s.now()); err != nil {
 		s.logRunError(ctx, run, "store_delivery", err)
 		return
 	}

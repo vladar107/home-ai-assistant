@@ -629,16 +629,21 @@ func (s *Service) deliver(ctx context.Context, task Task) error {
 	}
 	replyTo := task.RequestMessageID
 	chunks := conversation.SplitReply(ReportText(task))
-	var err error
+	// The card goes before the first chunk, so a delivery that already sent a chunk is past it.
+	sent := min(task.DeliveredChunks, len(chunks))
+	switch {
+	case sent > 0:
+		replyTo = 0
 	// A failed task's text explains the failure, so a card it staged would illustrate nothing.
-	if s.config.Cards != nil && task.ErrorKind == "" {
-		chunks, replyTo, err = conversation.SendCard(ctx, s.logger, s.config.Cards, s.config.Photos, task.PrincipalID, outbox.TaskTurn(task.ID), task.ChatID, replyTo, chunks)
+	case s.config.Cards != nil && task.ErrorKind == "":
+		remaining, quote, err := conversation.SendCard(ctx, s.logger, s.config.Cards, s.config.Photos, task.PrincipalID, outbox.TaskTurn(task.ID), task.ChatID, replyTo, chunks)
 		if err != nil {
 			return err
 		}
+		sent, replyTo = len(chunks)-len(remaining), quote
 	}
-	for _, chunk := range chunks {
-		if err := s.deliverer.SendReply(ctx, task.ChatID, replyTo, chunk); err != nil {
+	for index := sent; index < len(chunks); index++ {
+		if err := s.deliverer.SendReply(ctx, task.ChatID, replyTo, chunks[index]); err != nil {
 			if isPermanent(err) {
 				s.logger.WarnContext(ctx, "task.undeliverable", "principal_id", task.PrincipalID, "task_id", task.ID, "reason", "send_rejected")
 				return s.finishDelivery(ctx, task)
@@ -646,13 +651,23 @@ func (s *Service) deliver(ctx context.Context, task Task) error {
 			return err
 		}
 		replyTo = 0
+		// The chunk is in the chat, so recording it outlives a shutdown that has begun; otherwise
+		// the next attempt sends it again.
+		saveCtx, cancelSave := context.WithTimeout(context.WithoutCancel(ctx), saveTimeout)
+		if err := s.repository.SaveTaskDeliveryProgress(saveCtx, task.ID, index+1, time.Now()); err != nil {
+			s.logger.WarnContext(ctx, "task.delivery.progress_failed", "principal_id", task.PrincipalID, "task_id", task.ID, "error", err)
+		}
+		cancelSave()
 	}
 	s.logger.InfoContext(ctx, "task.delivered", "principal_id", task.PrincipalID, "task_id", task.ID)
 	return s.finishDelivery(ctx, task)
 }
 
 func (s *Service) finishDelivery(ctx context.Context, task Task) error {
-	if err := s.repository.MarkTaskDelivered(ctx, task.ID, time.Now()); err != nil {
+	saveCtx, cancelSave := context.WithTimeout(context.WithoutCancel(ctx), saveTimeout)
+	err := s.repository.MarkTaskDelivered(saveCtx, task.ID, time.Now())
+	cancelSave()
+	if err != nil {
 		return err
 	}
 	s.removeCard(task)

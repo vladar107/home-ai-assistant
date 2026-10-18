@@ -18,7 +18,7 @@ const scheduledJobColumns = `id, principal_id, name, job_type, cron, run_at, zon
 
 const scheduleRunColumns = `r.id, r.job_id, r.principal_id, r.scheduled_for, r.manual, r.status,
 	COALESCE(r.error_kind, ''), COALESCE(r.reply, ''), j.name, j.job_type, j.zone, j.run_at IS NOT NULL, j.config,
-	COALESCE(j.destination, '')`
+	COALESCE(j.destination, ''), r.delivered_chunks, COALESCE(r.delivered_messages, '[]')`
 
 func (s *Store) CreateScheduledJob(ctx context.Context, job schedule.Job, limit int) (bool, error) {
 	if s == nil || s.db == nil {
@@ -309,15 +309,23 @@ func (s *Store) ScheduledRuns(ctx context.Context, statuses ...string) ([]schedu
 	var runs []schedule.Run
 	for rows.Next() {
 		var run schedule.Run
-		var scheduledFor, config string
+		var scheduledFor, config, delivered string
 		if err := rows.Scan(
 			&run.ID, &run.JobID, &run.PrincipalID, &scheduledFor, &run.Manual, &run.Status,
 			&run.ErrorKind, &run.Reply, &run.JobName, &run.JobType, &run.JobZone, &run.JobOneTime, &config, &run.Destination,
+			&run.DeliveredChunks, &delivered,
 		); err != nil {
 			return nil, fmt.Errorf("scan scheduled run: %w", err)
 		}
 		if run.ScheduledFor, err = time.Parse(time.RFC3339Nano, scheduledFor); err != nil {
 			return nil, fmt.Errorf("parse scheduled run time: %w", err)
+		}
+		var messages []deliveredMessage
+		if err := json.Unmarshal([]byte(delivered), &messages); err != nil {
+			return nil, fmt.Errorf("parse scheduled run delivered messages: %w", err)
+		}
+		for _, message := range messages {
+			run.Delivered = append(run.Delivered, schedule.Sent{MessageID: message.MessageID, ThreadID: message.ThreadID})
 		}
 		run.Config = json.RawMessage(config)
 		runs = append(runs, run)
@@ -326,6 +334,33 @@ func (s *Store) ScheduledRuns(ctx context.Context, statuses ...string) ([]schedu
 		return nil, fmt.Errorf("iterate scheduled runs: %w", err)
 	}
 	return runs, nil
+}
+
+type deliveredMessage struct {
+	MessageID int64 `json:"message_id"`
+	ThreadID  int64 `json:"thread_id"`
+}
+
+func (s *Store) SaveScheduledRunProgress(ctx context.Context, runID string, chunks int, messages []schedule.Sent, now time.Time) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("save scheduled run delivery progress: SQLite store is not open")
+	}
+	delivered := make([]deliveredMessage, 0, len(messages))
+	for _, message := range messages {
+		delivered = append(delivered, deliveredMessage{MessageID: message.MessageID, ThreadID: message.ThreadID})
+	}
+	encoded, err := json.Marshal(delivered)
+	if err != nil {
+		return fmt.Errorf("encode scheduled run delivered messages: %w", err)
+	}
+	if _, err := s.db.ExecContext(
+		ctx,
+		`UPDATE schedule_runs SET delivered_chunks = ?, delivered_messages = ?, updated_at = ? WHERE id = ? AND status = 'ready'`,
+		chunks, string(encoded), formatTime(now), runID,
+	); err != nil {
+		return fmt.Errorf("save scheduled run delivery progress: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) TransitionScheduledRun(ctx context.Context, runID, from, to, reply, errorKind string, now time.Time) (bool, error) {

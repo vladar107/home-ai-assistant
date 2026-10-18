@@ -119,6 +119,8 @@ type Request struct {
 	// SubjectLabel names the job, watch, or trip when the request moved its tab to a conversation
 	// about another one than the tab held before; "" otherwise.
 	SubjectLabel string
+	// DeliveredChunks is how many of the reply's chunks an earlier delivery attempt already sent.
+	DeliveredChunks int
 }
 
 type EnqueueResult struct {
@@ -279,6 +281,8 @@ type Repository interface {
 	ReleaseConversationDelivery(context.Context, string) error
 	CancelConversationDelivery(context.Context, string) error
 	MarkConversationDelivered(context.Context, string) error
+	// SaveConversationProgress records how many of a delivering reply's chunks are in the chat.
+	SaveConversationProgress(ctx context.Context, requestID string, chunks int) error
 	CancelPendingConversation(context.Context, Lane) (bool, error)
 	// CancelPrincipalConversations cancels the pending turns of every lane of the principal.
 	CancelPrincipalConversations(context.Context, string) (bool, error)

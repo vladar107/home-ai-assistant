@@ -48,6 +48,8 @@ type Task struct {
 	StartedAt   time.Time
 	FinishedAt  time.Time
 	DeliveredAt time.Time
+	// DeliveredChunks is how many of the report's chunks an earlier delivery attempt already sent.
+	DeliveredChunks int
 }
 
 // Open reports whether the task has yet to finish.
@@ -94,6 +96,8 @@ type Repository interface {
 	// CancelTask ends one of the principal's open tasks without a report.
 	CancelTask(ctx context.Context, principalID, taskID string, now time.Time) (Task, bool, error)
 	MarkTaskDelivered(ctx context.Context, taskID string, now time.Time) error
+	// SaveTaskDeliveryProgress records how many of an undelivered report's chunks are in the chat.
+	SaveTaskDeliveryProgress(ctx context.Context, taskID string, chunks int, now time.Time) error
 	// RecoverTasks fails each task a previous process left running after it had already been
 	// started maximumAttempts times, and returns the principals with work left.
 	RecoverTasks(ctx context.Context, maximumAttempts int, failure string, now time.Time) ([]string, error)

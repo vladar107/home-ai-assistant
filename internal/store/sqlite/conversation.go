@@ -227,7 +227,7 @@ func (s *Store) NextConversationRequest(ctx context.Context, lane conversation.L
 		        COALESCE(request.response_text, ''), COALESCE(request.error_kind, ''), request.created_at,
 		        COALESCE(request.resumed_from, ''), COALESCE(request.reply_to_message_id, 0),
 		        request.thread_id, `+requestOpensSession+`,
-		        COALESCE(session.subject, ''), COALESCE(request.subject_label, '')
+		        COALESCE(session.subject, ''), COALESCE(request.subject_label, ''), request.delivered_chunks
 		 FROM conversation_requests AS request
 		 JOIN conversation_sessions AS session
 		   ON session.id = request.session_id AND session.principal_id = request.principal_id
@@ -297,6 +297,21 @@ func (s *Store) MarkConversationDelivered(ctx context.Context, requestID string)
 		requestID,
 	); err != nil {
 		return fmt.Errorf("mark conversation delivered: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) SaveConversationProgress(ctx context.Context, requestID string, chunks int) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("save conversation delivery progress: SQLite store is not open")
+	}
+	if _, err := s.db.ExecContext(
+		ctx,
+		`UPDATE conversation_requests SET delivered_chunks = ? WHERE id = ? AND state = 'delivering'`,
+		chunks,
+		requestID,
+	); err != nil {
+		return fmt.Errorf("save conversation delivery progress: %w", err)
 	}
 	return nil
 }
@@ -752,7 +767,7 @@ func loadConversationByUpdate(ctx context.Context, db queryRower, botUserID, upd
 		        COALESCE(request.response_text, ''), COALESCE(request.error_kind, ''), request.created_at,
 		        COALESCE(request.resumed_from, ''), COALESCE(request.reply_to_message_id, 0),
 		        request.thread_id, `+requestOpensSession+`,
-		        COALESCE(session.subject, ''), COALESCE(request.subject_label, '')
+		        COALESCE(session.subject, ''), COALESCE(request.subject_label, ''), request.delivered_chunks
 		 FROM conversation_requests AS request
 		 JOIN conversation_sessions AS session
 		   ON session.id = request.session_id AND session.principal_id = request.principal_id
@@ -825,6 +840,7 @@ func scanConversationRequest(row *sql.Row) (conversation.Request, error) {
 		&request.OpensSession,
 		&request.Subject,
 		&request.SubjectLabel,
+		&request.DeliveredChunks,
 	)
 	if err != nil {
 		return request, err

@@ -85,6 +85,10 @@ type Run struct {
 	// External is true when the run read outside content such as web pages or third-party tool
 	// results. Like Private, it is known only to the process that executed the run.
 	External bool
+	// DeliveredChunks is how many of the report's chunks an earlier delivery attempt already sent,
+	// and Delivered the messages of those it sent as text.
+	DeliveredChunks int
+	Delivered       []Sent
 }
 
 type Repository interface {
@@ -126,6 +130,9 @@ type Repository interface {
 	// TransitionScheduledRun moves a run from one status to another. A terminal status clears the
 	// stored reply; ready stores it.
 	TransitionScheduledRun(ctx context.Context, runID, from, to, reply, errorKind string, now time.Time) (bool, error)
+	// SaveScheduledRunProgress records how many of a ready run's chunks are in the chat and the
+	// messages they were sent as.
+	SaveScheduledRunProgress(ctx context.Context, runID string, chunks int, messages []Sent, now time.Time) error
 	// RecoverScheduledRuns moves every run left running by a previous process to ready with the
 	// given reply, returning how many there were.
 	RecoverScheduledRuns(ctx context.Context, reply, errorKind string, now time.Time) (int, error)

@@ -35,7 +35,8 @@ const (
 	// watch to have been watching without a break: two intervals and the slack.
 	carryGap = 2*HomeCheckInterval + checkSlack
 
-	rewriteTimeout = 30 * time.Second
+	rewriteTimeout       = 30 * time.Second
+	deliveryStoreTimeout = 5 * time.Second
 	// maximumMessageRunes is what one Telegram message holds.
 	maximumMessageRunes = 4096
 )
@@ -658,10 +659,14 @@ func (s *Service) deliver(ctx context.Context) {
 			}
 			continue
 		}
-		if s.finish(ctx, alert, statusDelivered, "", alertDelivered) {
+		// The alert is in the chat, so recording it outlives a shutdown that has begun; otherwise
+		// the next process sends it again.
+		storeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deliveryStoreTimeout)
+		if s.finish(storeCtx, alert, statusDelivered, "", alertDelivered) {
 			s.remember(alert, text, messageID)
-			s.keepMessage(ctx, alert, text, messageID, threadID)
+			s.keepMessage(storeCtx, alert, text, messageID, threadID)
 		}
+		cancel()
 	}
 }
 

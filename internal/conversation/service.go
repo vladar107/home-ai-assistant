@@ -1056,16 +1056,23 @@ func (s *Service) deliver(ctx context.Context, request Request) error {
 		}
 		chunks = SplitReply(response)
 	}
+	// The card goes before the first chunk, so a delivery that already sent a chunk is past it.
+	sent := min(request.DeliveredChunks, len(chunks))
+	switch {
+	case sent > 0:
+		replyTo = 0
 	// A failed turn's text explains the failure, so a card it staged would illustrate nothing.
-	if s.config.Cards != nil && request.ErrorKind == "" && len(chunks) > 0 {
-		chunks, replyTo, err = SendCard(deliveryCtx, s.telemetry.ContextLogger(deliveryCtx, s.logger), s.config.Cards, s.config.Photos, request.PrincipalID, outbox.ChatTurn(request.ID), request.ChatID, replyTo, chunks)
+	case s.config.Cards != nil && request.ErrorKind == "" && len(chunks) > 0:
+		var remaining []string
+		remaining, replyTo, err = SendCard(deliveryCtx, s.telemetry.ContextLogger(deliveryCtx, s.logger), s.config.Cards, s.config.Photos, request.PrincipalID, outbox.ChatTurn(request.ID), request.ChatID, replyTo, chunks)
 		if err != nil {
 			_ = s.repository.ReleaseConversationDelivery(ctx, request.ID)
 			return err
 		}
+		sent = len(chunks) - len(remaining)
 	}
-	for _, chunk := range chunks {
-		messageID, _, err := s.deliverer.SendTrackedReply(deliveryCtx, request.ChatID, replyTo, chunk)
+	for index := sent; index < len(chunks); index++ {
+		messageID, _, err := s.deliverer.SendTrackedReply(deliveryCtx, request.ChatID, replyTo, chunks[index])
 		if err != nil {
 			if isPermanentDeliveryError(err) {
 				s.removeCard(request)
@@ -1083,16 +1090,23 @@ func (s *Service) deliver(ctx context.Context, request Request) error {
 			return err
 		}
 		replyTo = 0
+		storeCtx, cancelStore := deliveryStoreContext(ctx)
+		if err := s.repository.SaveConversationProgress(storeCtx, request.ID, index+1); err != nil {
+			s.logWorkerError(ctx, request.PrincipalID, "save_progress")
+		}
 		// The chunk is already in the chat, so a failure to remember it only costs the user the
 		// ability to return to this conversation by replying to it.
 		if messageID > 0 {
-			if err := s.repository.RecordConversationReply(deliveryCtx, request.PrincipalID, request.SessionID, request.ID, messageID); err != nil && ctx.Err() == nil {
+			if err := s.repository.RecordConversationReply(storeCtx, request.PrincipalID, request.SessionID, request.ID, messageID); err != nil {
 				s.logWorkerError(ctx, request.PrincipalID, "record_reply")
 			}
 		}
+		cancelStore()
 	}
-	if err := s.repository.MarkConversationDelivered(deliveryCtx, request.ID); err != nil {
-		_ = s.repository.ReleaseConversationDelivery(ctx, request.ID)
+	storeCtx, cancelStore := deliveryStoreContext(ctx)
+	defer cancelStore()
+	if err := s.repository.MarkConversationDelivered(storeCtx, request.ID); err != nil {
+		_ = s.repository.ReleaseConversationDelivery(storeCtx, request.ID)
 		return err
 	}
 	plainReply, message := s.recordReply(ctx, request, deliveryStarted)
@@ -1211,6 +1225,14 @@ func (s *Service) removeCard(request Request) {
 	if s.config.Cards != nil {
 		s.config.Cards.Remove(request.PrincipalID, outbox.ChatTurn(request.ID))
 	}
+}
+
+const deliveryStoreTimeout = 5 * time.Second
+
+// deliveryStoreContext records what a delivery already sent. It outlives a shutdown that has begun,
+// because a send that went through but was not recorded is sent again by the next process.
+func deliveryStoreContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), deliveryStoreTimeout)
 }
 
 func isPermanentDeliveryError(err error) bool {
