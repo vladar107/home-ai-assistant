@@ -106,6 +106,7 @@ plan that links back to the earlier record.
 | 0094 | [Scrub private details from two done plans](0094-plan-privacy-scrub.md) | done |
 | 0095 | [Telegram intake fixes: oversized voice turns, secrets in captions, and help](0095-telegram-intake-fixes.md) | done |
 | 0096 | [Resume interrupted deliveries instead of sending them again](0096-resume-interrupted-deliveries.md) | done |
+| 0097 | [PDF text extraction with bounded memory and time](0097-bounded-pdf-extraction.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

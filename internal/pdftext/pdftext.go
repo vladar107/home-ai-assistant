@@ -31,30 +31,24 @@ var (
 // stops on a whole rune at the limit and ends with one line saying where it stopped, so a reader
 // knows the rest of the document exists.
 //
-// The library cannot be interrupted, so extraction runs in its own goroutine and Extract returns
-// ctx.Err() as soon as the context ends; the goroutine stops at the next page boundary.
+// The library has no limits of its own: a small file can inflate into gigabytes of content, and
+// its parser cannot be interrupted. So the PDF is parsed in a worker process with hard memory and
+// CPU limits, one document at a time, and the worker is killed as soon as ctx ends. A document
+// that exceeds the limits is refused as ErrMalformed.
 func Extract(ctx context.Context, data []byte) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	type outcome struct {
-		text string
-		err  error
-	}
-	done := make(chan outcome, 1)
-	go func() {
-		text, err := extract(ctx, data)
-		done <- outcome{text: text, err: err}
-	}()
 	select {
+	case turn <- struct{}{}:
 	case <-ctx.Done():
 		return "", ctx.Err()
-	case result := <-done:
-		return result.text, result.err
 	}
+	defer func() { <-turn }()
+	return delegate(ctx, data)
 }
 
-func extract(ctx context.Context, data []byte) (text string, err error) {
+func extract(data []byte) (text string, err error) {
 	// The library panics on many malformed inputs, and a document the user sent must not be able
 	// to take the process down with it.
 	defer func() {
@@ -76,9 +70,6 @@ func extract(ctx context.Context, data []byte) (text string, err error) {
 	stopped := ""
 	failed := false
 	for number := 1; number <= pages; number++ {
-		if err := ctx.Err(); err != nil {
-			return "", err
-		}
 		if number > MaximumPages {
 			stopped = fmt.Sprintf("[The text stops here: only the first %d of %d pages were read.]", MaximumPages, pages)
 			break

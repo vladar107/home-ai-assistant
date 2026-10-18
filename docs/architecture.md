@@ -220,6 +220,14 @@ guard, so each attempt is checked again. The `home_agent.http.retries` counter
 records retried requests by service and outcome (recovered, exhausted,
 not_retryable), and each retry is logged at debug level.
 
+`pdftext` parses every PDF — web pages, NAS files, and attachments — in a worker
+process: the `home-agent` binary started again with an internal marker, an empty
+environment, and the document on stdin. The worker limits itself before reading it
+(a 384 MB memory ceiling enforced by the kernel on Linux and by a watchdog
+everywhere, 20 s of CPU, one thread), only one runs at a time, and it is killed when
+the caller's context ends or after 30 s. A document that inflates past those limits
+is refused as unreadable instead of exhausting the service's memory.
+
 ### A conversation turn
 
 1. `telegram` receives an update, `identity` resolves the sender to a principal, and

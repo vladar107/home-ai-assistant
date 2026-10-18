@@ -2,6 +2,7 @@ package pdftext_test
 
 import (
 	"bytes"
+	"compress/zlib"
 	"context"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/pdftext"
@@ -26,6 +28,20 @@ func fixture(t *testing.T, name string) []byte {
 // build writes the smallest PDF the library accepts, one page per entry, so the caps can be
 // exercised without committing a hundred-page fixture.
 func build(pages []string) []byte {
+	contents := make([]content, len(pages))
+	for index, text := range pages {
+		contents[index] = content{data: []byte(fmt.Sprintf("BT /F1 12 Tf 72 720 Td (%s) Tj ET", text))}
+	}
+	return assemble(contents)
+}
+
+// content is one page's content stream, with the stream dictionary entries besides its length.
+type content struct {
+	entries string
+	data    []byte
+}
+
+func assemble(pages []content) []byte {
 	var out bytes.Buffer
 	var offsets []int
 	object := func(body string) {
@@ -40,10 +56,9 @@ func build(pages []string) []byte {
 	object("<< /Type /Catalog /Pages 2 0 R >>")
 	object(fmt.Sprintf("<< /Type /Pages /Kids [%s] /Count %d >>", strings.Join(kids, " "), len(pages)))
 	object("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>")
-	for index, text := range pages {
+	for index, page := range pages {
 		object(fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents %d 0 R >>", 5+2*index))
-		stream := fmt.Sprintf("BT /F1 12 Tf 72 720 Td (%s) Tj ET", text)
-		object(fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(stream), stream))
+		object(fmt.Sprintf("<< /Length %d %s >>\nstream\n%s\nendstream", len(page.data), page.entries, page.data))
 	}
 	start := out.Len()
 	fmt.Fprintf(&out, "xref\n0 %d\n0000000000 65535 f \n", len(offsets)+1)
@@ -52,6 +67,37 @@ func build(pages []string) []byte {
 	}
 	fmt.Fprintf(&out, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", len(offsets)+1, start)
 	return out.Bytes()
+}
+
+// bomb writes a PDF whose one page has a content stream of inflated MiB, compressed to a small
+// fraction of that: operands with no operator, which the library keeps on its stack, each in a
+// value many times its two bytes. Once the window holds nothing but the repeated pattern, every
+// flushed block of the compressor decodes the same way, so one block repeated stands for the whole
+// stream without compressing all of it.
+func bomb(t *testing.T, inflated int) []byte {
+	t.Helper()
+	var stream bytes.Buffer
+	writer, err := zlib.NewWriterLevel(&stream, zlib.BestCompression)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunk := bytes.Repeat([]byte("1 "), 1<<19)
+	write := func(data []byte) {
+		if _, err := writer.Write(data); err != nil {
+			t.Fatal(err)
+		}
+		if err := writer.Flush(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(append([]byte("BT "), chunk...))
+	head := stream.Len()
+	write(chunk)
+	block := bytes.Clone(stream.Bytes()[head:])
+	for range inflated - 2 {
+		stream.Write(block)
+	}
+	return assemble([]content{{entries: "/Filter /FlateDecode", data: stream.Bytes()}})
 }
 
 func TestTextIsExtractedPageByPage(t *testing.T) {
@@ -128,5 +174,31 @@ func TestCancelledContextStopsExtraction(t *testing.T) {
 	cancel()
 	if _, err := pdftext.Extract(ctx, fixture(t, "handbook.pdf")); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Extract error = %v, want context.Canceled", err)
+	}
+}
+
+func TestInflatingContentIsRefusedWithinTheWorkerLimits(t *testing.T) {
+	document := bomb(t, 256)
+	if len(document) > 1<<20 {
+		t.Fatalf("the generated PDF is %d bytes; it should stay small", len(document))
+	}
+	started := time.Now()
+	text, err := pdftext.Extract(t.Context(), document)
+	if !errors.Is(err, pdftext.ErrMalformed) || text != "" {
+		t.Fatalf("Extract = %d bytes of text, %v; want ErrMalformed", len(text), err)
+	}
+	t.Logf("refused a %d KB PDF that inflates to 256 MiB in %s: %v", len(document)>>10, time.Since(started), err)
+}
+
+func TestCancelledExtractionDoesNotHoldUpTheNext(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer cancel()
+	if _, err := pdftext.Extract(ctx, bomb(t, 256)); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Extract error = %v, want context.DeadlineExceeded", err)
+	}
+	ctx, cancel = context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if _, err := pdftext.Extract(ctx, fixture(t, "handbook.pdf")); err != nil {
+		t.Fatalf("the next extraction failed: %v", err)
 	}
 }
