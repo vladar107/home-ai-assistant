@@ -114,6 +114,7 @@ plan that links back to the earlier record.
 | 0102 | [Pi runtime limits, session retention, and photo privacy](0102-pi-runtime-limits-and-session-retention.md) | done |
 | 0103 | [Watches and routes on transit abstractions](0103-transit-abstractions.md) | done |
 | 0104 | [One copy of the helpers that drifted apart](0104-shared-helpers.md) | done |
+| 0105 | [The model-facing prompt scaffolding in one place](0105-prompt-scaffolding.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
-	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/judgment"
+	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
@@ -264,12 +264,12 @@ func TestConfirmedSearchRunsOnceWithTheSameQuery(t *testing.T) {
 	}
 
 	call := receive(t, h.ctx, runtime.calls)
-	if !strings.HasSuffix(call.request.Message, conversation.ContinueMessage) || !strings.Contains(call.request.Message, "web_search") {
+	if !strings.HasSuffix(call.request.Message, prompt.Continue) || !strings.Contains(call.request.Message, "web_search") {
 		t.Fatalf("continuation message = %q", call.request.Message)
 	}
 	wantDecision(t, "confirmed query, other case and spacing", call.request.SearchCheck(call.ctx, "  See   https://EXAMPLE.com/page?id=7 "), agentruntime.SearchAllow, "confirmed")
 	wantDecision(t, "confirmed query again", h.searches.Check(call.ctx, "alice", heldQuery, false), agentruntime.SearchDeny, "pattern")
-	call.answer <- agentruntime.RunResult{Response: conversation.NothingToAdd}
+	call.answer <- agentruntime.RunResult{Response: prompt.NothingToAdd}
 	h.waitState(2, "delivered")
 
 	// A different query was never confirmed, and another user's confirmation is not this user's.

@@ -21,6 +21,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
+	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 	oteltrace "go.opentelemetry.io/otel/trace"
@@ -1073,7 +1074,7 @@ func (s *Service) continueConversation(ctx context.Context, bot Bot, updateID in
 		PrincipalID:       principalID,
 		ThreadID:          thread.From(ctx),
 		ChatID:            callback.Message.Chat.ID,
-		Message:           conversation.ContinueMessage,
+		Message:           prompt.Continue,
 	}
 	err := s.conversation.Enqueue(ctx, input)
 	if errors.Is(err, conversation.ErrBusy) && s.approvals != nil {

@@ -18,6 +18,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/prompt"
 )
 
 const (
@@ -277,7 +278,7 @@ func userText(text string) string {
 	kept := paragraphs[:0]
 	for _, paragraph := range paragraphs {
 		trimmed := strings.TrimSpace(paragraph)
-		if strings.HasPrefix(trimmed, "[system]") || strings.HasPrefix(trimmed, attachedPrefix) {
+		if strings.HasPrefix(trimmed, prompt.Marker) || strings.HasPrefix(trimmed, attachedPrefix) {
 			continue
 		}
 		kept = append(kept, paragraph)

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
-	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/notionsim"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
@@ -79,10 +79,10 @@ func (h *conversationHarness) proposeTurn(runtime *controlledRuntime, updateID i
 func (h *conversationHarness) continueTurn(runtime *controlledRuntime, updateID int64) runtimeCall {
 	h.t.Helper()
 	call := receive(h.t, h.ctx, runtime.calls)
-	if !strings.HasSuffix(call.request.Message, conversation.ContinueMessage) {
+	if !strings.HasSuffix(call.request.Message, prompt.Continue) {
 		h.t.Fatalf("continuation message = %q", call.request.Message)
 	}
-	call.answer <- agentruntime.RunResult{Response: conversation.NothingToAdd}
+	call.answer <- agentruntime.RunResult{Response: prompt.NothingToAdd}
 	h.waitState(updateID, "delivered")
 	if pending := len(h.messages); pending != 0 {
 		h.t.Fatalf("a silent continuation sent %d messages", pending)
@@ -434,10 +434,10 @@ func TestConfirmContinuesTheRequestUnlessRejected(t *testing.T) {
 	h.waitState(8, "delivered")
 	continued := receive(t, h.ctx, runtime.calls)
 	if !strings.HasPrefix(continued.request.Message, "[system] The user confirmed your notion_append_blocks proposal and it was executed.") ||
-		!strings.HasSuffix(continued.request.Message, conversation.ContinueMessage) {
+		!strings.HasSuffix(continued.request.Message, prompt.Continue) {
 		t.Fatalf("continuation after the busy turn = %q", continued.request.Message)
 	}
-	continued.answer <- agentruntime.RunResult{Response: conversation.NothingToAdd}
+	continued.answer <- agentruntime.RunResult{Response: prompt.NothingToAdd}
 	h.waitState(9, "delivered")
 	expectNoRuntimeCall(t, runtime, 100*time.Millisecond)
 }
@@ -521,7 +521,7 @@ func TestProposalsOfOneTurnAreConfirmedTogetherAndRunPastAFailure(t *testing.T) 
 	informed := receive(t, h.ctx, runtime.calls)
 	if !strings.HasPrefix(informed.request.Message, "[system] Your 2 proposals were shown and resolved together. (1) Your notion_update_page proposal was confirmed but failed: ") ||
 		!strings.Contains(informed.request.Message, "(2) The user confirmed your notion_update_page proposal and it was executed. Updated.") ||
-		!strings.HasSuffix(informed.request.Message, conversation.ContinueMessage) {
+		!strings.HasSuffix(informed.request.Message, prompt.Continue) {
 		t.Fatalf("turn after a bundle = %q", informed.request.Message)
 	}
 	informed.answer <- agentruntime.RunResult{Response: "one failed"}

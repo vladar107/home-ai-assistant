@@ -8,7 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 )
@@ -24,10 +24,10 @@ func TestQuietScheduledRunSendsNothing(t *testing.T) {
 	clock.Set(t, "2026-09-28T09:00:20+02:00")
 	h.scheduler.Wake()
 	run := receive(t, h.ctx, runtime.calls)
-	if !strings.Contains(run.request.Message, conversation.NothingToAdd) {
+	if !strings.Contains(run.request.Message, prompt.NothingToAdd) {
 		t.Fatalf("scheduled message lacks the quiet instruction: %q", run.request.Message)
 	}
-	run.answer <- agentruntime.RunResult{Response: " " + conversation.NothingToAdd + "\n", Final: conversation.NothingToAdd}
+	run.answer <- agentruntime.RunResult{Response: " " + prompt.NothingToAdd + "\n", Final: prompt.NothingToAdd}
 	h.waitRun(job.ID, schedule.StatusSkipped)
 
 	if got := h.countRows(`SELECT count(*) FROM schedule_runs WHERE job_id = ? AND status = 'skipped' AND error_kind = 'quiet'`, job.ID); got != 1 {
@@ -55,7 +55,7 @@ func TestQuietManualRunSaysSoAndMarkerIsStrippedFromText(t *testing.T) {
 	}
 	h.scheduler.Wake()
 	run := receive(t, h.ctx, runtime.calls)
-	run.answer <- agentruntime.RunResult{Response: conversation.NothingToAdd, Final: conversation.NothingToAdd}
+	run.answer <- agentruntime.RunResult{Response: prompt.NothingToAdd, Final: prompt.NothingToAdd}
 	if message := h.nextMessage(); !strings.Contains(message.text, schedule.QuietManualText) {
 		t.Fatalf("manual quiet run sent %q", message.text)
 	}
@@ -67,10 +67,10 @@ func TestQuietManualRunSaysSoAndMarkerIsStrippedFromText(t *testing.T) {
 	}
 	h.scheduler.Wake()
 	run = receive(t, h.ctx, runtime.calls)
-	text := "Rent is due tomorrow. " + conversation.NothingToAdd
+	text := "Rent is due tomorrow. " + prompt.NothingToAdd
 	run.answer <- agentruntime.RunResult{Response: text, Final: text}
 	message := h.nextMessage()
-	if !strings.Contains(message.text, "Rent is due tomorrow.") || strings.Contains(message.text, conversation.NothingToAdd) {
+	if !strings.Contains(message.text, "Rent is due tomorrow.") || strings.Contains(message.text, prompt.NothingToAdd) {
 		t.Fatalf("report = %q", message.text)
 	}
 }

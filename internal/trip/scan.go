@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/localtime"
+	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
@@ -150,9 +151,7 @@ func (s scan) Run(ctx context.Context, occurrence schedule.Occurrence) (schedule
 		return schedule.Result{}, err
 	}
 	ctx = tools.WithCallBudget(ctx, budget)
-	message := fmt.Sprintf("[system] This is the user's scheduled job %q, scheduled for %s; it can run late, so go by the current local time above. "+
-		"The user is not watching this turn and cannot answer questions, and only read-only tools are available. Do the task below.\n\n%s",
-		occurrence.JobName, localtime.Format(occurrence.ScheduledFor, occurrence.Location), ScanPrompt(days))
+	message := prompt.ScheduledScan(occurrence.JobName, occurrence.ScheduledFor, occurrence.Location, ScanPrompt(days))
 	text, errorKind, err := s.checker.RunCheck(ctx, occurrence.PrincipalID, message)
 	if err != nil {
 		return schedule.Result{}, err

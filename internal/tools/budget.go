@@ -2,9 +2,6 @@ package tools
 
 import "context"
 
-// budgetHandoffText follows budgetExhaustedText when the turn offers a tool outside the budget.
-const budgetHandoffText = " If the request needs more lookups than that, hand the rest to %s instead of answering partially."
-
 type budgetKey struct{}
 
 // WithCallBudget sets how many calls the tool set collected under ctx may make, in place of the

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/memory"
+	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 )
 
@@ -22,7 +22,7 @@ func (h *conversationHarness) thumbsDown(runtime *controlledRuntime, askID, reac
 	h.waitState(askID, "delivered")
 	h.push(reactionUpdate(reactID, 101, reply.messageID, "👎"))
 	reconsider := receive(h.t, h.ctx, runtime.calls)
-	if !strings.HasPrefix(reconsider.request.Message, conversation.ReconsiderMessage) {
+	if !strings.HasPrefix(reconsider.request.Message, prompt.Reconsider) {
 		h.t.Fatalf("reconsider message = %q", reconsider.request.Message)
 	}
 	return reconsider

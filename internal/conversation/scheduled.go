@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/vladar107/home-ai-assistant/internal/localtime"
+	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
@@ -100,18 +100,11 @@ func (s *Service) runUnwatched(ctx context.Context, principalID, turn, message s
 }
 
 func withPlace(place, message string) string {
-	if place == "" {
-		return message
-	}
-	return "[system] " + place + "\n\n" + message
+	return prompt.Prepend(prompt.Place(place), message)
 }
 
 func (s *Service) withUser(principalID, message string) string {
-	name := s.config.DisplayNames[principalID]
-	if name == "" {
-		return message
-	}
-	return "[system] The user is " + name + ".\n\n" + message
+	return prompt.Prepend(prompt.User(s.config.DisplayNames[principalID]), message)
 }
 
 // withTime starts a turn's message with the current local time in the household zone.
@@ -119,5 +112,5 @@ func (s *Service) withTime(message string) string {
 	if s.config.Location == nil {
 		return message
 	}
-	return localtime.Line(s.config.Now(), s.config.Location) + "\n\n" + message
+	return prompt.Prepend(prompt.Time(s.config.Now(), s.config.Location), message)
 }

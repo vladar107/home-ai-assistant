@@ -10,8 +10,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
-	"github.com/vladar107/home-ai-assistant/internal/localtime"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
+	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -89,29 +89,14 @@ func (m modelTurn) Run(ctx context.Context, occurrence Occurrence) (Result, erro
 	if occurrence.JobID == HeadsUpJobID(occurrence.PrincipalID) {
 		ctx = tools.WithCallBudget(ctx, headsUpCallBudget)
 	}
-	reply, err := m.runner.RunScheduled(ctx, occurrence.PrincipalID, outbox.ScheduledTurn(occurrence.RunID), scheduledMessage(occurrence, config.Prompt))
+	reply, err := m.runner.RunScheduled(ctx, occurrence.PrincipalID, outbox.ScheduledTurn(occurrence.RunID), prompt.ScheduledJob(occurrence.JobName, occurrence.ScheduledFor, occurrence.Location, config.Prompt))
 	if err != nil {
 		return Result{}, err
 	}
 	result := Result{Text: reply.Text, ErrorKind: reply.ErrorKind, Private: reply.Private, External: reply.External}
-	if reply.ErrorKind == "" && strings.Contains(reply.Text, conversation.NothingToAdd) {
-		result.Text = strings.TrimSpace(strings.ReplaceAll(reply.Text, conversation.NothingToAdd, ""))
+	if reply.ErrorKind == "" && strings.Contains(reply.Text, prompt.NothingToAdd) {
+		result.Text = strings.TrimSpace(strings.ReplaceAll(reply.Text, prompt.NothingToAdd, ""))
 		result.Quiet = result.Text == ""
 	}
 	return result, nil
-}
-
-// scheduledMessage tells the model that nobody is waiting on this turn, so it does the task and
-// reports instead of asking questions or offering changes it cannot make.
-func scheduledMessage(occurrence Occurrence, prompt string) string {
-	return fmt.Sprintf(
-		"[system] This is the user's scheduled job %q, scheduled for %s; it can run late, so go by the current local time above. "+
-			"The user is not watching this turn and cannot answer questions, "+
-			"and only read-only tools are available, so nothing can be created, changed, or saved. "+
-			"Never show a status, time, or count that no tool returned in this run, and never carry one over from an earlier run; "+
-			"if a check failed, say which one, and leave a leg out rather than guess its status. "+
-			"If the task asks to report only when something holds and it does not hold now, reply with exactly %s and nothing else, and nothing is sent; a check that failed is still reported. "+
-			"Do the task below and reply with the report the user should receive.\n\n%s",
-		occurrence.JobName, localtime.Format(occurrence.ScheduledFor, occurrence.Location), conversation.NothingToAdd, prompt,
-	)
 }

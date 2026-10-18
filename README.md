@@ -203,6 +203,7 @@ internal/app/          wiring
 internal/telegram/     Telegram client, poller, commands, /settings
 internal/conversation/ turn coordination
 internal/runtime/pi/   Pi subprocess and tool bridge
+internal/prompt/       system prompt and [system] lines the model reads
 internal/tools/        tool broker
 internal/connectors/   notion, gmail, nas, ns, bus, web, homeassistant, places
 internal/location/     shared positions and their expiry

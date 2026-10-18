@@ -16,6 +16,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/judgment"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
+	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/turnstate"
 )
@@ -145,7 +146,7 @@ func TestExecuteTimesOutWhenTheProviderOutrunsItsDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.IsError || result.Text != timedOutText {
+	if !result.IsError || result.Text != prompt.ToolTimedOut {
 		t.Errorf("result = %+v, want the timed-out text", result)
 	}
 }
@@ -226,7 +227,7 @@ func TestThirdPartyCallMarksThePrincipalExposed(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if result.Text != untrustedResultPrefix+"text" {
+				if result.Text != prompt.ToolResultUntrusted+"text" {
 					t.Fatalf("%s result = %q, want it marked as untrusted", name, result.Text)
 				}
 				if got := registry.Exposure(testPrincipal); got != test.want {
@@ -437,7 +438,7 @@ func TestThirdPartyErrorsMarkTheTurn(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !result.IsError || !strings.HasPrefix(result.Text, untrustedResultPrefix) {
+		if !result.IsError || !strings.HasPrefix(result.Text, prompt.ToolResultUntrusted) {
 			t.Fatalf("%s result = %+v, want an error marked as untrusted", name, result)
 		}
 	}
@@ -548,7 +549,7 @@ func (f screeningFixture) call(t *testing.T, name string) string {
 
 func TestScreenedResultWarnsAndMarksThePrincipalSuspicious(t *testing.T) {
 	f := newScreeningFixture(t, http.StatusOK, 0.95)
-	if got, want := f.call(t, "read_page"), untrustedResultPrefix+screenedWarning+screenInput; got != want {
+	if got, want := f.call(t, "read_page"), prompt.ToolResultUntrusted+prompt.ToolResultScreened+screenInput; got != want {
 		t.Fatalf("result = %q, want %q", got, want)
 	}
 	if got := f.registry.Exposure(testPrincipal); got != turnstate.LevelSuspicious {
@@ -558,7 +559,7 @@ func TestScreenedResultWarnsAndMarksThePrincipalSuspicious(t *testing.T) {
 
 func TestCleanScreenedResultIsUnchanged(t *testing.T) {
 	f := newScreeningFixture(t, http.StatusOK, 0.05)
-	if got, want := f.call(t, "read_page"), untrustedResultPrefix+screenInput; got != want {
+	if got, want := f.call(t, "read_page"), prompt.ToolResultUntrusted+screenInput; got != want {
 		t.Fatalf("result = %q, want %q", got, want)
 	}
 	if got := f.registry.Exposure(testPrincipal); got != turnstate.LevelExposed {
@@ -568,7 +569,7 @@ func TestCleanScreenedResultIsUnchanged(t *testing.T) {
 
 func TestScreeningFailureLeavesTheResultUnchanged(t *testing.T) {
 	f := newScreeningFixture(t, http.StatusInternalServerError, 0)
-	if got, want := f.call(t, "read_page"), untrustedResultPrefix+screenInput; got != want {
+	if got, want := f.call(t, "read_page"), prompt.ToolResultUntrusted+screenInput; got != want {
 		t.Fatalf("result = %q, want %q", got, want)
 	}
 	if got := f.registry.Exposure(testPrincipal); got != turnstate.LevelExposed {
@@ -579,7 +580,7 @@ func TestScreeningFailureLeavesTheResultUnchanged(t *testing.T) {
 func TestUnscreenedToolsSendNothingToTypeSafe(t *testing.T) {
 	f := newScreeningFixture(t, http.StatusOK, 0.95)
 	for _, name := range []string{"own_note", "gmail_search"} {
-		if got, want := f.call(t, name), untrustedResultPrefix+screenInput; got != want {
+		if got, want := f.call(t, name), prompt.ToolResultUntrusted+screenInput; got != want {
 			t.Fatalf("%s result = %q", name, got)
 		}
 	}

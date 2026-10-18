@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
@@ -35,7 +36,7 @@ func TestReactOnlyTurnSendsNothingAndStillRunsTheFollowUp(t *testing.T) {
 
 	h.push(textUpdate(1, 101, "got it, and check my train at 9"))
 	chat := receive(t, h.ctx, runtime.calls)
-	if !slices.Contains(toolNames(chat.request.Tools), "react") || !strings.Contains(chat.request.Tools.Guidance, "react and then reply with exactly "+conversation.NothingToAdd) {
+	if !slices.Contains(toolNames(chat.request.Tools), "react") || !strings.Contains(chat.request.Tools.Guidance, "react and then reply with exactly "+prompt.NothingToAdd) {
 		t.Fatalf("chat turn tools = %v, guidance %q", toolNames(chat.request.Tools), chat.request.Tools.Guidance)
 	}
 	react(t, chat, "👍")
@@ -46,7 +47,7 @@ func TestReactOnlyTurnSendsNothingAndStillRunsTheFollowUp(t *testing.T) {
 	if err != nil || result.IsError {
 		t.Fatalf("proposal = %+v %v", result, err)
 	}
-	chat.answer <- agentruntime.RunResult{Response: conversation.NothingToAdd}
+	chat.answer <- agentruntime.RunResult{Response: prompt.NothingToAdd}
 	h.waitState(1, "delivered")
 	if proposal := h.nextMessage(); proposal.replyTo != 0 || !strings.Contains(proposal.text, "Runs once: Mon 28 Sep 09:00 CEST") {
 		t.Fatalf("follow-up message = %+v", proposal)
@@ -115,7 +116,7 @@ func TestReactOnlyTurnInAResumedConversationSendsNothing(t *testing.T) {
 		t.Fatalf("reply continued in %s, want the earlier %s", resumed.request.SessionID, first.request.SessionID)
 	}
 	react(t, resumed, "👌")
-	resumed.answer <- agentruntime.RunResult{Response: conversation.NothingToAdd}
+	resumed.answer <- agentruntime.RunResult{Response: prompt.NothingToAdd}
 	h.waitState(4, "delivered")
 	if pending := len(h.messages); pending != 0 {
 		t.Fatalf("a react-only resumed turn sent %d messages: %+v", pending, h.nextMessage())
@@ -153,7 +154,7 @@ func TestContinuationAndScheduledRunsAreNotOfferedReact(t *testing.T) {
 	h.nextEdit()
 
 	continuation := receive(t, h.ctx, runtime.calls)
-	if !strings.HasSuffix(continuation.request.Message, conversation.ContinueMessage) {
+	if !strings.HasSuffix(continuation.request.Message, prompt.Continue) {
 		t.Fatalf("continuation message = %q", continuation.request.Message)
 	}
 	if names := toolNames(continuation.request.Tools); slices.Contains(names, "react") || strings.Contains(continuation.request.Tools.Guidance, "react sets") {
@@ -162,7 +163,7 @@ func TestContinuationAndScheduledRunsAreNotOfferedReact(t *testing.T) {
 	if result, err := continuation.request.Tools.Executor.Execute(continuation.ctx, agentruntime.ToolCall{Name: "react", Arguments: json.RawMessage(`{"emoji":"👍"}`)}); err != nil || !result.IsError {
 		t.Fatalf("react in a continuation = %+v %v", result, err)
 	}
-	continuation.answer <- agentruntime.RunResult{Response: conversation.NothingToAdd}
+	continuation.answer <- agentruntime.RunResult{Response: prompt.NothingToAdd}
 	h.waitState(2, "delivered")
 
 	clock.Set(t, "2026-09-28T09:00:20+02:00")
@@ -269,7 +270,7 @@ func TestFirstThumbsDownStartsOneReconsiderTurn(t *testing.T) {
 
 	h.push(reactionUpdate(2, 101, tail.messageID, "👎"))
 	reconsider := receive(t, h.ctx, runtime.calls)
-	if !strings.HasPrefix(reconsider.request.Message, conversation.ReconsiderMessage) || reconsider.request.SessionID != first.request.SessionID {
+	if !strings.HasPrefix(reconsider.request.Message, prompt.Reconsider) || reconsider.request.SessionID != first.request.SessionID {
 		t.Fatalf("reconsider turn = %q in %s, want the reconsider message in %s", reconsider.request.Message, reconsider.request.SessionID, first.request.SessionID)
 	}
 	if names := toolNames(reconsider.request.Tools); slices.Contains(names, "react") {
@@ -341,7 +342,7 @@ func TestThumbsDownWhileATurnIsPendingStartsNoReconsider(t *testing.T) {
 
 	h.push(reactionUpdate(4, 101, reply.messageID, "👎"))
 	reconsider := receive(t, h.ctx, runtime.calls)
-	if !strings.HasPrefix(reconsider.request.Message, conversation.ReconsiderMessage) {
+	if !strings.HasPrefix(reconsider.request.Message, prompt.Reconsider) {
 		t.Fatalf("reconsider message = %q", reconsider.request.Message)
 	}
 	reconsider.answer <- agentruntime.RunResult{Response: "The orchid too."}

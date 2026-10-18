@@ -10,17 +10,11 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/clip"
+	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
 const (
-	doneText       = "Done: the change is made, without asking, because the user asked for it in a conversation that has read no outside content."
-	doneUndoText   = "After your reply the user sees it with an Undo button that works for 24 hours. Tell the user it is done; do not ask for confirmation."
-	doneNoUndoText = "It cannot be undone from the chat. Tell the user it is done; do not ask for confirmation."
-	repeatedText   = "This exact action was already made in this turn, so it was not repeated."
-	retriedText    = "This exact action was already tried in this turn and failed, so it was not repeated."
-	executingText  = "This exact action is already being made in this turn, so it was not repeated."
-
 	outcomeRunes = 1000
 	// directOutcomeRunes cuts an outcome in a "Done" message, so the longest summary Act accepts
 	// still fits one Telegram message with it.
@@ -147,7 +141,7 @@ func (s *Service) proposeText(ctx context.Context, principalID string, proposal 
 
 func (s *Service) repeatedText(record Record) (string, error) {
 	if record.Status == StatusConfirmed {
-		return executingText, nil
+		return prompt.ActExecuting, nil
 	}
 	return s.repeatedOrDone(record, true)
 }
@@ -156,21 +150,21 @@ func (s *Service) repeatedText(record Record) (string, error) {
 func (s *Service) repeatedOrDone(record Record, repeated bool) (string, error) {
 	prefix := ""
 	if repeated {
-		prefix = repeatedText + " "
+		prefix = prompt.ActRepeated + " "
 		if record.Status != StatusDone && record.Status != StatusUndone {
-			prefix = retriedText + " "
+			prefix = prompt.ActRetried + " "
 		}
 	}
 	switch record.Status {
 	case StatusDone, StatusUndone:
-		text := doneNoUndoText
+		text := prompt.ActNotUndoable
 		if len(record.Undo) > 0 {
-			text = doneUndoText
+			text = prompt.ActUndoable
 		}
 		if record.Status == StatusUndone {
-			text = "The user has since pressed Undo, so the change no longer stands."
+			text = prompt.ActUndone
 		}
-		return strings.Join(strings.Fields(prefix+doneText+" "+record.Outcome+" "+text), " "), nil
+		return strings.Join(strings.Fields(prefix+prompt.ActDone+" "+record.Outcome+" "+text), " "), nil
 	default:
 		return "", &FailedError{Text: prefix + "The action failed: " + statusLine(record, outcomeRunes)}
 	}

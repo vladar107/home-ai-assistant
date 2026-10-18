@@ -1,0 +1,1 @@
+[system] This conversation is about the user's trip "Conference" (id t1); trip_list with its id shows it in full.

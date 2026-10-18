@@ -1,0 +1,15 @@
+Proposed and awaiting the user's confirmation; nothing has been written yet. After your reply the user sees this turn's proposals together with one Confirm and one Reject button. Do not claim it was done.
+---
+Done: the change is made, without asking, because the user asked for it in a conversation that has read no outside content.
+---
+After your reply the user sees it with an Undo button that works for 24 hours. Tell the user it is done; do not ask for confirmation.
+---
+It cannot be undone from the chat. Tell the user it is done; do not ask for confirmation.
+---
+The user has since pressed Undo, so the change no longer stands.
+---
+This exact action was already made in this turn, so it was not repeated.
+---
+This exact action was already tried in this turn and failed, so it was not repeated.
+---
+This exact action is already being made in this turn, so it was not repeated.

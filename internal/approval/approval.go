@@ -22,6 +22,7 @@ import (
 	"unicode/utf16"
 
 	"github.com/vladar107/home-ai-assistant/internal/clip"
+	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
@@ -75,7 +76,8 @@ const (
 	bundleSummaryUnits = 2500
 	bundleOutcomeRunes = 120
 
-	ProposedText = "Proposed and awaiting the user's confirmation; nothing has been written yet. After your reply the user sees this turn's proposals together with one Confirm and one Reject button. Do not claim it was done."
+	// ProposedText is what a write tool answers once its call is proposed for confirmation.
+	ProposedText = prompt.Proposed
 )
 
 // ErrBundleFull is returned for a proposal that no longer fits the bundle waiting for confirmation.

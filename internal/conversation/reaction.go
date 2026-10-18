@@ -9,14 +9,9 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
-
-// ReconsiderMessage starts the turn that a 👎 on a reply asks for, followed by when that reply was
-// sent so the model finds it among the session's turns. It quotes no reply text: none is stored,
-// and the turn's message is trusted as the user's instruction.
-const ReconsiderMessage = "[system] The user reacted 👎 to one of your replies, marking it as wrong or unhelpful. " +
-	"Look at it again: say briefly what was wrong and give a better answer, or ask what they expected if it is unclear."
 
 // Classes of a user's reaction to a reply. Startup creates each class's series at zero from
 // FeedbackClasses, so a new class belongs there too.
@@ -42,19 +37,7 @@ var positiveEmojis = []string{"👍", "❤", "🔥", "👌", "🎉", "🙏"}
 // ownMessage reports whether a turn's message is ours rather than the user's, so it is neither the
 // request actions are judged against, nor a message to hint tools for or react to.
 func ownMessage(message string) bool {
-	return message == ContinueMessage || strings.HasPrefix(message, ReconsiderMessage)
-}
-
-// reconsiderLesson is the reconsider message's second step while the user lets it learn from 👎.
-const reconsiderLesson = " Then, if the mistake would recur because of a preference, a habit of the user's, or a rule you should follow, " +
-	"propose one memory instruction for it; otherwise propose nothing and do not mention memory."
-
-func reconsiderMessage(sentAt time.Time, learn bool) string {
-	message := ReconsiderMessage
-	if learn {
-		message += reconsiderLesson
-	}
-	return message + " The reply was sent at " + sentAt.Format("15:04 on Monday 2 January 2006") + "."
+	return message == prompt.Continue || strings.HasPrefix(message, prompt.Reconsider)
 }
 
 // learnsFromFeedback reports whether a reconsider turn may propose a lesson. A failed lookup
@@ -143,7 +126,7 @@ func (s *Service) React(ctx context.Context, input ReactionInput) (ReactionResul
 		PrincipalID:       input.PrincipalID,
 		ThreadID:          origin.ThreadID,
 		ChatID:            input.ChatID,
-		Message:           reconsiderMessage(s.local(origin.SentAt), s.learnsFromFeedback(ctx, input.PrincipalID)),
+		Message:           prompt.ReconsiderAt(s.local(origin.SentAt), s.learnsFromFeedback(ctx, input.PrincipalID)),
 		ReplyToMessageID:  input.MessageID,
 	})
 	if errors.Is(err, ErrBusy) {

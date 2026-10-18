@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
+	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 	"github.com/vladar107/home-ai-assistant/internal/turnstate"
@@ -182,19 +182,13 @@ func SubjectLine(label string, resumedFrom time.Time) string {
 
 // subjectContext is the line every turn of a conversation about a job, watch, or trip starts from.
 func subjectContext(subject, name string) string {
-	named := ""
-	if name != "" {
-		// A name can come from outside, as a trip's title from mail can, so it is quoted in a way
-		// its own text cannot close.
-		named = " " + strconv.Quote(name)
-	}
 	switch kind, id := SplitSubject(subject); kind {
 	case SubjectJob:
-		return "[system] This conversation is about the user's scheduled job" + named + " (id " + id + "); schedule_get shows it in full."
+		return prompt.AboutJob(name, id)
 	case SubjectWatch:
-		return "[system] This conversation is about the user's watch" + named + " (id " + id + "); watch_list shows it in full."
+		return prompt.AboutWatch(name, id)
 	case SubjectTrip:
-		return "[system] This conversation is about the user's trip" + named + " (id " + id + "); trip_list with its id shows it in full."
+		return prompt.AboutTrip(name, id)
 	}
 	return ""
 }

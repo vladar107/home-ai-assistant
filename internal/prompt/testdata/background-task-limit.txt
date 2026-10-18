@@ -1,0 +1,1 @@
+[system] This background task has reached its time limit. Do not look anything else up: tool calls will be refused. Write the report now from what you have found so far, and say plainly what you did not get to.

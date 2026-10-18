@@ -16,6 +16,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
+	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
@@ -49,8 +50,6 @@ const (
 
 	InterruptedTwiceText = "This background task was interrupted by a restart twice, so I stopped it. Ask again if you still need it."
 	LimitText            = "This background task reached its limit and could not write a report in time."
-
-	resumeMessage = "[system] You were interrupted; continue the task and report when it is complete."
 )
 
 var (
@@ -508,7 +507,7 @@ func (s *Service) run(ctx context.Context, task Task, sink *progressSink) (Outco
 	callBudget := max(s.config.ToolBudget-(task.Progress.ToolCalls-task.Progress.WebSearches), 0)
 	limit := "time limit"
 	if time.Now().Before(task.Deadline) && !sink.overBudget() {
-		message := resumeMessage
+		message := prompt.BackgroundTaskResume
 		if task.Attempts <= 1 {
 			message = s.firstMessage(task)
 		}
@@ -542,7 +541,7 @@ func (s *Service) run(ctx context.Context, task Task, sink *progressSink) (Outco
 	sink.begin(nil)
 	reply, err := s.runner.RunTask(reportCtx, conversation.TaskRun{
 		PrincipalID: task.PrincipalID, Turn: outbox.TaskTurn(task.ID), SessionID: task.SessionID,
-		Message: limitMessage(limit), Instruction: s.firstMessage(task), Continued: true, Report: true, Sink: sink,
+		Message: prompt.BackgroundTaskLimit(limit), Instruction: s.firstMessage(task), Continued: true, Report: true, Sink: sink,
 	})
 	switch {
 	case ctx.Err() != nil:
@@ -559,18 +558,7 @@ func (s *Service) run(ctx context.Context, task Task, sink *progressSink) (Outco
 // firstMessage tells the sub-agent what it is, so it works through the brief and reports instead
 // of asking questions or offering changes it cannot make.
 func (s *Service) firstMessage(task Task) string {
-	return fmt.Sprintf(
-		"[system] You are a background task the user started from chat, titled %q. The user is not watching and cannot answer questions, "+
-			"and you cannot see the chat, so the brief below is all you have. Only read-only tools are available, so nothing can be created, "+
-			"changed, or saved; if something should change, say so in the report. Work through the brief thoroughly: you may make up to %d "+
-			"tool calls and have up to %s. Then reply with the report the user should receive, leading with what they asked for.\n\n%s",
-		task.Title, s.config.ToolBudget, Duration(s.config.Timeout), task.Brief,
-	)
-}
-
-func limitMessage(limit string) string {
-	return "[system] This background task has reached its " + limit + ". Do not look anything else up: tool calls will be refused. " +
-		"Write the report now from what you have found so far, and say plainly what you did not get to."
+	return prompt.BackgroundTask(task.Title, s.config.ToolBudget, Duration(s.config.Timeout), task.Brief)
 }
 
 // watch updates the status message and the stored progress once per interval until stopped.

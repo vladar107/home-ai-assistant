@@ -5,7 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 
-	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/prompt"
 )
 
 const (
@@ -25,7 +25,7 @@ const HeadsUpPrompt = "Look at the user's calendar for today and tomorrow, their
 	"(doors left open, errors, low batteries, a full bin), health and energy trends worth knowing, and pending reminders. " +
 	"Read the reports already sent today with job_reports and repeat none of them. " +
 	"Write only when something needs the user's attention or action: a few short lines, most important first, " +
-	"in the language of the user's memory and other jobs. A source that is off or not connected is not worth mentioning. Otherwise reply with exactly " + conversation.NothingToAdd + "."
+	"in the language of the user's memory and other jobs. A source that is off or not connected is not worth mentioning. Otherwise reply with exactly " + prompt.NothingToAdd + "."
 
 // HeadsUpJobID is the principal's Heads-up job ID, so the job is found and created once however
 // often the switch is pressed.

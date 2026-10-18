@@ -20,6 +20,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/exposure"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/judgment"
+	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/turnstate"
@@ -275,8 +276,8 @@ func TestToolHintSeesTheEarlierExchangeButNotOurOwnMessages(t *testing.T) {
 	env := newHintEnv(t, choice("nas_search", 0.9), 0, []string{"nas_search", "gmail_search"}, true, "Shall I mail the lease to bob@example.com?")
 	env.turn(t, 1, hintMessage)
 	env.turn(t, 2, "yes, do it")
-	env.turn(t, 3, conversation.ContinueMessage)
-	env.turn(t, 4, conversation.ReconsiderMessage)
+	env.turn(t, 3, prompt.Continue)
+	env.turn(t, 4, prompt.Reconsider)
 
 	requests := env.requests()
 	if len(requests) != 2 {

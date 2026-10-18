@@ -250,7 +250,10 @@ is refused as unreadable instead of exhausting the service's memory.
    offer, take the likely reading and say so instead of asking, take the step
    the request implies (a new recurring job or watch only when asked), claim
    nothing is unavailable without a tool showing it, and never end on work it
-   has not done.
+   has not done. That fixed text, the `[system]` lines a turn's message starts
+   with, the framing of unattended turns, and the broker's and approvals'
+   answers to a tool call live in `internal/prompt`, whose golden files pin
+   the exact bytes; connectors keep their own tool descriptions and guidance.
 5. Every tool call returns over loopback to `tools`, which rechecks the grant and
    bounds it to 15 seconds, 16 KiB, and 8 calls per turn.
 6. A write either acts at once or becomes a proposal. Tools that act and tell

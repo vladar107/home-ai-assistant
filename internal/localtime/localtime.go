@@ -35,10 +35,3 @@ func SavedZone(zone string) *time.Location {
 func Format(at time.Time, location *time.Location) string {
 	return at.In(location).Format(layout) + " (" + location.String() + ")"
 }
-
-// Line is the current-time line every model turn starts with. It goes in the message rather than
-// the system prompt, so the prompt stays cacheable and the session history keeps when each
-// message was sent.
-func Line(now time.Time, location *time.Location) string {
-	return "[system] Current local time: " + Format(now, location) + "."
-}
