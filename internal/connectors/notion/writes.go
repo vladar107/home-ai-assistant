@@ -570,13 +570,13 @@ func sortedKeys(values map[string]json.RawMessage) []string {
 	return keys
 }
 
-// ExecuteApproved performs a confirmed proposal, or a direct update, with the principal's own token.
-// Creates and appends are never retried after an ambiguous failure; an update is retried once. A
-// direct update first keeps the values it replaces, so it can be undone.
 // PrivateOutcomes reports that a write's outcome may quote the page's table, such as the property
 // names and options of a rejected write.
 func (s *Service) PrivateOutcomes() bool { return true }
 
+// ExecuteApproved performs a confirmed proposal, or a direct update, with the principal's own token.
+// Creates and appends are never retried after an ambiguous failure; an update is retried once. A
+// direct update first keeps the values it replaces, so it can be undone.
 func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (approval.Outcome, error) {
 	token, connected, err := s.token(ctx, record.PrincipalID)
 	if err != nil {

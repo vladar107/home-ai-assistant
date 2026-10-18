@@ -152,8 +152,9 @@ func (a Answers) Choice(id string) (option string, confidence float64, ok bool) 
 	return found.Choice, found.Confidence, true
 }
 
-// Ask sends redacted state and questions to TypeSafe. It does not retry; callers
-// own the timeout and treat any error as "no judgment".
+// Ask sends redacted state and questions to TypeSafe. The default HTTP client retries transient
+// failures through the shared retry transport, within the caller's timeout; callers own that
+// timeout and treat any error as "no judgment".
 func (c *Client) Ask(ctx context.Context, purpose string, state map[string]Redacted, questions map[string]Question) (Answers, error) {
 	started := time.Now()
 	answers, err := c.ask(ctx, state, questions)

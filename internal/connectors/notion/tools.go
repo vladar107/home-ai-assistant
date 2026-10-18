@@ -262,10 +262,9 @@ func (s *Service) parentSchema(ctx context.Context, token string, parent Parent)
 	return renderSchema(dataSource.Properties)
 }
 
-// content flattens the page's top-level blocks up to the byte cap, following Notion's cursor
-// only while the cap leaves room.
-// blockContent flattens one level of the children of any block. Notion treats a page as a block,
-// so the same helper serves page content and a nested block reached by ID.
+// blockContent flattens one level of the children of any block up to the byte cap, following
+// Notion's cursor only while the cap leaves room. Notion treats a page as a block, so the same
+// helper serves page content and a nested block reached by ID.
 func (s *Service) blockContent(ctx context.Context, token, blockID string) (string, bool, error) {
 	var blocks []Block
 	cursor := ""

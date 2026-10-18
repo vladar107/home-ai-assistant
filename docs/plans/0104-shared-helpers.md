@@ -1,6 +1,6 @@
 # 0104 — One copy of the helpers that drifted apart
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
@@ -9,8 +9,9 @@ copies no longer behave alike:
 
 - Tool argument decoding exists in about twenty copies. Most reject fields
   the struct does not know; the NAS, Notion, image generation, attachment,
-  help, and conversation history tools accept them. Some treat empty arguments as `{}`, only two ignore surrounding
-  whitespace, and the error text differs.
+  help, and conversation history tools accept them. Some treat empty
+  arguments as `{}`, only two ignore surrounding whitespace, and the error
+  text differs.
 - Text clipping has as many copies. `clip` means a byte cap in the NS, bus,
   and web connectors, but a rune cap with an ellipsis in places and Grafana.
   `truncateRunes` appends "…" in some packages and not in others, and the
@@ -38,18 +39,20 @@ and deadcode report nothing in production code.
   does not know is a model mistake that should be reported rather than
   silently dropped. No tool's schema lists a property its struct lacks, so no
   tool relied on the lenient copies. Empty or whitespace-only arguments
-  decode as `{}`, and every failure reads "the arguments do not match the
-  tool's schema". Home Assistant's passthrough of MCP arguments into a map is
-  not argument decoding into a typed struct and keeps its own helper.
+  decode as `{}`, and the helper fails with "the arguments do not match the
+  tool's schema"; tools that answered in their own words keep them. Home
+  Assistant's passthrough of MCP arguments into a map is not argument
+  decoding into a typed struct and keeps its own helper.
 - **Two clipping behaviours, in a new `internal/clip` package.**
   `clip.Bytes` caps a value's size in bytes on a rune boundary, with no
   marker, for size caps. `clip.Runes` caps text shown to a person or the
   model at a number of runes; when it cuts, the last rune is "…", so the
   result never exceeds the limit, and whitespace before the ellipsis is
   dropped. Callers that normalise whitespace or encoding first keep doing so
-  around the shared call. A caller that cut by bytes with a rune-named limit
-  now cuts by runes; a caller that subtracted one from its limit to make room
-  for the ellipsis no longer does.
+  around the shared call; Grafana's one-line clipping is renamed `excerpt`
+  so `clip` no longer means two things. A caller that cut by bytes with a
+  rune-named limit now cuts by runes; a caller that subtracted one from its
+  limit to make room for the ellipsis no longer does.
 - **Hard rune caps on stored or displayed names become `clip.Runes`.**
   Approval intent targets, connection names, attachment names, venue names,
   and judgment hints were cut by runes without a marker; they are shown text,
@@ -66,9 +69,9 @@ and deadcode report nothing in production code.
   is deleted.
 - **Test-only helpers in production packages stay where several test
   packages share them** (`httpretry.WithoutWaits`,
-  `observability.NewWithReader`). `conversation.AlwaysConnected`, used by one
-  test, moves into that test. `nas.parseRelative`, whose only caller is its
-  test, is deleted with the test.
+  `observability.NewWithReader`). `conversation.AlwaysConnected`, used only
+  by the package's own tests, moves into them. `nas.parseRelative`, whose
+  only caller is its test, is deleted with the test.
 
 ## Approach
 
@@ -87,7 +90,8 @@ and deadcode report nothing in production code.
 - The render files that clip text, `internal/attachment`, `internal/approval`,
   `internal/judgment`, `internal/pdftext`, `internal/telegram/location.go`,
   `internal/conversation/history`
-- `internal/watch/watch.go`, `internal/routes/route.go`
+- `internal/watch/watch.go`, `internal/watch/reports.go`,
+  `internal/task/service.go`, `internal/routes/route.go`
 - `internal/conversation/types.go`, `internal/connectors/bus/ovapi.go`,
   `internal/connectors/nas/paths.go`, `internal/connectors/gmail/service.go`,
   `internal/testutil/calendarsim`, and the telemetry tests
@@ -102,6 +106,6 @@ and deadcode report nothing in production code.
 
 ## Risks and open questions
 
-- A model that sends a field outside a NAS, Notion, or image tool's schema
-  now gets an error instead of a silently ignored field; the error names the
-  schema, so the model can retry.
+- A model that sends a field outside the schema of a tool that used to
+  accept extras now gets an error instead of a silently ignored field; the
+  error names the schema, so the model can retry.
