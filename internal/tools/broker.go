@@ -63,7 +63,8 @@ type Definition struct {
 	Risk        RiskClass
 	Timeout     time.Duration
 	// ThirdParty marks a tool whose result carries text written by someone outside the household,
-	// such as web pages or email; a successful call marks the principal exposed.
+	// such as web pages or email; a call that returns, even with an error, marks the principal
+	// exposed and its result untrusted.
 	ThirdParty bool
 	// Household marks a third-party tool whose text comes from the household's own devices. It
 	// still marks the conversation exposed for memory, but not externally exposed, so the actions
@@ -424,20 +425,17 @@ func (e *turnExecutor) perform(ctx context.Context, call agentruntime.ToolCall, 
 		return "oversized", "", agentruntime.ToolResult{Text: oversizedText, IsError: true}
 	case result.IsError:
 		// A private tool's error can still quote what it read, such as a Notion table's property
-		// names and options.
+		// names and options, and a third-party tool's error can quote the outside service.
 		e.markPrivate(ctx, binding, result)
-		return "tool_error", "", agentruntime.ToolResult{Text: result.Text, IsError: true}
+		text := result.Text
+		if binding.thirdParty {
+			e.markExposed(ctx, binding, result)
+			text = untrustedResultPrefix + text
+		}
+		return "tool_error", "", agentruntime.ToolResult{Text: text, IsError: true}
 	default:
-		_, chat := outbox.ChatRequest(e.turn)
-		if binding.thirdParty && chat && e.broker.exposure != nil {
-			e.broker.exposure.MarkExposed(e.principalID)
-		}
-		external := binding.thirdParty && !binding.household
-		if external && e.run != nil {
-			e.run.MarkExternal(result.Text)
-		}
-		if binding.thirdParty && e.broker.turns != nil {
-			e.broker.turns.MarkTurnExposed(ctx, e.principalID, e.turn, external)
+		if binding.thirdParty {
+			e.markExposed(ctx, binding, result)
 		}
 		e.markPrivate(ctx, binding, result)
 		text := untrustedResultPrefix
@@ -449,6 +447,22 @@ func (e *turnExecutor) perform(ctx context.Context, call agentruntime.ToolCall, 
 			}
 		}
 		return "success", screened, agentruntime.ToolResult{Text: text + result.Text}
+	}
+}
+
+// markExposed records a third-party result on the principal, the run, and the turn's conversation;
+// the run also remembers the addresses an outside result names.
+func (e *turnExecutor) markExposed(ctx context.Context, binding toolBinding, result Result) {
+	_, chat := outbox.ChatRequest(e.turn)
+	if chat && e.broker.exposure != nil {
+		e.broker.exposure.MarkExposed(e.principalID)
+	}
+	external := !binding.household
+	if external && e.run != nil {
+		e.run.MarkExternal(result.Text)
+	}
+	if e.broker.turns != nil {
+		e.broker.turns.MarkTurnExposed(ctx, e.principalID, e.turn, external)
 	}
 }
 

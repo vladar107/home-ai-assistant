@@ -163,7 +163,7 @@ func TestGoogleAccountsSearchSwitchesAndDisconnect(t *testing.T) {
 		t.Fatalf("narrowed search = %+v", narrowed)
 	}
 	if foreign := executeTool(t, call.ctx, call.request.Tools, "gmail_search", `{"query":"x","account":"bob@example.com"}`); !foreign.IsError ||
-		foreign.Text != "account must be one of this user's mailboxes: alice@example.com, alice@work.example" {
+		!strings.HasSuffix(foreign.Text, "\naccount must be one of this user's mailboxes: alice@example.com, alice@work.example") {
 		t.Fatalf("another user's mailbox = %+v", foreign)
 	}
 	plain := executeTool(t, call.ctx, call.request.Tools, "gmail_read_message", `{"account":"alice@example.com","id":"m1"}`)
@@ -283,7 +283,7 @@ func TestGoogleSignInRefusalsAndRevokedGrant(t *testing.T) {
 	}
 	sim.RevokeGrant(aliceMailbox)
 	sim.ExpireAccessTokens()
-	if result := executeTool(t, call.ctx, call.request.Tools, "gmail_search", `{"query":"is:unread"}`); !result.IsError || result.Text != gmail.NotConnectedText {
+	if result := executeTool(t, call.ctx, call.request.Tools, "gmail_search", `{"query":"is:unread"}`); !result.IsError || !strings.HasSuffix(result.Text, "\n"+gmail.NotConnectedText) {
 		t.Fatalf("search with a revoked grant = %+v", result)
 	}
 	call.answer <- agentruntime.RunResult{Response: "reconnect please"}

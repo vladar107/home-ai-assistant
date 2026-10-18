@@ -649,7 +649,8 @@ routes after jobs and watches, read-only, with a Delete button each.
 - **Outside content turns actions into proposals.** Once a conversation has read
   text written outside the household, such as a web page, an email, a calendar
   invite, log lines, a Notion page, a NAS file's contents, or a background
-  task's report, it stays marked until `/new`.
+  task's report, it stays marked until `/new`. An outside tool's error counts
+  too, since it can quote the service.
   Text from the household's own devices through Home Assistant does not count.
   A file or photo the user sends counts as outside content, and so does
   `read_attachment`. A run is marked when such a read starts, so a write

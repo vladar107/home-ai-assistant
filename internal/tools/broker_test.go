@@ -179,8 +179,9 @@ func TestExecuteCarriesTheTurnKeyToTheProvider(t *testing.T) {
 }
 
 // Only a chat turn marks the principal exposed: a scheduled run or a background task reads on
-// its own record, and its content never enters the chat.
-func TestSuccessfulThirdPartyCallMarksThePrincipalExposed(t *testing.T) {
+// its own record, and its content never enters the chat. A third-party error marks it too, since
+// its text can quote the outside service, and comes back as untrusted data.
+func TestThirdPartyCallMarksThePrincipalExposed(t *testing.T) {
 	for _, test := range []struct {
 		name string
 		turn string
@@ -191,40 +192,46 @@ func TestSuccessfulThirdPartyCallMarksThePrincipalExposed(t *testing.T) {
 		{name: "task turn", turn: outbox.TaskTurn("task-1"), want: turnstate.LevelNone},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			registry := turnstate.New(nil)
-			broker := testBroker(t)
-			broker.SetExposure(registry)
-			thirdParty := testDefinition("read_page", 0)
-			thirdParty.ThirdParty = true
-			failing := testDefinition("read_mail", 0)
-			failing.ThirdParty = true
-			provider := &fakeProvider{
-				principal:   testPrincipal,
-				definitions: []Definition{testDefinition("own_note", 0), thirdParty, failing},
-				respond: func(_ context.Context, call Call) (Result, error) {
-					return Result{Text: "text", IsError: call.Name == "read_mail"}, nil
-				},
-			}
-			if err := broker.Register(provider); err != nil {
-				t.Fatal(err)
-			}
-			set, err := broker.ToolsFor(WithTurn(context.Background(), test.turn), testPrincipal)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, name := range []string{"own_note", "read_mail"} {
-				if _, err := set.Executor.Execute(context.Background(), agentruntime.ToolCall{Name: name, Arguments: json.RawMessage(`{}`)}); err != nil {
+			for _, name := range []string{"read_page", "read_mail"} {
+				registry := turnstate.New(nil)
+				broker := testBroker(t)
+				broker.SetExposure(registry)
+				thirdParty := testDefinition("read_page", 0)
+				thirdParty.ThirdParty = true
+				failing := testDefinition("read_mail", 0)
+				failing.ThirdParty = true
+				provider := &fakeProvider{
+					principal:   testPrincipal,
+					definitions: []Definition{testDefinition("own_note", 0), testDefinition("own_error", 0), thirdParty, failing},
+					respond: func(_ context.Context, call Call) (Result, error) {
+						return Result{Text: "text", IsError: call.Name == "read_mail" || call.Name == "own_error"}, nil
+					},
+				}
+				if err := broker.Register(provider); err != nil {
 					t.Fatal(err)
 				}
-				if got := registry.Exposure(testPrincipal); got != turnstate.LevelNone {
-					t.Fatalf("exposure after %s = %v", name, got)
+				set, err := broker.ToolsFor(WithTurn(context.Background(), test.turn), testPrincipal)
+				if err != nil {
+					t.Fatal(err)
 				}
-			}
-			if _, err := set.Executor.Execute(context.Background(), agentruntime.ToolCall{Name: "read_page", Arguments: json.RawMessage(`{}`)}); err != nil {
-				t.Fatal(err)
-			}
-			if got := registry.Exposure(testPrincipal); got != test.want {
-				t.Fatalf("exposure after read_page = %v, want %v", got, test.want)
+				for _, own := range []string{"own_note", "own_error"} {
+					if _, err := set.Executor.Execute(context.Background(), agentruntime.ToolCall{Name: own, Arguments: json.RawMessage(`{}`)}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if got := registry.Exposure(testPrincipal); got != turnstate.LevelNone {
+					t.Fatalf("exposure after the own tools = %v", got)
+				}
+				result, err := set.Executor.Execute(context.Background(), agentruntime.ToolCall{Name: name, Arguments: json.RawMessage(`{}`)})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if result.Text != untrustedResultPrefix+"text" {
+					t.Fatalf("%s result = %q, want it marked as untrusted", name, result.Text)
+				}
+				if got := registry.Exposure(testPrincipal); got != test.want {
+					t.Fatalf("exposure after %s = %v, want %v", name, got, test.want)
+				}
 			}
 		})
 	}
@@ -397,6 +404,49 @@ func TestOutsideCallMarksTheRunWhenItStarts(t *testing.T) {
 	}
 	if externalAtStart["home_state"] || !externalAtStart["read_page"] || !run.External() {
 		t.Fatalf("external at start = %v, run external = %v", externalAtStart, run.External())
+	}
+}
+
+// An outside tool's error is outside text too: it marks the turn's conversation external, and the
+// addresses it names become ones the run has seen. A household error marks it for memory alone.
+func TestThirdPartyErrorsMarkTheTurn(t *testing.T) {
+	broker := testBroker(t)
+	turns := &recordedTurns{}
+	broker.SetTurnExposure(turns)
+	household := testDefinition("home_state", 0)
+	household.ThirdParty, household.Household = true, true
+	outside := testDefinition("read_page", 0)
+	outside.ThirdParty = true
+	provider := &fakeProvider{
+		principal:   testPrincipal,
+		definitions: []Definition{household, outside},
+		respond: func(context.Context, Call) (Result, error) {
+			return Result{Text: "Not found; try https://example.com/elsewhere", IsError: true}, nil
+		},
+	}
+	if err := broker.Register(provider); err != nil {
+		t.Fatal(err)
+	}
+	run := NewRun("read it")
+	set, err := broker.ToolsFor(WithRun(WithTurn(context.Background(), "turn-1"), run), testPrincipal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"home_state", "read_page"} {
+		result, err := set.Executor.Execute(context.Background(), agentruntime.ToolCall{Name: name, Arguments: json.RawMessage(`{}`)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.IsError || !strings.HasPrefix(result.Text, untrustedResultPrefix) {
+			t.Fatalf("%s result = %+v, want an error marked as untrusted", name, result)
+		}
+	}
+	if !run.Seen("https://example.com/elsewhere") {
+		t.Fatal("the outside error's address was not seen")
+	}
+	want := []turnMark{{turn: "turn-1", external: false}, {turn: "turn-1", external: true}}
+	if fmt.Sprint(turns.marks) != fmt.Sprint(want) {
+		t.Fatalf("turn marks = %v, want %v", turns.marks, want)
 	}
 }
 
