@@ -28,6 +28,7 @@ const (
 	GoogleTakenReply         = "That Google account is already connected for another household member, so it was not connected for you."
 	GoogleConnectFailedReply = "Google could not be reached to finish the sign-in, so nothing was connected. Please try again later."
 	GoogleNotGrantedReply    = "That account did not allow it when it was connected. Press Connect a Google account, sign in with the same account, and leave it ticked."
+	GoogleSignInGuardReply   = "That looked like a Google sign-in address, so I deleted it and did not send it to the model. To finish signing in, send the address on its own as a text message."
 )
 
 // GoogleController is implemented by the Google connector; nil disables the Google settings section.
@@ -194,4 +195,11 @@ func (g googleSection) intercept(ctx context.Context, principalID string, text s
 		result.reply, result.reason = GoogleConnectFailedReply, "google_signin_failed"
 	}
 	return result, nil
+}
+
+func (g googleSection) guard(text string) interception {
+	if !google.LooksLikeRedirect(text) {
+		return interception{}
+	}
+	return interception{handled: true, remove: true, reply: GoogleSignInGuardReply, reason: "google_signin_guard"}
 }

@@ -20,7 +20,6 @@ const (
 	TabClosedReply     = "Closed the tab. Its conversation stays in /sessions."
 	TabNotRemovedReply = "I ended that tab's conversation, which stays in /sessions, but Telegram did not let me remove the tab. You can delete it from the tab's menu."
 	CloseMainViewReply = "The main view cannot be closed. /new starts a fresh conversation here."
-	TabsHelpLine       = " /close closes the tab it is sent in."
 
 	tabsPrefix     = "tabs"
 	tabCloseAction = "close"

@@ -123,11 +123,7 @@ func (s *Service) helpText(ctx context.Context, principalID, topic string) (stri
 		}
 		fmt.Fprintf(&builder, "The user sends /settings and sees:\n%s\nButtons, each opening a group: %s", text, buttonTexts(keyboard))
 	case helpTopicCommands:
-		builder.WriteString("Chat commands:")
-		for _, command := range s.botCommands() {
-			fmt.Fprintf(&builder, "\n/%s: %s", command.Command, command.Description)
-		}
-		builder.WriteString("\nNot in the menu but answered when typed:\n/status: Show whether Home Agent is online\n/privacy: Show the current privacy mode")
+		builder.WriteString("Chat commands:" + commandList(s.botCommands()) + "\nNot in the menu but answered when typed:" + commandList(typedCommands))
 	case helpTopicJobs:
 		fmt.Fprintf(&builder, "/jobs: %s. It lists reminders, scheduled jobs, watches, and saved routes. Each job and reminder has buttons there to pause, resume, run now, or delete it; a watch has pause, resume, and delete, and a saved route has delete.\n%s\n%s", jobsDescription(s.botCommands()), NoJobsReply, SchedulePrivacyLine)
 	case helpTopicWebSearch:

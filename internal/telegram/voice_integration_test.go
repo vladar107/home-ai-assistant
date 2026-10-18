@@ -84,6 +84,41 @@ func TestVoiceFailuresAreAnsweredWithoutATurn(t *testing.T) {
 	h.wantReply(101, 4, "still here")
 }
 
+// A turn that would pass the conversation's limit is refused once instead of being retried, which
+// would transcribe the recording again and hold every later update.
+func TestVoiceTurnThatWouldNotFitIsRefusedOnce(t *testing.T) {
+	sim := chatgptsim.New(t)
+	runtime := newControlledRuntime()
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{chatGPT: sim})
+	h.provision("alice", "acct-alice")
+	h.start()
+	h.addFile("voice-1", "voice/file_1.oga", []byte("OggS a long story"))
+
+	sim.SetTranscript(strings.Repeat("a", 4096))
+	h.push(voiceUpdate(1, 101))
+	h.wantReply(101, 1, TranscriptTooLongReply)
+
+	transcript := strings.Repeat("words ", 600) + "end"
+	sim.SetTranscript(transcript)
+	captioned := voiceUpdate(2, 101)
+	captioned.Message.Caption = strings.Repeat("c", 1000)
+	h.push(captioned)
+	h.wantReply(101, 2, CaptionTooLongReply)
+
+	short := voiceUpdate(3, 101)
+	short.Message.Caption = "for later"
+	h.push(short)
+	call := receive(t, h.ctx, runtime.calls)
+	if want := voiceMarker + "\n" + transcript + "\n\nfor later"; call.request.Message != want {
+		t.Fatalf("turn message = %q, want the fitting recording", call.request.Message)
+	}
+	if requests := sim.Requests(); len(requests) != 3 {
+		t.Fatalf("ChatGPT requests = %d, want each recording transcribed once", len(requests))
+	}
+	call.answer <- agentruntime.RunResult{Response: "noted"}
+	h.wantReply(101, 3, "noted")
+}
+
 func TestVoiceWithoutAConnectionIsNotTranscribed(t *testing.T) {
 	sim := chatgptsim.New(t)
 	h := newConversationHarnessWithOptions(t, newControlledRuntime(), harnessOptions{chatGPT: sim})

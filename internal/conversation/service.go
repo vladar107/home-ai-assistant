@@ -21,7 +21,8 @@ import (
 )
 
 const (
-	maximumMessageRunes = 4096
+	// MaximumMessageRunes is the longest message a turn accepts.
+	MaximumMessageRunes = 4096
 	maximumReplyRunes   = 4000
 	deliveryRetryDelay  = 5 * time.Second
 	toolHintBudget      = 800 * time.Millisecond
@@ -249,17 +250,17 @@ func (s *Service) Shutdown(ctx context.Context) error {
 
 func (s *Service) Enqueue(ctx context.Context, input EnqueueInput) error {
 	if input.BotUserID <= 0 || input.TelegramUpdateID < 0 || input.TelegramMessageID <= 0 || input.PrincipalID == "" || input.ChatID <= 0 {
-		return fmt.Errorf("conversation request identity is invalid")
+		return fmt.Errorf("%w: identity is invalid", ErrInvalidRequest)
 	}
-	if !utf8.ValidString(input.Message) || utf8.RuneCountInString(input.Message) > maximumMessageRunes {
-		return fmt.Errorf("conversation message must be valid UTF-8 within 4096 characters")
+	if !utf8.ValidString(input.Message) || utf8.RuneCountInString(input.Message) > MaximumMessageRunes {
+		return fmt.Errorf("%w: message must be valid UTF-8 within %d characters", ErrInvalidRequest, MaximumMessageRunes)
 	}
 	// A photo or a file carries the request on its own, so only a message with neither is empty.
 	if strings.TrimSpace(input.Message) == "" && len(input.Attachments) == 0 {
-		return fmt.Errorf("conversation request must carry a message or an attachment")
+		return fmt.Errorf("%w: it must carry a message or an attachment", ErrInvalidRequest)
 	}
 	if len(input.Attachments) > 0 && s.config.Attachments == nil {
-		return fmt.Errorf("conversation attachments are not supported")
+		return fmt.Errorf("%w: attachments are not supported", ErrInvalidRequest)
 	}
 	if !s.running() {
 		return fmt.Errorf("conversation service is not running")

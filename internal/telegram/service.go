@@ -563,14 +563,20 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 	text := cmp.Or(message.Text, message.Caption)
 	transcribed := false
 	if item, found := voiceRecording(message); found && s.transcriber != nil && s.conversation != nil {
-		transcript, reply, reason, err := s.transcribe(ctx, authorization.Principal.ID, item, message.Caption)
+		transcript, reply, reason, err := s.transcribe(ctx, authorization.Principal.ID, item)
 		if err != nil {
 			return processingResult{}, "transcribe_voice", err
+		}
+		if reply == "" {
+			if result := s.guardSecrets(transcript, message.Caption); result.handled {
+				return s.finishInterception(ctx, message, authorization.Principal.ID, result)
+			}
+			text, reply, reason = voiceTurn(transcript, message.Caption)
 		}
 		if reply != "" {
 			return s.sendMediaReply(ctx, message, authorization.Principal.ID, reason, reply)
 		}
-		text, transcribed = transcript, true
+		transcribed = true
 	}
 	var carried []media
 	var unsupported string
@@ -583,6 +589,11 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 			reason:      "unhandled_text",
 			principalID: authorization.Principal.ID,
 		}, "", nil
+	}
+	if unsupported != "" || len(carried) > 0 {
+		if result := s.guardSecrets(message.Caption); result.handled {
+			return s.finishInterception(ctx, message, authorization.Principal.ID, result)
+		}
 	}
 	if unsupported != "" {
 		return s.sendMediaReply(ctx, message, authorization.Principal.ID, unsupported, unsupportedMediaReply(unsupported))
@@ -627,6 +638,11 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 	if elsewhere := (*conversation.OpenElsewhereError)(nil); errors.As(err, &elsewhere) {
 		return s.sendCommandReply(ctx, message, authorization.Principal.ID, "elsewhere", SessionOpenIn(elsewhere.ThreadID, elsewhere.TabName), nil)
 	}
+	// A retry would be refused the same way and hold every later update behind this one.
+	if errors.Is(err, conversation.ErrInvalidRequest) {
+		s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "telegram.conversation.refused", "principal_id", authorization.Principal.ID, "error", err)
+		return s.sendCommandReply(ctx, message, authorization.Principal.ID, "invalid", InvalidMessageReply, nil)
+	}
 	if err != nil {
 		return processingResult{}, "enqueue_conversation", err
 	}
@@ -634,6 +650,19 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 		event:       "telegram.conversation.queued",
 		principalID: authorization.Principal.ID,
 	}, "", nil
+}
+
+// guardSecrets runs only the secret guards, for a caption or transcript that cannot be an intake
+// reply, so it never consumes a pending intake.
+func (s *Service) guardSecrets(texts ...string) interception {
+	for _, text := range texts {
+		for _, interceptor := range s.interceptors {
+			if result := interceptor.guard(text); result.handled {
+				return result
+			}
+		}
+	}
+	return interception{}
 }
 
 // processDraftStop cancels the turn whose draft the user stopped. The update names no user, and a
@@ -1227,32 +1256,32 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		return NoSessionReply, nil, nil
 	case "sessions":
 		if s.conversation == nil {
-			return HelpReply, nil, nil
+			return s.helpReply(), nil, nil
 		}
 		return renderSessions(ctx, laneOf(ctx, principalID), s.conversation, s.topics.Load())
 	case "jobs":
 		if s.schedules == nil {
-			return HelpReply, nil, nil
+			return s.helpReply(), nil, nil
 		}
 		return renderJobs(ctx, principalID, s.schedules, s.watches, s.routes, 1)
 	case "memory":
 		if s.memory == nil {
-			return HelpReply, nil, nil
+			return s.helpReply(), nil, nil
 		}
 		return renderMemory(ctx, principalID, s.memory, 1)
 	case "backlog":
 		if s.backlog == nil {
-			return HelpReply, nil, nil
+			return s.helpReply(), nil, nil
 		}
 		return renderBacklog(ctx, principalID, s.backlog, 1)
 	case "tasks":
 		if s.tasks == nil {
-			return HelpReply, nil, nil
+			return s.helpReply(), nil, nil
 		}
 		return renderTasks(ctx, principalID, s.tasks)
 	case "settings":
 		if len(s.sections) == 0 {
-			return HelpReply, nil, nil
+			return s.helpReply(), nil, nil
 		}
 		text, keyboard, err := renderSettings(ctx, principalID, sectionsFor(s.sections, principalID), settingsRootPage, "")
 		if err != nil {
@@ -1260,21 +1289,29 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		}
 		return text, keyboard, nil
 	default:
-		reply := HelpReply
-		if s.memory != nil {
-			reply += MemoryHelpLine
-		}
-		if s.backlog != nil {
-			reply += BacklogHelpLine
-		}
-		if s.tasks != nil {
-			reply += TasksHelpLine
-		}
-		if s.conversation != nil && s.topics.Load() {
-			reply += TabsHelpLine
-		}
-		return reply, nil, nil
+		return s.helpReply(), nil, nil
 	}
+}
+
+// helpReply lists the commands registered with Telegram and those answered only when typed, so it
+// cannot drift from either.
+func (s *Service) helpReply() string {
+	reply := HelpHeading + commandList(s.botCommands()) + commandList(typedCommands)
+	if s.backlog != nil {
+		reply += "\n" + BacklogHelpLine
+	}
+	if s.conversation != nil {
+		reply += "\n\n" + HelpConversationLine
+	}
+	return reply
+}
+
+func commandList(commands []BotCommand) string {
+	var builder strings.Builder
+	for _, command := range commands {
+		fmt.Fprintf(&builder, "\n/%s: %s", command.Command, command.Description)
+	}
+	return builder.String()
 }
 
 // dispatchCommand runs one command and answers it in the tab of ctx.

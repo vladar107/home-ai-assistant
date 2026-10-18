@@ -15,7 +15,7 @@ const (
 	BacklogTitle      = "Backlog"
 	NoBacklogReply    = "Your backlog is empty. Tell me in conversation, for example: add to the backlog that you should answer weather questions with a chart."
 	BacklogGoneReply  = "That item is no longer open."
-	BacklogHelpLine   = " /backlog shows your ideas for developing me; /backlog export sends them to paste into a development session."
+	BacklogHelpLine   = "/backlog export sends your ideas to paste into a development session."
 	BacklogExportHead = "# Assistant backlog"
 
 	backlogExportArgument = "export"

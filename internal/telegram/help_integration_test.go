@@ -15,6 +15,26 @@ func onlyHelp(set agentruntime.ToolSet) bool {
 	return slices.Equal(toolNames(set), []string{"app_help"})
 }
 
+// /help and an unknown command list exactly what is registered, plus the commands answered only
+// when typed.
+func TestHelpListsTheRegisteredCommands(t *testing.T) {
+	h := newConversationHarnessWithOptions(t, newControlledRuntime(), harnessOptions{schedules: newTestClock(t, mondayMorning)})
+	h.start()
+	registration := receive(t, h.ctx, h.registrations)
+
+	want := HelpHeading
+	for _, command := range append(registration.commands, typedCommands...) {
+		want += "\n/" + command.Command + ": " + command.Description
+	}
+	want += "\n\n" + HelpConversationLine
+	if !strings.Contains(want, "\n/jobs: ") {
+		t.Fatalf("registered commands = %+v, want /jobs among them", registration.commands)
+	}
+	h.push(textUpdate(1, 101, "/help"), textUpdate(2, 101, "/unknown"))
+	h.wantReply(101, 1, want)
+	h.wantReply(101, 2, want)
+}
+
 func TestAppHelpShowsTheSettingsPagesTheUserSees(t *testing.T) {
 	runtime := newControlledRuntime()
 	sim := notionsim.New(t)

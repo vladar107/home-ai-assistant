@@ -17,6 +17,10 @@ import (
 
 var ErrBusy = errors.New("a conversation turn is already pending")
 
+// ErrInvalidRequest wraps every Enqueue failure caused by the request itself, which a retry of the
+// same request cannot cure.
+var ErrInvalidRequest = errors.New("invalid conversation request")
+
 // Error kinds a failed turn reports to telemetry. Startup creates each kind's series at zero from
 // TurnErrorKinds, so a new kind belongs there too.
 const (

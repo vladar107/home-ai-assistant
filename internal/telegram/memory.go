@@ -20,7 +20,6 @@ const (
 	MemoryOffLine      = "Memory: off. I do not use or add to what I remembered; the saved entries are kept until you delete them in /memory."
 	MemoryLearnOnLine  = "Learn from 👎: on (the default). When you mark a reply 👎 and the mistake would recur, I may propose an instruction to avoid it; it is kept only if you confirm."
 	MemoryLearnOffLine = "Learn from 👎: off. A 👎 only makes me look at that reply again."
-	MemoryHelpLine     = " /memory shows what I remember about you."
 	MemoryPrivacyLine  = "Memory is kept until you delete it in /memory and goes to your model with every request while it is on."
 
 	memorySectionPrefix = "memory"

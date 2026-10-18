@@ -17,8 +17,6 @@ const (
 	// maximumRecordingBytes is the most a bot may download from Telegram.
 	maximumRecordingBytes = 20 << 20
 	transcriptionTimeout  = 90 * time.Second
-	// maximumTranscriptRunes leaves room in a turn's message for the voice marker and a caption.
-	maximumTranscriptRunes = 3800
 
 	voiceMarker = "[Voice message, transcribed]"
 
@@ -26,6 +24,7 @@ const (
 	NoSpeechReply            = "I could not hear any speech in that recording."
 	RecordingTooLargeReply   = "That recording is too large for me to listen to; recordings must stay under 20 MB."
 	TranscriptTooLongReply   = "That recording is too long for one message. Keep voice messages under about four minutes, or split them."
+	CaptionTooLongReply      = "That recording and its caption are too long together for one message. Send the caption as a separate message, or shorten the recording."
 	UsageLimitReply          = "Your ChatGPT usage limit is reached, so I cannot do that right now. Try again later."
 	// VoicePrivacyLine is added to /privacy while voice messages are transcribed.
 	VoicePrivacyLine = "Voice: transcribed by your own ChatGPT subscription; the recording is not kept."
@@ -60,19 +59,19 @@ func voiceRecording(message *Message) (recording, bool) {
 	return recording{}, false
 }
 
-// transcribe returns the turn's message built from a recording, or the reply that answers the
-// message instead. Every failure is answered rather than retried, since a retry would download
-// and spend the subscription on the same recording again; only shutdown returns an error, so the
-// update is processed again after a restart.
-func (s *Service) transcribe(ctx context.Context, principalID string, item recording, caption string) (string, string, string, error) {
-	message, reply, reason := s.transcribeWithin(ctx, principalID, item, caption)
+// transcribe returns a recording's transcript, or the reply that answers the message instead.
+// Every failure is answered rather than retried, since a retry would download and spend the
+// subscription on the same recording again; only shutdown returns an error, so the update is
+// processed again after a restart.
+func (s *Service) transcribe(ctx context.Context, principalID string, item recording) (string, string, string, error) {
+	transcript, reply, reason := s.transcribeWithin(ctx, principalID, item)
 	if reply != "" && ctx.Err() != nil {
 		return "", "", "", ctx.Err()
 	}
-	return message, reply, reason, nil
+	return transcript, reply, reason, nil
 }
 
-func (s *Service) transcribeWithin(parent context.Context, principalID string, item recording, caption string) (string, string, string) {
+func (s *Service) transcribeWithin(parent context.Context, principalID string, item recording) (string, string, string) {
 	if item.fileID == "" {
 		return "", AttachmentUnavailableReply, "unavailable"
 	}
@@ -104,13 +103,21 @@ func (s *Service) transcribeWithin(parent context.Context, principalID string, i
 	if transcript == "" {
 		return "", NoSpeechReply, "no_speech"
 	}
-	if utf8.RuneCountInString(transcript) > maximumTranscriptRunes {
+	return transcript, "", ""
+}
+
+// voiceTurn builds the turn's message from a transcript and the caption, or the reply that refuses
+// one the conversation could not take.
+func voiceTurn(transcript, caption string) (string, string, string) {
+	message := voiceMarker + "\n" + transcript
+	if utf8.RuneCountInString(message) > conversation.MaximumMessageRunes {
 		return "", TranscriptTooLongReply, "too_long"
 	}
-
-	message := voiceMarker + "\n" + transcript
 	if caption = strings.TrimSpace(caption); caption != "" {
 		message += "\n\n" + caption
+	}
+	if utf8.RuneCountInString(message) > conversation.MaximumMessageRunes {
+		return "", CaptionTooLongReply, "caption_too_long"
 	}
 	return message, "", ""
 }

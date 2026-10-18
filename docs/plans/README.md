@@ -104,6 +104,7 @@ plan that links back to the earlier record.
 | 0092 | [OV-fiets availability at stations](0092-ov-fiets.md) | done |
 | 0093 | [Vacuum schedule through Home Assistant](0093-vacuum-schedule-tools.md) | done |
 | 0094 | [Scrub private details from two done plans](0094-plan-privacy-scrub.md) | done |
+| 0095 | [Telegram intake fixes: oversized voice turns, secrets in captions, and help](0095-telegram-intake-fixes.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

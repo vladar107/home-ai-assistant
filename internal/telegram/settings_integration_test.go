@@ -102,6 +102,8 @@ func TestRemovedConnectionCommandsGetHelp(t *testing.T) {
 	h.start()
 	h.push(textUpdate(1, 101, "/connect"), textUpdate(2, 101, "/connection"), textUpdate(3, 101, "/disconnect"))
 	for id := int64(1); id <= 3; id++ {
-		h.wantReply(101, id, HelpReply)
+		if reply := h.nextMessage(); reply.replyTo != requestMessageID(id) || !strings.HasPrefix(reply.text, HelpHeading) {
+			t.Fatalf("reply to removed command = %+v, want the help reply", reply)
+		}
 	}
 }

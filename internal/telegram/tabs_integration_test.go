@@ -714,7 +714,7 @@ func TestWithTopicsOffNoTabCallIsMade(t *testing.T) {
 		t.Fatalf("Open with tabs off = %+v", answer)
 	}
 	h.push(textUpdate(4, 101, "/close"))
-	if reply := h.nextMessage(); !strings.HasPrefix(reply.text, HelpReply) || strings.Contains(reply.text, "/close") {
+	if reply := h.nextMessage(); !strings.HasPrefix(reply.text, HelpHeading) || strings.Contains(reply.text, "/close") {
 		t.Fatalf("/close with tabs off = %q", reply.text)
 	}
 }

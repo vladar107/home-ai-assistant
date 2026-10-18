@@ -14,7 +14,6 @@ const (
 	TasksTitle       = "Background tasks"
 	NoTasksReply     = "You have no background tasks from the last week. Ask me for something long, such as going through a month of mail, and I will work on it in the background while we keep talking."
 	TaskGoneReply    = "That task has already finished or was cancelled."
-	TasksHelpLine    = " /tasks shows your background tasks."
 	TaskPrivacyLine  = "Background task reports are kept for 30 days."
 	tasksPrefix      = "tasks"
 	taskCancelAction = "cancel"

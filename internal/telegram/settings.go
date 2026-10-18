@@ -91,9 +91,11 @@ type settingsView struct {
 }
 
 // messageInterceptor lets a section consume an ordinary message before it is enqueued for the
-// model, for deterministic intake such as a pasted token.
+// model, for deterministic intake such as a pasted token. guard only keeps a secret out of the
+// model, consuming no intake, for a caption or transcript that cannot be an intake reply.
 type messageInterceptor interface {
 	intercept(ctx context.Context, principalID string, text string) (interception, error)
+	guard(text string) interception
 }
 
 type interception struct {
@@ -560,10 +562,14 @@ func (n notionSection) intercept(ctx context.Context, principalID string, text s
 			return interception{handled: true, remove: true, reply: NotionConnectedReply(status), reason: "notion_intake_connected"}, nil
 		}
 	}
-	if notion.LooksLikeToken(text) {
-		return interception{handled: true, remove: true, reply: NotionTokenGuardReply, reason: "notion_token_guard"}, nil
+	return n.guard(text), nil
+}
+
+func (n notionSection) guard(text string) interception {
+	if !notion.LooksLikeToken(text) {
+		return interception{}
 	}
-	return interception{}, nil
+	return interception{handled: true, remove: true, reply: NotionTokenGuardReply, reason: "notion_token_guard"}
 }
 
 const (

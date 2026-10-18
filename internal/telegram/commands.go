@@ -18,7 +18,9 @@ const (
 	NothingToCancelReply     = "There is no response to cancel."
 	NewSessionReply          = "Started a fresh conversation."
 	NoSessionReply           = "There is no conversation to reset yet."
-	HelpReply                = "Available commands: /cancel, /new, /privacy, /sessions, /settings, /status. You can otherwise talk to me normally, and reply to one of my earlier answers to continue that conversation."
+	HelpHeading              = "Available commands:"
+	HelpConversationLine     = "You can otherwise talk to me normally, and reply to one of my earlier answers to continue that conversation."
+	InvalidMessageReply      = "I could not take that message. A message can hold at most 4096 characters; split a longer one and send the parts."
 
 	// privacyItem starts each line /privacy adds below its opening paragraph.
 	privacyItem = "\n• "
@@ -52,9 +54,15 @@ type menuCommand struct {
 	offered bool
 }
 
+// typedCommands answer when typed but are left out of the slash menu; the help reply and /settings
+// name them.
+var typedCommands = []BotCommand{
+	{Command: "status", Description: "Show whether Home Agent is online"},
+	{Command: "privacy", Description: "Show the current privacy mode"},
+}
+
 // menuCommands is the slash menu: the offered entries, which callers list alphabetically so a
-// command is found where the user looks for it. /status and /privacy are left out but still answer
-// when typed; the help reply and /settings name them.
+// command is found where the user looks for it.
 func menuCommands(entries []menuCommand) []BotCommand {
 	var commands []BotCommand
 	for _, entry := range entries {
