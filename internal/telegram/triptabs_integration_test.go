@@ -33,16 +33,12 @@ func newTripTabHarness(t *testing.T, topics bool) *tripTabHarness {
 	t.Helper()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, topics: topics})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, topics: topics, trips: true})
 	h.tabs.icons = append(slices.Clone(testTopicIcons), TopicIcon{Emoji: "✈️", CustomEmojiID: tripIconID})
 	h.provision("alice", "account-alice")
-	trips, err := trip.NewService(trip.Config{Now: clock.Now}, h.store, trip.NewScheduleReminders(h.scheduler), slog.New(slog.NewTextHandler(h.logs, nil)))
-	if err != nil {
-		t.Fatal(err)
-	}
+	trips := h.trips
 	notifier := &TripNotifier{Client: h.client, Chats: h.store, Feeds: h.service.Feeds()}
 	trips.SetTabs(notifier)
-	h.service.SetTrips(trips)
 	h.start()
 	receive(t, h.ctx, h.registrations)
 	receive(t, h.ctx, h.registrations)

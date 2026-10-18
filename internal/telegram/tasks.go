@@ -26,12 +26,6 @@ type TaskController interface {
 	Now() time.Time
 }
 
-// SetTasks adds /tasks, its Cancel buttons, and the background task line to /help and /privacy;
-// call it before Start.
-func (s *Service) SetTasks(tasks TaskController) {
-	s.tasks = tasks
-}
-
 // TaskMessenger keeps each task's status message, with the Cancel button that /tasks also uses.
 type TaskMessenger struct {
 	Client *Client

@@ -57,15 +57,6 @@ type TripController interface {
 	Now() time.Time
 }
 
-// SetTrips adds the Trips switch to /settings, handles the buttons of trip cards, and gives planned
-// trips their tabs; call it before Start.
-func (s *Service) SetTrips(trips TripController) {
-	s.trips = trips
-	if trips != nil && s.schedules != nil && s.google != nil {
-		s.sections = append(s.sections, tripsSection{schedules: s.schedules, google: s.google, logger: s.logger, telemetry: s.telemetry})
-	}
-}
-
 // TripChats resolves the principal's active chat.
 type TripChats interface {
 	ResolveActiveChat(ctx context.Context, principalID string) (int64, bool, error)

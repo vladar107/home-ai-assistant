@@ -54,15 +54,6 @@ type MemoryController interface {
 	SetLearnFromFeedback(context.Context, string, bool) error
 }
 
-// SetMemory adds /memory and the memory switch to /settings; call it before Start.
-func (s *Service) SetMemory(controller MemoryController) {
-	if controller == nil {
-		return
-	}
-	s.memory = controller
-	s.sections = append(s.sections, memorySection{memory: controller, logger: s.logger, telemetry: s.telemetry})
-}
-
 type memorySection struct {
 	memory    MemoryController
 	logger    *slog.Logger

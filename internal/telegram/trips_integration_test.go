@@ -69,22 +69,17 @@ func newTripHarness(t *testing.T) (*tripHarness, *googlesim.Simulator) {
 	t.Helper()
 	clock := newTestClock(t, mondayMorning)
 	sim := googleSimulator(t)
-	h := newConversationHarnessWithOptions(t, newControlledRuntime(), harnessOptions{schedules: clock, google: sim, calendar: calendarSimulator(t, sim)})
+	h := newConversationHarnessWithOptions(t, newControlledRuntime(), harnessOptions{schedules: clock, google: sim, calendar: calendarSimulator(t, sim), trips: true})
 	h.provision("alice", "account-alice")
 	h.provision("bob", "account-bob")
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	trips, err := trip.NewService(trip.Config{Now: clock.Now}, h.store, trip.NewScheduleReminders(h.scheduler), logger)
-	if err != nil {
-		t.Fatal(err)
-	}
 	notifier := TripNotifier{Client: h.client, Chats: h.store}
 	reply := &scanReply{}
-	if err := h.scheduler.Register(trip.ScanJobType(reply, h.store, readableMail{}, trips, notifier, notifier, clock.Now, logger)); err != nil {
+	if err := h.scheduler.Register(trip.ScanJobType(reply, h.store, readableMail{}, h.trips, notifier, notifier, clock.Now, logger)); err != nil {
 		t.Fatal(err)
 	}
-	h.service.SetTrips(trips)
 	h.start()
-	return &tripHarness{conversationHarness: h, clock: clock, trips: trips, scan: reply}, sim
+	return &tripHarness{conversationHarness: h, clock: clock, trips: h.trips, scan: reply}, sim
 }
 
 func (h *tripHarness) suggest(reference string) trip.Trip {

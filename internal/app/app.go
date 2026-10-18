@@ -877,51 +877,66 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	}
 
 	// Interface values are built here so a disabled conversation never becomes a typed nil controller.
-	var conversationController telegram.ConversationController
-	var attachmentStore telegram.AttachmentStore
-	var connectionController telegram.ConnectionController
-	var notionController telegram.NotionController
-	var nasController telegram.NASController
-	var googleController telegram.GoogleController
-	var webController telegram.SwitchController
-	var nsController telegram.SwitchController
-	var homeAssistantController telegram.HomeAssistantController
-	var busController telegram.SwitchController
-	var approvalController telegram.ApprovalController
-	var scheduleController telegram.ScheduleController
+	deps := telegram.Dependencies{
+		Client:     client,
+		Identities: identities,
+		Cursors:    a.store,
+		Logger:     a.logger,
+		Telemetry:  a.telemetry,
+		Tabs:       a.store,
+	}
 	if a.conversation != nil {
-		conversationController = a.conversation
-		attachmentStore = a.attachments
-		connectionController = a.connections
-		approvalController = a.approvals
-		scheduleController = a.scheduler
+		deps.Conversation = a.conversation
+		deps.Attachments = a.attachments
+		deps.Connections = a.connections
+		deps.Approvals = a.approvals
+		deps.Schedules = a.scheduler
+		deps.Trips = a.trips
+		deps.Routes = a.routes
+		deps.Memory = a.memory
+		deps.Backlog = a.backlog
+		deps.Transcriber = a.chatGPT
 	}
 	if a.notion != nil {
-		notionController = a.notion
+		deps.Notion = a.notion
 	}
 	if a.nas != nil {
-		nasController = a.nas
+		deps.NAS = a.nas
 	}
 	if a.google != nil {
-		googleController = a.google
+		deps.Google = a.google
 	}
 	if a.web != nil {
-		webController = a.switches.Toggle(web.Switch)
+		deps.Web = a.switches.Toggle(web.Switch)
 	}
 	if a.ns != nil {
-		nsController = a.switches.Toggle(ns.Switch)
+		deps.NS = a.switches.Toggle(ns.Switch)
 	}
 	if a.homeAssistant != nil {
-		homeAssistantController = homeSettings{Toggle: a.switches.Toggle(homeassistant.Switch), home: a.homeAssistant}
+		deps.HomeAssistant = homeSettings{Toggle: a.switches.Toggle(homeassistant.Switch), home: a.homeAssistant}
 	}
 	if a.bus != nil {
-		busController = a.switches.Toggle(bus.Switch)
+		deps.Bus = a.switches.Toggle(bus.Switch)
 	}
-	service, err := telegram.NewService(client, identities, a.store, conversationController, attachmentStore, connectionController, notionController, nasController, googleController, webController, nsController, homeAssistantController, busController, approvalController, scheduleController, a.logger, a.telemetry)
+	if a.typeSafe {
+		deps.TypeSafe = a.switches.Toggle(judgment.OptInSwitch)
+	}
+	if a.locations != nil {
+		deps.Locations = a.locations
+	}
+	if a.grafana != nil {
+		deps.Grafana = grafanaSettings{Toggle: a.switches.Toggle(grafana.Switch), grafana: a.grafana}
+	}
+	if a.tasks != nil {
+		deps.Tasks = a.tasks
+	}
+	if a.watches != nil {
+		deps.Watches = a.watches
+	}
+	service, err := telegram.NewService(deps)
 	if err != nil {
 		return fmt.Errorf("initialize Telegram service: %w", err)
 	}
-	service.SetTabs(a.store)
 	client.ObserveTabs(service)
 	// Messages nobody asked for go to their feed tab while the bot has tabs on.
 	if a.scheduler != nil {
@@ -935,36 +950,6 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	}
 	if a.conversation != nil {
 		a.conversation.SetTabReplies(service)
-	}
-	if a.typeSafe {
-		service.SetTypeSafe(a.switches.Toggle(judgment.OptInSwitch))
-	}
-	if a.locations != nil {
-		service.SetLocations(a.locations)
-	}
-	if a.grafana != nil {
-		service.SetGrafana(grafanaSettings{Toggle: a.switches.Toggle(grafana.Switch), grafana: a.grafana})
-	}
-	if a.memory != nil {
-		service.SetMemory(a.memory)
-	}
-	if a.backlog != nil {
-		service.SetBacklog(a.backlog)
-	}
-	if a.trips != nil {
-		service.SetTrips(a.trips)
-	}
-	if a.tasks != nil {
-		service.SetTasks(a.tasks)
-	}
-	if a.watches != nil {
-		service.SetWatches(a.watches)
-	}
-	if a.routes != nil {
-		service.SetRoutes(a.routes)
-	}
-	if a.chatGPT != nil {
-		service.SetTranscriber(a.chatGPT)
 	}
 	if a.tools != nil {
 		if err := a.tools.Register(service.Help()); err != nil {

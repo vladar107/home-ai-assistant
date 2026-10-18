@@ -201,101 +201,134 @@ type Service struct {
 	ready  atomic.Bool
 }
 
-func NewService(
-	client botAPI,
-	identities identityResolver,
-	cursors cursorStore,
-	conversation ConversationController,
-	attachments AttachmentStore,
-	connections ConnectionController,
-	notion NotionController,
-	nasFiles NASController,
-	googleAccess GoogleController,
-	webAccess SwitchController,
-	nsTrains SwitchController,
-	home HomeAssistantController,
-	buses SwitchController,
-	approvals ApprovalController,
-	schedules ScheduleController,
-	logger *slog.Logger,
-	telemetry Telemetry,
-) (*Service, error) {
-	if client == nil {
+// Dependencies is everything the Telegram service uses. Client, Identities, Cursors, and Logger are
+// required; a nil Telemetry records nothing, and any other nil field leaves its feature out.
+type Dependencies struct {
+	Client     botAPI
+	Identities identityResolver
+	Cursors    cursorStore
+	Logger     *slog.Logger
+	Telemetry  Telemetry
+
+	Tabs          TabStore
+	Conversation  ConversationController
+	Attachments   AttachmentStore
+	Connections   ConnectionController
+	Notion        NotionController
+	NAS           NASController
+	Google        GoogleController
+	Web           SwitchController
+	NS            SwitchController
+	HomeAssistant HomeAssistantController
+	Bus           SwitchController
+	Approvals     ApprovalController
+	Schedules     ScheduleController
+	TypeSafe      SwitchController
+	Locations     LocationController
+	Grafana       GrafanaController
+	Memory        MemoryController
+	Backlog       BacklogController
+	Tasks         TaskController
+	Watches       WatchController
+	Trips         TripController
+	Routes        RouteController
+	Transcriber   Transcriber
+}
+
+func NewService(deps Dependencies) (*Service, error) {
+	if deps.Client == nil {
 		return nil, fmt.Errorf("Telegram client is required")
 	}
-	if identities == nil {
+	if deps.Identities == nil {
 		return nil, fmt.Errorf("Telegram identity service is required")
 	}
-	if cursors == nil {
+	if deps.Cursors == nil {
 		return nil, fmt.Errorf("Telegram cursor store is required")
 	}
-	if logger == nil {
+	if deps.Logger == nil {
 		return nil, fmt.Errorf("Telegram logger is required")
 	}
 
+	logger, telemetry := deps.Logger, telemetryOrNoop(deps.Telemetry)
 	service := &Service{
-		client:        client,
-		identities:    identities,
-		cursors:       cursors,
-		conversation:  conversation,
-		attachments:   attachments,
-		connections:   connections,
-		notion:        notion,
-		nas:           nasFiles,
-		google:        googleAccess,
-		web:           webAccess,
-		ns:            nsTrains,
-		homeAssistant: home,
-		bus:           buses,
-		approvals:     approvals,
-		schedules:     schedules,
+		client:        deps.Client,
+		identities:    deps.Identities,
+		cursors:       deps.Cursors,
+		conversation:  deps.Conversation,
+		attachments:   deps.Attachments,
+		connections:   deps.Connections,
+		notion:        deps.Notion,
+		nas:           deps.NAS,
+		google:        deps.Google,
+		web:           deps.Web,
+		typeSafe:      deps.TypeSafe,
+		ns:            deps.NS,
+		homeAssistant: deps.HomeAssistant,
+		bus:           deps.Bus,
+		approvals:     deps.Approvals,
+		schedules:     deps.Schedules,
+		locations:     deps.Locations,
+		grafana:       deps.Grafana,
+		memory:        deps.Memory,
+		backlog:       deps.Backlog,
+		tasks:         deps.Tasks,
+		watches:       deps.Watches,
+		trips:         deps.Trips,
+		routes:        deps.Routes,
+		transcriber:   deps.Transcriber,
+		tabs:          deps.Tabs,
 		logger:        logger,
-		telemetry:     telemetryOrNoop(telemetry),
+		telemetry:     telemetry,
 	}
-	if connections != nil {
+	if deps.Connections != nil {
 		service.sections = append(service.sections, modelSection{
-			connections: connections, conversation: conversation, logger: logger, telemetry: service.telemetry,
+			connections: deps.Connections, conversation: deps.Conversation, logger: logger, telemetry: telemetry,
 		})
 	}
-	if notion != nil {
-		section := notionSection{notion: notion, logger: logger, telemetry: service.telemetry}
+	if deps.Notion != nil {
+		section := notionSection{notion: deps.Notion, logger: logger, telemetry: telemetry}
 		service.sections = append(service.sections, section)
 		service.interceptors = append(service.interceptors, section)
 	}
-	if nasFiles != nil {
-		service.sections = append(service.sections, nasSection{nas: nasFiles, logger: logger, telemetry: service.telemetry})
+	if deps.NAS != nil {
+		service.sections = append(service.sections, nasSection{nas: deps.NAS, logger: logger, telemetry: telemetry})
 	}
-	if googleAccess != nil {
-		section := googleSection{google: googleAccess, logger: logger, telemetry: service.telemetry}
+	if deps.Google != nil {
+		section := googleSection{google: deps.Google, logger: logger, telemetry: telemetry}
 		service.sections = append(service.sections, section)
 		service.interceptors = append(service.interceptors, section)
 	}
-	if webAccess != nil {
-		service.sections = append(service.sections, webSection{web: webAccess, logger: logger, telemetry: service.telemetry})
+	if deps.Web != nil {
+		service.sections = append(service.sections, webSection{web: deps.Web, logger: logger, telemetry: telemetry})
 	}
-	if nsTrains != nil {
-		service.sections = append(service.sections, nsSection{ns: nsTrains, logger: logger, telemetry: service.telemetry})
+	if deps.NS != nil {
+		service.sections = append(service.sections, nsSection{ns: deps.NS, logger: logger, telemetry: telemetry})
 	}
-	if home != nil {
-		service.sections = append(service.sections, homeAssistantSection{homeAssistant: home, logger: logger, telemetry: service.telemetry})
+	if deps.HomeAssistant != nil {
+		service.sections = append(service.sections, homeAssistantSection{homeAssistant: deps.HomeAssistant, logger: logger, telemetry: telemetry})
 	}
-	if buses != nil {
-		service.sections = append(service.sections, busSection{bus: buses, logger: logger, telemetry: service.telemetry})
+	if deps.Bus != nil {
+		service.sections = append(service.sections, busSection{bus: deps.Bus, logger: logger, telemetry: telemetry})
 	}
-	if schedules != nil {
-		service.sections = append(service.sections, headsUpSection{schedules: schedules, logger: logger, telemetry: service.telemetry})
+	if deps.Schedules != nil {
+		service.sections = append(service.sections, headsUpSection{schedules: deps.Schedules, logger: logger, telemetry: telemetry})
+	}
+	if deps.TypeSafe != nil {
+		service.sections = append(service.sections, typeSafeSection{typeSafe: deps.TypeSafe})
+	}
+	if deps.Locations != nil {
+		service.sections = append(service.sections, locationSection{locations: deps.Locations, logger: logger, telemetry: telemetry})
+	}
+	if deps.Grafana != nil {
+		service.sections = append(service.sections, grafanaSection{grafana: deps.Grafana, logger: logger, telemetry: telemetry})
+	}
+	if deps.Memory != nil {
+		service.sections = append(service.sections, memorySection{memory: deps.Memory, logger: logger, telemetry: telemetry})
+	}
+	if deps.Trips != nil && deps.Schedules != nil && deps.Google != nil {
+		service.sections = append(service.sections, tripsSection{schedules: deps.Schedules, google: deps.Google, logger: logger, telemetry: telemetry})
 	}
 	return service, nil
-}
-
-// SetTypeSafe adds the safety checks section to /settings and its line to /privacy; call it before
-// Start. A nil controller leaves both out.
-func (s *Service) SetTypeSafe(typeSafe SwitchController) {
-	if typeSafe == nil {
-		return
-	}
-	s.typeSafe = typeSafe
-	s.sections = append(s.sections, typeSafeSection{typeSafe: typeSafe})
 }
 
 func (s *Service) botCommands() []BotCommand {

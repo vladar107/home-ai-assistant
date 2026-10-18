@@ -35,12 +35,6 @@ type Transcriber interface {
 	Transcribe(ctx context.Context, principalID string, audio chatgpt.Audio) (string, error)
 }
 
-// SetTranscriber turns voice messages and audio files into conversation turns; call it before
-// Start. Without it they are answered as unsupported.
-func (s *Service) SetTranscriber(transcriber Transcriber) {
-	s.transcriber = transcriber
-}
-
 // recording is a voice note or audio file a message carried, before it has been downloaded.
 type recording struct {
 	fileID   string

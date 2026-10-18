@@ -55,11 +55,6 @@ type TabStore interface {
 	SetFixedTabName(ctx context.Context, principalID string, threadID int64, name string) error
 }
 
-// SetTabs gives the service the tab registry; call it before Start.
-func (s *Service) SetTabs(tabs TabStore) {
-	s.tabs = tabs
-}
-
 type chatTab struct{ chatID, threadID int64 }
 
 var _ TabObserver = (*Service)(nil)

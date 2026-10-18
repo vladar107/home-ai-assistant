@@ -37,11 +37,6 @@ type BacklogController interface {
 	Day(time.Time) string
 }
 
-// SetBacklog adds /backlog; call it before Start.
-func (s *Service) SetBacklog(controller BacklogController) {
-	s.backlog = controller
-}
-
 // commandArgument is the first word after a command, lower-cased, or "" without one.
 func commandArgument(text string) string {
 	fields := strings.Fields(text)

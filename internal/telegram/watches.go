@@ -28,11 +28,6 @@ type WatchController interface {
 	DescribeState(watch.Watch) string
 }
 
-// SetWatches adds watches to /jobs and handles the buttons of their alerts; call it before Start.
-func (s *Service) SetWatches(watches WatchController) {
-	s.watches = watches
-}
-
 // WatchAlertSender delivers watch alerts with their Mute today and Pause buttons.
 type WatchAlertSender struct {
 	Client *Client

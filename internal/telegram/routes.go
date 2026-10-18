@@ -13,8 +13,3 @@ type RouteController interface {
 	Routes(context.Context, string) ([]routes.Route, error)
 	Delete(context.Context, string, string) (bool, error)
 }
-
-// SetRoutes lists saved routes in /jobs with a delete button each; call it before Start.
-func (s *Service) SetRoutes(routes RouteController) {
-	s.routes = routes
-}

@@ -44,6 +44,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/imagegen"
 	"github.com/vladar107/home-ai-assistant/internal/integration"
+	"github.com/vladar107/home-ai-assistant/internal/judgment"
 	"github.com/vladar107/home-ai-assistant/internal/location"
 	"github.com/vladar107/home-ai-assistant/internal/memory"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
@@ -60,6 +61,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/testutil/googlesim"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/notionsim"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
+	"github.com/vladar107/home-ai-assistant/internal/trip"
 	"github.com/vladar107/home-ai-assistant/internal/turnstate"
 	"github.com/vladar107/home-ai-assistant/internal/watch"
 )
@@ -229,6 +231,10 @@ type harnessOptions struct {
 	backlog bool
 	// topics turns the bot's tabs on, as BotFather's switch does.
 	topics bool
+	// typeSafe adds the safety checks section to /settings and /privacy, as a TypeSafe key does.
+	typeSafe bool
+	// trips adds trips on the schedules clock, with the Trips section where Google is set up too.
+	trips bool
 }
 
 type fixedDescriber string
@@ -275,6 +281,7 @@ type conversationHarness struct {
 	watches        *watch.Service
 	agentChecked   chan struct{}
 	routes         *routes.Service
+	trips          *trip.Service
 	auth           *codexauth.Simulator
 	profilesDir    string
 	credentialsDir string
@@ -812,11 +819,52 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 			t.Fatal(err)
 		}
 	}
-	h.service, err = NewService(h.client, identities, h.store, h.conversation, h.attachments, h.connections, notionController, nasController, googleController, webController, nsController, homeAssistantController, busController, h.approvals, scheduleController, logger, nil)
+	deps := Dependencies{
+		Client: h.client, Identities: identities, Cursors: h.store, Logger: logger, Tabs: h.store,
+		Conversation: h.conversation, Attachments: h.attachments, Connections: h.connections, Approvals: h.approvals,
+		Notion: notionController, NAS: nasController, Google: googleController,
+		Web: webController, NS: nsController, HomeAssistant: homeAssistantController, Bus: busController,
+		Schedules: scheduleController,
+	}
+	if options.typeSafe {
+		deps.TypeSafe = h.switches.Toggle(judgment.OptInSwitch)
+	}
+	if h.locations != nil {
+		deps.Locations = h.locations
+	}
+	if h.grafana != nil {
+		deps.Grafana = grafanaSettings{Toggle: h.switches.Toggle(grafana.Switch), Service: h.grafana}
+	}
+	if h.memory != nil {
+		deps.Memory = h.memory
+	}
+	if h.backlog != nil {
+		deps.Backlog = h.backlog
+	}
+	if h.tasks != nil {
+		h.tasks.SetRunner(h.conversation)
+		deps.Tasks = h.tasks
+	}
+	if h.watches != nil {
+		deps.Watches = h.watches
+	}
+	if options.trips {
+		h.trips, err = trip.NewService(trip.Config{Now: options.schedules.Now}, h.store, trip.NewScheduleReminders(h.scheduler), logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		deps.Trips = h.trips
+	}
+	if h.routes != nil {
+		deps.Routes = h.routes
+	}
+	if transcriber != nil {
+		deps.Transcriber = transcriber
+	}
+	h.service, err = NewService(deps)
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.service.SetTabs(h.store)
 	h.client.ObserveTabs(h.service)
 	if h.scheduler != nil {
 		h.scheduler.SetFeeds(h.service.Feeds())
@@ -828,25 +876,6 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	if err := broker.Register(h.service.Help()); err != nil {
 		t.Fatal(err)
 	}
-	if h.locations != nil {
-		h.service.SetLocations(h.locations)
-	}
-	if h.grafana != nil {
-		h.service.SetGrafana(grafanaSettings{Toggle: h.switches.Toggle(grafana.Switch), Service: h.grafana})
-	}
-	if h.memory != nil {
-		h.service.SetMemory(h.memory)
-	}
-	if h.backlog != nil {
-		h.service.SetBacklog(h.backlog)
-	}
-	if h.tasks != nil {
-		h.tasks.SetRunner(h.conversation)
-		h.service.SetTasks(h.tasks)
-	}
-	if h.watches != nil {
-		h.service.SetWatches(h.watches)
-	}
 	if options.agentWatches {
 		h.agentChecked = make(chan struct{}, 16)
 		agent, err := watch.NewAgentEvaluator(h.conversation, watch.AgentConfig{Now: options.schedules.Now, Finished: func() { h.agentChecked <- struct{}{} }})
@@ -857,12 +886,6 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = agent.Stop(context.Background()) })
-	}
-	if h.routes != nil {
-		h.service.SetRoutes(h.routes)
-	}
-	if transcriber != nil {
-		h.service.SetTranscriber(transcriber)
 	}
 	t.Cleanup(h.stop)
 	return h

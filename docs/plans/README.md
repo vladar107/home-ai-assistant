@@ -116,6 +116,7 @@ plan that links back to the earlier record.
 | 0104 | [One copy of the helpers that drifted apart](0104-shared-helpers.md) | done |
 | 0105 | [The model-facing prompt scaffolding in one place](0105-prompt-scaffolding.md) | done |
 | 0106 | [One per-user switch for each integration](0106-integration-switches.md) | done |
+| 0107 | [One connector contract and wiring shared with the tests](0107-connector-contract-and-shared-wiring.md) | in-progress |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

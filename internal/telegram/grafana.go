@@ -22,16 +22,6 @@ type GrafanaController interface {
 	Allowed(string) bool
 }
 
-// SetGrafana adds the monitoring section to /settings and its line to /privacy for the principals
-// the operator allowed; call it before Start.
-func (s *Service) SetGrafana(controller GrafanaController) {
-	if controller == nil {
-		return
-	}
-	s.grafana = controller
-	s.sections = append(s.sections, grafanaSection{grafana: controller, logger: s.logger, telemetry: s.telemetry})
-}
-
 type grafanaSection struct {
 	grafana   GrafanaController
 	logger    *slog.Logger

@@ -38,15 +38,6 @@ type LocationController interface {
 	Forget(context.Context, string) (bool, error)
 }
 
-// SetLocations accepts shared locations and adds their section to /settings; call it before Start.
-func (s *Service) SetLocations(locations LocationController) {
-	if locations == nil {
-		return
-	}
-	s.locations = locations
-	s.sections = append(s.sections, locationSection{locations: locations, logger: s.logger, telemetry: s.telemetry})
-}
-
 // processLocation stores a newly shared pin, venue, or live location and acknowledges it without
 // a model call; the question about it comes in a later message.
 func (s *Service) processLocation(ctx context.Context, message *Message, principalID string) (processingResult, string, error) {
