@@ -156,6 +156,7 @@ type Service struct {
 	trips        TripController
 	routes       RouteController
 	transcriber  Transcriber
+	model        *ModelCommand
 	tabs         TabStore
 	sections     []Section
 	interceptors []messageInterceptor
@@ -213,6 +214,8 @@ type Dependencies struct {
 	Trips        TripController
 	Routes       RouteController
 	Transcriber  Transcriber
+	// Model enables /model; it also needs Conversation.
+	Model *ModelCommand
 
 	// Sections are the /settings pages, in any order: settingsGroups places the pages, sectionOrder
 	// their app_help topics, and privacyOrder their /privacy lines.
@@ -252,6 +255,7 @@ func NewService(deps Dependencies) (*Service, error) {
 		trips:        deps.Trips,
 		routes:       deps.Routes,
 		transcriber:  deps.Transcriber,
+		model:        deps.Model,
 		tabs:         deps.Tabs,
 		sections:     inSectionOrder(deps.Sections),
 		logger:       deps.Logger,
@@ -301,12 +305,14 @@ func validateSections(sections []Section) error {
 
 func (s *Service) botCommands() []BotCommand {
 	conversationEnabled := s.conversation != nil
+	modelEnabled := conversationEnabled && s.model != nil
 	return menuCommands([]menuCommand{
 		{BotCommand{Command: "backlog", Description: "Show and export your ideas for developing me"}, s.backlog != nil},
 		{BotCommand{Command: "cancel", Description: "Stop the current response"}, conversationEnabled},
 		{BotCommand{Command: "close", Description: "Close this tab"}, conversationEnabled && s.topics.Load()},
 		{BotCommand{Command: "jobs", Description: "Show and manage your reminders and scheduled jobs"}, s.schedules != nil},
 		{BotCommand{Command: "memory", Description: "Show and delete what I remember about you"}, s.memory != nil},
+		{BotCommand{Command: "model", Description: ModelCommandDescription}, modelEnabled},
 		{BotCommand{Command: "new", Description: "Start a fresh conversation"}, conversationEnabled},
 		{BotCommand{Command: "sessions", Description: "Return to a recent conversation"}, conversationEnabled},
 		{BotCommand{Command: "settings", Description: "Show and change your settings"}, len(s.sections) > 0},
@@ -930,6 +936,9 @@ func (s *Service) processCallback(ctx context.Context, bot Bot, updateID int64, 
 	if action, threadID, isTab := parseTabCallback(callback.Data); isTab && s.conversation != nil && bot.HasTopicsEnabled {
 		return s.processTabPress(ctx, callback, principalID, action, threadID)
 	}
+	if press, isModel := parseModelCallback(callback.Data); isModel && s.conversation != nil && s.model != nil {
+		return s.processModelPress(ctx, callback, principalID, press)
+	}
 	if taskID, isTask := parseTaskCallback(callback.Data); isTask && s.tasks != nil {
 		return s.processTaskPress(ctx, callback, principalID, taskID)
 	}
@@ -1245,6 +1254,9 @@ func commandList(commands []BotCommand) string {
 func (s *Service) dispatchCommand(ctx context.Context, bot Bot, message *Message, principalID, command string) (processingResult, string, error) {
 	if command == "backlog" && s.backlog != nil && commandArgument(message.Text) == backlogExportArgument {
 		return s.sendBacklogExport(ctx, message, principalID)
+	}
+	if command == "model" && s.conversation != nil && s.model != nil {
+		return s.processModelCommand(ctx, message, principalID, command)
 	}
 	if command == "close" && bot.HasTopicsEnabled && s.conversation != nil {
 		return s.processCloseCommand(ctx, message, principalID)

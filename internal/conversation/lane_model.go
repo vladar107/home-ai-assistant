@@ -96,9 +96,21 @@ func (s *Service) EffectiveChoice(ctx context.Context, lane Lane) (choice agentr
 	return choice, passedOver.Model != "", err
 }
 
+// EffectiveChoiceFrom is EffectiveChoice judged against the models the caller already read, nil
+// meaning the catalog could not be read, so a caller that holds them does not take Pi's catalog
+// lock again.
+func (s *Service) EffectiveChoiceFrom(ctx context.Context, lane Lane, models []modelcatalog.Model) (choice agentruntime.ModelEffort, stale bool, err error) {
+	choice, passedOver, _, err := s.resolveChoiceWith(ctx, lane, func() ([]modelcatalog.Model, error) { return models, nil })
+	return choice, passedOver.Model != "", err
+}
+
 // resolveChoice also returns the choice it passed over and the lane's epoch from before it read
 // anything, which recordLaneTurn needs to ignore a turn that a later change has overtaken.
 func (s *Service) resolveChoice(ctx context.Context, lane Lane) (choice, passedOver agentruntime.ModelEffort, epoch int, err error) {
+	return s.resolveChoiceWith(ctx, lane, func() ([]modelcatalog.Model, error) { return s.catalog(ctx, lane.PrincipalID) })
+}
+
+func (s *Service) resolveChoiceWith(ctx context.Context, lane Lane, load func() ([]modelcatalog.Model, error)) (choice, passedOver agentruntime.ModelEffort, epoch int, err error) {
 	s.mu.Lock()
 	epoch = s.laneEpochs[lane]
 	s.mu.Unlock()
@@ -109,7 +121,7 @@ func (s *Service) resolveChoice(ctx context.Context, lane Lane) (choice, passedO
 	if !found {
 		return s.config.ChatModel, agentruntime.ModelEffort{}, epoch, nil
 	}
-	models, err := s.catalog(ctx, lane.PrincipalID)
+	models, err := load()
 	if err != nil {
 		return agentruntime.ModelEffort{}, agentruntime.ModelEffort{}, epoch, err
 	}

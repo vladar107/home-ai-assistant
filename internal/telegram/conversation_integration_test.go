@@ -468,9 +468,10 @@ func (h *conversationHarness) wiringInputs(t *testing.T, runtime agentruntime.Ag
 			TurnTimeout: cmp.Or(options.turnTimeout, 10*time.Second), TurnZone: options.location, Now: now,
 			TypingInterval: options.typingInterval, DraftDelay: options.draftDelay, DraftInterval: options.draftInterval,
 			ChatModel: agentruntime.ModelEffort{Model: "gpt-test", Effort: agentruntime.DefaultEffort},
+			TaskModel: agentruntime.ModelEffort{Model: "gpt-6.1-sol", Effort: agentruntime.DefaultEffort},
 			ChatGPT:   chatgpt.Config{BaseURL: chatGPT.URL(), HTTPClient: chatGPT.Client()},
 			Connection: connection.Config{
-				ProfilesDir: h.profilesDir, AuthBaseURL: h.auth.URL(), HTTPClient: h.auth.Client(),
+				Provider: connection.DefaultProvider, ProfilesDir: h.profilesDir, AuthBaseURL: h.auth.URL(), HTTPClient: h.auth.Client(),
 				CodeTimeout: options.codeTimeout, Principals: []string{"alice", "bob"},
 			},
 			Approval: approval.Config{Lifetime: options.approvalLifetime, SweepInterval: options.approvalSweep},
@@ -557,6 +558,10 @@ func (h *conversationHarness) telegramService(identities *identity.Service, logg
 	}
 	if asm.Watches != nil {
 		deps.Watches = asm.Watches
+	}
+	deps.Model = &ModelCommand{
+		Lanes: asm.Conversation, Catalog: asm.Models, Usage: asm.ChatGPT,
+		ChatDefault: asm.ChatModel, TaskDefault: asm.TaskModel,
 	}
 	deps.Sections = []Section{NewModelSection(asm.Connections, asm.Conversation, logger, nil)}
 	if asm.Notion != nil {
@@ -1505,7 +1510,7 @@ func TestBusyWhileResponseIsBeingDelivered(t *testing.T) {
 func TestBotCommandsRegisteredOnceAtStartup(t *testing.T) {
 	h := newConversationHarness(t, newControlledRuntime())
 	h.start()
-	want := []string{"backlog", "cancel", "jobs", "memory", "new", "sessions", "settings"}
+	want := []string{"backlog", "cancel", "jobs", "memory", "model", "new", "sessions", "settings"}
 	for _, wantScope := range [][]string{nil, {`{"type":"all_private_chats"}`}} {
 		registration := receive(t, h.ctx, h.registrations)
 		if !slices.Equal(registration.scope, wantScope) {

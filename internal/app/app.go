@@ -407,6 +407,10 @@ func (a *App) buildTelegram(ctx context.Context, client *telegram.Client, config
 		deps.Memory = asm.Memory
 		deps.Backlog = asm.Backlog
 		deps.Transcriber = asm.ChatGPT
+		deps.Model = &telegram.ModelCommand{
+			Lanes: asm.Conversation, Catalog: asm.Models, Usage: asm.ChatGPT,
+			ChatDefault: asm.ChatModel, TaskDefault: asm.TaskModel,
+		}
 		if asm.Locations != nil {
 			deps.Locations = asm.Locations
 		}

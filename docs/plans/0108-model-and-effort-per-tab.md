@@ -92,6 +92,11 @@ Research on the pinned Pi 1.0.0 found:
 - **Buttons use their own callback prefix**, distinct from the `/settings` Model section's. A
   button tapped after `/new` applies to the lane's new conversation, which is the same lane;
   that is accepted rather than adding a freshness token that would not fit the 64-byte limit.
+- **Typed `/model` forms.** `/model <effort>` changes the effort of the model in use; `/model
+  <model>` keeps the effort in use when the model supports it, then `medium`, then its lowest
+  level; `/model default` clears the choice. The list marks a model unavailable only from a
+  cached usage read no older than 15 minutes. The task default line is informational: tasks are
+  not changed by `/model`.
 - **Last turn in memory.** The model and tokens of each lane's last turn are kept in memory;
   after a restart `/status` says no turn has run yet.
 - **Usage reads are the user's own.** The usage read uses only the requesting principal's
