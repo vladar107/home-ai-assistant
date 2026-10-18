@@ -723,7 +723,8 @@ routes after jobs and watches, read-only, with a Delete button each.
   or an instruction the user states, is written at once (an instruction with
   Undo). Any write in a conversation that has read third-party content,
   including a web search, needs Confirm, and so does an instruction after
-  household content.
+  household content. Removing an entry follows the same rules, and Undo of a
+  removed instruction puts it back as it was.
   Every write is shown, in the reply or, for a direct instruction, in the
   "Done" message, and `/memory` deletes any entry. Only the
   turn a 👎 starts writes `learned` entries, one proposal at most, and each still

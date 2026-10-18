@@ -26,7 +26,7 @@ const (
 		"An instruction is saved at once when the user asks for it in a conversation that has read no third-party content, not even the household's own devices; after your reply the user sees it with an Undo button. Otherwise it only becomes a proposal the user confirms after your reply, so never claim a proposed instruction was saved; the tool result says which happened. " +
 		"After you have read mail or web pages in this conversation, facts become proposals too. " +
 		"When the user corrects you and the correction states a lasting preference, such as use metric or always 24-hour times, offer to keep it as an instruction and save it only once they agree; a one-off fix, such as I meant the 07:42, is not one. " +
-		"When the conversation contradicts an entry, change it with memory_replace, and when the user asks you to forget something use memory_remove, by id. " +
+		"When the conversation contradicts an entry, change it with memory_replace, and when the user asks you to forget something use memory_remove, by id; removing follows the same rules as writing, and the tool result says whether it was done or proposed. " +
 		"Each entry holds at most 300 characters, instructions 1500 and facts 2000 in total; when a write is refused for size, merge or remove entries first."
 
 	screenedWarning = "⚠️ This reads like instructions aimed at an AI assistant rather than a fact about you. Confirm only if you asked me to remember it."
@@ -54,7 +54,7 @@ var definitions = []tools.Definition{
 	},
 	{
 		Name:        toolRemove,
-		Description: "Forget one memory entry, by its id from the Memory section.",
+		Description: "Forget one memory entry, by its id from the Memory section. An instruction is forgotten at once only in a conversation that has read no third-party content, and a fact only before any; otherwise it is proposed for the user to confirm.",
 		Risk:        tools.RiskWrite,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"id":{"type":"string","description":"The entry's id from the Memory section."}},` +
@@ -86,6 +86,13 @@ type proposedReplace struct {
 
 type removeArguments struct {
 	ID string `json:"id"`
+}
+
+// proposedRemove is what a removal record stores: the entry and the text the user saw, so a
+// confirmation does not remove an entry that changed since.
+type proposedRemove struct {
+	ID   string `json:"id"`
+	Text string `json:"text"`
 }
 
 // Contribute offers the memory tools to a principal who has memory on. They are write tools, so a
@@ -261,9 +268,36 @@ func (s *Service) remove(ctx context.Context, principalID string, call tools.Cal
 	if err := decodeArguments(call.Arguments, &arguments); err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
+	entry, found, err := s.repository.LoadMemory(ctx, principalID, strings.TrimSpace(arguments.ID))
+	if err != nil {
+		return tools.Result{}, err
+	}
+	if !found {
+		return tools.Result{Text: unknownEntryText, IsError: true}, nil
+	}
+	exposed := s.exposed(ctx, principalID)
+	if entry.Kind != KindInstruction && !exposed {
+		return s.forget(ctx, principalID, entry.ID)
+	}
+	canonical, err := json.Marshal(proposedRemove{ID: entry.ID, Text: entry.Text})
+	if err != nil {
+		return tools.Result{}, err
+	}
+	proposal := approval.Proposal{
+		Tool: toolRemove, Arguments: canonical, Summary: fmt.Sprintf("Forget the remembered %s: %q", entry.Kind, entry.Text),
+		Intent: approval.Intent{Verb: "forget", TargetKind: entry.Kind + " in memory"},
+	}
+	if entry.Kind == KindInstruction {
+		return s.act(ctx, principalID, proposal)
+	}
+	// The text is already in memory, so there is nothing new to screen.
+	return s.propose(ctx, principalID, false, entry.Text, entry.Kind, proposal)
+}
+
+func (s *Service) forget(ctx context.Context, principalID, id string) (tools.Result, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	entry, found, err := s.repository.LoadMemory(ctx, principalID, strings.TrimSpace(arguments.ID))
+	entry, found, err := s.repository.LoadMemory(ctx, principalID, id)
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -397,7 +431,7 @@ func (s *Service) act(ctx context.Context, principalID string, proposal approval
 }
 
 func (s *Service) ActionTools() []string {
-	return []string{toolAdd, toolReplace}
+	return []string{toolAdd, toolReplace, toolRemove}
 }
 
 // ExecuteApproved writes the confirmed entry. The caps and duplicates are checked again, because
@@ -461,6 +495,23 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		}
 		previous := undoEntry{ID: entry.ID, Text: entry.Text, Source: entry.Source, UpdatedAt: entry.UpdatedAt}
 		return approval.Outcome{Text: "Updated.", Undo: s.undoPayload(ctx, record, previous)}, nil
+	case toolRemove:
+		var confirmed proposedRemove
+		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil || confirmed.ID == "" {
+			return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed entry could not be read; nothing was forgotten."}
+		}
+		entry, found := find(entries, confirmed.ID)
+		if !found {
+			return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That entry no longer exists."}
+		}
+		if entry.Text != confirmed.Text {
+			return approval.Outcome{}, &approval.ActionError{Reason: "changed", Text: "That entry changed since; nothing was forgotten."}
+		}
+		if _, err := s.repository.RemoveMemory(ctx, record.PrincipalID, entry.ID); err != nil {
+			return approval.Outcome{}, err
+		}
+		s.record(ctx, record.PrincipalID, entry.Kind, outcomeRemoved)
+		return approval.Outcome{Text: "Forgot.", Undo: removalUndo(record, entry)}, nil
 	default:
 		return approval.Outcome{}, &approval.ActionError{Reason: "unavailable", Text: "That action is no longer available."}
 	}
@@ -507,9 +558,65 @@ func (s *Service) undoPayload(ctx context.Context, record approval.Record, undo 
 	return payload
 }
 
+// removedEntry is what reverses a direct removal: the whole entry as it was stored.
+type removedEntry struct {
+	ID        string    `json:"id"`
+	Kind      string    `json:"kind"`
+	Text      string    `json:"text"`
+	Source    string    `json:"source"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// removalUndo returns what puts a directly removed entry back; a proposal gets none.
+func removalUndo(record approval.Record, entry Entry) json.RawMessage {
+	if record.Mode != approval.ModeDirect {
+		return nil
+	}
+	payload, err := json.Marshal(removedEntry{ID: entry.ID, Kind: entry.Kind, Text: entry.Text, Source: entry.Source, CreatedAt: entry.CreatedAt, UpdatedAt: entry.UpdatedAt})
+	if err != nil {
+		return nil
+	}
+	return payload
+}
+
+// restore puts a directly removed entry back as it was, unless its ID is taken again or memory has
+// no room for it or already holds its text.
+func (s *Service) restore(ctx context.Context, record approval.Record, payload json.RawMessage) (approval.Outcome, error) {
+	var removed removedEntry
+	if json.Unmarshal(payload, &removed) != nil || removed.ID == "" || !validKind(removed.Kind) || validText(removed.Text) != "" {
+		return approval.Outcome{}, &approval.UndoRefusal{Reason: "the change could not be read back."}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entries, err := s.repository.ListMemory(ctx, record.PrincipalID)
+	if err != nil {
+		return approval.Outcome{}, err
+	}
+	if _, found := find(entries, removed.ID); found {
+		return approval.Outcome{}, &approval.UndoRefusal{Reason: "that entry is in memory again."}
+	}
+	if rejected := check(entries, removed.Kind, removed.Text, ""); rejected.outcome != "" {
+		reason := "memory has no room for it now."
+		if rejected.outcome == outcomeDuplicate {
+			reason = "memory already holds that text in another entry."
+		}
+		return approval.Outcome{}, &approval.UndoRefusal{Reason: reason}
+	}
+	entry := Entry{ID: removed.ID, PrincipalID: record.PrincipalID, Kind: removed.Kind, Text: removed.Text, Source: removed.Source, CreatedAt: removed.CreatedAt, UpdatedAt: removed.UpdatedAt}
+	if err := s.repository.AddMemory(ctx, entry); err != nil {
+		return approval.Outcome{}, err
+	}
+	s.record(ctx, record.PrincipalID, entry.Kind, outcomeWritten)
+	return approval.Outcome{Text: "Restored: " + entry.Text}, nil
+}
+
 // Undo reverses a direct instruction write while the entry still holds what it wrote: it removes an
-// added entry and restores a replaced one as it was.
+// added entry and restores a replaced or removed one as it was.
 func (s *Service) Undo(ctx context.Context, record approval.Record, payload json.RawMessage) (approval.Outcome, error) {
+	if record.Tool == toolRemove {
+		return s.restore(ctx, record, payload)
+	}
 	var undo undoEntry
 	var written struct {
 		Text string `json:"text"`

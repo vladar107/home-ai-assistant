@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/memory"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -93,4 +96,90 @@ func TestThirdPartyErrorMarksTheConversation(t *testing.T) {
 	proposed, err := writeNote(call.ctx, h, "groceries", false)
 	wantProposed(t, proposed, err)
 	h.finishTurn(call, 2, "proposed")
+}
+
+// Removing an instruction in a clean turn is made at once, and Undo puts the entry back exactly as
+// it was; an entry whose ID is taken again refuses Undo.
+func TestMemoryInstructionRemovalActsAndUndoRestoresTheEntry(t *testing.T) {
+	runtime := newControlledRuntime()
+	h := newActMemoryHarness(t, runtime)
+	created := time.Date(2026, time.August, 1, 8, 0, 0, 0, time.UTC)
+	updated := time.Date(2026, time.September, 1, 8, 0, 0, 0, time.UTC)
+	original := memory.Entry{ID: "aaaaaaa1", PrincipalID: "alice", Kind: memory.KindInstruction, Text: "answer in English", Source: memory.SourceConfirmed, CreatedAt: created, UpdatedAt: updated}
+	if err := h.store.AddMemory(h.ctx, original); err != nil {
+		t.Fatal(err)
+	}
+
+	_, results := h.memoryTurn(runtime, 1, 101, "ok", memoryCall("memory_remove", `{"id":"aaaaaaa1"}`))
+	wantDoneResult(t, results[0])
+	if entries := h.memoryEntries("alice"); len(entries) != 0 {
+		t.Fatalf("entries after removal = %+v", entries)
+	}
+	removed, status := h.directRecordOf("memory_remove")
+	done := h.nextMessage()
+	if status != approval.StatusDone || !strings.Contains(done.text, `Forget the remembered instruction: "answer in English"`) {
+		t.Fatalf("done message = %+v with record %s", done, status)
+	}
+	h.waitMessageRecorded(done.messageID)
+	if undid, err := h.approvals.Undo(h.ctx, "alice", removed); err != nil || undid.Answer != "Undone." {
+		t.Fatalf("undo = %+v %v", undid, err)
+	}
+	entries := h.memoryEntries("alice")
+	if len(entries) != 1 || entries[0].ID != original.ID || entries[0].Kind != original.Kind || entries[0].Text != original.Text ||
+		entries[0].Source != original.Source || !entries[0].CreatedAt.Equal(created) || !entries[0].UpdatedAt.Equal(updated) {
+		t.Fatalf("entries after undo = %+v, want %+v", entries, original)
+	}
+	h.nextEdit()
+
+	_, results = h.memoryTurn(runtime, 2, 101, "ok", memoryCall("memory_remove", `{"id":"aaaaaaa1"}`))
+	wantDoneResult(t, results[0])
+	again, _ := h.directRecordOf("memory_remove")
+	h.nextMessage()
+	if err := h.store.AddMemory(h.ctx, memory.Entry{ID: "aaaaaaa1", PrincipalID: "alice", Kind: memory.KindInstruction, Text: "answer in Dutch", Source: memory.SourceModel, CreatedAt: updated, UpdatedAt: updated}); err != nil {
+		t.Fatal(err)
+	}
+	if undid, err := h.approvals.Undo(h.ctx, "alice", again); err != nil || undid.Answer != "Not undone: that entry is in memory again." {
+		t.Fatalf("undo onto a taken ID = %+v %v", undid, err)
+	}
+}
+
+// After third-party content, the household's own devices included, removing an instruction or a
+// fact is proposed, and Confirm removes them only while they still hold what the user saw.
+func TestMemoryRemovalProposesAfterThirdPartyContent(t *testing.T) {
+	runtime := newControlledRuntime()
+	h := newActMemoryHarness(t, runtime)
+	at := time.Date(2026, time.September, 1, 8, 0, 0, 0, time.UTC)
+	for _, entry := range []memory.Entry{
+		{ID: "aaaaaaa1", PrincipalID: "alice", Kind: memory.KindInstruction, Text: "answer in English", Source: memory.SourceConfirmed, CreatedAt: at, UpdatedAt: at},
+		{ID: "bbbbbbb1", PrincipalID: "alice", Kind: memory.KindFact, Text: "likes tea", Source: memory.SourceModel, CreatedAt: at, UpdatedAt: at},
+	} {
+		if err := h.store.AddMemory(h.ctx, entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	_, results := h.memoryTurn(runtime, 1, 101, "ok", memoryCall("home_read", `{}`),
+		memoryCall("memory_remove", `{"id":"aaaaaaa1"}`), memoryCall("memory_remove", `{"id":"bbbbbbb1"}`))
+	wantProposedResult(t, results[1])
+	wantProposedResult(t, results[2])
+	if entries := h.memoryEntries("alice"); len(entries) != 2 {
+		t.Fatalf("entries before confirm = %+v", entries)
+	}
+	bundle := h.nextMessage()
+	if !strings.Contains(bundle.text, `Forget the remembered instruction: "answer in English"`) || !strings.Contains(bundle.text, `Forget the remembered fact: "likes tea"`) {
+		t.Fatalf("bundle = %+v", bundle)
+	}
+	if _, err := h.store.ReplaceMemory(h.ctx, "alice", "bbbbbbb1", "likes coffee", memory.SourceModel, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	confirm, _ := approvalButtons(t, bundle.keyboard)
+	h.push(callbackUpdate(2, 101, bundle.messageID, confirm))
+	h.wantAnswer(2)
+	if edit := h.nextEdit(); !strings.Contains(edit.text, "Forgot.") || !strings.Contains(edit.text, "That entry changed since; nothing was forgotten.") {
+		t.Fatalf("bundle after confirm = %+v", edit)
+	}
+	h.continueTurn(runtime, 2)
+	if entries := h.memoryEntries("alice"); len(entries) != 1 || entries[0].Text != "likes coffee" {
+		t.Fatalf("entries after confirm = %+v, want only the changed fact kept", entries)
+	}
 }
