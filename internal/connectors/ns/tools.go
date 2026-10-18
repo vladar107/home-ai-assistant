@@ -36,8 +36,6 @@ const (
 	maximumDepartures = 25
 
 	dateTimeLayout = "2006-01-02T15:04"
-
-	DisabledText = "Train information is off for this user; they can turn it on in /settings."
 )
 
 const guidance = "Trains (NS): ns_trips plans journeys between Dutch railway stations with live delays, cancellations, platform changes, transfers, and crowding; use it for any question about how or when to get from one place to another by train, with arrive_by for questions about being somewhere by a time. " +
@@ -109,16 +107,9 @@ var definitions = []tools.Definition{
 
 var _ tools.Provider = (*Service)(nil)
 
-// Contribute offers the tools while the principal's switch is on; a scheduled run receives them
-// too, since all of them are reads.
-func (s *Service) Contribute(ctx context.Context, principalID string) (tools.Contribution, error) {
-	status, err := s.Status(ctx, principalID)
-	if err != nil {
-		return tools.Contribution{}, err
-	}
-	if !status.Enabled {
-		return tools.Contribution{}, nil
-	}
+// Contribute offers the tools; the broker asks only while the principal has trains on. A scheduled
+// run receives them too, since all of them are reads.
+func (s *Service) Contribute(context.Context, string) (tools.Contribution, error) {
 	return tools.Contribution{Guidance: guidance, Definitions: definitions}, nil
 }
 
@@ -143,13 +134,6 @@ type disruptionsRequest struct {
 }
 
 func (s *Service) Execute(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
-	status, err := s.Status(ctx, principalID)
-	if err != nil {
-		return tools.Result{}, err
-	}
-	if !status.Enabled {
-		return errorResult(DisabledText), nil
-	}
 	switch call.Name {
 	case toolTrips:
 		var arguments tripsRequest

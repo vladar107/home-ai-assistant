@@ -3,8 +3,6 @@ package telegram
 import (
 	"context"
 	"log/slog"
-
-	"github.com/vladar107/home-ai-assistant/internal/connectors/bus"
 )
 
 const (
@@ -18,14 +16,8 @@ const (
 	BusPlanningLine = "Trips at a later time or with changes are planned by Transitous (transitous.org/sources), using open transit data and © OpenStreetMap contributors."
 )
 
-// BusController is implemented by the bus connector; nil disables the buses settings section.
-type BusController interface {
-	Status(context.Context, string) (bus.Status, error)
-	SetEnabled(context.Context, string, bool) (bus.Status, error)
-}
-
 type busSection struct {
-	bus       BusController
+	bus       SwitchController
 	logger    *slog.Logger
 	telemetry Telemetry
 }
@@ -33,19 +25,19 @@ type busSection struct {
 func (b busSection) prefix() string { return busSectionPrefix }
 
 func (b busSection) summary(ctx context.Context, principalID string) (settingsSummary, error) {
-	status, err := b.bus.Status(ctx, principalID)
+	enabled, err := b.bus.Enabled(ctx, principalID)
 	if err != nil {
 		return settingsSummary{}, err
 	}
-	return settingsSummary{name: "Buses", state: onOff(status.Enabled)}, nil
+	return settingsSummary{name: "Buses", state: onOff(enabled)}, nil
 }
 
 func (b busSection) render(ctx context.Context, principalID string) (settingsView, error) {
-	status, err := b.bus.Status(ctx, principalID)
+	enabled, err := b.bus.Enabled(ctx, principalID)
 	if err != nil {
 		return settingsView{}, err
 	}
-	if status.Enabled {
+	if enabled {
 		return settingsView{
 			lines:   []string{BusOnLine, BusPlanningLine},
 			buttons: []InlineButton{{Text: "Turn off buses", CallbackData: busSectionPrefix + ":" + busOffAction}},
@@ -61,7 +53,7 @@ func (b busSection) act(ctx context.Context, principalID string, _ int64, action
 	switch action {
 	case busOnAction, busOffAction:
 		enabled := action == busOnAction
-		if _, err := b.bus.SetEnabled(ctx, principalID, enabled); err != nil {
+		if err := b.bus.SetEnabled(ctx, principalID, enabled); err != nil {
 			return settingsOutcome{}, err
 		}
 		b.telemetry.ContextLogger(ctx, b.logger).InfoContext(ctx, "bus.changed", "principal_id", principalID, "enabled", enabled)

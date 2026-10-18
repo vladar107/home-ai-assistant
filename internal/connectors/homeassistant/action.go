@@ -54,16 +54,9 @@ func (s *Service) proposeAction(ctx context.Context, principalID, name string, t
 	return tools.Result{Text: approval.ProposedText}
 }
 
-// executeApprovedAction re-checks the switch, a fresh snapshot, that actions are still allowed, and
+// executeApprovedAction re-checks a fresh snapshot, that actions are still allowed, and
 // that the tool is still a write tool before running it with the stored arguments.
 func (s *Service) executeApprovedAction(ctx context.Context, record approval.Record) (approval.Outcome, error) {
-	status, err := s.Status(ctx, record.PrincipalID)
-	if err != nil {
-		return approval.Outcome{}, err
-	}
-	if !status.Enabled {
-		return approval.Outcome{}, &approval.ActionError{Reason: "disabled", Text: "The home is off for you; turn it on in /settings and ask again."}
-	}
 	var stored actionArguments
 	if err := json.Unmarshal(record.Arguments, &stored); err != nil || stored.Tool == "" {
 		return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The stored action could not be read."}

@@ -19,12 +19,7 @@ import (
 )
 
 const (
-	Integration = "web"
-	// A row for the integration records that the principal turned web access off; without one it
-	// is on, since web access is on by default wherever the operator enabled it.
-	optOutWorkspaceID   = "web-access-off"
-	optOutWorkspaceName = "Web access off"
-
+	Integration         = "web"
 	defaultGeocodingURL = "https://geocoding-api.open-meteo.com/v1/search"
 	defaultForecastURL  = "https://api.open-meteo.com/v1/forecast"
 	maximumPlaceRunes   = 200
@@ -59,14 +54,9 @@ type Cards interface {
 	Stage(principalID, turn string, png []byte) error
 }
 
-// Status is a principal's web access switch.
-type Status struct {
-	Enabled bool
-}
-
 type Service struct {
 	guard        *guard
-	repository   integration.Repository
+	switches     integration.SwitchReader
 	weatherHome  string
 	geocodingURL *url.URL
 	forecastURL  *url.URL
@@ -81,7 +71,10 @@ type Service struct {
 	running atomic.Bool
 }
 
-var _ module.Module = (*Service)(nil)
+var (
+	_ module.Module        = (*Service)(nil)
+	_ integration.Switched = (*Service)(nil)
+)
 
 // Telemetry records day-card render metrics.
 type Telemetry interface {
@@ -105,9 +98,9 @@ func (s *Service) SetTelemetry(telemetry Telemetry) {
 	s.telemetry = telemetry
 }
 
-func NewService(cfg Config, repository integration.Repository, logger *slog.Logger) (*Service, error) {
-	if repository == nil {
-		return nil, fmt.Errorf("web repository is required")
+func NewService(cfg Config, switches integration.SwitchReader, logger *slog.Logger) (*Service, error) {
+	if switches == nil {
+		return nil, fmt.Errorf("web switches are required")
 	}
 	if logger == nil {
 		return nil, fmt.Errorf("web logger is required")
@@ -138,7 +131,7 @@ func NewService(cfg Config, repository integration.Repository, logger *slog.Logg
 		cards:        cfg.Cards,
 		trains:       cfg.Trains,
 		guard:        newGuard(cfg.Resolver, cfg.Dial),
-		repository:   repository,
+		switches:     switches,
 		weatherHome:  home,
 		geocodingURL: geocoding,
 		forecastURL:  forecast,
@@ -182,49 +175,14 @@ func (s *Service) Shutdown(context.Context) error {
 	return nil
 }
 
-// Status reports the principal's switch. Web access is on unless the principal saved the opt-out
-// row, which carries no credential, since nothing here signs in anywhere.
-func (s *Service) Status(ctx context.Context, principalID string) (Status, error) {
-	_, optedOut, err := s.repository.LoadIntegrationConnection(ctx, principalID, Integration)
-	if err != nil {
-		return Status{}, err
-	}
-	return Status{Enabled: !optedOut}, nil
-}
+// Switch is each principal's web access switch. Web access is on by default wherever the
+// operator enabled it, since nothing here signs in anywhere.
+var Switch = integration.Switch{Integration: Integration, Name: "Web access", DefaultOn: true}
 
-// SetEnabled turns the principal's web access on or off. Turning it off takes effect on the next
-// tool call, including one later in a turn already running.
-func (s *Service) SetEnabled(ctx context.Context, principalID string, enabled bool) (Status, error) {
-	if enabled {
-		deleted, err := s.repository.DeleteIntegrationConnection(ctx, principalID, Integration)
-		if err != nil {
-			return Status{}, err
-		}
-		if deleted {
-			s.logger.InfoContext(ctx, "web.access.enabled", "principal_id", principalID)
-		}
-		return Status{Enabled: true}, nil
-	}
-	status, err := s.Status(ctx, principalID)
-	if err != nil || !status.Enabled {
-		return status, err
-	}
-	if err := s.repository.SaveIntegrationConnection(ctx, integration.Connection{
-		PrincipalID:   principalID,
-		Integration:   Integration,
-		TokenKind:     integration.TokenKindInternal,
-		WorkspaceID:   optOutWorkspaceID,
-		WorkspaceName: optOutWorkspaceName,
-	}); err != nil {
-		return Status{}, err
-	}
-	s.logger.InfoContext(ctx, "web.access.disabled", "principal_id", principalID)
-	return Status{}, nil
-}
+func (s *Service) Switch() integration.Switch { return Switch }
 
 // WebSearchEnabled tells the conversation whether the principal's turns load the search extension;
 // it follows the same switch as the tools here.
 func (s *Service) WebSearchEnabled(ctx context.Context, principalID string) (bool, error) {
-	status, err := s.Status(ctx, principalID)
-	return status.Enabled, err
+	return s.switches.Enabled(ctx, principalID, Switch)
 }

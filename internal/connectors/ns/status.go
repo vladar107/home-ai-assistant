@@ -29,12 +29,12 @@ const (
 // trip they would take: the first one departing at or after At, or with ArriveBy the last one
 // arriving by At.
 func (s *Service) TripStatus(ctx context.Context, principalID string, query transit.TripQuery) (transit.TripStatus, error) {
-	status, err := s.Status(ctx, principalID)
+	enabled, err := s.Enabled(ctx, principalID)
 	if err != nil {
 		return transit.TripStatus{}, err
 	}
-	if !status.Enabled {
-		return transit.TripStatus{}, &transit.RefusalError{Text: DisabledText, Unavailable: true, Disabled: true}
+	if !enabled {
+		return transit.TripStatus{}, &transit.RefusalError{Text: Switch.OffText(), Unavailable: true, Disabled: true}
 	}
 	list, failure := s.stationList(ctx, principalID)
 	if failure != nil {

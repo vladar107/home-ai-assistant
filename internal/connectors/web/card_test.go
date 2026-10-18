@@ -261,9 +261,7 @@ func TestWeatherCardRefusals(t *testing.T) {
 
 func TestWeatherCardFollowsTheWebSwitch(t *testing.T) {
 	f, _ := newCardFixture(t)
-	if status, err := f.service.SetEnabled(f.ctx, "alice", false); err != nil || status.Enabled {
-		t.Fatalf("disable = %+v %v", status, err)
-	}
+	f.setWeb("alice", false)
 	if set := f.toolSet("alice"); !set.Empty() {
 		t.Fatalf("tools with web access off = %v", toolNames(set))
 	}

@@ -15,21 +15,14 @@ const (
 	TypeSafePrivacyLine = "Safety checks: a scrubbed copy of messages, replies, outside content, and proposed actions goes to TypeSafe, never after Notion or NAS content."
 )
 
-// TypeSafeController is implemented by the judgment opt-in service; nil disables the safety checks section.
-type TypeSafeController interface {
-	Status(context.Context, string) (bool, error)
-	Enable(context.Context, string) error
-	Disable(context.Context, string) error
-}
-
 type typeSafeSection struct {
-	typeSafe TypeSafeController
+	typeSafe SwitchController
 }
 
 func (t typeSafeSection) prefix() string { return typeSafeSectionPrefix }
 
 func (t typeSafeSection) summary(ctx context.Context, principalID string) (settingsSummary, error) {
-	enabled, err := t.typeSafe.Status(ctx, principalID)
+	enabled, err := t.typeSafe.Enabled(ctx, principalID)
 	if err != nil {
 		return settingsSummary{}, err
 	}
@@ -37,7 +30,7 @@ func (t typeSafeSection) summary(ctx context.Context, principalID string) (setti
 }
 
 func (t typeSafeSection) render(ctx context.Context, principalID string) (settingsView, error) {
-	enabled, err := t.typeSafe.Status(ctx, principalID)
+	enabled, err := t.typeSafe.Enabled(ctx, principalID)
 	if err != nil {
 		return settingsView{}, err
 	}
@@ -55,12 +48,8 @@ func (t typeSafeSection) render(ctx context.Context, principalID string) (settin
 
 func (t typeSafeSection) act(ctx context.Context, principalID string, _ int64, action string) (settingsOutcome, error) {
 	switch action {
-	case typeSafeOnAction:
-		if err := t.typeSafe.Enable(ctx, principalID); err != nil {
-			return settingsOutcome{}, err
-		}
-	case typeSafeOffAction:
-		if err := t.typeSafe.Disable(ctx, principalID); err != nil {
+	case typeSafeOnAction, typeSafeOffAction:
+		if err := t.typeSafe.SetEnabled(ctx, principalID, action == typeSafeOnAction); err != nil {
 			return settingsOutcome{}, err
 		}
 	default:

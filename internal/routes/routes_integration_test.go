@@ -22,6 +22,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/ns"
 	"github.com/vladar107/home-ai-assistant/internal/httpretry"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
+	"github.com/vladar107/home-ai-assistant/internal/integration"
 	"github.com/vladar107/home-ai-assistant/internal/routes"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
@@ -226,12 +227,16 @@ func newHarness(t *testing.T) *harness {
 	server := httptest.NewServer(h.gateway)
 	t.Cleanup(server.Close)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	trains, err := ns.NewService(ns.Config{APIKey: "test-key", BaseURL: server.URL + strings.TrimSuffix(nsPrefix, "/"), Now: h.nsClock.Now}, state, logger)
+	switches, err := integration.NewSwitches(state, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trains, err := ns.NewService(ns.Config{APIKey: "test-key", BaseURL: server.URL + strings.TrimSuffix(nsPrefix, "/"), Now: h.nsClock.Now}, switches, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
 	busClock := &clock{now: busCaptured}
-	buses, err := bus.NewService(bus.Config{OVapiURL: server.URL + "/ovapi", GTFSURL: server.URL + "/gtfs", TransitousURL: server.URL + "/transitous", Now: busClock.Now}, state, logger)
+	buses, err := bus.NewService(bus.Config{OVapiURL: server.URL + "/ovapi", GTFSURL: server.URL + "/gtfs", TransitousURL: server.URL + "/transitous", Now: busClock.Now}, switches, logger)
 	if err != nil {
 		t.Fatal(err)
 	}

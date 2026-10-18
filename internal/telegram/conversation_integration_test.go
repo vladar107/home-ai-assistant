@@ -43,6 +43,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/exposure"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/imagegen"
+	"github.com/vladar107/home-ai-assistant/internal/integration"
 	"github.com/vladar107/home-ai-assistant/internal/location"
 	"github.com/vladar107/home-ai-assistant/internal/memory"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
@@ -263,6 +264,7 @@ type conversationHarness struct {
 	homeAssistant  *homeassistant.Service
 	grafana        *grafana.Service
 	bus            *bus.Service
+	switches       *integration.Switches
 	locations      *location.Service
 	memory         *memory.Service
 	backlog        *backlog.Service
@@ -435,10 +437,15 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	if err != nil {
 		t.Fatal(err)
 	}
+	h.switches, err = integration.NewSwitches(h.store, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
 	broker, err := tools.NewBroker(logger)
 	if err != nil {
 		t.Fatal(err)
 	}
+	broker.SetSwitches(h.switches)
 	exposures, err := exposure.NewService(h.store, logger)
 	if err != nil {
 		t.Fatal(err)
@@ -482,6 +489,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		t.Fatal(err)
 	}
 	h.approvals.SetExposure(exposures)
+	h.approvals.SetSwitches(h.switches)
 	// Tests that assert a turn's exact tools leave the withdraw tool out by not using the scheduler.
 	if options.schedules != nil {
 		if err := broker.Register(withdrawal.Provider{Withdrawer: h.approvals}); err != nil {
@@ -565,10 +573,10 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		}
 		googleController = h.google
 	}
-	var webController WebController
+	var webController SwitchController
 	var webSearch conversation.WebSearch
 	if options.web {
-		h.web, err = web.NewService(web.Config{}, h.store, logger)
+		h.web, err = web.NewService(web.Config{}, h.switches, logger)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -576,22 +584,22 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		if err := broker.Register(h.web); err != nil {
 			t.Fatal(err)
 		}
-		webController, webSearch = h.web, h.web
+		webController, webSearch = h.switches.Toggle(web.Switch), h.web
 	}
-	var nsController NSController
+	var nsController SwitchController
 	if options.ns != "" {
-		h.ns, err = ns.NewService(ns.Config{APIKey: "test-key", BaseURL: options.ns}, h.store, logger)
+		h.ns, err = ns.NewService(ns.Config{APIKey: "test-key", BaseURL: options.ns}, h.switches, logger)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if err := broker.Register(h.ns); err != nil {
 			t.Fatal(err)
 		}
-		nsController = h.ns
+		nsController = h.switches.Toggle(ns.Switch)
 	}
 	var homeAssistantController HomeAssistantController
 	if options.homeAssistant != "" {
-		h.homeAssistant, err = homeassistant.NewService(homeassistant.Config{Token: "test-token", BaseURL: options.homeAssistant}, h.store, h.approvals, logger)
+		h.homeAssistant, err = homeassistant.NewService(homeassistant.Config{Token: "test-token", BaseURL: options.homeAssistant}, h.switches, h.approvals, logger)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -599,10 +607,10 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		if err := broker.Register(h.homeAssistant); err != nil {
 			t.Fatal(err)
 		}
-		homeAssistantController = h.homeAssistant
+		homeAssistantController = homeSettings{Toggle: h.switches.Toggle(homeassistant.Switch), Service: h.homeAssistant}
 	}
 	if options.grafana != "" {
-		h.grafana, err = grafana.NewService(grafana.Config{Token: "test-token", BaseURL: options.grafana, Principals: []string{"alice"}}, h.store, logger)
+		h.grafana, err = grafana.NewService(grafana.Config{Token: "test-token", BaseURL: options.grafana, Principals: []string{"alice"}}, logger)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -610,19 +618,19 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 			t.Fatal(err)
 		}
 	}
-	var busController BusController
+	var busController SwitchController
 	if options.bus != "" {
 		h.bus, err = bus.NewService(bus.Config{
 			HomeStop: "50420100", Contact: options.busContact,
 			OVapiURL: options.bus, GTFSURL: options.bus, TransitousURL: options.bus,
-		}, h.store, logger)
+		}, h.switches, logger)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if err := broker.Register(h.bus); err != nil {
 			t.Fatal(err)
 		}
-		busController = h.bus
+		busController = h.switches.Toggle(bus.Switch)
 	}
 	var cards conversation.Cards
 	var photos conversation.PhotoDeliverer
@@ -824,7 +832,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		h.service.SetLocations(h.locations)
 	}
 	if h.grafana != nil {
-		h.service.SetGrafana(h.grafana)
+		h.service.SetGrafana(grafanaSettings{Toggle: h.switches.Toggle(grafana.Switch), Service: h.grafana})
 	}
 	if h.memory != nil {
 		h.service.SetMemory(h.memory)
@@ -1827,4 +1835,15 @@ func TestBotCommandRegistrationFailureKeepsPolling(t *testing.T) {
 	if strings.Contains(logs, "test-token") {
 		t.Fatal("logs contain the Telegram token")
 	}
+}
+
+// homeSettings and grafanaSettings pair a switch with its connector, as the application does.
+type homeSettings struct {
+	integration.Toggle
+	*homeassistant.Service
+}
+
+type grafanaSettings struct {
+	integration.Toggle
+	*grafana.Service
 }

@@ -12,12 +12,12 @@ import (
 // calamities first, then disruptions, then engineering works. An empty station asks about the whole
 // country; a zero at means now.
 func (s *Service) Disruptions(ctx context.Context, principalID, stationQuery string, at time.Time) ([]transit.Disruption, error) {
-	status, err := s.Status(ctx, principalID)
+	enabled, err := s.Enabled(ctx, principalID)
 	if err != nil {
 		return nil, err
 	}
-	if !status.Enabled {
-		return nil, &transit.RefusalError{Text: DisabledText, Unavailable: true, Disabled: true}
+	if !enabled {
+		return nil, &transit.RefusalError{Text: Switch.OffText(), Unavailable: true, Disabled: true}
 	}
 	if at.IsZero() {
 		at = s.now()

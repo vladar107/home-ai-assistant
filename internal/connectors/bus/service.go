@@ -20,10 +20,6 @@ import (
 
 const (
 	Integration = "bus"
-	// A row for the integration records that the principal turned buses off; without one they are
-	// on, since buses are on by default wherever the operator enabled them.
-	optOutWorkspaceID   = "bus-off"
-	optOutWorkspaceName = "Buses off"
 
 	moduleVersion = "0.1.0"
 
@@ -49,16 +45,11 @@ type Config struct {
 	Now func() time.Time
 }
 
-// Status is a principal's buses switch.
-type Status struct {
-	Enabled bool
-}
-
 type Service struct {
 	ovapi      *client
 	gtfs       *client
 	transitous *client
-	repository integration.Repository
+	switches   integration.SwitchReader
 	logger     *slog.Logger
 	now        func() time.Time
 	location   *time.Location
@@ -74,13 +65,14 @@ type Service struct {
 }
 
 var (
-	_ module.Module      = (*Service)(nil)
-	_ transit.Departures = (*Service)(nil)
+	_ module.Module        = (*Service)(nil)
+	_ integration.Switched = (*Service)(nil)
+	_ transit.Departures   = (*Service)(nil)
 )
 
-func NewService(cfg Config, repository integration.Repository, logger *slog.Logger) (*Service, error) {
-	if repository == nil {
-		return nil, fmt.Errorf("bus repository is required")
+func NewService(cfg Config, switches integration.SwitchReader, logger *slog.Logger) (*Service, error) {
+	if switches == nil {
+		return nil, fmt.Errorf("bus switches are required")
 	}
 	if logger == nil {
 		return nil, fmt.Errorf("bus logger is required")
@@ -111,14 +103,14 @@ func NewService(cfg Config, repository integration.Repository, logger *slog.Logg
 	}
 	agent := "HomeAgent/" + moduleVersion + " (private household assistant)"
 	service := &Service{
-		ovapi:      newClient(ovapiBase, agent),
-		gtfs:       newClient(gtfsBase, agent),
-		repository: repository,
-		logger:     logger,
-		now:        now,
-		location:   location,
-		homeStop:   homeStop,
-		cache:      make(map[string]cachedResult),
+		ovapi:    newClient(ovapiBase, agent),
+		gtfs:     newClient(gtfsBase, agent),
+		switches: switches,
+		logger:   logger,
+		now:      now,
+		location: location,
+		homeStop: homeStop,
+		cache:    make(map[string]cachedResult),
 	}
 	transitousBase, err := baseURL(cfg.TransitousURL, defaultTransitousURL)
 	if err != nil {
@@ -177,44 +169,14 @@ func (s *Service) Shutdown(context.Context) error {
 	return nil
 }
 
-// Status reports the principal's switch. Buses are on unless the principal saved the opt-out row,
-// which carries no credential, since none of the services needs one.
-func (s *Service) Status(ctx context.Context, principalID string) (Status, error) {
-	_, optedOut, err := s.repository.LoadIntegrationConnection(ctx, principalID, Integration)
-	if err != nil {
-		return Status{}, err
-	}
-	return Status{Enabled: !optedOut}, nil
-}
+// Switch is each principal's buses switch. Buses are on by default wherever the operator
+// enabled them, since none of the services needs a credential.
+var Switch = integration.Switch{Integration: Integration, Name: "Bus information", DefaultOn: true}
 
-// SetEnabled turns the principal's buses on or off. Turning them off takes effect on the next tool
-// call, including one later in a turn already running.
-func (s *Service) SetEnabled(ctx context.Context, principalID string, enabled bool) (Status, error) {
-	if enabled {
-		deleted, err := s.repository.DeleteIntegrationConnection(ctx, principalID, Integration)
-		if err != nil {
-			return Status{}, err
-		}
-		if deleted {
-			s.logger.InfoContext(ctx, "bus.enabled", "principal_id", principalID)
-		}
-		return Status{Enabled: true}, nil
-	}
-	status, err := s.Status(ctx, principalID)
-	if err != nil || !status.Enabled {
-		return status, err
-	}
-	if err := s.repository.SaveIntegrationConnection(ctx, integration.Connection{
-		PrincipalID:   principalID,
-		Integration:   Integration,
-		TokenKind:     integration.TokenKindInternal,
-		WorkspaceID:   optOutWorkspaceID,
-		WorkspaceName: optOutWorkspaceName,
-	}); err != nil {
-		return Status{}, err
-	}
-	s.logger.InfoContext(ctx, "bus.disabled", "principal_id", principalID)
-	return Status{}, nil
+func (s *Service) Switch() integration.Switch { return Switch }
+
+func (s *Service) enabled(ctx context.Context, principalID string) (bool, error) {
+	return s.switches.Enabled(ctx, principalID, Switch)
 }
 
 func digitsOnly(value string) bool {

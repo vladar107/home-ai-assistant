@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/connectors/homeassistant"
 	"github.com/vladar107/home-ai-assistant/internal/watch"
 )
 
@@ -268,7 +269,7 @@ func TestHomeWatchFailsWhenEntityStopsBeingExposed(t *testing.T) {
 
 func TestHomeWatchSkipsWhileTheHomeIsOff(t *testing.T) {
 	f := homeFixture(t, balconyDoor)
-	if _, err := f.service.SetEnabled(t.Context(), "alice", false); err != nil {
+	if err := f.switches.SetEnabled(t.Context(), "alice", homeassistant.Switch, false); err != nil {
 		t.Fatal(err)
 	}
 	_, err := f.service.Evaluate(t.Context(), "alice", doorWatch(0), watch.Occurrence{Cache: watch.NewCache()})

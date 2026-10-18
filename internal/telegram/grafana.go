@@ -3,8 +3,6 @@ package telegram
 import (
 	"context"
 	"log/slog"
-
-	"github.com/vladar107/home-ai-assistant/internal/connectors/grafana"
 )
 
 const (
@@ -17,12 +15,11 @@ const (
 	GrafanaPrivacyLine = "Monitoring: metrics and logs you ask about go to your model and can show other household members' activity."
 )
 
-// GrafanaController is implemented by the Grafana connector; nil leaves monitoring out of /settings
-// and /privacy.
+// GrafanaController is the Grafana switch beside the connector's allowlist; nil leaves monitoring
+// out of /settings and /privacy.
 type GrafanaController interface {
+	SwitchController
 	Allowed(string) bool
-	Status(context.Context, string) (grafana.Status, error)
-	SetEnabled(context.Context, string, bool) (grafana.Status, error)
 }
 
 // SetGrafana adds the monitoring section to /settings and its line to /privacy for the principals
@@ -46,19 +43,19 @@ func (g grafanaSection) prefix() string { return grafanaSectionPrefix }
 func (g grafanaSection) availableTo(principalID string) bool { return g.grafana.Allowed(principalID) }
 
 func (g grafanaSection) summary(ctx context.Context, principalID string) (settingsSummary, error) {
-	status, err := g.grafana.Status(ctx, principalID)
+	enabled, err := g.grafana.Enabled(ctx, principalID)
 	if err != nil {
 		return settingsSummary{}, err
 	}
-	return settingsSummary{name: "Grafana", state: onOff(status.Enabled)}, nil
+	return settingsSummary{name: "Grafana", state: onOff(enabled)}, nil
 }
 
 func (g grafanaSection) render(ctx context.Context, principalID string) (settingsView, error) {
-	status, err := g.grafana.Status(ctx, principalID)
+	enabled, err := g.grafana.Enabled(ctx, principalID)
 	if err != nil {
 		return settingsView{}, err
 	}
-	if status.Enabled {
+	if enabled {
 		return settingsView{
 			lines:   []string{GrafanaOnLine},
 			buttons: []InlineButton{{Text: "Turn off monitoring", CallbackData: grafanaSectionPrefix + ":" + grafanaOffAction}},
@@ -74,7 +71,7 @@ func (g grafanaSection) act(ctx context.Context, principalID string, _ int64, ac
 	switch action {
 	case grafanaOnAction, grafanaOffAction:
 		enabled := action == grafanaOnAction
-		if _, err := g.grafana.SetEnabled(ctx, principalID, enabled); err != nil {
+		if err := g.grafana.SetEnabled(ctx, principalID, enabled); err != nil {
 			return settingsOutcome{}, err
 		}
 		g.telemetry.ContextLogger(ctx, g.logger).InfoContext(ctx, "grafana.changed", "principal_id", principalID, "enabled", enabled)

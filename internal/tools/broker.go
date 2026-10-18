@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/integration"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
@@ -111,7 +112,9 @@ type Result struct {
 }
 
 // Provider is the narrow interface a connector module implements. It never receives the
-// application, the store, or the runtime; the principal comes from the turn.
+// application, the store, or the runtime; the principal comes from the turn. A provider that also
+// implements integration.Switched is asked for its tools, and its tools are run, only while the
+// principal has its integration on.
 type Provider interface {
 	Contribute(context.Context, string) (Contribution, error)
 	Execute(context.Context, string, Call) (Result, error)
@@ -148,6 +151,7 @@ type Broker struct {
 	privacy   TurnPrivacyRecorder
 	screener  Screener
 	telemetry Telemetry
+	switches  integration.SwitchReader
 }
 
 func NewBroker(logger *slog.Logger) (*Broker, error) {
@@ -157,13 +161,23 @@ func NewBroker(logger *slog.Logger) (*Broker, error) {
 	return &Broker{logger: logger}, nil
 }
 
-// Register adds a provider at wiring time, before turns start.
+// Register adds a provider at wiring time, before turns start. A switched provider needs the
+// switches set first.
 func (b *Broker) Register(provider Provider) error {
 	if provider == nil {
 		return fmt.Errorf("register tool provider: provider is nil")
 	}
+	if switched, ok := provider.(integration.Switched); ok && b.switches == nil {
+		return fmt.Errorf("register tool provider: %q is switched but the broker has no switches", switched.Switch().Integration)
+	}
 	b.providers = append(b.providers, provider)
 	return nil
+}
+
+// SetSwitches sets where the principals' integration switches are read, at wiring time before
+// providers are registered.
+func (b *Broker) SetSwitches(switches integration.SwitchReader) {
+	b.switches = switches
 }
 
 // SetExposure sets where third-party results are recorded, at wiring time before turns start.
@@ -220,6 +234,13 @@ func (b *Broker) toolsFor(ctx context.Context, principalID string, readOnly bool
 	var definitions []agentruntime.ToolDefinition
 	activities := make(map[string]string)
 	for _, provider := range b.providers {
+		off, _, err := b.switchedOff(ctx, provider, principalID)
+		if err != nil {
+			return agentruntime.ToolSet{}, fmt.Errorf("read integration switch: %w", err)
+		}
+		if off {
+			continue
+		}
 		contribution, err := provider.Contribute(ctx, principalID)
 		if err != nil {
 			return agentruntime.ToolSet{}, fmt.Errorf("collect tool contribution: %w", err)
@@ -265,6 +286,21 @@ func (b *Broker) toolsFor(ctx context.Context, principalID string, readOnly bool
 		Executor:    executor,
 		Activities:  activities,
 	}, nil
+}
+
+// switchedOff reports whether the provider belongs to an integration the principal has off, and
+// which one.
+func (b *Broker) switchedOff(ctx context.Context, provider Provider, principalID string) (bool, integration.Switch, error) {
+	switched, ok := provider.(integration.Switched)
+	if !ok {
+		return false, integration.Switch{}, nil
+	}
+	sw := switched.Switch()
+	enabled, err := b.switches.Enabled(ctx, principalID, sw)
+	if err != nil {
+		return false, sw, err
+	}
+	return !enabled, sw, nil
 }
 
 func validateDefinition(definition Definition) error {
@@ -375,7 +411,15 @@ func (e *turnExecutor) perform(ctx context.Context, call agentruntime.ToolCall, 
 	if !known {
 		return "unknown_tool", "", agentruntime.ToolResult{Text: prompt.ToolUnavailable, IsError: true}
 	}
-	// The grant is rechecked so a connection removed during the turn fails closed.
+	// The switch and the grant are rechecked so an integration switched off or a connection removed
+	// during the turn fails closed.
+	off, sw, err := e.broker.switchedOff(ctx, binding.provider, e.principalID)
+	if err != nil {
+		return "grant_check_failed", "", agentruntime.ToolResult{Text: prompt.ToolUnavailableNow, IsError: true}
+	}
+	if off {
+		return "switched_off", "", agentruntime.ToolResult{Text: sw.OffText(), IsError: true}
+	}
 	contribution, err := binding.provider.Contribute(ctx, e.principalID)
 	if err != nil {
 		return "grant_check_failed", "", agentruntime.ToolResult{Text: prompt.ToolUnavailableNow, IsError: true}

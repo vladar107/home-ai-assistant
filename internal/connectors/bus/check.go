@@ -28,12 +28,12 @@ func (s *Service) CheckDepartures(ctx context.Context, principalID string, query
 	if len(query.Times) == 0 || len(query.Times) > MaximumCheckedDepartures {
 		return nil, &transit.RefusalError{Text: fmt.Sprintf("give 1 to %d planned departures.", MaximumCheckedDepartures)}
 	}
-	status, err := s.Status(ctx, principalID)
+	enabled, err := s.enabled(ctx, principalID)
 	if err != nil {
 		return nil, err
 	}
-	if !status.Enabled {
-		return nil, &transit.RefusalError{Text: DisabledText, Unavailable: true, Disabled: true}
+	if !enabled {
+		return nil, &transit.RefusalError{Text: Switch.OffText(), Unavailable: true, Disabled: true}
 	}
 	index, failure := s.index(ctx, principalID)
 	if failure != nil {
@@ -49,12 +49,12 @@ func (s *Service) CheckDepartures(ctx context.Context, principalID string, query
 // ResolvePlace checks that a name means one stop, under the principal's own buses switch, and
 // returns the stop's name; role names the field in a refusal, such as "stop".
 func (s *Service) ResolvePlace(ctx context.Context, principalID, role, query string) (string, error) {
-	status, err := s.Status(ctx, principalID)
+	enabled, err := s.enabled(ctx, principalID)
 	if err != nil {
 		return "", err
 	}
-	if !status.Enabled {
-		return "", &transit.RefusalError{Text: DisabledText, Unavailable: true, Disabled: true}
+	if !enabled {
+		return "", &transit.RefusalError{Text: Switch.OffText(), Unavailable: true, Disabled: true}
 	}
 	index, failure := s.index(ctx, principalID)
 	if failure != nil {

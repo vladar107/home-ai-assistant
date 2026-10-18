@@ -22,6 +22,7 @@ import (
 	"unicode/utf16"
 
 	"github.com/vladar107/home-ai-assistant/internal/clip"
+	"github.com/vladar107/home-ai-assistant/internal/integration"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
@@ -46,6 +47,8 @@ const (
 	ReasonTimeout        = "timeout"
 	ReasonNoExecutor     = "no_executor"
 	ReasonExecutorFailed = "executor_failed"
+	// ReasonDisabled marks an action whose integration the principal switched off before it ran.
+	ReasonDisabled = "disabled"
 	// ReasonWithdrawn marks a rejected record the model withdrew itself.
 	ReasonWithdrawn = "withdrawn"
 	// ReasonUndoRefused marks a done record whose Undo was refused for good; its outcome says why.
@@ -351,6 +354,7 @@ type Service struct {
 	checker   IntentChecker
 	exposure  Exposure
 	telemetry Telemetry
+	switches  integration.SwitchReader
 	intents   map[string]Intent
 	// notices holds what became of resolved proposals per tab, so the outcome reaches the
 	// conversation that made them.
@@ -457,13 +461,26 @@ func (s *Service) SetExposure(exposure Exposure) {
 	s.exposure = exposure
 }
 
-// RegisterExecutor binds a connector to the tools it can execute once confirmed.
+// SetSwitches sets where the principals' integration switches are read, at wiring time before
+// executors are registered.
+func (s *Service) SetSwitches(switches integration.SwitchReader) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.switches = switches
+}
+
+// RegisterExecutor binds a connector to the tools it can execute once confirmed. An executor that
+// implements integration.Switched runs only while the principal has its integration on, so it
+// needs the switches set first.
 func (s *Service) RegisterExecutor(executor Executor) error {
 	if executor == nil {
 		return fmt.Errorf("register approval executor: executor is nil")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if switched, ok := executor.(integration.Switched); ok && s.switches == nil {
+		return fmt.Errorf("register approval executor: %q is switched but the service has no switches", switched.Switch().Integration)
+	}
 	for _, tool := range executor.ActionTools() {
 		if _, exists := s.executors[tool]; exists {
 			return fmt.Errorf("register approval executor: tool %q is already bound", tool)
@@ -934,7 +951,7 @@ func (s *Service) execute(ctx context.Context, record Record) Record {
 	}
 	if bound {
 		var succeeded bool
-		succeeded, reason, outcome, _ = runExecutor(ctx, executor, record)
+		succeeded, reason, outcome, _ = s.runExecutor(ctx, executor, record)
 		if succeeded {
 			status = StatusExecuted
 		}
@@ -949,8 +966,22 @@ func (s *Service) execute(ctx context.Context, record Record) Record {
 }
 
 // runExecutor runs a started record's action, returning whether it succeeded, the failure reason,
-// the outcome line, and the undo payload of a success.
-func runExecutor(ctx context.Context, executor Executor, record Record) (bool, string, string, json.RawMessage) {
+// the outcome line, and the undo payload of a success. An action whose integration the principal
+// has switched off since it was proposed is not run.
+func (s *Service) runExecutor(ctx context.Context, executor Executor, record Record) (bool, string, string, json.RawMessage) {
+	if switched, ok := executor.(integration.Switched); ok {
+		s.mu.Lock()
+		switches := s.switches
+		s.mu.Unlock()
+		sw := switched.Switch()
+		enabled, err := switches.Enabled(ctx, record.PrincipalID, sw)
+		if err != nil {
+			return false, ReasonExecutorFailed, "", nil
+		}
+		if !enabled {
+			return false, ReasonDisabled, sw.UserOffText(), nil
+		}
+	}
 	executionCtx, cancel := context.WithTimeout(ctx, executionTimeout)
 	defer cancel()
 	result, err := executor.ExecuteApproved(executionCtx, record)

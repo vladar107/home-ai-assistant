@@ -22,6 +22,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/homeassistant"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
+	"github.com/vladar107/home-ai-assistant/internal/integration"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
@@ -356,6 +357,7 @@ func (deliverer) EditDirectActions(context.Context, int64, int64, approval.Direc
 type fixture struct {
 	t        *testing.T
 	service  *homeassistant.Service
+	switches *integration.Switches
 	broker   *tools.Broker
 	sim      *simulator
 	server   *httptest.Server
@@ -388,11 +390,16 @@ func newFixtureWithToken(t *testing.T, sim *simulator, serviceToken string) *fix
 	t.Cleanup(f.server.Close)
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	f.switches, err = integration.NewSwitches(state, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
 	f.approval, err = approval.NewService(approval.Config{}, state, deliverer{}, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.service, err = homeassistant.NewService(homeassistant.Config{Token: serviceToken, BaseURL: f.server.URL, Now: f.clock.Now}, state, f.approval, logger)
+	f.approval.SetSwitches(f.switches)
+	f.service, err = homeassistant.NewService(homeassistant.Config{Token: serviceToken, BaseURL: f.server.URL, Now: f.clock.Now}, f.switches, f.approval, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -403,6 +410,7 @@ func newFixtureWithToken(t *testing.T, sim *simulator, serviceToken string) *fix
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.broker.SetSwitches(f.switches)
 	if err := f.broker.Register(f.service); err != nil {
 		t.Fatal(err)
 	}
@@ -879,43 +887,69 @@ func TestSwitchIsOnByDefaultAndPerUser(t *testing.T) {
 	f := newFixture(t, newSimulator(livingTV))
 	ctx := t.Context()
 
-	if status, err := f.service.Status(ctx, "alice"); err != nil || !status.Enabled {
-		t.Fatalf("default status = %+v %v", status, err)
+	if enabled, err := f.switches.Enabled(ctx, "alice", homeassistant.Switch); err != nil || !enabled {
+		t.Fatalf("default switch = %v %v", enabled, err)
 	}
 	set := f.toolSet()
 	wantTools(t, set, readTools)
 
-	if status, err := f.service.SetEnabled(ctx, "alice", false); err != nil || status.Enabled {
-		t.Fatalf("disable = %+v %v", status, err)
+	if err := f.switches.SetEnabled(ctx, "alice", homeassistant.Switch, false); err != nil {
+		t.Fatal(err)
 	}
 	if off := f.toolSet(); !off.Empty() {
 		t.Fatalf("tools while off = %v", toolNames(off))
 	}
-	wantError(t, f.call(set, "ha_media_pause", map[string]any{"name": "Living TV"}), "no longer available")
+	wantError(t, f.call(set, "ha_media_pause", map[string]any{"name": "Living TV"}), homeassistant.Switch.OffText())
 	if bob, err := f.broker.ToolsFor(ctx, "bob"); err != nil || bob.Empty() {
 		t.Fatalf("bob's tools = %v %v", toolNames(bob), err)
 	}
 
-	if status, err := f.service.SetEnabled(ctx, "alice", true); err != nil || !status.Enabled {
-		t.Fatalf("enable = %+v %v", status, err)
+	if err := f.switches.SetEnabled(ctx, "alice", homeassistant.Switch, true); err != nil {
+		t.Fatal(err)
 	}
 	wantTools(t, f.toolSet(), readTools)
 }
 
+// A proposal made while the home was on and confirmed after the user turned it off is not run,
+// whichever home tool proposed it.
 func TestConfirmedActionIsRefusedWhileTheHomeIsOff(t *testing.T) {
-	sim := newSimulator(livingTV)
-	sim.labelFrontDoor()
-	f := newFixture(t, sim)
-	f.call(f.toolSet(), "ha_service_call", map[string]any{"entity_id": "lock.front_door", "service": "unlock"})
-	record, _ := f.pending()
-	if _, err := f.service.SetEnabled(t.Context(), "alice", false); err != nil {
-		t.Fatal(err)
+	proposals := map[string]func(*fixture){
+		"service call": func(f *fixture) {
+			f.call(f.toolSet(), "ha_service_call", map[string]any{"entity_id": "lock.front_door", "service": "unlock"})
+		},
+		"action after outside content": func(f *fixture) {
+			f.service.SetExposure(&externalFlag{external: true})
+			f.call(f.toolSet(), "ha_turn_on", map[string]any{"name": "Living TV"})
+		},
 	}
-	if _, err := f.approval.Press(t.Context(), "alice", approval.ActionConfirm, record.ID); err != nil {
-		t.Fatal(err)
-	}
-	if posts := f.sim.posts("/api/services/"); len(posts) != 0 {
-		t.Fatalf("posts = %+v", posts)
+	for name, propose := range proposals {
+		t.Run(name, func(t *testing.T) {
+			sim := newSimulator(livingTV)
+			sim.labelFrontDoor()
+			f := newFixture(t, sim)
+			propose(f)
+			record, found := f.pending()
+			if !found {
+				t.Fatal("no proposal")
+			}
+			if err := f.switches.SetEnabled(t.Context(), "alice", homeassistant.Switch, false); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.approval.Press(t.Context(), "alice", approval.ActionConfirm, record.ID); err != nil {
+				t.Fatal(err)
+			}
+			finished, found, err := f.state.LoadApproval(t.Context(), record.ID)
+			if err != nil || !found || finished.Status != approval.StatusFailed || finished.Reason != approval.ReasonDisabled ||
+				finished.Outcome != "The home is off for you; turn it on in /settings and ask again." {
+				t.Fatalf("record = %+v %v %v", finished, found, err)
+			}
+			if posts := f.sim.posts("/api/services/"); len(posts) != 0 {
+				t.Fatalf("posts = %+v", posts)
+			}
+			if calls := turnOnCalls(f.sim); len(calls) != 0 {
+				t.Fatalf("calls = %+v", calls)
+			}
+		})
 	}
 }
 
@@ -995,13 +1029,17 @@ func TestServiceRejectsBadConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = state.Close() })
+	switches, err := integration.NewSwitches(state, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for name, cfg := range map[string]homeassistant.Config{
 		"no token":       {BaseURL: "https://ha.home"},
 		"path":           {Token: token, BaseURL: "https://ha.home/api"},
 		"credentials":    {Token: token, BaseURL: "https://user:pw@ha.home"},
 		"unknown scheme": {Token: token, BaseURL: "ftp://ha.home"},
 	} {
-		if _, err := homeassistant.NewService(cfg, state, nil, logger); err == nil {
+		if _, err := homeassistant.NewService(cfg, switches, nil, logger); err == nil {
 			t.Fatalf("%s: configuration was accepted", name)
 		}
 	}
@@ -1086,7 +1124,7 @@ func TestActionAfterOutsideContentIsProposedAndRunsOnlyAfterConfirmation(t *test
 func TestOutsideContentWithoutAProposerRefusesTheAction(t *testing.T) {
 	sim := newSimulator(livingTV)
 	f := newFixture(t, sim)
-	service, err := homeassistant.NewService(homeassistant.Config{Token: token, BaseURL: f.server.URL, Now: f.clock.Now}, f.state, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	service, err := homeassistant.NewService(homeassistant.Config{Token: token, BaseURL: f.server.URL, Now: f.clock.Now}, f.switches, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1095,6 +1133,7 @@ func TestOutsideContentWithoutAProposerRefusesTheAction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	broker.SetSwitches(f.switches)
 	if err := broker.Register(service); err != nil {
 		t.Fatal(err)
 	}
@@ -1110,11 +1149,6 @@ func TestOutsideContentWithoutAProposerRefusesTheAction(t *testing.T) {
 
 func TestConfirmedActionFailsWhenItIsNoLongerSafeToRun(t *testing.T) {
 	cases := map[string]func(*fixture){
-		"switch turned off": func(f *fixture) {
-			if _, err := f.service.SetEnabled(t.Context(), "alice", false); err != nil {
-				t.Fatal(err)
-			}
-		},
 		"actions withheld": func(f *fixture) {
 			f.sim.set(func(s *simulator) { s.liveContext += frontDoor })
 		},

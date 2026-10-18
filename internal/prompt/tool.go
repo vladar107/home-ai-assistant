@@ -26,6 +26,12 @@ func ToolBudgetExhausted(handoff string) string {
 	return text
 }
 
+// ToolIntegrationOff refuses a call to an integration the user switched off; name is how the
+// integration is called, such as "Train information".
+func ToolIntegrationOff(name string) string {
+	return name + " is off for this user; they can turn it on in /settings."
+}
+
 // What a write tool's call answers once approvals have taken it: proposed for the user to confirm,
 // or made at once and told.
 const (

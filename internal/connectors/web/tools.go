@@ -21,8 +21,6 @@ const (
 	// cardTimeout covers a geocoding and a forecast request for each of up to four legs; the
 	// train statuses are asked for alongside them under their own shorter limit.
 	cardTimeout = 45 * time.Second
-
-	DisabledText = "Web access is off for this user; they can turn it on in /settings."
 )
 
 const guidance = "Web: fetch_page reads a public web page or PDF by its address and returns its text in windows; use it for a link the user gave or one a search found; once the conversation has read content from outside the household it opens only links the user sent or that appeared in what you read, so ask the user for any other link; never guess addresses, least of all for anything inside the home, which cannot be fetched. " +
@@ -113,21 +111,16 @@ var definitions = []tools.Definition{
 
 var _ tools.Provider = (*Service)(nil)
 
-// Contribute offers the tools while the principal's switch is on; a scheduled run receives them
-// too, since all are reads, staging a card for the principal's own reply included.
+// Contribute offers the tools; the broker asks only while the principal has web access on. A
+// scheduled run receives them too, since all are reads, staging a card for the principal's own
+// reply included.
 func (s *Service) Contribute(ctx context.Context, principalID string) (tools.Contribution, error) {
-	status, err := s.Status(ctx, principalID)
-	if err != nil {
-		return tools.Contribution{}, err
-	}
-	if !status.Enabled {
-		return tools.Contribution{}, nil
-	}
 	if s.cards == nil {
 		return tools.Contribution{Guidance: s.guidance(), Definitions: definitions}, nil
 	}
 	trains := false
 	if s.trains != nil {
+		var err error
 		if trains, err = s.trains.Enabled(ctx, principalID); err != nil {
 			return tools.Contribution{}, err
 		}
@@ -151,13 +144,6 @@ func (s *Service) guidance() string {
 }
 
 func (s *Service) Execute(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
-	status, err := s.Status(ctx, principalID)
-	if err != nil {
-		return tools.Result{}, err
-	}
-	if !status.Enabled {
-		return errorResult(DisabledText), nil
-	}
 	switch call.Name {
 	case toolFetchPage:
 		var arguments struct {

@@ -26,8 +26,6 @@ const (
 	// toolTimeout covers a snapshot refresh, which makes four requests under the client's own
 	// 10-second limit each, and the call itself.
 	toolTimeout = 45 * time.Second
-
-	DisabledText = "The home is off for this user; they can turn it on in /settings."
 )
 
 const guidance = "Home (Home Assistant): the ha_ tools reach the household's smart-home devices that the household exposed to the assistant. " +
@@ -85,17 +83,11 @@ var serviceCallDefinition = tools.Definition{
 
 var _ tools.Provider = (*Service)(nil)
 
-// Contribute offers Home Assistant's read tools while the principal's switch is on, its action tools
-// only while no exposed entity needs confirmation, and the proposal tools while any entity carries
-// the confirmation label. Home Assistant being down offers nothing rather than failing the turn.
+// Contribute offers Home Assistant's read tools, its action tools only while no exposed entity
+// needs confirmation, and the proposal tools while any entity carries the confirmation label; the
+// broker asks only while the principal has the home on. Home Assistant being down offers nothing
+// rather than failing the turn.
 func (s *Service) Contribute(ctx context.Context, principalID string) (tools.Contribution, error) {
-	status, err := s.Status(ctx, principalID)
-	if err != nil {
-		return tools.Contribution{}, err
-	}
-	if !status.Enabled {
-		return tools.Contribution{}, nil
-	}
 	snap, err := s.current(ctx)
 	if err != nil {
 		return tools.Contribution{}, nil
@@ -125,13 +117,6 @@ func (s *Service) Contribute(ctx context.Context, principalID string) (tools.Con
 }
 
 func (s *Service) Execute(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
-	status, err := s.Status(ctx, principalID)
-	if err != nil {
-		return tools.Result{}, err
-	}
-	if !status.Enabled {
-		return tools.Result{Text: DisabledText, IsError: true}, nil
-	}
 	snap, err := s.current(ctx)
 	if err != nil {
 		return failure(err), nil

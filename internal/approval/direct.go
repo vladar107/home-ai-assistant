@@ -108,7 +108,7 @@ func (s *Service) Act(ctx context.Context, principalID string, proposal Proposal
 		s.mu.Unlock()
 	}
 
-	succeeded, reason, outcome, undo := runExecutor(ctx, executor, record)
+	succeeded, reason, outcome, undo := s.runExecutor(ctx, executor, record)
 	status := StatusFailed
 	if succeeded {
 		status, reason = StatusDone, ""

@@ -36,8 +36,6 @@ const (
 	defaultLogLines   = 50
 	maximumLogLines   = 200
 	defaultAlertRange = 24 * time.Hour
-
-	DisabledText = "Grafana is off for this user; they can turn it on in /settings."
 )
 
 const guidance = "Grafana: the grafana_ tools read the household's own monitoring through Grafana. " +
@@ -115,28 +113,18 @@ var (
 	durationPattern     = regexp.MustCompile(`^([0-9]+)(s|m|h|d|w)$`)
 )
 
-// Contribute offers Grafana's tools to an allowed principal whose switch is on, and nothing to
-// anyone else.
-func (s *Service) Contribute(ctx context.Context, principalID string) (tools.Contribution, error) {
-	status, err := s.Status(ctx, principalID)
-	if err != nil {
-		return tools.Contribution{}, err
-	}
-	if !status.Enabled {
+// Contribute offers Grafana's tools to an allowed principal, and nothing to anyone else; the broker
+// asks only while the principal has Grafana on.
+func (s *Service) Contribute(_ context.Context, principalID string) (tools.Contribution, error) {
+	if !s.Allowed(principalID) {
 		return tools.Contribution{}, nil
 	}
 	return tools.Contribution{Guidance: guidance, Definitions: definitions}, nil
 }
 
 func (s *Service) Execute(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
-	status, err := s.Status(ctx, principalID)
-	if err != nil {
-		return tools.Result{}, err
-	}
-	if !status.Enabled {
-		return tools.Result{Text: DisabledText, IsError: true}, nil
-	}
 	var text string
+	var err error
 	switch call.Name {
 	case toolDashboards:
 		text, err = s.dashboards(ctx, call.Arguments)

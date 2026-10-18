@@ -22,6 +22,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/connectors/web"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
+	"github.com/vladar107/home-ai-assistant/internal/integration"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
@@ -51,11 +52,12 @@ func (resolver) LookupNetIP(_ context.Context, _, host string) ([]netip.Addr, er
 }
 
 type fixture struct {
-	t       *testing.T
-	ctx     context.Context
-	service *web.Service
-	broker  *tools.Broker
-	logs    *lockedBuffer
+	t        *testing.T
+	ctx      context.Context
+	service  *web.Service
+	switches *integration.Switches
+	broker   *tools.Broker
+	logs     *lockedBuffer
 
 	mu     sync.Mutex
 	dialed []string
@@ -128,7 +130,11 @@ func newFixtureWith(t *testing.T, cfg web.Config) *fixture {
 		var dialer net.Dialer
 		return dialer.DialContext(ctx, "tcp", server.Listener.Addr().String())
 	}
-	service, err := web.NewService(cfg, state, logger)
+	switches, err := integration.NewSwitches(state, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := web.NewService(cfg, switches, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,10 +142,11 @@ func newFixtureWith(t *testing.T, cfg web.Config) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	broker.SetSwitches(switches)
 	if err := broker.Register(service); err != nil {
 		t.Fatal(err)
 	}
-	f.service, f.broker = service, broker
+	f.service, f.switches, f.broker = service, switches, broker
 	return f
 }
 
@@ -156,10 +163,10 @@ func (f *fixture) serve(hostPath, contentType string, body []byte) {
 	})
 }
 
-func (f *fixture) enable(principalID string) {
+func (f *fixture) setWeb(principalID string, enabled bool) {
 	f.t.Helper()
-	if status, err := f.service.SetEnabled(f.ctx, principalID, true); err != nil || !status.Enabled {
-		f.t.Fatalf("enable = %+v %v", status, err)
+	if err := f.switches.SetEnabled(f.ctx, principalID, web.Switch, enabled); err != nil {
+		f.t.Fatal(err)
 	}
 }
 
@@ -238,8 +245,8 @@ func TestWebAccessIsOnByDefaultAndAPerUserSwitch(t *testing.T) {
 	f := newFixture(t, "")
 	f.serve("public.test/", "text/plain", []byte("hello"))
 
-	if status, err := f.service.Status(f.ctx, "alice"); err != nil || !status.Enabled {
-		t.Fatalf("default status = %+v %v, want on", status, err)
+	if search, err := f.service.WebSearchEnabled(f.ctx, "alice"); err != nil || !search {
+		t.Fatalf("default switch = %v %v, want on", search, err)
 	}
 	set := f.toolSet("alice")
 	if got := toolNames(set); !slices.Equal(got, []string{"fetch_page", "weather_forecast"}) {
@@ -249,14 +256,10 @@ func TestWebAccessIsOnByDefaultAndAPerUserSwitch(t *testing.T) {
 		t.Fatalf("guidance = %q", set.Guidance)
 	}
 	wantText(t, f.callWith(set, "fetch_page", map[string]any{"url": "http://public.test/"}), "hello")
-	if status, err := f.service.SetEnabled(f.ctx, "alice", true); err != nil || !status.Enabled {
-		t.Fatalf("enable while on = %+v %v", status, err)
-	}
+	f.setWeb("alice", true)
 
-	if status, err := f.service.SetEnabled(f.ctx, "alice", false); err != nil || status.Enabled {
-		t.Fatalf("disable = %+v %v", status, err)
-	}
-	wantError(t, f.callWith(set, "fetch_page", map[string]any{"url": "http://public.test/"}), "no longer available")
+	f.setWeb("alice", false)
+	wantError(t, f.callWith(set, "fetch_page", map[string]any{"url": "http://public.test/"}), web.Switch.OffText())
 	if set := f.toolSet("alice"); !set.Empty() {
 		t.Fatalf("tools after disabling = %v, want none", toolNames(set))
 	}
@@ -267,15 +270,15 @@ func TestWebAccessIsOnByDefaultAndAPerUserSwitch(t *testing.T) {
 		t.Fatalf("bob's tools after alice turned hers off = %v", got)
 	}
 
-	f.enable("alice")
+	f.setWeb("alice", true)
 	if got := toolNames(f.toolSet("alice")); !slices.Equal(got, []string{"fetch_page", "weather_forecast"}) {
 		t.Fatalf("tools after turning back on = %v", got)
 	}
 	logs := f.logs.String()
-	if !strings.Contains(logs, "web.access.enabled") || !strings.Contains(logs, "web.access.disabled") {
+	if !strings.Contains(logs, "integration.switch.changed principal_id=alice integration=web enabled=false") {
 		t.Fatalf("logs lack the switch events:\n%s", logs)
 	}
-	if strings.Count(logs, "web.access.enabled") != 1 {
+	if strings.Count(logs, "integration.switch.changed principal_id=alice integration=web enabled=true") != 1 {
 		t.Fatalf("turning on while already on was logged:\n%s", logs)
 	}
 }

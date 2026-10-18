@@ -70,11 +70,11 @@ func matchVisible(visible map[string]string, name string) []string {
 // Resolve checks that a home watch looks at one entity the assistant can see and that its
 // condition fits the entity's state, and returns the spec with the entity ID and friendly name.
 func (s *Service) Resolve(ctx context.Context, principalID string, spec watch.Spec) (watch.Spec, error) {
-	status, err := s.Status(ctx, principalID)
+	enabled, err := s.enabled(ctx, principalID)
 	if err != nil {
 		return watch.Spec{}, err
 	}
-	if !status.Enabled {
+	if !enabled {
 		return watch.Spec{}, errors.New("the home is switched off for this user, so its devices cannot be watched")
 	}
 	snap, err := s.current(ctx)
@@ -198,11 +198,11 @@ func (s *Service) Evaluate(ctx context.Context, principalID string, w watch.Watc
 	if condition == nil {
 		return watch.Observation{}, errors.New("the watch has no condition")
 	}
-	status, err := s.Status(ctx, principalID)
+	enabled, err := s.enabled(ctx, principalID)
 	if err != nil {
 		return watch.Observation{}, err
 	}
-	if !status.Enabled {
+	if !enabled {
 		return watch.Observation{}, fmt.Errorf("the home is switched off: %w", watch.ErrSkip)
 	}
 	snap, err := s.current(ctx)

@@ -18,12 +18,7 @@ import (
 )
 
 const (
-	Integration = "grafana"
-	// A row for the integration records that the principal turned Grafana off; without one it is
-	// on for every principal the operator allowed.
-	optOutWorkspaceID   = "grafana-off"
-	optOutWorkspaceName = "Grafana off"
-
+	Integration    = "grafana"
 	DefaultBaseURL = "http://grafana:3000"
 
 	// The data sources home-monitoring provisions, by UID.
@@ -44,16 +39,8 @@ type Config struct {
 	Now func() time.Time
 }
 
-// Status is a principal's Grafana switch. Allowed is false for anyone the operator did not name,
-// who then has no switch at all.
-type Status struct {
-	Allowed bool
-	Enabled bool
-}
-
 type Service struct {
 	client     *client
-	repository integration.Repository
 	principals []string
 	location   *time.Location
 	logger     *slog.Logger
@@ -62,12 +49,12 @@ type Service struct {
 	running atomic.Bool
 }
 
-var _ module.Module = (*Service)(nil)
+var (
+	_ module.Module        = (*Service)(nil)
+	_ integration.Switched = (*Service)(nil)
+)
 
-func NewService(cfg Config, repository integration.Repository, logger *slog.Logger) (*Service, error) {
-	if repository == nil {
-		return nil, fmt.Errorf("grafana repository is required")
-	}
+func NewService(cfg Config, logger *slog.Logger) (*Service, error) {
 	if logger == nil {
 		return nil, fmt.Errorf("grafana logger is required")
 	}
@@ -96,7 +83,6 @@ func NewService(cfg Config, repository integration.Repository, logger *slog.Logg
 	}
 	return &Service{
 		client:     newClient(parsed, token),
-		repository: repository,
 		principals: slices.Clone(cfg.Principals),
 		location:   location,
 		logger:     logger,
@@ -131,48 +117,8 @@ func (s *Service) Allowed(principalID string) bool {
 	return slices.Contains(s.principals, principalID)
 }
 
-// Status reports the principal's switch. Grafana is on for an allowed principal unless they saved
-// the opt-out row, which carries no credential, since the token belongs to the operator.
-func (s *Service) Status(ctx context.Context, principalID string) (Status, error) {
-	if !s.Allowed(principalID) {
-		return Status{}, nil
-	}
-	_, optedOut, err := s.repository.LoadIntegrationConnection(ctx, principalID, Integration)
-	if err != nil {
-		return Status{}, err
-	}
-	return Status{Allowed: true, Enabled: !optedOut}, nil
-}
+// Switch is each principal's Grafana switch, on by default for every principal the operator
+// allowed, since the token belongs to the operator.
+var Switch = integration.Switch{Integration: Integration, Name: "Grafana", DefaultOn: true}
 
-// SetEnabled turns Grafana on or off for an allowed principal. Turning it off takes effect on the
-// next tool call, including one later in a turn already running.
-func (s *Service) SetEnabled(ctx context.Context, principalID string, enabled bool) (Status, error) {
-	if !s.Allowed(principalID) {
-		return Status{}, nil
-	}
-	if enabled {
-		deleted, err := s.repository.DeleteIntegrationConnection(ctx, principalID, Integration)
-		if err != nil {
-			return Status{}, err
-		}
-		if deleted {
-			s.logger.InfoContext(ctx, "grafana.enabled", "principal_id", principalID)
-		}
-		return Status{Allowed: true, Enabled: true}, nil
-	}
-	status, err := s.Status(ctx, principalID)
-	if err != nil || !status.Enabled {
-		return status, err
-	}
-	if err := s.repository.SaveIntegrationConnection(ctx, integration.Connection{
-		PrincipalID:   principalID,
-		Integration:   Integration,
-		TokenKind:     integration.TokenKindInternal,
-		WorkspaceID:   optOutWorkspaceID,
-		WorkspaceName: optOutWorkspaceName,
-	}); err != nil {
-		return Status{}, err
-	}
-	s.logger.InfoContext(ctx, "grafana.disabled", "principal_id", principalID)
-	return Status{Allowed: true}, nil
-}
+func (s *Service) Switch() integration.Switch { return Switch }

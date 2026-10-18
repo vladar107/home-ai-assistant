@@ -19,6 +19,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/connectors/grafana"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
+	"github.com/vladar107/home-ai-assistant/internal/integration"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
@@ -179,12 +180,13 @@ func newSimulator() *simulator {
 }
 
 type fixture struct {
-	t       *testing.T
-	service *grafana.Service
-	broker  *tools.Broker
-	sim     *simulator
-	server  *httptest.Server
-	logs    *bytes.Buffer
+	t        *testing.T
+	service  *grafana.Service
+	switches *integration.Switches
+	broker   *tools.Broker
+	sim      *simulator
+	server   *httptest.Server
+	logs     *bytes.Buffer
 }
 
 func newFixture(t *testing.T, sim *simulator) *fixture {
@@ -211,13 +213,17 @@ func newFixtureWithToken(t *testing.T, sim *simulator, serviceToken string) *fix
 	t.Cleanup(f.server.Close)
 
 	logger := slog.New(slog.NewTextHandler(f.logs, nil))
+	f.switches, err = integration.NewSwitches(state, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
 	f.service, err = grafana.NewService(grafana.Config{
 		Token:      serviceToken,
 		BaseURL:    f.server.URL,
 		Principals: []string{"alice"},
 		Location:   amsterdam,
 		Now:        func() time.Time { return now },
-	}, state, logger)
+	}, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,6 +231,7 @@ func newFixtureWithToken(t *testing.T, sim *simulator, serviceToken string) *fix
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.broker.SetSwitches(f.switches)
 	if err := f.broker.Register(f.service); err != nil {
 		t.Fatal(err)
 	}
@@ -338,41 +345,21 @@ func TestOptOutWithdrawsToolsEvenMidTurn(t *testing.T) {
 	f := newFixture(t, newSimulator())
 	set := f.toolSet()
 
-	status, err := f.service.SetEnabled(t.Context(), "alice", false)
-	if err != nil || !status.Allowed || status.Enabled {
-		t.Fatalf("status after opting out = %+v, %v", status, err)
+	if err := f.switches.SetEnabled(t.Context(), "alice", grafana.Switch, false); err != nil {
+		t.Fatal(err)
 	}
 	if after := f.toolSet(); !after.Empty() {
 		t.Fatalf("tools after opting out = %v", toolNames(after))
 	}
-	wantError(t, f.call(set, "grafana_dashboards", map[string]any{}), "no longer available")
+	wantError(t, f.call(set, "grafana_dashboards", map[string]any{}), grafana.Switch.OffText())
 	if got := f.sim.count(); got != 0 {
 		t.Fatalf("requests after opting out = %d, want 0", got)
 	}
 
-	status, err = f.service.SetEnabled(t.Context(), "alice", true)
-	if err != nil || !status.Enabled {
-		t.Fatalf("status after opting back in = %+v, %v", status, err)
+	if err := f.switches.SetEnabled(t.Context(), "alice", grafana.Switch, true); err != nil {
+		t.Fatal(err)
 	}
 	wantTools(t, f.toolSet(), grafanaTools)
-}
-
-func TestPrincipalsTheOperatorDidNotNameHaveNoSwitch(t *testing.T) {
-	f := newFixture(t, newSimulator())
-	ctx := t.Context()
-
-	if status, err := f.service.Status(ctx, "bob"); err != nil || status != (grafana.Status{}) {
-		t.Fatalf("status for bob = %+v, %v", status, err)
-	}
-	if status, err := f.service.SetEnabled(ctx, "bob", false); err != nil || status != (grafana.Status{}) {
-		t.Fatalf("opt-out for bob = %+v, %v", status, err)
-	}
-	if status, err := f.service.SetEnabled(ctx, "bob", true); err != nil || status != (grafana.Status{}) {
-		t.Fatalf("opt-in for bob = %+v, %v", status, err)
-	}
-	if status, err := f.service.Status(ctx, "alice"); err != nil || status != (grafana.Status{Allowed: true, Enabled: true}) {
-		t.Fatalf("status for alice = %+v, %v", status, err)
-	}
 }
 
 func TestDashboardsListAndDescribe(t *testing.T) {
@@ -734,11 +721,6 @@ func TestGrafanaDownIsReportedAsUnavailable(t *testing.T) {
 
 func TestServiceRejectsBadConfiguration(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
-	state, err := sqlite.Open(t.Context(), filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = state.Close() })
 	allowed := []string{"alice"}
 	for name, cfg := range map[string]grafana.Config{
 		"no token":       {BaseURL: "http://grafana:3000", Principals: allowed},
@@ -748,11 +730,11 @@ func TestServiceRejectsBadConfiguration(t *testing.T) {
 		"credentials":    {Token: token, BaseURL: "http://user:pw@grafana:3000", Principals: allowed},
 		"unknown scheme": {Token: token, BaseURL: "ftp://grafana", Principals: allowed},
 	} {
-		if _, err := grafana.NewService(cfg, state, logger); err == nil {
+		if _, err := grafana.NewService(cfg, logger); err == nil {
 			t.Fatalf("%s: configuration was accepted", name)
 		}
 	}
-	if _, err := grafana.NewService(grafana.Config{Token: token, Principals: allowed}, state, logger); err != nil {
+	if _, err := grafana.NewService(grafana.Config{Token: token, Principals: allowed}, logger); err != nil {
 		t.Fatalf("default URL was rejected: %v", err)
 	}
 }

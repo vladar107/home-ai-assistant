@@ -20,10 +20,10 @@ const (
 	HomeAssistantOffLine       = "Home (Home Assistant): off. Turn it back on to let me read and control the devices the household exposed to Assist, and propose confirmed actions for devices labelled for confirmation."
 )
 
-// HomeAssistantController is implemented by the Home Assistant connector; nil disables the home settings section.
+// HomeAssistantController is the home switch beside the Home Assistant connector's exposure check;
+// nil disables the home settings section.
 type HomeAssistantController interface {
-	Status(context.Context, string) (homeassistant.Status, error)
-	SetEnabled(context.Context, string, bool) (homeassistant.Status, error)
+	SwitchController
 	Exposure(context.Context) homeassistant.Exposure
 }
 
@@ -36,23 +36,23 @@ type homeAssistantSection struct {
 func (h homeAssistantSection) prefix() string { return homeAssistantSectionPrefix }
 
 func (h homeAssistantSection) summary(ctx context.Context, principalID string) (settingsSummary, error) {
-	status, err := h.homeAssistant.Status(ctx, principalID)
+	enabled, err := h.homeAssistant.Enabled(ctx, principalID)
 	if err != nil {
 		return settingsSummary{}, err
 	}
-	summary := settingsSummary{name: "Home", state: onOff(status.Enabled)}
-	if exposure := h.homeAssistant.Exposure(ctx); status.Enabled && (!exposure.Checked || len(exposure.Conflicts) > 0) {
+	summary := settingsSummary{name: "Home", state: onOff(enabled)}
+	if exposure := h.homeAssistant.Exposure(ctx); enabled && (!exposure.Checked || len(exposure.Conflicts) > 0) {
 		summary.attention = "Home actions are paused; see Home & files."
 	}
 	return summary, nil
 }
 
 func (h homeAssistantSection) render(ctx context.Context, principalID string) (settingsView, error) {
-	status, err := h.homeAssistant.Status(ctx, principalID)
+	enabled, err := h.homeAssistant.Enabled(ctx, principalID)
 	if err != nil {
 		return settingsView{}, err
 	}
-	if status.Enabled {
+	if enabled {
 		lines := []string{HomeAssistantOnLine}
 		exposure := h.homeAssistant.Exposure(ctx)
 		switch {
@@ -76,7 +76,7 @@ func (h homeAssistantSection) act(ctx context.Context, principalID string, _ int
 	switch action {
 	case homeAssistantOnAction, homeAssistantOffAction:
 		enabled := action == homeAssistantOnAction
-		if _, err := h.homeAssistant.SetEnabled(ctx, principalID, enabled); err != nil {
+		if err := h.homeAssistant.SetEnabled(ctx, principalID, enabled); err != nil {
 			return settingsOutcome{}, err
 		}
 		h.telemetry.ContextLogger(ctx, h.logger).InfoContext(ctx, "homeassistant.home.changed", "principal_id", principalID, "enabled", enabled)

@@ -21,6 +21,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/connectors/bus"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
+	"github.com/vladar107/home-ai-assistant/internal/integration"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
@@ -192,11 +193,12 @@ func (s *simulator) editPass(code, key string, edit func(map[string]any)) {
 }
 
 type fixture struct {
-	t       *testing.T
-	service *bus.Service
-	broker  *tools.Broker
-	server  *simulator
-	clock   *clock
+	t        *testing.T
+	service  *bus.Service
+	switches *integration.Switches
+	broker   *tools.Broker
+	server   *simulator
+	clock    *clock
 }
 
 type options struct {
@@ -239,6 +241,10 @@ func newFixture(t *testing.T, opts options) *fixture {
 	if opts.homeStop == "" {
 		opts.homeStop = homeStop
 	}
+	switches, err := integration.NewSwitches(state, slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
 	service, err := bus.NewService(bus.Config{
 		HomeStop:      opts.homeStop,
 		Contact:       opts.contact,
@@ -246,7 +252,7 @@ func newFixture(t *testing.T, opts options) *fixture {
 		GTFSURL:       httpServer.URL + "/gtfs",
 		TransitousURL: httpServer.URL + "/transitous",
 		Now:           f.clock.Now,
-	}, state, slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)))
+	}, switches, slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,10 +260,11 @@ func newFixture(t *testing.T, opts options) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	broker.SetSwitches(switches)
 	if err := broker.Register(service); err != nil {
 		t.Fatal(err)
 	}
-	f.service, f.broker = service, broker
+	f.service, f.switches, f.broker = service, switches, broker
 	return f
 }
 
@@ -476,7 +483,7 @@ func TestBusesAreOnByDefaultAndSwitchPerUser(t *testing.T) {
 	}
 	set := f.toolSet("alice")
 
-	if _, err := f.service.SetEnabled(t.Context(), "alice", false); err != nil {
+	if err := f.switches.SetEnabled(t.Context(), "alice", bus.Switch, false); err != nil {
 		t.Fatal(err)
 	}
 	if names := toolNames(f.toolSet("alice")); slices.Contains(names, "bus_trip") {
@@ -490,11 +497,11 @@ func TestBusesAreOnByDefaultAndSwitchPerUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.IsError || (!strings.Contains(result.Text, "off for this user") && !strings.Contains(result.Text, "no longer available")) {
+	if !result.IsError || result.Text != bus.Switch.OffText() {
 		t.Fatalf("call after turning buses off = %+v", result)
 	}
 
-	if _, err := f.service.SetEnabled(t.Context(), "alice", true); err != nil {
+	if err := f.switches.SetEnabled(t.Context(), "alice", bus.Switch, true); err != nil {
 		t.Fatal(err)
 	}
 	if names := toolNames(f.toolSet("alice")); !slices.Contains(names, "bus_trip") {
@@ -907,7 +914,7 @@ func TestDepartureChecksUseTheTimetableBeyondLiveData(t *testing.T) {
 		t.Fatalf("departures with Transitous down = %+v %v", departures, err)
 	}
 
-	if _, err := f.service.SetEnabled(t.Context(), "alice", false); err != nil {
+	if err := f.switches.SetEnabled(t.Context(), "alice", bus.Switch, false); err != nil {
 		t.Fatal(err)
 	}
 	var refused *transit.RefusalError

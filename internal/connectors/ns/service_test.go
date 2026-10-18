@@ -21,6 +21,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/ns"
 	"github.com/vladar107/home-ai-assistant/internal/httpretry"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
+	"github.com/vladar107/home-ai-assistant/internal/integration"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
@@ -145,12 +146,13 @@ func (s *simulator) allRequests() []*url.URL {
 }
 
 type fixture struct {
-	t       *testing.T
-	service *ns.Service
-	broker  *tools.Broker
-	server  *simulator
-	clock   *clock
-	logs    *lockedBuffer
+	t        *testing.T
+	service  *ns.Service
+	switches *integration.Switches
+	broker   *tools.Broker
+	server   *simulator
+	clock    *clock
+	logs     *lockedBuffer
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -180,12 +182,16 @@ func newFixture(t *testing.T) *fixture {
 	f.server.serve("v2/stations", fixtureBytes(t, "stations.json"))
 
 	logger := slog.New(slog.NewTextHandler(f.logs, nil))
+	switches, err := integration.NewSwitches(state, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
 	service, err := ns.NewService(ns.Config{
 		APIKey:        apiKey,
 		BaseURL:       httpServer.URL + strings.TrimSuffix(apiPrefix, "/"),
 		PlacesBaseURL: httpServer.URL + strings.TrimSuffix(placesPrefix, "/"),
 		Now:           f.clock.Now,
-	}, state, logger)
+	}, switches, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,10 +199,11 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	broker.SetSwitches(switches)
 	if err := broker.Register(service); err != nil {
 		t.Fatal(err)
 	}
-	f.service, f.broker = service, broker
+	f.service, f.switches, f.broker = service, switches, broker
 	return f
 }
 
@@ -296,8 +303,8 @@ func TestTrainsAreOnByDefaultAndAPerUserSwitch(t *testing.T) {
 	f.server.serve("v3/trips", fixtureBytes(t, "trips.json"))
 	ctx := t.Context()
 
-	if status, err := f.service.Status(ctx, "alice"); err != nil || !status.Enabled {
-		t.Fatalf("default status = %+v %v, want on", status, err)
+	if enabled, err := f.service.Enabled(ctx, "alice"); err != nil || !enabled {
+		t.Fatalf("default switch = %v %v, want on", enabled, err)
 	}
 	set := f.toolSet("alice")
 	if got := toolNames(set); !slices.Equal(got, allTools) {
@@ -313,10 +320,10 @@ func TestTrainsAreOnByDefaultAndAPerUserSwitch(t *testing.T) {
 	}
 	wantText(t, f.callWith(set, "ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal"}), "SPR 5822")
 
-	if status, err := f.service.SetEnabled(ctx, "alice", false); err != nil || status.Enabled {
-		t.Fatalf("disable = %+v %v", status, err)
+	if err := f.switches.SetEnabled(ctx, "alice", ns.Switch, false); err != nil {
+		t.Fatal(err)
 	}
-	wantError(t, f.callWith(set, "ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal"}), "no longer available")
+	wantError(t, f.callWith(set, "ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal"}), ns.Switch.OffText())
 	if set := f.toolSet("alice"); !set.Empty() {
 		t.Fatalf("tools after disabling = %v, want none", toolNames(set))
 	}
@@ -324,14 +331,15 @@ func TestTrainsAreOnByDefaultAndAPerUserSwitch(t *testing.T) {
 		t.Fatalf("bob's tools after alice turned hers off = %v", got)
 	}
 
-	if status, err := f.service.SetEnabled(ctx, "alice", true); err != nil || !status.Enabled {
-		t.Fatalf("enable = %+v %v", status, err)
+	if err := f.switches.SetEnabled(ctx, "alice", ns.Switch, true); err != nil {
+		t.Fatal(err)
 	}
 	if got := toolNames(f.toolSet("alice")); !slices.Equal(got, allTools) {
 		t.Fatalf("tools after turning back on = %v", got)
 	}
 	logs := f.logs.String()
-	if !strings.Contains(logs, "ns.trains.enabled") || !strings.Contains(logs, "ns.trains.disabled") {
+	if !strings.Contains(logs, "integration.switch.changed principal_id=alice integration=ns enabled=false") ||
+		!strings.Contains(logs, "integration.switch.changed principal_id=alice integration=ns enabled=true") {
 		t.Fatalf("logs lack the switch events:\n%s", logs)
 	}
 }
@@ -818,17 +826,13 @@ func TestOVFietsIsCachedAndFollowsTheTrainsSwitch(t *testing.T) {
 		t.Fatalf("NS asked %d times within 30 seconds, want once", got)
 	}
 
-	if _, err := f.service.SetEnabled(t.Context(), "alice", false); err != nil {
+	if err := f.switches.SetEnabled(t.Context(), "alice", ns.Switch, false); err != nil {
 		t.Fatal(err)
 	}
 	if set := f.toolSet("alice"); !set.Empty() {
 		t.Fatalf("tools with trains off = %v, want none", toolNames(set))
 	}
-	wantError(t, f.callWith(set, "ns_ovfiets", map[string]any{"station": "Utrecht Centraal"}), "no longer available")
-	refused, err := f.service.Execute(t.Context(), "alice", tools.Call{Name: "ns_ovfiets", Arguments: json.RawMessage(`{"station":"UT"}`)})
-	if err != nil || !refused.IsError || refused.Text != ns.DisabledText {
-		t.Fatalf("direct call with trains off = %+v %v", refused, err)
-	}
+	wantError(t, f.callWith(set, "ns_ovfiets", map[string]any{"station": "Utrecht Centraal"}), ns.Switch.OffText())
 	if got := len(f.server.seen(ovfietsPath)); got != 1 {
 		t.Fatalf("NS asked %d times, want no request with trains off", got)
 	}
@@ -1010,10 +1014,10 @@ func TestTripStatusSharesTheTripsCacheAndRefuses(t *testing.T) {
 	unknown.To = "Atlantis"
 	refusal("alice", unknown, `No NS station matches to "Atlantis"`, false)
 
-	if _, err := f.service.SetEnabled(ctx, "alice", false); err != nil {
+	if err := f.switches.SetEnabled(ctx, "alice", ns.Switch, false); err != nil {
 		t.Fatal(err)
 	}
-	refusal("alice", query, ns.DisabledText, true)
+	refusal("alice", query, ns.Switch.OffText(), true)
 	if status, err := f.service.TripStatus(ctx, "bob", query); err != nil || !status.Found {
 		t.Fatalf("bob's status after alice turned trains off = %+v %v", status, err)
 	}
@@ -1126,7 +1130,7 @@ func TestDepartureChecksNormalizeTheStatus(t *testing.T) {
 	result := f.call("ns_trips", map[string]any{"from": "AMFS", "to": "UT", "date_time": "2026-10-05T07:00", "departures": []string{"07:56"}})
 	wantText(t, result, "1. check failed — the 07:56 from Amersfoort Schothorst to Utrecht Centraal\n   NS travel information is unavailable right now.")
 
-	if _, err := f.service.SetEnabled(t.Context(), "alice", false); err != nil {
+	if err := f.switches.SetEnabled(t.Context(), "alice", ns.Switch, false); err != nil {
 		t.Fatal(err)
 	}
 	var refused *transit.RefusalError

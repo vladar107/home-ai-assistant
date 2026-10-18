@@ -2,7 +2,6 @@ package telegram
 
 import (
 	"context"
-	"log/slog"
 	"slices"
 	"strings"
 	"testing"
@@ -12,11 +11,8 @@ import (
 
 func TestTypeSafeSettingsToggleThroughTheSettingsFlow(t *testing.T) {
 	h := newConversationHarness(t, newControlledRuntime())
-	optIn, err := judgment.NewOptInService(h.store, slog.New(slog.NewTextHandler(h.logs, nil)), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	h.service.SetTypeSafe(optIn)
+	optIn := judgment.NewOptIn(h.switches)
+	h.service.SetTypeSafe(h.switches.Toggle(judgment.OptInSwitch))
 	h.provision("alice", "acct-alice-1111")
 	h.start()
 
@@ -55,17 +51,18 @@ func TestTypeSafeSettingsToggleThroughTheSettingsFlow(t *testing.T) {
 		t.Fatalf("after turning off: %+v", off)
 	}
 	logs := h.logs.String()
-	if !strings.Contains(logs, "judgment.optin.enabled") || !strings.Contains(logs, "judgment.optin.disabled") {
+	if !strings.Contains(logs, "integration.switch.changed principal_id=alice integration=typesafe enabled=true") ||
+		!strings.Contains(logs, "integration.switch.changed principal_id=alice integration=typesafe enabled=false") {
 		t.Fatalf("logs lack the opt-in events: %s", logs)
 	}
 }
 
-func TestTypeSafeSectionAbsentWithoutOptInService(t *testing.T) {
+func TestTypeSafeSectionAbsentWithoutTypeSafe(t *testing.T) {
 	h := newConversationHarness(t, newControlledRuntime())
 	h.provision("alice", "acct-alice-1111")
 	h.start()
 	settings := h.requestSettings(1, 101)
 	if strings.Contains(settings.text, "TypeSafe") || slices.Contains(buttonData(settings.keyboard), "typesafe:on") {
-		t.Fatalf("settings show safety checks without an opt-in service: %+v", settings)
+		t.Fatalf("settings show safety checks without TypeSafe configured: %+v", settings)
 	}
 }

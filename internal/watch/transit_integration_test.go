@@ -21,6 +21,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/ns"
 	"github.com/vladar107/home-ai-assistant/internal/httpretry"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
+	"github.com/vladar107/home-ai-assistant/internal/integration"
 	"github.com/vladar107/home-ai-assistant/internal/routes"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
@@ -121,6 +122,7 @@ type transitEngine struct {
 	store     *sqlite.Store
 	clock     *testClock
 	gateway   *gateway
+	switches  *integration.Switches
 	trains    *ns.Service
 	buses     *bus.Service
 	routes    *routes.Service
@@ -160,11 +162,15 @@ func newTransitEngine(t *testing.T) *transitEngine {
 	e.gateway.serve("/ovapi/tpc/", recorded(t, "bus", "tpc_amersfoort.json"))
 
 	logger := slog.New(slog.NewTextHandler(&lockedBuffer{}, nil))
-	e.trains, err = ns.NewService(ns.Config{APIKey: "test-key", BaseURL: server.URL + "/ns", Now: e.clock.Now}, store, logger)
+	e.switches, err = integration.NewSwitches(store, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
-	e.buses, err = bus.NewService(bus.Config{OVapiURL: server.URL + "/ovapi", GTFSURL: server.URL + "/gtfs", TransitousURL: server.URL + "/transitous", Now: e.clock.Now}, store, logger)
+	e.trains, err = ns.NewService(ns.Config{APIKey: "test-key", BaseURL: server.URL + "/ns", Now: e.clock.Now}, e.switches, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.buses, err = bus.NewService(bus.Config{OVapiURL: server.URL + "/ovapi", GTFSURL: server.URL + "/gtfs", TransitousURL: server.URL + "/transitous", Now: e.clock.Now}, e.switches, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -427,18 +433,18 @@ func TestDepartureWatchChecksABus(t *testing.T) {
 func TestDepartureWatchRespectsEachUsersSwitches(t *testing.T) {
 	e := newTransitEngine(t)
 	e.clock.Set(t, "2026-10-05 05:00")
-	if _, err := e.trains.SetEnabled(e.ctx, "bob", false); err != nil {
+	if err := e.switches.SetEnabled(e.ctx, "bob", ns.Switch, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.buses.SetEnabled(e.ctx, "alice", false); err != nil {
+	if err := e.switches.SetEnabled(e.ctx, "alice", bus.Switch, false); err != nil {
 		t.Fatal(err)
 	}
 
 	train := map[string]any{"kind": "departure", "mode": "train", "from": "Schothorst", "to": "Utrecht", "departure": "07:56", "days": []string{"mon"}}
-	if result := e.propose("bob", train); !result.IsError || result.Text != ns.DisabledText {
+	if result := e.propose("bob", train); !result.IsError || result.Text != ns.Switch.OffText() {
 		t.Fatalf("bob's train proposal = %+v", result)
 	}
-	if result := e.propose("alice", map[string]any{"kind": "departure", "mode": "bus", "stop": "Amersfoort, Stadhuis", "line": "3", "departure": "18:18", "days": []string{"sun"}}); !result.IsError || result.Text != bus.DisabledText {
+	if result := e.propose("alice", map[string]any{"kind": "departure", "mode": "bus", "stop": "Amersfoort, Stadhuis", "line": "3", "departure": "18:18", "days": []string{"sun"}}); !result.IsError || result.Text != bus.Switch.OffText() {
 		t.Fatalf("alice's bus proposal = %+v", result)
 	}
 	if result := e.propose("alice", map[string]any{"kind": "departure", "mode": "train", "from": "Nowhere Junction", "to": "Utrecht", "departure": "07:56", "days": []string{"mon"}}); !result.IsError || !strings.Contains(result.Text, "Nowhere Junction") {
@@ -575,11 +581,11 @@ func TestDisruptionWatchAlertsOnNewAndChangedDisruptions(t *testing.T) {
 func TestDisruptionWatchRespectsEachUsersTrainsSwitch(t *testing.T) {
 	e := newTransitEngine(t)
 	e.clock.Set(t, "2026-10-04 12:00")
-	if _, err := e.trains.SetEnabled(e.ctx, "bob", false); err != nil {
+	if err := e.switches.SetEnabled(e.ctx, "bob", ns.Switch, false); err != nil {
 		t.Fatal(err)
 	}
 	stations := map[string]any{"kind": "disruptions", "stations": []string{"Sloterdijk", "Breda", "BD"}, "window_from": "18:00", "window_until": "19:30", "days": []string{"sun"}}
-	if result := e.propose("bob", stations); !result.IsError || result.Text != ns.DisabledText {
+	if result := e.propose("bob", stations); !result.IsError || result.Text != ns.Switch.OffText() {
 		t.Fatalf("bob's proposal = %+v", result)
 	}
 	if result := e.propose("alice", stations); result.IsError {
@@ -757,7 +763,7 @@ func TestRouteWatchTellsTrainsOffApartFromNSFailing(t *testing.T) {
 	e.saveRoute("bob", "0000000000000002", "work", "07:56")
 	e.create("alice", watchID, routeSpec("work"))
 	e.create("bob", "0000000000000003", routeSpec("work"))
-	if _, err := e.trains.SetEnabled(e.ctx, "bob", false); err != nil {
+	if err := e.switches.SetEnabled(e.ctx, "bob", ns.Switch, false); err != nil {
 		t.Fatal(err)
 	}
 	e.gateway.fail("/ns/v3/trips", http.StatusServiceUnavailable)

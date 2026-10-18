@@ -39,7 +39,6 @@ const (
 
 	dateTimeLayout = "2006-01-02T15:04"
 
-	DisabledText   = "Bus information is off for this user; they can turn it on in /settings."
 	noHomeStopText = "No home stop is configured; ask the user which stop they mean."
 
 	// nearbyRadius is how far from a point bus_stop_status looks for stops, and alternatives is
@@ -91,16 +90,9 @@ var definitions = []tools.Definition{
 
 var _ tools.Provider = (*Service)(nil)
 
-// Contribute offers the tools while the principal's switch is on; a scheduled run receives them
-// too, since both are reads.
-func (s *Service) Contribute(ctx context.Context, principalID string) (tools.Contribution, error) {
-	status, err := s.Status(ctx, principalID)
-	if err != nil {
-		return tools.Contribution{}, err
-	}
-	if !status.Enabled {
-		return tools.Contribution{}, nil
-	}
+// Contribute offers the tools; the broker asks only while the principal has buses on. A scheduled
+// run receives them too, since both are reads.
+func (s *Service) Contribute(context.Context, string) (tools.Contribution, error) {
 	return tools.Contribution{Guidance: guidance, Definitions: definitions}, nil
 }
 
@@ -121,13 +113,6 @@ type stopStatusRequest struct {
 }
 
 func (s *Service) Execute(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
-	status, err := s.Status(ctx, principalID)
-	if err != nil {
-		return tools.Result{}, err
-	}
-	if !status.Enabled {
-		return errorResult(DisabledText), nil
-	}
 	switch call.Name {
 	case toolTrip:
 		var arguments tripRequest

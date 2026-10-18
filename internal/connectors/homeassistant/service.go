@@ -20,12 +20,7 @@ import (
 )
 
 const (
-	Integration = "homeassistant"
-	// A row for the integration records that the principal turned the home off; without one it is
-	// on, since the home is shared wherever the operator configured a token.
-	optOutWorkspaceID   = "homeassistant-off"
-	optOutWorkspaceName = "Home off"
-
+	Integration    = "homeassistant"
 	DefaultBaseURL = "https://ha.home"
 )
 
@@ -36,11 +31,6 @@ type Config struct {
 	BaseURL string
 	// Now is the clock for the snapshot's age; nil means time.Now.
 	Now func() time.Time
-}
-
-// Status is a principal's home switch.
-type Status struct {
-	Enabled bool
 }
 
 // Proposer is the core approval service as the connector sees it.
@@ -55,12 +45,12 @@ type ExposureChecker interface {
 }
 
 type Service struct {
-	client     *client
-	repository integration.Repository
-	proposer   Proposer
-	exposure   ExposureChecker
-	logger     *slog.Logger
-	now        func() time.Time
+	client   *client
+	switches integration.SwitchReader
+	proposer Proposer
+	exposure ExposureChecker
+	logger   *slog.Logger
+	now      func() time.Time
 
 	snapshotMu sync.Mutex
 	snapshot   *snapshot
@@ -68,11 +58,14 @@ type Service struct {
 	running atomic.Bool
 }
 
-var _ module.Module = (*Service)(nil)
+var (
+	_ module.Module        = (*Service)(nil)
+	_ integration.Switched = (*Service)(nil)
+)
 
-func NewService(cfg Config, repository integration.Repository, proposer Proposer, logger *slog.Logger) (*Service, error) {
-	if repository == nil {
-		return nil, fmt.Errorf("home assistant repository is required")
+func NewService(cfg Config, switches integration.SwitchReader, proposer Proposer, logger *slog.Logger) (*Service, error) {
+	if switches == nil {
+		return nil, fmt.Errorf("home assistant switches are required")
 	}
 	if logger == nil {
 		return nil, fmt.Errorf("home assistant logger is required")
@@ -94,11 +87,11 @@ func NewService(cfg Config, repository integration.Repository, proposer Proposer
 		now = time.Now
 	}
 	return &Service{
-		client:     newClient(parsed, token),
-		repository: repository,
-		proposer:   proposer,
-		logger:     logger,
-		now:        now,
+		client:   newClient(parsed, token),
+		switches: switches,
+		proposer: proposer,
+		logger:   logger,
+		now:      now,
 	}, nil
 }
 
@@ -130,44 +123,14 @@ func (s *Service) Shutdown(context.Context) error {
 	return nil
 }
 
-// Status reports the principal's switch. The home is on unless the principal saved the opt-out row,
-// which carries no credential, since the token belongs to the household.
-func (s *Service) Status(ctx context.Context, principalID string) (Status, error) {
-	_, optedOut, err := s.repository.LoadIntegrationConnection(ctx, principalID, Integration)
-	if err != nil {
-		return Status{}, err
-	}
-	return Status{Enabled: !optedOut}, nil
-}
+// Switch is each principal's home switch. The home is on by default wherever the operator
+// configured a token, since the home is shared.
+var Switch = integration.Switch{Integration: Integration, Name: "The home", DefaultOn: true}
 
-// SetEnabled turns the principal's home on or off. Turning it off takes effect on the next tool
-// call, including one later in a turn already running.
-func (s *Service) SetEnabled(ctx context.Context, principalID string, enabled bool) (Status, error) {
-	if enabled {
-		deleted, err := s.repository.DeleteIntegrationConnection(ctx, principalID, Integration)
-		if err != nil {
-			return Status{}, err
-		}
-		if deleted {
-			s.logger.InfoContext(ctx, "homeassistant.home.enabled", "principal_id", principalID)
-		}
-		return Status{Enabled: true}, nil
-	}
-	status, err := s.Status(ctx, principalID)
-	if err != nil || !status.Enabled {
-		return status, err
-	}
-	if err := s.repository.SaveIntegrationConnection(ctx, integration.Connection{
-		PrincipalID:   principalID,
-		Integration:   Integration,
-		TokenKind:     integration.TokenKindInternal,
-		WorkspaceID:   optOutWorkspaceID,
-		WorkspaceName: optOutWorkspaceName,
-	}); err != nil {
-		return Status{}, err
-	}
-	s.logger.InfoContext(ctx, "homeassistant.home.disabled", "principal_id", principalID)
-	return Status{}, nil
+func (s *Service) Switch() integration.Switch { return Switch }
+
+func (s *Service) enabled(ctx context.Context, principalID string) (bool, error) {
+	return s.switches.Enabled(ctx, principalID, Switch)
 }
 
 // Exposure is what the exposure check found: whether it could run, and the exposed devices that

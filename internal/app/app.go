@@ -38,6 +38,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/httpretry"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/imagegen"
+	"github.com/vladar107/home-ai-assistant/internal/integration"
 	"github.com/vladar107/home-ai-assistant/internal/judgment"
 	userlocation "github.com/vladar107/home-ai-assistant/internal/location"
 	usermemory "github.com/vladar107/home-ai-assistant/internal/memory"
@@ -91,7 +92,8 @@ type App struct {
 	backlog       *backlog.Service
 	trips         *trip.Service
 	tripNotifier  *telegram.TripNotifier
-	typeSafe      *judgment.OptInService
+	switches      *integration.Switches
+	typeSafe      bool
 	telegram      *telegram.Service
 	telemetry     *observability.Telemetry
 	ready         atomic.Bool
@@ -347,11 +349,17 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		}
 		runtime.SetTelemetry(a.telemetry)
 		a.telemetry.ZeroRareOutcomes(ctx, principals, conversation.TurnErrorKinds(), reaction.Emojis(), conversation.FeedbackClasses())
+		switches, err := integration.NewSwitches(a.store, a.logger)
+		if err != nil {
+			return fmt.Errorf("initialize integration switches: %w", err)
+		}
+		a.switches = switches
 		broker, err := tools.NewBroker(a.logger)
 		if err != nil {
 			return fmt.Errorf("initialize tool broker: %w", err)
 		}
 		broker.SetTelemetry(a.telemetry)
+		broker.SetSwitches(switches)
 		attachments, err := attachment.NewService(attachment.Config{
 			Directory: filepath.Join(a.cfg.DataDir, "attachments"),
 		}, a.store, a.logger)
@@ -389,6 +397,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			return fmt.Errorf("initialize approvals: %w", err)
 		}
 		approvals.SetTelemetry(a.telemetry)
+		approvals.SetSwitches(switches)
 		if err := broker.Register(withdrawal.Provider{Withdrawer: approvals}); err != nil {
 			return fmt.Errorf("register approval tools: %w", err)
 		}
@@ -431,10 +440,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			if err != nil {
 				return fmt.Errorf("initialize TypeSafe client: %w", err)
 			}
-			typeSafe, err := judgment.NewOptInService(a.store, a.logger, nil)
-			if err != nil {
-				return fmt.Errorf("initialize TypeSafe opt-in: %w", err)
-			}
+			typeSafe := judgment.NewOptIn(switches)
 			screener := judgment.NewScreener(judge, typeSafe, registry)
 			broker.SetScreener(screener)
 			memoryService.SetScreener(screener)
@@ -442,7 +448,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			searchChecks.SetJudge(judgment.NewSearchJudge(judge, typeSafe, registry, registry))
 			toolHint = judgment.NewToolHinter(judge, typeSafe)
 			safetyChecks = typeSafe
-			a.typeSafe = typeSafe
+			a.typeSafe = true
 		}
 		// Scheduled runs reach only the owner's own chat, resolved from the allowlist at delivery.
 		scheduler, err := schedule.NewService(schedule.Config{Zone: a.cfg.Timezone, Cards: cards, Photos: client, Reminders: telegram.ReminderSender{Client: client}, Sessions: runtime.SessionPruner(a.store)}, a.store, a.store, client, approvals, a.logger)
@@ -460,7 +466,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		var nsService *ns.Service
 		var trains transit.Trips
 		if a.cfg.NS.Enabled() {
-			nsService, err = ns.NewService(ns.Config{APIKey: a.cfg.NS.APIKey}, a.store, a.logger)
+			nsService, err = ns.NewService(ns.Config{APIKey: a.cfg.NS.APIKey}, switches, a.logger)
 			if err != nil {
 				return fmt.Errorf("initialize NS connector: %w", err)
 			}
@@ -472,7 +478,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		}
 		var webSearch conversation.WebSearch
 		if a.cfg.Web.Enabled {
-			webService, err := web.NewService(web.Config{WeatherHome: a.cfg.Web.WeatherHome, Location: location, Cards: cards, Trains: trains}, a.store, a.logger)
+			webService, err := web.NewService(web.Config{WeatherHome: a.cfg.Web.WeatherHome, Location: location, Cards: cards, Trains: trains}, switches, a.logger)
 			if err != nil {
 				return fmt.Errorf("initialize web connector: %w", err)
 			}
@@ -780,7 +786,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			a.ns = nsService
 		}
 		if a.cfg.HA.Enabled() {
-			homeAssistantService, err := homeassistant.NewService(homeassistant.Config{Token: a.cfg.HA.Token, BaseURL: a.cfg.HA.URL}, a.store, approvals, a.logger)
+			homeAssistantService, err := homeassistant.NewService(homeassistant.Config{Token: a.cfg.HA.Token, BaseURL: a.cfg.HA.URL}, switches, approvals, a.logger)
 			if err != nil {
 				return fmt.Errorf("initialize Home Assistant connector: %w", err)
 			}
@@ -808,7 +814,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 				BaseURL:    a.cfg.Grafana.URL,
 				Principals: a.cfg.Grafana.Principals,
 				Location:   location,
-			}, a.store, a.logger)
+			}, a.logger)
 			if err != nil {
 				return fmt.Errorf("initialize Grafana connector: %w", err)
 			}
@@ -821,7 +827,7 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 			a.grafana = grafanaService
 		}
 		if a.cfg.Bus.Enabled {
-			busService, err := bus.NewService(bus.Config{HomeStop: a.cfg.Bus.HomeStop, Contact: a.cfg.Bus.Contact}, a.store, a.logger)
+			busService, err := bus.NewService(bus.Config{HomeStop: a.cfg.Bus.HomeStop, Contact: a.cfg.Bus.Contact}, switches, a.logger)
 			if err != nil {
 				return fmt.Errorf("initialize bus connector: %w", err)
 			}
@@ -877,10 +883,10 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	var notionController telegram.NotionController
 	var nasController telegram.NASController
 	var googleController telegram.GoogleController
-	var webController telegram.WebController
-	var nsController telegram.NSController
+	var webController telegram.SwitchController
+	var nsController telegram.SwitchController
 	var homeAssistantController telegram.HomeAssistantController
-	var busController telegram.BusController
+	var busController telegram.SwitchController
 	var approvalController telegram.ApprovalController
 	var scheduleController telegram.ScheduleController
 	if a.conversation != nil {
@@ -900,16 +906,16 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 		googleController = a.google
 	}
 	if a.web != nil {
-		webController = a.web
+		webController = a.switches.Toggle(web.Switch)
 	}
 	if a.ns != nil {
-		nsController = a.ns
+		nsController = a.switches.Toggle(ns.Switch)
 	}
 	if a.homeAssistant != nil {
-		homeAssistantController = a.homeAssistant
+		homeAssistantController = homeSettings{Toggle: a.switches.Toggle(homeassistant.Switch), home: a.homeAssistant}
 	}
 	if a.bus != nil {
-		busController = a.bus
+		busController = a.switches.Toggle(bus.Switch)
 	}
 	service, err := telegram.NewService(client, identities, a.store, conversationController, attachmentStore, connectionController, notionController, nasController, googleController, webController, nsController, homeAssistantController, busController, approvalController, scheduleController, a.logger, a.telemetry)
 	if err != nil {
@@ -930,14 +936,14 @@ func (a *App) initializeTelegram(ctx context.Context) error {
 	if a.conversation != nil {
 		a.conversation.SetTabReplies(service)
 	}
-	if a.typeSafe != nil {
-		service.SetTypeSafe(a.typeSafe)
+	if a.typeSafe {
+		service.SetTypeSafe(a.switches.Toggle(judgment.OptInSwitch))
 	}
 	if a.locations != nil {
 		service.SetLocations(a.locations)
 	}
 	if a.grafana != nil {
-		service.SetGrafana(a.grafana)
+		service.SetGrafana(grafanaSettings{Toggle: a.switches.Toggle(grafana.Switch), grafana: a.grafana})
 	}
 	if a.memory != nil {
 		service.SetMemory(a.memory)
@@ -1144,4 +1150,26 @@ func registerWatchKinds(watches *watch.Service, trains *ns.Service, buses *bus.S
 		return fmt.Errorf("initialize disruption watches: %w", err)
 	}
 	return watches.Register(watch.KindDisruptions, disruptions)
+}
+
+// homeSettings is what the home settings section reads: the principal's home switch and the
+// connector's exposure check.
+type homeSettings struct {
+	integration.Toggle
+	home *homeassistant.Service
+}
+
+func (h homeSettings) Exposure(ctx context.Context) homeassistant.Exposure {
+	return h.home.Exposure(ctx)
+}
+
+// grafanaSettings is what the monitoring settings section reads: the principal's Grafana switch and
+// the operator's allowlist.
+type grafanaSettings struct {
+	integration.Toggle
+	grafana *grafana.Service
+}
+
+func (g grafanaSettings) Allowed(principalID string) bool {
+	return g.grafana.Allowed(principalID)
 }

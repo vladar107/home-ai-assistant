@@ -200,13 +200,6 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 	default:
 		return approval.Outcome{}, &approval.ActionError{Reason: "unknown_tool", Text: "This action is not supported."}
 	}
-	status, err := s.Status(ctx, record.PrincipalID)
-	if err != nil {
-		return approval.Outcome{}, err
-	}
-	if !status.Enabled {
-		return approval.Outcome{}, &approval.ActionError{Reason: "disabled", Text: "The home is off for you; turn it on in /settings and ask again."}
-	}
 	s.forget()
 	snap, err := s.current(ctx)
 	if err != nil {

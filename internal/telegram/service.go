@@ -92,6 +92,14 @@ type ConnectionController interface {
 	Disconnect(context.Context, string) (bool, error)
 }
 
+// SwitchController is one integration's per-principal switch, implemented by integration.Toggle.
+// The web access, trains, buses, and safety checks sections take one each; nil disables that
+// section.
+type SwitchController interface {
+	Enabled(context.Context, string) (bool, error)
+	SetEnabled(context.Context, string, bool) error
+}
+
 // NotionController is implemented by the Notion connector; nil disables the Notion settings section.
 type NotionController interface {
 	Status(context.Context, string) (notion.Status, error)
@@ -142,11 +150,11 @@ type Service struct {
 	notion        NotionController
 	nas           NASController
 	google        GoogleController
-	web           WebController
-	typeSafe      TypeSafeController
-	ns            NSController
+	web           SwitchController
+	typeSafe      SwitchController
+	ns            SwitchController
 	homeAssistant HomeAssistantController
-	bus           BusController
+	bus           SwitchController
 	approvals     ApprovalController
 	schedules     ScheduleController
 	locations     LocationController
@@ -203,10 +211,10 @@ func NewService(
 	notion NotionController,
 	nasFiles NASController,
 	googleAccess GoogleController,
-	webAccess WebController,
-	nsTrains NSController,
+	webAccess SwitchController,
+	nsTrains SwitchController,
 	home HomeAssistantController,
-	buses BusController,
+	buses SwitchController,
 	approvals ApprovalController,
 	schedules ScheduleController,
 	logger *slog.Logger,
@@ -282,7 +290,7 @@ func NewService(
 
 // SetTypeSafe adds the safety checks section to /settings and its line to /privacy; call it before
 // Start. A nil controller leaves both out.
-func (s *Service) SetTypeSafe(typeSafe TypeSafeController) {
+func (s *Service) SetTypeSafe(typeSafe SwitchController) {
 	if typeSafe == nil {
 		return
 	}
@@ -1169,38 +1177,38 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 			reply += privacyItem + TaskPrivacyLine
 		}
 		if s.web != nil {
-			status, err := s.web.Status(ctx, principalID)
+			enabled, err := s.web.Enabled(ctx, principalID)
 			if err != nil {
 				return "", nil, err
 			}
-			if status.Enabled {
+			if enabled {
 				reply += privacyItem + WebPrivacyLine
 			}
 		}
 		if s.ns != nil {
-			status, err := s.ns.Status(ctx, principalID)
+			enabled, err := s.ns.Enabled(ctx, principalID)
 			if err != nil {
 				return "", nil, err
 			}
-			if status.Enabled {
+			if enabled {
 				reply += privacyItem + NSPrivacyLine
 			}
 		}
 		if s.homeAssistant != nil {
-			status, err := s.homeAssistant.Status(ctx, principalID)
+			enabled, err := s.homeAssistant.Enabled(ctx, principalID)
 			if err != nil {
 				return "", nil, err
 			}
-			if status.Enabled {
+			if enabled {
 				reply += privacyItem + HomeAssistantPrivacyLine
 			}
 		}
 		if s.bus != nil {
-			status, err := s.bus.Status(ctx, principalID)
+			enabled, err := s.bus.Enabled(ctx, principalID)
 			if err != nil {
 				return "", nil, err
 			}
-			if status.Enabled {
+			if enabled {
 				reply += privacyItem + BusPrivacyLine + " " + BusPlanningPrivacyLine
 			}
 		}
@@ -1210,12 +1218,12 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		if s.transcriber != nil {
 			reply += privacyItem + VoicePrivacyLine
 		}
-		if s.grafana != nil {
-			status, err := s.grafana.Status(ctx, principalID)
+		if s.grafana != nil && s.grafana.Allowed(principalID) {
+			enabled, err := s.grafana.Enabled(ctx, principalID)
 			if err != nil {
 				return "", nil, err
 			}
-			if status.Enabled {
+			if enabled {
 				reply += privacyItem + GrafanaPrivacyLine
 			}
 		}
@@ -1223,7 +1231,7 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 			reply += privacyItem + MemoryPrivacyLine
 		}
 		if s.typeSafe != nil {
-			enabled, err := s.typeSafe.Status(ctx, principalID)
+			enabled, err := s.typeSafe.Enabled(ctx, principalID)
 			if err != nil {
 				return "", nil, err
 			}

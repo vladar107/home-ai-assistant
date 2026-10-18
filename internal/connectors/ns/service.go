@@ -21,10 +21,6 @@ import (
 
 const (
 	Integration = "ns"
-	// A row for the integration records that the principal turned trains off; without one they are
-	// on, since trains are on by default wherever the operator configured a key.
-	optOutWorkspaceID   = "ns-trains-off"
-	optOutWorkspaceName = "Trains off"
 
 	defaultBaseURL       = "https://gateway.apiportal.ns.nl/reisinformatie-api/api"
 	defaultPlacesBaseURL = "https://gateway.apiportal.ns.nl/places-api"
@@ -44,18 +40,13 @@ type Config struct {
 	Now func() time.Time
 }
 
-// Status is a principal's trains switch.
-type Status struct {
-	Enabled bool
-}
-
 type Service struct {
-	client     *client
-	places     *client
-	repository integration.Repository
-	logger     *slog.Logger
-	now        func() time.Time
-	location   *time.Location
+	client   *client
+	places   *client
+	switches integration.SwitchReader
+	logger   *slog.Logger
+	now      func() time.Time
+	location *time.Location
 
 	stations *transit.Directory[[]station]
 
@@ -66,15 +57,16 @@ type Service struct {
 }
 
 var (
-	_ module.Module       = (*Service)(nil)
-	_ transit.Departures  = (*Service)(nil)
-	_ transit.Disruptions = (*Service)(nil)
-	_ transit.Trips       = (*Service)(nil)
+	_ module.Module        = (*Service)(nil)
+	_ integration.Switched = (*Service)(nil)
+	_ transit.Departures   = (*Service)(nil)
+	_ transit.Disruptions  = (*Service)(nil)
+	_ transit.Trips        = (*Service)(nil)
 )
 
-func NewService(cfg Config, repository integration.Repository, logger *slog.Logger) (*Service, error) {
-	if repository == nil {
-		return nil, fmt.Errorf("ns repository is required")
+func NewService(cfg Config, switches integration.SwitchReader, logger *slog.Logger) (*Service, error) {
+	if switches == nil {
+		return nil, fmt.Errorf("ns switches are required")
 	}
 	if logger == nil {
 		return nil, fmt.Errorf("ns logger is required")
@@ -100,13 +92,13 @@ func NewService(cfg Config, repository integration.Repository, logger *slog.Logg
 		now = time.Now
 	}
 	service := &Service{
-		client:     newClient(parsed, key),
-		places:     newClient(places, key),
-		repository: repository,
-		logger:     logger,
-		now:        now,
-		location:   location,
-		cache:      make(map[string]cachedResult),
+		client:   newClient(parsed, key),
+		places:   newClient(places, key),
+		switches: switches,
+		logger:   logger,
+		now:      now,
+		location: location,
+		cache:    make(map[string]cachedResult),
 	}
 	service.stations = &transit.Directory[[]station]{
 		Fetch:       service.fetchStations,
@@ -152,48 +144,13 @@ func (s *Service) Shutdown(context.Context) error {
 	return nil
 }
 
-// Status reports the principal's switch. Trains are on unless the principal saved the opt-out row,
-// which carries no credential, since the key belongs to the operator.
-func (s *Service) Status(ctx context.Context, principalID string) (Status, error) {
-	_, optedOut, err := s.repository.LoadIntegrationConnection(ctx, principalID, Integration)
-	if err != nil {
-		return Status{}, err
-	}
-	return Status{Enabled: !optedOut}, nil
-}
+// Switch is each principal's trains switch. Trains are on by default wherever the operator
+// configured a key, since the key is the household's.
+var Switch = integration.Switch{Integration: Integration, Name: "Train information", DefaultOn: true}
 
-// Enabled reports whether the principal's trains switch is on.
+func (s *Service) Switch() integration.Switch { return Switch }
+
+// Enabled reports whether the principal has trains on.
 func (s *Service) Enabled(ctx context.Context, principalID string) (bool, error) {
-	status, err := s.Status(ctx, principalID)
-	return status.Enabled, err
-}
-
-// SetEnabled turns the principal's trains on or off. Turning them off takes effect on the next tool
-// call, including one later in a turn already running.
-func (s *Service) SetEnabled(ctx context.Context, principalID string, enabled bool) (Status, error) {
-	if enabled {
-		deleted, err := s.repository.DeleteIntegrationConnection(ctx, principalID, Integration)
-		if err != nil {
-			return Status{}, err
-		}
-		if deleted {
-			s.logger.InfoContext(ctx, "ns.trains.enabled", "principal_id", principalID)
-		}
-		return Status{Enabled: true}, nil
-	}
-	status, err := s.Status(ctx, principalID)
-	if err != nil || !status.Enabled {
-		return status, err
-	}
-	if err := s.repository.SaveIntegrationConnection(ctx, integration.Connection{
-		PrincipalID:   principalID,
-		Integration:   Integration,
-		TokenKind:     integration.TokenKindInternal,
-		WorkspaceID:   optOutWorkspaceID,
-		WorkspaceName: optOutWorkspaceName,
-	}); err != nil {
-		return Status{}, err
-	}
-	s.logger.InfoContext(ctx, "ns.trains.disabled", "principal_id", principalID)
-	return Status{}, nil
+	return s.switches.Enabled(ctx, principalID, Switch)
 }
