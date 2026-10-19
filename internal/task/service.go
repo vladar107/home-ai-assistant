@@ -22,6 +22,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
+	"github.com/vladar107/home-ai-assistant/internal/turn"
 )
 
 const (
@@ -62,10 +63,10 @@ var (
 	errModelBudget = errors.New("background task reached its model call budget")
 )
 
-// Runner is the conversation service as a background task sees it: one run of the task's own
+// Runner is the turn engine as a background task sees it: one run of the task's own
 // session beside the chat.
 type Runner interface {
-	RunTask(ctx context.Context, run conversation.TaskRun) (conversation.TaskReply, error)
+	RunTask(ctx context.Context, run turn.TaskRun) (turn.TaskReply, error)
 }
 
 type Config struct {
@@ -603,7 +604,7 @@ func (s *Service) run(ctx context.Context, task Task, sink *progressSink) (Outco
 		deadlineCtx, cancelDeadline := context.WithDeadline(ctx, task.Deadline)
 		mainCtx, stopMain := context.WithCancelCause(deadlineCtx)
 		sink.begin(func() { stopMain(errModelBudget) })
-		reply, err := s.runner.RunTask(mainCtx, conversation.TaskRun{
+		reply, err := s.runner.RunTask(mainCtx, turn.TaskRun{
 			PrincipalID: task.PrincipalID, Turn: outbox.TaskTurn(task.ID), SessionID: task.SessionID,
 			Message: message, Instruction: s.firstMessage(task), Continued: task.Attempts > 1, CallBudget: callBudget, Sink: sink,
 			Model: task.Model, Effort: task.Effort,
@@ -629,7 +630,7 @@ func (s *Service) run(ctx context.Context, task Task, sink *progressSink) (Outco
 	reportCtx, cancelReport := context.WithTimeout(ctx, s.config.Grace)
 	defer cancelReport()
 	sink.begin(nil)
-	reply, err := s.runner.RunTask(reportCtx, conversation.TaskRun{
+	reply, err := s.runner.RunTask(reportCtx, turn.TaskRun{
 		PrincipalID: task.PrincipalID, Turn: outbox.TaskTurn(task.ID), SessionID: task.SessionID,
 		Message: prompt.BackgroundTaskLimit(limit), Instruction: s.firstMessage(task), Continued: true, Report: true, Sink: sink, Model: task.Model, Effort: task.Effort,
 	})

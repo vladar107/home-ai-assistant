@@ -60,6 +60,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/testutil/notionsim"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 	"github.com/vladar107/home-ai-assistant/internal/trip"
+	"github.com/vladar107/home-ai-assistant/internal/turn"
 	"github.com/vladar107/home-ai-assistant/internal/turnstate"
 	"github.com/vladar107/home-ai-assistant/internal/watch"
 	"github.com/vladar107/home-ai-assistant/internal/wiring"
@@ -235,6 +236,7 @@ type conversationHarness struct {
 	client         *Client
 	service        *Service
 	conversation   *conversation.Service
+	engine         *turn.Engine
 	attachments    *attachment.Service
 	attachmentsDir string
 	files          map[string]testFile
@@ -414,7 +416,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	}
 	h.assembly = asm
 	h.switches, h.connections, h.attachments, h.outbox = asm.Switches, asm.Connections, asm.Attachments, asm.Outbox
-	h.conversation, h.approvals, h.searches, h.scheduler, h.tasks, h.watches = asm.Conversation, asm.Approvals, asm.SearchChecks, asm.Scheduler, asm.Tasks, asm.Watches
+	h.conversation, h.engine, h.approvals, h.searches, h.scheduler, h.tasks, h.watches = asm.Conversation, asm.Turns, asm.Approvals, asm.SearchChecks, asm.Scheduler, asm.Tasks, asm.Watches
 	h.notion, h.nas, h.google, h.web, h.ns, h.homeAssistant, h.grafana, h.bus = asm.Notion, asm.NAS, asm.Google, asm.Web, asm.NS, asm.HomeAssistant, asm.Grafana, asm.Bus
 	h.routes, h.locations, h.memory, h.backlog, h.trips = asm.Routes, asm.Locations, asm.Memory, asm.Backlog, asm.Trips
 	h.service = h.telegramService(identities, logger)
@@ -545,7 +547,7 @@ func (h *conversationHarness) telegramService(identities *identity.Service, logg
 	asm := h.assembly
 	deps := Dependencies{
 		Client: h.client, Identities: identities, Cursors: h.store, Logger: logger, Tabs: h.store,
-		Conversation: asm.Conversation, Attachments: asm.Attachments, Approvals: asm.Approvals, Schedules: asm.Scheduler,
+		Conversation: asm.Conversation, Namer: asm.Turns, Attachments: asm.Attachments, Approvals: asm.Approvals, Schedules: asm.Scheduler,
 		Trips: asm.Trips, Routes: asm.Routes, Memory: asm.Memory, Backlog: asm.Backlog, Transcriber: asm.ChatGPT,
 	}
 	if asm.Locations != nil {

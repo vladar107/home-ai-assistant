@@ -23,6 +23,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/testutil"
+	"github.com/vladar107/home-ai-assistant/internal/turn"
 	"github.com/vladar107/home-ai-assistant/internal/turnstate"
 )
 
@@ -44,6 +45,16 @@ func (d hintDeliverer) SendTrackedReply(ctx context.Context, chatID, replyTo int
 func (hintDeliverer) SendTyping(context.Context, int64) error { return nil }
 func (hintDeliverer) SendMessageDraft(context.Context, int64, int64, string, bool) error {
 	return nil
+}
+
+// testEngine is the turn engine the coordinator under test runs its turns through.
+func testEngine(t *testing.T, runtime agentruntime.AgentRuntime, toolProvider turn.ToolProvider, logger *slog.Logger, telemetry turn.Telemetry) *turn.Engine {
+	t.Helper()
+	engine, err := turn.New(turn.Config{TurnTimeout: 10 * time.Second}, runtime, alwaysConnected{}, toolProvider, logger, telemetry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return engine
 }
 
 type alwaysConnected struct{}
@@ -165,10 +176,8 @@ func newHintEnv(t *testing.T, answer string, delay time.Duration, tools []string
 	}
 	env.runtime = recordingRuntime{messages: make(chan string, 1), reply: reply}
 	env.deliverer = hintDeliverer{replies: make(chan string, 1)}
-	env.service, err = conversation.NewService(
-		config, store, env.runtime, env.deliverer, hintTools{names: tools}, alwaysConnected{},
-		logger, quietTelemetry{},
-	)
+	config.Engine = testEngine(t, env.runtime, hintTools{names: tools}, logger, quietTelemetry{})
+	env.service, err = conversation.NewService(config, store, env.deliverer, logger, quietTelemetry{})
 	if err != nil {
 		t.Fatal(err)
 	}

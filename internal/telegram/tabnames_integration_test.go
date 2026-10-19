@@ -112,7 +112,7 @@ func TestABotNamedTabIsNamedOncePerConversationWithAnIcon(t *testing.T) {
 	}
 
 	// Without a connected subscription nothing is asked.
-	if _, err := h.conversation.NameTab(h.ctx, "bob", "a question", "an answer", nil); err == nil {
+	if _, err := h.engine.NameTab(h.ctx, "bob", "a question", "an answer", nil); err == nil {
 		t.Fatal("a tab was named without a model connection")
 	}
 	if len(runtime.calls) != 0 {

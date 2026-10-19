@@ -53,7 +53,7 @@ func ScanPrompt(days int) string {
 }
 
 // Checker runs one model turn without staging anything for the user; the application adapts the
-// conversation service to it.
+// turn engine to it.
 type Checker interface {
 	RunCheck(ctx context.Context, principalID, message string) (text, errorKind string, err error)
 }

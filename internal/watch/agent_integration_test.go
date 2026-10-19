@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
-	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
+	"github.com/vladar107/home-ai-assistant/internal/turn"
 	"github.com/vladar107/home-ai-assistant/internal/watch"
 )
 
@@ -22,13 +22,13 @@ import (
 type fakeChecks struct {
 	started    chan struct{}
 	mu         sync.Mutex
-	reply      conversation.ScheduledReply
+	reply      turn.ScheduledReply
 	messages   []string
 	principals []string
 	gate       chan struct{}
 }
 
-func (f *fakeChecks) answer(reply conversation.ScheduledReply) {
+func (f *fakeChecks) answer(reply turn.ScheduledReply) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.reply = reply
@@ -41,7 +41,7 @@ func (f *fakeChecks) hold() chan struct{} {
 	return f.gate
 }
 
-func (f *fakeChecks) RunCheck(ctx context.Context, principalID, message string) (conversation.ScheduledReply, error) {
+func (f *fakeChecks) RunCheck(ctx context.Context, principalID, message string) (turn.ScheduledReply, error) {
 	f.mu.Lock()
 	f.messages = append(f.messages, message)
 	f.principals = append(f.principals, principalID)
@@ -52,7 +52,7 @@ func (f *fakeChecks) RunCheck(ctx context.Context, principalID, message string) 
 		select {
 		case <-gate:
 		case <-ctx.Done():
-			return conversation.ScheduledReply{}, ctx.Err()
+			return turn.ScheduledReply{}, ctx.Err()
 		}
 	}
 	f.mu.Lock()
@@ -119,7 +119,7 @@ func (a *agentEngine) waitStarted(count int) {
 
 // check runs one whole agent check at the local time: the cycle that starts it and, once it has
 // finished, the cycle that collects its answer.
-func (a *agentEngine) check(local string, reply conversation.ScheduledReply) {
+func (a *agentEngine) check(local string, reply turn.ScheduledReply) {
 	a.t.Helper()
 	a.checks.answer(reply)
 	before := len(a.checks.sent())
@@ -143,9 +143,9 @@ func (a *agentEngine) wantAlert(contains ...string) {
 	}
 }
 
-func verdict(met bool, value, headline string) conversation.ScheduledReply {
+func verdict(met bool, value, headline string) turn.ScheduledReply {
 	encoded, _ := json.Marshal(map[string]any{"met": met, "value": value, "headline": headline})
-	return conversation.ScheduledReply{Text: "I searched the airline's fares.\n\n" + string(encoded)}
+	return turn.ScheduledReply{Text: "I searched the airline's fares.\n\n" + string(encoded)}
 }
 
 // agentSpec is a stored agent watch with the given triggers, enter alone when none are given.
@@ -260,18 +260,18 @@ func TestAgentWatchCountsUnreadableAnswersAsFailures(t *testing.T) {
 	a := newAgentEngine(t)
 	a.create("alice", watchID, agentSpec())
 
-	a.check("2026-09-28 10:00", conversation.ScheduledReply{Text: "The price seems to be about 140 euros."})
-	a.check("2026-09-28 11:00", conversation.ScheduledReply{Text: `Nothing loaded. {"error": "the fare page did not load"}`})
+	a.check("2026-09-28 10:00", turn.ScheduledReply{Text: "The price seems to be about 140 euros."})
+	a.check("2026-09-28 11:00", turn.ScheduledReply{Text: `Nothing loaded. {"error": "the fare page did not load"}`})
 	a.wantSent(0)
-	a.check("2026-09-28 12:00", conversation.ScheduledReply{Text: "The model is unavailable.", ErrorKind: "runtime"})
+	a.check("2026-09-28 12:00", turn.ScheduledReply{Text: "The model is unavailable.", ErrorKind: "runtime"})
 	a.wantAlert("Lisbon flight price", "I can't check this right now.")
-	a.check("2026-09-28 13:00", conversation.ScheduledReply{Text: `{"met": "maybe"}`})
+	a.check("2026-09-28 13:00", turn.ScheduledReply{Text: `{"met": "maybe"}`})
 	a.wantSent(0)
 	if a.telemetry.count("check alice agent failed") != 4 || a.telemetry.count("upstream agent model") != 1 {
 		t.Fatalf("telemetry = %v", a.telemetry.events)
 	}
 
-	a.check("2026-09-28 14:00", conversation.ScheduledReply{Text: "```json\n{\"met\": true, \"value\": \"€140\", \"headline\": \"Down to €140.\"}\n```"})
+	a.check("2026-09-28 14:00", turn.ScheduledReply{Text: "```json\n{\"met\": true, \"value\": \"€140\", \"headline\": \"Down to €140.\"}\n```"})
 	a.wantAlert("Down to €140.")
 }
 

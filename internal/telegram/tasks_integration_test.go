@@ -39,7 +39,7 @@ func (h *conversationHarness) restartTasks(cfg task.Config) {
 		h.t.Fatal(err)
 	}
 	h.tasks = h.newTaskService(cfg)
-	h.tasks.SetRunner(h.conversation)
+	h.tasks.SetRunner(h.engine)
 	if err := h.tasks.Start(h.ctx); err != nil {
 		h.t.Fatal(err)
 	}

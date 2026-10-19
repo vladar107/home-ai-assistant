@@ -19,6 +19,7 @@ import (
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/testutil"
+	"github.com/vladar107/home-ai-assistant/internal/turn"
 	"github.com/vladar107/home-ai-assistant/internal/turnstate"
 )
 
@@ -54,6 +55,8 @@ type metricsEnv struct {
 	reader    sdkmetric.Reader
 	telemetry *observability.Telemetry
 	replies   chan string
+	// engine is the one the latest service runs its turns through.
+	engine *turn.Engine
 }
 
 func newMetricsEnv(t *testing.T) *metricsEnv {
@@ -81,11 +84,10 @@ func newMetricsEnv(t *testing.T) *metricsEnv {
 func (e *metricsEnv) service(t *testing.T, runtime agentruntime.AgentRuntime, config conversation.Config) *conversation.Service {
 	t.Helper()
 	config.TurnTimeout = 10 * time.Second
-	service, err := conversation.NewService(
-		config, e.store, runtime, hintDeliverer{replies: e.replies},
-		hintTools{names: []string{"nas_search", "gmail_search"}}, alwaysConnected{},
-		slog.New(slog.NewTextHandler(io.Discard, nil)), e.telemetry,
-	)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	e.engine = testEngine(t, runtime, hintTools{names: []string{"nas_search", "gmail_search"}}, logger, e.telemetry)
+	config.Engine = e.engine
+	service, err := conversation.NewService(config, e.store, hintDeliverer{replies: e.replies}, logger, e.telemetry)
 	if err != nil {
 		t.Fatal(err)
 	}

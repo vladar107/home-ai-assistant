@@ -403,6 +403,7 @@ func (a *App) buildTelegram(ctx context.Context, client *telegram.Client, config
 		}
 		// Interface values are set only for what was built, so none of them is a typed nil.
 		deps.Conversation = asm.Conversation
+		deps.Namer = asm.Turns
 		deps.Attachments = asm.Attachments
 		deps.Approvals = asm.Approvals
 		deps.Schedules = asm.Scheduler

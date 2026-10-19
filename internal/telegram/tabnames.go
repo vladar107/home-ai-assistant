@@ -93,7 +93,7 @@ var _ conversation.TabReplies = (*Service)(nil)
 // A failure leaves the tab as it is and is not retried. Neither the exchange nor the name is
 // logged.
 func (s *Service) TabReplied(ctx context.Context, reply conversation.TabReply) {
-	if !s.topics.Load() || s.tabs == nil || s.conversation == nil || reply.ThreadID <= 0 {
+	if !s.topics.Load() || s.tabs == nil || s.namer == nil || reply.ThreadID <= 0 {
 		return
 	}
 	key := chatTab{reply.ChatID, reply.ThreadID}
@@ -112,7 +112,7 @@ func (s *Service) TabReplied(ctx context.Context, reply conversation.TabReply) {
 	}
 	s.refreshTopicIcons(ctx)
 	nameCtx, cancel := context.WithTimeout(ctx, tabNameTimeout)
-	chosen, err := s.conversation.NameTab(nameCtx, reply.PrincipalID, reply.Message, reply.Reply, s.offeredIcons())
+	chosen, err := s.namer.NameTab(nameCtx, reply.PrincipalID, reply.Message, reply.Reply, s.offeredIcons())
 	cancel()
 	if err != nil {
 		if ctx.Err() == nil {

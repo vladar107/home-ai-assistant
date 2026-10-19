@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/clip"
-	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/localtime"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
+	"github.com/vladar107/home-ai-assistant/internal/turn"
 )
 
 const (
@@ -33,7 +33,7 @@ const (
 
 // CheckRunner runs one unwatched, read-only model turn on the principal's own subscription.
 type CheckRunner interface {
-	RunCheck(ctx context.Context, principalID, message string) (conversation.ScheduledReply, error)
+	RunCheck(ctx context.Context, principalID, message string) (turn.ScheduledReply, error)
 }
 
 type AgentConfig struct {
@@ -192,7 +192,7 @@ type verdict struct {
 // normalized value, so the value is there for the next check's message. A changed value is stored
 // silently unless the condition holds and the watch alerts on a change, and a change between met
 // and unmet is never silent.
-func observe(watch Watch, previous string, reply conversation.ScheduledReply) (Observation, error) {
+func observe(watch Watch, previous string, reply turn.ScheduledReply) (Observation, error) {
 	if reply.ErrorKind != "" {
 		return Observation{}, &UpstreamError{Service: "model", Err: fmt.Errorf("the check turn failed: %s", reply.ErrorKind)}
 	}

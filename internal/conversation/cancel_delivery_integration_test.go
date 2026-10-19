@@ -45,10 +45,10 @@ func TestCancelledDeliveryLetsTheNextMessageThroughAtOnce(t *testing.T) {
 	runtime := scriptedRuntime{run: func(context.Context, agentruntime.RunRequest, agentruntime.EventSink) (agentruntime.RunResult, error) {
 		return agentruntime.RunResult{Response: "answer"}, nil
 	}}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	service, err := conversation.NewService(
-		conversation.Config{TurnTimeout: 10 * time.Second}, env.store, runtime, deliverer,
-		hintTools{}, alwaysConnected{},
-		slog.New(slog.NewTextHandler(io.Discard, nil)), env.telemetry,
+		conversation.Config{TurnTimeout: 10 * time.Second, Engine: testEngine(t, runtime, hintTools{}, logger, env.telemetry)},
+		env.store, deliverer, logger, env.telemetry,
 	)
 	if err != nil {
 		t.Fatal(err)

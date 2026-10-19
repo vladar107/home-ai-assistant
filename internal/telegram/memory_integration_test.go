@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/memory"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
+	"github.com/vladar107/home-ai-assistant/internal/turn"
 )
 
 // outsideProvider stands in for a tool that reads mail or a web page.
@@ -481,9 +481,9 @@ func TestScheduledRunReadsMemoryButCannotWriteIt(t *testing.T) {
 	h := newMemoryHarness(t, runtime)
 	h.seedMemory("alice", "aaaaaaa1", memory.KindInstruction, "answer briefly")
 
-	replies := make(chan conversation.ScheduledReply, 1)
+	replies := make(chan turn.ScheduledReply, 1)
 	go func() {
-		reply, err := h.conversation.RunScheduled(h.ctx, "alice", "schedule/aaaa", "check the weather")
+		reply, err := h.engine.RunScheduled(h.ctx, "alice", "schedule/aaaa", "check the weather")
 		if err != nil {
 			t.Error(err)
 		}
@@ -507,9 +507,9 @@ func TestScheduledRunDeliversOnlyTheFinalMessage(t *testing.T) {
 	runtime := newControlledRuntime()
 	h := newMemoryHarness(t, runtime)
 
-	replies := make(chan conversation.ScheduledReply, 1)
+	replies := make(chan turn.ScheduledReply, 1)
 	go func() {
-		reply, err := h.conversation.RunScheduled(h.ctx, "alice", "schedule/bbbb", "check the weather")
+		reply, err := h.engine.RunScheduled(h.ctx, "alice", "schedule/bbbb", "check the weather")
 		if err != nil {
 			t.Error(err)
 		}
@@ -522,7 +522,7 @@ func TestScheduledRunDeliversOnlyTheFinalMessage(t *testing.T) {
 	}
 
 	go func() {
-		reply, err := h.conversation.RunScheduled(h.ctx, "alice", "schedule/cccc", "check the weather")
+		reply, err := h.engine.RunScheduled(h.ctx, "alice", "schedule/cccc", "check the weather")
 		if err != nil {
 			t.Error(err)
 		}

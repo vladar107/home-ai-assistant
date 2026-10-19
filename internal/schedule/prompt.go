@@ -9,7 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/clip"
-	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/turn"
 )
 
 const (
@@ -25,8 +25,8 @@ const promptSectionHeading = "Scheduled jobs: the user's enabled scheduled jobs 
 	"Before asking the user about their plans, trips, or routine, read the job that covers them with schedule_get."
 
 var (
-	_ conversation.Jobs = (*Service)(nil)
-	_ conversation.Jobs = PromptSection{}
+	_ turn.Jobs = (*Service)(nil)
+	_ turn.Jobs = PromptSection{}
 )
 
 // PromptSection is the jobs section of the system prompt over the repository alone, so a turn

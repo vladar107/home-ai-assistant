@@ -9,10 +9,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
+	"github.com/vladar107/home-ai-assistant/internal/turn"
 )
 
 const (
@@ -23,10 +23,10 @@ const (
 	maximumPromptRunes       = 1000
 )
 
-// TurnRunner is the conversation service as a scheduled model turn sees it: one isolated,
+// TurnRunner is the turn engine as a scheduled model turn sees it: one isolated,
 // read-only turn on the principal's own subscription.
 type TurnRunner interface {
-	RunScheduled(ctx context.Context, principalID, turn, message string) (conversation.ScheduledReply, error)
+	RunScheduled(ctx context.Context, principalID, turn, message string) (turn.ScheduledReply, error)
 }
 
 type modelTurnConfig struct {

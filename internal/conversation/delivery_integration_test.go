@@ -64,10 +64,10 @@ func (d *chatDeliverer) next(t *testing.T, ctx context.Context) string {
 
 func (e *metricsEnv) deliveryService(t *testing.T, runtime agentruntime.AgentRuntime, deliverer conversation.Deliverer) *conversation.Service {
 	t.Helper()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	service, err := conversation.NewService(
-		conversation.Config{TurnTimeout: 10 * time.Second}, e.store, runtime, deliverer,
-		hintTools{}, alwaysConnected{},
-		slog.New(slog.NewTextHandler(io.Discard, nil)), e.telemetry,
+		conversation.Config{TurnTimeout: 10 * time.Second, Engine: testEngine(t, runtime, hintTools{}, logger, e.telemetry)},
+		e.store, deliverer, logger, e.telemetry,
 	)
 	if err != nil {
 		t.Fatal(err)

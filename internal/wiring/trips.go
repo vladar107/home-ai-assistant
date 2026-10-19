@@ -4,16 +4,16 @@ import (
 	"context"
 
 	"github.com/vladar107/home-ai-assistant/internal/connectors/google"
-	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
+	"github.com/vladar107/home-ai-assistant/internal/turn"
 )
 
 type tripScanChecker struct {
-	conversation *conversation.Service
+	engine *turn.Engine
 }
 
 func (c tripScanChecker) RunCheck(ctx context.Context, principalID, message string) (string, string, error) {
-	reply, err := c.conversation.RunCheck(ctx, principalID, message)
+	reply, err := c.engine.RunCheck(ctx, principalID, message)
 	return reply.Text, reply.ErrorKind, err
 }
 

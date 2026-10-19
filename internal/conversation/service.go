@@ -92,10 +92,7 @@ type replyCapture struct {
 func NewService(
 	config Config,
 	repository Repository,
-	runtime agentruntime.AgentRuntime,
 	deliverer Deliverer,
-	toolProvider ToolProvider,
-	gate ConnectionGate,
 	logger *slog.Logger,
 	telemetry Telemetry,
 ) (*Service, error) {
@@ -105,17 +102,11 @@ func NewService(
 	if repository == nil {
 		return nil, fmt.Errorf("conversation repository is required")
 	}
-	if runtime == nil {
-		return nil, fmt.Errorf("conversation runtime is required")
+	if config.Engine == nil {
+		return nil, fmt.Errorf("conversation turn engine is required")
 	}
 	if deliverer == nil {
 		return nil, fmt.Errorf("conversation deliverer is required")
-	}
-	if toolProvider == nil {
-		return nil, fmt.Errorf("conversation tool provider is required")
-	}
-	if gate == nil {
-		return nil, fmt.Errorf("conversation connection gate is required")
 	}
 	if logger == nil {
 		return nil, fmt.Errorf("conversation logger is required")
@@ -139,27 +130,10 @@ func NewService(
 		return nil, fmt.Errorf("conversation cards and photos must be configured together")
 	}
 
-	engine, err := turn.New(turn.Config{
-		TurnTimeout:  config.TurnTimeout,
-		Location:     config.Location,
-		Now:          config.Now,
-		DisplayNames: config.DisplayNames,
-		Memory:       config.Memory,
-		Jobs:         config.Jobs,
-		WebSearch:    config.WebSearch,
-		SearchChecks: config.SearchChecks,
-		Exposure:     config.Exposure,
-		Locations:    config.Locations,
-		Trips:        config.Trips,
-	}, runtime, gate, toolProvider, logger, telemetry)
-	if err != nil {
-		return nil, err
-	}
-
 	return &Service{
 		config:     config,
 		repository: repository,
-		engine:     engine,
+		engine:     config.Engine,
 		deliverer:  deliverer,
 		logger:     logger,
 		telemetry:  telemetry,

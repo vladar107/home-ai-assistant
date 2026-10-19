@@ -23,6 +23,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
+	"github.com/vladar107/home-ai-assistant/internal/turn"
 	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
@@ -70,12 +71,15 @@ type ConversationController interface {
 	// SessionMessages returns the Telegram messages of one of the principal's conversations, oldest
 	// first.
 	SessionMessages(ctx context.Context, principalID, sessionID string) ([]int64, error)
-	// NameTab chooses a tab's name and one of icons from a conversation's first exchange, on the
-	// principal's own subscription.
-	NameTab(ctx context.Context, principalID, message, reply string, icons []string) (conversation.TabName, error)
 	// React records a reaction to one of the principal's replies and starts a reconsider turn for a
 	// first 👎.
 	React(context.Context, conversation.ReactionInput) (conversation.ReactionResult, error)
+}
+
+// TabNamer chooses a tab's name and one of icons from a conversation's first exchange, on the
+// principal's own subscription.
+type TabNamer interface {
+	NameTab(ctx context.Context, principalID, message, reply string, icons []string) (turn.TabName, error)
 }
 
 // AttachmentStore reports what the principal's conversation may still hold; nil refuses photos
@@ -145,6 +149,7 @@ type Service struct {
 	identities   identityResolver
 	cursors      cursorStore
 	conversation ConversationController
+	namer        TabNamer
 	attachments  AttachmentStore
 	approvals    ApprovalController
 	schedules    ScheduleController
@@ -203,17 +208,19 @@ type Dependencies struct {
 
 	Tabs         TabStore
 	Conversation ConversationController
-	Attachments  AttachmentStore
-	Approvals    ApprovalController
-	Schedules    ScheduleController
-	Locations    LocationController
-	Memory       MemoryController
-	Backlog      BacklogController
-	Tasks        TaskController
-	Watches      WatchController
-	Trips        TripController
-	Routes       RouteController
-	Transcriber  Transcriber
+	// Namer names tabs after their conversations; without it tabs keep their first name.
+	Namer       TabNamer
+	Attachments AttachmentStore
+	Approvals   ApprovalController
+	Schedules   ScheduleController
+	Locations   LocationController
+	Memory      MemoryController
+	Backlog     BacklogController
+	Tasks       TaskController
+	Watches     WatchController
+	Trips       TripController
+	Routes      RouteController
+	Transcriber Transcriber
 	// Model enables /model; it also needs Conversation.
 	Model *ModelCommand
 
@@ -244,6 +251,7 @@ func NewService(deps Dependencies) (*Service, error) {
 		identities:   deps.Identities,
 		cursors:      deps.Cursors,
 		conversation: deps.Conversation,
+		namer:        deps.Namer,
 		attachments:  deps.Attachments,
 		approvals:    deps.Approvals,
 		schedules:    deps.Schedules,

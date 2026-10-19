@@ -21,6 +21,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/task"
 	"github.com/vladar107/home-ai-assistant/internal/testutil"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
+	"github.com/vladar107/home-ai-assistant/internal/turn"
 )
 
 var (
@@ -56,18 +57,18 @@ func (u fixedUsage) CachedUsage(string, time.Duration) (chatgpt.Usage, bool) {
 
 type recordingRunner struct {
 	mu        sync.Mutex
-	runs      []conversation.TaskRun
+	runs      []turn.TaskRun
 	failFirst bool
 }
 
-func (r *recordingRunner) RunTask(_ context.Context, run conversation.TaskRun) (conversation.TaskReply, error) {
+func (r *recordingRunner) RunTask(_ context.Context, run turn.TaskRun) (turn.TaskReply, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.runs = append(r.runs, run)
 	if r.failFirst && !run.Report {
-		return conversation.TaskReply{}, context.DeadlineExceeded
+		return turn.TaskReply{}, context.DeadlineExceeded
 	}
-	return conversation.TaskReply{Text: "report"}, nil
+	return turn.TaskReply{Text: "report"}, nil
 }
 
 func (r *recordingRunner) pairs() []agentruntime.ModelEffort {

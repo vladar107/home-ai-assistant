@@ -112,6 +112,23 @@ behave as before.
 
 ## Deviations
 
+- The chat flow cannot call one `Setup`: the activity draft starts between the
+  connection gate and the tools, and the tool hint starts between the tools and
+  the web switch, so the engine exposes `Ready`, `Tools(scope)` and
+  `Switches` (web switch, then memory) in that order instead, and `Compose`
+  takes the subject line as text because the subject kinds stay with the
+  coordinator.
+- `Run` returns the runtime result with the call counts and called tool names;
+  memory notes stay a separate `MemoryNotes` call (with `WithMemoryNotes`) so
+  they are still taken after the draft stops, as before. The draft follows tool
+  calls through a sink the coordinator passes in, since the engine knows
+  nothing of drafts.
+- The scheduled run, the task run, the rewrite and the tab name keep their
+  moved code as it was rather than going through `Run`.
+- Telegram receives the engine for tab naming through a new `Namer`
+  dependency until M4 moves naming into `telegram.Tabs`, and the assembly
+  exposes the engine as `Turns`. The coordinator's `Memory` config shrinks to
+  the one question it asks (`LearnsFromFeedback`).
 - M1 did not need the leaf values for construction order, since the engine can
   be built where the coordinator is built today; they are still used there so
   the engine does not hold the scheduler or the trip service. The scheduler

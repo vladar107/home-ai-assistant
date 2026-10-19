@@ -53,6 +53,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 	"github.com/vladar107/home-ai-assistant/internal/transit"
 	"github.com/vladar107/home-ai-assistant/internal/trip"
+	"github.com/vladar107/home-ai-assistant/internal/turn"
 	"github.com/vladar107/home-ai-assistant/internal/turnstate"
 	"github.com/vladar107/home-ai-assistant/internal/watch"
 )
@@ -203,6 +204,7 @@ type Assembly struct {
 	Attachments   *attachment.Service
 	Outbox        *outbox.Box
 	Conversation  *conversation.Service
+	Turns         *turn.Engine
 	Approvals     *approval.Service
 	SearchChecks  *searchcheck.Service
 	Scheduler     *schedule.Service
@@ -525,7 +527,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		}
 		trains = a.NS
 	}
-	var webSearch conversation.WebSearch
+	var webSearch turn.WebSearch
 	if in.Web != nil {
 		webConfig := *in.Web
 		webConfig.Location = cmp.Or(webConfig.Location, a.location)
@@ -545,7 +547,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		a.Web = webService
 		webSearch = webService
 	}
-	var turnLocations conversation.Locations
+	var turnLocations turn.Locations
 	if in.Core.Location != nil {
 		placesService, err := places.NewService(in.Core.Location.Places, in.Logger)
 		if err != nil {
@@ -630,8 +632,26 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	if runtime, ok := in.Runtime.(conversation.Transcripts); ok {
 		transcripts = runtime
 	}
+	engine, err := turn.New(turn.Config{
+		TurnTimeout:  in.Core.TurnTimeout,
+		Location:     in.Core.TurnZone,
+		Now:          in.Core.Now,
+		DisplayNames: a.displayNames,
+		Memory:       memoryService,
+		Jobs:         schedule.NewPromptSection(in.Store, in.Zone, in.Logger),
+		WebSearch:    webSearch,
+		SearchChecks: searchChecks,
+		Exposure:     exposures,
+		Locations:    turnLocations,
+		Trips:        trip.NewReader(in.Store, in.Core.Now),
+	}, in.Runtime, connections, broker, in.Logger, telemetry)
+	if err != nil {
+		return fmt.Errorf("initialize turn engine: %w", err)
+	}
+	a.Turns = engine
 	conversationService, err := conversation.NewService(
 		conversation.Config{
+			Engine:         engine,
 			TurnTimeout:    in.Core.TurnTimeout,
 			ChatModel:      a.ChatModel,
 			TaskModel:      a.TaskModel,
@@ -639,10 +659,8 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 			FollowUp:       approvals,
 			Notice:         notices,
 			Reports:        reports,
-			Jobs:           schedule.NewPromptSection(in.Store, in.Zone, in.Logger),
 			Attachments:    attachments,
 			Transcripts:    transcripts,
-			WebSearch:      webSearch,
 			Cards:          cards,
 			Photos:         in.Chat,
 			Recent:         recent,
@@ -650,30 +668,23 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 			SafetyChecks:   safetyChecks,
 			Location:       in.Core.TurnZone,
 			Now:            in.Core.Now,
-			Locations:      turnLocations,
-			Trips:          trip.NewReader(in.Store, in.Core.Now),
 			Memory:         memoryService,
 			Exposure:       exposures,
-			SearchChecks:   searchChecks,
 			History:        conversationHistory,
-			DisplayNames:   a.displayNames,
 			Reactions:      reactions,
 			TypingInterval: in.Core.TypingInterval,
 			DraftDelay:     in.Core.DraftDelay,
 			DraftInterval:  in.Core.DraftInterval,
 		},
 		in.Store,
-		in.Runtime,
 		in.Chat,
-		broker,
-		connections,
 		in.Logger,
 		telemetry,
 	)
 	if err != nil {
 		return fmt.Errorf("initialize conversation service: %w", err)
 	}
-	if err := scheduler.Register(schedule.ModelTurn(conversationService)); err != nil {
+	if err := scheduler.Register(schedule.ModelTurn(engine)); err != nil {
 		return err
 	}
 	if err := scheduler.Register(schedule.Reminder(scheduler.Now)); err != nil {
@@ -705,7 +716,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	a.tripState = &tripScanState{schedules: scheduler}
 	tripTools.SetScanState(a.tripState)
 	tripService.SetTabs(in.TripNotices)
-	if err := scheduler.Register(trip.ScanJobType(tripScanChecker{conversationService}, in.Store, a.tripState, tripService, in.TripNotices, in.TripNotices, scheduler.Now, in.Logger)); err != nil {
+	if err := scheduler.Register(trip.ScanJobType(tripScanChecker{engine}, in.Store, a.tripState, tripService, in.TripNotices, in.TripNotices, scheduler.Now, in.Logger)); err != nil {
 		return err
 	}
 	paused := []trip.Paused{scheduler}
@@ -732,11 +743,11 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	}
 	a.Backlog = backlogService
 	if a.Tasks != nil {
-		a.Tasks.SetRunner(conversationService)
+		a.Tasks.SetRunner(engine)
 	}
 	if a.Watches != nil {
-		a.Watches.SetRewriter(conversationService)
-		agent, err := watch.NewAgentEvaluator(conversationService, watch.AgentConfig{Now: in.Core.Now, Finished: a.Watches.Wake})
+		a.Watches.SetRewriter(engine)
+		agent, err := watch.NewAgentEvaluator(engine, watch.AgentConfig{Now: in.Core.Now, Finished: a.Watches.Wake})
 		if err != nil {
 			return fmt.Errorf("initialize agent watches: %w", err)
 		}

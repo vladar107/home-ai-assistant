@@ -525,24 +525,15 @@ type PhotoDeliverer interface {
 	CaptionFits(caption string) bool
 }
 
-// The turn engine's collaborators, under the names this package's Config has always used.
-type (
-	ConnectionGate = turn.ConnectionGate
-	ToolProvider   = turn.ToolProvider
-	Jobs           = turn.Jobs
-	WebSearch      = turn.WebSearch
-	Locations      = turn.Locations
-	Trips          = turn.Trips
-	Memory         = turn.Memory
-	SearchChecks   = turn.SearchChecks
-
-	ScheduledReply = turn.ScheduledReply
-	TaskRun        = turn.TaskRun
-	TaskReply      = turn.TaskReply
-	TabName        = turn.TabName
-)
+// Memory is what the coordinator asks of the principal's memory; the engine reads the rest.
+type Memory interface {
+	// LearnsFromFeedback reports whether the turn a 👎 starts may propose an instruction.
+	LearnsFromFeedback(ctx context.Context, principalID string) (bool, error)
+}
 
 type Config struct {
+	// Engine runs the model turns; the coordinator owns the lanes around them.
+	Engine      *turn.Engine
 	TurnTimeout time.Duration
 	// ChatModel is the model and effort a chat turn runs on when its lane has no choice of its own.
 	ChatModel agentruntime.ModelEffort
@@ -561,28 +552,17 @@ type Config struct {
 	// Transcripts loses a conversation's photos wherever Attachments loses its files; nil leaves
 	// them in the runtime's history.
 	Transcripts Transcripts
-	WebSearch   WebSearch
 	ToolHint    ToolHinter
 	// SafetyChecks labels the turn's metrics; nil labels every turn "unavailable".
 	SafetyChecks SafetyChecks
 	// Cards and Photos attach a staged card to a successful reply; nil leaves replies text only.
 	Cards  Cards
 	Photos PhotoDeliverer
-	// Locations tells each turn where its user is while they share a location; nil leaves it out.
-	Locations Locations
-	// Trips tells each turn about the user's active or next trip; nil leaves it out.
-	Trips Trips
-	// Memory goes into every turn's system prompt and adds a line to a reply for each write the
-	// turn made; nil leaves memory out.
+	// Memory decides whether a reconsider turn may propose a lesson; nil leaves that step out.
 	Memory Memory
-	// Jobs goes into the system prompt of chat turns and background tasks beside memory; nil
-	// leaves it out.
-	Jobs Jobs
 	// Exposure records a turn that searched the web or carried an outside notice as having read
 	// text from outside the household; nil records nothing.
 	Exposure Exposure
-	// SearchChecks decides each query of a turn's web search; nil refuses every search.
-	SearchChecks SearchChecks
 	// Location is the household's time zone; each chat turn then tells the model the current
 	// local time. Nil leaves the time out.
 	Location *time.Location
@@ -597,9 +577,6 @@ type Config struct {
 	DraftInterval time.Duration
 	// History titles the conversations /sessions lists; nil lists them without titles.
 	History History
-	// DisplayNames tells each turn which household member its user is; a principal without a
-	// name goes unnamed.
-	DisplayNames map[string]string
 	// Reactions turns a chat turn's emoji-only reply into a reaction on the user's message; nil
 	// sends such replies as text.
 	Reactions Reactions

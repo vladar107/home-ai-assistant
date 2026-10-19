@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/backlog"
-	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
+	"github.com/vladar107/home-ai-assistant/internal/turn"
 )
 
 func newBacklogHarness(t *testing.T, runtime *controlledRuntime) *conversationHarness {
@@ -253,9 +253,9 @@ func TestScheduledRunIsNotOfferedTheBacklog(t *testing.T) {
 	h := newBacklogHarness(t, runtime)
 	h.seedBacklog("alice", "aaaaaaa1", "Chart the weather", "", time.Now())
 
-	replies := make(chan conversation.ScheduledReply, 1)
+	replies := make(chan turn.ScheduledReply, 1)
 	go func() {
-		reply, err := h.conversation.RunScheduled(h.ctx, "alice", "schedule/aaaa", "check the weather")
+		reply, err := h.engine.RunScheduled(h.ctx, "alice", "schedule/aaaa", "check the weather")
 		if err != nil {
 			t.Error(err)
 		}

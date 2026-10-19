@@ -11,6 +11,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/modelcatalog"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
+	"github.com/vladar107/home-ai-assistant/internal/turn"
 )
 
 var (
@@ -315,7 +316,7 @@ func TestStaleLaneChoiceFallsBackAndIsReported(t *testing.T) {
 func TestTaskRunPassesItsStoredPairToTheRuntime(t *testing.T) {
 	env := newLaneEnv(t)
 	for _, report := range []bool{false, true} {
-		reply, err := env.service.RunTask(env.ctx, conversation.TaskRun{
+		reply, err := env.engine.RunTask(env.ctx, turn.TaskRun{
 			PrincipalID: "alice", Turn: "task:one", SessionID: "55555555-5555-4555-8555-555555555555",
 			Message: "work", Report: report, Model: strongHigh.Model, Effort: strongHigh.Effort,
 		})
