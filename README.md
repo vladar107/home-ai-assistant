@@ -205,11 +205,29 @@ internal/telegram/     Telegram client, poller, commands, /settings
 internal/conversation/ turn coordination
 internal/runtime/pi/   Pi subprocess and tool bridge
 internal/prompt/       system prompt and [system] lines the model reads
+internal/turn/         one model turn, chat or unattended
+internal/turnstate/    recent messages and trust per tab
 internal/tools/        tool broker
-internal/connectors/   notion, gmail, nas, ns, bus, web, homeassistant, places
+internal/approval/     Confirm / Reject proposals and direct actions with Undo
+internal/exposure/     which conversations read outside content
+internal/judgment/     TypeSafe screening and intent checks
+internal/searchcheck/  per-query web search checks
+internal/schedule/     durable jobs, reminders, and scheduled turns
+internal/task/         background sub-agents
+internal/watch/        windowed watches, in code or by model turn
+internal/routes/       saved journeys checked leg by leg
+internal/trip/         trips, bookings, and travel reminders
+internal/transit/      shared vocabulary of the train and bus services
+internal/connectors/   notion, google, gmail, calendar, nas, ns, bus, web,
+                       homeassistant, grafana, places
+internal/chatgpt/      transcription, image generation, and usage
+internal/imagegen/     drawn pictures on the user's own subscription
+internal/reaction/     emoji reaction tool
+internal/modelcatalog/ models a subscription offers
 internal/location/     shared positions and their expiry
 internal/memory/       per-user memory, its tools, and prompt rendering
 internal/backlog/      per-user backlog of ideas for developing the assistant
+internal/clip/ localtime/ weekday/ httpretry/ testutil/  small shared helpers
 internal/store/sqlite/ persistence and migrations
 deploy/                Compose files and configuration examples
 scripts/               operator scripts (deploy, secrets, checks)

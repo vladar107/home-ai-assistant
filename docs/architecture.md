@@ -118,6 +118,13 @@ flowchart TB
     routes["<b>routes</b><br/>saved journeys,<br/>checked leg by leg in code"]
     judgment["<b>judgment</b><br/>TypeSafe screening, intent checks,<br/>tool hints (opt-in)"]
     searchcheck["<b>searchcheck</b><br/>per-query web search checks"]
+    exposure["<b>exposure</b><br/>which conversations read<br/>outside content"]
+    turnstate["<b>turnstate</b><br/>recent messages and trust<br/>per tab, memory-only"]
+    prompt["<b>prompt</b><br/>system prompt, [system] lines,<br/>framing text"]
+    reaction["<b>reaction</b><br/>emoji reaction tool"]
+    imagegen["<b>imagegen</b><br/>drawn pictures on the user's<br/>own ChatGPT subscription"]
+    chatgpt["<b>chatgpt</b><br/>transcription, image generation,<br/>usage on the user's subscription"]
+    modelcatalog["<b>modelcatalog</b><br/>models a subscription offers,<br/>read from Pi's cache"]
     integration["<b>integration</b><br/>per-user enable / disable"]
     loc["<b>location</b><br/>latest shared position, expiry"]
     mem["<b>memory</b><br/>per-user instructions and facts"]
@@ -177,6 +184,16 @@ flowchart TB
     conv --> card
     conv --> judgment
     turn --> searchcheck
+    turn --> turnstate
+    turn --> prompt
+    judgment --> turnstate
+    approval --> exposure
+    broker --> reaction
+    broker --> imagegen
+    imagegen --> chatgpt
+    tg --> chatgpt
+    tg --> modelcatalog
+    conv --> modelcatalog
     searchcheck --> approval
     searchcheck --> judgment
     runtime --> connection
@@ -209,6 +226,11 @@ flowchart TB
     connectors --> integration
     identity & conv & approval & schedule & connection & integration & loc & mem & backlog & trip --> store
 ```
+
+`httpretry`, `transit` (the shared vocabulary of the train and bus services),
+`thread` (the tab a piece of work belongs to), `localtime`, `weekday`, and `clip`
+are small helpers the components above import, and `testutil` holds the test
+fixtures.
 
 `turn` is the model turn engine: the connection gate, the tools, the web search
 switch, memory, the jobs and place lines, the search check, and the error replies.
@@ -807,8 +829,11 @@ routes after jobs and watches, read-only, with a Delete button each.
   write in a conversation that has read text from outside the household needs
   Confirm, because an exported item is pasted into a development session.
   `/api/backlog` serves every principal's open items, one item by ID, and
-  marking one done, without authentication: the home-edge Caddy exposes only
-  `/api/*` to the home network, and the API cannot add, edit, or delete items.
+  marking one done, and the API cannot add, edit, or delete items. It has no
+  authentication, by the operator's decision (plan 0076): it relies on who can
+  reach the service over the network, and it returns all principals' items, not
+  only the caller's. That is a deliberate trust boundary, unlike every other
+  per-principal interface here.
 - **Short-lived location.** Only each user's latest shared position is stored. It is
   used while fresh, then deleted by a prune with SQLite `secure_delete` on; a user
   forgets it at once from `/settings`, and a forgotten live share stays ignored.

@@ -83,7 +83,7 @@ plan that links back to the earlier record.
 | 0071 | [Emoji-only replies become reactions](0071-emoji-replies-become-reactions.md) | done |
 | 0072 | [Scheduled jobs and their reports in the conversation's context](0072-job-reports-in-context.md) | done |
 | 0073 | [A backlog of ideas for the assistant](0073-backlog.md) | done |
-| 0074 | [Watch anything: model-checked watches](0074-watch-anything.md) | in-progress |
+| 0074 | [Watch anything: model-checked watches](0074-watch-anything.md) | done |
 | 0075 | [Tuning after the first conversation with jobs, backlog, and agent watches](0075-tuning-after-first-use.md) | done |
 | 0076 | [Backlog over HTTP for development sessions](0076-backlog-api.md) | done |
 | 0077 | [Larger file uploads](0077-larger-file-uploads.md) | done |
@@ -121,6 +121,7 @@ plan that links back to the earlier record.
 | 0109 | [One ordered lifecycle and a module registry without unused parts](0109-module-lifecycle.md) | done |
 | 0110 | [Faster integration tests: shared migrated database, no race exit sleep, parallel Telegram tests](0110-faster-tests.md) | done |
 | 0111 | [A turn engine apart from the conversation coordinator](0111-turn-engine.md) | done |
+| 0112 | [Documentation and plan drift](0112-documentation-drift.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

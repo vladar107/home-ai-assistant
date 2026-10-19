@@ -1,6 +1,6 @@
 # 0074 — Watch anything: model-checked watches
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
