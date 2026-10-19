@@ -93,6 +93,29 @@ func (e *laneEnv) say(t *testing.T, lane conversation.Lane, replyTo int64) agent
 	return agentruntime.ModelEffort{Model: last.Model, Effort: last.Effort}
 }
 
+// resume switches the lane to an earlier conversation, waiting out the previous turn's delivery,
+// which is answered as busy until it is recorded.
+func (e *laneEnv) resume(t *testing.T, lane conversation.Lane, sessionID string) {
+	t.Helper()
+	for {
+		resumed, err := e.service.Resume(e.ctx, lane, sessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resumed.Found {
+			return
+		}
+		if !resumed.Busy {
+			t.Fatalf("resume = %+v", resumed)
+		}
+		select {
+		case <-time.After(5 * time.Millisecond):
+		case <-e.ctx.Done():
+			t.Fatal("the previous turn never finished")
+		}
+	}
+}
+
 func (e *laneEnv) expect(t *testing.T, lane conversation.Lane, want agentruntime.ModelEffort) {
 	t.Helper()
 	if got := e.say(t, lane, 0); got != want {
@@ -123,9 +146,7 @@ func TestLaneChoiceAppliesAfterNewAndHoldsAcrossSwitching(t *testing.T) {
 			older = session
 		}
 	}
-	if resumed, err := env.service.Resume(env.ctx, main, older.ID); err != nil || !resumed.Found {
-		t.Fatalf("resume = %+v %v", resumed, err)
-	}
+	env.resume(t, main, older.ID)
 	env.expect(t, main, strongHigh)
 
 	current := sessions[0].ID
@@ -238,9 +259,7 @@ func TestLaneChoiceKeptWhenATabOnlyLooksGoneAndResumeStartsOnDefaults(t *testing
 		t.Fatalf("close tab = %v %v", closed, err)
 	}
 	fresh := conversation.Lane{PrincipalID: "alice", ThreadID: 9}
-	if resumed, err := env.service.Resume(env.ctx, fresh, sessions[0].ID); err != nil || !resumed.Found {
-		t.Fatalf("resume into a new tab = %+v %v", resumed, err)
-	}
+	env.resume(t, fresh, sessions[0].ID)
 	env.expect(t, fresh, chatDefault)
 }
 
