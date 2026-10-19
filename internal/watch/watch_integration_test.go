@@ -15,6 +15,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
+	"github.com/vladar107/home-ai-assistant/internal/testutil"
 	"github.com/vladar107/home-ai-assistant/internal/watch"
 )
 
@@ -207,10 +208,7 @@ func newEngine(t *testing.T) *engine {
 	t.Helper()
 	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "state", "assistant.sqlite")
-	store, err := sqlite.Open(ctx, path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	store := testutil.OpenStore(t, path)
 	t.Cleanup(func() { _ = store.Close() })
 	if err := store.BootstrapConfiguredPrincipals(ctx, []identity.ConfiguredPrincipal{
 		{ID: "alice", DisplayName: "Alice", TelegramUserID: 101},

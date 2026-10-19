@@ -12,7 +12,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
-	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
+	"github.com/vladar107/home-ai-assistant/internal/testutil"
 )
 
 // heldTurn answers a model turn at once, except for the held principal, whose turns wait as they
@@ -47,10 +47,7 @@ func (h *heldTurn) count(principalID string) int {
 }
 
 func TestHeldModelTurnsLeaveRoomForOthersAndReminders(t *testing.T) {
-	store, err := sqlite.Open(t.Context(), filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	store := testutil.OpenStore(t, filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
 	t.Cleanup(func() { _ = store.Close() })
 	if err := store.BootstrapConfiguredPrincipals(t.Context(), []identity.ConfiguredPrincipal{
 		{ID: "alice", DisplayName: "Alice", TelegramUserID: 101},

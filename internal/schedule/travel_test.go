@@ -18,6 +18,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
+	"github.com/vladar107/home-ai-assistant/internal/testutil"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -75,10 +76,7 @@ func utc(day, hour, minute int) time.Time {
 func newTravelFixture(t *testing.T) *travelFixture {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "state", "assistant.sqlite")
-	store, err := sqlite.Open(t.Context(), path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	store := testutil.OpenStore(t, path)
 	t.Cleanup(func() { _ = store.Close() })
 	if err := store.BootstrapConfiguredPrincipals(t.Context(), []identity.ConfiguredPrincipal{{ID: "alice", DisplayName: "Alice", TelegramUserID: 101}}); err != nil {
 		t.Fatal(err)

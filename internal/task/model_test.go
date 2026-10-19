@@ -19,6 +19,7 @@ import (
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/task"
+	"github.com/vladar107/home-ai-assistant/internal/testutil"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -91,10 +92,7 @@ type modelEnv struct {
 func newModelEnv(t *testing.T) *modelEnv {
 	t.Helper()
 	ctx := t.Context()
-	store, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	store := testutil.OpenStore(t, filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
 	t.Cleanup(func() { _ = store.Close() })
 	if err := store.BootstrapConfiguredPrincipals(ctx, []identity.ConfiguredPrincipal{{ID: "alice", DisplayName: "Alice", TelegramUserID: 101}}); err != nil {
 		t.Fatal(err)

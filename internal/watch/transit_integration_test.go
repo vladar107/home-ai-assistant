@@ -24,6 +24,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/integration"
 	"github.com/vladar107/home-ai-assistant/internal/routes"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
+	"github.com/vladar107/home-ai-assistant/internal/testutil"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 	"github.com/vladar107/home-ai-assistant/internal/watch"
 )
@@ -136,10 +137,7 @@ func newTransitEngine(t *testing.T) *transitEngine {
 	t.Helper()
 	httpretry.WithoutWaits(t)
 	ctx := t.Context()
-	store, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	store := testutil.OpenStore(t, filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
 	t.Cleanup(func() { _ = store.Close() })
 	if err := store.BootstrapConfiguredPrincipals(ctx, []identity.ConfiguredPrincipal{
 		{ID: "alice", DisplayName: "Alice", TelegramUserID: 101},
@@ -162,6 +160,7 @@ func newTransitEngine(t *testing.T) *transitEngine {
 	e.gateway.serve("/ovapi/tpc/", recorded(t, "bus", "tpc_amersfoort.json"))
 
 	logger := slog.New(slog.NewTextHandler(&lockedBuffer{}, nil))
+	var err error
 	e.switches, err = integration.NewSwitches(store, logger)
 	if err != nil {
 		t.Fatal(err)

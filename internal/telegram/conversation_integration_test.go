@@ -52,6 +52,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/searchcheck"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/task"
+	"github.com/vladar107/home-ai-assistant/internal/testutil"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/calendarsim"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/chatgptsim"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/codexauth"
@@ -372,11 +373,8 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	server := httptest.NewServer(http.HandlerFunc(h.serveHTTP))
 	t.Cleanup(server.Close)
 	path := filepath.Join(t.TempDir(), "state", "assistant.sqlite")
+	h.store = testutil.OpenStore(t, path)
 	var err error
-	h.store, err = sqlite.Open(ctx, path)
-	if err != nil {
-		t.Fatal(err)
-	}
 	t.Cleanup(func() {
 		if err := h.store.Close(); err != nil {
 			t.Error(err)
