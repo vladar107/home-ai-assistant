@@ -266,6 +266,10 @@ func TestTaskFromBeforeTheMigrationRunsOnItsOwnTerms(t *testing.T) {
 	if queuedDone.Model != chatPair.Model || queuedDone.ModelFallback != task.FallbackCatalog {
 		t.Fatalf("queued task = %+v, want the task default checked, falling back", queuedDone)
 	}
+	// The first service would otherwise race the second for the next task.
+	if err := service.Shutdown(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 
 	available := baseConfig()
 	available.Models = catalogWith(taskPair.Model, chatPair.Model)
