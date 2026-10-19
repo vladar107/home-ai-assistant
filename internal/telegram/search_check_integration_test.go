@@ -128,6 +128,7 @@ func (h *conversationHarness) useSearchJudge(stub *searchJudgeStub, optedIn bool
 }
 
 func TestSearchRunsFreelyAndIsCheckedAfterOutsideContent(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newSearchHarness(t, runtime, harnessOptions{})
 
@@ -167,6 +168,7 @@ func TestSearchRunsFreelyAndIsCheckedAfterOutsideContent(t *testing.T) {
 }
 
 func TestOneUsersOutsideContentDoesNotHoldAnothersSearch(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newSearchHarness(t, runtime, harnessOptions{})
 
@@ -182,6 +184,7 @@ func TestOneUsersOutsideContentDoesNotHoldAnothersSearch(t *testing.T) {
 }
 
 func TestSuspiciousConversationHoldsEverySearch(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newSearchHarness(t, runtime, harnessOptions{})
 	stub := newSearchJudgeStub(t, 0.9, http.StatusOK)
@@ -201,6 +204,7 @@ func TestSuspiciousConversationHoldsEverySearch(t *testing.T) {
 }
 
 func TestSuspicionIsIgnoredWithoutTheSafetyChecksOptIn(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newSearchHarness(t, runtime, harnessOptions{})
 	h.useSearchJudge(newSearchJudgeStub(t, 0.9, http.StatusOK), false, func(registry *turnstate.Registry) { registry.MarkSuspicious("alice") })
@@ -210,6 +214,7 @@ func TestSuspicionIsIgnoredWithoutTheSafetyChecksOptIn(t *testing.T) {
 }
 
 func TestJudgeHoldsASearchThatIsNotPartOfTheRequest(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newSearchHarness(t, runtime, harnessOptions{})
 	stub := newSearchJudgeStub(t, 0.1, http.StatusOK)
@@ -228,6 +233,7 @@ func TestJudgeHoldsASearchThatIsNotPartOfTheRequest(t *testing.T) {
 }
 
 func TestJudgeFailureFallsBackToTheDeterministicCheck(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newSearchHarness(t, runtime, harnessOptions{})
 	stub := newSearchJudgeStub(t, 0, http.StatusInternalServerError)
@@ -249,6 +255,7 @@ func TestJudgeFailureFallsBackToTheDeterministicCheck(t *testing.T) {
 }
 
 func TestConfirmedSearchRunsOnceWithTheSameQuery(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newSearchHarness(t, runtime, harnessOptions{})
 
@@ -282,6 +289,7 @@ func TestConfirmedSearchRunsOnceWithTheSameQuery(t *testing.T) {
 }
 
 func TestRejectedSearchStaysHeld(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newSearchHarness(t, runtime, harnessOptions{})
 
@@ -299,6 +307,7 @@ func TestRejectedSearchStaysHeld(t *testing.T) {
 }
 
 func TestScheduledRunDeniesWhatAChatTurnWouldHold(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, web: true, providers: []tools.Provider{outsideProvider{}}})
@@ -331,6 +340,7 @@ func TestScheduledRunDeniesWhatAChatTurnWouldHold(t *testing.T) {
 }
 
 func TestSearchCheckThroughTheRealRuntimeAndBridge(t *testing.T) {
+	t.Parallel()
 	profiles := filepath.Join(t.TempDir(), "profiles")
 	runtime, _ := newWebFixtureRuntime(t, profiles)
 	h := newSearchHarness(t, runtime, harnessOptions{profilesDir: profiles})

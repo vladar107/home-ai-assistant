@@ -124,6 +124,7 @@ func (h *conversationHarness) approvalStatus(id string) (string, string) {
 func approvalID(data string) string { return data[strings.LastIndex(data, ":")+1:] }
 
 func TestNotionWritesAreProposedConfirmedAndExecutedOnce(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	sim := writableNotionSimulator(t)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{notion: sim})
@@ -315,6 +316,7 @@ func TestNotionWritesAreProposedConfirmedAndExecutedOnce(t *testing.T) {
 	}
 }
 
+// Serial: waits out a 2 s approval lifetime with a 100 ms sweep.
 func TestNotionProposalsExpireFailSafelyAndDoNotSurviveRestart(t *testing.T) {
 	runtime := newControlledRuntime()
 	sim := writableNotionSimulator(t)
@@ -399,6 +401,7 @@ func TestNotionProposalsExpireFailSafelyAndDoNotSurviveRestart(t *testing.T) {
 // outcome for the user's next turn instead. A press while a turn runs continues once that turn is
 // delivered.
 func TestConfirmContinuesTheRequestUnlessRejected(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{notion: writableNotionSimulator(t)})
 	h.provision("alice", "acct-alice-1111")
@@ -443,6 +446,7 @@ func TestConfirmContinuesTheRequestUnlessRejected(t *testing.T) {
 }
 
 func TestProposalsOfOneTurnAreConfirmedTogetherAndRunPastAFailure(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	sim := writableNotionSimulator(t)
 	sim.SharePage(aliceNotionToken, notionsim.Page{

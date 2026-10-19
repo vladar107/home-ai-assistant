@@ -3,6 +3,7 @@ package telegram
 import "testing"
 
 func TestRenderMarkupRendersASafeSubset(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		text string
@@ -40,6 +41,7 @@ func TestRenderMarkupRendersASafeSubset(t *testing.T) {
 		{"plain text unchanged", "Notion writes are on.", "Notion writes are on."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			if got := renderMarkup(tc.text); got != tc.want {
 				t.Fatalf("renderMarkup(%q) = %q, want %q", tc.text, got, tc.want)
 			}

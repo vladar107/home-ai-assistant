@@ -41,6 +41,7 @@ func toolNames(set agentruntime.ToolSet) []string {
 // user can reach and switches saving on and off. There is nothing to connect or disconnect,
 // because access is a set of mounted directories rather than an account.
 func TestSettingsShowsNASFoldersAndSavingSwitch(t *testing.T) {
+	t.Parallel()
 	h := newConversationHarnessWithOptions(t, newControlledRuntime(), harnessOptions{nasRoots: nasRootsFor(t, true)})
 	h.start()
 	h.provision("alice", "account-alice")
@@ -70,6 +71,7 @@ func TestSettingsShowsNASFoldersAndSavingSwitch(t *testing.T) {
 
 // A user with no writable root must not be offered a switch that cannot do anything.
 func TestSettingsHidesSavingSwitchWithoutAWritableRoot(t *testing.T) {
+	t.Parallel()
 	h := newConversationHarnessWithOptions(t, newControlledRuntime(), harnessOptions{nasRoots: nasRootsFor(t, false)})
 	h.start()
 	h.provision("alice", "account-alice")
@@ -87,6 +89,7 @@ func TestSettingsHidesSavingSwitchWithoutAWritableRoot(t *testing.T) {
 // A user the operator did not configure sees the NAS section report exactly that, and gets no
 // buttons that would imply otherwise, even though another user has folders.
 func TestSettingsReportsNoNASFoldersForAnUnconfiguredUser(t *testing.T) {
+	t.Parallel()
 	roots := nasRootsFor(t, true)
 	roots[0].PrincipalID = "someone-else"
 	h := newConversationHarnessWithOptions(t, newControlledRuntime(), harnessOptions{nasRoots: roots})
@@ -107,6 +110,7 @@ func TestSettingsReportsNoNASFoldersForAnUnconfiguredUser(t *testing.T) {
 // mounted root through the real Telegram client, and the user gets the file itself rather than an
 // account of it. Nothing is read to make that happen.
 func TestSendingANASFileDeliversADocumentToTheChat(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	roots := nasRootsFor(t, false)
 	home := roots[0].Roots[0].Path
@@ -147,6 +151,7 @@ func TestSendingANASFileDeliversADocumentToTheChat(t *testing.T) {
 // A file the assistant cannot deliver must leave the model able to say so, and must not put a
 // document in the chat.
 func TestARefusedSendDeliversNoDocument(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{nasRoots: nasRootsFor(t, false)})
 	h.provision("alice", "account-alice")

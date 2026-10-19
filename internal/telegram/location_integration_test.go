@@ -75,6 +75,7 @@ func (h *conversationHarness) wantQuiet(runtime *controlledRuntime) {
 }
 
 func TestSharedPinIsAcknowledgedWithoutATurnAndInformsTheNextOne(t *testing.T) {
+	t.Parallel()
 	h, runtime, clock := locationHarness(t, nil)
 	h.start()
 
@@ -104,6 +105,7 @@ func TestSharedPinIsAcknowledgedWithoutATurnAndInformsTheNextOne(t *testing.T) {
 }
 
 func TestOtherPrincipalsNeverSeeALocation(t *testing.T) {
+	t.Parallel()
 	h, runtime, clock := locationHarness(t, nil)
 	h.start()
 	h.push(pinUpdate(1, 101, clock.Now(), 52.16612, 4.48105))
@@ -118,6 +120,7 @@ func TestOtherPrincipalsNeverSeeALocation(t *testing.T) {
 }
 
 func TestVenueShareNamesTheVenue(t *testing.T) {
+	t.Parallel()
 	h, runtime, clock := locationHarness(t, nil)
 	h.start()
 	update := pinUpdate(1, 101, clock.Now(), 52.1, 4.4)
@@ -131,6 +134,7 @@ func TestVenueShareNamesTheVenue(t *testing.T) {
 }
 
 func TestLiveLocationFollowsEditsSilently(t *testing.T) {
+	t.Parallel()
 	h, runtime, clock := locationHarness(t, nil)
 	h.start()
 	start := clock.Now()
@@ -170,6 +174,7 @@ func TestLiveLocationFollowsEditsSilently(t *testing.T) {
 }
 
 func TestStoppingALiveShareKeepsItBrieflyAsEnded(t *testing.T) {
+	t.Parallel()
 	h, runtime, clock := locationHarness(t, nil)
 	h.start()
 	start := clock.Now()
@@ -193,6 +198,7 @@ func TestStoppingALiveShareKeepsItBrieflyAsEnded(t *testing.T) {
 }
 
 func TestForgettingDuringALiveShareStopsLaterEdits(t *testing.T) {
+	t.Parallel()
 	h, runtime, clock := locationHarness(t, nil)
 	h.start()
 	start := clock.Now()
@@ -236,6 +242,7 @@ func TestForgettingDuringALiveShareStopsLaterEdits(t *testing.T) {
 }
 
 func TestUnreadableLocationIsRefusedAndNotKept(t *testing.T) {
+	t.Parallel()
 	h, runtime, clock := locationHarness(t, nil)
 	h.start()
 	h.push(pinUpdate(1, 101, clock.Now(), 91, 4.4))
@@ -248,6 +255,7 @@ func TestUnreadableLocationIsRefusedAndNotKept(t *testing.T) {
 }
 
 func TestLocationSharingDisabledTurnsPinsAway(t *testing.T) {
+	t.Parallel()
 	h, runtime, clock := locationHarness(t, func(o *harnessOptions) { o.locations = false })
 	h.start()
 	h.push(pinUpdate(1, 101, clock.Now(), 52.1, 4.4))
@@ -260,6 +268,7 @@ func TestLocationSharingDisabledTurnsPinsAway(t *testing.T) {
 }
 
 func TestPrivacyMentionsLocationsWhenEnabled(t *testing.T) {
+	t.Parallel()
 	h, _, _ := locationHarness(t, nil)
 	h.start()
 	h.push(textUpdate(1, 101, "/privacy"))

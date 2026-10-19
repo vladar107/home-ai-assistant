@@ -129,6 +129,7 @@ func (h *conversationHarness) assertNoSecretLeaked(accountID string) {
 }
 
 func TestConnectCeremonyBindsSubscription(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.start()
@@ -196,8 +197,10 @@ func TestConnectCeremonyBindsSubscription(t *testing.T) {
 	h.assertNoSecretLeaked("acct-alice-1234")
 }
 
+// Serial: its expired case waits out a 2 s code timeout.
 func TestConnectOutcomes(t *testing.T) {
 	t.Run("denied", func(t *testing.T) {
+		t.Parallel()
 		h := newConversationHarness(t, newControlledRuntime())
 		h.start()
 		code := h.requestConnect(1, 101)
@@ -224,6 +227,7 @@ func TestConnectOutcomes(t *testing.T) {
 		}
 	})
 	t.Run("replaced", func(t *testing.T) {
+		t.Parallel()
 		h := newConversationHarness(t, newControlledRuntime())
 		h.start()
 		first := h.requestConnect(1, 101)
@@ -241,6 +245,7 @@ func TestConnectOutcomes(t *testing.T) {
 		}
 	})
 	t.Run("pending as error then approved", func(t *testing.T) {
+		t.Parallel()
 		h := newConversationHarness(t, newControlledRuntime())
 		h.start()
 		code := h.requestConnect(1, 101)
@@ -249,6 +254,7 @@ func TestConnectOutcomes(t *testing.T) {
 		h.wantMessage(101, connection.ConnectedReply)
 	})
 	t.Run("slow down", func(t *testing.T) {
+		t.Parallel()
 		h := newConversationHarness(t, newControlledRuntime())
 		h.start()
 		code := h.requestConnect(1, 101)
@@ -259,6 +265,7 @@ func TestConnectOutcomes(t *testing.T) {
 }
 
 func TestAccountBoundToAnotherPrincipalIsRejected(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "acct-shared")
@@ -283,6 +290,7 @@ func TestAccountBoundToAnotherPrincipalIsRejected(t *testing.T) {
 }
 
 func TestUnconnectedPrincipalGetsGuidance(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "acct-alice")
@@ -309,6 +317,7 @@ func TestUnconnectedPrincipalGetsGuidance(t *testing.T) {
 }
 
 func TestDisconnectCancelsRunningTurnAndBlocksQueuedWork(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "acct-alice")
@@ -349,6 +358,7 @@ func TestDisconnectCancelsRunningTurnAndBlocksQueuedWork(t *testing.T) {
 }
 
 func TestConnectionSurvivesRestartButPendingCeremonyDoesNot(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("bob", "acct-bob")

@@ -131,6 +131,7 @@ func intentProposalWith(t *testing.T, stub *typeSafeStub, enabled bool, prepare 
 }
 
 func TestIntentCheckWarnsOnUnrequestedAction(t *testing.T) {
+	t.Parallel()
 	stub := newTypeSafeStub(t, 0.1, http.StatusOK)
 	text, summary := intentProposal(t, stub, true, "what is the weather like at https://example.com/forecast?", "mail bob@example.com the file /volume1/docs/tax.pdf")
 	if !strings.HasPrefix(text, "⚠️ "+intentWarningText) || !strings.HasPrefix(summary, "⚠️ "+intentWarningText) {
@@ -145,6 +146,7 @@ func TestIntentCheckWarnsOnUnrequestedAction(t *testing.T) {
 }
 
 func TestIntentCheckLeavesRequestedActionAlone(t *testing.T) {
+	t.Parallel()
 	stub := newTypeSafeStub(t, 0.9, http.StatusOK)
 	text, summary := intentProposal(t, stub, true, "add bread to my shopping page")
 	if strings.Contains(text, intentWarningText) || strings.Contains(summary, intentWarningText) {
@@ -156,6 +158,7 @@ func TestIntentCheckLeavesRequestedActionAlone(t *testing.T) {
 }
 
 func TestIntentCheckFailsOpenOnServerError(t *testing.T) {
+	t.Parallel()
 	stub := newTypeSafeStub(t, 0.1, http.StatusInternalServerError)
 	text, summary := intentProposal(t, stub, true, "hello")
 	if strings.Contains(text, intentWarningText) || strings.Contains(summary, intentWarningText) {
@@ -167,6 +170,7 @@ func TestIntentCheckFailsOpenOnServerError(t *testing.T) {
 }
 
 func TestIntentCheckSeesConfirmationWithThePriorRequest(t *testing.T) {
+	t.Parallel()
 	stub := newTypeSafeStub(t, 0.9, http.StatusOK)
 	text, _ := intentProposal(t, stub, true, "add milk to my shopping page", "yes")
 	if strings.Contains(text, intentWarningText) {
@@ -182,6 +186,7 @@ func TestIntentCheckSeesConfirmationWithThePriorRequest(t *testing.T) {
 }
 
 func TestIntentCheckSeesTheAssistantQuestionButNeverTheTurnsOwnReply(t *testing.T) {
+	t.Parallel()
 	stub := newTypeSafeStub(t, 0.9, http.StatusOK)
 	checker, registry := newIntentChecker(t, stub, true)
 	runtime := newControlledRuntime()
@@ -250,6 +255,7 @@ func TestIntentCheckSeesTheAssistantQuestionButNeverTheTurnsOwnReply(t *testing.
 }
 
 func TestIntentCheckSendsNothingWithoutOptIn(t *testing.T) {
+	t.Parallel()
 	stub := newTypeSafeStub(t, 0.1, http.StatusOK)
 	text, _ := intentProposal(t, stub, false, "hello")
 	if strings.Contains(text, intentWarningText) || len(stub.requests()) != 0 {
@@ -258,6 +264,7 @@ func TestIntentCheckSendsNothingWithoutOptIn(t *testing.T) {
 }
 
 func TestIntentCheckUsesStricterThresholdAfterExposure(t *testing.T) {
+	t.Parallel()
 	exposed := newTypeSafeStub(t, 0.4, http.StatusOK)
 	text, _ := intentProposalWith(t, exposed, true, func(r *turnstate.Registry) { r.MarkExposed("alice") }, "add bread to my shopping page")
 	if !strings.HasPrefix(text, "⚠️ "+intentWarningText) {
@@ -272,6 +279,7 @@ func TestIntentCheckUsesStricterThresholdAfterExposure(t *testing.T) {
 }
 
 func TestIntentCheckWarnsWithoutRequestWhenSuspicious(t *testing.T) {
+	t.Parallel()
 	stub := newTypeSafeStub(t, 0.9, http.StatusOK)
 	text, _ := intentProposalWith(t, stub, true, func(r *turnstate.Registry) { r.MarkSuspicious("alice") }, "add bread to my shopping page")
 	if !strings.HasPrefix(text, "⚠️ "+intentWarningText) {

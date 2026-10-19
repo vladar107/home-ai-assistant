@@ -43,6 +43,7 @@ func stopUpdate(id int64, chat Chat, draftID int64) Update {
 }
 
 func TestSendMessageDraftSendsTheDraftParameters(t *testing.T) {
+	t.Parallel()
 	h := newConversationHarness(t, newControlledRuntime())
 	h.start()
 	receive(t, h.ctx, h.registrations)
@@ -63,6 +64,7 @@ func TestSendMessageDraftSendsTheDraftParameters(t *testing.T) {
 }
 
 func TestStoppedDraftReachesTheConversationOnlyFromAnAuthorizedPrivateChat(t *testing.T) {
+	t.Parallel()
 	h := newConversationHarness(t, newControlledRuntime())
 	h.provision("alice", "account-alice")
 	recorder := &stopRecorder{Service: h.conversation, matches: true}
@@ -214,6 +216,7 @@ func (h *conversationHarness) waitTurnOutcome(outcome string) {
 	}
 }
 
+// Serial: asserts typing and draft timing in real time.
 func TestLongTurnKeepsTypingAndItsDraftFollowsTheTools(t *testing.T) {
 	runtime := newControlledRuntime()
 	h := newIndicatorHarness(t, runtime)
@@ -251,6 +254,7 @@ func TestLongTurnKeepsTypingAndItsDraftFollowsTheTools(t *testing.T) {
 	}
 }
 
+// Serial: asserts typing and draft timing in real time.
 func TestQuickTurnTypesWithoutADraft(t *testing.T) {
 	runtime := newControlledRuntime()
 	h := newIndicatorHarness(t, runtime)
@@ -271,6 +275,7 @@ func TestQuickTurnTypesWithoutADraft(t *testing.T) {
 	}
 }
 
+// Serial: asserts typing and draft timing in real time.
 func TestTurnIndicatorsStopWithTheTurn(t *testing.T) {
 	t.Run("error", func(t *testing.T) {
 		runtime := newControlledRuntime()
@@ -296,6 +301,7 @@ func TestTurnIndicatorsStopWithTheTurn(t *testing.T) {
 	})
 }
 
+// Serial: asserts typing and draft timing in real time.
 func TestDraftStopCancelsOnlyTheTurnItShows(t *testing.T) {
 	runtime := newControlledRuntime()
 	h := newIndicatorHarness(t, runtime)
@@ -329,6 +335,7 @@ func TestDraftStopCancelsOnlyTheTurnItShows(t *testing.T) {
 	h.waitState(7, "delivered")
 }
 
+// Serial: asserts typing gaps in real time.
 func TestTurnWaitingBehindAnotherKeepsTyping(t *testing.T) {
 	runtime := newControlledRuntime()
 	h := newIndicatorHarness(t, runtime)
@@ -359,6 +366,7 @@ func TestTurnWaitingBehindAnotherKeepsTyping(t *testing.T) {
 	h.wantSteadyTyping(int(2 * indicatorDelay / indicatorTyping))
 }
 
+// Serial: asserts typing and draft timing in real time.
 func TestFailingTurnIndicatorsAreCountedAndLeaveTheReplyAlone(t *testing.T) {
 	runtime := newControlledRuntime()
 	h := newIndicatorHarness(t, runtime)

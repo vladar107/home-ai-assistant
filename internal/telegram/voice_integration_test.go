@@ -18,6 +18,7 @@ import (
 )
 
 func TestVoiceMessageBecomesATurnFromItsTranscript(t *testing.T) {
+	t.Parallel()
 	sim := chatgptsim.New(t)
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{chatGPT: sim})
@@ -55,6 +56,7 @@ func TestVoiceMessageBecomesATurnFromItsTranscript(t *testing.T) {
 }
 
 func TestVoiceFailuresAreAnsweredWithoutATurn(t *testing.T) {
+	t.Parallel()
 	sim := chatgptsim.New(t)
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{chatGPT: sim})
@@ -87,6 +89,7 @@ func TestVoiceFailuresAreAnsweredWithoutATurn(t *testing.T) {
 // A turn that would pass the conversation's limit is refused once instead of being retried, which
 // would transcribe the recording again and hold every later update.
 func TestVoiceTurnThatWouldNotFitIsRefusedOnce(t *testing.T) {
+	t.Parallel()
 	sim := chatgptsim.New(t)
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{chatGPT: sim})
@@ -120,6 +123,7 @@ func TestVoiceTurnThatWouldNotFitIsRefusedOnce(t *testing.T) {
 }
 
 func TestVoiceWithoutAConnectionIsNotTranscribed(t *testing.T) {
+	t.Parallel()
 	sim := chatgptsim.New(t)
 	h := newConversationHarnessWithOptions(t, newControlledRuntime(), harnessOptions{chatGPT: sim})
 	h.start()
@@ -133,6 +137,7 @@ func TestVoiceWithoutAConnectionIsNotTranscribed(t *testing.T) {
 }
 
 func TestExpiredTokenIsRefreshedUnderPiLock(t *testing.T) {
+	t.Parallel()
 	sim := chatgptsim.New(t)
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{chatGPT: sim})
@@ -172,6 +177,7 @@ func TestExpiredTokenIsRefreshedUnderPiLock(t *testing.T) {
 }
 
 func TestGeneratedImageIsShownInTheChat(t *testing.T) {
+	t.Parallel()
 	sim := chatgptsim.New(t)
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{chatGPT: sim})
@@ -203,6 +209,7 @@ func TestGeneratedImageIsShownInTheChat(t *testing.T) {
 }
 
 func TestImageEditsAPhotoTheUserSent(t *testing.T) {
+	t.Parallel()
 	sim := chatgptsim.New(t)
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{chatGPT: sim})
@@ -236,6 +243,7 @@ func TestImageEditsAPhotoTheUserSent(t *testing.T) {
 }
 
 func TestRefusedImageIsReportedToTheModel(t *testing.T) {
+	t.Parallel()
 	sim := chatgptsim.New(t)
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{chatGPT: sim})

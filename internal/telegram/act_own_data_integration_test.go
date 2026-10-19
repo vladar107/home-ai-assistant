@@ -114,6 +114,7 @@ func (h *conversationHarness) storedJob(id string) (schedule.Job, bool) {
 // run moved the job; a job changed since and a one-time job whose time passed are refused. After
 // outside content the same call is only proposed.
 func TestJobsAreChangedAtOnceAndUndone(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, providers: []tools.Provider{outsideProvider{}}})
@@ -198,6 +199,7 @@ func TestJobsAreChangedAtOnceAndUndone(t *testing.T) {
 // watch comes back with its pause. A watch changed since is refused, and after outside content the
 // same call is only proposed.
 func TestWatchesAreChangedAtOnceAndUndone(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, watches: &stubEvaluator{}, providers: []tools.Provider{outsideProvider{}}})
@@ -266,6 +268,7 @@ func TestWatchesAreChangedAtOnceAndUndone(t *testing.T) {
 // Routes: a clean turn saves, changes, and deletes at once, and Undo reverses each; a route
 // changed since is refused, and after outside content the same call is only proposed.
 func TestRoutesAreChangedAtOnceAndUndone(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: newTestClock(t, mondayMorning), ns: stationsGateway(t), providers: []tools.Provider{outsideProvider{}}})
 	h.provision("alice", "account-alice")

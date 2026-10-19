@@ -56,6 +56,7 @@ func (p *grantProvider) recorded() []string {
 }
 
 func TestTurnsCarryOnlyThePrincipalsGrantedTools(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	provider := &grantProvider{principal: "alice"}
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{providers: []tools.Provider{provider}})

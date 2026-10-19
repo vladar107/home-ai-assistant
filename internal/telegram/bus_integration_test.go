@@ -9,6 +9,7 @@ import (
 )
 
 func TestBusesHiddenUnlessEnabled(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "account-alice")
@@ -30,6 +31,7 @@ func TestBusesHiddenUnlessEnabled(t *testing.T) {
 }
 
 func TestBusesSwitchControlsToolsPerUser(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{bus: nsGateway(t), busContact: "ops@example.org"})
 	h.provision("alice", "account-alice")

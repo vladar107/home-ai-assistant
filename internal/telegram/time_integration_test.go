@@ -10,6 +10,7 @@ import (
 )
 
 func TestChatTurnsCarryTheCurrentLocalTime(t *testing.T) {
+	t.Parallel()
 	amsterdam, err := time.LoadLocation("Europe/Amsterdam")
 	if err != nil {
 		t.Fatal(err)
@@ -47,6 +48,7 @@ func TestChatTurnsCarryTheCurrentLocalTime(t *testing.T) {
 // An unattended turn starts with the current local time as a chat turn does, and a run that starts
 // late, as after downtime, says both its slot and that the current time is the one to go by.
 func TestALateScheduledTurnCarriesTheCurrentLocalTime(t *testing.T) {
+	t.Parallel()
 	amsterdam, err := time.LoadLocation("Europe/Amsterdam")
 	if err != nil {
 		t.Fatal(err)

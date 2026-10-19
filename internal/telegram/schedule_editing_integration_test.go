@@ -27,6 +27,7 @@ func toolCaller(t *testing.T, chat runtimeCall) func(name, arguments string) age
 // A change to a job's instructions is a patch: each edit must match once, the result is held to the
 // prompt's limits, and the user confirms only the changed passages.
 func TestScheduledJobInstructionsArePatched(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, providers: []tools.Provider{outsideProvider{}}})
@@ -101,6 +102,7 @@ func (h *conversationHarness) nextAnswer(updateID int64) string {
 // scheduled run would, posts the report under the proposal, and saves nothing. One preview runs per
 // bundle at a time, a retried press starts no second one, and another user's press does nothing.
 func TestProposedJobIsPreviewedWithoutSavingAnything(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, providers: []tools.Provider{outsideProvider{}}})
@@ -201,6 +203,7 @@ func TestProposedJobIsPreviewedWithoutSavingAnything(t *testing.T) {
 // its buttons for the rest, Confirm runs only what is left, and a batch withdrawn before it was
 // sent shows only what remains. A batch with nothing left loses its buttons.
 func TestModelWithdrawsPartOfABatch(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, providers: []tools.Provider{outsideProvider{}}})

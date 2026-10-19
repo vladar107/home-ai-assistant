@@ -8,6 +8,7 @@ import (
 )
 
 func TestSettingsCallbacksAreAuthorizedAnsweredAndRefreshed(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "acct-alice-1111")
@@ -66,6 +67,7 @@ func TestSettingsCallbacksAreAuthorizedAnsweredAndRefreshed(t *testing.T) {
 }
 
 func TestSettingsEditFallsBackWhenTelegramRejectsTheEdit(t *testing.T) {
+	t.Parallel()
 	h := newConversationHarness(t, newControlledRuntime())
 	h.provision("alice", "acct-alice-1111")
 	h.start()
@@ -98,6 +100,7 @@ func TestSettingsEditFallsBackWhenTelegramRejectsTheEdit(t *testing.T) {
 }
 
 func TestRemovedConnectionCommandsGetHelp(t *testing.T) {
+	t.Parallel()
 	h := newConversationHarness(t, newControlledRuntime())
 	h.start()
 	h.push(textUpdate(1, 101, "/connect"), textUpdate(2, 101, "/connection"), textUpdate(3, 101, "/disconnect"))

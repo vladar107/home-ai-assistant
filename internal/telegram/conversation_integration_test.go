@@ -1219,6 +1219,7 @@ func (h *conversationHarness) waitOffset(want int64) {
 }
 
 func TestConversationSessionsAndUserIsolation(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "acct-alice")
@@ -1268,6 +1269,7 @@ func TestConversationSessionsAndUserIsolation(t *testing.T) {
 }
 
 func TestCommandsRemainResponsiveAndCancelSuppressesLateAnswer(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "acct-alice")
@@ -1298,6 +1300,7 @@ func TestCommandsRemainResponsiveAndCancelSuppressesLateAnswer(t *testing.T) {
 }
 
 func TestUnauthorizedAndNonPrivateUpdatesAreIgnoredAndCursorSurvivesRestart(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "acct-alice")
@@ -1341,8 +1344,10 @@ func TestUnauthorizedAndNonPrivateUpdatesAreIgnoredAndCursorSurvivesRestart(t *t
 }
 
 func TestConversationRestartRecovery(t *testing.T) {
+	t.Parallel()
 	for _, state := range []string{"queued", "running", "ready", "delivering"} {
 		t.Run(state, func(t *testing.T) {
+			t.Parallel()
 			runtime := newControlledRuntime()
 			h := newConversationHarness(t, runtime)
 			h.provision("alice", "acct-alice")
@@ -1397,8 +1402,10 @@ func TestConversationRestartRecovery(t *testing.T) {
 }
 
 func TestConversationDeliveryFailuresAndUnicodeChunks(t *testing.T) {
+	t.Parallel()
 	for _, status := range []int{http.StatusInternalServerError, http.StatusForbidden} {
 		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			t.Parallel()
 			runtime := newControlledRuntime()
 			h := newConversationHarness(t, runtime)
 			h.provision("alice", "acct-alice")
@@ -1447,9 +1454,11 @@ func TestConversationDeliveryFailuresAndUnicodeChunks(t *testing.T) {
 }
 
 func TestOutgoingMessagesUseHTMLAndFallBackToPlainText(t *testing.T) {
+	t.Parallel()
 	const answer = "**Done** on [the page](https://notion.so/p?a=1&b=2): `data_source_id` a & b <now>"
 	const formatted = `<b>Done</b> on <a href="https://notion.so/p?a=1&amp;b=2">the page</a>: <code>data_source_id</code> a &amp; b &lt;now&gt;`
 	t.Run("rendered", func(t *testing.T) {
+		t.Parallel()
 		runtime := newControlledRuntime()
 		h := newConversationHarness(t, runtime)
 		h.provision("alice", "acct-alice")
@@ -1464,6 +1473,7 @@ func TestOutgoingMessagesUseHTMLAndFallBackToPlainText(t *testing.T) {
 		h.waitState(1, "delivered")
 	})
 	t.Run("refused entities", func(t *testing.T) {
+		t.Parallel()
 		runtime := newControlledRuntime()
 		h := newConversationHarness(t, runtime)
 		h.provision("alice", "acct-alice")
@@ -1488,6 +1498,7 @@ func TestOutgoingMessagesUseHTMLAndFallBackToPlainText(t *testing.T) {
 }
 
 func TestBusyWhileResponseIsBeingDelivered(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	gate := make(chan struct{})
@@ -1516,6 +1527,7 @@ func TestBusyWhileResponseIsBeingDelivered(t *testing.T) {
 }
 
 func TestBotCommandsRegisteredOnceAtStartup(t *testing.T) {
+	t.Parallel()
 	h := newConversationHarness(t, newControlledRuntime())
 	h.start()
 	want := []string{"backlog", "cancel", "jobs", "memory", "model", "new", "sessions", "settings", "usage"}
@@ -1545,6 +1557,7 @@ func TestBotCommandsRegisteredOnceAtStartup(t *testing.T) {
 }
 
 func TestBotCommandRegistrationFailureKeepsPolling(t *testing.T) {
+	t.Parallel()
 	h := newConversationHarness(t, newControlledRuntime())
 	h.commandStatus = http.StatusInternalServerError
 	h.start()

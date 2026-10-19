@@ -43,6 +43,7 @@ func onlyCoreTools(set agentruntime.ToolSet) bool {
 // /help and an unknown command list exactly what is registered, plus the commands answered only
 // when typed.
 func TestHelpListsTheRegisteredCommands(t *testing.T) {
+	t.Parallel()
 	h := newConversationHarnessWithOptions(t, newControlledRuntime(), harnessOptions{schedules: newTestClock(t, mondayMorning)})
 	h.start()
 	registration := receive(t, h.ctx, h.registrations)
@@ -60,6 +61,7 @@ func TestHelpListsTheRegisteredCommands(t *testing.T) {
 	h.wantReply(101, 2, want)
 }
 
+// Serial: runs inside a 300 ms Notion intake lifetime.
 func TestAppHelpShowsTheSettingsPagesTheUserSees(t *testing.T) {
 	runtime := newControlledRuntime()
 	sim := notionsim.New(t)

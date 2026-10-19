@@ -95,6 +95,7 @@ func newMemoryHarness(t *testing.T, runtime *controlledRuntime) *conversationHar
 }
 
 func TestMemoryFactCarriesToTheNextSessionAndNeverToAnotherUser(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newMemoryHarness(t, runtime)
 
@@ -127,6 +128,7 @@ func TestMemoryFactCarriesToTheNextSessionAndNeverToAnotherUser(t *testing.T) {
 
 // After outside content an instruction is a proposal, written only once the user confirms it.
 func TestMemoryInstructionAfterOutsideContentIsWrittenOnlyAfterConfirm(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newMemoryHarness(t, runtime)
 
@@ -161,6 +163,7 @@ func TestMemoryInstructionAfterOutsideContentIsWrittenOnlyAfterConfirm(t *testin
 }
 
 func TestMemoryWriteAfterThirdPartyContentBecomesAProposal(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newMemoryHarness(t, runtime)
 	screener := &assistantScreener{}
@@ -200,6 +203,7 @@ func TestMemoryWriteAfterThirdPartyContentBecomesAProposal(t *testing.T) {
 }
 
 func TestMemoryExposureLastsForTheConversationAndCoversWebSearch(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newMemoryHarness(t, runtime)
 
@@ -232,6 +236,7 @@ func TestMemoryExposureLastsForTheConversationAndCoversWebSearch(t *testing.T) {
 }
 
 func TestMemoryConfirmAfterTurningMemoryOffWritesNothing(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newMemoryHarness(t, runtime)
 
@@ -271,6 +276,7 @@ func (s *assistantScreener) texts() []string {
 }
 
 func TestMemoryCapsForceConsolidation(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newMemoryHarness(t, runtime)
 
@@ -307,6 +313,7 @@ func TestMemoryCapsForceConsolidation(t *testing.T) {
 }
 
 func TestMemoryDuplicateIsRejectedAndReplaceKeepsTheKind(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newMemoryHarness(t, runtime)
 	h.seedMemory("alice", "aaaaaaa1", memory.KindFact, "has two children")
@@ -331,6 +338,7 @@ func TestMemoryDuplicateIsRejectedAndReplaceKeepsTheKind(t *testing.T) {
 }
 
 func TestMemoryCommandListsPagesAndDeletes(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newMemoryHarness(t, runtime)
 
@@ -388,6 +396,7 @@ func TestMemoryCommandListsPagesAndDeletes(t *testing.T) {
 }
 
 func TestMemoryForgetEverythingNeedsASecondPress(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newMemoryHarness(t, runtime)
 	h.seedMemory("alice", "aaaaaaa1", memory.KindFact, "likes tea")
@@ -426,6 +435,7 @@ func TestMemoryForgetEverythingNeedsASecondPress(t *testing.T) {
 }
 
 func TestMemorySwitchRemovesTheSectionAndTheTools(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newMemoryHarness(t, runtime)
 	h.seedMemory("alice", "aaaaaaa1", memory.KindFact, "likes tea")
@@ -466,6 +476,7 @@ func TestMemorySwitchRemovesTheSectionAndTheTools(t *testing.T) {
 }
 
 func TestScheduledRunReadsMemoryButCannotWriteIt(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newMemoryHarness(t, runtime)
 	h.seedMemory("alice", "aaaaaaa1", memory.KindInstruction, "answer briefly")
@@ -492,6 +503,7 @@ func TestScheduledRunReadsMemoryButCannotWriteIt(t *testing.T) {
 }
 
 func TestScheduledRunDeliversOnlyTheFinalMessage(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newMemoryHarness(t, runtime)
 
@@ -524,6 +536,7 @@ func TestScheduledRunDeliversOnlyTheFinalMessage(t *testing.T) {
 }
 
 func TestMemoryPrivacyLineAndCommandRegistration(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newMemoryHarness(t, runtime)
 

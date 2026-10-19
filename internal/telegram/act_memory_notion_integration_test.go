@@ -53,6 +53,7 @@ func wantProposedResult(t *testing.T, result agentruntime.ToolResult) {
 // "Done" message rather than a reply line, and Undo removes it; a replaced instruction is restored
 // as it was; and an entry changed since refuses Undo.
 func TestMemoryInstructionActsInACleanTurnAndUndoes(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newActMemoryHarness(t, runtime)
 
@@ -121,6 +122,7 @@ func TestMemoryInstructionActsInACleanTurnAndUndoes(t *testing.T) {
 // An instruction proposes after household content, which memory's stricter rule counts, and after
 // outside content.
 func TestMemoryInstructionProposesAfterHouseholdOrOutsideContent(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newActMemoryHarness(t, runtime)
 
@@ -149,6 +151,7 @@ func TestMemoryInstructionProposesAfterHouseholdOrOutsideContent(t *testing.T) {
 
 // The lesson of a turn a 👎 started stays a labelled proposal, however clean the conversation.
 func TestReconsiderLessonStillProposes(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newActMemoryHarness(t, runtime)
 
@@ -221,6 +224,7 @@ func editInNotion(t *testing.T, sim *notionsim.Simulator, pageID, body string) {
 // A property update asked for in a clean turn is made at once, and Undo writes back the value it
 // replaced, unless someone changed the property in Notion since.
 func TestNotionUpdateActsInACleanTurnAndUndoWritesBackThePreviousValue(t *testing.T) {
+	t.Parallel()
 	h, runtime, sim := newActNotionHarness(t)
 
 	h.push(textUpdate(3, 101, "mark groceries done"))
@@ -275,6 +279,7 @@ func TestNotionUpdateActsInACleanTurnAndUndoWritesBackThePreviousValue(t *testin
 // After outside content the update proposes, and creating pages or appending to them always
 // proposes, in a clean turn too.
 func TestNotionCreateAndAppendStillProposeAndUpdatesProposeAfterOutsideContent(t *testing.T) {
+	t.Parallel()
 	h, runtime, sim := newActNotionHarness(t)
 
 	h.push(textUpdate(3, 101, "add a task and a note"))

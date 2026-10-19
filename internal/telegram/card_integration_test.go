@@ -173,6 +173,7 @@ func (h *conversationHarness) requestID(updateID int64) string {
 }
 
 func TestCardTurnDeliversOnePhotoWithTheReplyAsCaption(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{cards: true})
 	h.provision("alice", "acct-alice")
@@ -202,6 +203,7 @@ func TestCardTurnDeliversOnePhotoWithTheReplyAsCaption(t *testing.T) {
 }
 
 func TestCardWithALongReplyArrivesAsPhotoThenText(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{cards: true})
 	h.provision("alice", "acct-alice")
@@ -221,6 +223,7 @@ func TestCardWithALongReplyArrivesAsPhotoThenText(t *testing.T) {
 }
 
 func TestCardCaptionRefusedByTelegramIsResentAsVisibleText(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{cards: true})
 	h.provision("alice", "acct-alice")
@@ -243,6 +246,7 @@ func TestCardCaptionRefusedByTelegramIsResentAsVisibleText(t *testing.T) {
 }
 
 func TestCardPhotoFailureIsRetriedWithTheCardStillStaged(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{cards: true})
 	h.provision("alice", "acct-alice")
@@ -269,6 +273,7 @@ func TestCardPhotoFailureIsRetriedWithTheCardStillStaged(t *testing.T) {
 	}
 }
 
+// Serial: reads the outbox straight after delivery, before load lets its clean-up finish.
 func TestCardTextFailureAfterThePhotoIsRetriedWithoutASecondPhoto(t *testing.T) {
 	var links strings.Builder
 	for range 34 {
@@ -315,6 +320,7 @@ func TestCardTextFailureAfterThePhotoIsRetriedWithoutASecondPhoto(t *testing.T) 
 	}
 }
 
+// Serial: its timeout case has a 300 ms turn timeout.
 func TestFailedTurnsDeliverTheirTextWithoutTheCard(t *testing.T) {
 	t.Run("timeout", func(t *testing.T) {
 		runtime := newControlledRuntime()
@@ -330,6 +336,7 @@ func TestFailedTurnsDeliverTheirTextWithoutTheCard(t *testing.T) {
 		h.wantNoCards("alice")
 	})
 	t.Run("runtime failure", func(t *testing.T) {
+		t.Parallel()
 		runtime := newControlledRuntime()
 		h := newConversationHarnessWithOptions(t, runtime, harnessOptions{cards: true})
 		h.provision("alice", "acct-alice")
@@ -344,6 +351,7 @@ func TestFailedTurnsDeliverTheirTextWithoutTheCard(t *testing.T) {
 		h.wantNoCards("alice")
 	})
 	t.Run("interrupted", func(t *testing.T) {
+		t.Parallel()
 		runtime := newControlledRuntime()
 		h := newConversationHarnessWithOptions(t, runtime, harnessOptions{cards: true})
 		h.provision("alice", "acct-alice")
@@ -366,6 +374,7 @@ func TestFailedTurnsDeliverTheirTextWithoutTheCard(t *testing.T) {
 }
 
 func TestScheduledRunDeliversItsCardUnderTheScheduledCaption(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{cards: true, schedules: clock})
@@ -412,6 +421,7 @@ func TestScheduledRunDeliversItsCardUnderTheScheduledCaption(t *testing.T) {
 }
 
 func TestCardsStayWithTheirPrincipal(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{cards: true})
 	h.provision("alice", "acct-alice")
@@ -444,6 +454,7 @@ func TestCardsStayWithTheirPrincipal(t *testing.T) {
 }
 
 func TestStartupSweepAndNewSessionRemoveStagedCards(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{cards: true})
 	h.provision("alice", "acct-alice")
@@ -470,6 +481,7 @@ func TestStartupSweepAndNewSessionRemoveStagedCards(t *testing.T) {
 }
 
 func TestScheduledCardSurvivesANewConversation(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{cards: true, schedules: clock})
@@ -492,6 +504,7 @@ func TestScheduledCardSurvivesANewConversation(t *testing.T) {
 }
 
 func TestCardMarkSentFailureDeliversTheReplyWithoutASecondPhoto(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores directory permissions")
 	}
@@ -521,6 +534,7 @@ func TestCardMarkSentFailureDeliversTheReplyWithoutASecondPhoto(t *testing.T) {
 }
 
 func TestUnreadableCardStillDeliversTheReplyAsText(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores file permissions")
 	}
@@ -543,6 +557,7 @@ func TestUnreadableCardStillDeliversTheReplyAsText(t *testing.T) {
 }
 
 func TestCaptionFitsMeasuresTheParsedTextInUTF16(t *testing.T) {
+	t.Parallel()
 	client, err := NewClient(ClientConfig{BaseURL: "http://telegram.invalid", Token: "999:test-token", PollTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
@@ -561,6 +576,7 @@ func TestCaptionFitsMeasuresTheParsedTextInUTF16(t *testing.T) {
 		{"the scheduled prefix counts", "**Scheduled: Weekly tasks**\n\n" + strings.Repeat("r", 1000), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			if fits := client.CaptionFits(tc.text); fits != tc.fits {
 				t.Fatalf("CaptionFits = %v, want %v", fits, tc.fits)
 			}

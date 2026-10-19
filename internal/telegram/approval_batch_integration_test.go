@@ -106,6 +106,7 @@ func (h *conversationHarness) expectNoEdit(wait time.Duration) {
 }
 
 func TestLongBatchIsSentAcrossMessagesAndConfirmedTogether(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
@@ -140,6 +141,7 @@ func TestLongBatchIsSentAcrossMessagesAndConfirmedTogether(t *testing.T) {
 }
 
 func TestLongBatchRejectionEditsTheButtonMessageOnly(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
@@ -171,6 +173,7 @@ func TestLongBatchRejectionEditsTheButtonMessageOnly(t *testing.T) {
 	}
 }
 
+// Serial: waits out a 3 s approval lifetime with a 100 ms sweep.
 func TestLongBatchExpiryEditsTheButtonMessageOnly(t *testing.T) {
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)

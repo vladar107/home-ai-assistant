@@ -52,6 +52,7 @@ func (h *conversationHarness) nextRunTime(jobID string) string {
 // A chat turn sets a reminder through the tool without any confirmation, and the tool's result
 // carries the time as Go rendered it.
 func TestReminderSetInConversationNeedsNoConfirmation(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
@@ -107,6 +108,7 @@ func TestReminderSetInConversationNeedsNoConfirmation(t *testing.T) {
 // A reminder reaches its owner once, with snooze buttons, without a model turn and even when the
 // owner's model subscription is not connected.
 func TestReminderIsDeliveredOnceWithoutModelOrSubscription(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
@@ -139,6 +141,7 @@ func TestReminderIsDeliveredOnceWithoutModelOrSubscription(t *testing.T) {
 // Snooze edits the delivered message and brings the reminder back later; a second press while it
 // is pending again moves nothing.
 func TestReminderSnoozeEditsMessageAndRedelivers(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
@@ -185,6 +188,7 @@ func TestReminderSnoozeEditsMessageAndRedelivers(t *testing.T) {
 // Another user's snooze press or a press for a job that is not a delivered reminder changes
 // nothing.
 func TestReminderSnoozeIsOwnerOnly(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
@@ -208,6 +212,7 @@ func TestReminderSnoozeIsOwnerOnly(t *testing.T) {
 // A reminder is delivered however late, and says when it was due once it is more than a few
 // minutes late.
 func TestReminderDeliveredLateSaysWhenItWasDue(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name string
 		now  string
@@ -216,6 +221,7 @@ func TestReminderDeliveredLateSaysWhenItWasDue(t *testing.T) {
 		{"twenty-five hours", "2026-09-29T18:00:00+02:00"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 			runtime := newControlledRuntime()
 			clock := newTestClock(t, mondayMorning)
 			h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
@@ -239,6 +245,7 @@ func TestReminderDeliveredLateSaysWhenItWasDue(t *testing.T) {
 // A one-time model turn is proposed with a time, confirmed once, runs once as a read-only turn,
 // and then leaves /jobs.
 func TestOneTimeJobIsProposedConfirmedRunOnceAndLeavesJobs(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, providers: []tools.Provider{outsideProvider{}}})
@@ -302,6 +309,7 @@ func TestOneTimeJobIsProposedConfirmedRunOnceAndLeavesJobs(t *testing.T) {
 // A one-time model turn that was due more than its catch-up window ago is not run; its owner is
 // told it was missed.
 func TestOneTimeJobMissedForTooLongIsReportedNotRun(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
@@ -335,6 +343,7 @@ func TestOneTimeJobMissedForTooLongIsReportedNotRun(t *testing.T) {
 // An unattended scheduled turn can read the schedule but is not offered the reminder tools, while
 // chat turns are.
 func TestScheduledTurnIsNotOfferedReminderTools(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
@@ -372,6 +381,7 @@ func TestScheduledTurnIsNotOfferedReminderTools(t *testing.T) {
 // Twenty jobs span three pages that stay within Telegram's limits, navigation shows the requested
 // page, and an action on page two refreshes page two.
 func TestJobsPagingStaysWithinTelegramLimitsAndKeepsPage(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
@@ -454,6 +464,7 @@ func (homeProvider) Execute(context.Context, string, tools.Call) (tools.Result, 
 // Reading the home's own devices leaves a reminder immediate; once the conversation reads outside
 // content, a reminder needs Confirm in that turn and in the conversation's later turns.
 func TestReminderAfterOutsideContentNeedsConfirmation(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, providers: []tools.Provider{homeProvider{}, outsideProvider{}}})

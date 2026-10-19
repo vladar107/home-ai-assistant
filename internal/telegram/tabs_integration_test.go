@@ -325,6 +325,7 @@ func (h *conversationHarness) registryTab(threadID int64) (thread.Tab, bool) {
 }
 
 func TestEverySendToATabFallsBackOnceAndReportsTheTab(t *testing.T) {
+	t.Parallel()
 	h, _ := newTabsHarness(t, newControlledRuntime(), true)
 	h.write(`INSERT INTO conversation_sessions (id, principal_id, runtime_session_id, thread_id)
 		 VALUES ('77777777-7777-4777-8777-777777777777', 'alice', '77777777-0000-4000-8000-000000000000', 77)`)
@@ -393,6 +394,7 @@ func TestEverySendToATabFallsBackOnceAndReportsTheTab(t *testing.T) {
 }
 
 func TestATabTheUserWroteInLatelyIsSuspectAndLaterGone(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h, _ := newTabsHarness(t, runtime, true)
 	h.turnInTab(runtime, 1, 50, "about the trip")
@@ -439,6 +441,7 @@ func TestATabTheUserWroteInLatelyIsSuspectAndLaterGone(t *testing.T) {
 }
 
 func TestOpenNamesTheTabAndPostsThere(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h, _ := newTabsHarness(t, runtime, true)
 	created := tabMessage(1, 50, "")
@@ -480,6 +483,7 @@ func TestOpenNamesTheTabAndPostsThere(t *testing.T) {
 }
 
 func TestOpenOnAGoneTabMovesTheConversationToANewTab(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h, _ := newTabsHarness(t, runtime, true)
 	h.turnInTab(runtime, 1, 50, "about the trip")
@@ -523,6 +527,7 @@ func TestOpenOnAGoneTabMovesTheConversationToANewTab(t *testing.T) {
 }
 
 func TestCloseCancelsTheTurnClosesTheConversationAndDeletesTheTab(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h, commands := newTabsHarness(t, runtime, true)
 	if !slices.ContainsFunc(commands, func(command BotCommand) bool { return command.Command == "close" }) {
@@ -609,6 +614,7 @@ func TestCloseCancelsTheTurnClosesTheConversationAndDeletesTheTab(t *testing.T) 
 }
 
 func TestATabIsConfirmedOnceTheRegistryKnowsIt(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h, _ := newTabsHarness(t, runtime, true)
 
@@ -643,6 +649,7 @@ func TestATabIsConfirmedOnceTheRegistryKnowsIt(t *testing.T) {
 }
 
 func TestTopicServiceMessagesNameTabsWithoutUndoingThem(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h, _ := newTabsHarness(t, runtime, true)
 	service := func(updateID, threadID, from int64, created *ForumTopicCreated, edited *ForumTopicEdited) Update {
@@ -693,6 +700,7 @@ func TestTopicServiceMessagesNameTabsWithoutUndoingThem(t *testing.T) {
 }
 
 func TestWithTopicsOffNoTabCallIsMade(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h, commands := newTabsHarness(t, runtime, false)
 	if slices.ContainsFunc(commands, func(command BotCommand) bool { return command.Command == "close" }) {
@@ -719,6 +727,7 @@ func TestWithTopicsOffNoTabCallIsMade(t *testing.T) {
 }
 
 func TestACommandThatOpensATabIsAnsweredInTheMainView(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h, _ := newTabsHarness(t, runtime, true)
 

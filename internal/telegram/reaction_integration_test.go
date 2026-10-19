@@ -28,6 +28,7 @@ func react(t *testing.T, call runtimeCall, emoji string) {
 
 // A turn that only reacts sends no text, yet is delivered and still sends the proposals it made.
 func TestReactOnlyTurnSendsNothingAndStillRunsTheFollowUp(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
@@ -65,6 +66,7 @@ func TestReactOnlyTurnSendsNothingAndStillRunsTheFollowUp(t *testing.T) {
 
 // A reaction can go with a reply; a later reaction replaces it, and only the curated emoji are set.
 func TestReactionWithReplySendsBoth(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "account-alice")
@@ -90,6 +92,7 @@ func TestReactionWithReplySendsBoth(t *testing.T) {
 // A react-only turn that returned to an earlier conversation sends nothing, not even the line that
 // marks the return.
 func TestReactOnlyTurnInAResumedConversationSendsNothing(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "account-alice")
@@ -128,6 +131,7 @@ func TestReactOnlyTurnInAResumedConversationSendsNothing(t *testing.T) {
 
 // The turn after Confirm and a scheduled run answer no message the user wrote, so neither can react.
 func TestContinuationAndScheduledRunsAreNotOfferedReact(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, providers: []tools.Provider{outsideProvider{}}})
@@ -215,6 +219,7 @@ func (h *conversationHarness) count(query string, args ...any) int {
 // A reaction to a delivered reply keeps its latest class and first emoji, and removing it removes
 // the feedback; none of it starts a turn or sends anything.
 func TestReactionsToRepliesAreKeptAsFeedback(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "account-alice")
@@ -256,6 +261,7 @@ func TestReactionsToRepliesAreKeptAsFeedback(t *testing.T) {
 // quotes the reacted message; neither another 👎, a redelivered update, nor a later 👎 starts a
 // second, and the reconsider's message is never taken as the user's.
 func TestFirstThumbsDownStartsOneReconsiderTurn(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	registry := turnstate.New(time.Now)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{recent: registry})
@@ -315,6 +321,7 @@ func TestFirstThumbsDownStartsOneReconsiderTurn(t *testing.T) {
 // A 👎 while a turn is pending is kept as feedback without a reconsider and sends nothing, so a 👎
 // after the turn finished still starts one.
 func TestThumbsDownWhileATurnIsPendingStartsNoReconsider(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "account-alice")
@@ -360,6 +367,7 @@ func TestThumbsDownWhileATurnIsPendingStartsNoReconsider(t *testing.T) {
 
 // Only the principal's own reaction in their private chat to one of their replies counts.
 func TestReactionsFromElsewhereOrOnOtherMessagesDoNothing(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "account-alice")
@@ -390,6 +398,7 @@ func TestReactionsFromElsewhereOrOnOtherMessagesDoNothing(t *testing.T) {
 
 // A 👎 on a reply from an earlier conversation returns to it, as replying to that reply does.
 func TestThumbsDownOnAnEarlierConversationReturnsToIt(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "account-alice")
@@ -433,6 +442,7 @@ func TestThumbsDownOnAnEarlierConversationReturnsToIt(t *testing.T) {
 // is set when the turn has not reacted, and the reply is dropped when it has. An emoji outside the
 // curated set and a reply with words are sent as written.
 func TestEmojiOnlyRepliesBecomeReactions(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "account-alice")
@@ -484,6 +494,7 @@ func TestEmojiOnlyRepliesBecomeReactions(t *testing.T) {
 // A turn that answers one of our own messages has no user message to react to, so its emoji-only
 // reply is sent as text.
 func TestEmojiOnlyReplyToOurOwnMessageIsSent(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "account-alice")

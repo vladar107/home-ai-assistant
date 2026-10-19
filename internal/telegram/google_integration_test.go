@@ -107,6 +107,7 @@ func (h *conversationHarness) connectGoogle(sim *googlesim.Simulator, firstUpdat
 // Two accounts for one user: both are searched and labelled, a switch withdraws one, a reconnect
 // keeps the switch and revokes nothing, and disconnecting one revokes only its grant.
 func TestGoogleAccountsSearchSwitchesAndDisconnect(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	sim := googleSimulator(t)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{google: sim, calendar: calendarSimulator(t, sim)})
@@ -236,6 +237,7 @@ func TestGoogleAccountsSearchSwitchesAndDisconnect(t *testing.T) {
 // Every way a sign-in can go wrong connects nothing, a taken account keeps working for its owner,
 // and a grant revoked at Google turns into a reconnect prompt for that account only.
 func TestGoogleSignInRefusalsAndRevokedGrant(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	sim := googleSimulator(t)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{google: sim})
@@ -306,6 +308,7 @@ func TestGoogleSignInRefusalsAndRevokedGrant(t *testing.T) {
 
 // 0025's single Gmail grant is revoked and removed when the Google module starts.
 func TestLegacyGmailGrantIsRemovedAtStartup(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	sim := googleSimulator(t)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{google: sim})

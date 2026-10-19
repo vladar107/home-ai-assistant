@@ -1,6 +1,6 @@
 # 0110 — Faster integration tests: shared migrated database, no race exit sleep, parallel Telegram tests
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
@@ -49,6 +49,22 @@ behaviour (typing indicators, short timeouts and lifetimes) and would flake unde
   integration timeout) gets a wider bound if load makes it flake, not a serial slot. Parallel tests
   start only after every serial test finishes, so the serial set sets a floor of roughly a minute
   on the package.
+- **The serial set.** Found by searching the Telegram tests for typing and draft intervals, turn
+  and task timeouts, approval lifetimes and sweeps, the connection code timeout, Notion intake
+  lifetimes, and real sleeps. Serial, each with a one-line comment: the typing and draft indicator
+  tests in `draft_integration_test.go` (long turn, quick turn, indicators stop, draft stop, waiting
+  behind another turn, failing indicators), `TestFailedTurnsDeliverTheirTextWithoutTheCard` (300 ms
+  turn timeout), `TestConnectOutcomes` (2 s code timeout), the approval expiry tests
+  (`TestLongBatchExpiryEditsTheButtonMessageOnly`,
+  `TestNotionProposalsExpireFailSafelyAndDoNotSurviveRestart`,
+  `TestApprovalLifecycleIsRecordedOncePerResolution`), the 300 ms Notion intake tests
+  (`TestNotionChatConnectIntake`, `TestAppHelpShowsTheSettingsPagesTheUserSees`),
+  `TestBackgroundTaskTimeLimitYieldsPartialReport` (300 ms task timeout), and the known
+  order-sensitive `TestAnEarlierConversationsNameDoesNotReplaceALaterOne` and
+  `TestCardTextFailureAfterThePhotoIsRetriedWithoutASecondPhoto`. In a serial test, the subtests
+  that assert no time (the other cases of `TestConnectOutcomes` and
+  `TestFailedTurnsDeliverTheirTextWithoutTheCard`) are still parallel. Short negative windows
+  (nothing sent within 20 to 300 ms) stay parallel: load can only make them weaker, not flaky.
 - **No package split and no CI sharding** unless CI still exceeds about five minutes afterwards.
 
 ## Approach

@@ -10,6 +10,7 @@ import (
 )
 
 func TestTypeSafeSettingsToggleThroughTheSettingsFlow(t *testing.T) {
+	t.Parallel()
 	h := newConversationHarnessWithOptions(t, newControlledRuntime(), harnessOptions{typeSafe: true})
 	optIn := judgment.NewOptIn(h.switches)
 	h.provision("alice", "acct-alice-1111")
@@ -57,6 +58,7 @@ func TestTypeSafeSettingsToggleThroughTheSettingsFlow(t *testing.T) {
 }
 
 func TestTypeSafeSectionAbsentWithoutTypeSafe(t *testing.T) {
+	t.Parallel()
 	h := newConversationHarness(t, newControlledRuntime())
 	h.provision("alice", "acct-alice-1111")
 	h.start()

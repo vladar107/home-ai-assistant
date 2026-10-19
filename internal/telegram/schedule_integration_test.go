@@ -122,6 +122,7 @@ func expectNoRuntimeCall(t *testing.T, runtime *controlledRuntime, wait time.Dur
 // The whole path: a job is proposed in conversation, confirmed once, runs at its time as an
 // unattended read-only turn, reaches the owner's chat, and is known to the next chat turn.
 func TestScheduledJobIsProposedConfirmedRunAndDelivered(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, providers: []tools.Provider{outsideProvider{}}})
@@ -223,8 +224,10 @@ func TestScheduledJobIsProposedConfirmedRunAndDelivered(t *testing.T) {
 // A report that may retell Notion page content makes the conversation it reaches private, so the
 // guards never keep that conversation's replies; a report that read none leaves it recordable.
 func TestScheduledReportOfPrivateContentMakesTheNextConversationPrivate(t *testing.T) {
+	t.Parallel()
 	for _, private := range []bool{true, false} {
 		t.Run(fmt.Sprintf("private=%v", private), func(t *testing.T) {
+			t.Parallel()
 			runtime := newControlledRuntime()
 			clock := newTestClock(t, mondayMorning)
 			registry := turnstate.New(time.Now)
@@ -276,6 +279,7 @@ func TestScheduledReportOfPrivateContentMakesTheNextConversationPrivate(t *testi
 // will be, and the change keeps the job's id and pause state; a job changed before the press is
 // left alone.
 func TestScheduledJobIsReadInFullAndChanged(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, providers: []tools.Provider{outsideProvider{}}})
@@ -379,6 +383,7 @@ func (h *conversationHarness) jobID(principalID string) string {
 // /jobs runs, pauses, resumes, and deletes the owner's jobs, and a chat message sent during a
 // scheduled run waits for it instead of starting a second model process.
 func TestJobsCommandControlsAndSharesTheTurnSlot(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
@@ -453,6 +458,7 @@ func TestJobsCommandControlsAndSharesTheTurnSlot(t *testing.T) {
 // /jobs toggles a recurring job's pause while traveling, and offers it neither for the built-in
 // Heads-up job nor for a one-time job.
 func TestJobsCommandTogglesThePauseWhileTraveling(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
@@ -482,6 +488,7 @@ func TestJobsCommandTogglesThePauseWhileTraveling(t *testing.T) {
 // A run whose owner has no model connection says so instead of disappearing, and a run whose
 // owner lost access is dropped without reaching any chat.
 func TestScheduledRunsForUnavailableOwners(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
@@ -508,6 +515,7 @@ func TestScheduledRunsForUnavailableOwners(t *testing.T) {
 // An occurrence missed for longer than the catch-up window is skipped instead of run late, while a
 // recent one runs once.
 func TestScheduledRunCatchUpAfterDowntime(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
@@ -542,6 +550,7 @@ func TestScheduledRunCatchUpAfterDowntime(t *testing.T) {
 
 // A run left running by a previous process is reported as interrupted, never run again.
 func TestScheduledRunInterruptedByRestart(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})

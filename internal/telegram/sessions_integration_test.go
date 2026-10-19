@@ -68,6 +68,7 @@ func sessionFiles(t *testing.T, profiles, principal, runtimeID string) (int, str
 }
 
 func TestSessionsResumeContinuesTheEarlierPiSession(t *testing.T) {
+	t.Parallel()
 	h, profiles := newHistoryHarness(t)
 	h.talk(1, 101, "plan the heating schedule for winter")
 	earlierID, earlierRuntimeID := h.activeSession("alice")
@@ -125,6 +126,7 @@ func TestSessionsResumeContinuesTheEarlierPiSession(t *testing.T) {
 }
 
 func TestNewDeletesThePhotoFromTheConversationHistory(t *testing.T) {
+	t.Parallel()
 	h, profiles := newHistoryHarness(t)
 	picture := []byte("\xff\xd8\xff\xe0 pretend JPEG bytes")
 	encoded := base64.StdEncoding.EncodeToString(picture)
@@ -146,6 +148,7 @@ func TestNewDeletesThePhotoFromTheConversationHistory(t *testing.T) {
 }
 
 func TestReplyToAnEarlierAnswerReturnsToItsConversation(t *testing.T) {
+	t.Parallel()
 	h, profiles := newHistoryHarness(t)
 	earlierAnswer := h.talk(1, 101, "which plants need water on Sundays")
 	_, earlierRuntimeID := h.activeSession("alice")
@@ -203,6 +206,7 @@ func TestReplyToAnEarlierAnswerReturnsToItsConversation(t *testing.T) {
 }
 
 func TestConversationSearchFindsOnlyTheUsersOwnEarlierConversations(t *testing.T) {
+	t.Parallel()
 	h, _ := newHistoryHarness(t)
 	h.talk(1, 101, "the boiler service code is 4417")
 	earlierID, _ := h.activeSession("alice")
@@ -286,6 +290,7 @@ func (h *conversationHarness) wantPrivate(principal string, updateID int64, want
 }
 
 func TestResumeIsRefusedWhileATurnIsPending(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "acct-alice")

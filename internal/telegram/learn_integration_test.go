@@ -40,6 +40,7 @@ func callTool(t *testing.T, call runtimeCall, toolCall agentruntime.ToolCall) ag
 // A 👎 starts a turn that may propose one instruction; the card names the 👎, Confirm keeps it as
 // learned, and /memory marks it.
 func TestThumbsDownProposesOneLearnedInstruction(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newMemoryHarness(t, runtime)
 
@@ -86,6 +87,7 @@ func TestThumbsDownProposesOneLearnedInstruction(t *testing.T) {
 
 // With learning from 👎 off, the reconsider turn is not asked for a lesson and cannot propose one.
 func TestLearningOffLeavesTheReconsiderTurnWithoutALesson(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newMemoryHarness(t, runtime)
 
@@ -119,6 +121,7 @@ func TestLearningOffLeavesTheReconsiderTurnWithoutALesson(t *testing.T) {
 // An instruction kept in an ordinary chat turn, even one after a reconsider, is not a lesson: it is
 // written at once, as the model's own.
 func TestInstructionInAChatTurnIsNotALesson(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newMemoryHarness(t, runtime)
 

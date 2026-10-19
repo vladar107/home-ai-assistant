@@ -52,6 +52,7 @@ func (h *conversationHarness) runtimeSession(threadID int64) string {
 }
 
 func TestABotNamedTabIsNamedOncePerConversationWithAnIcon(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h, _ := newTabsHarness(t, runtime, true)
 	h.push(implicitTab(1, 40))
@@ -120,6 +121,7 @@ func TestABotNamedTabIsNamedOncePerConversationWithAnIcon(t *testing.T) {
 }
 
 func TestUserFixedAndMainViewTabsAreNeverRenamed(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h, _ := newTabsHarness(t, runtime, true)
 	if _, err := h.store.AddTab(h.ctx, "alice", 42, "Reports", thread.NamedByFixed); err != nil {
@@ -167,6 +169,7 @@ func TestUserFixedAndMainViewTabsAreNeverRenamed(t *testing.T) {
 }
 
 func TestATabNameOutsideTheRulesIsNotUsed(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h, _ := newTabsHarness(t, runtime, true)
 	for _, threadID := range []int64{61, 62, 63, 64, 65} {
@@ -213,6 +216,7 @@ func TestATabNameOutsideTheRulesIsNotUsed(t *testing.T) {
 }
 
 func TestAFailedIconReadStillNamesTabs(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{topics: true})
 	h.tabs.iconStatus = 500
@@ -240,6 +244,7 @@ func TestAFailedIconReadStillNamesTabs(t *testing.T) {
 	}
 }
 
+// Serial: asserts that no tab edit follows a log line, an order that load can reverse.
 func TestAnEarlierConversationsNameDoesNotReplaceALaterOne(t *testing.T) {
 	runtime := newControlledRuntime()
 	h, _ := newTabsHarness(t, runtime, true)
@@ -278,6 +283,7 @@ func TestAnEarlierConversationsNameDoesNotReplaceALaterOne(t *testing.T) {
 }
 
 func TestTabIconsAreFoundByEmoji(t *testing.T) {
+	t.Parallel()
 	h := newConversationHarnessWithOptions(t, newControlledRuntime(), harnessOptions{topics: true})
 	// Telegram may list an emoji twice; the first icon stays.
 	h.tabs.icons = append(slices.Clone(testTopicIcons), TopicIcon{Emoji: "🌱", CustomEmojiID: "5000000000000000009"})
@@ -294,6 +300,7 @@ func TestTabIconsAreFoundByEmoji(t *testing.T) {
 }
 
 func TestWithTopicsOffNoTabIsNamed(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h, _ := newTabsHarness(t, runtime, false)
 	if _, err := h.store.AddTab(h.ctx, "alice", 40, "Made by the bot", thread.NamedByBot); err != nil {

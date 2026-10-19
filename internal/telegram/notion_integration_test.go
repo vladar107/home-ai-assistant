@@ -111,6 +111,7 @@ func usersMeRequests(sim *notionsim.Simulator) []notionsim.Request {
 }
 
 func TestNotionOperatorTokenIsAdoptedAndDisconnected(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	sim := notionsim.New(t)
 	sim.AddToken(aliceNotionToken, aliceWorkspace)
@@ -179,6 +180,7 @@ func TestNotionOperatorTokenIsAdoptedAndDisconnected(t *testing.T) {
 	h.assertNotionSecretHidden(aliceNotionToken, "ntn_bogus999", "secret_abcDEF123")
 }
 
+// Serial: asserts a 300 ms Notion intake expiry.
 func TestNotionChatConnectIntake(t *testing.T) {
 	runtime := newControlledRuntime()
 	sim := notionsim.New(t)
@@ -279,6 +281,7 @@ func TestNotionChatConnectIntake(t *testing.T) {
 }
 
 func TestNotionToolsAreScopedToTheConnectedPrincipal(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	sim := notionsim.New(t)
 	sim.AddToken(aliceNotionToken, aliceWorkspace)

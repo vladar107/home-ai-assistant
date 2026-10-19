@@ -85,6 +85,7 @@ func (h *conversationHarness) modelPress(updateID, messageID int64, data string)
 }
 
 func TestModelListsTheCatalogWithTheStateOfTheLane(t *testing.T) {
+	t.Parallel()
 	h, _ := newModelHarness(t, true)
 	reply := h.modelCommand(1, "/model")
 	if reply.replyTo != requestMessageID(1) {
@@ -114,6 +115,7 @@ func TestModelListsTheCatalogWithTheStateOfTheLane(t *testing.T) {
 }
 
 func TestModelButtonsChooseAModelThenItsLevels(t *testing.T) {
+	t.Parallel()
 	h, runtime := newModelHarness(t, true)
 	list := h.modelCommand(1, "/model")
 
@@ -148,6 +150,7 @@ func TestModelButtonsChooseAModelThenItsLevels(t *testing.T) {
 }
 
 func TestModelButtonsRefuseWhatTheCatalogDoesNotOffer(t *testing.T) {
+	t.Parallel()
 	h, _ := newModelHarness(t, true)
 	list := h.modelCommand(1, "/model")
 
@@ -166,6 +169,7 @@ func TestModelButtonsRefuseWhatTheCatalogDoesNotOffer(t *testing.T) {
 }
 
 func TestModelTypedForms(t *testing.T) {
+	t.Parallel()
 	h, runtime := newModelHarness(t, true)
 	update := int64(0)
 	next := func() int64 { update += 2; return update }
@@ -199,6 +203,7 @@ func TestModelTypedForms(t *testing.T) {
 }
 
 func TestModelTypedRefusalsListTheOptions(t *testing.T) {
+	t.Parallel()
 	h, runtime := newModelHarness(t, true)
 	update := int64(0)
 	typed := func(text string) string {
@@ -228,6 +233,7 @@ func TestModelTypedRefusalsListTheOptions(t *testing.T) {
 }
 
 func TestModelChoiceBelongsToTheTab(t *testing.T) {
+	t.Parallel()
 	h, runtime := newModelHarness(t, true)
 	if _, err := h.store.AddTab(h.ctx, "alice", 71, "Reports", thread.NamedByFixed); err != nil {
 		t.Fatal(err)
@@ -264,6 +270,7 @@ func TestModelChoiceBelongsToTheTab(t *testing.T) {
 }
 
 func TestModelAsTheFirstMessageOfAFreshTabIsAnsweredInTheMainView(t *testing.T) {
+	t.Parallel()
 	h, runtime := newModelHarness(t, true)
 	h.push(implicitTab(1, 70), tabMessage(2, 70, "/model sol low"))
 	answer := h.nextMessage()
@@ -280,6 +287,7 @@ func TestModelAsTheFirstMessageOfAFreshTabIsAnsweredInTheMainView(t *testing.T) 
 }
 
 func TestModelOffersOnlyTheDefaultsWithoutACatalog(t *testing.T) {
+	t.Parallel()
 	h, runtime := newModelHarness(t, false)
 	reply := h.modelCommand(1, "/model")
 	if !strings.Contains(reply.text, "The model list is unavailable right now") {
@@ -300,6 +308,7 @@ func TestModelOffersOnlyTheDefaultsWithoutACatalog(t *testing.T) {
 }
 
 func TestModelIsInTheMenuAndHelp(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{topics: true})
 	h.provision("alice", "acct-alice")
@@ -317,6 +326,7 @@ func TestModelIsInTheMenuAndHelp(t *testing.T) {
 // A catalog entry can come with no level Pi would run, which must be refused rather than crash
 // the household's only poller.
 func TestModelWithoutUsableLevelsIsRefused(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{topics: true})
 	h.provision("alice", "acct-alice")

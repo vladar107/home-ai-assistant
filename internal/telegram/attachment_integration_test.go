@@ -16,6 +16,7 @@ import (
 var attachmentIDPattern = regexp.MustCompile(`id ([0-9a-f]{8})`)
 
 func TestPhotoReachesTheModelAsAnImage(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "acct-alice")
@@ -45,6 +46,7 @@ func TestPhotoReachesTheModelAsAnImage(t *testing.T) {
 }
 
 func TestPhotoWithoutCaptionStillStartsATurn(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "acct-alice")
@@ -66,6 +68,7 @@ func TestPhotoWithoutCaptionStillStartsATurn(t *testing.T) {
 }
 
 func TestDocumentIsReadOnlyWhenTheModelAsksForIt(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "acct-alice")
@@ -114,6 +117,7 @@ func TestDocumentIsReadOnlyWhenTheModelAsksForIt(t *testing.T) {
 }
 
 func TestPDFIsReadAsTextFromACacheThatNewRemoves(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "acct-alice")
@@ -171,6 +175,7 @@ func TestPDFIsReadAsTextFromACacheThatNewRemoves(t *testing.T) {
 }
 
 func TestScannedPDFIsReportedAsHavingNoText(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "acct-alice")
@@ -197,6 +202,7 @@ func TestScannedPDFIsReportedAsHavingNoText(t *testing.T) {
 }
 
 func TestUnsupportedAndOversizedMediaAreAnswered(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "acct-alice")
@@ -223,6 +229,7 @@ func TestUnsupportedAndOversizedMediaAreAnswered(t *testing.T) {
 }
 
 func TestFilesOfARefusedMessageAreNotKept(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "acct-alice")
@@ -251,6 +258,7 @@ func TestFilesOfARefusedMessageAreNotKept(t *testing.T) {
 }
 
 func TestNewSessionRemovesStoredAttachments(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "acct-alice")

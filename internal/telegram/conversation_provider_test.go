@@ -36,6 +36,7 @@ func newFixtureRuntime(t *testing.T, profilesDir string) *pi.Runtime {
 }
 
 func TestProviderFailuresProduceActionableReplies(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		scenario string
 		reply    string
@@ -45,6 +46,7 @@ func TestProviderFailuresProduceActionableReplies(t *testing.T) {
 		{"auth", conversation.ReconnectReply, agentruntime.FailureAuth},
 	} {
 		t.Run(tc.scenario, func(t *testing.T) {
+			t.Parallel()
 			profiles := filepath.Join(t.TempDir(), "profiles")
 			h := newConversationHarnessWithOptions(t, newFixtureRuntime(t, profiles), harnessOptions{profilesDir: profiles})
 			h.provision("alice", "acct-alice")

@@ -30,6 +30,7 @@ func approvalsRecorded(t *testing.T, reader sdkmetric.Reader, status string, war
 	})
 }
 
+// Serial: waits out a 2 s approval lifetime with a 100 ms sweep.
 func TestApprovalLifecycleIsRecordedOncePerResolution(t *testing.T) {
 	telemetry, reader := newMetricsTelemetry(t)
 	runtime := newControlledRuntime()
@@ -95,6 +96,7 @@ func TestApprovalLifecycleIsRecordedOncePerResolution(t *testing.T) {
 }
 
 func TestScheduledRunRecordsItsOutcomeAndReplyTime(t *testing.T) {
+	t.Parallel()
 	telemetry, reader := newMetricsTelemetry(t)
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)

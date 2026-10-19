@@ -18,6 +18,7 @@ func nsGateway(t *testing.T) string {
 }
 
 func TestTrainsHiddenWithoutOperatorKey(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "account-alice")
@@ -39,6 +40,7 @@ func TestTrainsHiddenWithoutOperatorKey(t *testing.T) {
 }
 
 func TestTrainsSwitchControlsToolsPerUser(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{ns: nsGateway(t)})
 	h.provision("alice", "account-alice")

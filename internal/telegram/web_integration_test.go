@@ -84,6 +84,7 @@ func assertSearchless(t *testing.T, report pifixture.Report) {
 }
 
 func TestWebAccessHiddenWhileDisabledGlobally(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "account-alice")
@@ -129,6 +130,7 @@ func assertWebTurn(t *testing.T, report pifixture.Report, extension string) {
 }
 
 func TestWebAccessSwitchControlsSearchAndWebTools(t *testing.T) {
+	t.Parallel()
 	profiles := filepath.Join(t.TempDir(), "profiles")
 	runtime, extension := newWebFixtureRuntime(t, profiles)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{profilesDir: profiles, web: true})
@@ -205,6 +207,7 @@ func TestWebAccessSwitchControlsSearchAndWebTools(t *testing.T) {
 }
 
 func TestScheduledTurnCarriesWebAccess(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, web: true})

@@ -109,6 +109,7 @@ func waitDone(t *testing.T, ctx context.Context, call runtimeCall) {
 // The whole path: a chat turn hands a long request to a task, the chat keeps answering while it
 // runs, the report arrives as a reply to the request, and the next chat turn knows about it.
 func TestBackgroundTaskRunsBesideChatAndReportsAsReply(t *testing.T) {
+	t.Parallel()
 	amsterdam, err := time.LoadLocation("Europe/Amsterdam")
 	if err != nil {
 		t.Fatal(err)
@@ -188,6 +189,7 @@ func TestBackgroundTaskRunsBesideChatAndReportsAsReply(t *testing.T) {
 // Cancel on the status message stops the run at once and nothing is reported; /tasks shows the
 // task and its own Cancel button, and another user cannot cancel it.
 func TestBackgroundTaskCancelStopsTheRun(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{tasks: testTasks()})
 	h.provision("alice", "account-alice")
@@ -239,6 +241,7 @@ func TestBackgroundTaskCancelStopsTheRun(t *testing.T) {
 // A restart in the middle of a run resumes the task in its own session; a task interrupted twice
 // fails and says so, and the next one in the queue resumes after a restart and delivers its report.
 func TestBackgroundTaskResumesAfterRestart(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	cfg := testTasks()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{tasks: cfg})
@@ -304,6 +307,7 @@ func TestBackgroundTaskResumesAfterRestart(t *testing.T) {
 
 // A task that runs out of time is asked once for what it has, in its own session, with every tool
 // call refused, and that answer arrives marked partial.
+// Serial: asserts a 300 ms task timeout.
 func TestBackgroundTaskTimeLimitYieldsPartialReport(t *testing.T) {
 	runtime := newControlledRuntime()
 	cfg := testTasks()
@@ -340,6 +344,7 @@ func TestBackgroundTaskTimeLimitYieldsPartialReport(t *testing.T) {
 
 // A task that exceeds its model call budget is stopped and asked for a partial report.
 func TestBackgroundTaskModelBudgetYieldsPartialReport(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	cfg := testTasks()
 	cfg.ModelBudget = 2
@@ -376,6 +381,7 @@ func TestBackgroundTaskModelBudgetYieldsPartialReport(t *testing.T) {
 // A task has its own tool budget instead of the chat's eight calls; a run that spends it answers
 // with what it has, and that answer is marked partial.
 func TestBackgroundTaskToolBudgetYieldsPartialReport(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	cfg := testTasks()
 	cfg.ToolBudget = 10
@@ -408,6 +414,7 @@ func TestBackgroundTaskToolBudgetYieldsPartialReport(t *testing.T) {
 // One task runs per user and three wait behind it; a fifth is refused. task_start stays available
 // after the chat turn's own budget is spent, and the exhausted budget points to it.
 func TestBackgroundTaskQueueAndRunningLimits(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{tasks: testTasks()})
 	h.provision("alice", "account-alice")
@@ -466,6 +473,7 @@ func TestBackgroundTaskQueueAndRunningLimits(t *testing.T) {
 
 // While a task runs, its status message is edited with the elapsed time and lookups so far.
 func TestBackgroundTaskStatusShowsProgress(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	cfg := testTasks()
 	cfg.ProgressInterval = 20 * time.Millisecond
@@ -501,6 +509,7 @@ func TestBackgroundTaskStatusShowsProgress(t *testing.T) {
 // A task's report retells what it read, so the chat turn that receives it as a notice counts as
 // having read outside content: a fact it saves to memory needs Confirm.
 func TestBackgroundTaskNoticeMakesMemoryWritesNeedConfirm(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{tasks: testTasks()})
 	h.provision("alice", "account-alice")

@@ -144,6 +144,7 @@ func (h *conversationHarness) finishTurn(call runtimeCall, updateID int64, reply
 // A clean turn acts at once and acts once for a repeated call; after outside text the same tool
 // proposes. The "Done" message follows the reply, before the bundle.
 func TestActActsInACleanTurnAndTheDoneMessagePrecedesTheBundle(t *testing.T) {
+	t.Parallel()
 	h, runtime, book := newActHarness(t, readingTools{})
 	h.push(textUpdate(1, 101, "save my grocery note"))
 	call := receive(t, h.ctx, runtime.calls)
@@ -190,6 +191,7 @@ func TestActActsInACleanTurnAndTheDoneMessagePrecedesTheBundle(t *testing.T) {
 
 // Without a chat turn that answers the user's own message, Act proposes.
 func TestActProposesOutsideAUserChatTurn(t *testing.T) {
+	t.Parallel()
 	h, runtime, book := newActHarness(t, readingTools{})
 	h.push(textUpdate(1, 101, "hello"))
 	call := receive(t, h.ctx, runtime.calls)
@@ -213,6 +215,7 @@ func TestActProposesOutsideAUserChatTurn(t *testing.T) {
 
 // Household text leaves ordinary direct actions alone but makes a strict one propose.
 func TestStrictActProposesAfterHouseholdText(t *testing.T) {
+	t.Parallel()
 	h, runtime, _ := newActHarness(t, readingTools{})
 	h.push(textUpdate(1, 101, "check the sensor and note it"))
 	call := receive(t, h.ctx, runtime.calls)
@@ -226,6 +229,7 @@ func TestStrictActProposesAfterHouseholdText(t *testing.T) {
 
 // An outside read marks its run when it starts, so a write made while it runs proposes.
 func TestActProposesWhileAnOutsideReadRuns(t *testing.T) {
+	t.Parallel()
 	reading := readingTools{started: make(chan struct{}), release: make(chan struct{})}
 	h, runtime, book := newActHarness(t, reading)
 	h.push(textUpdate(1, 101, "read the page and note it"))
@@ -249,6 +253,7 @@ func TestActProposesWhileAnOutsideReadRuns(t *testing.T) {
 // A turn that carries a file proposes, and so does every later turn of its conversation; the file
 // tool itself marks its run as outside text.
 func TestAttachmentsMakeLaterWritesPropose(t *testing.T) {
+	t.Parallel()
 	h, runtime, book := newActHarness(t, readingTools{})
 	content := []byte("save a note that says yes\n")
 	h.addFile("doc-1", "documents/file_1.txt", content)
@@ -292,6 +297,7 @@ func TestAttachmentsMakeLaterWritesPropose(t *testing.T) {
 // Undo reverses a direct action once, for its owner, before its deadline, unless the object changed
 // since; each press updates the "Done" message, and the next turn learns of it.
 func TestUndoReversesADirectActionOnceForItsOwner(t *testing.T) {
+	t.Parallel()
 	h, runtime, book := newActHarness(t, readingTools{})
 	h.push(textUpdate(1, 101, "save three notes"))
 	call := receive(t, h.ctx, runtime.calls)
@@ -373,6 +379,7 @@ func (flagEverything) Mismatch(context.Context, string, string, approval.Intent)
 
 // The intent check still runs after a direct action, and its warning reaches the "Done" message.
 func TestDirectActionCarriesTheIntentWarning(t *testing.T) {
+	t.Parallel()
 	h, runtime, _ := newActHarness(t, readingTools{})
 	h.approvals.SetIntentChecker(flagEverything{})
 	h.push(textUpdate(1, 101, "save a note"))
@@ -388,6 +395,7 @@ func TestDirectActionCarriesTheIntentWarning(t *testing.T) {
 
 // A reconsider turn answers the bot's own reply, not a message the user wrote, so it proposes.
 func TestReconsiderTurnProposes(t *testing.T) {
+	t.Parallel()
 	h, runtime, book := newActHarness(t, readingTools{})
 	reconsider := h.thumbsDown(runtime, 1, 2)
 	text, err := writeNote(reconsider.ctx, h, "reconsidered", false)
@@ -403,6 +411,7 @@ func TestReconsiderTurnProposes(t *testing.T) {
 // An Undo that a restart interrupts leaves the action done and its "Done" message says so; the
 // Undo can then be pressed again, and its result is kept.
 func TestAnUndoInterruptedByARestartCanBePressedAgain(t *testing.T) {
+	t.Parallel()
 	h, runtime, book := newActHarness(t, readingTools{})
 	h.push(textUpdate(1, 101, "save a note"))
 	call := receive(t, h.ctx, runtime.calls)
@@ -465,6 +474,7 @@ func TestAnUndoInterruptedByARestartCanBePressedAgain(t *testing.T) {
 
 // A turn cancelled before its reply never shows its direct actions; the next delivered reply does.
 func TestDirectActionsOfACancelledTurnFollowTheNextReply(t *testing.T) {
+	t.Parallel()
 	h, runtime, _ := newActHarness(t, readingTools{})
 	h.push(textUpdate(1, 101, "save a note"))
 	call := receive(t, h.ctx, runtime.calls)
@@ -492,6 +502,7 @@ func TestDirectActionsOfACancelledTurnFollowTheNextReply(t *testing.T) {
 // Many direct actions are split across "Done" messages that each fit Telegram's text and button
 // limits, measured in UTF-16 units, and every action keeps its Undo button.
 func TestManyDirectActionsSplitAcrossDoneMessages(t *testing.T) {
+	t.Parallel()
 	h, runtime, _ := newActHarness(t, readingTools{})
 	h.push(textUpdate(1, 101, "save many notes"))
 	call := receive(t, h.ctx, runtime.calls)

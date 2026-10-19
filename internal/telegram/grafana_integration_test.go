@@ -22,6 +22,7 @@ func hasGrafanaButton(data []string) bool {
 }
 
 func TestMonitoringHiddenWithoutOperatorToken(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "account-alice")
@@ -34,6 +35,7 @@ func TestMonitoringHiddenWithoutOperatorToken(t *testing.T) {
 }
 
 func TestMonitoringSwitchControlsToolsAndPrivacyForTheAllowedUser(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{grafana: grafanaGateway(t)})
 	h.provision("alice", "account-alice")
@@ -87,6 +89,7 @@ func TestMonitoringSwitchControlsToolsAndPrivacyForTheAllowedUser(t *testing.T) 
 }
 
 func TestMonitoringIsInvisibleToUsersTheOperatorDidNotName(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{grafana: grafanaGateway(t)})
 	h.provision("alice", "account-alice")

@@ -89,6 +89,7 @@ func (h *conversationHarness) landedThread(query string, args ...any) int64 {
 }
 
 func TestEachKindOfMessageLandsInItsFeedTab(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	evaluator := &stubEvaluator{}
 	evaluator.set(watch.Observation{State: "cancelled", Triggered: true, Headline: "It is cancelled."})
@@ -175,6 +176,7 @@ func TestEachKindOfMessageLandsInItsFeedTab(t *testing.T) {
 // A file a scheduled run sends lands in the run's feed tab, while the run stays out of that tab's
 // conversation.
 func TestAScheduledRunSendsItsFilesToItsFeedTab(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	roots := nasRootsFor(t, false)
 	if err := os.WriteFile(filepath.Join(roots[0].Roots[0].Path, "Timetable.pdf"), []byte("%PDF-1.7 timetable"), 0o644); err != nil {
@@ -208,6 +210,7 @@ func TestAScheduledRunSendsItsFilesToItsFeedTab(t *testing.T) {
 }
 
 func TestFeedTabsShowTheirIconWhenTelegramOffersIt(t *testing.T) {
+	t.Parallel()
 	h, _ := newFeedHarness(t, newControlledRuntime(), nil, true)
 	if err := h.notifier().Send(h.ctx, "alice", "", "first"); err != nil {
 		t.Fatal(err)
@@ -241,6 +244,7 @@ func TestFeedTabsShowTheirIconWhenTelegramOffersIt(t *testing.T) {
 }
 
 func TestAGoneFeedTabIsMadeAgainOnItsNextMessage(t *testing.T) {
+	t.Parallel()
 	h, _ := newFeedHarness(t, newControlledRuntime(), nil, true)
 	if err := h.notifier().Send(h.ctx, "alice", "", "first"); err != nil {
 		t.Fatal(err)
@@ -268,6 +272,7 @@ func TestAGoneFeedTabIsMadeAgainOnItsNextMessage(t *testing.T) {
 }
 
 func TestANewFeedTabThatRefusesSendsIsNotReplacedForADay(t *testing.T) {
+	t.Parallel()
 	h, _ := newFeedHarness(t, newControlledRuntime(), nil, true)
 	broken, err := h.service.Feeds().Thread(h.ctx, "alice", 101, thread.FeedReminders)
 	if err != nil {
@@ -293,6 +298,7 @@ func TestANewFeedTabThatRefusesSendsIsNotReplacedForADay(t *testing.T) {
 }
 
 func TestAFeedTabThatCannotBeMadeLeavesTheMessageInTheMainView(t *testing.T) {
+	t.Parallel()
 	h, _ := newFeedHarness(t, newControlledRuntime(), nil, true)
 	h.mu.Lock()
 	h.tabs.createStatus = 429
@@ -319,6 +325,7 @@ func TestAFeedTabThatCannotBeMadeLeavesTheMessageInTheMainView(t *testing.T) {
 }
 
 func TestWithTopicsOffFeedsSendNoThread(t *testing.T) {
+	t.Parallel()
 	h, clock := newFeedHarness(t, newControlledRuntime(), nil, false)
 	if err := h.notifier().Send(h.ctx, "alice", "", "a trip notice"); err != nil {
 		t.Fatal(err)
@@ -337,6 +344,7 @@ func TestWithTopicsOffFeedsSendNoThread(t *testing.T) {
 // A reply in a feed tab to a report whose conversation another tab holds runs nothing and names
 // that tab.
 func TestAReplyToAConversationOpenElsewhereNamesItsTab(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h, _ := newFeedHarness(t, runtime, nil, true)
 	reports, err := h.service.Feeds().Thread(h.ctx, "alice", 101, thread.FeedReports)

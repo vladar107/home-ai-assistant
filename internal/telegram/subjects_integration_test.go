@@ -40,6 +40,7 @@ func replyInTab(updateID, threadID int64, text string, messageID int64) Update {
 }
 
 func TestFeedConversationsKnowTheirSubject(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h, _ := newFeedHarness(t, runtime, nil, true)
 	bins := h.createJob("alice", "00000000000000f1", "Bins", "0 9 * * *", "Which bins go out?")
@@ -87,6 +88,7 @@ func TestFeedConversationsKnowTheirSubject(t *testing.T) {
 }
 
 func TestARepliedAlertIsQuotedOnceWithItsMarks(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	evaluator := &stubEvaluator{}
 	evaluator.set(watch.Observation{State: "cancelled", Triggered: true, Headline: "It is cancelled.", Private: true})

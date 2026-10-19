@@ -118,6 +118,7 @@ func (h *tripHarness) pressCard(updateID, userID, messageID int64, data string) 
 // Track plans it with its reminders and says which could not be set, Ignore dismisses it for good,
 // and a stale press answers without changing anything.
 func TestTripCardTracksAndIgnoresForItsOwnerOnly(t *testing.T) {
+	t.Parallel()
 	h, _ := newTripHarness(t)
 	first, second := h.suggest("ABC123"), h.suggest("XYZ789")
 
@@ -164,6 +165,7 @@ func TestTripCardTracksAndIgnoresForItsOwnerOnly(t *testing.T) {
 // The Trips switch is off by default, is offered only once Mail or Calendar can be read, and
 // creates, resumes, and deletes the principal's own scan job.
 func TestTripsSwitchNeedsGoogleAndManagesItsJob(t *testing.T) {
+	t.Parallel()
 	h, sim := newTripHarness(t)
 
 	h.requestSettings(1, 101)
@@ -212,6 +214,7 @@ func TestTripsSwitchNeedsGoogleAndManagesItsJob(t *testing.T) {
 // and Scan now queues one more run; a press on a switch that is already on queues nothing. A run
 // with nothing new says so, and one that sent a card says how many it found.
 func TestTripsSwitchScansAtOnceAndScanNowScansAgain(t *testing.T) {
+	t.Parallel()
 	h, sim := newTripHarness(t)
 	h.connectGoogle(sim, 1, 101, aliceMailbox, bothProducts)
 	id := schedule.TripsJobID("alice")
@@ -271,6 +274,7 @@ func TestTripsSwitchScansAtOnceAndScanNowScansAgain(t *testing.T) {
 
 // While a scan is queued or running, neither Scan now nor turning Trips back on queues another.
 func TestTripsScanNowWaitsForTheScanUnderWay(t *testing.T) {
+	t.Parallel()
 	h, sim := newTripHarness(t)
 	h.connectGoogle(sim, 1, 101, aliceMailbox, bothProducts)
 	id := schedule.TripsJobID("alice")
@@ -307,6 +311,7 @@ func TestTripsScanNowWaitsForTheScanUnderWay(t *testing.T) {
 }
 
 func TestTripCardStaysUnderTelegramsLimitWithManyBookings(t *testing.T) {
+	t.Parallel()
 	found := trip.Trip{ID: "abcd1234", Title: strings.Repeat("t", 80), Destination: strings.Repeat("d", 80), Zone: "Europe/Lisbon",
 		Source: trip.SourceMail, StartsAt: time.Now(), EndsAt: time.Now().Add(48 * time.Hour)}
 	for range trip.MaximumBookings {

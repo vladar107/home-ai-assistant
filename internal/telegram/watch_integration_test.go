@@ -68,6 +68,7 @@ func (h *conversationHarness) watchState(id string) (bool, string) {
 // An alert reaches its owner with Mute today and Pause buttons; another user's press changes
 // nothing, a press mutes or pauses the owner's watch, and a repeated press is harmless.
 func TestWatchAlertButtonsMuteAndPause(t *testing.T) {
+	t.Parallel()
 	clock := newTestClock(t, mondayMorning)
 	evaluator := &stubEvaluator{}
 	evaluator.set(watch.Observation{State: "cancelled", Triggered: true, Headline: "It is cancelled."})
@@ -132,6 +133,7 @@ func (h *conversationHarness) runTool(runtime *controlledRuntime, updateID, user
 // A watch is proposed in conversation with a summary built from the parsed watch, created once on
 // Confirm, listed and managed in /jobs, and never visible or changeable for another user.
 func TestWatchIsProposedConfirmedAndManagedByItsOwnerOnly(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, watches: &stubEvaluator{}, providers: []tools.Provider{outsideProvider{}}})
@@ -277,6 +279,7 @@ func agentWatch() watch.Spec {
 // tools only. Its alert reaches the owner with the usual buttons, and the next chat turn is told
 // about it as outside content. Another user never sees the watch.
 func TestAgentWatchChecksInAReadOnlyTurnAndAlertsAsOutsideContent(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, watches: &stubEvaluator{}})

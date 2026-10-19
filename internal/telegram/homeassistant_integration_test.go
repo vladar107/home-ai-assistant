@@ -16,6 +16,7 @@ func homeAssistantGateway(t *testing.T) string {
 }
 
 func TestHomeHiddenWithoutOperatorToken(t *testing.T) {
+	t.Parallel()
 	h := newConversationHarness(t, newControlledRuntime())
 	h.provision("alice", "account-alice")
 	h.start()
@@ -29,6 +30,7 @@ func TestHomeHiddenWithoutOperatorToken(t *testing.T) {
 }
 
 func TestHomeSwitchIsPerUser(t *testing.T) {
+	t.Parallel()
 	h := newConversationHarnessWithOptions(t, newControlledRuntime(), harnessOptions{homeAssistant: homeAssistantGateway(t)})
 	h.provision("alice", "account-alice")
 	h.provision("bob", "account-bob")

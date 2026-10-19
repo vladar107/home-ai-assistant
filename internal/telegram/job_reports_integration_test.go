@@ -32,6 +32,7 @@ func replyTo(update Update, messageID int64) Update {
 // restart; a reply to its message quotes it in full; job_reports reads it; and a new conversation
 // starts with the last day's reports. Nothing of it reaches another user.
 func TestJobReportsReachLaterTurns(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
@@ -160,6 +161,7 @@ func TestJobReportsReachLaterTurns(t *testing.T) {
 // read some: a run that only read household data leaves the conversation clean, a run that read a
 // web page marks it.
 func TestJobReportMarksConversationOnlyWhenItsRunWasExternal(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
@@ -218,6 +220,7 @@ func TestJobReportMarksConversationOnlyWhenItsRunWasExternal(t *testing.T) {
 
 // A reminder's message is kept as its report too, so a reply to it is understood.
 func TestReplyToReminderQuotesIt(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
@@ -253,6 +256,7 @@ func (h *conversationHarness) optionalReportID(text string) string {
 // Chat turns carry the user's own jobs, with the start of each prompt, in the system prompt; a
 // change to a job changes it, and a scheduled turn, which has its own prompt, goes without.
 func TestChatTurnsKnowTheUsersJobs(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})

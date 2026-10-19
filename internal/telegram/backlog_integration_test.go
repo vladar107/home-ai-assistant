@@ -46,6 +46,7 @@ func (h *conversationHarness) seedBacklog(principalID, id, title, details string
 // An item is dated by the household's calendar, in the tools and in the export alike: added in
 // the UTC evening, it is already the next day at home.
 func TestBacklogDatesFollowTheHouseholdCalendar(t *testing.T) {
+	t.Parallel()
 	home, err := time.LoadLocation("Pacific/Auckland")
 	if err != nil {
 		t.Fatal(err)
@@ -67,6 +68,7 @@ func TestBacklogDatesFollowTheHouseholdCalendar(t *testing.T) {
 }
 
 func TestBacklogToolsKeepEachUsersItemsAndStayOutOfThePrompt(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newBacklogHarness(t, runtime)
 
@@ -120,6 +122,7 @@ func TestBacklogToolsKeepEachUsersItemsAndStayOutOfThePrompt(t *testing.T) {
 }
 
 func TestBacklogWriteAfterOutsideContentIsConfirmedFirst(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newBacklogHarness(t, runtime)
 
@@ -149,6 +152,7 @@ func TestBacklogWriteAfterOutsideContentIsConfirmedFirst(t *testing.T) {
 }
 
 func TestBacklogCommandMarksDoneAndDeletesOwnItems(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newBacklogHarness(t, runtime)
 
@@ -211,6 +215,7 @@ func TestBacklogCommandMarksDoneAndDeletesOwnItems(t *testing.T) {
 }
 
 func TestBacklogExportSendsEveryOpenItemInFull(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newBacklogHarness(t, runtime)
 	created := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
@@ -243,6 +248,7 @@ func TestBacklogExportSendsEveryOpenItemInFull(t *testing.T) {
 }
 
 func TestScheduledRunIsNotOfferedTheBacklog(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newBacklogHarness(t, runtime)
 	h.seedBacklog("alice", "aaaaaaa1", "Chart the weather", "", time.Now())
@@ -267,6 +273,7 @@ func TestScheduledRunIsNotOfferedTheBacklog(t *testing.T) {
 }
 
 func TestBacklogInHelpAndCommandRegistration(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newBacklogHarness(t, runtime)
 

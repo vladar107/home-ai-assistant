@@ -35,6 +35,7 @@ func stationsGateway(t *testing.T) string {
 // from the route as it will be stored; /jobs lists it with a delete button that works only for its
 // owner.
 func TestRouteIsSavedChangedAndRemovedOnConfirm(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: newTestClock(t, mondayMorning), ns: stationsGateway(t), providers: []tools.Provider{outsideProvider{}}})
 	h.provision("alice", "account-alice")
@@ -119,6 +120,7 @@ func TestRouteIsSavedChangedAndRemovedOnConfirm(t *testing.T) {
 }
 
 func TestRouteDeletesFromJobs(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: newTestClock(t, mondayMorning), ns: stationsGateway(t)})
 	h.provision("alice", "account-alice")

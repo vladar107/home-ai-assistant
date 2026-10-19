@@ -28,6 +28,7 @@ func (h *conversationHarness) wantChunks(letters ...string) []int {
 }
 
 func TestScheduledReportResumesWithTheChunkThatFailed(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
@@ -56,6 +57,7 @@ func TestScheduledReportResumesWithTheChunkThatFailed(t *testing.T) {
 }
 
 func TestTaskReportResumesWithTheChunkThatFailed(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	cfg := testTasks()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{tasks: cfg})

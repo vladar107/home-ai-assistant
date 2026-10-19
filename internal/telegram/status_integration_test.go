@@ -68,6 +68,7 @@ func successfulUsage() fakeUsage {
 }
 
 func TestStatusShowsModelTaskModelLastTurnAndUsage(t *testing.T) {
+	t.Parallel()
 	h, runtime := newStatusHarness(t, successfulUsage(), fakeTaskModels{pair: agentruntime.ModelEffort{Model: "gpt-6.1-sol", Effort: "medium"}})
 
 	first := h.status(1)
@@ -96,6 +97,7 @@ func TestStatusShowsModelTaskModelLastTurnAndUsage(t *testing.T) {
 }
 
 func TestStatusNotesAStaleChoiceAndATaskFallback(t *testing.T) {
+	t.Parallel()
 	h, _ := newStatusHarness(t, successfulUsage(), fakeTaskModels{
 		pair: agentruntime.ModelEffort{Model: "gpt-test", Effort: "medium"}, fallback: task.FallbackUsage,
 	})
@@ -118,6 +120,7 @@ func TestStatusNotesAStaleChoiceAndATaskFallback(t *testing.T) {
 }
 
 func TestStatusUsageFailuresShowNoProviderDetail(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		err  error
@@ -131,6 +134,7 @@ func TestStatusUsageFailuresShowNoProviderDetail(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			usage := fakeUsage{read: func(context.Context) (chatgpt.Usage, error) { return chatgpt.Usage{}, c.err }}
 			h, _ := newStatusHarness(t, usage, nil)
 			reply := h.status(1)
@@ -145,6 +149,7 @@ func TestStatusUsageFailuresShowNoProviderDetail(t *testing.T) {
 }
 
 func TestStatusGivesUpOnASlowUsageRead(t *testing.T) {
+	t.Parallel()
 	usage := fakeUsage{read: func(ctx context.Context) (chatgpt.Usage, error) {
 		<-ctx.Done()
 		return chatgpt.Usage{}, ctx.Err()
@@ -156,6 +161,7 @@ func TestStatusGivesUpOnASlowUsageRead(t *testing.T) {
 }
 
 func TestPrivacyAndHelpMentionTheModelCommandAndUsageRead(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{})
 	h.provision("alice", "acct-alice")

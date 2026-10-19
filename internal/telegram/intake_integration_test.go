@@ -14,6 +14,7 @@ import (
 // A message the conversation refuses as invalid is answered and its update committed, so the
 // poller moves on to the next one.
 func TestInvalidMessageIsAnsweredAndThePollerMovesOn(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarness(t, runtime)
 	h.provision("alice", "acct-alice")
@@ -34,6 +35,7 @@ func TestInvalidMessageIsAnsweredAndThePollerMovesOn(t *testing.T) {
 // The Notion token guard covers captions and transcripts too, without a photo or recording ever
 // completing a pending intake.
 func TestNotionTokenGuardCoversCaptionsAndTranscripts(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	notionSim := notionsim.New(t)
 	notionSim.AddToken(aliceNotionToken, aliceWorkspace)
@@ -84,6 +86,7 @@ func TestNotionTokenGuardCoversCaptionsAndTranscripts(t *testing.T) {
 }
 
 func TestGoogleSignInAddressInACaptionIsGuarded(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{google: googleSimulator(t)})
 	h.provision("alice", "account-alice")

@@ -14,6 +14,7 @@ import (
 )
 
 func TestQuietScheduledRunSendsNothing(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
@@ -43,6 +44,7 @@ func TestQuietScheduledRunSendsNothing(t *testing.T) {
 }
 
 func TestQuietManualRunSaysSoAndMarkerIsStrippedFromText(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
@@ -76,12 +78,14 @@ func TestQuietManualRunSaysSoAndMarkerIsStrippedFromText(t *testing.T) {
 }
 
 func TestHeadsUpPromptFitsTheJobLimit(t *testing.T) {
+	t.Parallel()
 	if n := utf8.RuneCountInString(schedule.HeadsUpPrompt); n > 1000 {
 		t.Fatalf("prompt has %d runes", n)
 	}
 }
 
 func TestHeadsUpSwitchCreatesResumesAndDeletesItsJob(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
@@ -150,6 +154,7 @@ func TestHeadsUpSwitchCreatesResumesAndDeletesItsJob(t *testing.T) {
 // The Heads-up prompt asks for about a dozen lookups, so its runs get more tool calls than another
 // job's turn.
 func TestHeadsUpRunsGetALargerToolBudget(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})

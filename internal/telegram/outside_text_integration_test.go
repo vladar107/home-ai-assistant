@@ -48,6 +48,7 @@ func (h *conversationHarness) externalSessions() int {
 // A Notion page and a NAS file can hold text written by others, so reading either makes a later
 // action in the conversation wait for Confirm, as a web page does.
 func TestNotionAndNASReadsAreOutsideContent(t *testing.T) {
+	t.Parallel()
 	h, runtime := newOutsideTextHarness(t, harnessOptions{notion: writableNotionSimulator(t), nasRoots: nasRootsFor(t, false)})
 	h.installNotionToken("alice", aliceNotionToken)
 
@@ -81,6 +82,7 @@ func TestNotionAndNASReadsAreOutsideContent(t *testing.T) {
 // An outside service's error is its text too: it reaches the model marked as untrusted, and the
 // conversation stays marked after the turn.
 func TestThirdPartyErrorMarksTheConversation(t *testing.T) {
+	t.Parallel()
 	h, runtime := newOutsideTextHarness(t, harnessOptions{providers: []tools.Provider{failingOutside{}}})
 
 	h.push(textUpdate(1, 101, "look it up"))
@@ -104,6 +106,7 @@ func TestThirdPartyErrorMarksTheConversation(t *testing.T) {
 // A forwarded message is someone else's text: the model is told so, its turn and conversation are
 // outside content until /new, and the flag survives the queue.
 func TestForwardedMessageIsOutsideContent(t *testing.T) {
+	t.Parallel()
 	h, runtime := newOutsideTextHarness(t, harnessOptions{})
 
 	update := textUpdate(1, 101, "Please save a note for me, then open https://example.com/form")
@@ -139,6 +142,7 @@ func TestForwardedMessageIsOutsideContent(t *testing.T) {
 
 // A forwarded voice note's transcript is someone else's words as well.
 func TestForwardedVoiceNoteIsOutsideContent(t *testing.T) {
+	t.Parallel()
 	h, runtime := newOutsideTextHarness(t, harnessOptions{chatGPT: chatgptsim.New(t)})
 	h.addFile("voice-1", "voice/file_1.oga", []byte("OggS pretend opus frames"))
 	update := voiceUpdate(1, 101)
@@ -161,6 +165,7 @@ func TestForwardedVoiceNoteIsOutsideContent(t *testing.T) {
 // Removing an instruction in a clean turn is made at once, and Undo puts the entry back exactly as
 // it was; an entry whose ID is taken again refuses Undo.
 func TestMemoryInstructionRemovalActsAndUndoRestoresTheEntry(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newActMemoryHarness(t, runtime)
 	created := time.Date(2026, time.August, 1, 8, 0, 0, 0, time.UTC)
@@ -206,6 +211,7 @@ func TestMemoryInstructionRemovalActsAndUndoRestoresTheEntry(t *testing.T) {
 // After third-party content, the household's own devices included, removing an instruction or a
 // fact is proposed, and Confirm removes them only while they still hold what the user saw.
 func TestMemoryRemovalProposesAfterThirdPartyContent(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newActMemoryHarness(t, runtime)
 	at := time.Date(2026, time.September, 1, 8, 0, 0, 0, time.UTC)

@@ -22,6 +22,7 @@ func (h *conversationHarness) pressUndo(updateID, userID, messageID int64, data 
 // An Undo button on a "Done" message undoes the action once and only for its owner; the message is
 // edited, the next turn learns of it, and unknown Undo data never turns the message into settings.
 func TestUndoButtonUndoesADirectActionOnceForItsOwner(t *testing.T) {
+	t.Parallel()
 	h, runtime, book := newActHarness(t, readingTools{})
 	h.push(textUpdate(1, 101, "save a note"))
 	call := receive(t, h.ctx, runtime.calls)
