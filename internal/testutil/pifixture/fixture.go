@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -65,18 +66,20 @@ func ReportPath(sessionDir, sessionID string) string {
 
 // RunIfRequested dispatches before testing parses flags in the child test binary.
 func RunIfRequested() {
+	// syscall.Exit skips the race detector's one-second sleep in os.Exit; the trade-off is that a
+	// race inside the fixture child no longer changes its exit status.
 	if len(os.Args) == 2 && os.Args[1] == "--version" {
 		fmt.Println(Version)
-		os.Exit(0)
+		syscall.Exit(0)
 	}
 	if len(os.Args) < 3 || os.Args[1] != "--mode" || os.Args[2] != "rpc" {
 		return
 	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
+		syscall.Exit(2)
 	}
-	os.Exit(0)
+	syscall.Exit(0)
 }
 
 func run() error {
@@ -384,7 +387,7 @@ func run() error {
 	case "fixture:crash":
 		fmt.Fprintln(os.Stderr, "Error: synthetic startup failure")
 		fmt.Fprintln(os.Stderr, "    at loadAuth (/opt/pi/dist/core/auth.js:12:3) token=synthetic-private-token")
-		os.Exit(3)
+		syscall.Exit(3)
 	case "fixture:malformed":
 		fmt.Fprintln(os.Stdout, "not-json synthetic-private-text")
 	case "fixture:oversized-event":
