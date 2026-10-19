@@ -176,6 +176,10 @@ func modelLevelsKeyboard(model modelcatalog.Model) InlineKeyboard {
 	})
 }
 
+func modelChangeKeyboard() InlineKeyboard {
+	return InlineKeyboard{{{Text: "Change model", CallbackData: modelPrefix + ":" + modelListAction}}}
+}
+
 func modelCallback(action, value string) string {
 	return modelPrefix + ":" + action + ":" + value
 }
@@ -329,7 +333,8 @@ func (s *Service) processModelPress(ctx context.Context, callback *CallbackQuery
 		if err = s.model.Lanes.ClearChoice(ctx, lane); err != nil {
 			return processingResult{}, "model_action", err
 		}
-		note = "Back on the default."
+		chat := s.model.ChatDefault
+		text, keyboard = fmt.Sprintf("Back on the default: %s, effort %s.", chat.Model, chat.Effort), modelChangeKeyboard()
 	case modelPickAction:
 		index := slices.IndexFunc(catalog.models, func(m modelcatalog.Model) bool { return m.ID == press.model })
 		if index >= 0 {
@@ -346,7 +351,12 @@ func (s *Service) processModelPress(ctx context.Context, callback *CallbackQuery
 		case err != nil:
 			return processingResult{}, "model_action", err
 		default:
-			note = "Saved. This conversation holds the choice until /new."
+			// A confirmation rather than the whole list again, which reads as if nothing changed.
+			applied, _, err := s.model.Lanes.EffectiveChoiceFrom(ctx, lane, catalog.listed)
+			if err != nil {
+				return processingResult{}, "model_action", err
+			}
+			text, keyboard = fmt.Sprintf("Saved: %s, effort %s, in this conversation until /new.", applied.Model, applied.Effort), modelChangeKeyboard()
 		}
 	}
 	if text == "" {

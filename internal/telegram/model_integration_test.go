@@ -127,8 +127,8 @@ func TestModelButtonsChooseAModelThenItsLevels(t *testing.T) {
 	}
 
 	applied := h.modelPress(3, list.messageID, "mdl:e:gpt-6.1-sol:xhigh")
-	if !strings.Contains(applied.text, "Saved") || !strings.Contains(applied.text, "Here: gpt-6.1-sol, effort xhigh (your choice, until /new)") {
-		t.Fatalf("applied page = %s", applied.text)
+	if applied.text != "Saved: gpt-6.1-sol, effort xhigh, in this conversation until /new." || !slices.Equal(buttonData(applied.keyboard), []string{"mdl:l"}) {
+		t.Fatalf("applied page = %+v", applied)
 	}
 	if ran := h.say(runtime, 4, 0); ran != (agentruntime.ModelEffort{Model: "gpt-6.1-sol", Effort: "xhigh"}) {
 		t.Fatalf("turn ran on %v", ran)
@@ -139,8 +139,8 @@ func TestModelButtonsChooseAModelThenItsLevels(t *testing.T) {
 		t.Fatalf("list after back = %+v", back)
 	}
 	reset := h.modelPress(6, list.messageID, "mdl:d")
-	if !strings.Contains(reset.text, "Here: gpt-test, effort medium (the default)") {
-		t.Fatalf("page after defaults = %s", reset.text)
+	if reset.text != "Back on the default: gpt-test, effort medium." || !slices.Equal(buttonData(reset.keyboard), []string{"mdl:l"}) {
+		t.Fatalf("page after defaults = %+v", reset)
 	}
 	if ran := h.say(runtime, 7, 0); ran != (agentruntime.ModelEffort{Model: "gpt-test", Effort: "medium"}) {
 		t.Fatalf("turn after defaults ran on %v", ran)
@@ -252,7 +252,7 @@ func TestModelChoiceBelongsToTheTab(t *testing.T) {
 
 	h.push(tabPress(7, 71, list.messageID, "mdl:e:gpt-test:high"))
 	h.wantAnswer(7)
-	if edit := h.nextEdit(); !strings.Contains(edit.text, "Here: gpt-test, effort high (your choice, until /new)") {
+	if edit := h.nextEdit(); edit.text != "Saved: gpt-test, effort high, in this conversation until /new." {
 		t.Fatalf("press in a tab = %+v", edit)
 	}
 	if ran := h.say(runtime, 8, 71); ran != (agentruntime.ModelEffort{Model: "gpt-test", Effort: "high"}) {
