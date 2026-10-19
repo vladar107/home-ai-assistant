@@ -316,6 +316,7 @@ func (s *Service) botCommands() []BotCommand {
 		{BotCommand{Command: "new", Description: "Start a fresh conversation"}, conversationEnabled},
 		{BotCommand{Command: "sessions", Description: "Return to a recent conversation"}, conversationEnabled},
 		{BotCommand{Command: "settings", Description: "Show and change your settings"}, len(s.sections) > 0},
+		{BotCommand{Command: "usage", Description: "Show your ChatGPT subscription usage"}, modelEnabled && s.model.Usage != nil},
 		{BotCommand{Command: "tasks", Description: "Show and cancel your background tasks"}, s.tasks != nil},
 	})
 }
@@ -1164,6 +1165,11 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 			return reply, nil, err
 		}
 		return StatusReply, nil, nil
+	case "usage":
+		if s.model == nil || s.model.Usage == nil {
+			return s.helpReply(), nil, nil
+		}
+		return strings.Join(s.model.statusUsageLines(ctx, principalID), "\n"), nil, nil
 	case "privacy":
 		reply, err := s.privacyReply(ctx, principalID)
 		return reply, nil, err

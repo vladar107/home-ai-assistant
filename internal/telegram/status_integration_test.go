@@ -173,3 +173,12 @@ func TestPrivacyAndHelpMentionTheModelCommandAndUsageRead(t *testing.T) {
 	call.answer <- agentruntime.RunResult{Response: "Use /model."}
 	h.wantReply(101, 2, "Use /model.")
 }
+
+func TestUsageShowsTheSubscriptionUsageAlone(t *testing.T) {
+	t.Parallel()
+	h, _ := newStatusHarness(t, successfulUsage(), nil)
+	h.push(textUpdate(1, 101, "/usage"))
+	if reply := h.nextMessage().text; !strings.HasPrefix(reply, "Subscription usage (plus plan):") || !strings.Contains(reply, "5-hour: 42% used") || strings.Contains(reply, "Model here") {
+		t.Fatalf("/usage = %q", reply)
+	}
+}
