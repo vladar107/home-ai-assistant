@@ -30,7 +30,7 @@ type topicIcons struct {
 // refreshTopicIcons reads the icon set again once it is due, outside the lock, so IconFor never
 // waits for Telegram. A failed read keeps the set it had, which may be none, so tabs are then named
 // without icons. Telegram may list an emoji twice; its first icon is kept.
-func (s *Service) refreshTopicIcons(ctx context.Context) {
+func (s *Tabs) refreshTopicIcons(ctx context.Context) {
 	s.icons.mu.Lock()
 	if s.icons.fetching || time.Now().Before(s.icons.due) {
 		s.icons.mu.Unlock()
@@ -67,14 +67,14 @@ func (s *Service) refreshTopicIcons(ctx context.Context) {
 // IconFor returns the custom emoji ID of the tab icon Telegram offers for emoji, as it was last
 // read, so a tab of a fixed kind can show its icon; ok is false when Telegram offers none for it.
 // It never reads the set itself: that happens at start and, once due, when a tab is named.
-func (s *Service) IconFor(emoji string) (customEmojiID string, ok bool) {
+func (s *Tabs) IconFor(emoji string) (customEmojiID string, ok bool) {
 	s.icons.mu.Lock()
 	defer s.icons.mu.Unlock()
 	customEmojiID, ok = s.icons.byEmoji[plainIcon(emoji)]
 	return customEmojiID, ok
 }
 
-func (s *Service) offeredIcons() []string {
+func (s *Tabs) offeredIcons() []string {
 	s.icons.mu.Lock()
 	defer s.icons.mu.Unlock()
 	return s.icons.emoji
@@ -85,15 +85,15 @@ func plainIcon(emoji string) string {
 	return strings.ReplaceAll(strings.TrimSpace(emoji), "\uFE0F", "")
 }
 
-var _ conversation.TabReplies = (*Service)(nil)
+var _ conversation.TabReplies = (*Tabs)(nil)
 
 // TabReplied names a tab after its conversation once its first plain reply is delivered: a short
 // name and an icon from the user's own subscription. Only a tab the bot named may be renamed, once
 // per conversation, which the registry keeps across restarts; a tab the user named keeps its name.
 // A failure leaves the tab as it is and is not retried. Neither the exchange nor the name is
 // logged.
-func (s *Service) TabReplied(ctx context.Context, reply conversation.TabReply) {
-	if !s.topics.Load() || s.tabs == nil || s.namer == nil || reply.ThreadID <= 0 {
+func (s *Tabs) TabReplied(ctx context.Context, reply conversation.TabReply) {
+	if !s.topics.Load() || s.store == nil || s.namer == nil || reply.ThreadID <= 0 {
 		return
 	}
 	key := chatTab{reply.ChatID, reply.ThreadID}
@@ -101,7 +101,7 @@ func (s *Service) TabReplied(ctx context.Context, reply conversation.TabReply) {
 		return
 	}
 	logger := s.telemetry.ContextLogger(ctx, s.logger)
-	claimed, err := s.tabs.ClaimTabName(ctx, reply.PrincipalID, reply.ThreadID, reply.SessionID)
+	claimed, err := s.store.ClaimTabName(ctx, reply.PrincipalID, reply.ThreadID, reply.SessionID)
 	if err != nil {
 		logger.WarnContext(ctx, "telegram.tab.name_failed", "principal_id", reply.PrincipalID, "thread_id", reply.ThreadID, "reason", "claim", "error", err)
 		return
@@ -122,7 +122,7 @@ func (s *Service) TabReplied(ctx context.Context, reply conversation.TabReply) {
 	}
 	// While the name was chosen, the user may have renamed the tab, or a later conversation there
 	// may have claimed it; either one's name wins.
-	tab, known, err := s.tabs.Tab(ctx, reply.PrincipalID, reply.ThreadID)
+	tab, known, err := s.store.Tab(ctx, reply.PrincipalID, reply.ThreadID)
 	if err != nil {
 		logger.WarnContext(ctx, "telegram.tab.name_failed", "principal_id", reply.PrincipalID, "thread_id", reply.ThreadID, "reason", "read", "error", err)
 		return
@@ -143,7 +143,7 @@ func (s *Service) TabReplied(ctx context.Context, reply conversation.TabReply) {
 		logger.WarnContext(ctx, "telegram.tab.name_failed", "principal_id", reply.PrincipalID, "thread_id", reply.ThreadID, "reason", "edit", "error", err)
 		return
 	}
-	named, err := s.tabs.NameBotTab(ctx, reply.PrincipalID, reply.ThreadID, reply.SessionID, chosen.Name, iconID)
+	named, err := s.store.NameBotTab(ctx, reply.PrincipalID, reply.ThreadID, reply.SessionID, chosen.Name, iconID)
 	if err != nil {
 		logger.WarnContext(ctx, "telegram.tab.name_failed", "principal_id", reply.PrincipalID, "thread_id", reply.ThreadID, "reason", "record", "error", err)
 		return

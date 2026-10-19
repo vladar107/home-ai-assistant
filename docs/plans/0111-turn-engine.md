@@ -125,12 +125,23 @@ behave as before.
   nothing of drafts.
 - The scheduled run, the task run, the rewrite and the tab name keep their
   moved code as it was rather than going through `Run`.
-- Telegram receives the engine for tab naming through a new `Namer`
-  dependency until M4 moves naming into `telegram.Tabs`, and the assembly
-  exposes the engine as `Turns`. The coordinator's `Memory` config shrinks to
+- Telegram received the engine for tab naming through a `Namer` dependency
+  until M4 moved naming into `telegram.Tabs`; the assembly still exposes the
+  engine as `Turns`. The coordinator's `Memory` config shrinks to
   the one question it asks (`LearnsFromFeedback`).
 - M1 did not need the leaf values for construction order, since the engine can
   be built where the coordinator is built today; they are still used there so
   the engine does not hold the scheduler or the trip service. The scheduler
   and watch `Feeds`, the watch `Rewriter`, and the task `Runner` config fields
   wait for M4 and M5, where their producers exist.
+- `wiring` cannot import `telegram` (the Telegram tests build through
+  `wiring`), and `telegram.Tabs` needs the engine and the trip reader that
+  `Build` makes, so `wiring.Inputs.Tabs` is a factory the composition root
+  supplies; `Build` calls it right after building the engine and gets back the
+  feeds, the tab replies, and the trip notices. The scheduler and the trip
+  service are therefore built after the engine.
+- The Telegram service stays the tab observer (`ObserveTabs`) and the owner of
+  the tabs the user just opened: refusing a send closes a conversation and
+  resolves a principal, which `Tabs` cannot do before the coordinator exists.
+  `Tabs` holds the registry, the feeds, the trip tabs, the naming, and the
+  sync maps, and works before the poller starts.

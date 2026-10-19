@@ -15,26 +15,26 @@ const (
 	tripTabFallbackName = "Trip"
 )
 
-var _ TripFeeds = Feeds{}
+var _ TripFeeds = (*Tabs)(nil)
 
 // Destination resolves a trip's destination to the trip's tab, which a planned trip that has none
 // gets now. Anything else, including a trip that ended, was cancelled, or no longer exists and has
 // no tab, resolves to the feed. A trip whose tab cannot be had, or was just found gone, falls back
 // to the feed as well.
-func (f Feeds) Destination(ctx context.Context, principalID string, chatID int64, destination, feed string) (int64, error) {
+func (s *Tabs) Destination(ctx context.Context, principalID string, chatID int64, destination, feed string) (int64, error) {
 	if tripID, isTrip := thread.TripOf(destination); isTrip {
-		if threadID, err := f.service.tripThread(ctx, principalID, chatID, tripID, false); err == nil && threadID > 0 {
+		if threadID, err := s.tripThread(ctx, principalID, chatID, tripID, false); err == nil && threadID > 0 {
 			return threadID, nil
 		}
 	}
-	return f.Thread(ctx, principalID, chatID, feed)
+	return s.Thread(ctx, principalID, chatID, feed)
 }
 
 // Summarize keeps a trip's tab in step after a write to the trip: a planned trip without a tab gets
 // one, its summary is edited, or sent and pinned again when it is gone, and the tab is renamed when
 // the title changed. A failure is logged and left to the next write.
-func (f Feeds) Summarize(ctx context.Context, principalID string, chatID int64, tripID string) {
-	_, _ = f.service.tripThread(ctx, principalID, chatID, tripID, true)
+func (s *Tabs) Summarize(ctx context.Context, principalID string, chatID int64, tripID string) {
+	_, _ = s.tripThread(ctx, principalID, chatID, tripID, true)
 }
 
 // tripThread returns the trip's tab, or zero when it has none and gets none. A trip keeps its tab
@@ -43,8 +43,8 @@ func (f Feeds) Summarize(ctx context.Context, principalID string, chatID int64, 
 // dropped, is made again with a fresh summary. With refresh set, the summary and the tab's name are
 // brought up to date; otherwise only a missing summary is sent. One trip's tab is resolved by one
 // caller at a time.
-func (s *Service) tripThread(ctx context.Context, principalID string, chatID int64, tripID string, refresh bool) (int64, error) {
-	if s == nil || s.tabs == nil || s.trips == nil {
+func (s *Tabs) tripThread(ctx context.Context, principalID string, chatID int64, tripID string, refresh bool) (int64, error) {
+	if s.store == nil || s.trips == nil {
 		return 0, nil
 	}
 	logger := s.telemetry.ContextLogger(ctx, s.logger)
@@ -69,7 +69,7 @@ func (s *Service) tripThread(ctx context.Context, principalID string, chatID int
 	if !known {
 		return 0, nil
 	}
-	threadID, tabbed, err := s.tabs.SubjectTab(ctx, principalID, subject)
+	threadID, tabbed, err := s.store.SubjectTab(ctx, principalID, subject)
 	if err != nil {
 		logger.WarnContext(ctx, "telegram.trip_tab.failed", "principal_id", principalID, "trip_id", tripID, "stage", "load", "error", err)
 		return 0, err
@@ -95,7 +95,7 @@ func (s *Service) tripThread(ctx context.Context, principalID string, chatID int
 	case found.SummaryMessageID <= 0:
 		kept = s.sendTripSummary(ctx, principalID, chatID, threadID, found)
 	case refresh:
-		err := s.editPlain(ctx, chatID, found.SummaryMessageID, trip.Summary(found, s.trips.Now()))
+		err := editPlain(ctx, s.client, chatID, found.SummaryMessageID, trip.Summary(found, s.trips.Now()))
 		switch {
 		case err != nil && isPermanentAPIError(err):
 			// Telegram no longer has the summary to edit, so it is sent and pinned again.
@@ -112,7 +112,7 @@ func (s *Service) tripThread(ctx context.Context, principalID string, chatID int
 
 // makeTripTab opens the trip's tab under the trip's title and records it as the trip's, with a fixed
 // name that only a new title changes.
-func (s *Service) makeTripTab(ctx context.Context, principalID string, chatID int64, found trip.Trip) (int64, error) {
+func (s *Tabs) makeTripTab(ctx context.Context, principalID string, chatID int64, found trip.Trip) (int64, error) {
 	logger := s.telemetry.ContextLogger(ctx, s.logger)
 	name := tripTabName(found)
 	threadID, err := s.client.CreateForumTopic(ctx, chatID, name)
@@ -120,7 +120,7 @@ func (s *Service) makeTripTab(ctx context.Context, principalID string, chatID in
 		logger.WarnContext(ctx, "telegram.trip_tab.failed", "principal_id", principalID, "trip_id", found.ID, "stage", "create", "error", err)
 		return 0, err
 	}
-	if err := s.tabs.AddSubjectTab(ctx, principalID, threadID, name, thread.TripDestination(found.ID)); err != nil {
+	if err := s.store.AddSubjectTab(ctx, principalID, threadID, name, thread.TripDestination(found.ID)); err != nil {
 		logger.WarnContext(ctx, "telegram.trip_tab.failed", "principal_id", principalID, "trip_id", found.ID, "thread_id", threadID, "stage", "record", "error", err)
 		// A tab the registry does not hold would be left behind by the next message's new one.
 		if removeErr := s.client.DeleteForumTopic(ctx, chatID, threadID); removeErr != nil {
@@ -138,7 +138,7 @@ func (s *Service) makeTripTab(ctx context.Context, principalID string, chatID in
 // and pins it, which in a private chat is silent. The summary goes only to the tab: one in the main
 // view would be pinned there. A pin Telegram refuses leaves the summary as the tab's first message
 // and is logged once per trip. It reports false when Telegram's refusal had the tab taken for gone.
-func (s *Service) sendTripSummary(ctx context.Context, principalID string, chatID, threadID int64, found trip.Trip) bool {
+func (s *Tabs) sendTripSummary(ctx context.Context, principalID string, chatID, threadID int64, found trip.Trip) bool {
 	logger := s.telemetry.ContextLogger(ctx, s.logger)
 	messageID, err := s.client.SendPlainInTab(thread.WithDelivery(ctx, threadID), chatID, trip.Summary(found, s.trips.Now()))
 	if err != nil {
@@ -162,9 +162,9 @@ func (s *Service) sendTripSummary(ctx context.Context, principalID string, chatI
 }
 
 // renameTripTab names the tab after the trip's title once the title changed.
-func (s *Service) renameTripTab(ctx context.Context, principalID string, chatID, threadID int64, found trip.Trip) {
+func (s *Tabs) renameTripTab(ctx context.Context, principalID string, chatID, threadID int64, found trip.Trip) {
 	logger := s.telemetry.ContextLogger(ctx, s.logger)
-	tab, known, err := s.tabs.Tab(ctx, principalID, threadID)
+	tab, known, err := s.store.Tab(ctx, principalID, threadID)
 	name := tripTabName(found)
 	if err != nil || !known || tab.Name == name {
 		if err != nil {
@@ -176,7 +176,7 @@ func (s *Service) renameTripTab(ctx context.Context, principalID string, chatID,
 		logger.WarnContext(ctx, "telegram.trip_tab.failed", "principal_id", principalID, "trip_id", found.ID, "thread_id", threadID, "stage", "rename", "error", err)
 		return
 	}
-	if err := s.tabs.SetFixedTabName(ctx, principalID, threadID, name); err != nil {
+	if err := s.store.SetFixedTabName(ctx, principalID, threadID, name); err != nil {
 		logger.WarnContext(ctx, "telegram.trip_tab.failed", "principal_id", principalID, "trip_id", found.ID, "thread_id", threadID, "stage", "rename", "error", err)
 	}
 }

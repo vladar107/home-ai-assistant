@@ -34,25 +34,25 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/task"
 	"github.com/vladar107/home-ai-assistant/internal/telegram"
+	"github.com/vladar107/home-ai-assistant/internal/trip"
+	"github.com/vladar107/home-ai-assistant/internal/turn"
 	"github.com/vladar107/home-ai-assistant/internal/wiring"
 )
 
 const telemetryShutdownTimeout = 3 * time.Second
 
 type App struct {
-	cfg      config.Config
-	logger   *slog.Logger
-	registry *module.Registry
-	modules  []module.Module
-	server   *http.Server
-	store    *sqlite.Store
-	assembly *wiring.Assembly
-	// tripNotifier is the assembly's trip notices, which reach the Telegram feeds once the service
-	// exists.
-	tripNotifier *telegram.TripNotifier
-	telegram     *telegram.Service
-	telemetry    *observability.Telemetry
-	ready        atomic.Bool
+	cfg       config.Config
+	logger    *slog.Logger
+	registry  *module.Registry
+	modules   []module.Module
+	server    *http.Server
+	store     *sqlite.Store
+	assembly  *wiring.Assembly
+	tabs      *telegram.Tabs
+	telegram  *telegram.Service
+	telemetry *observability.Telemetry
+	ready     atomic.Bool
 }
 
 func New(cfg config.Config, registry *module.Registry, logger *slog.Logger) (*App, error) {
@@ -290,7 +290,6 @@ func (a *App) buildAssembly(ctx context.Context, client *telegram.Client, config
 		return nil, fmt.Errorf("initialize Pi runtime: %w", err)
 	}
 	runtime.SetTelemetry(a.telemetry)
-	a.tripNotifier = &telegram.TripNotifier{Client: client, Chats: a.store}
 	in := wiring.Inputs{
 		Store:        a.store,
 		Registry:     a.registry,
@@ -303,10 +302,16 @@ func (a *App) buildAssembly(ctx context.Context, client *telegram.Client, config
 		Reminders:    telegram.ReminderSender{Client: client},
 		Alerts:       telegram.WatchAlertSender{Client: client},
 		TaskMessages: telegram.TaskMessenger{Client: client},
-		TripNotices:  a.tripNotifier,
-		Principals:   configured,
-		DataDir:      cfg.DataDir,
-		Zone:         cfg.Timezone,
+		Tabs: func(namer *turn.Engine, trips trip.Reader) wiring.TabServices {
+			a.tabs = telegram.NewTabs(client, a.store, trips, namer, a.logger, a.telemetry)
+			return wiring.TabServices{
+				Feeds: a.tabs, Replies: a.tabs,
+				Trips: &telegram.TripNotifier{Client: client, Chats: a.store, Feeds: a.tabs},
+			}
+		},
+		Principals: configured,
+		DataDir:    cfg.DataDir,
+		Zone:       cfg.Timezone,
 		Core: wiring.CoreConfig{
 			TurnTimeout: cfg.Conversation.TurnTimeout,
 			TurnZone:    location,
@@ -387,13 +392,16 @@ func (a *App) buildTelegram(ctx context.Context, client *telegram.Client, config
 		return fmt.Errorf("bootstrap Telegram identities: %w", err)
 	}
 
+	if a.tabs == nil {
+		a.tabs = telegram.NewTabs(client, a.store, nil, nil, a.logger, a.telemetry)
+	}
 	deps := telegram.Dependencies{
 		Client:     client,
 		Identities: identities,
 		Cursors:    a.store,
 		Logger:     a.logger,
 		Telemetry:  a.telemetry,
-		Tabs:       a.store,
+		Tabs:       a.tabs,
 	}
 	asm := a.assembly
 	if asm != nil {
@@ -403,7 +411,6 @@ func (a *App) buildTelegram(ctx context.Context, client *telegram.Client, config
 		}
 		// Interface values are set only for what was built, so none of them is a typed nil.
 		deps.Conversation = asm.Conversation
-		deps.Namer = asm.Turns
 		deps.Attachments = asm.Attachments
 		deps.Approvals = asm.Approvals
 		deps.Schedules = asm.Scheduler
@@ -440,13 +447,6 @@ func (a *App) buildTelegram(ctx context.Context, client *telegram.Client, config
 	}
 	client.ObserveTabs(service)
 	if asm != nil {
-		// Messages nobody asked for go to their feed tab while the bot has tabs on.
-		asm.Scheduler.SetFeeds(service.Feeds())
-		if asm.Watches != nil {
-			asm.Watches.SetFeeds(service.Feeds())
-		}
-		a.tripNotifier.Feeds = service.Feeds()
-		asm.Conversation.SetTabReplies(service)
 		if err := asm.Tools.Register(service.Help()); err != nil {
 			return err
 		}

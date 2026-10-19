@@ -81,7 +81,7 @@ func TestABotNamedTabIsNamedOncePerConversationWithAnIcon(t *testing.T) {
 	// The same conversation names the tab once, also after a restart, which forgets what the
 	// service remembered.
 	h.turnInTab(runtime, 3, 40, "and in a heat wave")
-	h.service.namedTabs.Clear()
+	h.tabSet.namedTabs.Clear()
 	h.turnInTab(runtime, 4, 40, "and in the rain")
 
 	h.turnInTab(runtime, 5, 0, "groceries")
@@ -239,7 +239,7 @@ func TestAFailedIconReadStillNamesTabs(t *testing.T) {
 	if !strings.Contains(h.logs.String(), "msg=telegram.tab.icons_failed") {
 		t.Fatalf("failed icon read not logged:\n%s", h.logs.String())
 	}
-	if _, ok := h.service.IconFor("🌱"); ok {
+	if _, ok := h.tabSet.IconFor("🌱"); ok {
 		t.Fatal("an icon was offered without being read")
 	}
 }
@@ -290,11 +290,11 @@ func TestTabIconsAreFoundByEmoji(t *testing.T) {
 	h.provision("alice", "acct-alice")
 	h.start()
 	for emoji, want := range map[string]string{"⏰": "5000000000000000002", "⏰\uFE0F": "5000000000000000002", "🌱": "5000000000000000001"} {
-		if id, ok := h.service.IconFor(emoji); !ok || id != want {
+		if id, ok := h.tabSet.IconFor(emoji); !ok || id != want {
 			t.Fatalf("IconFor(%q) = %q %v, want %q", emoji, id, ok, want)
 		}
 	}
-	if id, ok := h.service.IconFor("🚀"); ok {
+	if id, ok := h.tabSet.IconFor("🚀"); ok {
 		t.Fatalf("IconFor of an emoji outside the set = %q", id)
 	}
 }
@@ -307,7 +307,7 @@ func TestWithTopicsOffNoTabIsNamed(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.turnInTab(runtime, 1, 0, "groceries")
-	h.service.TabReplied(h.ctx, conversation.TabReply{
+	h.tabSet.TabReplied(h.ctx, conversation.TabReply{
 		Lane: conversation.Lane{PrincipalID: "alice", ThreadID: 40}, ChatID: 101, SessionID: "a-session", Message: "a question", Reply: "an answer",
 	})
 	if len(runtime.calls) != 0 {
@@ -316,7 +316,7 @@ func TestWithTopicsOffNoTabIsNamed(t *testing.T) {
 	if tab, _ := h.registryTab(40); tab.NamedSessionID != "" || tab.Name != "Made by the bot" {
 		t.Fatalf("tab with topics off = %+v", tab)
 	}
-	if _, ok := h.service.IconFor("🌱"); ok {
+	if _, ok := h.tabSet.IconFor("🌱"); ok {
 		t.Fatal("icons were read with topics off")
 	}
 }

@@ -249,14 +249,14 @@ func (s *Service) resumeInTab(ctx context.Context, chatID int64, lane conversati
 		return "", nil, ctx, "", nil
 	}
 	tab := conversation.Lane{PrincipalID: lane.PrincipalID, ThreadID: threadID}
-	s.recordBotTab(ctx, lane.PrincipalID, threadID, name)
+	s.tabs.recordBotTab(ctx, lane.PrincipalID, threadID, name)
 	tabCtx := thread.With(ctx, threadID)
 	resumed, err := s.conversation.Resume(tabCtx, tab, sessionID)
 	if err != nil || !resumed.Found || resumed.Busy || resumed.Elsewhere || resumed.Current {
 		if deleteErr := s.client.DeleteForumTopic(ctx, chatID, threadID); deleteErr != nil {
 			logger.WarnContext(ctx, "telegram.sessions.tab_left", "principal_id", lane.PrincipalID, "error", deleteErr)
 		}
-		s.forgetTab(ctx, chatID, tab)
+		s.tabs.forget(ctx, chatID, tab)
 		if err != nil {
 			return "", nil, ctx, "sessions_action", err
 		}

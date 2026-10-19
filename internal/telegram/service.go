@@ -149,7 +149,6 @@ type Service struct {
 	identities   identityResolver
 	cursors      cursorStore
 	conversation ConversationController
-	namer        TabNamer
 	attachments  AttachmentStore
 	approvals    ApprovalController
 	schedules    ScheduleController
@@ -162,34 +161,14 @@ type Service struct {
 	routes       RouteController
 	transcriber  Transcriber
 	model        *ModelCommand
-	tabs         TabStore
+	tabs         *Tabs
 	sections     []Section
 	interceptors []messageInterceptor
 	logger       *slog.Logger
 	telemetry    Telemetry
 
-	// topics is the bot's tabs switch as getMe last reported it.
-	topics atomic.Bool
-	// topicsKnown is set once getMe has answered, which may be before Start for a feed delivery.
-	topicsKnown atomic.Bool
-	// confirmedTabs holds the tabs the registry holds as confirmed, so a send there writes nothing.
-	confirmedTabs sync.Map
-	// knownTabs holds the tabs the registry has a row for, so a message there adds none.
-	knownTabs sync.Map
-	// feedLocks holds a lock per principal and feed or trip, so deliveries to one of them at once
-	// make one tab.
-	feedLocks sync.Map
-	// iconedFeeds holds the feed and trip tabs whose fixed icon was settled since start.
-	iconedFeeds sync.Map
-	// pinFailures holds the trips whose summary could not be pinned since start, so each is logged
-	// once.
-	pinFailures sync.Map
 	// freshTabs holds the tabs the user just opened, with when, until their first message.
 	freshTabs sync.Map
-	// namedTabs holds the conversation each tab was last considered for naming after, so a reply
-	// there asks the registry once per conversation.
-	namedTabs sync.Map
-	icons     topicIcons
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -206,21 +185,21 @@ type Dependencies struct {
 	Logger     *slog.Logger
 	Telemetry  Telemetry
 
-	Tabs         TabStore
+	// Tabs holds the tab registry, the feed and trip tabs, and tab naming; without it tabs are not
+	// recorded or named and every refused tab is taken for gone.
+	Tabs         *Tabs
 	Conversation ConversationController
-	// Namer names tabs after their conversations; without it tabs keep their first name.
-	Namer       TabNamer
-	Attachments AttachmentStore
-	Approvals   ApprovalController
-	Schedules   ScheduleController
-	Locations   LocationController
-	Memory      MemoryController
-	Backlog     BacklogController
-	Tasks       TaskController
-	Watches     WatchController
-	Trips       TripController
-	Routes      RouteController
-	Transcriber Transcriber
+	Attachments  AttachmentStore
+	Approvals    ApprovalController
+	Schedules    ScheduleController
+	Locations    LocationController
+	Memory       MemoryController
+	Backlog      BacklogController
+	Tasks        TaskController
+	Watches      WatchController
+	Trips        TripController
+	Routes       RouteController
+	Transcriber  Transcriber
 	// Model enables /model; it also needs Conversation.
 	Model *ModelCommand
 
@@ -251,7 +230,6 @@ func NewService(deps Dependencies) (*Service, error) {
 		identities:   deps.Identities,
 		cursors:      deps.Cursors,
 		conversation: deps.Conversation,
-		namer:        deps.Namer,
 		attachments:  deps.Attachments,
 		approvals:    deps.Approvals,
 		schedules:    deps.Schedules,
@@ -264,7 +242,7 @@ func NewService(deps Dependencies) (*Service, error) {
 		routes:       deps.Routes,
 		transcriber:  deps.Transcriber,
 		model:        deps.Model,
-		tabs:         deps.Tabs,
+		tabs:         cmp.Or(deps.Tabs, NewTabs(deps.Client, nil, nil, nil, deps.Logger, deps.Telemetry)),
 		sections:     inSectionOrder(deps.Sections),
 		logger:       deps.Logger,
 		telemetry:    telemetryOrNoop(deps.Telemetry),
@@ -317,7 +295,7 @@ func (s *Service) botCommands() []BotCommand {
 	return menuCommands([]menuCommand{
 		{BotCommand{Command: "backlog", Description: "Show and export your ideas for developing me"}, s.backlog != nil},
 		{BotCommand{Command: "cancel", Description: "Stop the current response"}, conversationEnabled},
-		{BotCommand{Command: "close", Description: "Close this tab"}, conversationEnabled && s.topics.Load()},
+		{BotCommand{Command: "close", Description: "Close this tab"}, conversationEnabled && s.tabs.enabled()},
 		{BotCommand{Command: "jobs", Description: "Show and manage your reminders and scheduled jobs"}, s.schedules != nil},
 		{BotCommand{Command: "memory", Description: "Show and delete what I remember about you"}, s.memory != nil},
 		{BotCommand{Command: "model", Description: ModelCommandDescription}, modelEnabled},
@@ -344,10 +322,9 @@ func (s *Service) Start(ctx context.Context) error {
 	if bot.ID <= 0 || bot.Username == "" || bot.Username != strings.TrimSpace(bot.Username) {
 		return fmt.Errorf("Telegram getMe returned an invalid bot identity")
 	}
-	s.topics.Store(bot.HasTopicsEnabled)
-	s.topicsKnown.Store(true)
+	s.tabs.setTopics(bot.HasTopicsEnabled)
 	if bot.HasTopicsEnabled {
-		s.refreshTopicIcons(ctx)
+		s.tabs.refreshTopicIcons(ctx)
 	}
 
 	commands := s.botCommands()
@@ -567,7 +544,7 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 	if reason != "" {
 		return ignoredResult(reason), "", nil
 	}
-	s.noteTab(ctx, bot, authorization.Principal.ID, message)
+	s.tabs.noteTab(ctx, bot, authorization.Principal.ID, message)
 
 	command, isCommand := ParseCommand(message.Text, bot.Username)
 	if threadID := thread.From(ctx); isCommand && s.openedForCommand(message.Chat.ID, threadID) {
@@ -1209,7 +1186,7 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		if s.conversation == nil {
 			return s.helpReply(), nil, nil
 		}
-		return renderSessions(ctx, laneOf(ctx, principalID), s.conversation, s.topics.Load())
+		return renderSessions(ctx, laneOf(ctx, principalID), s.conversation, s.tabs.enabled())
 	case "jobs":
 		if s.schedules == nil {
 			return s.helpReply(), nil, nil

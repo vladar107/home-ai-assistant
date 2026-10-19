@@ -48,7 +48,7 @@ func frontDoorWatch() watch.Spec {
 }
 
 func (h *conversationHarness) notifier() TripNotifier {
-	return TripNotifier{Client: h.client, Chats: h.store, Feeds: h.service.Feeds()}
+	return TripNotifier{Client: h.client, Chats: h.store, Feeds: h.tabSet}
 }
 
 // wantFeedTab takes the next tab the bot made and checks it is the named feed, recorded as fixed.
@@ -150,7 +150,7 @@ func TestEachKindOfMessageLandsInItsFeedTab(t *testing.T) {
 	threads := make(chan int64, 8)
 	for range 8 {
 		wg.Go(func() {
-			threadID, err := h.service.Feeds().Thread(h.ctx, "bob", 202, thread.FeedReports)
+			threadID, err := h.tabSet.Thread(h.ctx, "bob", 202, thread.FeedReports)
 			if err != nil {
 				t.Error(err)
 			}
@@ -232,7 +232,7 @@ func TestFeedTabsShowTheirIconWhenTelegramOffersIt(t *testing.T) {
 	}
 	h.nextMessage()
 	// The Reports icon is not in the set Telegram offers here, so that tab is made without one.
-	if _, err := h.service.Feeds().Thread(h.ctx, "alice", 101, thread.FeedReports); err != nil {
+	if _, err := h.tabSet.Thread(h.ctx, "alice", 101, thread.FeedReports); err != nil {
 		t.Fatal(err)
 	}
 	h.wantFeedTab("Reports", thread.FeedReports)
@@ -274,7 +274,7 @@ func TestAGoneFeedTabIsMadeAgainOnItsNextMessage(t *testing.T) {
 func TestANewFeedTabThatRefusesSendsIsNotReplacedForADay(t *testing.T) {
 	t.Parallel()
 	h, _ := newFeedHarness(t, newControlledRuntime(), nil, true)
-	broken, err := h.service.Feeds().Thread(h.ctx, "alice", 101, thread.FeedReminders)
+	broken, err := h.tabSet.Thread(h.ctx, "alice", 101, thread.FeedReminders)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +347,7 @@ func TestAReplyToAConversationOpenElsewhereNamesItsTab(t *testing.T) {
 	t.Parallel()
 	runtime := newControlledRuntime()
 	h, _ := newFeedHarness(t, runtime, nil, true)
-	reports, err := h.service.Feeds().Thread(h.ctx, "alice", 101, thread.FeedReports)
+	reports, err := h.tabSet.Thread(h.ctx, "alice", 101, thread.FeedReports)
 	if err != nil {
 		t.Fatal(err)
 	}

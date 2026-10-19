@@ -24,23 +24,15 @@ var feedIcons = map[string]string{
 	thread.FeedWatches:   "👀",
 }
 
-// Feeds resolves the feed tabs of each principal's chat from the tab registry, making a feed's tab
-// the first time it is needed.
-type Feeds struct{ service *Service }
-
-var _ thread.Feeds = Feeds{}
-
-// Feeds is the resolver of this service's feed tabs; with tabs off every feed is the main view.
-func (s *Service) Feeds() Feeds { return Feeds{service: s} }
+var _ thread.Feeds = (*Tabs)(nil)
 
 // Thread returns the feed's tab, making it when the registry has none. Two deliveries of one feed
 // at once make one tab. A tab the registry keeps is returned even while it refuses sends: it is
 // suspect for its first day, its sends fall back to the main view, and only once it is taken for
 // gone is its row dropped and a new one made. A failure is logged and returned, and the next
 // delivery tries again.
-func (f Feeds) Thread(ctx context.Context, principalID string, chatID int64, feed string) (int64, error) {
-	s := f.service
-	if s == nil || s.tabs == nil {
+func (s *Tabs) Thread(ctx context.Context, principalID string, chatID int64, feed string) (int64, error) {
+	if s.store == nil {
 		return 0, nil
 	}
 	on, err := s.tabsOn(ctx)
@@ -61,7 +53,7 @@ func (f Feeds) Thread(ctx context.Context, principalID string, chatID int64, fee
 
 	logger := s.telemetry.ContextLogger(ctx, s.logger)
 	subject := thread.FeedSubject(feed)
-	threadID, found, err := s.tabs.SubjectTab(ctx, principalID, subject)
+	threadID, found, err := s.store.SubjectTab(ctx, principalID, subject)
 	if err != nil {
 		logger.WarnContext(ctx, "telegram.feed.failed", "principal_id", principalID, "feed", feed, "stage", "load", "error", err)
 		return 0, err
@@ -75,7 +67,7 @@ func (f Feeds) Thread(ctx context.Context, principalID string, chatID int64, fee
 		logger.WarnContext(ctx, "telegram.feed.failed", "principal_id", principalID, "feed", feed, "stage", "create", "error", err)
 		return 0, err
 	}
-	if err := s.tabs.AddSubjectTab(ctx, principalID, threadID, name, subject); err != nil {
+	if err := s.store.AddSubjectTab(ctx, principalID, threadID, name, subject); err != nil {
 		logger.WarnContext(ctx, "telegram.feed.failed", "principal_id", principalID, "thread_id", threadID, "feed", feed, "stage", "record", "error", err)
 		// A tab the registry does not hold would be left behind by the next delivery's new one.
 		if removeErr := s.client.DeleteForumTopic(ctx, chatID, threadID); removeErr != nil {
@@ -91,7 +83,7 @@ func (f Feeds) Thread(ctx context.Context, principalID string, chatID int64, fee
 
 // tabsOn reports the bot's tabs switch. Scheduled runs, watches, and trips start before the poller
 // does, so the first of them may ask before Start has read the switch.
-func (s *Service) tabsOn(ctx context.Context) (bool, error) {
+func (s *Tabs) tabsOn(ctx context.Context) (bool, error) {
 	if !s.topicsKnown.Load() {
 		bot, err := s.client.GetMe(ctx)
 		if err != nil {
@@ -103,7 +95,7 @@ func (s *Service) tabsOn(ctx context.Context) (bool, error) {
 	return s.topics.Load(), nil
 }
 
-func (s *Service) giveFeedIcon(ctx context.Context, principalID string, chatID, threadID int64, feed string) {
+func (s *Tabs) giveFeedIcon(ctx context.Context, principalID string, chatID, threadID int64, feed string) {
 	s.giveFixedIcon(ctx, principalID, chatID, threadID, feedIcons[feed], "telegram.feed.failed", "feed", feed)
 }
 
@@ -111,7 +103,7 @@ func (s *Service) giveFeedIcon(ctx context.Context, principalID string, chatID, 
 // the set was read gets it with a later message. A tab that has its icon, or that refused it, is
 // not asked again until a restart; a failure only costs the icon, and is logged as the event with
 // the attributes that name the tab's kind.
-func (s *Service) giveFixedIcon(ctx context.Context, principalID string, chatID, threadID int64, emoji, event string, kind ...any) {
+func (s *Tabs) giveFixedIcon(ctx context.Context, principalID string, chatID, threadID int64, emoji, event string, kind ...any) {
 	key := chatTab{chatID, threadID}
 	if _, done := s.iconedFeeds.Load(key); done {
 		return
@@ -125,7 +117,7 @@ func (s *Service) giveFixedIcon(ctx context.Context, principalID string, chatID,
 		attributes := append([]any{"principal_id", principalID, "thread_id", threadID}, kind...)
 		logger.WarnContext(ctx, event, append(attributes, "stage", "icon", "error", err)...)
 	}
-	tab, found, err := s.tabs.Tab(ctx, principalID, threadID)
+	tab, found, err := s.store.Tab(ctx, principalID, threadID)
 	if err != nil {
 		failed(err)
 		return
@@ -138,7 +130,7 @@ func (s *Service) giveFixedIcon(ctx context.Context, principalID string, chatID,
 		failed(err)
 		return
 	}
-	if err := s.tabs.SetFixedTabIcon(ctx, principalID, threadID, iconID); err != nil {
+	if err := s.store.SetFixedTabIcon(ctx, principalID, threadID, iconID); err != nil {
 		failed(err)
 	}
 }

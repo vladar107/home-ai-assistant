@@ -60,32 +60,14 @@ var _ TabObserver = (*Service)(nil)
 
 // TabAccepted confirms a tab the first time it takes a send.
 func (s *Service) TabAccepted(ctx context.Context, chatID, threadID int64) {
-	if s.tabs == nil {
-		return
-	}
-	if _, confirmed := s.confirmedTabs.Load(chatTab{chatID, threadID}); confirmed {
+	if s.tabs.store == nil || s.tabs.confirmed(chatID, threadID) {
 		return
 	}
 	principalID, found := s.chatPrincipal(ctx, chatID)
 	if !found {
 		return
 	}
-	s.confirmTab(ctx, chatID, principalID, threadID)
-}
-
-func (s *Service) confirmTab(ctx context.Context, chatID int64, principalID string, threadID int64) {
-	if _, confirmed := s.confirmedTabs.Load(chatTab{chatID, threadID}); confirmed {
-		return
-	}
-	confirmed, err := s.tabs.ConfirmTab(ctx, principalID, threadID)
-	if err != nil {
-		s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "telegram.tab.confirm_failed", "principal_id", principalID, "thread_id", threadID, "error", err)
-		return
-	}
-	// A tab the registry does not know yet may be added later, and must be confirmed then.
-	if confirmed {
-		s.confirmedTabs.Store(chatTab{chatID, threadID}, struct{}{})
-	}
+	s.tabs.confirm(ctx, chatID, principalID, threadID)
 }
 
 // TabRefused decides what a tab Telegram did not find is. A tab the user wrote in lately, or one the
@@ -100,7 +82,7 @@ func (s *Service) TabRefused(ctx context.Context, chatID, threadID int64) TabVer
 		return TabGone
 	}
 	lane := conversation.Lane{PrincipalID: principalID, ThreadID: threadID}
-	if s.tabSuspect(ctx, lane) {
+	if s.tabs.suspect(ctx, lane) {
 		logger.InfoContext(ctx, "telegram.send.thread_gone_suspect", "principal_id", principalID, "thread_id", threadID)
 		s.telemetry.RecordTab(ctx, principalID, "tab_gone_suspect")
 		return TabSuspect
@@ -115,44 +97,8 @@ func (s *Service) TabRefused(ctx context.Context, chatID, threadID int64) TabVer
 			s.telemetry.RecordTab(ctx, principalID, "tab_gone")
 		}
 	}
-	s.forgetTab(ctx, chatID, lane)
+	s.tabs.forget(ctx, chatID, lane)
 	return TabGone
-}
-
-// tabSuspect reports whether a refused tab should be kept. A tab whose state cannot be read is kept.
-func (s *Service) tabSuspect(ctx context.Context, lane conversation.Lane) bool {
-	if s.tabs == nil {
-		return false
-	}
-	logger := s.telemetry.ContextLogger(ctx, s.logger)
-	last, wrote, err := s.tabs.LaneLastRequest(ctx, lane)
-	if err != nil {
-		logger.WarnContext(ctx, "telegram.tab.read_failed", "principal_id", lane.PrincipalID, "thread_id", lane.ThreadID, "error", err)
-		return true
-	}
-	if wrote && time.Since(last) < tabSuspectWindow {
-		return true
-	}
-	// A message of the user's confirms the tab it came from, so an unconfirmed tab is one the bot made.
-	tab, known, err := s.tabs.Tab(ctx, lane.PrincipalID, lane.ThreadID)
-	if err != nil {
-		logger.WarnContext(ctx, "telegram.tab.read_failed", "principal_id", lane.PrincipalID, "thread_id", lane.ThreadID, "error", err)
-		return true
-	}
-	return known && !tab.Confirmed && time.Since(tab.CreatedAt) < tabSuspectWindow
-}
-
-func (s *Service) forgetTab(ctx context.Context, chatID int64, lane conversation.Lane) {
-	s.confirmedTabs.Delete(chatTab{chatID, lane.ThreadID})
-	s.knownTabs.Delete(chatTab{chatID, lane.ThreadID})
-	s.namedTabs.Delete(chatTab{chatID, lane.ThreadID})
-	s.iconedFeeds.Delete(chatTab{chatID, lane.ThreadID})
-	if s.tabs == nil {
-		return
-	}
-	if err := s.tabs.DeleteTab(ctx, lane.PrincipalID, lane.ThreadID); err != nil {
-		s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "telegram.tab.forget_failed", "principal_id", lane.PrincipalID, "thread_id", lane.ThreadID, "error", err)
-	}
 }
 
 // chatPrincipal is the principal of a private chat, whose ID is its user's.
@@ -162,45 +108,6 @@ func (s *Service) chatPrincipal(ctx context.Context, chatID int64) (string, bool
 		return "", false
 	}
 	return authorization.Principal.ID, true
-}
-
-// recordBotTab adds a tab the bot made to the registry before anything is sent there.
-func (s *Service) recordBotTab(ctx context.Context, principalID string, threadID int64, name string) {
-	if s.tabs == nil {
-		return
-	}
-	if _, err := s.tabs.AddTab(ctx, principalID, threadID, name, thread.NamedByBot); err != nil {
-		s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "telegram.tab.record_failed", "principal_id", principalID, "thread_id", threadID, "error", err)
-	}
-}
-
-// noteTab learns from a message of the user's in a tab: the tab exists, and the message replies to
-// the one that created the tab, which names it. That root is on every message in a tab, so it only
-// adds a tab the registry does not know and never changes a known one, and a tab once known is not
-// looked up again until it is forgotten.
-func (s *Service) noteTab(ctx context.Context, bot Bot, principalID string, message *Message) {
-	threadID := thread.From(ctx)
-	if s.tabs == nil || threadID <= 0 {
-		return
-	}
-	key := chatTab{message.Chat.ID, threadID}
-	_, known := s.knownTabs.Load(key)
-	if root := message.ReplyToMessage; !known && root != nil && root.ForumTopicCreated != nil {
-		if name := topicName(root.ForumTopicCreated.Name); name != "" {
-			// A tab first seen through the root its messages reply to was open before the bot
-			// recorded it, and a tab that was already there keeps its name.
-			added, err := s.tabs.AddTab(ctx, principalID, threadID, name, thread.NamedByUser)
-			if err != nil {
-				s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "telegram.tab.record_failed", "principal_id", principalID, "thread_id", threadID, "error", err)
-			} else {
-				s.knownTabs.Store(key, struct{}{})
-			}
-			if added {
-				s.logTopicService(ctx, principalID, threadID, "created", "reply", root.From != nil && root.From.ID == bot.ID, true, root.ForumTopicCreated.IsNameImplicit, root.ForumTopicCreated.IconCustomEmojiID != "")
-			}
-		}
-	}
-	s.confirmTab(ctx, message.Chat.ID, principalID, threadID)
 }
 
 // processTopicService records a tab's creation or rename. The bot's own messages are read too,
@@ -223,11 +130,11 @@ func (s *Service) processTopicService(ctx context.Context, bot Bot, message *Mes
 	byBot := message.From.ID == bot.ID
 	result := processingResult{event: "telegram.topic.handled", principalID: principalID, command: "topic"}
 	if created := message.ForumTopicCreated; created != nil {
-		s.logTopicService(ctx, principalID, threadID, "created", "message", byBot, created.Name != "", created.IsNameImplicit, created.IconCustomEmojiID != "")
+		s.tabs.logTopicService(ctx, principalID, threadID, "created", "message", byBot, created.Name != "", created.IsNameImplicit, created.IconCustomEmojiID != "")
 		if !byBot {
 			s.rememberFreshTab(chatTab{message.Chat.ID, threadID})
 		}
-		if s.tabs == nil {
+		if s.tabs.store == nil {
 			return result, "", nil
 		}
 		if name := topicName(created.Name); name != "" {
@@ -235,36 +142,25 @@ func (s *Service) processTopicService(ctx context.Context, bot Bot, message *Mes
 			if byBot || created.IsNameImplicit {
 				namedBy = thread.NamedByBot
 			}
-			if _, err := s.tabs.AddTab(ctx, principalID, threadID, name, namedBy); err != nil {
+			if err := s.tabs.addTab(ctx, principalID, threadID, name, namedBy); err != nil {
 				return processingResult{}, "record_tab", err
 			}
 		}
 	} else if edited := message.ForumTopicEdited; edited != nil {
-		s.logTopicService(ctx, principalID, threadID, "edited", "message", byBot, edited.Name != nil, false, edited.IconCustomEmojiID != nil)
-		if s.tabs == nil || byBot || edited.Name == nil {
+		s.tabs.logTopicService(ctx, principalID, threadID, "edited", "message", byBot, edited.Name != nil, false, edited.IconCustomEmojiID != nil)
+		if s.tabs.store == nil || byBot || edited.Name == nil {
 			return result, "", nil
 		}
 		if name := topicName(*edited.Name); name != "" {
-			if _, err := s.tabs.RenameTab(ctx, principalID, threadID, name); err != nil {
+			if err := s.tabs.renameTab(ctx, principalID, threadID, name); err != nil {
 				return processingResult{}, "record_tab", err
 			}
 		}
 	}
-	if !byBot && s.tabs != nil {
-		s.confirmTab(ctx, message.Chat.ID, principalID, threadID)
+	if !byBot {
+		s.tabs.confirm(ctx, message.Chat.ID, principalID, threadID)
 	}
 	return result, "", nil
-}
-
-// logTopicService records which fields a topic service message carried, never the name.
-func (s *Service) logTopicService(ctx context.Context, principalID string, threadID int64, kind, source string, byBot, name, implicit, icon bool) {
-	sender := "user"
-	if byBot {
-		sender = "bot"
-	}
-	s.telemetry.ContextLogger(ctx, s.logger).InfoContext(ctx, "telegram.topic.service",
-		"principal_id", principalID, "thread_id", threadID, "kind", kind, "source", source, "sender", sender,
-		"name_present", name, "name_implicit", implicit, "icon_present", icon)
 }
 
 // topicName is a tab name as the registry keeps it: one trimmed line within Telegram's limit, or ""
@@ -346,7 +242,7 @@ func (s *Service) processTabPress(ctx context.Context, callback *CallbackQuery, 
 		}
 		// A tab Telegram does not find is already gone.
 		removed := err == nil || isThreadGone(err)
-		s.forgetTab(ctx, chatID, lane)
+		s.tabs.forget(ctx, chatID, lane)
 		s.telemetry.RecordTab(ctx, principalID, "tab_closed")
 		s.telemetry.ContextLogger(ctx, s.logger).InfoContext(ctx, "telegram.tab.closed", "principal_id", principalID, "thread_id", threadID, "removed", removed)
 		text = TabClosedReply
@@ -422,6 +318,6 @@ func (s *Service) processMainViewCommand(ctx context.Context, bot Bot, message *
 		logger.WarnContext(ctx, "telegram.tab.command_tab_left", "principal_id", principalID, "thread_id", threadID, "error", deleteErr)
 		return result, failure, nil
 	}
-	s.forgetTab(ctx, message.Chat.ID, conversation.Lane{PrincipalID: principalID, ThreadID: threadID})
+	s.tabs.forget(ctx, message.Chat.ID, conversation.Lane{PrincipalID: principalID, ThreadID: threadID})
 	return result, failure, nil
 }

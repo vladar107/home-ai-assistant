@@ -50,6 +50,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/searchcheck"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/task"
+	"github.com/vladar107/home-ai-assistant/internal/thread"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 	"github.com/vladar107/home-ai-assistant/internal/transit"
 	"github.com/vladar107/home-ai-assistant/internal/trip"
@@ -95,6 +96,18 @@ type TripNotices interface {
 	trip.Sender
 }
 
+// TabServices are the tabs the services deliver into: where scheduled runs and watch alerts go,
+// where a tab's first reply names it, and where trip notices go.
+type TabServices struct {
+	Feeds   thread.Feeds
+	Replies conversation.TabReplies
+	Trips   TripNotices
+}
+
+// TabsFactory builds the tab services over what only Build can supply: the engine that names tabs
+// and the trip reader.
+type TabsFactory func(namer *turn.Engine, trips trip.Reader) TabServices
+
 // Inputs is everything Build needs. The connector configurations are nil for a connector the
 // operator did not configure; Build fills the fields they leave empty that it knows, such as the
 // household time zone and the credentials directory.
@@ -117,7 +130,8 @@ type Inputs struct {
 	Reminders    schedule.ReminderDeliverer
 	Alerts       watch.Sender
 	TaskMessages task.Messenger
-	TripNotices  TripNotices
+	// Tabs builds the tab services once the turn engine exists.
+	Tabs TabsFactory
 
 	Principals []identity.ConfiguredPrincipal
 	DataDir    string
@@ -247,7 +261,7 @@ func Build(ctx context.Context, in Inputs) (*Assembly, error) {
 		return nil, errors.New("wiring: telemetry is required")
 	case in.Runtime == nil:
 		return nil, errors.New("wiring: model runtime is required")
-	case in.Chat == nil || in.Reminders == nil || in.Alerts == nil || in.TaskMessages == nil || in.TripNotices == nil:
+	case in.Chat == nil || in.Reminders == nil || in.Alerts == nil || in.TaskMessages == nil || in.Tabs == nil:
 		return nil, errors.New("wiring: the chat and its senders are required")
 	case len(in.Principals) == 0:
 		return nil, errors.New("wiring: principals are required")
@@ -504,21 +518,6 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 			return err
 		}
 	}
-	// Scheduled runs reach only the owner's own chat, resolved from the allowlist at delivery.
-	scheduler, err := schedule.NewService(schedule.Config{
-		Zone: in.Zone, TickInterval: in.Core.ScheduleTick, Now: in.Core.Now,
-		Cards: cards, Photos: in.Chat, Reminders: in.Reminders, Sessions: in.Sessions,
-		Travel: trip.NewTravel(in.Store), Telemetry: telemetry, Exposure: exposures, SafetyChecks: safetyChecks,
-	}, in.Store, in.Store, in.Chat, approvals, in.Logger)
-	if err != nil {
-		return fmt.Errorf("initialize scheduler: %w", err)
-	}
-	a.Scheduler = scheduler
-	tripService, err := trip.NewService(trip.Config{Now: in.Core.Now}, in.Store, trip.NewScheduleReminders(scheduler), in.Logger)
-	if err != nil {
-		return fmt.Errorf("initialize trips: %w", err)
-	}
-	a.Trips = tripService
 	var trains transit.Trips
 	if in.NS != nil {
 		a.NS, err = ns.NewService(*in.NS, switches, in.Logger)
@@ -572,6 +571,41 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		a.Locations = locationService
 		turnLocations = locationService
 	}
+	tripReader := trip.NewReader(in.Store, in.Core.Now)
+	engine, err := turn.New(turn.Config{
+		TurnTimeout:  in.Core.TurnTimeout,
+		Location:     in.Core.TurnZone,
+		Now:          in.Core.Now,
+		DisplayNames: a.displayNames,
+		Memory:       memoryService,
+		Jobs:         schedule.NewPromptSection(in.Store, in.Zone, in.Logger),
+		WebSearch:    webSearch,
+		SearchChecks: searchChecks,
+		Exposure:     exposures,
+		Locations:    turnLocations,
+		Trips:        tripReader,
+	}, in.Runtime, connections, broker, in.Logger, telemetry)
+	if err != nil {
+		return fmt.Errorf("initialize turn engine: %w", err)
+	}
+	a.Turns = engine
+	tabs := in.Tabs(engine, tripReader)
+	// Scheduled runs reach only the owner's own chat, resolved from the allowlist at delivery.
+	scheduler, err := schedule.NewService(schedule.Config{
+		Zone: in.Zone, TickInterval: in.Core.ScheduleTick, Now: in.Core.Now,
+		Cards: cards, Photos: in.Chat, Reminders: in.Reminders, Sessions: in.Sessions,
+		Travel: trip.NewTravel(in.Store), Telemetry: telemetry, Exposure: exposures, SafetyChecks: safetyChecks,
+		Feeds: tabs.Feeds,
+	}, in.Store, in.Store, in.Chat, approvals, in.Logger)
+	if err != nil {
+		return fmt.Errorf("initialize scheduler: %w", err)
+	}
+	a.Scheduler = scheduler
+	tripService, err := trip.NewService(trip.Config{Now: in.Core.Now}, in.Store, trip.NewScheduleReminders(scheduler), in.Logger)
+	if err != nil {
+		return fmt.Errorf("initialize trips: %w", err)
+	}
+	a.Trips = tripService
 	var conversationHistory conversation.History
 	if in.SessionFiles != nil {
 		reader, err := history.NewService(in.Store, in.SessionFiles, a.location, telemetry)
@@ -606,7 +640,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	}
 	if in.Core.Watches {
 		// Alerts reach only the owner's own chat, resolved from the allowlist at delivery.
-		watches, err := watch.NewService(watch.Config{Zone: in.Zone, Now: in.Core.Now, Travel: trip.NewTravel(in.Store), Telemetry: telemetry}, in.Store, in.Store, in.Alerts, approvals, in.Logger)
+		watches, err := watch.NewService(watch.Config{Zone: in.Zone, Now: in.Core.Now, Travel: trip.NewTravel(in.Store), Telemetry: telemetry, Feeds: tabs.Feeds}, in.Store, in.Store, in.Alerts, approvals, in.Logger)
 		if err != nil {
 			return fmt.Errorf("initialize watches: %w", err)
 		}
@@ -632,23 +666,6 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	if runtime, ok := in.Runtime.(conversation.Transcripts); ok {
 		transcripts = runtime
 	}
-	engine, err := turn.New(turn.Config{
-		TurnTimeout:  in.Core.TurnTimeout,
-		Location:     in.Core.TurnZone,
-		Now:          in.Core.Now,
-		DisplayNames: a.displayNames,
-		Memory:       memoryService,
-		Jobs:         schedule.NewPromptSection(in.Store, in.Zone, in.Logger),
-		WebSearch:    webSearch,
-		SearchChecks: searchChecks,
-		Exposure:     exposures,
-		Locations:    turnLocations,
-		Trips:        trip.NewReader(in.Store, in.Core.Now),
-	}, in.Runtime, connections, broker, in.Logger, telemetry)
-	if err != nil {
-		return fmt.Errorf("initialize turn engine: %w", err)
-	}
-	a.Turns = engine
 	conversationService, err := conversation.NewService(
 		conversation.Config{
 			Engine:         engine,
@@ -672,6 +689,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 			Exposure:       exposures,
 			History:        conversationHistory,
 			Reactions:      reactions,
+			TabReplies:     tabs.Replies,
 			TypingInterval: in.Core.TypingInterval,
 			DraftDelay:     in.Core.DraftDelay,
 			DraftInterval:  in.Core.DraftInterval,
@@ -715,15 +733,15 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	}
 	a.tripState = &tripScanState{schedules: scheduler}
 	tripTools.SetScanState(a.tripState)
-	tripService.SetTabs(in.TripNotices)
-	if err := scheduler.Register(trip.ScanJobType(tripScanChecker{engine}, in.Store, a.tripState, tripService, in.TripNotices, in.TripNotices, scheduler.Now, in.Logger)); err != nil {
+	tripService.SetTabs(tabs.Trips)
+	if err := scheduler.Register(trip.ScanJobType(tripScanChecker{engine}, in.Store, a.tripState, tripService, tabs.Trips, tabs.Trips, scheduler.Now, in.Logger)); err != nil {
 		return err
 	}
 	paused := []trip.Paused{scheduler}
 	if a.Watches != nil {
 		paused = append(paused, a.Watches)
 	}
-	tripLoop, err := trip.NewLoop(trip.LoopConfig{Now: in.Core.Now}, tripService, paused, in.TripNotices, in.Logger)
+	tripLoop, err := trip.NewLoop(trip.LoopConfig{Now: in.Core.Now}, tripService, paused, tabs.Trips, in.Logger)
 	if err != nil {
 		return fmt.Errorf("initialize trip loop: %w", err)
 	}

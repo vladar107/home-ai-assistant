@@ -67,6 +67,9 @@ type Config struct {
 	Exposure ExposureChecker
 	// SafetyChecks labels scheduled reply metrics; without it they are labelled "unavailable".
 	SafetyChecks SafetyChecks
+	// Feeds are the tabs that runs are delivered to while the bot has tabs on; without them every
+	// run goes to the main view.
+	Feeds thread.Feeds
 }
 
 // SessionPruner removes the model session files that no conversation or open task refers to and
@@ -150,12 +153,6 @@ type Travel interface {
 // time; without it nobody is ever traveling.
 func (s *Service) SetTravel(travel Travel) {
 	s.travel = travel
-}
-
-// SetFeeds sets the tabs that runs are delivered to while the bot has tabs on, at wiring time
-// before the scheduler starts; without it every run goes to the main view.
-func (s *Service) SetFeeds(feeds thread.Feeds) {
-	s.feeds = feeds
 }
 
 // feed is the tab of the run's kind: reminders and Trips scans with the reminders, every other
@@ -285,6 +282,7 @@ func NewService(cfg Config, repository Repository, chats Chats, deliverer conver
 		types:      make(map[string]JobType),
 		proposer:   proposer,
 		travel:     cfg.Travel,
+		feeds:      cfg.Feeds,
 		telemetry:  cfg.Telemetry,
 		exposure:   cfg.Exposure,
 		safety:     cfg.SafetyChecks,

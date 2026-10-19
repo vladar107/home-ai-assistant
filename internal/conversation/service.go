@@ -48,7 +48,6 @@ type Service struct {
 	deliverer  Deliverer
 	logger     *slog.Logger
 	telemetry  Telemetry
-	tabReplies TabReplies
 	// startedAt is truncated like the stored created_at, so a request queued in the same
 	// millisecond as the start does not read as recovered.
 	startedAt time.Time
@@ -145,11 +144,6 @@ func NewService(
 		inflight:   make(map[Lane]context.CancelFunc),
 		drafts:     make(map[Lane]*runningDraft),
 	}, nil
-}
-
-// SetTabReplies hands each plain reply delivered in a tab to tabs; call it before Start.
-func (s *Service) SetTabReplies(tabs TabReplies) {
-	s.tabReplies = tabs
 }
 
 func (s *Service) Start(ctx context.Context) error {
@@ -1069,14 +1063,14 @@ func (s *Service) deliver(ctx context.Context, request Request) error {
 // Shutdown cancels and waits for it. A reply to the bot's own message, such as a continuation's,
 // tells nothing of the conversation's topic and is not passed on.
 func (s *Service) tabReplied(ctx context.Context, request Request, message, plainReply string) {
-	if s.tabReplies == nil || request.ThreadID <= 0 || message == "" || plainReply == "" {
+	if s.config.TabReplies == nil || request.ThreadID <= 0 || message == "" || plainReply == "" {
 		return
 	}
 	reply := TabReply{Lane: request.Lane(), ChatID: request.ChatID, SessionID: request.SessionID, Message: message, Reply: plainReply}
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		s.tabReplies.TabReplied(ctx, reply)
+		s.config.TabReplies.TabReplied(ctx, reply)
 	}()
 }
 

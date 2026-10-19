@@ -580,6 +580,9 @@ type Config struct {
 	// Reactions turns a chat turn's emoji-only reply into a reaction on the user's message; nil
 	// sends such replies as text.
 	Reactions Reactions
+	// TabReplies hears of each plain reply delivered in a tab, so the tab can be named after its
+	// conversation; nil leaves tabs with their first name.
+	TabReplies TabReplies
 }
 
 // Reactions answers a chat turn with a reaction instead of its emoji-only reply. ReplyAsReaction

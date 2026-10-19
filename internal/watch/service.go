@@ -101,6 +101,9 @@ type Config struct {
 	Travel Travel
 	// Telemetry records watch metrics.
 	Telemetry Telemetry
+	// Feeds are the tabs that alerts are delivered to while the bot has tabs on; without them every
+	// alert goes to the main view.
+	Feeds thread.Feeds
 }
 
 type Service struct {
@@ -184,6 +187,7 @@ func NewService(cfg Config, repository Repository, chats Chats, sender Sender, p
 		sender:     sender,
 		proposer:   proposer,
 		travel:     cfg.Travel,
+		feeds:      cfg.Feeds,
 		telemetry:  cfg.Telemetry,
 		logger:     logger,
 		zone:       cfg.Zone,
@@ -242,12 +246,6 @@ func (s *Service) travelingAt(ctx context.Context, cache *Cache, principalID, wa
 		return false
 	}
 	return traveling
-}
-
-// SetFeeds sets the tabs that alerts are delivered to while the bot has tabs on, at wiring time
-// before the service starts; without it every alert goes to the main view.
-func (s *Service) SetFeeds(feeds thread.Feeds) {
-	s.feeds = feeds
 }
 
 // feed is the tab of the alert's kind: Home Assistant watches have their own, and the others share one.

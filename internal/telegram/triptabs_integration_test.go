@@ -36,12 +36,10 @@ func newTripTabHarness(t *testing.T, topics bool) *tripTabHarness {
 	h.tabs.icons = append(slices.Clone(testTopicIcons), TopicIcon{Emoji: "✈️", CustomEmojiID: tripIconID})
 	h.provision("alice", "account-alice")
 	trips := h.trips
-	notifier := &TripNotifier{Client: h.client, Chats: h.store, Feeds: h.service.Feeds()}
-	trips.SetTabs(notifier)
 	h.start()
 	receive(t, h.ctx, h.registrations)
 	receive(t, h.ctx, h.registrations)
-	return &tripTabHarness{conversationHarness: h, runtime: runtime, clock: clock, trips: trips, notifier: notifier}
+	return &tripTabHarness{conversationHarness: h, runtime: runtime, clock: clock, trips: trips, notifier: h.tripNotifier}
 }
 
 // exampleDraft starts three days after mondayMorning, with a flight whose check-in opens two days

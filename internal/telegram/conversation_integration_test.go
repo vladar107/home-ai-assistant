@@ -261,6 +261,7 @@ type conversationHarness struct {
 	routes         *routes.Service
 	trips          *trip.Service
 	assembly       *wiring.Assembly
+	tabSet         *Tabs
 	tripNotifier   *TripNotifier
 	auth           *codexauth.Simulator
 	profilesDir    string
@@ -457,12 +458,11 @@ func (h *conversationHarness) wiringInputs(t *testing.T, runtime agentruntime.Ag
 	if options.location != nil {
 		zone = options.location.String()
 	}
-	h.tripNotifier = &TripNotifier{Client: h.client, Chats: h.store}
 	in := wiring.Inputs{
 		Store: h.store, Logger: logger, Telemetry: &integrationTelemetry{Telemetry: observability.Noop(), h: h},
 		Runtime: runtime, SessionFiles: sessionFiles,
 		Chat: h.client, Reminders: ReminderSender{Client: h.client}, Alerts: WatchAlertSender{Client: h.client},
-		TaskMessages: TaskMessenger{Client: h.client}, TripNotices: h.tripNotifier,
+		TaskMessages: TaskMessenger{Client: h.client}, Tabs: func(namer *turn.Engine, trips trip.Reader) wiring.TabServices { return h.newTabs(logger, namer, trips) },
 		Principals: unnamed, DataDir: filepath.Dir(h.attachmentsDir), Zone: zone,
 		Core: wiring.CoreConfig{
 			TurnTimeout: cmp.Or(options.turnTimeout, 10*time.Second), TurnZone: options.location, Now: now,
@@ -541,13 +541,21 @@ func (h *conversationHarness) wiringInputs(t *testing.T, runtime agentruntime.Ag
 	return in
 }
 
+// newTabs builds the tab services as the application does, once the engine and the trip reader
+// exist.
+func (h *conversationHarness) newTabs(logger *slog.Logger, namer *turn.Engine, trips trip.Reader) wiring.TabServices {
+	h.tabSet = NewTabs(h.client, h.store, trips, namer, logger, nil)
+	h.tripNotifier = &TripNotifier{Client: h.client, Chats: h.store, Feeds: h.tabSet}
+	return wiring.TabServices{Feeds: h.tabSet, Replies: h.tabSet, Trips: h.tripNotifier}
+}
+
 // telegramService builds the Telegram service on the assembly as the application does.
 func (h *conversationHarness) telegramService(identities *identity.Service, logger *slog.Logger) *Service {
 	h.t.Helper()
 	asm := h.assembly
 	deps := Dependencies{
-		Client: h.client, Identities: identities, Cursors: h.store, Logger: logger, Tabs: h.store,
-		Conversation: asm.Conversation, Namer: asm.Turns, Attachments: asm.Attachments, Approvals: asm.Approvals, Schedules: asm.Scheduler,
+		Client: h.client, Identities: identities, Cursors: h.store, Logger: logger, Tabs: h.tabSet,
+		Conversation: asm.Conversation, Attachments: asm.Attachments, Approvals: asm.Approvals, Schedules: asm.Scheduler,
 		Trips: asm.Trips, Routes: asm.Routes, Memory: asm.Memory, Backlog: asm.Backlog, Transcriber: asm.ChatGPT,
 	}
 	if asm.Locations != nil {
@@ -598,12 +606,6 @@ func (h *conversationHarness) telegramService(identities *identity.Service, logg
 		h.t.Fatal(err)
 	}
 	h.client.ObserveTabs(service)
-	asm.Scheduler.SetFeeds(service.Feeds())
-	if asm.Watches != nil {
-		asm.Watches.SetFeeds(service.Feeds())
-	}
-	h.tripNotifier.Feeds = service.Feeds()
-	asm.Conversation.SetTabReplies(service)
 	if err := asm.Tools.Register(service.Help()); err != nil {
 		h.t.Fatal(err)
 	}

@@ -63,7 +63,7 @@ type TripChats interface {
 }
 
 // TripFeeds resolves the tabs trip messages go to and keeps each trip's tab in step with the trip;
-// the service's Feeds implement it.
+// the service's Tabs implement it.
 type TripFeeds interface {
 	thread.Feeds
 	// Summarize gives a planned trip its tab when it has none, and keeps its pinned summary and
@@ -354,7 +354,7 @@ func (s *Service) processTripPress(ctx context.Context, callback *CallbackQuery,
 		}
 		text += "\n\n" + staleTripReply(known, found)
 	}
-	if err := s.editPlain(ctx, callback.Message.Chat.ID, callback.Message.MessageID, text); err != nil {
+	if err := editPlain(ctx, s.client, callback.Message.Chat.ID, callback.Message.MessageID, text); err != nil {
 		if isPermanentAPIError(err) {
 			result.event, result.reason, result.err = "telegram.callback.undeliverable", "send_rejected", err
 			return result, "", nil
@@ -378,11 +378,11 @@ func staleTripReply(known trip.Trip, found bool) string {
 	return TripGoneReply
 }
 
-func (s *Service) editPlain(ctx context.Context, chatID, messageID int64, text string) error {
-	if editor, ok := s.client.(plainEditor); ok {
+func editPlain(ctx context.Context, client botAPI, chatID, messageID int64, text string) error {
+	if editor, ok := client.(plainEditor); ok {
 		return editor.EditPlain(ctx, chatID, messageID, text)
 	}
-	return s.client.EditKeyboard(ctx, chatID, messageID, text, nil)
+	return client.EditKeyboard(ctx, chatID, messageID, text, nil)
 }
 
 // NewTripsSection is the page that turns the principal's Trips scan of Google mail and calendar on
