@@ -1,6 +1,6 @@
 # 0111 — A turn engine apart from the conversation coordinator
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
@@ -10,7 +10,7 @@ sessions, per-lane model choice) and the engine that runs one model turn
 (connection gate, tools, web search switch, memory, jobs, place lines, the
 search check, error mapping). Everything unattended reaches the engine by
 importing the coordinator: the scheduler, the watches, the background tasks,
-the trip scan, and the reactions take `conversation.ScheduledReply`,
+the trip scan take `conversation.ScheduledReply`,
 `conversation.TaskRun` and friends, so those packages depend on the whole chat
 service for a few types and one call. The services are also wired by setters
 (`SetRunner`, `SetRewriter`, `SetTravel`, `SetFeeds`, `SetTabs`,
@@ -70,7 +70,8 @@ behave as before.
    types. `runTurn` is rewritten over `Setup`, `Compose`, `Run`, and the slots.
 3. M3, point the consumers at the engine: the scheduler's `TurnRunner`, the
    watches' `CheckRunner` and `Rewriter`, the tasks' `Runner`, the trip scan
-   adapter, and the reactions take `turn.*` types; the aliases go.
+   adapter take `turn.*` types; the aliases go. The reactions never used the
+   moved types and are untouched.
    `conversation.Config` gains `Engine`, `NewService` loses the runtime, tool
    provider, and gate, and the composition root and the Telegram harness build
    the engine first.
@@ -88,7 +89,7 @@ behave as before.
 ## Files affected
 
 - `internal/turn` (new), `internal/conversation`, `internal/schedule`,
-  `internal/watch`, `internal/task`, `internal/trip`, `internal/reaction`,
+  `internal/watch`, `internal/task`, `internal/trip`,
   `internal/wiring`, `internal/telegram` (harness and tabs), and
   `docs/architecture.md`.
 
@@ -114,7 +115,7 @@ behave as before.
 
 - The chat flow cannot call one `Setup`: the activity draft starts between the
   connection gate and the tools, and the tool hint starts between the tools and
-  the web switch, so the engine exposes `Ready`, `Tools(scope)` and
+  the web switch, so the engine exposes `Ready`, `Tools` and
   `Switches` (web switch, then memory) in that order instead, and `Compose`
   takes the subject line as text because the subject kinds stay with the
   coordinator.
@@ -145,3 +146,14 @@ behave as before.
   resolves a principal, which `Tabs` cannot do before the coordinator exists.
   `Tabs` holds the registry, the feeds, the trip tabs, the naming, and the
   sync maps, and works before the poller starts.
+- The engine API is narrower than the design: no read-only tool scope, no web
+  switch parameter, and no `Jobs` or `Interactive` run flags, since only the
+  chat flow calls those phases and it always wants them. `turn.Memory` holds
+  only what the engine calls; `LearnsFromFeedback` stays with the coordinator.
+- The coordinator no longer takes the turn timeout or the household zone as its
+  own config: it asks the engine, so a caller cannot drop the time line from
+  chat turns by forgetting one of two copies.
+- M5 also removed the setters M1 left behind: the scheduler's `SetTelemetry`,
+  `SetExposure`, and `SetSafetyChecks`, and the task service's `SetProposer`,
+  `SetExposure`, and `SetTelemetry`. The tests that used them pass the config
+  fields instead; the metrics test gives the harness its telemetry as an option.

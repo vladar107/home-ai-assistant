@@ -107,6 +107,7 @@ flowchart TB
     tg["<b>telegram</b><br/>poller, commands, /settings,<br/>media, markup"]
     identity["<b>identity</b><br/>Telegram ID → principal"]
     conv["<b>conversation</b><br/>per-principal turn coordinator"]
+    turn["<b>turn</b><br/>engine: one model turn,<br/>chat or unattended"]
     runtime["<b>runtime / runtime/pi</b><br/>AgentRuntime, Pi process,<br/>bridge extension"]
     connection["<b>connection</b><br/>per-user model subscription"]
     broker["<b>tools</b><br/>broker: grants, budgets,<br/>untrusted-result marking"]
@@ -144,7 +145,7 @@ flowchart TB
 
     store[("<b>store/sqlite</b><br/>migrations")]
     obs["<b>observability</b><br/>OpenTelemetry"]
-    module["<b>module</b><br/>registry, lifecycle, readiness"]
+    module["<b>module</b><br/>registry, readiness"]
 
     tg --> identity
     tg --> conv
@@ -153,8 +154,10 @@ flowchart TB
     tg --> approval
     tg --> loc
     tg --> mem
-    conv --> loc
+    conv --> turn
     conv --> mem
+    turn --> loc
+    turn --> mem
     broker --> mem
     approval --> mem
     tg --> backlog
@@ -167,13 +170,13 @@ flowchart TB
     trip --> schedule
     schedule -.->|travel gate| trip
     watch -.->|travel gate| trip
-    conv --> trip
+    turn --> trip
     loc --> placesc
-    conv --> runtime
-    conv --> broker
+    turn --> runtime
+    turn --> broker
     conv --> card
     conv --> judgment
-    conv --> searchcheck
+    turn --> searchcheck
     searchcheck --> approval
     searchcheck --> judgment
     runtime --> connection
@@ -183,10 +186,11 @@ flowchart TB
     broker --> judgment
     approval --> connectors
     approval --> schedule
-    schedule --> conv
+    schedule --> turn
     tg --> task
+    tg --> turn
     broker --> task
-    task --> conv
+    task --> turn
     task --> store
     tg --> watch
     broker --> watch
@@ -195,7 +199,7 @@ flowchart TB
     watch --> nsc
     watch --> busc
     watch --> hac
-    watch --> conv
+    watch --> turn
     tg --> routes
     broker --> routes
     approval --> routes
@@ -205,6 +209,13 @@ flowchart TB
     connectors --> integration
     identity & conv & approval & schedule & connection & integration & loc & mem & backlog & trip --> store
 ```
+
+`turn` is the model turn engine: the connection gate, the tools, the web search
+switch, memory, the jobs and place lines, the search check, and the error replies.
+`conversation` runs chat turns through it in phases, while the scheduler, the
+watches, and the background tasks run their unattended turns on it without
+importing the coordinator for a run; they still use `conversation`'s delivery
+helpers (reply splitting and cards).
 
 `internal/wiring` builds and connects everything except the Telegram service, and
 does not import `telegram`. Each connector is one typed bundle: its module (lifecycle
@@ -216,7 +227,10 @@ model's tool list follows. `internal/app` translates the configuration into the
 wiring's inputs, builds the Telegram service on the result, and runs the
 lifecycle: the modules in registration order, then the core services the
 assembly lists, then Telegram, each a step that starts in turn, while everything
-started stops together; the Telegram tests build through the same wiring.
+started stops together; the Telegram tests build through the same wiring. The tab
+services (`telegram.Tabs`: the feed and trip tabs, tab naming, and the tab registry)
+come in through a factory input, since `wiring` cannot import `telegram` and the
+tabs need the turn engine that `wiring` builds.
 
 The Telegram service takes a `Dependencies` struct. Each `/settings` page is a
 `Section`, which may also add `/privacy` lines and name an `app_help` topic. The
@@ -518,7 +532,7 @@ subject `trip:<id>` under a fixed name, which is the only record of it.
 A request that needs many lookups is handed by the model to `task_start`, which
 is outside the turn's 8-call budget. `task` stores the task with its own Pi session
 and posts a status message with a Cancel button. One worker per principal runs it
-through `conversation` as a second Pi process beside the chat, without the
+through `turn` as a second Pi process beside the chat, without the
 principal's turn slot, with read tools only and its own time, tool, and model-call
 budgets. A task that reaches a limit is asked once, briefly, to report what it has.
 The report goes out as a reply to the request, and the next chat turn learns of it.

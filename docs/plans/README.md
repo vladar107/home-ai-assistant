@@ -120,7 +120,7 @@ plan that links back to the earlier record.
 | 0108 | [Model and effort per tab, and subscription usage in /status](0108-model-and-effort-per-tab.md) | done |
 | 0109 | [One ordered lifecycle and a module registry without unused parts](0109-module-lifecycle.md) | done |
 | 0110 | [Faster integration tests: shared migrated database, no race exit sleep, parallel Telegram tests](0110-faster-tests.md) | done |
-| 0111 | [A turn engine apart from the conversation coordinator](0111-turn-engine.md) | in-progress |
+| 0111 | [A turn engine apart from the conversation coordinator](0111-turn-engine.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.
