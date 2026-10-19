@@ -65,6 +65,9 @@ func (h *conversationHarness) say(runtime *controlledRuntime, updateID, threadID
 	if answer := h.nextMessage(); answer.threadID != threadID {
 		h.t.Fatalf("answer = %+v, want tab %d", answer, threadID)
 	}
+	// The answer is sent before the turn is marked delivered, and a message in between is refused
+	// as busy.
+	h.waitState(updateID, "delivered")
 	return agentruntime.ModelEffort{Model: call.request.Model, Effort: call.request.Effort}
 }
 
