@@ -147,8 +147,19 @@ func (h *conversationHarness) cardFiles(principalID string) []string {
 	return names
 }
 
+// wantNoCards checks the principal's outbox is empty, giving a delivery that marks its message
+// delivered before it removes the card a moment to finish.
 func (h *conversationHarness) wantNoCards(principalID string) {
 	h.t.Helper()
+	deadline := time.After(3 * time.Second)
+	for len(h.cardFiles(principalID)) != 0 {
+		select {
+		case <-time.After(5 * time.Millisecond):
+			continue
+		case <-deadline:
+		}
+		break
+	}
 	if files := h.cardFiles(principalID); len(files) != 0 {
 		h.t.Fatalf("outbox of %s still holds %v", principalID, files)
 	}
