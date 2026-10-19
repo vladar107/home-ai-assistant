@@ -57,6 +57,16 @@ type Config struct {
 	Reminders ReminderDeliverer
 	// Sessions removes old model sessions of finished runs and tasks; nil keeps them.
 	Sessions SessionPruner
+	// Travel is the trip lookup that jobs flagged to pause while traveling consult; without it
+	// nobody is ever traveling.
+	Travel Travel
+	// Telemetry records run metrics.
+	Telemetry Telemetry
+	// Exposure makes reminders wait for confirmation once the conversation has read outside
+	// content; without it reminders are always set at once.
+	Exposure ExposureChecker
+	// SafetyChecks labels scheduled reply metrics; without it they are labelled "unavailable".
+	SafetyChecks SafetyChecks
 }
 
 // SessionPruner removes the model session files that no conversation or open task refers to and
@@ -274,6 +284,10 @@ func NewService(cfg Config, repository Repository, chats Chats, deliverer conver
 		startedAt:  now(),
 		types:      make(map[string]JobType),
 		proposer:   proposer,
+		travel:     cfg.Travel,
+		telemetry:  cfg.Telemetry,
+		exposure:   cfg.Exposure,
+		safety:     cfg.SafetyChecks,
 		wake:       make(chan struct{}, 1),
 		inflight:   make(map[string]bool),
 		executing:  make(map[string]bool),

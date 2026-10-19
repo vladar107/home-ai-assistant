@@ -96,6 +96,11 @@ type Config struct {
 	// CheckTimeout bounds one evaluator call.
 	CheckTimeout time.Duration
 	Now          func() time.Time
+	// Travel is the trip lookup that watches flagged to pause while traveling consult; without it
+	// nobody is ever traveling.
+	Travel Travel
+	// Telemetry records watch metrics.
+	Telemetry Telemetry
 }
 
 type Service struct {
@@ -178,6 +183,8 @@ func NewService(cfg Config, repository Repository, chats Chats, sender Sender, p
 		chats:      chats,
 		sender:     sender,
 		proposer:   proposer,
+		travel:     cfg.Travel,
+		telemetry:  cfg.Telemetry,
 		logger:     logger,
 		zone:       cfg.Zone,
 		tick:       tick,

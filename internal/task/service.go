@@ -90,6 +90,14 @@ type Config struct {
 	// neither is consulted over the network.
 	Models modelcatalog.Reader
 	Usage  CachedUsage
+	// Proposer records task proposals; without it a task started after outside content was read
+	// is refused.
+	Proposer Proposer
+	// Exposure makes task_start wait for confirmation once the conversation has read outside
+	// content; without it tasks always start at once.
+	Exposure ExposureChecker
+	// Telemetry measures task runs; nil measures nothing.
+	Telemetry Telemetry
 }
 
 // CachedUsage is the last subscription usage read of a principal, never fetched on demand.
@@ -151,7 +159,7 @@ func NewService(cfg Config, repository Repository, chats Chats, messenger Messen
 	if cfg.ProgressInterval <= 0 {
 		cfg.ProgressInterval = DefaultProgressInterval
 	}
-	return &Service{
+	service := &Service{
 		config:     cfg,
 		repository: repository,
 		chats:      chats,
@@ -159,9 +167,13 @@ func NewService(cfg Config, repository Repository, chats Chats, messenger Messen
 		deliverer:  deliverer,
 		logger:     logger,
 		telemetry:  noTelemetry{},
+		proposer:   cfg.Proposer,
+		exposure:   cfg.Exposure,
 		workers:    make(map[string]chan struct{}),
 		running:    make(map[string]context.CancelCauseFunc),
-	}, nil
+	}
+	service.SetTelemetry(cfg.Telemetry)
+	return service, nil
 }
 
 // SetRunner sets what runs a task's model turns, at wiring time before Start; the conversation

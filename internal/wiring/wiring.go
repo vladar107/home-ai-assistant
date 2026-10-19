@@ -506,19 +506,16 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	scheduler, err := schedule.NewService(schedule.Config{
 		Zone: in.Zone, TickInterval: in.Core.ScheduleTick, Now: in.Core.Now,
 		Cards: cards, Photos: in.Chat, Reminders: in.Reminders, Sessions: in.Sessions,
+		Travel: trip.NewTravel(in.Store), Telemetry: telemetry, Exposure: exposures, SafetyChecks: safetyChecks,
 	}, in.Store, in.Store, in.Chat, approvals, in.Logger)
 	if err != nil {
 		return fmt.Errorf("initialize scheduler: %w", err)
 	}
-	scheduler.SetTelemetry(telemetry)
-	scheduler.SetSafetyChecks(safetyChecks)
-	scheduler.SetExposure(exposures)
 	a.Scheduler = scheduler
 	tripService, err := trip.NewService(trip.Config{Now: in.Core.Now}, in.Store, trip.NewScheduleReminders(scheduler), in.Logger)
 	if err != nil {
 		return fmt.Errorf("initialize trips: %w", err)
 	}
-	scheduler.SetTravel(tripService)
 	a.Trips = tripService
 	var trains transit.Trips
 	if in.NS != nil {
@@ -591,13 +588,11 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		taskConfig.Cards, taskConfig.Photos = cards, in.Chat
 		taskConfig.TaskModel, taskConfig.ChatModel = a.TaskModel, a.ChatModel
 		taskConfig.Models, taskConfig.Usage = a.Models, a.ChatGPT
+		taskConfig.Proposer, taskConfig.Exposure, taskConfig.Telemetry = approvals, exposures, telemetry
 		tasks, err := task.NewService(taskConfig, in.Store, in.Store, in.TaskMessages, in.Chat, in.Logger)
 		if err != nil {
 			return fmt.Errorf("initialize background tasks: %w", err)
 		}
-		tasks.SetTelemetry(telemetry)
-		tasks.SetExposure(exposures)
-		tasks.SetProposer(approvals)
 		if err := broker.Register(tasks); err != nil {
 			return err
 		}
@@ -609,12 +604,10 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	}
 	if in.Core.Watches {
 		// Alerts reach only the owner's own chat, resolved from the allowlist at delivery.
-		watches, err := watch.NewService(watch.Config{Zone: in.Zone, Now: in.Core.Now}, in.Store, in.Store, in.Alerts, approvals, in.Logger)
+		watches, err := watch.NewService(watch.Config{Zone: in.Zone, Now: in.Core.Now, Travel: trip.NewTravel(in.Store), Telemetry: telemetry}, in.Store, in.Store, in.Alerts, approvals, in.Logger)
 		if err != nil {
 			return fmt.Errorf("initialize watches: %w", err)
 		}
-		watches.SetTelemetry(telemetry)
-		watches.SetTravel(tripService)
 		if err := a.Registry.Register(watches); err != nil {
 			return err
 		}
@@ -646,7 +639,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 			FollowUp:       approvals,
 			Notice:         notices,
 			Reports:        reports,
-			Jobs:           scheduler,
+			Jobs:           schedule.NewPromptSection(in.Store, in.Zone, in.Logger),
 			Attachments:    attachments,
 			Transcripts:    transcripts,
 			WebSearch:      webSearch,
@@ -658,7 +651,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 			Location:       in.Core.TurnZone,
 			Now:            in.Core.Now,
 			Locations:      turnLocations,
-			Trips:          tripService,
+			Trips:          trip.NewReader(in.Store, in.Core.Now),
 			Memory:         memoryService,
 			Exposure:       exposures,
 			SearchChecks:   searchChecks,

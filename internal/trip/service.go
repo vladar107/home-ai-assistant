@@ -16,7 +16,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/vladar107/home-ai-assistant/internal/localtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
@@ -92,7 +91,7 @@ func (s *Service) announce(ctx context.Context, result *Result) {
 
 // SetSummaryMessage records the message that sums the trip up in its tab; zero forgets it.
 func (s *Service) SetSummaryMessage(ctx context.Context, principalID, id string, messageID int64) error {
-	return s.repository.SetTripSummary(ctx, principalID, id, messageID)
+	return NewReader(s.repository, s.now).SetSummaryMessage(ctx, principalID, id, messageID)
 }
 
 // Settle runs once at start. Every planned trip that has not ended gives its destination to those
@@ -476,14 +475,13 @@ func (s *Service) Trips(ctx context.Context, principalID string) ([]Trip, error)
 
 // Trip finds one of the principal's trips of any status.
 func (s *Service) Trip(ctx context.Context, principalID, id string) (Trip, bool, error) {
-	return s.repository.LoadTrip(ctx, principalID, id)
+	return NewReader(s.repository, s.now).Trip(ctx, principalID, id)
 }
 
 // Traveling is true when a planned trip of the principal spans the instant, from its start up
 // to but not including its end.
 func (s *Service) Traveling(ctx context.Context, principalID string, at time.Time) (bool, error) {
-	active, err := s.repository.ListActiveTrips(ctx, principalID, at)
-	return len(active) > 0, err
+	return NewTravel(s.repository).Traveling(ctx, principalID, at)
 }
 
 // ActiveTrips returns the principal's planned trips under way at the instant, without bookings.
@@ -494,31 +492,7 @@ func (s *Service) ActiveTrips(ctx context.Context, principalID string, at time.T
 // TurnLine tells a turn about the active trip or the next one starting within 14 days; empty
 // when there is none.
 func (s *Service) TurnLine(ctx context.Context, principalID string) (string, error) {
-	planned, err := s.repository.ListTrips(ctx, principalID, StatusPlanned)
-	if err != nil {
-		return "", err
-	}
-	now := s.now()
-	var next *Trip
-	for index := range planned {
-		trip := planned[index]
-		if trip.Active(now) {
-			location := localtime.SavedZone(trip.Zone)
-			return fmt.Sprintf("User is traveling: %q, destination %q, %s to %s (%s); local time there is %s.",
-				trip.Title, trip.Destination, trip.StartsAt.In(location).Format("Mon 2006-01-02"),
-				trip.EndLabel(turnDateLayout, turnDateLayout), location, now.In(location).Format("Mon 2006-01-02 15:04")), nil
-		}
-		if trip.StartsAt.After(now) && trip.StartsAt.Sub(now) <= turnLineHorizon && (next == nil || trip.StartsAt.Before(next.StartsAt)) {
-			next = &planned[index]
-		}
-	}
-	if next == nil {
-		return "", nil
-	}
-	location := localtime.SavedZone(next.Zone)
-	return fmt.Sprintf("User's next trip: %q, destination %q, %s to %s (%s).",
-		next.Title, next.Destination, next.StartsAt.In(location).Format("Mon 2006-01-02"),
-		next.EndLabel(turnDateLayout, turnDateLayout), location), nil
+	return NewReader(s.repository, s.now).TurnLine(ctx, principalID)
 }
 
 // DueNotices returns the notices owed at now across all principals: a start notice for a planned

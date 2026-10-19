@@ -3,6 +3,7 @@ package schedule
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -23,12 +24,33 @@ const promptSectionHeading = "Scheduled jobs: the user's enabled scheduled jobs 
 	"When the user refers to something that fits a job, use these facts, and call schedule_get with the job's id for its full instructions when the excerpt is not enough. " +
 	"Before asking the user about their plans, trips, or routine, read the job that covers them with schedule_get."
 
-var _ conversation.Jobs = (*Service)(nil)
+var (
+	_ conversation.Jobs = (*Service)(nil)
+	_ conversation.Jobs = PromptSection{}
+)
+
+// PromptSection is the jobs section of the system prompt over the repository alone, so a turn
+// reads it without the scheduler.
+type PromptSection struct {
+	repository Repository
+	zone       string
+	logger     *slog.Logger
+}
+
+// NewPromptSection returns the section for jobs described in the zone.
+func NewPromptSection(repository Repository, zone string, logger *slog.Logger) PromptSection {
+	return PromptSection{repository: repository, zone: zone, logger: logger}
+}
+
+// PromptSection is the scheduler's own section, the same as the value's.
+func (s *Service) PromptSection(ctx context.Context, principalID string) string {
+	return NewPromptSection(s.repository, s.zone, s.logger).PromptSection(ctx, principalID)
+}
 
 // PromptSection lists the principal's enabled jobs and pending reminders for the system prompt,
 // each with the start of its instructions. Jobs are ordered by creation rather than by last
 // change, because every run moves a job's last change and would change the prompt with it.
-func (s *Service) PromptSection(ctx context.Context, principalID string) string {
+func (s PromptSection) PromptSection(ctx context.Context, principalID string) string {
 	jobs, err := s.repository.ListScheduledJobs(ctx, principalID)
 	if err != nil {
 		if ctx.Err() == nil {
@@ -65,7 +87,7 @@ func (s *Service) PromptSection(ctx context.Context, principalID string) string 
 	return section
 }
 
-func (s *Service) promptEntry(job Job) string {
+func (s PromptSection) promptEntry(job Job) string {
 	if job.Type == TypeReminder {
 		return fmt.Sprintf("id %s: reminder, %s: %s", job.ID, DescribeJob(job, s.zone), promptExcerpt(ReminderText(job.Config)))
 	}
