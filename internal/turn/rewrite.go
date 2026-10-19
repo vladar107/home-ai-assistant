@@ -1,4 +1,4 @@
-package conversation
+package turn
 
 import (
 	"context"
@@ -15,19 +15,19 @@ var errNotConnected = errors.New("the principal has no model connection")
 // the principal's own subscription. The run has no tools, memory, or web search and a fresh
 // session, and it does not take the principal's turn slot, so a chat turn does not hold it back.
 // Its deadline is whatever ctx carries.
-func (s *Service) RewriteAlert(ctx context.Context, principalID, language, text string) (string, error) {
-	connected, err := s.gate.Ready(ctx, principalID)
+func (e *Engine) RewriteAlert(ctx context.Context, principalID, language, text string) (string, error) {
+	connected, err := e.gate.Ready(ctx, principalID)
 	if err != nil {
 		return "", err
 	}
 	if !connected {
 		return "", errNotConnected
 	}
-	sessionID, err := newID()
+	sessionID, err := NewID()
 	if err != nil {
 		return "", err
 	}
-	result, err := s.runtime.Run(ctx, agentruntime.RunRequest{
+	result, err := e.runtime.Run(ctx, agentruntime.RunRequest{
 		PrincipalID: principalID,
 		SessionID:   sessionID,
 		Message: "[system] Rewrite the message below in " + language + " for the user. The application wrote it from live data, so keep its meaning exactly: " +

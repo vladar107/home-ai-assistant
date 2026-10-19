@@ -1,4 +1,4 @@
-package conversation
+package turn
 
 import (
 	"context"
@@ -28,28 +28,28 @@ type ScheduledReply struct {
 // same principal has finished. Failures come back as the reply a chat turn would have given. An
 // error is returned only when ctx ends, and then nothing should be delivered. The turn key names
 // the run, so what its tools stage goes out with its reply.
-func (s *Service) RunScheduled(ctx context.Context, principalID, turn, message string) (ScheduledReply, error) {
-	release, err := s.acquireTurn(ctx, principalID)
+func (e *Engine) RunScheduled(ctx context.Context, principalID, turn, message string) (ScheduledReply, error) {
+	release, err := e.Acquire(ctx, Lane{PrincipalID: principalID})
 	if err != nil {
 		return ScheduledReply{}, err
 	}
 	defer release()
-	return s.runUnwatched(ctx, principalID, turn, message)
+	return e.runUnwatched(ctx, principalID, turn, message)
 }
 
 // RunCheck runs one check of an agent watch as RunScheduled runs a scheduled turn, but under no
 // turn key: nothing goes out with the reply but the watch's own alert, so its tools stage nothing.
 // It takes no turn slot, as a background task does not: checks run all day, and the user's chat
 // turn must not wait behind one. The caller reads the verdict from the final text.
-func (s *Service) RunCheck(ctx context.Context, principalID, message string) (ScheduledReply, error) {
-	return s.runUnwatched(ctx, principalID, "", message)
+func (e *Engine) RunCheck(ctx context.Context, principalID, message string) (ScheduledReply, error) {
+	return e.runUnwatched(ctx, principalID, "", message)
 }
 
-func (s *Service) runUnwatched(ctx context.Context, principalID, turn, message string) (ScheduledReply, error) {
+func (e *Engine) runUnwatched(ctx context.Context, principalID, turn, message string) (ScheduledReply, error) {
 	run := tools.NewRun(message)
-	turnCtx, cancel := context.WithTimeout(tools.WithRun(tools.WithTurn(ctx, turn), run), s.config.TurnTimeout)
+	turnCtx, cancel := context.WithTimeout(tools.WithRun(tools.WithTurn(ctx, turn), run), e.config.TurnTimeout)
 	defer cancel()
-	connected, err := s.gate.Ready(turnCtx, principalID)
+	connected, err := e.gate.Ready(turnCtx, principalID)
 	switch {
 	case ctx.Err() != nil:
 		return ScheduledReply{}, ctx.Err()
@@ -58,14 +58,14 @@ func (s *Service) runUnwatched(ctx context.Context, principalID, turn, message s
 	case !connected:
 		return ScheduledReply{Text: NotConnectedReply, ErrorKind: "not_connected"}, nil
 	}
-	tools, err := s.toolProvider.ReadOnlyToolsFor(turnCtx, principalID)
+	tools, err := e.tools.ReadOnlyToolsFor(turnCtx, principalID)
 	var webSearch bool
 	if err == nil {
-		webSearch, err = s.webSearchEnabled(turnCtx, principalID)
+		webSearch, err = e.webSearchEnabled(turnCtx, principalID)
 	}
 	var memory string
 	if err == nil {
-		memory, err = s.memoryText(turnCtx, principalID)
+		memory, err = e.memoryText(turnCtx, principalID)
 	}
 	if err != nil {
 		if ctx.Err() != nil {
@@ -73,26 +73,26 @@ func (s *Service) runUnwatched(ctx context.Context, principalID, turn, message s
 		}
 		return ScheduledReply{Text: UnavailableReply, ErrorKind: "tool_provider"}, nil
 	}
-	sessionID, err := newID()
+	sessionID, err := NewID()
 	if err != nil {
 		return ScheduledReply{}, err
 	}
-	result, runErr := s.runtime.Run(turnCtx, agentruntime.RunRequest{
+	result, runErr := e.runtime.Run(turnCtx, agentruntime.RunRequest{
 		PrincipalID: principalID,
 		SessionID:   sessionID,
-		Message:     s.withTime(s.withUser(principalID, withPlace(s.placeLines(turnCtx, principalID), message))),
+		Message:     e.withTime(e.withUser(principalID, withPlace(e.placeLines(turnCtx, principalID), message))),
 		Tools:       tools,
 		Memory:      memory,
 		WebSearch:   webSearch,
-		SearchCheck: s.searchCheck(principalID, webSearch, false),
-	}, s.newCountingSink(principalID, turn, run))
+		SearchCheck: e.searchCheck(principalID, webSearch, false),
+	}, e.newCountingSink(principalID, turn, run))
 	switch {
 	case ctx.Err() != nil:
 		return ScheduledReply{}, ctx.Err()
 	case errors.Is(turnCtx.Err(), context.DeadlineExceeded) || errors.Is(runErr, agentruntime.ErrStalled):
 		return ScheduledReply{Text: TimeoutReply, ErrorKind: "timeout"}, nil
 	case runErr != nil || strings.TrimSpace(result.Final) == "":
-		reply, kind := failureReply(runErr)
+		reply, kind := FailureReply(runErr)
 		return ScheduledReply{Text: reply, ErrorKind: kind}, nil
 	default:
 		return ScheduledReply{Text: result.Final, Private: run.Private(), External: run.External()}, nil
@@ -103,14 +103,14 @@ func withPlace(place, message string) string {
 	return prompt.Prepend(prompt.Place(place), message)
 }
 
-func (s *Service) withUser(principalID, message string) string {
-	return prompt.Prepend(prompt.User(s.config.DisplayNames[principalID]), message)
+func (e *Engine) withUser(principalID, message string) string {
+	return prompt.Prepend(prompt.User(e.config.DisplayNames[principalID]), message)
 }
 
 // withTime starts a turn's message with the current local time in the household zone.
-func (s *Service) withTime(message string) string {
-	if s.config.Location == nil {
+func (e *Engine) withTime(message string) string {
+	if e.config.Location == nil {
 		return message
 	}
-	return prompt.Prepend(prompt.Time(s.config.Now(), s.config.Location), message)
+	return prompt.Prepend(prompt.Time(e.config.Now(), e.config.Location), message)
 }

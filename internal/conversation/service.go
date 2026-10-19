@@ -2,8 +2,6 @@ package conversation
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -18,6 +16,7 @@ import (
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
+	"github.com/vladar107/home-ai-assistant/internal/turn"
 	"github.com/vladar107/home-ai-assistant/internal/turnstate"
 )
 
@@ -35,23 +34,21 @@ const (
 const (
 	BusyReply         = "I am still working on your previous message. You can wait for it or use /cancel."
 	InterruptedReply  = "The previous response was interrupted by a restart, so I did not retry it. Please send it again if you still need it."
-	TimeoutReply      = "That response took too long. Please try again with a smaller request."
-	UnavailableReply  = "I could not complete that response. /status and /privacy are still available."
-	QuotaReply        = "Your model subscription has reached its usage limit. Please try again later."
-	ReconnectReply    = "Your model subscription is not connected or has expired. Reconnect it and try again."
-	NotConnectedReply = "Your model subscription is not connected. Use /settings to connect it."
+	TimeoutReply      = turn.TimeoutReply
+	UnavailableReply  = turn.UnavailableReply
+	QuotaReply        = turn.QuotaReply
+	ReconnectReply    = turn.ReconnectReply
+	NotConnectedReply = turn.NotConnectedReply
 )
 
 type Service struct {
-	config       Config
-	repository   Repository
-	runtime      agentruntime.AgentRuntime
-	deliverer    Deliverer
-	toolProvider ToolProvider
-	gate         ConnectionGate
-	logger       *slog.Logger
-	telemetry    Telemetry
-	tabReplies   TabReplies
+	config     Config
+	repository Repository
+	engine     *turn.Engine
+	deliverer  Deliverer
+	logger     *slog.Logger
+	telemetry  Telemetry
+	tabReplies TabReplies
 	// startedAt is truncated like the stored created_at, so a request queued in the same
 	// millisecond as the start does not read as recovered.
 	startedAt time.Time
@@ -61,11 +58,6 @@ type Service struct {
 	cancel   context.CancelFunc
 	workers  map[Lane]chan struct{}
 	inflight map[Lane]context.CancelFunc
-	// turns holds one slot per lane, so a lane's chat turns take turns with each other and the main
-	// lane's also with scheduled runs. It once guarded a whole principal against a credential-refresh
-	// race that Pi 1.0.0 removed by locking auth.json, which is why tabs and background tasks run
-	// beside each other.
-	turns map[Lane]chan struct{}
 	// drafts holds the draft of each lane's running chat turn, so a stop press counts only while
 	// that turn is still running.
 	drafts map[Lane]*runningDraft
@@ -147,23 +139,37 @@ func NewService(
 		return nil, fmt.Errorf("conversation cards and photos must be configured together")
 	}
 
+	engine, err := turn.New(turn.Config{
+		TurnTimeout:  config.TurnTimeout,
+		Location:     config.Location,
+		Now:          config.Now,
+		DisplayNames: config.DisplayNames,
+		Memory:       config.Memory,
+		Jobs:         config.Jobs,
+		WebSearch:    config.WebSearch,
+		SearchChecks: config.SearchChecks,
+		Exposure:     config.Exposure,
+		Locations:    config.Locations,
+		Trips:        config.Trips,
+	}, runtime, gate, toolProvider, logger, telemetry)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Service{
-		config:       config,
-		repository:   repository,
-		runtime:      runtime,
-		deliverer:    deliverer,
-		toolProvider: toolProvider,
-		gate:         gate,
-		logger:       logger,
-		telemetry:    telemetry,
-		startedAt:    time.Now().Truncate(time.Millisecond),
-		captures:     make(map[string]replyCapture),
-		laneTurns:    make(map[Lane]LaneTurn),
-		laneEpochs:   make(map[Lane]int),
-		workers:      make(map[Lane]chan struct{}),
-		inflight:     make(map[Lane]context.CancelFunc),
-		turns:        make(map[Lane]chan struct{}),
-		drafts:       make(map[Lane]*runningDraft),
+		config:     config,
+		repository: repository,
+		engine:     engine,
+		deliverer:  deliverer,
+		logger:     logger,
+		telemetry:  telemetry,
+		startedAt:  time.Now().Truncate(time.Millisecond),
+		captures:   make(map[string]replyCapture),
+		laneTurns:  make(map[Lane]LaneTurn),
+		laneEpochs: make(map[Lane]int),
+		workers:    make(map[Lane]chan struct{}),
+		inflight:   make(map[Lane]context.CancelFunc),
+		drafts:     make(map[Lane]*runningDraft),
 	}, nil
 }
 
@@ -263,15 +269,15 @@ func (s *Service) Enqueue(ctx context.Context, input EnqueueInput) error {
 		return fmt.Errorf("conversation service is not running")
 	}
 
-	sessionID, err := newID()
+	sessionID, err := turn.NewID()
 	if err != nil {
 		return err
 	}
-	runtimeSessionID, err := newID()
+	runtimeSessionID, err := turn.NewID()
 	if err != nil {
 		return err
 	}
-	requestID, err := newID()
+	requestID, err := turn.NewID()
 	if err != nil {
 		return err
 	}
@@ -702,10 +708,9 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 	// The stored kind stays within the schema's allowed set; telemetry and logs carry the finer category.
 	reportedKind := ""
 	reply, plainReply := "", ""
-	connected, runErr := s.gate.Ready(turnCtx, request.PrincipalID)
+	connected, runErr := s.engine.Ready(turnCtx, request.PrincipalID)
 	var tools agentruntime.ToolSet
-	var webSearch bool
-	var memory string
+	var switches turn.Switches
 	var attachments attachment.Turn
 	var hint toolHint
 	var choice agentruntime.ModelEffort
@@ -722,14 +727,11 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		s.drafts[lane] = &runningDraft{id: draft, cancel: cancel}
 		s.mu.Unlock()
 		activity = s.startActivity(turnCtx, request.PrincipalID, request.ChatID, draft)
-		tools, runErr = s.toolProvider.ToolsFor(turnCtx, request.PrincipalID)
+		tools, runErr = s.engine.Tools(turnCtx, request.PrincipalID, turn.Chat)
 		var hinted <-chan toolHint
 		if runErr == nil {
 			hinted = s.startToolHint(turnCtx, request, tools)
-			webSearch, runErr = s.webSearchEnabled(turnCtx, request.PrincipalID)
-		}
-		if runErr == nil {
-			memory, runErr = s.memoryText(turnCtx, request.PrincipalID)
+			switches, runErr = s.engine.Switches(turnCtx, request.PrincipalID, true)
 		}
 		if runErr != nil {
 			errorKind = ErrorKindToolProvider
@@ -767,30 +769,39 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 			s.config.Recent.RecordMessage(request.PrincipalID, request.ThreadID, request.Message)
 		}
 		notice := s.takeNotice(turnCtx, request)
-		sink := s.newCountingSink(request.PrincipalID, outbox.ChatTurn(request.ID), run)
-		sink.activity, sink.activities = activity, tools.Activities
 		runStarted = time.Now()
-		result, err := s.runtime.Run(turnCtx, agentruntime.RunRequest{
+		message := s.engine.Compose(turnCtx, request.PrincipalID, turn.Parts{
+			Message:     request.Message,
+			Forwarded:   request.Forwarded,
+			Hint:        hint.name,
+			Notice:      notice.text,
+			Subject:     subjectContext(request.Subject, request.SubjectName),
+			Attachments: attachments.Summary,
+		})
+		result, err := s.engine.Run(turnCtx, turn.Run{
 			PrincipalID: request.PrincipalID,
 			SessionID:   request.RuntimeSessionID,
-			Message:     s.turnMessage(request, notice.text, attachments.Summary, hint.name, s.placeLines(turnCtx, request.PrincipalID)),
+			Turn:        outbox.ChatTurn(request.ID),
+			Message:     message,
 			Images:      attachments.Images,
 			Tools:       tools,
-			Memory:      memory,
-			Jobs:        s.jobsText(turnCtx, request.PrincipalID),
-			WebSearch:   webSearch,
-			SearchCheck: s.searchCheck(request.PrincipalID, webSearch, true),
+			Memory:      switches.Memory,
+			WebSearch:   switches.WebSearch,
+			Jobs:        true,
+			Interactive: true,
 			Kind:        agentruntime.RunChat,
 			Model:       choice.Model,
 			Effort:      choice.Effort,
-		}, sink)
+			Run:         run,
+			Sink:        activitySink{activity: activity, activities: tools.Activities},
+		})
 		modelTime = time.Since(runStarted)
 		runErr = err
-		s.recordLaneTurn(lane, epoch, passedOver, result, err == nil)
+		s.recordLaneTurn(lane, epoch, passedOver, result.RunResult, err == nil)
 		activity.stop()
-		notes := s.memoryNotes(request.PrincipalID, outbox.ChatTurn(request.ID))
+		notes := s.engine.MemoryNotes(request.PrincipalID, outbox.ChatTurn(request.ID))
 		if err == nil && !errors.Is(turnCtx.Err(), context.Canceled) {
-			s.recordTurnMetrics(turnCtx, request.PrincipalID, safetyChecks, sink, result.Usage, !tools.Empty() || webSearch, hint)
+			s.recordTurnMetrics(turnCtx, request.PrincipalID, safetyChecks, result, !tools.Empty() || switches.WebSearch, hint)
 		}
 		switch {
 		case errors.Is(turnCtx.Err(), context.DeadlineExceeded) || errors.Is(runErr, agentruntime.ErrStalled):
@@ -802,7 +813,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 			return
 		case runErr != nil || strings.TrimSpace(result.Response) == "":
 			errorKind = ErrorKindRuntime
-			reply, reportedKind = failureReply(runErr)
+			reply, reportedKind = turn.FailureReply(runErr)
 		default:
 			reply = result.Response
 			if s.replyAsReaction(turnCtx, request.PrincipalID, reply) {
@@ -812,7 +823,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 				plainReply = reply
 			}
 		}
-		reply = withMemoryNotes(reply, notes)
+		reply = turn.WithMemoryNotes(reply, notes)
 	}
 	if reportedKind == "" {
 		reportedKind = errorKind
@@ -877,59 +888,6 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 	)
 }
 
-// webSearchEnabled reads the principal's switch at turn start; an error fails the turn instead of
-// guessing either way.
-func (s *Service) webSearchEnabled(ctx context.Context, principalID string) (bool, error) {
-	if s.config.WebSearch == nil {
-		return false, nil
-	}
-	return s.config.WebSearch.WebSearchEnabled(ctx, principalID)
-}
-
-// searchCheck binds the search check to the principal for one run, or returns nil when the run
-// has no web search. Chat turns can ask the user to confirm a search; scheduled runs and tasks
-// cannot.
-func (s *Service) searchCheck(principalID string, webSearch, interactive bool) agentruntime.SearchCheck {
-	if !webSearch || s.config.SearchChecks == nil {
-		return nil
-	}
-	return func(ctx context.Context, query string) agentruntime.SearchDecision {
-		return s.config.SearchChecks.Check(ctx, principalID, query, interactive)
-	}
-}
-
-// memoryText reads the principal's memory at turn start; an error fails the turn instead of
-// running it without what the user asked it to remember.
-func (s *Service) memoryText(ctx context.Context, principalID string) (string, error) {
-	if s.config.Memory == nil {
-		return "", nil
-	}
-	return s.config.Memory.Render(ctx, principalID)
-}
-
-func (s *Service) jobsText(ctx context.Context, principalID string) string {
-	if s.config.Jobs == nil {
-		return ""
-	}
-	return s.config.Jobs.PromptSection(ctx, principalID)
-}
-
-func (s *Service) memoryNotes(principalID, turn string) []string {
-	if s.config.Memory == nil {
-		return nil
-	}
-	return s.config.Memory.TakeNotes(principalID, turn)
-}
-
-// withMemoryNotes ends the reply with a line for each memory write the turn made, so the user
-// does not depend on the model mentioning them.
-func withMemoryNotes(reply string, notes []string) string {
-	if len(notes) == 0 {
-		return reply
-	}
-	return strings.TrimRight(reply, "\n") + "\n\n" + strings.Join(notes, "\n")
-}
-
 // toolHint is what a turn's tool hint came to. answered is false when no hint was asked or none
 // came back in time, so follow-through counts only hints that had their say.
 type toolHint struct {
@@ -972,9 +930,6 @@ func (s *Service) startToolHint(ctx context.Context, request Request, tools agen
 	return result
 }
 
-// turnMessage prefixes what became of the principal's last confirmation request, which was
-// resolved between turns and which the model would otherwise have to guess at, and appends what
-// the message carried so the model can see its files without reading them.
 // turnNotice is what became of the principal's earlier requests, and whether it carries text from
 // outside the household.
 type turnNotice struct {
@@ -1023,25 +978,6 @@ func (s *Service) takeNotice(ctx context.Context, request Request) turnNotice {
 		}
 	}
 	return turnNotice{text: text, outside: outside}
-}
-
-func (s *Service) turnMessage(request Request, notice, attachments, hint, place string) string {
-	message := request.Message
-	if request.Forwarded {
-		message = prompt.Prepend(prompt.Forwarded, message)
-	}
-	message = prompt.Prepend(prompt.ToolHint(hint), message)
-	message = prompt.Prepend(prompt.Notice(notice), message)
-	message = s.withUser(request.PrincipalID, withPlace(place, message))
-	message = prompt.Prepend(subjectContext(request.Subject, request.SubjectName), message)
-	message = s.withTime(message)
-	if attachments == "" {
-		return message
-	}
-	if strings.TrimSpace(message) == "" {
-		return attachments
-	}
-	return strings.TrimRight(message, "\n") + "\n\n" + attachments
 }
 
 func (s *Service) deliver(ctx context.Context, request Request) error {
@@ -1231,9 +1167,9 @@ func (s *Service) safetyChecksLabel(ctx context.Context, principalID string) str
 	}
 }
 
-func (s *Service) recordTurnMetrics(ctx context.Context, principalID, safetyChecks string, sink *countingSink, usage agentruntime.Usage, offeredTools bool, hint toolHint) {
+func (s *Service) recordTurnMetrics(ctx context.Context, principalID, safetyChecks string, ran turn.Result, offeredTools bool, hint toolHint) {
+	usage, calls, called := ran.Usage, ran.Calls, ran.Called
 	s.telemetry.RecordModelTurn(ctx, principalID, safetyChecks, usage.ModelCalls, usage.PromptTokens, usage.OutputTokens)
-	calls, called := sink.snapshot()
 	if offeredTools {
 		s.telemetry.RecordToolCallsPerTurn(ctx, principalID, safetyChecks, calls)
 	}
@@ -1276,32 +1212,12 @@ func isPermanentDeliveryError(err error) bool {
 	return errors.As(err, &permanent) && permanent.Permanent()
 }
 
-// failureReply maps a failed run to the reply the user sees and the category telemetry reports.
-func failureReply(err error) (string, string) {
-	if errors.Is(err, agentruntime.ErrStalled) {
-		return TimeoutReply, ErrorKindTimeout
-	}
-	var providerErr *agentruntime.ProviderError
-	if errors.As(err, &providerErr) {
-		switch providerErr.Category {
-		case agentruntime.FailureQuota:
-			return QuotaReply, ErrorKindProviderQuota
-		case agentruntime.FailureAuth:
-			return ReconnectReply, ErrorKindProviderAuth
-		}
-	}
-	return UnavailableReply, ErrorKindRuntime
-}
-
 // awaitTurn waits for the lane's turn slot. While another turn holds it the user sees the typing
 // indicator, and /cancel or /new can still stop the wait.
 func (s *Service) awaitTurn(ctx context.Context, request Request) (func(), bool) {
 	lane := request.Lane()
-	slot := s.turnSlot(lane)
-	select {
-	case slot <- struct{}{}:
-		return func() { <-slot }, true
-	default:
+	if release, acquired := s.engine.TryAcquire(lane); acquired {
+		return release, true
 	}
 
 	waitCtx, stopWaiting := context.WithCancel(ctx)
@@ -1316,34 +1232,11 @@ func (s *Service) awaitTurn(ctx context.Context, request Request) (func(), bool)
 	}()
 	typing := s.startActivity(waitCtx, request.PrincipalID, request.ChatID, 0)
 	defer typing.stop()
-	select {
-	case slot <- struct{}{}:
-		return func() { <-slot }, true
-	case <-waitCtx.Done():
+	release, err := s.engine.Acquire(waitCtx, lane)
+	if err != nil {
 		return nil, false
 	}
-}
-
-// acquireTurn takes the main lane's slot, where scheduled runs take turns with chat turns.
-func (s *Service) acquireTurn(ctx context.Context, principalID string) (func(), error) {
-	slot := s.turnSlot(Lane{PrincipalID: principalID})
-	select {
-	case slot <- struct{}{}:
-		return func() { <-slot }, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-}
-
-func (s *Service) turnSlot(lane Lane) chan struct{} {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	slot, exists := s.turns[lane]
-	if !exists {
-		slot = make(chan struct{}, 1)
-		s.turns[lane] = slot
-	}
-	return slot
+	return release, true
 }
 
 func (s *Service) logWorkerError(ctx context.Context, principalID, errorKind string) {
@@ -1352,86 +1245,6 @@ func (s *Service) logWorkerError(ctx context.Context, principalID, errorKind str
 		"principal_id", principalID,
 		"error_kind", errorKind,
 	)
-}
-
-// webSearchTool runs inside the runtime rather than through the broker, so its calls get no
-// broker audit line; the turn's sink records each by name instead.
-const webSearchTool = "web_search"
-
-// countingSink remembers which tools a turn called, by name only, and logs each web search call.
-// A web search result also marks the turn as having read third-party content, which the broker
-// cannot do for a tool that runs inside the runtime. The mark waits for the result, so the search
-// check of a call still in flight never sees that call's own exposure.
-type countingSink struct {
-	principalID string
-	turn        string
-	logger      *slog.Logger
-	telemetry   Telemetry
-	exposure    tools.TurnExposureRecorder
-	run         *tools.Run
-
-	// activity and activities follow a chat turn's tool calls on its draft; both are nil for a turn
-	// nobody is watching.
-	activity   *turnActivity
-	activities map[string]string
-
-	mu     sync.Mutex
-	calls  int
-	called map[string]bool
-}
-
-func (s *Service) newCountingSink(principalID, turn string, run *tools.Run) *countingSink {
-	return &countingSink{principalID: principalID, turn: turn, logger: s.logger, telemetry: s.telemetry, exposure: s.config.Exposure, run: run, called: make(map[string]bool)}
-}
-
-func (c *countingSink) Emit(ctx context.Context, event agentruntime.Event) error {
-	switch event.Type {
-	case "tool_call":
-		c.activity.show(activityKey(event.Text, c.activities))
-	case "tool_result":
-		c.activity.show("")
-	}
-	if event.Type == "tool_result" && event.Tool == webSearchTool {
-		if c.run != nil {
-			c.run.MarkExternal(event.Text)
-		}
-		if c.exposure != nil {
-			c.exposure.MarkTurnExposed(ctx, c.principalID, c.turn, true)
-		}
-		return nil
-	}
-	if event.Type != "tool_call" {
-		return nil
-	}
-	c.mu.Lock()
-	c.calls++
-	c.called[event.Text] = true
-	c.mu.Unlock()
-	if event.Text == webSearchTool {
-		c.telemetry.ContextLogger(ctx, c.logger).InfoContext(ctx, "conversation.web_search.called", "principal_id", c.principalID, "tool", webSearchTool)
-	}
-	return nil
-}
-
-func (c *countingSink) snapshot() (int, map[string]bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	called := make(map[string]bool, len(c.called))
-	for name := range c.called {
-		called[name] = true
-	}
-	return c.calls, called
-}
-
-func newID() (string, error) {
-	var value [16]byte
-	if _, err := rand.Read(value[:]); err != nil {
-		return "", fmt.Errorf("generate conversation identifier: %w", err)
-	}
-	value[6] = value[6]&0x0f | 0x40
-	value[8] = value[8]&0x3f | 0x80
-	encoded := hex.EncodeToString(value[:])
-	return encoded[:8] + "-" + encoded[8:12] + "-" + encoded[12:16] + "-" + encoded[16:20] + "-" + encoded[20:], nil
 }
 
 // SplitReply cuts a reply into Telegram-sized chunks, preferring line breaks.
@@ -1467,43 +1280,4 @@ func wait(ctx context.Context, duration time.Duration) bool {
 	case <-ctx.Done():
 		return false
 	}
-}
-
-// locationLine is where the principal is, for the turn's message. A failed lookup leaves the
-// line out rather than failing the turn.
-func (s *Service) locationLine(ctx context.Context, principalID string) string {
-	if s.config.Locations == nil {
-		return ""
-	}
-	line, err := s.config.Locations.TurnLine(ctx, principalID)
-	if err != nil {
-		s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "conversation.location.failed", "principal_id", principalID, "error", err)
-		return ""
-	}
-	return line
-}
-
-// tripLine is the principal's active or next trip, for the turn's message. A failed lookup
-// leaves the line out rather than failing the turn.
-func (s *Service) tripLine(ctx context.Context, principalID string) string {
-	if s.config.Trips == nil {
-		return ""
-	}
-	line, err := s.config.Trips.TurnLine(ctx, principalID)
-	if err != nil {
-		s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "conversation.trip.failed", "principal_id", principalID, "error", err)
-		return ""
-	}
-	return line
-}
-
-// placeLines is where the principal is and where they are going, for the turn's message.
-func (s *Service) placeLines(ctx context.Context, principalID string) string {
-	var lines []string
-	for _, line := range []string{s.locationLine(ctx, principalID), s.tripLine(ctx, principalID)} {
-		if line != "" {
-			lines = append(lines, line)
-		}
-	}
-	return strings.Join(lines, " ")
 }

@@ -1,4 +1,4 @@
-package conversation
+package turn
 
 import (
 	"context"
@@ -35,15 +35,15 @@ type TabName struct {
 // subscription with no tools, memory, or web search and a fresh session, and it does not take the
 // principal's turn slot. A name that is not one short line is an error; an icon outside icons is no
 // icon.
-func (s *Service) NameTab(ctx context.Context, principalID, message, reply string, icons []string) (TabName, error) {
-	connected, err := s.gate.Ready(ctx, principalID)
+func (e *Engine) NameTab(ctx context.Context, principalID, message, reply string, icons []string) (TabName, error) {
+	connected, err := e.gate.Ready(ctx, principalID)
 	if err != nil {
 		return TabName{}, err
 	}
 	if !connected {
 		return TabName{}, errNotConnected
 	}
-	sessionID, err := newID()
+	sessionID, err := NewID()
 	if err != nil {
 		return TabName{}, err
 	}
@@ -51,7 +51,7 @@ func (s *Service) NameTab(ctx context.Context, principalID, message, reply strin
 	if len(icons) > 0 {
 		iconLine = "For \"icon\", choose the one of these emoji that fits the topic best, or leave it empty when none fits: " + strings.Join(icons, " ")
 	}
-	result, err := s.runtime.Run(ctx, agentruntime.RunRequest{
+	result, err := e.runtime.Run(ctx, agentruntime.RunRequest{
 		PrincipalID: principalID,
 		SessionID:   sessionID,
 		Message: "[system] Name the chat tab that holds the conversation below. The name says what the conversation is about in at most " +

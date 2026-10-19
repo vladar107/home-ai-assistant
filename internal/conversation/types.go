@@ -13,6 +13,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
+	"github.com/vladar107/home-ai-assistant/internal/turn"
 	"github.com/vladar107/home-ai-assistant/internal/turnstate"
 )
 
@@ -22,29 +23,18 @@ var ErrBusy = errors.New("a conversation turn is already pending")
 // same request cannot cure.
 var ErrInvalidRequest = errors.New("invalid conversation request")
 
-// Error kinds a failed turn reports to telemetry. Startup creates each kind's series at zero from
-// TurnErrorKinds, so a new kind belongs there too.
+// Error kinds a failed turn reports to telemetry, as the turn engine defines them.
 const (
-	ErrorKindTimeout       = "timeout"
-	ErrorKindRuntime       = "runtime"
-	ErrorKindToolProvider  = "tool_provider"
-	ErrorKindAttachments   = "attachments"
-	ErrorKindNotConnected  = "not_connected"
-	ErrorKindProviderQuota = string(agentruntime.FailureQuota)
-	ErrorKindProviderAuth  = string(agentruntime.FailureAuth)
+	ErrorKindTimeout       = turn.ErrorKindTimeout
+	ErrorKindRuntime       = turn.ErrorKindRuntime
+	ErrorKindToolProvider  = turn.ErrorKindToolProvider
+	ErrorKindAttachments   = turn.ErrorKindAttachments
+	ErrorKindNotConnected  = turn.ErrorKindNotConnected
+	ErrorKindProviderQuota = turn.ErrorKindProviderQuota
+	ErrorKindProviderAuth  = turn.ErrorKindProviderAuth
 )
 
-func TurnErrorKinds() []string {
-	return []string{
-		ErrorKindTimeout,
-		ErrorKindRuntime,
-		ErrorKindToolProvider,
-		ErrorKindAttachments,
-		ErrorKindNotConnected,
-		ErrorKindProviderQuota,
-		ErrorKindProviderAuth,
-	}
-}
+func TurnErrorKinds() []string { return turn.TurnErrorKinds() }
 
 const (
 	RequestStateQueued = "queued"
@@ -60,12 +50,8 @@ const (
 )
 
 // Lane is one conversation place of a principal: a Telegram tab, or the chat's main view at thread
-// zero, which is the only lane while the bot has tabs off. Each lane holds its own active session
-// and runs its turns apart from the others.
-type Lane struct {
-	PrincipalID string
-	ThreadID    int64
-}
+// zero. The turn engine owns the type because it keeps the lanes' turn slots.
+type Lane = turn.Lane
 
 func (r Request) Lane() Lane {
 	return Lane{PrincipalID: r.PrincipalID, ThreadID: r.ThreadID}
@@ -336,19 +322,6 @@ type History interface {
 	Title(ctx context.Context, principalID, runtimeSessionID string) (string, error)
 }
 
-// ConnectionGate reports whether a principal's own model connection is usable before a turn starts.
-type ConnectionGate interface {
-	Ready(context.Context, string) (bool, error)
-}
-
-// ToolProvider returns the tools a principal may use in one turn, with the executor bound to that
-// principal; an empty set runs the turn without tools.
-type ToolProvider interface {
-	ToolsFor(context.Context, string) (agentruntime.ToolSet, error)
-	// ReadOnlyToolsFor is the same set limited to read tools, for a turn nobody is watching.
-	ReadOnlyToolsFor(context.Context, string) (agentruntime.ToolSet, error)
-}
-
 type Telemetry interface {
 	ContextLogger(context.Context, *slog.Logger) *slog.Logger
 	StartConversationTurn(ctx context.Context, principal, safetyChecks string) (context.Context, func(string, string))
@@ -515,12 +488,6 @@ type ReportTurn struct {
 	ReplyToMessageID int64
 }
 
-// Jobs describes the principal's scheduled jobs for the system prompt of chat turns and background
-// tasks, or returns "" when there are none or they cannot be read.
-type Jobs interface {
-	PromptSection(ctx context.Context, principalID string) string
-}
-
 // Attachments keeps the photos and files a principal sent, for as long as the session lives; nil
 // leaves a deployment without attachment support.
 type Attachments interface {
@@ -538,12 +505,6 @@ type Attachments interface {
 type Transcripts interface {
 	// ForgetImages removes the photos from a runtime session's history and keeps its text.
 	ForgetImages(ctx context.Context, principalID, runtimeSessionID string) error
-}
-
-// WebSearch reports whether a principal has web access on, so the runtime offers its own web
-// search in their turns; nil never offers it.
-type WebSearch interface {
-	WebSearchEnabled(ctx context.Context, principalID string) (bool, error)
 }
 
 // Cards holds the image a turn's tool staged to go out with its reply, keyed by the turn.
@@ -564,25 +525,22 @@ type PhotoDeliverer interface {
 	CaptionFits(caption string) bool
 }
 
-// Locations describes a principal's shared position for a turn, or returns "" when there is none.
-type Locations interface {
-	TurnLine(ctx context.Context, principalID string) (string, error)
-}
+// The turn engine's collaborators, under the names this package's Config has always used.
+type (
+	ConnectionGate = turn.ConnectionGate
+	ToolProvider   = turn.ToolProvider
+	Jobs           = turn.Jobs
+	WebSearch      = turn.WebSearch
+	Locations      = turn.Locations
+	Trips          = turn.Trips
+	Memory         = turn.Memory
+	SearchChecks   = turn.SearchChecks
 
-// Trips describes a principal's active or next trip for a turn, or returns "" when there is none.
-type Trips interface {
-	TurnLine(ctx context.Context, principalID string) (string, error)
-}
-
-// Memory is the principal's remembered instructions and facts, which every turn starts from.
-type Memory interface {
-	// Render is the memory as prompt text, or "" when it is off or empty.
-	Render(ctx context.Context, principalID string) (string, error)
-	// TakeNotes returns, and forgets, the lines the turn's memory writes owe its reply.
-	TakeNotes(principalID, turn string) []string
-	// LearnsFromFeedback reports whether the turn a 👎 starts may propose an instruction.
-	LearnsFromFeedback(ctx context.Context, principalID string) (bool, error)
-}
+	ScheduledReply = turn.ScheduledReply
+	TaskRun        = turn.TaskRun
+	TaskReply      = turn.TaskReply
+	TabName        = turn.TabName
+)
 
 type Config struct {
 	TurnTimeout time.Duration
@@ -652,12 +610,6 @@ type Config struct {
 // may go unsent.
 type Reactions interface {
 	ReplyAsReaction(ctx context.Context, principalID, emoji string) (bool, error)
-}
-
-// SearchChecks decides one web search query of a run. A run with nobody to confirm a search, such
-// as a scheduled job or a background task, is not interactive.
-type SearchChecks interface {
-	Check(ctx context.Context, principalID, query string, interactive bool) agentruntime.SearchDecision
 }
 
 // Exposure records which turns read third-party content or private content and answers whether a

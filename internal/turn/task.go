@@ -1,4 +1,4 @@
-package conversation
+package turn
 
 import (
 	"cmp"
@@ -48,13 +48,13 @@ type TaskReply struct {
 // and scheduled runs go on beside it, and its deadline is whatever ctx carries rather than the turn
 // timeout. Failures come back as the reply a chat turn would have given. An error is returned only
 // when ctx ends, and the caller then decides what the task became.
-func (s *Service) RunTask(ctx context.Context, run TaskRun) (TaskReply, error) {
+func (e *Engine) RunTask(ctx context.Context, run TaskRun) (TaskReply, error) {
 	record := tools.NewRun(cmp.Or(run.Instruction, run.Message))
 	if run.Continued {
 		record.MarkExternal("")
 	}
 	runCtx := tools.WithRun(tools.WithCallBudget(tools.WithTurn(ctx, run.Turn), run.CallBudget), record)
-	connected, err := s.gate.Ready(runCtx, run.PrincipalID)
+	connected, err := e.gate.Ready(runCtx, run.PrincipalID)
 	switch {
 	case ctx.Err() != nil:
 		return TaskReply{}, ctx.Err()
@@ -63,14 +63,14 @@ func (s *Service) RunTask(ctx context.Context, run TaskRun) (TaskReply, error) {
 	case !connected:
 		return TaskReply{Text: NotConnectedReply, ErrorKind: ErrorKindNotConnected}, nil
 	}
-	toolSet, err := s.toolProvider.ReadOnlyToolsFor(runCtx, run.PrincipalID)
+	toolSet, err := e.tools.ReadOnlyToolsFor(runCtx, run.PrincipalID)
 	var webSearch bool
 	if err == nil && !run.Report {
-		webSearch, err = s.webSearchEnabled(runCtx, run.PrincipalID)
+		webSearch, err = e.webSearchEnabled(runCtx, run.PrincipalID)
 	}
 	var memory string
 	if err == nil {
-		memory, err = s.memoryText(runCtx, run.PrincipalID)
+		memory, err = e.memoryText(runCtx, run.PrincipalID)
 	}
 	if err != nil {
 		if ctx.Err() != nil {
@@ -78,20 +78,20 @@ func (s *Service) RunTask(ctx context.Context, run TaskRun) (TaskReply, error) {
 		}
 		return TaskReply{Text: UnavailableReply, ErrorKind: ErrorKindToolProvider}, nil
 	}
-	message := s.withTime(s.withUser(run.PrincipalID, withPlace(s.placeLines(runCtx, run.PrincipalID), run.Message)))
-	var sink agentruntime.EventSink = s.newCountingSink(run.PrincipalID, run.Turn, record)
+	message := e.withTime(e.withUser(run.PrincipalID, withPlace(e.placeLines(runCtx, run.PrincipalID), run.Message)))
+	var sink agentruntime.EventSink = e.newCountingSink(run.PrincipalID, run.Turn, record)
 	if run.Sink != nil {
 		sink = sinks{sink, run.Sink}
 	}
-	result, runErr := s.runtime.Run(runCtx, agentruntime.RunRequest{
+	result, runErr := e.runtime.Run(runCtx, agentruntime.RunRequest{
 		PrincipalID: run.PrincipalID,
 		SessionID:   run.SessionID,
 		Message:     message,
 		Tools:       toolSet,
 		Memory:      memory,
-		Jobs:        s.jobsText(runCtx, run.PrincipalID),
+		Jobs:        e.jobsText(runCtx, run.PrincipalID),
 		WebSearch:   webSearch,
-		SearchCheck: s.searchCheck(run.PrincipalID, webSearch, false),
+		SearchCheck: e.searchCheck(run.PrincipalID, webSearch, false),
 		Kind:        agentruntime.RunTask,
 		Model:       run.Model,
 		Effort:      run.Effort,
@@ -100,7 +100,7 @@ func (s *Service) RunTask(ctx context.Context, run TaskRun) (TaskReply, error) {
 	case ctx.Err() != nil:
 		return TaskReply{}, ctx.Err()
 	case runErr != nil || strings.TrimSpace(result.Final) == "":
-		reply, kind := failureReply(runErr)
+		reply, kind := FailureReply(runErr)
 		return TaskReply{Text: reply, ErrorKind: kind}, nil
 	default:
 		return TaskReply{Text: result.Final}, nil

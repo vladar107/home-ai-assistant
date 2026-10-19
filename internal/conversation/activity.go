@@ -8,7 +8,9 @@ import (
 	"sync"
 	"time"
 
+	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
+	"github.com/vladar107/home-ai-assistant/internal/turn"
 )
 
 const (
@@ -192,8 +194,24 @@ func draftID(requestID string) int64 {
 // activityKey is the activity of a tool call: the runtime's own web search, or the key the broker
 // offered the tool with.
 func activityKey(tool string, activities map[string]string) string {
-	if tool == webSearchTool {
+	if tool == turn.WebSearchTool {
 		return tools.ActivityWeb
 	}
 	return activities[tool]
+}
+
+// activitySink follows a chat turn's tool calls on its draft.
+type activitySink struct {
+	activity   *turnActivity
+	activities map[string]string
+}
+
+func (a activitySink) Emit(_ context.Context, event agentruntime.Event) error {
+	switch event.Type {
+	case "tool_call":
+		a.activity.show(activityKey(event.Text, a.activities))
+	case "tool_result":
+		a.activity.show("")
+	}
+	return nil
 }
