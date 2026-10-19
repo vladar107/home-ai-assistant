@@ -149,12 +149,6 @@ type Travel interface {
 	Traveling(ctx context.Context, principalID string, at time.Time) (bool, error)
 }
 
-// SetTravel sets the trip lookup that jobs flagged to pause while traveling consult, at wiring
-// time; without it nobody is ever traveling.
-func (s *Service) SetTravel(travel Travel) {
-	s.travel = travel
-}
-
 // feed is the tab of the run's kind: reminders and Trips scans with the reminders, every other
 // job's report with the reports.
 func feed(run Run) string {
@@ -182,23 +176,6 @@ func (s *Service) inFeed(ctx context.Context, run Run, chatID int64) context.Con
 		threadID = 0
 	}
 	return thread.WithDelivery(ctx, threadID)
-}
-
-// SetTelemetry sets where run metrics are recorded, at wiring time before the scheduler starts.
-func (s *Service) SetTelemetry(telemetry Telemetry) {
-	s.telemetry = telemetry
-}
-
-// SetExposure sets the check that makes reminders wait for confirmation once the conversation has
-// read outside content, at wiring time; without it reminders are always set at once.
-func (s *Service) SetExposure(exposure ExposureChecker) {
-	s.exposure = exposure
-}
-
-// SetSafetyChecks sets the opt-in lookup that labels scheduled reply metrics; without it they
-// are labelled "unavailable".
-func (s *Service) SetSafetyChecks(checks SafetyChecks) {
-	s.safety = checks
 }
 
 // recordRun counts a finished run. A run that ended with a report also records the time from its

@@ -48,6 +48,11 @@ var start = time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
+	return newFixtureWithTabs(t, nil)
+}
+
+func newFixtureWithTabs(t *testing.T, tabs trip.Tabs) *fixture {
+	t.Helper()
 	store, err := sqlite.Open(t.Context(), filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +73,7 @@ func newFixture(t *testing.T) *fixture {
 	if err := f.schedules.Register(schedule.Reminder(f.clock.Now)); err != nil {
 		t.Fatal(err)
 	}
-	f.trips, err = trip.NewService(trip.Config{Now: f.clock.Now}, store, trip.NewScheduleReminders(f.schedules), logger)
+	f.trips, err = trip.NewService(trip.Config{Now: f.clock.Now, Tabs: tabs}, store, trip.NewScheduleReminders(f.schedules), logger)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -89,7 +89,7 @@ func newTravelFixture(t *testing.T) *travelFixture {
 	f := &travelFixture{t: t, store: store, proposer: &recordingProposer{}, now: utc(5, 8, 0), db: db,
 		trip: &tripWindow{from: utc(5, 0, 0), to: utc(7, 0, 0)}}
 	service, err := schedule.NewService(
-		schedule.Config{Zone: "UTC", TickInterval: time.Hour, Now: f.clock},
+		schedule.Config{Zone: "UTC", TickInterval: time.Hour, Now: f.clock, Travel: f.trip},
 		store, store, discardingDeliverer{}, f.proposer, slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
 	if err != nil {
@@ -101,7 +101,6 @@ func newTravelFixture(t *testing.T) *travelFixture {
 	if err := service.Register(schedule.Reminder(f.clock)); err != nil {
 		t.Fatal(err)
 	}
-	service.SetTravel(f.trip)
 	f.service = service
 	return f
 }

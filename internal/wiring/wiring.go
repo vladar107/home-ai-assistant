@@ -601,7 +601,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		return fmt.Errorf("initialize scheduler: %w", err)
 	}
 	a.Scheduler = scheduler
-	tripService, err := trip.NewService(trip.Config{Now: in.Core.Now}, in.Store, trip.NewScheduleReminders(scheduler), in.Logger)
+	tripService, err := trip.NewService(trip.Config{Now: in.Core.Now, Tabs: tabs.Trips}, in.Store, trip.NewScheduleReminders(scheduler), in.Logger)
 	if err != nil {
 		return fmt.Errorf("initialize trips: %w", err)
 	}
@@ -625,6 +625,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		taskConfig.TaskModel, taskConfig.ChatModel = a.TaskModel, a.ChatModel
 		taskConfig.Models, taskConfig.Usage = a.Models, a.ChatGPT
 		taskConfig.Proposer, taskConfig.Exposure, taskConfig.Telemetry = approvals, exposures, telemetry
+		taskConfig.Runner = engine
 		tasks, err := task.NewService(taskConfig, in.Store, in.Store, in.TaskMessages, in.Chat, in.Logger)
 		if err != nil {
 			return fmt.Errorf("initialize background tasks: %w", err)
@@ -640,7 +641,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	}
 	if in.Core.Watches {
 		// Alerts reach only the owner's own chat, resolved from the allowlist at delivery.
-		watches, err := watch.NewService(watch.Config{Zone: in.Zone, Now: in.Core.Now, Travel: trip.NewTravel(in.Store), Telemetry: telemetry, Feeds: tabs.Feeds}, in.Store, in.Store, in.Alerts, approvals, in.Logger)
+		watches, err := watch.NewService(watch.Config{Zone: in.Zone, Now: in.Core.Now, Travel: trip.NewTravel(in.Store), Telemetry: telemetry, Rewriter: engine, Feeds: tabs.Feeds}, in.Store, in.Store, in.Alerts, approvals, in.Logger)
 		if err != nil {
 			return fmt.Errorf("initialize watches: %w", err)
 		}
@@ -669,7 +670,6 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	conversationService, err := conversation.NewService(
 		conversation.Config{
 			Engine:         engine,
-			TurnTimeout:    in.Core.TurnTimeout,
 			ChatModel:      a.ChatModel,
 			TaskModel:      a.TaskModel,
 			Models:         a.Models,
@@ -683,7 +683,6 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 			Recent:         recent,
 			ToolHint:       toolHint,
 			SafetyChecks:   safetyChecks,
-			Location:       in.Core.TurnZone,
 			Now:            in.Core.Now,
 			Memory:         memoryService,
 			Exposure:       exposures,
@@ -733,7 +732,6 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	}
 	a.tripState = &tripScanState{schedules: scheduler}
 	tripTools.SetScanState(a.tripState)
-	tripService.SetTabs(tabs.Trips)
 	if err := scheduler.Register(trip.ScanJobType(tripScanChecker{engine}, in.Store, a.tripState, tripService, tabs.Trips, tabs.Trips, scheduler.Now, in.Logger)); err != nil {
 		return err
 	}
@@ -760,11 +758,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		return err
 	}
 	a.Backlog = backlogService
-	if a.Tasks != nil {
-		a.Tasks.SetRunner(engine)
-	}
 	if a.Watches != nil {
-		a.Watches.SetRewriter(engine)
 		agent, err := watch.NewAgentEvaluator(engine, watch.AgentConfig{Now: in.Core.Now, Finished: a.Watches.Wake})
 		if err != nil {
 			return fmt.Errorf("initialize agent watches: %w", err)

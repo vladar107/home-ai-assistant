@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
@@ -66,7 +65,7 @@ func (e *metricsEnv) deliveryService(t *testing.T, runtime agentruntime.AgentRun
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	service, err := conversation.NewService(
-		conversation.Config{TurnTimeout: 10 * time.Second, Engine: testEngine(t, runtime, hintTools{}, logger, e.telemetry)},
+		conversation.Config{Engine: testEngine(t, runtime, hintTools{}, logger, e.telemetry)},
 		e.store, deliverer, logger, e.telemetry,
 	)
 	if err != nil {

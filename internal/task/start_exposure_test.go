@@ -18,6 +18,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/task"
 	"github.com/vladar107/home-ai-assistant/internal/testutil"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
+	"github.com/vladar107/home-ai-assistant/internal/turn"
 )
 
 type fixedExposure bool
@@ -65,12 +66,10 @@ func newTaskFixture(t *testing.T, exposed bool) *taskFixture {
 		t.Fatal(err)
 	}
 	fixture := &taskFixture{store: store, proposer: &recordingProposer{}, requestID: requestID}
-	service, err := task.NewService(task.Config{}, store, store, statusMessenger{}, struct{ conversation.Deliverer }{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	service, err := task.NewService(task.Config{Runner: noRunner{}, Proposer: fixture.proposer, Exposure: fixedExposure(exposed)}, store, store, statusMessenger{}, struct{ conversation.Deliverer }{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	service.SetProposer(fixture.proposer)
-	service.SetExposure(fixedExposure(exposed))
 	fixture.service = service
 	fixture.ctx = tools.WithTurn(ctx, outbox.ChatTurn(requestID))
 	return fixture
@@ -154,4 +153,10 @@ func TestTaskConfirmationFailsWhenTheQueueIsFull(t *testing.T) {
 	if !errors.As(err, &actionErr) || actionErr.Reason != "too_many" {
 		t.Fatalf("err = %v", err)
 	}
+}
+
+type noRunner struct{}
+
+func (noRunner) RunTask(context.Context, turn.TaskRun) (turn.TaskReply, error) {
+	return turn.TaskReply{}, errors.New("no model turns in this test")
 }

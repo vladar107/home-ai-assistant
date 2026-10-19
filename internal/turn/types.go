@@ -96,8 +96,6 @@ type Memory interface {
 	Render(ctx context.Context, principalID string) (string, error)
 	// TakeNotes returns, and forgets, the lines the turn's memory writes owe its reply.
 	TakeNotes(principalID, turn string) []string
-	// LearnsFromFeedback reports whether the turn a 👎 starts may propose an instruction.
-	LearnsFromFeedback(ctx context.Context, principalID string) (bool, error)
 }
 
 // SearchChecks decides one web search query of a run. A run with nobody to confirm a search, such

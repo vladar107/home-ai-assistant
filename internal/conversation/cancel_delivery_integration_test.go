@@ -47,7 +47,7 @@ func TestCancelledDeliveryLetsTheNextMessageThroughAtOnce(t *testing.T) {
 	}}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	service, err := conversation.NewService(
-		conversation.Config{TurnTimeout: 10 * time.Second, Engine: testEngine(t, runtime, hintTools{}, logger, env.telemetry)},
+		conversation.Config{Engine: testEngine(t, runtime, hintTools{}, logger, env.telemetry)},
 		env.store, deliverer, logger, env.telemetry,
 	)
 	if err != nil {

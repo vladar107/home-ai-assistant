@@ -45,7 +45,8 @@ func (e *engine) createFlagged(principalID, id string) {
 func TestFlaggedWatchIsNeitherCheckedNorDeliveredDuringATrip(t *testing.T) {
 	e := newEngine(t)
 	travel := &fakeTravel{}
-	e.service.SetTravel(travel)
+	e.travel = travel
+	e.service = e.newService()
 	e.createFlagged("alice", watchID)
 	e.create("alice", "0000000000000002", departureSpec())
 
@@ -237,7 +238,8 @@ func TestWatchFlagToggledAfterAProposalSurvivesConfirmAndUndo(t *testing.T) {
 func TestTravelLookupIsAskedOncePerPrincipalInACycle(t *testing.T) {
 	e := newEngine(t)
 	counting := &countingTravel{}
-	e.service.SetTravel(counting)
+	e.travel = counting
+	e.service = e.newService()
 	e.createFlagged("alice", watchID)
 	e.createFlagged("alice", "0000000000000002")
 	e.at("2026-09-28 06:15")

@@ -38,6 +38,12 @@ type Engine struct {
 	slots map[Lane]chan struct{}
 }
 
+// TurnTimeout is how long a turn may run.
+func (e *Engine) TurnTimeout() time.Duration { return e.config.TurnTimeout }
+
+// Location is the household's time zone, nil when turns carry no time line.
+func (e *Engine) Location() *time.Location { return e.config.Location }
+
 func New(config Config, runtime agentruntime.AgentRuntime, gate ConnectionGate, toolProvider ToolProvider, logger *slog.Logger, telemetry Telemetry) (*Engine, error) {
 	if config.TurnTimeout <= 0 {
 		return nil, fmt.Errorf("turn timeout must be positive")
@@ -71,26 +77,13 @@ func New(config Config, runtime agentruntime.AgentRuntime, gate ConnectionGate, 
 	}, nil
 }
 
-// Scope is which of a principal's tools a turn may use.
-type Scope int
-
-const (
-	// Chat is every tool, for a turn a user is waiting on.
-	Chat Scope = iota
-	// ReadOnly is the read tools only, for a turn nobody is watching.
-	ReadOnly
-)
-
 // Ready reports whether the principal's own model connection is usable.
 func (e *Engine) Ready(ctx context.Context, principalID string) (bool, error) {
 	return e.gate.Ready(ctx, principalID)
 }
 
-// Tools returns the tools the principal may use in a turn of the scope.
-func (e *Engine) Tools(ctx context.Context, principalID string, scope Scope) (agentruntime.ToolSet, error) {
-	if scope == ReadOnly {
-		return e.tools.ReadOnlyToolsFor(ctx, principalID)
-	}
+// Tools returns every tool the principal may use in a chat turn.
+func (e *Engine) Tools(ctx context.Context, principalID string) (agentruntime.ToolSet, error) {
 	return e.tools.ToolsFor(ctx, principalID)
 }
 
@@ -100,14 +93,12 @@ type Switches struct {
 	Memory    string
 }
 
-// Switches reads the web search switch, unless web is false, and then the principal's memory. An
-// error fails the turn instead of guessing either way.
-func (e *Engine) Switches(ctx context.Context, principalID string, web bool) (Switches, error) {
+// Switches reads the web search switch and then the principal's memory. An error fails the turn
+// instead of guessing either way.
+func (e *Engine) Switches(ctx context.Context, principalID string) (Switches, error) {
 	var switches Switches
 	var err error
-	if web {
-		switches.WebSearch, err = e.webSearchEnabled(ctx, principalID)
-	}
+	switches.WebSearch, err = e.webSearchEnabled(ctx, principalID)
 	if err == nil {
 		switches.Memory, err = e.memoryText(ctx, principalID)
 	}
@@ -150,7 +141,8 @@ func (e *Engine) Compose(ctx context.Context, principalID string, parts Parts) s
 	return strings.TrimRight(message, "\n") + "\n\n" + parts.Attachments
 }
 
-// Run is one model run set up by the caller.
+// Run is one model run of a chat turn, set up by the caller. A user is there to confirm a web
+// search, and the principal's scheduled jobs are part of the system prompt.
 type Run struct {
 	PrincipalID string
 	SessionID   string
@@ -162,11 +154,7 @@ type Run struct {
 	Memory  string
 	// WebSearch offers the runtime's own web search.
 	WebSearch bool
-	// Jobs adds the principal's scheduled jobs to the system prompt.
-	Jobs bool
-	// Interactive means a user can confirm a web search.
-	Interactive bool
-	Kind        agentruntime.RunKind
+	Kind      agentruntime.RunKind
 	// Model and Effort are the pair the run uses; both empty leaves the runtime's default.
 	Model  string
 	Effort string
@@ -199,13 +187,11 @@ func (e *Engine) Run(ctx context.Context, run Run) (Result, error) {
 		Tools:       run.Tools,
 		Memory:      run.Memory,
 		WebSearch:   run.WebSearch,
-		SearchCheck: e.searchCheck(run.PrincipalID, run.WebSearch, run.Interactive),
+		SearchCheck: e.searchCheck(run.PrincipalID, run.WebSearch, true),
+		Jobs:        e.jobsText(ctx, run.PrincipalID),
 		Kind:        run.Kind,
 		Model:       run.Model,
 		Effort:      run.Effort,
-	}
-	if run.Jobs {
-		request.Jobs = e.jobsText(ctx, run.PrincipalID)
 	}
 	result, err := e.runtime.Run(ctx, request, sink)
 	calls, called := counting.snapshot()

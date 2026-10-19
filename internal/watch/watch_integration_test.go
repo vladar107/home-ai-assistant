@@ -189,6 +189,9 @@ func (b *lockedBuffer) String() string {
 }
 
 type engine struct {
+	// travel and rewriter are given to every service newService builds; nil leaves them out.
+	travel    watch.Travel
+	rewriter  watch.Rewriter
 	t         *testing.T
 	ctx       context.Context
 	path      string
@@ -229,7 +232,7 @@ func newEngine(t *testing.T) *engine {
 // newService builds a service on the same store, as a restarted process does.
 func (e *engine) newService() *watch.Service {
 	e.t.Helper()
-	service, err := watch.NewService(watch.Config{Zone: "Europe/Amsterdam", Now: e.clock.Now}, e.store, e.store, e.sender, nil, slog.New(slog.NewTextHandler(e.logs, nil)))
+	service, err := watch.NewService(watch.Config{Zone: "Europe/Amsterdam", Now: e.clock.Now, Travel: e.travel, Rewriter: e.rewriter}, e.store, e.store, e.sender, nil, slog.New(slog.NewTextHandler(e.logs, nil)))
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -610,7 +613,8 @@ func byWatch(sent []sentAlert) map[string]string {
 func TestWatchSendsMessagesInItsLanguageAndFallsBackToEnglish(t *testing.T) {
 	e := newEngine(t)
 	rewriter := &fakeRewriter{}
-	e.service.SetRewriter(rewriter)
+	e.rewriter = rewriter
+	e.service = e.newService()
 	russian := departureSpec()
 	russian.Language = "Russian"
 	e.create("alice", watchID, russian)

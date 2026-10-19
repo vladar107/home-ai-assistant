@@ -83,7 +83,6 @@ func newMetricsEnv(t *testing.T) *metricsEnv {
 
 func (e *metricsEnv) service(t *testing.T, runtime agentruntime.AgentRuntime, config conversation.Config) *conversation.Service {
 	t.Helper()
-	config.TurnTimeout = 10 * time.Second
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	e.engine = testEngine(t, runtime, hintTools{names: []string{"nas_search", "gmail_search"}}, logger, e.telemetry)
 	config.Engine = e.engine

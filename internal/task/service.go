@@ -70,6 +70,8 @@ type Runner interface {
 }
 
 type Config struct {
+	// Runner runs a task's model turns; it is required.
+	Runner Runner
 	// Timeout caps a task's wall time from its first start; restarts do not extend it.
 	Timeout time.Duration
 	// Grace is how long a task that reached a limit has to write what it has.
@@ -142,6 +144,9 @@ func NewService(cfg Config, repository Repository, chats Chats, messenger Messen
 	if logger == nil {
 		return nil, fmt.Errorf("task logger is required")
 	}
+	if cfg.Runner == nil {
+		return nil, fmt.Errorf("task runner is required")
+	}
 	if (cfg.Cards == nil) != (cfg.Photos == nil) {
 		return nil, fmt.Errorf("task cards and photos must be configured together")
 	}
@@ -167,47 +172,22 @@ func NewService(cfg Config, repository Repository, chats Chats, messenger Messen
 		messenger:  messenger,
 		deliverer:  deliverer,
 		logger:     logger,
+		runner:     cfg.Runner,
 		telemetry:  noTelemetry{},
 		proposer:   cfg.Proposer,
 		exposure:   cfg.Exposure,
 		workers:    make(map[string]chan struct{}),
 		running:    make(map[string]context.CancelCauseFunc),
 	}
-	service.SetTelemetry(cfg.Telemetry)
-	return service, nil
-}
-
-// SetRunner sets what runs a task's model turns, at wiring time before Start; the conversation
-// service is built after this one because its turns read this one's notices.
-func (s *Service) SetRunner(runner Runner) {
-	s.runner = runner
-}
-
-// SetProposer sets who records task proposals, at wiring time; without it a task started after
-// outside content was read is refused.
-func (s *Service) SetProposer(proposer Proposer) {
-	s.proposer = proposer
-}
-
-// SetExposure sets the check that makes task_start wait for confirmation once the conversation
-// has read outside content, at wiring time; without it tasks always start at once.
-func (s *Service) SetExposure(exposure ExposureChecker) {
-	s.exposure = exposure
-}
-
-// SetTelemetry sets where task runs are measured, at wiring time before Start.
-func (s *Service) SetTelemetry(telemetry Telemetry) {
-	if telemetry != nil {
-		s.telemetry = telemetry
+	if cfg.Telemetry != nil {
+		service.telemetry = cfg.Telemetry
 	}
+	return service, nil
 }
 
 // Start fails what was interrupted too often, then resumes every principal's open work: reports
 // still to deliver, interrupted runs, and queued tasks.
 func (s *Service) Start(ctx context.Context) error {
-	if s.runner == nil {
-		return fmt.Errorf("task runner is required")
-	}
 	s.mu.Lock()
 	if s.ctx != nil {
 		s.mu.Unlock()

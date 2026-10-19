@@ -533,8 +533,7 @@ type Memory interface {
 
 type Config struct {
 	// Engine runs the model turns; the coordinator owns the lanes around them.
-	Engine      *turn.Engine
-	TurnTimeout time.Duration
+	Engine *turn.Engine
 	// ChatModel is the model and effort a chat turn runs on when its lane has no choice of its own.
 	ChatModel agentruntime.ModelEffort
 	// TaskModel is the task default; with ChatModel it is what a choice may name while the
@@ -560,14 +559,11 @@ type Config struct {
 	Photos PhotoDeliverer
 	// Memory decides whether a reconsider turn may propose a lesson; nil leaves that step out.
 	Memory Memory
-	// Exposure records a turn that searched the web or carried an outside notice as having read
-	// text from outside the household; nil records nothing.
+	// Exposure records a turn that carried an outside notice, a forwarded message, or a file as
+	// having read text from outside the household, and answers what a conversation has read; nil
+	// records nothing. The engine marks a turn's web searches itself.
 	Exposure Exposure
-	// Location is the household's time zone; each chat turn then tells the model the current
-	// local time. Nil leaves the time out.
-	Location *time.Location
-	// Now is the clock that time is read from, including a turn's elapsed time on its draft; nil
-	// means time.Now.
+	// Now is the clock a turn's elapsed time on its draft is read from; nil means time.Now.
 	Now func() time.Time
 	// TypingInterval is how often typing is resent while a chat turn waits or runs; zero means 4s.
 	TypingInterval time.Duration

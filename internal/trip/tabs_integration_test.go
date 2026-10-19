@@ -36,9 +36,8 @@ func (r *recordingTabs) take() []string {
 // A check-in reminder is delivered to its trip, and an edit through the scheduler, as
 // schedule_update makes one, keeps that.
 func TestCheckInRemindersGoToTheirTripAndKeepItWhenEdited(t *testing.T) {
-	f := newFixture(t)
 	tabs := &recordingTabs{}
-	f.trips.SetTabs(tabs)
+	f := newFixtureWithTabs(t, tabs)
 	planned := f.add(draft(3, 6, booking(trip.KindFlight, "Flight to Example City", "ABC123", days(3), days(2))))
 	if changed := tabs.take(); !slices.Equal(changed, []string{planned.ID + " planned"}) {
 		t.Fatalf("tabs heard of %v, want the new trip", changed)
@@ -79,9 +78,8 @@ func TestCheckInRemindersGoToTheirTripAndKeepItWhenEdited(t *testing.T) {
 // the user deleted stays deleted, and one whose check-in has just opened, which may still be
 // firing, is left as it is. Running it again changes nothing. Each such trip is handed to the tabs.
 func TestSettleOnlyGivesExistingRemindersTheirTrip(t *testing.T) {
-	f := newFixture(t)
 	tabs := &recordingTabs{}
-	f.trips.SetTabs(tabs)
+	f := newFixtureWithTabs(t, tabs)
 	planned := f.add(draft(1, 4,
 		booking(trip.KindFlight, "Flight to Example City", "ABC123", days(1), start.Add(time.Hour)),
 		booking(trip.KindHotel, "Example Hotel", "H-77", days(1), days(1).Add(-time.Hour)),
@@ -160,9 +158,8 @@ func (b *blockingTabs) TripChanged(context.Context, trip.Trip) {
 // The tabs hear of a write after the trip service let go of its lock, so a slow Telegram holding
 // up one trip's tab never holds up another write.
 func TestTripWritesDoNotWaitForTheTabs(t *testing.T) {
-	f := newFixture(t)
 	tabs := &blockingTabs{entered: make(chan struct{}), release: make(chan struct{})}
-	f.trips.SetTabs(tabs)
+	f := newFixtureWithTabs(t, tabs)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)

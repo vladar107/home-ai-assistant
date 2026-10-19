@@ -101,6 +101,9 @@ type Config struct {
 	Travel Travel
 	// Telemetry records watch metrics.
 	Telemetry Telemetry
+	// Rewriter lets watches with a language send their messages in it; without one they go out in
+	// English.
+	Rewriter Rewriter
 	// Feeds are the tabs that alerts are delivered to while the bot has tabs on; without them every
 	// alert goes to the main view.
 	Feeds thread.Feeds
@@ -187,6 +190,7 @@ func NewService(cfg Config, repository Repository, chats Chats, sender Sender, p
 		sender:     sender,
 		proposer:   proposer,
 		travel:     cfg.Travel,
+		rewriter:   cfg.Rewriter,
 		feeds:      cfg.Feeds,
 		telemetry:  cfg.Telemetry,
 		logger:     logger,
@@ -214,21 +218,9 @@ func (s *Service) Register(kind string, evaluator Evaluator) error {
 	return nil
 }
 
-// SetRewriter lets watches with a language send their messages in it, at wiring time before the
-// service starts; without one they go out in English.
-func (s *Service) SetRewriter(rewriter Rewriter) {
-	s.rewriter = rewriter
-}
-
 // Travel reports whether a principal is on a trip at an instant.
 type Travel interface {
 	Traveling(ctx context.Context, principalID string, at time.Time) (bool, error)
-}
-
-// SetTravel sets the trip lookup that watches flagged to pause while traveling consult, at wiring
-// time; without it nobody is ever traveling.
-func (s *Service) SetTravel(travel Travel) {
-	s.travel = travel
 }
 
 // travelingAt reports whether the watch's owner is on a trip at the instant, asking once per

@@ -22,6 +22,7 @@ func testTasks() *task.Config {
 
 func (h *conversationHarness) newTaskService(cfg task.Config) *task.Service {
 	h.t.Helper()
+	cfg.Runner = h.engine
 	service, err := task.NewService(cfg, h.store, h.store, TaskMessenger{Client: h.client}, h.client, slog.New(slog.NewTextHandler(h.logs, nil)))
 	if err != nil {
 		h.t.Fatal(err)
@@ -39,7 +40,6 @@ func (h *conversationHarness) restartTasks(cfg task.Config) {
 		h.t.Fatal(err)
 	}
 	h.tasks = h.newTaskService(cfg)
-	h.tasks.SetRunner(h.engine)
 	if err := h.tasks.Start(h.ctx); err != nil {
 		h.t.Fatal(err)
 	}

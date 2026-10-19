@@ -110,11 +110,11 @@ func newModelEnv(t *testing.T) *modelEnv {
 
 func (e *modelEnv) service(t *testing.T, config task.Config, runner task.Runner) *task.Service {
 	t.Helper()
+	config.Runner = runner
 	service, err := task.NewService(config, e.store, e.store, statusMessenger{}, sinkDeliverer{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	service.SetRunner(runner)
 	return service
 }
 

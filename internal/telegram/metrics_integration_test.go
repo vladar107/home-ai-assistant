@@ -100,9 +100,8 @@ func TestScheduledRunRecordsItsOutcomeAndReplyTime(t *testing.T) {
 	telemetry, reader := newMetricsTelemetry(t)
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, telemetry: telemetry})
 	h.provision("alice", "account-alice")
-	h.scheduler.SetTelemetry(telemetry)
 	h.start()
 
 	job := h.createJob("alice", "0123456789abcdef", "Weekly tasks", "0 9 * * 1", "List my overdue Notion tasks.")

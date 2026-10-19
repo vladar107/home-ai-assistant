@@ -166,6 +166,8 @@ func (b *lockedBuffer) String() string {
 // Everything production always runs, such as memory, the backlog, trips, routes, and reactions,
 // runs in every test, and so does the conversation history with a runtime that keeps session files.
 type harnessOptions struct {
+	// telemetry replaces the services' no-op telemetry, for tests that read their metrics; nil records nothing.
+	telemetry *observability.Telemetry
 	// chatGPT is the backend for voice transcription and pictures; nil gives an idle one.
 	chatGPT             *chatgptsim.Simulator
 	profilesDir         string
@@ -459,7 +461,7 @@ func (h *conversationHarness) wiringInputs(t *testing.T, runtime agentruntime.Ag
 		zone = options.location.String()
 	}
 	in := wiring.Inputs{
-		Store: h.store, Logger: logger, Telemetry: &integrationTelemetry{Telemetry: observability.Noop(), h: h},
+		Store: h.store, Logger: logger, Telemetry: &integrationTelemetry{Telemetry: cmp.Or(options.telemetry, observability.Noop()), h: h},
 		Runtime: runtime, SessionFiles: sessionFiles,
 		Chat: h.client, Reminders: ReminderSender{Client: h.client}, Alerts: WatchAlertSender{Client: h.client},
 		TaskMessages: TaskMessenger{Client: h.client}, Tabs: func(namer *turn.Engine, trips trip.Reader) wiring.TabServices { return h.newTabs(logger, namer, trips) },

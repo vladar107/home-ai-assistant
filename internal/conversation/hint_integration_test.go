@@ -166,7 +166,7 @@ func newHintEnv(t *testing.T, answer string, delay time.Duration, tools []string
 	if err != nil {
 		t.Fatal(err)
 	}
-	config := conversation.Config{TurnTimeout: 10 * time.Second, Attachments: attachments, ToolHint: judgment.NewToolHinter(client, staticOptIn(optIn))}
+	config := conversation.Config{Attachments: attachments, ToolHint: judgment.NewToolHinter(client, staticOptIn(optIn))}
 	if reply != "" {
 		exposures, err := exposure.NewService(store, logger)
 		if err != nil {

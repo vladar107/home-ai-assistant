@@ -34,6 +34,9 @@ const (
 type Config struct {
 	// Now is the clock; nil means time.Now.
 	Now func() time.Time
+	// Tabs gives each planned trip its own tab with a pinned summary; without it trips have no
+	// tabs.
+	Tabs Tabs
 }
 
 type Service struct {
@@ -62,16 +65,10 @@ func NewService(cfg Config, repository Repository, reminders Reminders, logger *
 	if now == nil {
 		now = time.Now
 	}
-	return &Service{repository: repository, reminders: reminders, logger: logger, now: now}, nil
+	return &Service{repository: repository, reminders: reminders, tabs: cfg.Tabs, logger: logger, now: now}, nil
 }
 
 func (s *Service) Now() time.Time { return s.now() }
-
-// SetTabs gives each planned trip its own tab with a pinned summary, at wiring time; without it
-// trips have no tabs.
-func (s *Service) SetTabs(tabs Tabs) {
-	s.tabs = tabs
-}
 
 // changed tells the tabs of a write to the trip.
 func (s *Service) changed(ctx context.Context, trip Trip) {

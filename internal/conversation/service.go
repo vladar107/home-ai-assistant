@@ -95,9 +95,6 @@ func NewService(
 	logger *slog.Logger,
 	telemetry Telemetry,
 ) (*Service, error) {
-	if config.TurnTimeout <= 0 {
-		return nil, fmt.Errorf("conversation turn timeout must be positive")
-	}
 	if repository == nil {
 		return nil, fmt.Errorf("conversation repository is required")
 	}
@@ -539,10 +536,10 @@ func (s *Service) summarize(ctx context.Context, principalID string, record Sess
 }
 
 func (s *Service) local(at time.Time) time.Time {
-	if s.config.Location == nil {
-		return at
+	if location := s.engine.Location(); location != nil {
+		return at.In(location)
 	}
-	return at.In(s.config.Location)
+	return at
 }
 
 func (s *Service) running() bool {
@@ -638,7 +635,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 	if strings.HasPrefix(request.Message, prompt.Reconsider) {
 		s.markReconsider(ctx, run, request)
 	}
-	turnCtx, cancel := context.WithTimeout(tools.WithRun(tools.WithTurn(ctx, outbox.ChatTurn(request.ID)), run), s.config.TurnTimeout)
+	turnCtx, cancel := context.WithTimeout(tools.WithRun(tools.WithTurn(ctx, outbox.ChatTurn(request.ID)), run), s.engine.TurnTimeout())
 	lane := request.Lane()
 	s.mu.Lock()
 	s.inflight[lane] = cancel
@@ -695,11 +692,11 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		s.drafts[lane] = &runningDraft{id: draft, cancel: cancel}
 		s.mu.Unlock()
 		activity = s.startActivity(turnCtx, request.PrincipalID, request.ChatID, draft)
-		tools, runErr = s.engine.Tools(turnCtx, request.PrincipalID, turn.Chat)
+		tools, runErr = s.engine.Tools(turnCtx, request.PrincipalID)
 		var hinted <-chan toolHint
 		if runErr == nil {
 			hinted = s.startToolHint(turnCtx, request, tools)
-			switches, runErr = s.engine.Switches(turnCtx, request.PrincipalID, true)
+			switches, runErr = s.engine.Switches(turnCtx, request.PrincipalID)
 		}
 		if runErr != nil {
 			errorKind = ErrorKindToolProvider
@@ -755,8 +752,6 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 			Tools:       tools,
 			Memory:      switches.Memory,
 			WebSearch:   switches.WebSearch,
-			Jobs:        true,
-			Interactive: true,
 			Kind:        agentruntime.RunChat,
 			Model:       choice.Model,
 			Effort:      choice.Effort,

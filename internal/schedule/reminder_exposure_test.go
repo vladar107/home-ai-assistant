@@ -52,7 +52,7 @@ func newReminderFixture(t *testing.T, exposed bool) *reminderFixture {
 	}
 	fixture := &reminderFixture{store: store, proposer: &recordingProposer{}, now: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)}
 	service, err := schedule.NewService(
-		schedule.Config{Zone: "Europe/Amsterdam", Now: func() time.Time { return fixture.now }},
+		schedule.Config{Zone: "Europe/Amsterdam", Now: func() time.Time { return fixture.now }, Exposure: fixedExposure(exposed)},
 		store, store, struct{ conversation.Deliverer }{}, fixture.proposer, slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
 	if err != nil {
@@ -61,7 +61,6 @@ func newReminderFixture(t *testing.T, exposed bool) *reminderFixture {
 	if err := service.Register(schedule.Reminder(func() time.Time { return fixture.now })); err != nil {
 		t.Fatal(err)
 	}
-	service.SetExposure(fixedExposure(exposed))
 	fixture.service = service
 	return fixture
 }
