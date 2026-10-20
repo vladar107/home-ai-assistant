@@ -102,6 +102,7 @@ func TestUnattendedTurns(t *testing.T) {
 	checkGolden(t, "scheduled-job", ScheduledJob(`Morning "summary"`, slot, zone, "Summarise today's calendar."))
 	checkGolden(t, "scheduled-scan", ScheduledScan("Trip scan", slot, zone, "Search the mail for bookings."))
 	checkGolden(t, "watch-check", WatchCheck("Price", slot, time.UTC, "Check: the page.\nTell the user when: below 10."))
+	checkGolden(t, "weekly-review", WeeklyReview(slot, zone, "Replies the user marked 👎: none."))
 	checkGolden(t, "background-task", BackgroundTask(`Read "mail"`, 100, "1h", "Go through last week's mail."))
 	checkGolden(t, "background-task-limit", BackgroundTaskLimit("time limit"))
 	checkGolden(t, "background-task-resume", BackgroundTaskResume)

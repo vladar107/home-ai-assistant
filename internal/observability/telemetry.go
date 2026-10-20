@@ -82,6 +82,8 @@ type Telemetry struct {
 	memoryWrites                 metric.Int64Counter
 	memoryLessons                metric.Int64Counter
 	memoryProcedureReads         metric.Int64Counter
+	memoryReviews                metric.Int64Counter
+	memoryReviewChanges          metric.Int64Counter
 	conversationResumes          metric.Int64Counter
 	conversationSearches         metric.Int64Counter
 	turnIndicatorFailures        metric.Int64Counter
@@ -414,10 +416,16 @@ func (t *Telemetry) createBusinessInstruments(meter metric.Meter) error {
 	if t.memoryWrites, err = counter("home_agent.memory.writes", "Memory writes by kind and outcome.", "{write}"); err != nil {
 		return err
 	}
-	if t.memoryLessons, err = counter("home_agent.memory.lessons", "Instructions learned from a negative reaction, by outcome.", "{lesson}"); err != nil {
+	if t.memoryLessons, err = counter("home_agent.memory.lessons", "Lessons proposed and written, by mechanism and outcome.", "{lesson}"); err != nil {
 		return err
 	}
 	if t.memoryProcedureReads, err = counter("home_agent.memory.procedure_reads", "Kept procedures the model read.", "{read}"); err != nil {
+		return err
+	}
+	if t.memoryReviews, err = counter("home_agent.memory.reviews", "Weekly reviews run, by outcome.", "{review}"); err != nil {
+		return err
+	}
+	if t.memoryReviewChanges, err = counter("home_agent.memory.review_changes", "Proposals the weekly reviews sent.", "{proposal}"); err != nil {
 		return err
 	}
 	if t.conversationResumes, err = counter("home_agent.conversation.resumes", "Returns to an earlier conversation, by trigger.", "{resume}"); err != nil {
@@ -668,10 +676,11 @@ func (t *Telemetry) StartToolCall(ctx context.Context, principal, tool string) (
 
 // ZeroRareOutcomes creates each principal's rare failure series, its series for each reaction the
 // bot may set, and its series for each class of a user's reaction, each reconsider outcome, each
-// reply conversion outcome, each lesson outcome, and each tab outcome, at zero, so increase() sees
-// their first occurrence. The label tuples must match the ones StartConversationTurn,
-// StartModelCall, RecordReaction, RecordReplyFeedback, RecordReconsider, RecordReactionConversion,
-// RecordMemoryLesson, and RecordTab record.
+// reply conversion outcome, each lesson mechanism and outcome, each weekly review outcome, and each
+// tab outcome, at zero, so increase() sees their first occurrence. The label tuples must match the
+// ones StartConversationTurn, StartModelCall, RecordReaction, RecordReplyFeedback,
+// RecordReconsider, RecordReactionConversion, RecordMemoryLesson, RecordMemoryReview, and RecordTab
+// record.
 func (t *Telemetry) ZeroRareOutcomes(ctx context.Context, principals, turnErrorKinds, reactions, feedbackClasses []string) {
 	for _, principal := range principals {
 		for _, errorKind := range turnErrorKinds {
@@ -705,9 +714,16 @@ func (t *Telemetry) ZeroRareOutcomes(ctx context.Context, principals, turnErrorK
 		for _, outcome := range []string{"reacted", "dropped"} {
 			t.reactionConversions.Add(ctx, 0, metric.WithAttributes(principalAttr(principal), labelAttr("home_agent.outcome", outcome, "unknown")))
 		}
-		for _, outcome := range []string{"proposed", "written"} {
-			t.memoryLessons.Add(ctx, 0, metric.WithAttributes(principalAttr(principal), labelAttr("home_agent.outcome", outcome, "unknown")))
+		for _, mechanism := range []string{"feedback", "procedure", "review"} {
+			for _, outcome := range []string{"proposed", "written"} {
+				t.memoryLessons.Add(ctx, 0, metric.WithAttributes(principalAttr(principal),
+					labelAttr("home_agent.mechanism", mechanism, "unknown"), labelAttr("home_agent.outcome", outcome, "unknown")))
+			}
 		}
+		for _, outcome := range []string{"sent", "nothing", "skipped", "failed"} {
+			t.memoryReviews.Add(ctx, 0, metric.WithAttributes(principalAttr(principal), labelAttr("home_agent.outcome", outcome, "unknown")))
+		}
+		t.memoryReviewChanges.Add(ctx, 0, metric.WithAttributes(principalAttr(principal)))
 		for _, outcome := range TabOutcomes() {
 			t.telegramTabs.Add(ctx, 0, metric.WithAttributes(principalAttr(principal), labelAttr("home_agent.outcome", outcome, "unknown")))
 		}
@@ -894,12 +910,23 @@ func (t *Telemetry) RecordMemoryWrite(ctx context.Context, principal, kind, outc
 	))
 }
 
-// RecordMemoryLesson counts an instruction learned from a negative reaction: "proposed" or "written".
-func (t *Telemetry) RecordMemoryLesson(ctx context.Context, principal, outcome string) {
+// RecordMemoryLesson counts a lesson, "proposed" or "written", by the mechanism it came from:
+// "feedback" for the turn a 👎 started, "procedure" for a chat turn's procedure, and "review" for the
+// weekly review.
+func (t *Telemetry) RecordMemoryLesson(ctx context.Context, principal, mechanism, outcome string) {
 	t.memoryLessons.Add(ctx, 1, metric.WithAttributes(
 		principalAttr(principal),
+		labelAttr("home_agent.mechanism", mechanism, "unknown"),
 		labelAttr("home_agent.outcome", outcome, "unknown"),
 	))
+}
+
+// RecordMemoryReview counts a weekly review by outcome and adds the proposals it sent.
+func (t *Telemetry) RecordMemoryReview(ctx context.Context, principal, outcome string, changes int) {
+	t.memoryReviews.Add(ctx, 1, metric.WithAttributes(principalAttr(principal), labelAttr("home_agent.outcome", outcome, "unknown")))
+	if changes > 0 {
+		t.memoryReviewChanges.Add(ctx, int64(changes), metric.WithAttributes(principalAttr(principal)))
+	}
 }
 
 // RecordProcedureRead counts a procedure the model read with procedure_read.

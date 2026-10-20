@@ -2,12 +2,14 @@ package telegram
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
 
 	"github.com/vladar107/home-ai-assistant/internal/memory"
+	"github.com/vladar107/home-ai-assistant/internal/schedule"
 )
 
 const (
@@ -20,10 +22,17 @@ const (
 	MemoryOffLine      = "Memory: off. I do not use or add to what I remembered; the saved entries are kept until you delete them in /memory."
 	MemoryLearnOnLine  = "Learn from 👎: on (the default). When you mark a reply 👎 and the mistake would recur, I may propose an instruction to avoid it; it is kept only if you confirm."
 	MemoryLearnOffLine = "Learn from 👎: off. A 👎 only makes me look at that reply again."
-	MemoryPrivacyLine  = "Memory, including the procedures you kept, is kept until you delete it in /memory and goes to your model with every request while it is on; a procedure's steps go only when I read it."
+	MemoryPrivacyLine  = "Memory, including the procedures you kept, is kept until you delete it in /memory and goes to your model with every request while it is on; a procedure's steps go only when I read it. " +
+		"For the weekly review I count each day how often each tool's calls succeeded or failed, never what they were asked or answered, and delete the counts after 30 days."
 
 	MemoryProceduresOnLine  = "Learn procedures: on (the default). After a request that took several steps, I may offer to keep how it was done as a procedure, which I read before similar requests; it is kept only if you confirm."
 	MemoryProceduresOffLine = "Learn procedures: off. I offer no new procedures; the ones you kept are still used until you delete them in /memory."
+
+	MemoryReviewOnLine      = "Weekly review: on. Every Sunday at 18:00 I look back at the week: the replies you marked 👎, the tools that failed, and your instructions and procedures. I offer at most three changes and two backlog items as cards; nothing changes unless you confirm. Press Review now to look at once. Uses your model subscription."
+	MemoryReviewOffLine     = "Weekly review: off (the default). Turn it on and every Sunday evening I look back at the week and offer what is worth learning, at most three changes and two backlog items, as cards; nothing changes unless you confirm. Uses your model subscription."
+	MemoryReviewingNote     = "Reviewing the past week now; anything worth learning arrives as cards."
+	MemoryReviewBusyNote    = "A review is already running; anything worth learning arrives as cards."
+	MemoryReviewTooManyNote = "You already have the maximum number of scheduled jobs. Remove one in /jobs, then turn the weekly review on."
 
 	memorySectionPrefix = "memory"
 	memoryOnAction      = "on"
@@ -32,6 +41,9 @@ const (
 	learnOffAction      = "learn_off"
 	proceduresOnAction  = "procedures_on"
 	proceduresOffAction = "procedures_off"
+	reviewOnAction      = "review_on"
+	reviewOffAction     = "review_off"
+	reviewNowAction     = "review_now"
 
 	learnedMarker     = " (learned)"
 	proceduresHeading = "Procedures"
@@ -66,14 +78,15 @@ type MemoryController interface {
 	SetLearnProcedures(context.Context, string, bool) error
 }
 
-// NewMemorySection is the page that turns the principal's memory, learning from 👎, and learning
-// procedures on and off.
-func NewMemorySection(memory MemoryController, logger *slog.Logger, telemetry Telemetry) Section {
-	return memorySection{memory: memory, logger: logger, telemetry: telemetryOrNoop(telemetry)}
+// NewMemorySection is the page that turns the principal's memory, learning from 👎, learning
+// procedures, and the weekly review on and off.
+func NewMemorySection(memory MemoryController, schedules ScheduleController, logger *slog.Logger, telemetry Telemetry) Section {
+	return memorySection{memory: memory, schedules: schedules, logger: logger, telemetry: telemetryOrNoop(telemetry)}
 }
 
 type memorySection struct {
 	memory    MemoryController
+	schedules ScheduleController
 	logger    *slog.Logger
 	telemetry Telemetry
 }
@@ -123,6 +136,20 @@ func (m memorySection) render(ctx context.Context, principalID string) (settings
 			view.lines = append(view.lines, MemoryProceduresOffLine)
 			view.rows = [][]InlineButton{{{Text: "Learn procedures", CallbackData: memorySectionPrefix + ":" + proceduresOnAction}}}
 		}
+		review, err := m.reviewing(ctx, principalID)
+		if err != nil {
+			return settingsView{}, err
+		}
+		if review {
+			view.lines = append(view.lines, MemoryReviewOnLine)
+			view.rows = append(view.rows, []InlineButton{
+				{Text: "Review now", CallbackData: memorySectionPrefix + ":" + reviewNowAction},
+				{Text: "Turn off weekly review", CallbackData: memorySectionPrefix + ":" + reviewOffAction},
+			})
+		} else {
+			view.lines = append(view.lines, MemoryReviewOffLine)
+			view.rows = append(view.rows, []InlineButton{{Text: "Turn on weekly review", CallbackData: memorySectionPrefix + ":" + reviewOnAction}})
+		}
 		return view, nil
 	}
 	return settingsView{
@@ -154,8 +181,100 @@ func (m memorySection) act(ctx context.Context, principalID string, _ int64, act
 		}
 		m.telemetry.ContextLogger(ctx, m.logger).InfoContext(ctx, "memory.procedures.changed", "principal_id", principalID, "learn", learn)
 		return settingsOutcome{}, nil
+	case reviewOnAction, reviewOffAction, reviewNowAction:
+		// The review needs memory on, so its buttons do nothing while memory is off.
+		enabled, err := m.memory.Enabled(ctx, principalID)
+		if err != nil || !enabled {
+			return settingsOutcome{}, err
+		}
+		return m.actOnReview(ctx, principalID, action)
 	default:
 		return settingsOutcome{}, errUnknownSettingsAction
+	}
+}
+
+// reviewing reports whether the principal's weekly review job exists and is enabled.
+func (m memorySection) reviewing(ctx context.Context, principalID string) (bool, error) {
+	jobs, err := m.schedules.Jobs(ctx, principalID)
+	if err != nil {
+		return false, err
+	}
+	id := schedule.ReviewJobID(principalID)
+	for _, job := range jobs {
+		if job.ID == id {
+			return job.Enabled, nil
+		}
+	}
+	return false, nil
+}
+
+// actOnReview creates or resumes the principal's weekly review job, deletes it, or queues one run of
+// it. Turning it on runs nothing at once; Review now does.
+func (m memorySection) actOnReview(ctx context.Context, principalID, action string) (settingsOutcome, error) {
+	id := schedule.ReviewJobID(principalID)
+	logger := m.telemetry.ContextLogger(ctx, m.logger)
+	switch action {
+	case reviewOnAction:
+		jobs, err := m.schedules.Jobs(ctx, principalID)
+		if err != nil {
+			return settingsOutcome{}, err
+		}
+		for _, job := range jobs {
+			if job.ID != id {
+				continue
+			}
+			if !job.Enabled {
+				if _, err := m.schedules.SetEnabled(ctx, principalID, id, true); err != nil {
+					return settingsOutcome{}, err
+				}
+				logger.InfoContext(ctx, "memory.review.changed", "principal_id", principalID, "enabled", true)
+			}
+			return settingsOutcome{}, nil
+		}
+		prepared, err := m.schedules.Prepare(principalID, schedule.ReviewName, schedule.ReviewType,
+			schedule.Timing{Cron: schedule.ReviewCron, Zone: m.schedules.DefaultZone()}, memory.ReviewConfigJSON())
+		if err != nil {
+			return settingsOutcome{}, err
+		}
+		created, err := m.schedules.Create(ctx, id, prepared)
+		if err != nil {
+			if errors.Is(err, schedule.ErrTooManyJobs) {
+				return settingsOutcome{note: MemoryReviewTooManyNote}, nil
+			}
+			return settingsOutcome{}, err
+		}
+		if created {
+			logger.InfoContext(ctx, "memory.review.changed", "principal_id", principalID, "enabled", true)
+		}
+		return settingsOutcome{}, nil
+	case reviewOffAction:
+		deleted, err := m.schedules.Delete(ctx, principalID, id)
+		if err != nil {
+			return settingsOutcome{}, err
+		}
+		if deleted {
+			logger.InfoContext(ctx, "memory.review.changed", "principal_id", principalID, "enabled", false)
+		}
+		return settingsOutcome{}, nil
+	default:
+		reviewing, err := m.reviewing(ctx, principalID)
+		if err != nil || !reviewing {
+			return settingsOutcome{}, err
+		}
+		// A review already queued or running is left to finish, so two never share the subscription.
+		busy, err := m.schedules.Busy(ctx, principalID, id)
+		if err != nil {
+			return settingsOutcome{}, err
+		}
+		if busy {
+			return settingsOutcome{note: MemoryReviewBusyNote}, nil
+		}
+		queued, err := m.schedules.RunNow(ctx, principalID, id, pressTriggerFrom(ctx))
+		if err != nil || !queued {
+			return settingsOutcome{}, err
+		}
+		logger.InfoContext(ctx, "memory.review.queued", "principal_id", principalID)
+		return settingsOutcome{note: MemoryReviewingNote}, nil
 	}
 }
 

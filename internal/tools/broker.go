@@ -155,6 +155,7 @@ type Broker struct {
 	privacy   TurnPrivacyRecorder
 	screener  Screener
 	telemetry Telemetry
+	outcomes  OutcomeRecorder
 	switches  integration.SwitchReader
 }
 
@@ -210,6 +211,17 @@ type Telemetry interface {
 // SetTelemetry sets where call metrics are recorded, at wiring time before turns start.
 func (b *Broker) SetTelemetry(telemetry Telemetry) {
 	b.telemetry = telemetry
+}
+
+// OutcomeRecorder keeps how each of a principal's calls ended, by tool name, for the weekly review.
+// It never sees a call's arguments or result.
+type OutcomeRecorder interface {
+	RecordToolOutcome(ctx context.Context, principal, tool, outcome string)
+}
+
+// SetOutcomes sets where call outcomes are kept, at wiring time before turns start.
+func (b *Broker) SetOutcomes(recorder OutcomeRecorder) {
+	b.outcomes = recorder
 }
 
 // SetScreener sets who screens results of tools marked Screen, at wiring time before turns start.
@@ -384,6 +396,9 @@ func (e *turnExecutor) Execute(ctx context.Context, call agentruntime.ToolCall) 
 	finishSpan(outcome)
 	if e.broker.telemetry != nil {
 		e.broker.telemetry.RecordToolCall(ctx, e.principalID, tool, outcome, time.Since(started))
+	}
+	if e.broker.outcomes != nil {
+		e.broker.outcomes.RecordToolOutcome(context.WithoutCancel(ctx), e.principalID, tool, outcome)
 	}
 	attrs := []any{
 		"principal_id", e.principalID,

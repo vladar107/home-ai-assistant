@@ -140,9 +140,14 @@ borrowed between users.
   several steps, it may offer to keep how it was done as a procedure, confirmed
   on a card that shows the steps; later turns list only procedure titles, and
   the assistant reads a procedure's steps, in chat and background tasks, when a
-  request matches it. `/memory` lists and deletes entries and procedures,
-  marking learned ones, and `/settings` turns memory, learning from 👎, or
-  learning procedures off.
+  request matches it. With the weekly review turned on in `/settings`, every
+  Sunday evening the assistant looks back at the replies marked 👎, the tools
+  that failed, and the kept instructions and procedures, and offers at most
+  three memory changes, such as merging instructions that overlap, and two
+  backlog items as one card in the Reports tab; a quiet week sends nothing.
+  `/memory` lists and deletes entries and procedures, marking learned ones, and
+  `/settings` turns memory, learning from 👎, learning procedures, or the
+  weekly review on and off.
 - **Backlog.** Ideas for developing the assistant itself ("add to the backlog:
   answer weather questions with a chart") are kept as a per-user backlog that
   never changes how the assistant behaves. `/backlog` marks items done or

@@ -25,7 +25,8 @@ func (s *Service) Withdraw(ctx context.Context, principalID string, items []int,
 		return "", false, err
 	}
 	direct := s.directNote(ctx, principalID)
-	if len(pending) == 0 {
+	// A bundle offered outside a chat turn holds no proposal of the model's to withdraw.
+	if len(pending) == 0 || offered(pending) {
 		if direct != "" {
 			return "No proposal of yours is waiting for the user's confirmation; nothing was withdrawn. " + direct, false, nil
 		}

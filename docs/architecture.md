@@ -371,7 +371,8 @@ is refused as unreadable instead of exhausting the service's memory.
    reply's date when known and not when the conversation read outside
    content, refuse a second one in the same turn, and refuse any while learning is off;
    a confirmed lesson is kept with source `learned`. `home_agent.memory.lessons`
-   counts lessons proposed and written.
+   counts lessons proposed and written by mechanism: `feedback` for these,
+   `procedure` for a chat turn's procedure, and `review` for the weekly review.
 
 ### Earlier conversations
 
@@ -821,8 +822,8 @@ routes after jobs and watches, read-only, with a Delete button each.
   removed instruction puts it back as it was.
   Every write is shown, in the reply or, for a direct instruction, in the
   "Done" message, and `/memory` deletes any entry. Only the
-  turn a 👎 starts writes `learned` entries, one proposal at most, and each still
-  needs Confirm.
+  turn a 👎 starts, one proposal at most, and the weekly review below write
+  `learned` entries, and each still needs Confirm.
   Procedures, how a request that needed several steps was done, are kept apart
   in `memory_procedures`: a title of at most 80 characters, steps of at most
   1,000, and when the model last read them, at most 20 per principal. The
@@ -843,6 +844,34 @@ routes after jobs and watches, read-only, with a Delete button each.
   Turning memory off removes both tools and the titles.
   `home_agent.memory.writes` counts procedure writes under kind `procedure`,
   and `home_agent.memory.procedure_reads` counts reads.
+  The weekly review is a built-in job of type `memory.review`, one per
+  principal with a fixed id, Sunday 18:00 in the job's zone, which the user
+  turns on and runs at once from the Memory page of `/settings`; it does
+  nothing while memory is off. Code gathers its inputs: each 👎 reply of the
+  past 7 days, at most the 20 newest, read with the user's message before it
+  from the Pi session file by the reply's session and send time (a reply that
+  file does not show is left out), the past 7 days of `tool_outcome_counts`,
+  which the broker's outcome hook fills through a background writer with one
+  count per call by UTC day, tool, and outcome, pruned after 30 days, the
+  instructions and procedures, and how lessons proposed in the past
+  30 days ended. A week with no 👎, no failed call, fewer than two instructions,
+  and no procedure asks no model. Otherwise one turn with no tools, memory, or
+  web search runs on the chat default model and answers in JSON with up to
+  three changes (add, replace, merge, or remove an instruction, save or remove
+  a procedure) and two backlog items. Code checks each change against memory as
+  the earlier ones leave it (ids exist, caps hold, no duplicates, no entry
+  touched twice) and drops the rest. The replies can quote outside content, so
+  each change carries a fixed warning when any 👎 reply the review read came
+  from a conversation that had read third-party content. The model's reasons and
+  the backlog items are screened, and a flagged one warns on its card; the
+  instruction and procedure texts are not, since they address the assistant by
+  design. The approval
+  service offers the changes outside a chat turn as one bundle under the heading
+  "Weekly review" in the Reports tab, each item labelled as from the review,
+  confirmable for 24 hours; Confirm continues no conversation. Confirmed changes
+  get source `learned`, and a merge applies only while the instructions it
+  replaces are unchanged. `home_agent.memory.reviews` counts reviews by outcome
+  and `home_agent.memory.review_changes` the proposals they sent.
 - **Backlog.** Each principal's ideas for developing the assistant live in
   SQLite, apart from memory, and never reach the prompt; the model reads them
   only through `backlog_list`. The tools are offered in chat turns alone, and a

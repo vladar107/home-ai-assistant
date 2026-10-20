@@ -84,6 +84,41 @@ func (s *Store) ReplaceMemory(ctx context.Context, principalID, id, text, source
 	return changed == 1, nil
 }
 
+// MergeMemory gives the principal's entry keep the text and source and removes the entries
+// removed, all or none; false means one of them is gone.
+func (s *Store) MergeMemory(ctx context.Context, principalID, keep, text, source string, removed []string, at time.Time) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("merge memory: SQLite store is not open")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin merging memory: %w", err)
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx,
+		`UPDATE memory_entries SET text = ?, source = ?, updated_at = ? WHERE principal_id = ? AND id = ?`,
+		text, source, formatTime(at), principalID, keep)
+	if err != nil {
+		return false, fmt.Errorf("merge memory: %w", err)
+	}
+	if changed, err := result.RowsAffected(); err != nil || changed != 1 {
+		return false, err
+	}
+	for _, id := range removed {
+		result, err := tx.ExecContext(ctx, `DELETE FROM memory_entries WHERE principal_id = ? AND id = ?`, principalID, id)
+		if err != nil {
+			return false, fmt.Errorf("merge memory: %w", err)
+		}
+		if changed, err := result.RowsAffected(); err != nil || changed != 1 {
+			return false, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit merging memory: %w", err)
+	}
+	return true, nil
+}
+
 func (s *Store) RemoveMemory(ctx context.Context, principalID, id string) (bool, error) {
 	if s == nil || s.db == nil {
 		return false, fmt.Errorf("remove memory: SQLite store is not open")

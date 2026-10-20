@@ -247,6 +247,23 @@ func (s *Service) executeUpdate(ctx context.Context, principalID string, call to
 	return tools.Result{Text: fmt.Sprintf("Updated the backlog item (id %s): %s (%s)", next.ID, next.Title, next.Status)}, nil
 }
 
+// AddProposal is a new item suggested outside a chat turn, such as by the weekly review, as a
+// proposal for the user to confirm, or why the item is refused.
+func (s *Service) AddProposal(title, details string) (approval.Proposal, string) {
+	title, details = normalizeTitle(title), normalizeDetails(details)
+	if reason := cmp.Or(validTitle(title), validDetails(details)); reason != "" {
+		return approval.Proposal{}, reason
+	}
+	canonical, err := json.Marshal(addArguments{Title: title, Details: details})
+	if err != nil {
+		return approval.Proposal{}, err.Error()
+	}
+	return approval.Proposal{
+		Tool: toolAdd, Arguments: canonical,
+		Summary: fmt.Sprintf("Add to your backlog: %s\n%s", title, details),
+	}, ""
+}
+
 func (s *Service) propose(ctx context.Context, principalID string, proposal approval.Proposal) (tools.Result, error) {
 	if s.proposer == nil {
 		return tools.Result{Text: "I read outside content in this conversation, so backlog changes need the user's confirmation, and confirming is not available. Tell the user nothing was changed.", IsError: true}, nil

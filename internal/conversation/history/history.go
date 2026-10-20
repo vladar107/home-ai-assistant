@@ -85,6 +85,46 @@ func (s *Service) Title(_ context.Context, principalID, runtimeSessionID string)
 	return title, err
 }
 
+// Exchange is a reply the session recorded and the user's message before it, or "" when the session
+// holds none before the reply. Found is false when the reply was not recorded.
+type Exchange struct {
+	User  string
+	Reply string
+	Found bool
+}
+
+// Exchanges finds, for each send time, the reply the session recorded last at or before it and the
+// user's message before that, reading the session's files once. Pi records no request IDs, so a
+// reply is found by time: when the last message recorded by then is the user's, the reply itself was
+// not recorded, as for a turn that failed, and nothing is found rather than an older reply.
+func (s *Service) Exchanges(_ context.Context, principalID, runtimeSessionID string, sentAt []time.Time) ([]Exchange, error) {
+	var recorded []message
+	if err := s.messages(principalID, runtimeSessionID, func(current message) bool {
+		recorded = append(recorded, current)
+		return true
+	}); err != nil {
+		return nil, err
+	}
+	exchanges := make([]Exchange, len(sentAt))
+	for index, at := range sentAt {
+		var lastUser string
+		var last message
+		for _, current := range recorded {
+			if current.at.After(at) {
+				break
+			}
+			if last.role == roleUser {
+				lastUser = last.text
+			}
+			last = current
+		}
+		if last.role == roleAssistant {
+			exchanges[index] = Exchange{User: lastUser, Reply: last.text, Found: true}
+		}
+	}
+	return exchanges, nil
+}
+
 const (
 	roleUser      = "user"
 	roleAssistant = "assistant"

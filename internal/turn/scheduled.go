@@ -45,6 +45,46 @@ func (e *Engine) RunCheck(ctx context.Context, principalID, message string) (Sch
 	return e.runUnwatched(ctx, principalID, "", message)
 }
 
+// RunReview runs the turn of a weekly review on the principal's own subscription and the given
+// model: with no tools, memory, or web search, since the message carries everything the review
+// reads, and in a fresh session. Like RunCheck it takes no turn slot. Failures come back as the
+// reply a chat turn would have given; an error is returned only when ctx ends.
+func (e *Engine) RunReview(ctx context.Context, principalID, message string, model agentruntime.ModelEffort) (ScheduledReply, error) {
+	turnCtx, cancel := context.WithTimeout(ctx, e.config.TurnTimeout)
+	defer cancel()
+	connected, err := e.gate.Ready(turnCtx, principalID)
+	switch {
+	case ctx.Err() != nil:
+		return ScheduledReply{}, ctx.Err()
+	case err != nil:
+		return ScheduledReply{Text: UnavailableReply, ErrorKind: "runtime"}, nil
+	case !connected:
+		return ScheduledReply{Text: NotConnectedReply, ErrorKind: "not_connected"}, nil
+	}
+	sessionID, err := NewID()
+	if err != nil {
+		return ScheduledReply{}, err
+	}
+	result, runErr := e.runtime.Run(turnCtx, agentruntime.RunRequest{
+		PrincipalID: principalID,
+		SessionID:   sessionID,
+		Message:     e.withTime(message),
+		Model:       model.Model,
+		Effort:      model.Effort,
+	}, discardEvents{})
+	switch {
+	case ctx.Err() != nil:
+		return ScheduledReply{}, ctx.Err()
+	case errors.Is(turnCtx.Err(), context.DeadlineExceeded) || errors.Is(runErr, agentruntime.ErrStalled):
+		return ScheduledReply{Text: TimeoutReply, ErrorKind: "timeout"}, nil
+	case runErr != nil || strings.TrimSpace(result.Final) == "":
+		reply, kind := FailureReply(runErr)
+		return ScheduledReply{Text: reply, ErrorKind: kind}, nil
+	default:
+		return ScheduledReply{Text: result.Final}, nil
+	}
+}
+
 func (e *Engine) runUnwatched(ctx context.Context, principalID, turn, message string) (ScheduledReply, error) {
 	run := tools.NewRun(message)
 	turnCtx, cancel := context.WithTimeout(tools.WithRun(tools.WithTurn(ctx, turn), run), e.config.TurnTimeout)

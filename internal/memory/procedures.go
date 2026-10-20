@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -19,6 +20,8 @@ const (
 
 	toolProcedureRead = "procedure_read"
 	toolProcedureSave = "procedure_save"
+	// toolProcedureRemove is an action only the weekly review proposes; the model has no such tool.
+	toolProcedureRemove = "procedure_remove"
 
 	procedureReadGuidance = "Procedures: when a request matches a procedure listed in the Memory section, read it with procedure_read first and follow its steps, adapting them to the request."
 	procedureSaveGuidance = "Propose keeping a procedure with procedure_save only when a request needed several tool calls, or a recovery from failures, to succeed and the same kind of request is likely again, or when the user asks you to remember how something was done. " +
@@ -76,14 +79,24 @@ type procedureSaveArguments struct {
 	Steps string `json:"steps"`
 }
 
+// proposedProcedureRemoval is what a procedure_remove record stores: the procedure, the title the
+// user saw, and when it last changed, so a confirmation does not forget one that changed since.
+type proposedProcedureRemoval struct {
+	ID      string    `json:"id"`
+	Title   string    `json:"title"`
+	Updated time.Time `json:"updated"`
+}
+
 // proposedProcedure is what a procedure_save record stores; ID is "" for a new procedure. Updated
 // is when the replaced procedure last changed, so a confirmation does not overwrite a procedure
-// that changed since the card was shown.
+// that changed since the card was shown. Review marks one the weekly review proposed, which the
+// application sets, never the model.
 type proposedProcedure struct {
 	ID      string    `json:"id,omitempty"`
 	Title   string    `json:"title"`
 	Steps   string    `json:"steps"`
 	Updated time.Time `json:"updated,omitzero"`
+	Review  bool      `json:"review,omitempty"`
 }
 
 func (s *Service) Procedures(ctx context.Context, principalID string) ([]Procedure, error) {
@@ -199,7 +212,11 @@ func (s *Service) saveProcedure(ctx context.Context, principalID string, call to
 	if exposed {
 		proposal.Summary = exposedProcedureWarning + "\n" + proposal.Summary
 	}
-	return s.propose(ctx, principalID, exposed, stored.Title+"\n"+stored.Steps, KindProcedure, proposal)
+	result, err := s.propose(ctx, principalID, exposed, stored.Title+"\n"+stored.Steps, KindProcedure, proposal)
+	if err == nil && !result.IsError {
+		s.recordLesson(ctx, principalID, MechanismProcedure, outcomeProposed)
+	}
+	return result, err
 }
 
 // normalizeSteps keeps the steps' lines, since steps read best one to a line, and makes each line
@@ -278,11 +295,15 @@ func (s *Service) executeProcedure(ctx context.Context, record approval.Record) 
 		}
 	}
 	now := s.now()
+	source, mechanism := SourceConfirmed, MechanismProcedure
+	if confirmed.Review {
+		source, mechanism = SourceLearned, MechanismReview
+	}
 	if confirmed.ID != "" {
 		if !replaced.UpdatedAt.Equal(confirmed.Updated) {
 			return approval.Outcome{}, &approval.ActionError{Reason: "changed", Text: "That procedure changed since; nothing was changed."}
 		}
-		found, err := s.repository.ReplaceProcedure(ctx, record.PrincipalID, confirmed.ID, confirmed.Title, confirmed.Steps, SourceConfirmed, now)
+		found, err := s.repository.ReplaceProcedure(ctx, record.PrincipalID, confirmed.ID, confirmed.Title, confirmed.Steps, source, now)
 		if err != nil {
 			return approval.Outcome{}, err
 		}
@@ -290,15 +311,42 @@ func (s *Service) executeProcedure(ctx context.Context, record approval.Record) 
 			return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That procedure no longer exists."}
 		}
 		s.record(ctx, record.PrincipalID, KindProcedure, outcomeWritten)
+		s.recordLesson(ctx, record.PrincipalID, mechanism, outcomeWritten)
 		return approval.Outcome{Text: "Updated the procedure."}, nil
 	}
 	id, err := s.uniqueID(ctx, record.PrincipalID)
 	if err != nil {
 		return approval.Outcome{}, err
 	}
-	if err := s.repository.AddProcedure(ctx, Procedure{ID: id, PrincipalID: record.PrincipalID, Title: confirmed.Title, Steps: confirmed.Steps, Source: SourceConfirmed, CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := s.repository.AddProcedure(ctx, Procedure{ID: id, PrincipalID: record.PrincipalID, Title: confirmed.Title, Steps: confirmed.Steps, Source: source, CreatedAt: now, UpdatedAt: now}); err != nil {
 		return approval.Outcome{}, err
 	}
 	s.record(ctx, record.PrincipalID, KindProcedure, outcomeWritten)
+	s.recordLesson(ctx, record.PrincipalID, mechanism, outcomeWritten)
 	return approval.Outcome{Text: "Kept the procedure."}, nil
+}
+
+// executeProcedureRemoval forgets a confirmed procedure while it still has the title the user saw.
+func (s *Service) executeProcedureRemoval(ctx context.Context, record approval.Record) (approval.Outcome, error) {
+	var confirmed proposedProcedureRemoval
+	if err := json.Unmarshal(record.Arguments, &confirmed); err != nil || confirmed.ID == "" {
+		return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed procedure could not be read; nothing was forgotten."}
+	}
+	procedures, err := s.repository.ListProcedures(ctx, record.PrincipalID)
+	if err != nil {
+		return approval.Outcome{}, err
+	}
+	index := slices.IndexFunc(procedures, func(procedure Procedure) bool { return procedure.ID == confirmed.ID })
+	if index < 0 {
+		return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That procedure no longer exists."}
+	}
+	if procedures[index].Title != confirmed.Title || !procedures[index].UpdatedAt.Equal(confirmed.Updated) {
+		return approval.Outcome{}, &approval.ActionError{Reason: "changed", Text: "That procedure changed since; nothing was forgotten."}
+	}
+	if _, err := s.repository.RemoveProcedure(ctx, record.PrincipalID, confirmed.ID); err != nil {
+		return approval.Outcome{}, err
+	}
+	s.record(ctx, record.PrincipalID, KindProcedure, outcomeRemoved)
+	s.recordLesson(ctx, record.PrincipalID, MechanismReview, outcomeWritten)
+	return approval.Outcome{Text: "Forgot the procedure."}, nil
 }

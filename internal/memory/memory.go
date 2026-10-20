@@ -28,8 +28,15 @@ const (
 
 	SourceModel     = "model"
 	SourceConfirmed = "confirmed"
-	// SourceLearned is an instruction the turn a 👎 started proposed and the user confirmed.
+	// SourceLearned is an entry or procedure the user confirmed from a lesson: the proposal of the
+	// turn a 👎 started, or of the weekly review.
 	SourceLearned = "learned"
+
+	// The mechanisms a lesson comes from: the turn a 👎 started, a chat turn's procedure, and the
+	// weekly review.
+	MechanismFeedback  = "feedback"
+	MechanismProcedure = "procedure"
+	MechanismReview    = "review"
 
 	MaximumEntryRunes       = 300
 	MaximumInstructionRunes = 1500
@@ -59,6 +66,9 @@ type Repository interface {
 	AddMemory(context.Context, Entry) error
 	ReplaceMemory(ctx context.Context, principalID, id, text, source string, at time.Time) (bool, error)
 	RemoveMemory(ctx context.Context, principalID, id string) (bool, error)
+	// MergeMemory gives the entry keep the text and source and removes the entries removed, all or
+	// none; false means one of them is gone.
+	MergeMemory(ctx context.Context, principalID, keep, text, source string, removed []string, at time.Time) (bool, error)
 	// ClearMemory deletes the principal's entries and procedures together.
 	ClearMemory(ctx context.Context, principalID string) (int, error)
 	// MemoryEnabled is true for a principal who never changed the switch.
@@ -89,12 +99,13 @@ type Proposer interface {
 	Act(context.Context, string, approval.Proposal) (string, error)
 }
 
-// Telemetry records memory writes by kind and outcome, lessons by outcome, and procedure reads,
-// never their content.
+// Telemetry records memory writes by kind and outcome, lessons by mechanism and outcome, procedure
+// reads, and weekly reviews by outcome with the changes they sent, never their content.
 type Telemetry interface {
 	RecordMemoryWrite(ctx context.Context, principal, kind, outcome string)
-	RecordMemoryLesson(ctx context.Context, principal, outcome string)
+	RecordMemoryLesson(ctx context.Context, principal, mechanism, outcome string)
 	RecordProcedureRead(ctx context.Context, principal string)
+	RecordMemoryReview(ctx context.Context, principal, outcome string, changes int)
 }
 
 type Config struct {
@@ -151,9 +162,9 @@ func (s *Service) record(ctx context.Context, principalID, kind, outcome string)
 	}
 }
 
-func (s *Service) recordLesson(ctx context.Context, principalID, outcome string) {
+func (s *Service) recordLesson(ctx context.Context, principalID, mechanism, outcome string) {
 	if s.telemetry != nil {
-		s.telemetry.RecordMemoryLesson(ctx, principalID, outcome)
+		s.telemetry.RecordMemoryLesson(ctx, principalID, mechanism, outcome)
 	}
 }
 

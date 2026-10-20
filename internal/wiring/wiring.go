@@ -248,6 +248,7 @@ type Assembly struct {
 	exposures    *exposure.Service
 	tripState    *tripScanState
 	watchKinds   map[string]bool
+	outcomes     *toolOutcomeLog
 }
 
 // Build builds every service and connector the inputs configure and connects them.
@@ -300,6 +301,7 @@ func Build(ctx context.Context, in Inputs) (*Assembly, error) {
 func (a *Assembly) Steps() []Step {
 	steps := []Step{
 		{Name: "model connections", Start: a.Connections.Start, Shutdown: a.Connections.Shutdown},
+		{Name: "tool outcome counts", Start: a.outcomes.Start, Shutdown: a.outcomes.Shutdown},
 		{Name: "approvals", Start: a.Approvals.Start, Shutdown: a.Approvals.Shutdown},
 		{Name: "conversation service", Start: a.Conversation.Start, Shutdown: a.Conversation.Shutdown},
 		{Name: "scheduler", Start: a.Scheduler.Start, Shutdown: a.Scheduler.Shutdown},
@@ -408,6 +410,8 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		return fmt.Errorf("initialize tool broker: %w", err)
 	}
 	broker.SetTelemetry(telemetry)
+	a.outcomes = newToolOutcomeLog(in.Store, in.Logger)
+	broker.SetOutcomes(a.outcomes)
 	broker.SetSwitches(switches)
 	a.Tools = broker
 	for _, provider := range in.ExtraProviders {
@@ -607,6 +611,8 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	}
 	a.Trips = tripService
 	var conversationHistory conversation.History
+	// The weekly review reads the replies the user marked 👎 from the same files.
+	var exchanges usermemory.Exchanges
 	if in.SessionFiles != nil {
 		reader, err := history.NewService(in.Store, in.SessionFiles, a.location, telemetry)
 		if err != nil {
@@ -615,7 +621,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		if err := broker.Register(reader); err != nil {
 			return err
 		}
-		conversationHistory = reader
+		conversationHistory, exchanges = reader, reader
 	}
 	notices := conversation.Notices{approvals}
 	var reports conversation.Reports = scheduler
@@ -758,6 +764,16 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		return err
 	}
 	a.Backlog = backlogService
+	reviewJob, err := memoryService.ReviewJobType(usermemory.ReviewConfig{
+		Checker: reviewChecker{engine: engine, model: a.ChatModel}, Signals: in.Store, Exchanges: exchanges,
+		Offers: approvals, Chats: in.Store, Backlog: backlogService,
+	})
+	if err != nil {
+		return fmt.Errorf("initialize the weekly review: %w", err)
+	}
+	if err := scheduler.Register(reviewJob); err != nil {
+		return err
+	}
 	if a.Watches != nil {
 		agent, err := watch.NewAgentEvaluator(engine, watch.AgentConfig{Now: in.Core.Now, Finished: a.Watches.Wake})
 		if err != nil {

@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/memory"
 )
 
 const conversationTimeLayout = "2006-01-02T15:04:05.000Z"
@@ -276,6 +278,57 @@ func (s *Store) DeleteReplyFeedback(ctx context.Context, principalID string, mes
 		return fmt.Errorf("delete reply feedback: %w", err)
 	}
 	return nil
+}
+
+// NegativeReplies returns the newest limit of the principal's delivered replies the user marked 👎
+// at or after since, one per request and oldest first. Each comes with the session file to read it
+// from, whether a reconsider turn was started for it, and whether its conversation has read
+// third-party content. A reply sent in several messages is returned once, at the time its last
+// marked message was sent.
+func (s *Store) NegativeReplies(ctx context.Context, principalID string, since time.Time, limit int) ([]memory.NegativeReply, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("list negative replies: SQLite store is not open")
+	}
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT session.runtime_session_id, MAX(reply.created_at),
+		        EXISTS(SELECT 1 FROM reply_reconsiders AS reconsider
+		               WHERE reconsider.principal_id = reply.principal_id AND reconsider.reconsider_key = reply.reconsider_key),
+		        MAX(session.exposed_at IS NOT NULL)
+		 FROM (SELECT principal_id, telegram_message_id, session_id, created_at,
+		              CASE WHEN request_id = '' THEN 'message:' || telegram_message_id ELSE request_id END AS reconsider_key
+		       FROM conversation_reply_messages WHERE principal_id = ?) AS reply
+		 JOIN reply_feedback AS feedback
+		      ON feedback.principal_id = reply.principal_id AND feedback.telegram_message_id = reply.telegram_message_id
+		 JOIN conversation_sessions AS session ON session.id = reply.session_id AND session.principal_id = reply.principal_id
+		 WHERE feedback.class = 'negative' AND feedback.updated_at >= ?
+		 GROUP BY session.runtime_session_id, reply.reconsider_key
+		 ORDER BY 2 DESC LIMIT ?`,
+		principalID,
+		since.UTC().Format(conversationTimeLayout),
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list negative replies: %w", err)
+	}
+	defer rows.Close()
+	var replies []memory.NegativeReply
+	for rows.Next() {
+		var reply memory.NegativeReply
+		var sent string
+		if err := rows.Scan(&reply.RuntimeSessionID, &sent, &reply.Reconsidered, &reply.Exposed); err != nil {
+			return nil, fmt.Errorf("scan negative reply: %w", err)
+		}
+		if reply.SentAt, err = time.Parse(conversationTimeLayout, sent); err != nil {
+			return nil, fmt.Errorf("parse negative reply send time: %w", err)
+		}
+		replies = append(replies, reply)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list negative replies: %w", err)
+	}
+	slices.Reverse(replies)
+	return replies, nil
 }
 
 // ClaimReplyReconsider records that a reconsider turn was started for the key and reports whether

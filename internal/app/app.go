@@ -483,7 +483,7 @@ func (a *App) settingsSections(asm *wiring.Assembly) ([]telegram.Section, error)
 	if asm.Locations != nil {
 		sections = append(sections, telegram.NewLocationSection(asm.Locations, a.logger, a.telemetry))
 	}
-	sections = append(sections, telegram.NewMemorySection(asm.Memory, a.logger, a.telemetry))
+	sections = append(sections, telegram.NewMemorySection(asm.Memory, asm.Scheduler, a.logger, a.telemetry))
 	if asm.Google != nil {
 		sections = append(sections, telegram.NewTripsSection(asm.Scheduler, asm.Google, a.logger, a.telemetry))
 	}

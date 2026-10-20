@@ -161,6 +161,9 @@ type Record struct {
 	// Undo is the payload a done direct action's executor returned to reverse it, until UndoUntil.
 	Undo      json.RawMessage
 	UndoUntil time.Time
+	// Heading is what a bundle offered outside a chat turn is shown under; a chat turn's bundle has
+	// none.
+	Heading string
 }
 
 // Outcome is the content-free result line of an executed action, such as a created page URL.
@@ -245,6 +248,8 @@ type Repository interface {
 	// after expiring every pending record of the principal with ReasonReplaced, and those are
 	// returned; any other record joins its bundle.
 	CreateApproval(context.Context, Record) ([]Record, error)
+	// CreateApprovals stores the records of one bundle as CreateApproval does, all or none.
+	CreateApprovals(context.Context, []Record) ([]Record, error)
 	LoadApproval(context.Context, string) (Record, bool, error)
 	// LoadBundle returns a bundle's records in position order.
 	LoadBundle(ctx context.Context, bundleID string) ([]Record, error)
@@ -613,7 +618,7 @@ func (s *Service) proposalLock(principalID string) *sync.Mutex {
 // store joins the record to the turn's bundle or starts a new one, returning the records it
 // replaced. An identical proposal already in the bundle is returned instead of a new record.
 func (s *Service) store(ctx context.Context, principalID, tool string, canonical json.RawMessage, hash, summary, id string) (Record, []Record, error) {
-	if utf16Units(strings.TrimSpace(summary))+utf16Units(IntentWarning)+2 > bundleSummaryUnits {
+	if !SummaryFits(summary) {
 		return Record{}, nil, ErrSummaryTooLong
 	}
 	pending, err := s.repository.PendingApprovals(ctx, principalID, thread.From(ctx))
@@ -664,7 +669,7 @@ func (s *Service) store(ctx context.Context, principalID, tool string, canonical
 }
 
 // joinable reports whether the pending records are one bundle that this turn is still building:
-// not yet sent, and young enough that a turn whose reply never went out does not pass its
+// made by a chat turn, not yet sent, and young enough that a turn whose reply never went out does not pass its
 // proposals, or a deadline about to lapse, to a later turn.
 func joinable(pending []Record, now time.Time, lifetime time.Duration) bool {
 	if len(pending) == 0 {
@@ -672,7 +677,7 @@ func joinable(pending []Record, now time.Time, lifetime time.Duration) bool {
 	}
 	first := pending[0]
 	for _, item := range pending {
-		if item.BundleID != first.BundleID || item.ChatID != 0 {
+		if item.BundleID != first.BundleID || item.ChatID != 0 || item.Heading != "" {
 			return false
 		}
 	}
@@ -853,8 +858,9 @@ type Pressed struct {
 	Text string
 	// Owned is false for a press on another principal's proposal, which is ignored.
 	Owned bool
-	// Ran reports that this press confirmed the bundle and ran its actions, so the model has an
-	// outcome to continue from.
+	// Ran reports that this press confirmed a chat turn's bundle and ran its actions, so the model
+	// has an outcome to continue from; a bundle offered outside a chat turn has no conversation to
+	// continue.
 	Ran bool
 }
 
@@ -911,7 +917,7 @@ func (s *Service) Press(ctx context.Context, principalID, action, approvalID str
 			}
 		}
 		s.rememberNotice(bundle)
-		return Pressed{Text: bundleText(bundle), Owned: true, Ran: true}, nil
+		return Pressed{Text: bundleText(bundle), Owned: true, Ran: !offered(bundle)}, nil
 	default:
 		return Pressed{}, nil
 	}
@@ -1059,6 +1065,9 @@ func groupBundles(records []Record) [][]Record {
 // model answers from the outcome it never saw instead of assuming its proposals are still waiting.
 // Only the latest resolution is kept, and proposals the model itself replaced need no notice.
 func (s *Service) rememberNotice(bundle []Record) {
+	if offered(bundle) {
+		return
+	}
 	var notices []string
 	for _, record := range bundle {
 		if record.Reason == ReasonReplaced || record.Reason == ReasonWithdrawn {
@@ -1199,8 +1208,12 @@ func bundleText(bundle []Record) string {
 // a numbered list with each item's result under it, or one shared result at the end of the last
 // message when they all ended the same way.
 func messageText(bundle []Record, from, to int) string {
+	heading := ""
+	if from == 0 && bundle[0].Heading != "" {
+		heading = bundle[0].Heading + "\n\n"
+	}
 	if len(bundle) == 1 {
-		return finalText(bundle[0])
+		return heading + finalText(bundle[0])
 	}
 	shared := statusLine(bundle[0], bundleOutcomeRunes)
 	for _, record := range bundle[1:] {
@@ -1210,6 +1223,7 @@ func messageText(bundle []Record, from, to int) string {
 		}
 	}
 	var builder strings.Builder
+	builder.WriteString(heading)
 	switch {
 	case from == 0:
 		fmt.Fprintf(&builder, "%d changes, confirmed or rejected together:", len(bundle))
@@ -1289,7 +1303,16 @@ func fmtMinutes(duration time.Duration) string {
 	if minutes == 1 {
 		return "1 minute"
 	}
+	if minutes >= 120 && minutes%60 == 0 {
+		return fmt.Sprintf("%d hours", minutes/60)
+	}
 	return fmt.Sprintf("%d minutes", minutes)
+}
+
+// SummaryFits reports whether a proposal's summary fits one bundle message with the intent warning,
+// so it can be shown whole.
+func SummaryFits(summary string) bool {
+	return utf16Units(strings.TrimSpace(summary))+utf16Units(IntentWarning)+2 <= bundleSummaryUnits
 }
 
 // canonicalJSON re-encodes arguments with sorted object keys and no insignificant whitespace so

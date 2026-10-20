@@ -318,6 +318,31 @@ notices log `trip.notice.sent` and, when a send fails and is retried on the next
 minute, `trip.notice.send_failed`. Logs carry IDs and counts, never titles,
 destinations, or references.
 
+### Weekly review
+
+Migration 044 adds `tool_outcome_counts`, one count per user, UTC day, tool, and
+outcome, written in the background and pruned after 30 days, and a `heading`
+column on `approvals`; neither can be undone, so take a data backup before the
+first deploy that carries them. No setting is needed. Each user turns the review
+on in the Memory page of `/settings`; it runs Sundays at 18:00 as the job
+"Weekly review" (also visible in `/jobs`), and *Review now* queues a manual run
+unless one is already queued or running. Its cards go to the Reports tab and
+stay confirmable for 24 hours, or until a restart expires them like any pending
+proposal.
+
+`home_agent_memory_reviews_total` counts reviews by outcome: `sent`, `nothing`
+(the model proposed nothing valid), `skipped` (memory off, or a week with nothing
+to review, which asks no model), and `failed`. `home_agent_memory_review_changes_total`
+counts the proposals sent, and `home_agent_memory_lessons_total` now carries a
+`mechanism` label (`feedback`, `procedure`, `review`), so dashboard queries on it
+should sum or filter by that label. In the logs, `memory.review.done` gives the
+sent and dropped counts, `memory.review.dropped` the action and reason of each
+dropped change, `memory.review.unreadable` a reply that was not the JSON asked for
+(nothing is sent, and it counts as `failed`), and `memory.review.exchange_unreadable`
+a session file that could not be read. `tools.outcome.dropped` counts tool outcomes
+the background writer had no room for, `tools.outcome.unrecorded` a failed write.
+Logs carry IDs and counts, never reply texts or memory entries.
+
 ## 7. Logs and rollback
 
 ```sh

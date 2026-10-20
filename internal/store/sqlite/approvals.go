@@ -17,9 +17,13 @@ var _ approval.Repository = (*Store)(nil)
 const approvalColumns = `id, bundle_id, position, principal_id, tool, arguments, arguments_hash, summary, status,
 	COALESCE(reason, ''), COALESCE(outcome, ''), COALESCE(chat_id, 0), COALESCE(message_id, 0),
 	created_at, expires_at, COALESCE(started_at, ''), COALESCE(finished_at, ''), mode, COALESCE(request_id, ''),
-	COALESCE(undo, ''), COALESCE(undo_until, ''), thread_id`
+	COALESCE(undo, ''), COALESCE(undo_until, ''), thread_id, COALESCE(heading, '')`
 
 func (s *Store) CreateApproval(ctx context.Context, record approval.Record) ([]approval.Record, error) {
+	return s.CreateApprovals(ctx, []approval.Record{record})
+}
+
+func (s *Store) CreateApprovals(ctx context.Context, records []approval.Record) ([]approval.Record, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("create approval: SQLite store is not open")
 	}
@@ -30,28 +34,43 @@ func (s *Store) CreateApproval(ctx context.Context, record approval.Record) ([]a
 	defer tx.Rollback()
 
 	var replaced []approval.Record
-	if record.BundleID == record.ID {
-		replaced, err = queryApprovals(ctx, tx, `SELECT `+approvalColumns+` FROM approvals WHERE principal_id = ? AND thread_id = ? AND status = 'pending' AND mode = 'proposed' ORDER BY bundle_id, position`, record.PrincipalID, record.ThreadID)
-		if err != nil {
+	for _, record := range records {
+		if err := createApproval(ctx, tx, record, &replaced); err != nil {
 			return nil, err
 		}
-		for index := range replaced {
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit approval creation: %w", err)
+	}
+	return replaced, nil
+}
+
+// createApproval stores one pending record in the transaction. A record that starts its bundle
+// first expires the tab's pending records, which it adds to replaced.
+func createApproval(ctx context.Context, tx *sql.Tx, record approval.Record, replaced *[]approval.Record) error {
+	if record.BundleID == record.ID {
+		pending, err := queryApprovals(ctx, tx, `SELECT `+approvalColumns+` FROM approvals WHERE principal_id = ? AND thread_id = ? AND status = 'pending' AND mode = 'proposed' ORDER BY bundle_id, position`, record.PrincipalID, record.ThreadID)
+		if err != nil {
+			return err
+		}
+		for index := range pending {
 			if _, err := tx.ExecContext(
 				ctx,
 				`UPDATE approvals SET status = 'expired', reason = ?, finished_at = ? WHERE id = ? AND status = 'pending'`,
 				approval.ReasonReplaced,
 				formatTime(record.CreatedAt),
-				replaced[index].ID,
+				pending[index].ID,
 			); err != nil {
-				return nil, fmt.Errorf("replace pending approval: %w", err)
+				return fmt.Errorf("replace pending approval: %w", err)
 			}
-			replaced[index].Status, replaced[index].Reason, replaced[index].FinishedAt = approval.StatusExpired, approval.ReasonReplaced, record.CreatedAt
+			pending[index].Status, pending[index].Reason, pending[index].FinishedAt = approval.StatusExpired, approval.ReasonReplaced, record.CreatedAt
 		}
+		*replaced = append(*replaced, pending...)
 	}
 	if _, err := tx.ExecContext(
 		ctx,
-		`INSERT INTO approvals (id, bundle_id, position, principal_id, tool, arguments, arguments_hash, summary, status, created_at, expires_at, thread_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
+		`INSERT INTO approvals (id, bundle_id, position, principal_id, tool, arguments, arguments_hash, summary, status, created_at, expires_at, thread_id, heading)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
 		record.ID,
 		record.BundleID,
 		record.Position,
@@ -63,13 +82,11 @@ func (s *Store) CreateApproval(ctx context.Context, record approval.Record) ([]a
 		formatTime(record.CreatedAt),
 		formatTime(record.ExpiresAt),
 		record.ThreadID,
+		sql.NullString{String: record.Heading, Valid: record.Heading != ""},
 	); err != nil {
-		return nil, fmt.Errorf("insert approval: %w", err)
+		return fmt.Errorf("insert approval: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit approval creation: %w", err)
-	}
-	return replaced, nil
+	return nil
 }
 
 func (s *Store) LoadApproval(ctx context.Context, id string) (approval.Record, bool, error) {
@@ -77,6 +94,25 @@ func (s *Store) LoadApproval(ctx context.Context, id string) (approval.Record, b
 		return approval.Record{}, false, fmt.Errorf("load approval: SQLite store is not open")
 	}
 	return scanApproval(s.db.QueryRowContext(ctx, `SELECT `+approvalColumns+` FROM approvals WHERE id = ?`, id))
+}
+
+// ResolvedApprovals returns the principal's proposals of the tools made at or after since that the
+// user confirmed or rejected or that expired, oldest first.
+func (s *Store) ResolvedApprovals(ctx context.Context, principalID string, tools []string, since time.Time) ([]approval.Record, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("list resolved approvals: SQLite store is not open")
+	}
+	if len(tools) == 0 {
+		return nil, nil
+	}
+	arguments := []any{principalID, formatTime(since)}
+	for _, tool := range tools {
+		arguments = append(arguments, tool)
+	}
+	return queryApprovals(ctx, s.db, `SELECT `+approvalColumns+` FROM approvals
+		 WHERE principal_id = ? AND created_at >= ? AND mode = 'proposed' AND status NOT IN ('pending', 'confirmed')
+		   AND tool IN (?`+strings.Repeat(", ?", len(tools)-1)+`)
+		 ORDER BY created_at, rowid`, arguments...)
 }
 
 func (s *Store) LoadBundle(ctx context.Context, bundleID string) ([]approval.Record, error) {
@@ -483,7 +519,7 @@ func scanApprovalRow(row rowScanner) (approval.Record, error) {
 	err := row.Scan(
 		&record.ID, &record.BundleID, &record.Position, &record.PrincipalID, &record.Tool, &arguments, &record.Hash, &record.Summary, &record.Status,
 		&record.Reason, &record.Outcome, &record.ChatID, &record.MessageID, &createdAt, &expiresAt, &startedAt, &finishedAt,
-		&record.Mode, &record.RequestID, &undo, &undoUntil, &record.ThreadID,
+		&record.Mode, &record.RequestID, &undo, &undoUntil, &record.ThreadID, &record.Heading,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
