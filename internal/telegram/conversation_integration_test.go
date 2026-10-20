@@ -108,6 +108,8 @@ type sentMessage struct {
 	parseMode string
 	keyboard  InlineKeyboard
 	status    int
+	// gated is whether the test held back Telegram's answer to it.
+	gated     bool
 	messageID int64
 	// threadID is the tab the message was sent to, or zero for the main view.
 	threadID int64
@@ -700,7 +702,7 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 		messageID := sentMessageID(h.sentCount)
 		h.mu.Unlock()
 		select {
-		case h.messages <- sentMessage{chatID: chatID, replyTo: replyTo, text: r.Form.Get("text"), parseMode: r.Form.Get("parse_mode"), keyboard: h.parseKeyboard(r.Form.Get("reply_markup")), status: status, messageID: messageID, threadID: threadID, preview: r.Form.Get("link_preview_options")}:
+		case h.messages <- sentMessage{chatID: chatID, replyTo: replyTo, text: r.Form.Get("text"), parseMode: r.Form.Get("parse_mode"), keyboard: h.parseKeyboard(r.Form.Get("reply_markup")), status: status, gated: gate != nil, messageID: messageID, threadID: threadID, preview: r.Form.Get("link_preview_options")}:
 		case <-r.Context().Done():
 			return
 		}
@@ -1144,7 +1146,18 @@ func receive[T any](t *testing.T, ctx context.Context, channel <-chan T) T {
 	}
 }
 
-func (h *conversationHarness) nextMessage() sentMessage { return receive(h.t, h.ctx, h.messages) }
+func (h *conversationHarness) nextMessage() sentMessage {
+	h.t.Helper()
+	message := receive(h.t, h.ctx, h.messages)
+	// The approval service records a proposal's message only after Telegram answers, and a press or
+	// another proposal before that would not find the bundle's message.
+	if message.status == http.StatusOK && !message.gated && slices.ContainsFunc(buttonData(message.keyboard), func(data string) bool {
+		return strings.HasPrefix(data, "approval:")
+	}) {
+		h.waitMessageRecorded(message.messageID)
+	}
+	return message
+}
 
 func (h *conversationHarness) nextDocument() sentDocument { return receive(h.t, h.ctx, h.documents) }
 
