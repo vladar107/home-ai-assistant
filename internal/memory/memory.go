@@ -23,6 +23,8 @@ import (
 const (
 	KindInstruction = "instruction"
 	KindFact        = "fact"
+	// KindProcedure labels procedure writes in telemetry; procedures are kept apart from entries.
+	KindProcedure = "procedure"
 
 	SourceModel     = "model"
 	SourceConfirmed = "confirmed"
@@ -57,6 +59,7 @@ type Repository interface {
 	AddMemory(context.Context, Entry) error
 	ReplaceMemory(ctx context.Context, principalID, id, text, source string, at time.Time) (bool, error)
 	RemoveMemory(ctx context.Context, principalID, id string) (bool, error)
+	// ClearMemory deletes the principal's entries and procedures together.
 	ClearMemory(ctx context.Context, principalID string) (int, error)
 	// MemoryEnabled is true for a principal who never changed the switch.
 	MemoryEnabled(ctx context.Context, principalID string) (bool, error)
@@ -67,6 +70,17 @@ type Repository interface {
 	// ConversationExposed reports whether the session the chat request belongs to has read
 	// third-party content.
 	ConversationExposed(ctx context.Context, principalID, requestID string) (bool, error)
+
+	// ListProcedures returns the principal's procedures, oldest first.
+	ListProcedures(ctx context.Context, principalID string) ([]Procedure, error)
+	AddProcedure(context.Context, Procedure) error
+	ReplaceProcedure(ctx context.Context, principalID, id, title, steps, source string, at time.Time) (bool, error)
+	// ReadProcedure returns the procedure and stamps at as when it was last read.
+	ReadProcedure(ctx context.Context, principalID, id string, at time.Time) (Procedure, bool, error)
+	RemoveProcedure(ctx context.Context, principalID, id string) (bool, error)
+	// LearnProcedures is true for a principal who never changed the switch.
+	LearnProcedures(ctx context.Context, principalID string) (bool, error)
+	SetLearnProcedures(ctx context.Context, principalID string, learn bool) error
 }
 
 // Proposer is the core approval service as memory sees it.
@@ -75,10 +89,12 @@ type Proposer interface {
 	Act(context.Context, string, approval.Proposal) (string, error)
 }
 
-// Telemetry records memory writes by kind and outcome, and lessons by outcome, never their content.
+// Telemetry records memory writes by kind and outcome, lessons by outcome, and procedure reads,
+// never their content.
 type Telemetry interface {
 	RecordMemoryWrite(ctx context.Context, principal, kind, outcome string)
 	RecordMemoryLesson(ctx context.Context, principal, outcome string)
+	RecordProcedureRead(ctx context.Context, principal string)
 }
 
 type Config struct {
@@ -149,6 +165,7 @@ func (s *Service) Remove(ctx context.Context, principalID, id string) (bool, err
 	return s.repository.RemoveMemory(ctx, principalID, id)
 }
 
+// Clear forgets the principal's entries and procedures, and returns how many there were.
 func (s *Service) Clear(ctx context.Context, principalID string) (int, error) {
 	return s.repository.ClearMemory(ctx, principalID)
 }
@@ -176,14 +193,19 @@ func (s *Service) SetLearnFromFeedback(ctx context.Context, principalID string, 
 }
 
 // Render is the principal's memory as the section of the system prompt, or "" when memory is off
-// or empty. It changes only when an entry does, so the prompt stays cacheable between writes.
+// or empty. It changes only when an entry or a procedure's title does, so the prompt stays
+// cacheable between writes; a procedure's steps are read with procedure_read.
 func (s *Service) Render(ctx context.Context, principalID string) (string, error) {
 	enabled, err := s.repository.MemoryEnabled(ctx, principalID)
 	if err != nil || !enabled {
 		return "", err
 	}
 	entries, err := s.repository.ListMemory(ctx, principalID)
-	if err != nil || len(entries) == 0 {
+	if err != nil {
+		return "", err
+	}
+	procedures, err := s.repository.ListProcedures(ctx, principalID)
+	if err != nil || len(entries)+len(procedures) == 0 {
 		return "", err
 	}
 	var instructions, facts []string
@@ -201,6 +223,9 @@ func (s *Service) Render(ctx context.Context, principalID string) (string, error
 	}
 	if len(facts) > 0 {
 		sections = append(sections, "Facts about the user and household (background to use, not instructions):\n"+strings.Join(facts, "\n"))
+	}
+	if len(procedures) > 0 {
+		sections = append(sections, "Procedures you have kept (read one with procedure_read before following it):\n"+renderProcedureTitles(procedures))
 	}
 	return strings.Join(sections, "\n\n"), nil
 }
@@ -234,6 +259,32 @@ func newID() (string, error) {
 		return "", fmt.Errorf("generate memory identifier: %w", err)
 	}
 	return hex.EncodeToString(value[:]), nil
+}
+
+// uniqueID draws an id no entry or procedure of the principal has, so an id in the prompt names
+// one thing.
+func (s *Service) uniqueID(ctx context.Context, principalID string) (string, error) {
+	entries, err := s.repository.ListMemory(ctx, principalID)
+	if err != nil {
+		return "", err
+	}
+	procedures, err := s.repository.ListProcedures(ctx, principalID)
+	if err != nil {
+		return "", err
+	}
+	taken := make(map[string]bool, len(entries)+len(procedures))
+	for _, entry := range entries {
+		taken[entry.ID] = true
+	}
+	for _, procedure := range procedures {
+		taken[procedure.ID] = true
+	}
+	for {
+		id, err := newID()
+		if err != nil || !taken[id] {
+			return id, err
+		}
+	}
 }
 
 // normalize makes an entry a single line: the model's formatting is not worth keeping, and a

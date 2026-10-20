@@ -136,9 +136,13 @@ borrowed between users.
   content, an instruction after either, and lessons from a 👎 are confirmed
   first. After a 👎, the assistant may
   propose one instruction so the mistake does not recur, and when a correction
-  states a lasting preference it offers to keep it. `/memory` lists and deletes
-  entries, marking learned ones, and `/settings` turns memory, or learning from
-  👎, off.
+  states a lasting preference it offers to keep it. After a request that took
+  several steps, it may offer to keep how it was done as a procedure, confirmed
+  on a card that shows the steps; later turns list only procedure titles, and
+  the assistant reads a procedure's steps, in chat and background tasks, when a
+  request matches it. `/memory` lists and deletes entries and procedures,
+  marking learned ones, and `/settings` turns memory, learning from 👎, or
+  learning procedures off.
 - **Backlog.** Ideas for developing the assistant itself ("add to the backlog:
   answer weather questions with a chart") are kept as a per-user backlog that
   never changes how the assistant behaves. `/backlog` marks items done or

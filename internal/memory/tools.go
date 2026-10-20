@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -30,6 +31,10 @@ const (
 
 	screenedWarning = "⚠️ This reads like instructions aimed at an AI assistant rather than a fact about you. Confirm only if you asked me to remember it."
 	screenTimeout   = 3 * time.Second
+
+	// exposedProcedureWarning heads every procedure proposed after outside content; procedures are
+	// instructions by design, so screening them would flag nearly all.
+	exposedProcedureWarning = "⚠️ I wrote these steps after this conversation read outside content. Check that they describe how you want this done before confirming."
 )
 
 var definitions = []tools.Definition{
@@ -94,14 +99,15 @@ type proposedRemove struct {
 	Text string `json:"text"`
 }
 
-// Contribute offers the memory tools to a principal who has memory on. They are write tools, so a
-// scheduled run, which reads memory from its prompt, is never offered them.
+// Contribute offers the memory tools to a principal who has memory on. All but procedure_read are
+// write tools, so a scheduled run or task, which reads memory from its prompt, is offered only
+// that one, and only its guidance.
 func (s *Service) Contribute(ctx context.Context, principalID string) (tools.Contribution, error) {
 	enabled, err := s.repository.MemoryEnabled(ctx, principalID)
 	if err != nil || !enabled {
 		return tools.Contribution{}, err
 	}
-	return tools.Contribution{Guidance: guidance, Definitions: definitions}, nil
+	return s.contributeProcedures(ctx, principalID, tools.Contribution{WriteGuidance: guidance, Definitions: slices.Clone(definitions)})
 }
 
 func (s *Service) Execute(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
@@ -112,6 +118,10 @@ func (s *Service) Execute(ctx context.Context, principalID string, call tools.Ca
 		return s.replace(ctx, principalID, call)
 	case toolRemove:
 		return s.remove(ctx, principalID, call)
+	case toolProcedureRead:
+		return s.readProcedure(ctx, principalID, call)
+	case toolProcedureSave:
+		return s.saveProcedure(ctx, principalID, call)
 	default:
 		return tools.Result{Text: "unknown memory tool", IsError: true}, nil
 	}
@@ -182,7 +192,7 @@ func (s *Service) writeFact(ctx context.Context, principalID, text string) (tool
 		s.record(ctx, principalID, KindFact, rejected.outcome)
 		return tools.Result{Text: rejected.text, IsError: true}, nil
 	}
-	id, err := newID()
+	id, err := s.uniqueID(ctx, principalID)
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -382,8 +392,8 @@ const unknownEntryText = "No memory entry has that id. The ids are in the Memory
 
 // propose hands a write to the user. A fact proposed while the principal is exposed to outside
 // content is screened first, which does nothing for a principal without safety checks; an
-// instruction is not, since it always addresses the assistant. Flagged text is still proposed,
-// with a warning, because the user decides either way.
+// instruction or procedure is not, since it always addresses the assistant. Flagged text is still
+// proposed, with a warning, because the user decides either way.
 func (s *Service) propose(ctx context.Context, principalID string, exposed bool, text, kind string, proposal approval.Proposal) (tools.Result, error) {
 	if s.proposer == nil {
 		return tools.Result{Text: "Memory proposals are not available.", IsError: true}, nil
@@ -430,7 +440,7 @@ func (s *Service) act(ctx context.Context, principalID string, proposal approval
 }
 
 func (s *Service) ActionTools() []string {
-	return []string{toolAdd, toolReplace, toolRemove}
+	return []string{toolAdd, toolReplace, toolRemove, toolProcedureSave}
 }
 
 // ExecuteApproved writes the confirmed entry. The caps and duplicates are checked again, because
@@ -444,6 +454,9 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 	}
 	if !enabled {
 		return approval.Outcome{}, &approval.ActionError{Reason: "disabled", Text: "Memory is turned off in /settings, so nothing was remembered."}
+	}
+	if record.Tool == toolProcedureSave {
+		return s.executeProcedure(ctx, record)
 	}
 	entries, err := s.repository.ListMemory(ctx, record.PrincipalID)
 	if err != nil {
@@ -459,7 +472,7 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 			s.record(ctx, record.PrincipalID, confirmed.Kind, rejected.outcome)
 			return approval.Outcome{}, &approval.ActionError{Reason: rejected.outcome, Text: userFacing(rejected)}
 		}
-		id, err := newID()
+		id, err := s.uniqueID(ctx, record.PrincipalID)
 		if err != nil {
 			return approval.Outcome{}, err
 		}

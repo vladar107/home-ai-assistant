@@ -110,6 +110,7 @@ func TestUnattendedTurns(t *testing.T) {
 func TestToolResults(t *testing.T) {
 	checkGolden(t, "tool-results", strings.Join([]string{
 		ToolResultUntrusted + ToolResultScreened + "result text",
+		ToolResultConfirmed + "result text",
 		ToolUnavailable,
 		ToolUnavailableNow,
 		ToolTimedOut,

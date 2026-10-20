@@ -99,19 +99,33 @@ func (s *Store) RemoveMemory(ctx context.Context, principalID, id string) (bool,
 	return removed == 1, nil
 }
 
+// ClearMemory deletes the principal's entries and procedures together and returns how many there
+// were.
 func (s *Store) ClearMemory(ctx context.Context, principalID string) (int, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("clear memory: SQLite store is not open")
 	}
-	result, err := s.db.ExecContext(ctx, `DELETE FROM memory_entries WHERE principal_id = ?`, principalID)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("clear memory: %w", err)
+		return 0, fmt.Errorf("begin clearing memory: %w", err)
 	}
-	removed, err := result.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("read cleared memory count: %w", err)
+	defer tx.Rollback()
+	total := 0
+	for _, query := range []string{`DELETE FROM memory_entries WHERE principal_id = ?`, `DELETE FROM memory_procedures WHERE principal_id = ?`} {
+		result, err := tx.ExecContext(ctx, query, principalID)
+		if err != nil {
+			return 0, fmt.Errorf("clear memory: %w", err)
+		}
+		removed, err := result.RowsAffected()
+		if err != nil {
+			return 0, fmt.Errorf("read cleared memory count: %w", err)
+		}
+		total += int(removed)
 	}
-	return int(removed), nil
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit clearing memory: %w", err)
+	}
+	return total, nil
 }
 
 func (s *Store) MemoryEnabled(ctx context.Context, principalID string) (bool, error) {
@@ -286,4 +300,150 @@ func scanMemory(row rowScanner) (memory.Entry, error) {
 		return memory.Entry{}, fmt.Errorf("parse memory time: %w", err)
 	}
 	return entry, nil
+}
+
+const procedureColumns = `id, principal_id, title, steps, source, created_at, updated_at, read_at`
+
+func (s *Store) ListProcedures(ctx context.Context, principalID string) ([]memory.Procedure, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("list procedures: SQLite store is not open")
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+procedureColumns+` FROM memory_procedures WHERE principal_id = ? ORDER BY created_at, rowid`, principalID)
+	if err != nil {
+		return nil, fmt.Errorf("query procedures: %w", err)
+	}
+	defer rows.Close()
+	var procedures []memory.Procedure
+	for rows.Next() {
+		procedure, err := scanProcedure(rows)
+		if err != nil {
+			return nil, err
+		}
+		procedures = append(procedures, procedure)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read procedures: %w", err)
+	}
+	return procedures, nil
+}
+
+func (s *Store) AddProcedure(ctx context.Context, procedure memory.Procedure) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("add procedure: SQLite store is not open")
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO memory_procedures (id, principal_id, title, steps, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		procedure.ID, procedure.PrincipalID, procedure.Title, procedure.Steps, procedure.Source, formatTime(procedure.CreatedAt), formatTime(procedure.UpdatedAt),
+	); err != nil {
+		return fmt.Errorf("add procedure: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) ReplaceProcedure(ctx context.Context, principalID, id, title, steps, source string, at time.Time) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("replace procedure: SQLite store is not open")
+	}
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE memory_procedures SET title = ?, steps = ?, source = ?, updated_at = ? WHERE principal_id = ? AND id = ?`,
+		title, steps, source, formatTime(at), principalID, id)
+	if err != nil {
+		return false, fmt.Errorf("replace procedure: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("read replaced procedure count: %w", err)
+	}
+	return changed == 1, nil
+}
+
+// ReadProcedure returns the procedure as it is now and stamps when it was read.
+func (s *Store) ReadProcedure(ctx context.Context, principalID, id string, at time.Time) (memory.Procedure, bool, error) {
+	if s == nil || s.db == nil {
+		return memory.Procedure{}, false, fmt.Errorf("read procedure: SQLite store is not open")
+	}
+	procedure, err := scanProcedure(s.db.QueryRowContext(ctx,
+		`UPDATE memory_procedures SET read_at = ? WHERE principal_id = ? AND id = ? RETURNING `+procedureColumns,
+		formatTime(at), principalID, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return memory.Procedure{}, false, nil
+	}
+	if err != nil {
+		return memory.Procedure{}, false, err
+	}
+	return procedure, true, nil
+}
+
+func (s *Store) RemoveProcedure(ctx context.Context, principalID, id string) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("remove procedure: SQLite store is not open")
+	}
+	result, err := s.db.ExecContext(ctx, `DELETE FROM memory_procedures WHERE principal_id = ? AND id = ?`, principalID, id)
+	if err != nil {
+		return false, fmt.Errorf("remove procedure: %w", err)
+	}
+	removed, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("read removed procedure count: %w", err)
+	}
+	return removed == 1, nil
+}
+
+// LearnProcedures is true for a principal who never changed the switch.
+func (s *Store) LearnProcedures(ctx context.Context, principalID string) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("load procedure learning switch: SQLite store is not open")
+	}
+	var learn int
+	err := s.db.QueryRowContext(ctx, `SELECT learn_procedures FROM memory_settings WHERE principal_id = ?`, principalID).Scan(&learn)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("query procedure learning switch: %w", err)
+	}
+	return learn == 1, nil
+}
+
+// SetLearnProcedures keeps the memory switch as it is; a principal without a row has memory on.
+func (s *Store) SetLearnProcedures(ctx context.Context, principalID string, learn bool) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("set procedure learning switch: SQLite store is not open")
+	}
+	value := 0
+	if learn {
+		value = 1
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO memory_settings (principal_id, enabled, learn_procedures) VALUES (?, 1, ?)
+		 ON CONFLICT (principal_id) DO UPDATE SET learn_procedures = excluded.learn_procedures`, principalID, value); err != nil {
+		return fmt.Errorf("set procedure learning switch: %w", err)
+	}
+	return nil
+}
+
+func scanProcedure(row rowScanner) (memory.Procedure, error) {
+	var procedure memory.Procedure
+	var createdAt, updatedAt string
+	var readAt sql.NullString
+	if err := row.Scan(&procedure.ID, &procedure.PrincipalID, &procedure.Title, &procedure.Steps, &procedure.Source, &createdAt, &updatedAt, &readAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return memory.Procedure{}, err
+		}
+		return memory.Procedure{}, fmt.Errorf("scan procedure: %w", err)
+	}
+	var err error
+	if procedure.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt); err != nil {
+		return memory.Procedure{}, fmt.Errorf("parse procedure time: %w", err)
+	}
+	if procedure.UpdatedAt, err = time.Parse(time.RFC3339Nano, updatedAt); err != nil {
+		return memory.Procedure{}, fmt.Errorf("parse procedure time: %w", err)
+	}
+	if readAt.Valid {
+		if procedure.ReadAt, err = time.Parse(time.RFC3339Nano, readAt.String); err != nil {
+			return memory.Procedure{}, fmt.Errorf("parse procedure time: %w", err)
+		}
+	}
+	return procedure, nil
 }

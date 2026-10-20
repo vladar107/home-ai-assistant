@@ -127,7 +127,7 @@ flowchart TB
     modelcatalog["<b>modelcatalog</b><br/>models a subscription offers,<br/>read from Pi's cache"]
     integration["<b>integration</b><br/>per-user enable / disable"]
     loc["<b>location</b><br/>latest shared position, expiry"]
-    mem["<b>memory</b><br/>per-user instructions and facts"]
+    mem["<b>memory</b><br/>per-user instructions, facts,<br/>and procedures"]
     backlog["<b>backlog</b><br/>per-user ideas for developing<br/>the assistant"]
     trip["<b>trip</b><br/>trips, bookings, check-in reminders,<br/>start and end notices"]
     attach["<b>attachment</b><br/>inbound photos and files"]
@@ -823,6 +823,26 @@ routes after jobs and watches, read-only, with a Delete button each.
   "Done" message, and `/memory` deletes any entry. Only the
   turn a 👎 starts writes `learned` entries, one proposal at most, and each still
   needs Confirm.
+  Procedures, how a request that needed several steps was done, are kept apart
+  in `memory_procedures`: a title of at most 80 characters, steps of at most
+  1,000, and when the model last read them, at most 20 per principal. The
+  prompt lists only their titles with their ids, so it changes only when a
+  title does. `procedure_read` is a read tool, offered while the principal
+  keeps a procedure, so background tasks and scheduled runs can read one too,
+  and it stamps the read. Its definition is marked `Confirmed`, so the broker
+  frames its result as text the user confirmed earlier rather than as
+  untrusted data. `procedure_save` is a write tool, offered in chat turns
+  while "Learn procedures" is on, and always proposes, a new procedure or the
+  replacement of one by id, which Confirm refuses if that procedure changed
+  since. After outside content its card always carries a warning to check the
+  steps; procedures are not screened, since they address the assistant by
+  design, and carry no intent check, since they are offers. Confirmed
+  procedures get source `confirmed`; `/memory` lists them after the facts with
+  their own Delete buttons, and "Forget everything" clears them with the
+  entries in one transaction. Entries and procedures share one id space.
+  Turning memory off removes both tools and the titles.
+  `home_agent.memory.writes` counts procedure writes under kind `procedure`,
+  and `home_agent.memory.procedure_reads` counts reads.
 - **Backlog.** Each principal's ideas for developing the assistant live in
   SQLite, apart from memory, and never reach the prompt; the model reads them
   only through `backlog_list`. The tools are offered in chat turns alone, and a

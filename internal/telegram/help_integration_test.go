@@ -16,7 +16,7 @@ import (
 var coreToolNames = []string{
 	"generate_image", "proposal_withdraw", "react",
 	"schedule_list", "schedule_get", "reminder_set", "reminder_cancel", "schedule_propose", "schedule_update", "schedule_remove",
-	"memory_add", "memory_replace", "memory_remove",
+	"memory_add", "memory_replace", "memory_remove", "procedure_save",
 	"trip_list", "trip_add", "trip_update",
 	"backlog_add", "backlog_list", "backlog_update",
 }

@@ -407,7 +407,7 @@ func TestMemoryForgetEverythingNeedsASecondPress(t *testing.T) {
 	h.push(callbackUpdate(2, 101, settingsMessageID(1), "mem:ask:1"))
 	h.wantAnswer(2)
 	ask := h.nextEdit()
-	if !strings.Contains(ask.text, "Forget all 1 entries?") || !slices.Equal(buttonData(ask.keyboard), []string{"mem:clear:1", "mem:back:1"}) {
+	if !strings.Contains(ask.text, "Forget all 1 items?") || !slices.Equal(buttonData(ask.keyboard), []string{"mem:clear:1", "mem:back:1"}) {
 		t.Fatalf("confirmation = %+v", ask)
 	}
 	if entries := h.memoryEntries("alice"); len(entries) != 1 {

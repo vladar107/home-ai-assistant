@@ -69,6 +69,10 @@ type Definition struct {
 	// OutsideBudget keeps the tool's calls out of the turn's call budget, so a turn that has spent
 	// its budget can still hand the rest of the work to it.
 	OutsideBudget bool
+	// Confirmed marks a tool whose result holds only text the user confirmed, so it is framed as
+	// theirs rather than as untrusted data; an error result keeps the usual framing. It excludes
+	// ThirdParty.
+	Confirmed bool
 	// Activity names what a call of the tool is doing, for showing the user while the turn runs; it
 	// is one of the Activity keys or empty, and never reaches the model.
 	Activity string
@@ -257,7 +261,7 @@ func (b *Broker) toolsFor(ctx context.Context, principalID string, readOnly bool
 			if _, exists := executor.bindings[definition.Name]; exists {
 				return agentruntime.ToolSet{}, fmt.Errorf("tool %q is contributed twice", definition.Name)
 			}
-			executor.bindings[definition.Name] = toolBinding{provider: provider, deadline: definition.Timeout, thirdParty: definition.ThirdParty, household: definition.Household, screen: definition.Screen, private: definition.Private, outsideBudget: definition.OutsideBudget}
+			executor.bindings[definition.Name] = toolBinding{provider: provider, deadline: definition.Timeout, thirdParty: definition.ThirdParty, household: definition.Household, screen: definition.Screen, private: definition.Private, outsideBudget: definition.OutsideBudget, confirmed: definition.Confirmed}
 			if definition.OutsideBudget && executor.handoff == "" {
 				executor.handoff = definition.Name
 			}
@@ -322,6 +326,9 @@ func validateDefinition(definition Definition) error {
 	if definition.Household && !definition.ThirdParty {
 		return fmt.Errorf("tool %q is marked household but not third-party", definition.Name)
 	}
+	if definition.Confirmed && definition.ThirdParty {
+		return fmt.Errorf("tool %q is marked confirmed but third-party", definition.Name)
+	}
 	var schema map[string]json.RawMessage
 	if err := json.Unmarshal(definition.InputSchema, &schema); err != nil || schema == nil {
 		return fmt.Errorf("tool %q input schema must be a JSON object", definition.Name)
@@ -339,6 +346,7 @@ type toolBinding struct {
 	screen        bool
 	private       bool
 	outsideBudget bool
+	confirmed     bool
 }
 
 // turnExecutor binds one turn to its principal and the grant collected when the turn started. The
@@ -467,6 +475,9 @@ func (e *turnExecutor) perform(ctx context.Context, call agentruntime.ToolCall, 
 		}
 		e.markPrivate(ctx, binding, result)
 		text := prompt.ToolResultUntrusted
+		if binding.confirmed {
+			text = prompt.ToolResultConfirmed
+		}
 		screened := ""
 		if binding.screen && e.broker.screener != nil {
 			screened = e.screen(ctx, call.Name, result.Text)

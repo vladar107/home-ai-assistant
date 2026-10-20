@@ -81,6 +81,7 @@ type Telemetry struct {
 	scheduleTravelPaused         metric.Int64Counter
 	memoryWrites                 metric.Int64Counter
 	memoryLessons                metric.Int64Counter
+	memoryProcedureReads         metric.Int64Counter
 	conversationResumes          metric.Int64Counter
 	conversationSearches         metric.Int64Counter
 	turnIndicatorFailures        metric.Int64Counter
@@ -414,6 +415,9 @@ func (t *Telemetry) createBusinessInstruments(meter metric.Meter) error {
 		return err
 	}
 	if t.memoryLessons, err = counter("home_agent.memory.lessons", "Instructions learned from a negative reaction, by outcome.", "{lesson}"); err != nil {
+		return err
+	}
+	if t.memoryProcedureReads, err = counter("home_agent.memory.procedure_reads", "Kept procedures the model read.", "{read}"); err != nil {
 		return err
 	}
 	if t.conversationResumes, err = counter("home_agent.conversation.resumes", "Returns to an earlier conversation, by trigger.", "{resume}"); err != nil {
@@ -896,6 +900,11 @@ func (t *Telemetry) RecordMemoryLesson(ctx context.Context, principal, outcome s
 		principalAttr(principal),
 		labelAttr("home_agent.outcome", outcome, "unknown"),
 	))
+}
+
+// RecordProcedureRead counts a procedure the model read with procedure_read.
+func (t *Telemetry) RecordProcedureRead(ctx context.Context, principal string) {
+	t.memoryProcedureReads.Add(ctx, 1, metric.WithAttributes(principalAttr(principal)))
 }
 
 func (t *Telemetry) StartStore(ctx context.Context, operation string) (context.Context, func(error)) {
