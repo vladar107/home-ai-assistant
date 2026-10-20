@@ -355,6 +355,7 @@ func TestTurnWaitingBehindAnotherKeepsTyping(t *testing.T) {
 	if drafts := h.draftRequests(); len(drafts) != 0 {
 		t.Fatalf("a waiting turn showed drafts: %+v", drafts)
 	}
+	released := time.Now()
 	first.answer <- agentruntime.RunResult{Response: "scheduled answer", Final: "scheduled answer"}
 	if err := receive(t, h.ctx, scheduled); err != nil {
 		t.Fatal(err)
@@ -363,7 +364,12 @@ func TestTurnWaitingBehindAnotherKeepsTyping(t *testing.T) {
 	chat.answer <- agentruntime.RunResult{Response: "chat answer"}
 	h.wantReply(101, 1, "chat answer")
 	h.wantIndicatorsQuiet()
-	h.wantSteadyTyping(int(2 * indicatorDelay / indicatorTyping))
+	// A loaded runner sends fewer actions than the cadence allows, so the wait is checked by when
+	// typing last ran rather than by a count.
+	h.wantSteadyTyping(int(indicatorDelay / indicatorTyping))
+	if actions := h.chatActionTimes(); actions[len(actions)-1].Before(released.Add(-5 * indicatorTyping)) {
+		t.Fatalf("typing stopped %v before the waiting turn could run", released.Sub(actions[len(actions)-1]))
+	}
 }
 
 // Serial: asserts typing and draft timing in real time.

@@ -211,14 +211,15 @@ func TestMemoryExposureLastsForTheConversationAndCoversWebSearch(t *testing.T) {
 	if results[1].IsError || !strings.Contains(results[1].Text, "awaiting the user's confirmation") {
 		t.Fatalf("write after a web search = %+v", results[1])
 	}
-	h.nextMessage()
+	// A proposal joins the bundle of one whose message is not recorded yet.
+	h.waitMessageRecorded(h.nextMessage().messageID)
 
 	// The search result is still in the session's history a turn later.
 	_, results = h.memoryTurn(runtime, 2, 101, "ok", addCall("fact", "likes coffee"))
 	if results[0].IsError || !strings.Contains(results[0].Text, "awaiting the user's confirmation") {
 		t.Fatalf("write in the same conversation later = %+v", results[0])
 	}
-	h.nextMessage()
+	h.waitMessageRecorded(h.nextMessage().messageID)
 
 	h.push(textUpdate(3, 101, "/new"))
 	h.wantReply(101, 3, NewSessionReply)

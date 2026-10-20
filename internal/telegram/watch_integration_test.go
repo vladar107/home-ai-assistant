@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
@@ -309,6 +310,8 @@ func TestAgentWatchChecksInAReadOnlyTurnAndAlertsAsOutsideContent(t *testing.T) 
 		!slices.Equal(buttonData(alert.keyboard), []string{"watch:mute:" + id, "watch:pause:" + id}) {
 		t.Fatalf("alert = %+v", alert)
 	}
+	// The loop keeps the alert for the next turn just after sending it.
+	h.waitAlertKept(id)
 
 	h.push(textUpdate(1, 101, "which version is that?"))
 	chat := receive(t, h.ctx, runtime.calls)
@@ -332,5 +335,18 @@ func TestAgentWatchChecksInAReadOnlyTurnAndAlertsAsOutsideContent(t *testing.T) 
 	}
 	if listed := h.runTool(runtime, 3, 101, "watch_list", `{}`); !strings.Contains(listed.Text, "id "+id+": agent watch, Release date") {
 		t.Fatalf("alice's list = %+v", listed)
+	}
+}
+
+func (h *conversationHarness) waitAlertKept(watchID string) {
+	h.t.Helper()
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for h.countRows(`SELECT count(*) FROM watch_alert_messages WHERE watch_id = ?`, watchID) == 0 {
+		select {
+		case <-ticker.C:
+		case <-h.ctx.Done():
+			h.t.Fatalf("the alert of watch %s was never kept", watchID)
+		}
 	}
 }
