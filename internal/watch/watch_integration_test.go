@@ -271,11 +271,7 @@ func (e *engine) wantSent(count int, contains ...string) []sentAlert {
 
 func (e *engine) alertStatus(watchID, occurrence string, sequence int) (string, string) {
 	e.t.Helper()
-	db, err := sql.Open("sqlite", e.path)
-	if err != nil {
-		e.t.Fatal(err)
-	}
-	defer db.Close()
+	db := testutil.OpenDB(e.t, e.path)
 	var status string
 	var reason sql.NullString
 	if err := db.QueryRowContext(e.ctx, `SELECT status, reason FROM watch_alerts WHERE watch_id = ? AND occurrence = ? AND sequence = ?`,

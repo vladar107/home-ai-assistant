@@ -387,11 +387,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 			t.Error(err)
 		}
 	})
-	h.db, err = sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = h.db.Close() })
+	h.db = testutil.OpenDB(t, path)
 	principals := []identity.ConfiguredPrincipal{
 		{ID: "alice", DisplayName: "Alice", TelegramUserID: 101},
 		{ID: "bob", DisplayName: "Bob", TelegramUserID: 202},

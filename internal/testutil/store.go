@@ -3,6 +3,7 @@ package testutil
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -37,6 +38,19 @@ func OpenStore(t testing.TB, path string) *sqlite.Store {
 		t.Fatal(err)
 	}
 	return store
+}
+
+// OpenDB opens a second handle on the database at path for a test to inspect or change rows
+// behind the store. It waits for the store's writers as the store does, instead of failing at once
+// with SQLITE_BUSY while a running service holds the write lock.
+func OpenDB(t testing.TB, path string) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?_busy_timeout=5000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return db
 }
 
 func buildTemplate() ([]byte, error) {

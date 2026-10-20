@@ -81,11 +81,7 @@ func newTravelFixture(t *testing.T) *travelFixture {
 	if err := store.BootstrapConfiguredPrincipals(t.Context(), []identity.ConfiguredPrincipal{{ID: "alice", DisplayName: "Alice", TelegramUserID: 101}}); err != nil {
 		t.Fatal(err)
 	}
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db := testutil.OpenDB(t, path)
 	f := &travelFixture{t: t, store: store, proposer: &recordingProposer{}, now: utc(5, 8, 0), db: db,
 		trip: &tripWindow{from: utc(5, 0, 0), to: utc(7, 0, 0)}}
 	service, err := schedule.NewService(
