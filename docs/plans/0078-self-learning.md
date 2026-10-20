@@ -1,6 +1,6 @@
 # 0078 — Self-learning from feedback and outcomes
 
-Status: `proposed`
+Status: `done`
 
 ## Context
 
@@ -21,8 +21,8 @@ signals are dropped:
 
 This plan was added from the backlog ("think through agent self-learning:
 how agents can learn from feedback and outcomes while keeping user control,
-transparency of changes, and safety"). It is a design for review; nothing is
-implemented yet.
+transparency of changes, and safety"). It is the design; plans 0080, 0113,
+and 0114 implement its three steps.
 
 ## Goal
 
@@ -140,7 +140,9 @@ Know-how kept apart from the always-on prompt.
    largest piece. It depends on the other two for its outputs.
 
 Each step gets its own implementation plan when it starts. This plan stays
-the design they refer to.
+the design they refer to, and each records where it departs from it: learn
+on correction in 0080, learned procedures in 0113, and the weekly review in
+0114.
 
 ## Files affected (expected)
 
