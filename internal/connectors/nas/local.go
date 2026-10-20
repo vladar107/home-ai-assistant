@@ -21,9 +21,11 @@ type PrincipalRoots struct {
 
 // RootPath is one mounted directory and the name the model addresses it by.
 type RootPath struct {
-	Name     string
-	Path     string
-	Writable bool
+	Name          string
+	Path          string
+	Writable      bool
+	Shared        bool
+	CreateFolders bool
 }
 
 // localStore reads the NAS through directories mounted into this container. There is no account
@@ -34,9 +36,11 @@ type localStore struct {
 }
 
 type resolvedRoot struct {
-	name     string
-	path     string
-	writable bool
+	name          string
+	path          string
+	writable      bool
+	shared        bool
+	createFolders bool
 }
 
 var _ Store = (*localStore)(nil)
@@ -52,7 +56,7 @@ func newLocalStore(configured []PrincipalRoots) (*localStore, error) {
 			if err != nil {
 				return nil, fmt.Errorf("NAS root %q for %q is not reachable", root.Name, principal.PrincipalID)
 			}
-			roots = append(roots, resolvedRoot{name: root.Name, path: path, writable: root.Writable})
+			roots = append(roots, resolvedRoot{name: root.Name, path: path, writable: root.Writable, shared: root.Shared, createFolders: root.CreateFolders})
 		}
 		store.principals[principal.PrincipalID] = roots
 	}
@@ -74,7 +78,7 @@ type localSession struct {
 func (s *localSession) Roots() []Root {
 	roots := make([]Root, 0, len(s.roots))
 	for _, root := range s.roots {
-		roots = append(roots, Root{Name: root.name, Writable: root.writable})
+		roots = append(roots, Root{Name: root.name, Writable: root.writable, Shared: root.shared, CreateFolders: root.createFolders})
 	}
 	return roots
 }

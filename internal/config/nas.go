@@ -38,11 +38,15 @@ type NASPrincipalRoots struct {
 
 // NASRoot is one mounted directory: the name the model addresses it by, the path inside the
 // container, and whether a confirmed save may write there. A root is read-only unless the mount
-// is read-write too; this flag only stops the connector from trying.
+// is read-write too; this flag only stops the connector from trying. Shared marks a directory
+// that belongs to the household rather than to this user, and CreateFolders lets a save create
+// missing folders in a writable root.
 type NASRoot struct {
-	Name     string `json:"name"`
-	Path     string `json:"path"`
-	Writable bool   `json:"writable,omitempty"`
+	Name          string `json:"name"`
+	Path          string `json:"path"`
+	Writable      bool   `json:"writable,omitempty"`
+	Shared        bool   `json:"shared,omitempty"`
+	CreateFolders bool   `json:"create_folders,omitempty"`
 }
 
 type nasRootsFile struct {
@@ -133,7 +137,42 @@ func (r NASRoots) validate() error {
 			return err
 		}
 	}
+	return r.validateSharedPaths()
+}
+
+// validateSharedPaths refuses a directory reachable by more than one principal, whether granted
+// to both or nested inside another principal's root, unless every grant involved marks it shared,
+// so a household folder is never presented to anyone as their own and no one reaches into
+// another user's own folders.
+func (r NASRoots) validateSharedPaths() error {
+	type grant struct {
+		principal string
+		path      string
+		shared    bool
+	}
+	var grants []grant
+	for _, principal := range r {
+		for _, root := range principal.Roots {
+			grants = append(grants, grant{principal: principal.PrincipalID, path: filepath.Clean(root.Path), shared: root.Shared})
+		}
+	}
+	for _, first := range grants {
+		for _, second := range grants {
+			if first.principal == second.principal || (first.shared && second.shared) {
+				continue
+			}
+			if overlaps(first.path, second.path) {
+				return fmt.Errorf("HOME_AGENT_NAS_ROOTS_FILE: %q is reachable by more than one principal and must be marked shared in every grant", second.path)
+			}
+		}
+	}
 	return nil
+}
+
+func overlaps(first, second string) bool {
+	return first == second ||
+		strings.HasPrefix(second, first+string(filepath.Separator)) ||
+		strings.HasPrefix(first, second+string(filepath.Separator))
 }
 
 func validateNASRootSet(principalID string, roots []NASRoot) error {
@@ -152,6 +191,9 @@ func validateNASRootSet(principalID string, roots []NASRoot) error {
 		if !filepath.IsAbs(root.Path) || root.Path != filepath.Clean(root.Path) {
 			return fmt.Errorf("HOME_AGENT_NAS_ROOTS_FILE: %q must be a clean absolute path", root.Path)
 		}
+		if root.CreateFolders && !root.Writable {
+			return fmt.Errorf("HOME_AGENT_NAS_ROOTS_FILE: %q sets create_folders on a read-only root", root.Name)
+		}
 	}
 	return nil
 }
@@ -164,6 +206,9 @@ func validateNASDefaultWrite(principal NASPrincipalRoots) error {
 		if root.Name == principal.DefaultWrite {
 			if !root.Writable {
 				return fmt.Errorf("HOME_AGENT_NAS_ROOTS_FILE: %q names a read-only default_write root", principal.PrincipalID)
+			}
+			if root.Shared {
+				return fmt.Errorf("HOME_AGENT_NAS_ROOTS_FILE: %q names a shared default_write root", principal.PrincipalID)
 			}
 			return nil
 		}

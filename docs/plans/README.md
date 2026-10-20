@@ -124,6 +124,7 @@ plan that links back to the earlier record.
 | 0112 | [Documentation and plan drift](0112-documentation-drift.md) | done |
 | 0113 | [Learned procedures](0113-learned-procedures.md) | done |
 | 0114 | [Weekly review](0114-weekly-review.md) | done |
+| 0115 | [NAS filing in place](0115-nas-filing-in-place.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

@@ -17,25 +17,58 @@ import (
 const toolSaveAttachment = "nas_save_attachment"
 
 func writeGuidance(status Status) string {
-	var writable []string
+	var own, shared, creating []string
 	for _, root := range status.Roots {
-		if root.Writable {
-			writable = append(writable, root.Name)
+		if !root.Writable {
+			continue
+		}
+		if root.Shared {
+			shared = append(shared, root.Name)
+		} else {
+			own = append(own, root.Name)
+		}
+		if root.CreateFolders {
+			creating = append(creating, root.Name)
 		}
 	}
-	sort.Strings(writable)
+	sort.Strings(own)
+	sort.Strings(shared)
+	sort.Strings(creating)
 
 	destination := "a folder is required, because this user has no default one"
+	fallback := "leave folder out and tell the user why"
 	if status.DefaultFolder != "" {
 		destination = "leave it out and the file goes to " + status.DefaultFolder
+		fallback = "leave folder out so the file goes to " + status.DefaultFolder + ", and tell the user why"
 	}
 	return "Saving to the NAS is on, and every save needs the user's confirmation: nas_save_attachment only proposes to file a photo or document the user already sent in this conversation. " +
-		"Give folder only when the user says where the file belongs, such as a folder for finances; " + destination + ". " +
-		"Only these folders can be saved to: " + strings.Join(writable, ", ") + ". Everything else on the NAS is read-only. " +
+		"The user's inbox, or \"my inbox\", is their own inbox and never a shared folder. Use a folder shared with the household only when the user says shared, household, family, or both of us. " +
+		"Give folder when the user says where the file belongs, such as a folder for finances, or when filing it where it belongs as described next; otherwise " + destination + ". " +
+		"When the user asks to file something where it belongs without naming a folder, call nas_list_folders on the user's own writable folders, choose the best-fitting existing folder from its name and the file the user sent, and never invent a folder; if nothing fits, " + fallback + ". " +
+		"Folders this user can save to: " + describeFolders(own, shared) + ". " +
+		"New folders can be created only in " + describeCreating(creating) + "; elsewhere the folder must already exist. Everything else on the NAS is read-only. " +
 		"After your reply the user sees the exact destination with Confirm and Reject buttons, so describe what you proposed and never claim it was saved. " +
 		"Every proposal you make in this turn is shown to the user together and confirmed or rejected as one batch, so propose every save the request needs in this turn, once each, and withdraw a wrong one with proposal_withdraw; a proposal in a later turn replaces a batch still waiting. " +
 		"A save can only add a new file: a name already in use is refused rather than replaced, and nothing already on the NAS can be changed or removed. " +
 		"Use list_attachments to find the id of the file the user sent."
+}
+
+func describeFolders(own, shared []string) string {
+	var parts []string
+	if len(own) > 0 {
+		parts = append(parts, strings.Join(own, ", ")+" (their own)")
+	}
+	if len(shared) > 0 {
+		parts = append(parts, strings.Join(shared, ", ")+" (shared with the household)")
+	}
+	return strings.Join(parts, "; ")
+}
+
+func describeCreating(names []string) string {
+	if len(names) == 0 {
+		return "no folder"
+	}
+	return strings.Join(names, ", ")
 }
 
 var writeDefinitions = []tools.Definition{
@@ -46,7 +79,7 @@ var writeDefinitions = []tools.Definition{
 		Activity:    tools.ActivityFiles,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"attachment_id":{"type":"string","description":"The id of the file the user sent, as listed by list_attachments."},` +
-			`"folder":{"type":"string","description":"Where the user asked for it, such as home/Documents/Finance. Omit to use this user's default folder. Missing folders are created."},` +
+			`"folder":{"type":"string","description":"An existing folder, for example one from nas_list_folders such as home/Documents. Omit to use this user's default folder. Missing folders are created only in the folders the guidance names."},` +
 			`"name":{"type":"string","description":"The file name to save under. Omit to keep the name the user sent it with."}},` +
 			`"required":["attachment_id"],"additionalProperties":false}`),
 	},
@@ -125,21 +158,25 @@ func (s *Service) executeSave(ctx context.Context, principalID string, call tool
 	}
 	defer connection.Close()
 
+	location, missing, err := resolveFolders(ctx, connection, location)
+	if err != nil {
+		return s.toolFailure(ctx, principalID, call.Name, err)
+	}
+	root, _ := rootNamed(status.Roots, location.Root)
+	if len(missing) > 0 && !root.CreateFolders {
+		return tools.Result{Text: missingFolderText(missing[0], location.Root, status.DefaultFolder), IsError: true}, nil
+	}
 	if _, taken, err := entryOf(ctx, connection, location); err != nil {
 		return s.toolFailure(ctx, principalID, call.Name, err)
 	} else if taken {
 		return tools.Result{Text: failureText(ErrorExists), IsError: true}, nil
-	}
-	missing, err := missingDirectories(ctx, connection, location)
-	if err != nil {
-		return s.toolFailure(ctx, principalID, call.Name, err)
 	}
 
 	canonical, err := json.Marshal(confirmedSave{AttachmentID: record.ID, Path: location.String()})
 	if err != nil {
 		return tools.Result{}, err
 	}
-	proposal := approval.Proposal{Tool: toolSaveAttachment, Arguments: canonical, Summary: saveSummary(record, location, missing), Intent: approval.Intent{Verb: "save", TargetKind: "file", TargetName: path.Base(location.Path)}}
+	proposal := approval.Proposal{Tool: toolSaveAttachment, Arguments: canonical, Summary: saveSummary(record, location, missing, root.Shared), Intent: approval.Intent{Verb: "save", TargetKind: "file", TargetName: path.Base(location.Path)}}
 	if _, err := s.proposer.Propose(ctx, principalID, proposal); err != nil {
 		if approval.Refused(err) {
 			return tools.Result{Text: err.Error(), IsError: true}, nil
@@ -167,8 +204,13 @@ func (s *Service) destination(status Status, arguments saveArguments, record att
 	if err != nil {
 		return Location{}, err
 	}
-	if !writableRoot(status.Roots, location.Root) {
+	if root, _ := rootNamed(status.Roots, location.Root); !root.Writable {
 		return Location{}, fmt.Errorf("%s is read-only; save to one of the folders that can be written to", location.Root)
+	}
+	for _, segment := range strings.Split(location.Path, "/") {
+		if err := refuseSystemName(segment); err != nil {
+			return Location{}, err
+		}
 	}
 
 	name := safeName(record.FileName)
@@ -181,21 +223,45 @@ func (s *Service) destination(status Status, arguments saveArguments, record att
 		}
 		name = chosen
 	}
+	if err := refuseSystemName(name); err != nil {
+		return Location{}, err
+	}
 	return location.Child(name), nil
 }
 
-func writableRoot(roots []Root, name string) bool {
+func rootNamed(roots []Root, name string) (Root, bool) {
 	for _, root := range roots {
 		if root.Name == name {
-			return root.Writable
+			return root, true
 		}
 	}
-	return false
+	return Root{}, false
 }
 
-func saveSummary(record attachment.Record, location Location, missing []Location) string {
+// refuseSystemName keeps a save out of the folders a NAS keeps for itself, such as snapshots and
+// recycle bins, and out of hidden names.
+func refuseSystemName(segment string) error {
+	if segment != "" && strings.ContainsRune(".@#", rune(segment[0])) {
+		return fmt.Errorf("%q starts with %q, which is reserved for system and hidden items; choose another name", segment, segment[:1])
+	}
+	return nil
+}
+
+func missingFolderText(missing Location, root, defaultFolder string) string {
+	text := fmt.Sprintf("%s does not exist, and new folders cannot be created in %s; choose an existing folder from nas_list_folders", missing, root)
+	if defaultFolder != "" {
+		text += ", or leave folder out to save to " + defaultFolder
+	}
+	return text + "."
+}
+
+func saveSummary(record attachment.Record, location Location, missing []Location, shared bool) string {
+	owner := "your"
+	if shared {
+		owner = "the shared"
+	}
 	var builder strings.Builder
-	fmt.Fprintf(&builder, "Save %q (%s) to the NAS as %s", record.FileName, formatSize(record.SizeBytes), location)
+	fmt.Fprintf(&builder, "Save %q (%s) to %s NAS folder as %s", record.FileName, formatSize(record.SizeBytes), owner, location)
 	if len(missing) > 0 {
 		names := make([]string, 0, len(missing))
 		for _, directory := range missing {
@@ -246,12 +312,16 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 	}
 	defer connection.Close()
 
-	for _, directory := range location.Ancestors() {
-		if err := connection.MakeDirectory(ctx, directory); err != nil {
-			if classify(err).Class == ErrorExists {
-				continue
+	// The live session decides whether folders may be created, not the proposal, so a root that
+	// stopped allowing it fails the save as a missing folder.
+	if root, _ := rootNamed(connection.Roots(), location.Root); root.CreateFolders {
+		for _, directory := range location.Ancestors() {
+			if err := connection.MakeDirectory(ctx, directory); err != nil {
+				if classify(err).Class == ErrorExists {
+					continue
+				}
+				return approval.Outcome{}, actionErrorFor(err)
 			}
-			return approval.Outcome{}, actionErrorFor(err)
 		}
 	}
 	if err := connection.Create(ctx, location, data); err != nil {
@@ -300,26 +370,48 @@ func entryOf(ctx context.Context, connection Session, location Location) (Entry,
 	return Entry{}, false, nil
 }
 
-// missingDirectories lists the folders a save would have to create, outermost first. The walk
-// stops at the first missing one because everything below it is missing too.
-func missingDirectories(ctx context.Context, connection Session, location Location) ([]Location, error) {
+// resolveFolders walks the destination's folders against the disk. Each existing folder takes the
+// exact name found there, so the stored path and the confirmation match the disk even when the
+// model wrote different capitals. The folders that do not exist, outermost first, are returned as
+// they would be created; the walk stops looking at the first missing one because everything below
+// it is missing too.
+func resolveFolders(ctx context.Context, connection Session, location Location) (Location, []Location, error) {
+	segments := strings.Split(location.Path, "/")
+	resolved := Location{Root: location.Root}
 	var missing []Location
-	for _, directory := range location.Ancestors() {
-		if len(missing) > 0 {
-			missing = append(missing, directory)
-			continue
+	for _, segment := range segments[:len(segments)-1] {
+		if len(missing) == 0 {
+			entries, err := connection.List(ctx, resolved)
+			if err != nil && classify(err).Class != ErrorNotFound {
+				return Location{}, nil, err
+			}
+			if found, exists := matchEntry(entries, segment); exists {
+				if !found.Directory {
+					return Location{}, nil, &Error{Class: ErrorExists}
+				}
+				resolved = resolved.Child(found.Name)
+				continue
+			}
 		}
-		found, exists, err := entryOf(ctx, connection, directory)
-		if err != nil {
-			return nil, err
+		resolved = resolved.Child(segment)
+		missing = append(missing, resolved)
+	}
+	return resolved.Child(segments[len(segments)-1]), missing, nil
+}
+
+// matchEntry prefers the exact name and falls back to a different capitalization.
+func matchEntry(entries []Entry, name string) (Entry, bool) {
+	var folded *Entry
+	for index, found := range entries {
+		if found.Name == name {
+			return found, true
 		}
-		if !exists {
-			missing = append(missing, directory)
-			continue
-		}
-		if !found.Directory {
-			return nil, &Error{Class: ErrorExists}
+		if folded == nil && strings.EqualFold(found.Name, name) {
+			folded = &entries[index]
 		}
 	}
-	return missing, nil
+	if folded != nil {
+		return *folded, true
+	}
+	return Entry{}, false
 }

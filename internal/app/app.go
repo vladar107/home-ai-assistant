@@ -530,7 +530,7 @@ func nasRoots(configured config.NASRoots) []nas.PrincipalRoots {
 	for _, principal := range configured {
 		paths := make([]nas.RootPath, 0, len(principal.Roots))
 		for _, root := range principal.Roots {
-			paths = append(paths, nas.RootPath{Name: root.Name, Path: root.Path, Writable: root.Writable})
+			paths = append(paths, nas.RootPath{Name: root.Name, Path: root.Path, Writable: root.Writable, Shared: root.Shared, CreateFolders: root.CreateFolders})
 		}
 		roots = append(roots, nas.PrincipalRoots{
 			PrincipalID:  principal.PrincipalID,

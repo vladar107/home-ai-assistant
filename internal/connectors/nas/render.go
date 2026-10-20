@@ -22,8 +22,8 @@ const (
 	maximumHits     = 25
 )
 
-// renderRoots lists the places this principal can reach, marking the ones a confirmed save can
-// write to so the model does not propose a save into a read-only folder.
+// renderRoots lists the places this principal can reach, marking whose they are and which a
+// confirmed save can write to so the model does not propose a save into a read-only folder.
 func renderRoots(roots []Root) string {
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "Folders on the NAS this user can reach: %d\n", len(roots))
@@ -31,11 +31,14 @@ func renderRoots(roots []Root) string {
 		builder.WriteString("(none)\n")
 	}
 	for _, root := range roots {
-		if root.Writable {
-			fmt.Fprintf(&builder, "- [folder, can be saved to] %s\n", root.Name)
-			continue
+		owner, access := "yours", "read-only"
+		if root.Shared {
+			owner = "shared with the household"
 		}
-		fmt.Fprintf(&builder, "- [folder, read-only] %s\n", root.Name)
+		if root.Writable {
+			access = "can be saved to"
+		}
+		fmt.Fprintf(&builder, "- [folder, %s, %s] %s\n", owner, access, root.Name)
 	}
 	return strings.TrimRight(builder.String(), "\n")
 }

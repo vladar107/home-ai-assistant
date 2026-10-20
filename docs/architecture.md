@@ -808,8 +808,10 @@ routes after jobs and watches, read-only, with a Delete button each.
   data source proxy and are bounded in range, resolution, series, and lines.
 - **Untrusted input.** Tool results, web pages, email, and model output are marked
   and treated as data. Private and loopback addresses are refused by the web tools.
-- **NAS isolation by mount.** Only inbox and shared-drop paths are mounted
-  writable; the per-principal roots file decides which user sees which folders.
+- **NAS isolation by mount.** The shared folder is mounted read-only; homes and
+  inboxes are writable, and a confirmed save only adds a new file there. The
+  per-principal roots file decides which user sees which folders, which are
+  shared with the household, and where a save may create folders.
 - **Quiet telemetry.** Logs and traces carry principal IDs, tool names, outcomes,
   and sizes, never message text, usernames, tokens, or locations.
 - **Memory.** Each principal's instructions and facts live in SQLite, are capped

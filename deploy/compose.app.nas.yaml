@@ -2,9 +2,10 @@
 # so a deployment without the feature mounts none of the household's directories.
 #
 # The application already runs as the household's own NAS user, so these mounts need no account
-# and no password. Every mount is read-only except the ones a confirmed save writes to, which is
-# the outermost guarantee that nothing already on the NAS can be changed or removed: a write to a
-# read-only mount fails in the kernel, whatever the application believes.
+# and no password. The shared folder is read-only; the personal homes and the inboxes are writable
+# because a confirmed save adds files there. A write to a read-only mount fails in the kernel,
+# whatever the application believes, and on a writable one the connector only ever adds new
+# files and folders, never replacing or removing anything.
 services:
   home-agent:
     environment:
@@ -19,7 +20,6 @@ services:
       - type: bind
         source: ${HOME_AGENT_NAS_PRIMARY_HOME_PATH:?set HOME_AGENT_NAS_PRIMARY_HOME_PATH}
         target: /nas/primary-home
-        read_only: true
         bind:
           create_host_path: false
       - type: bind
@@ -30,7 +30,6 @@ services:
       - type: bind
         source: ${HOME_AGENT_NAS_SECOND_HOME_PATH:?set HOME_AGENT_NAS_SECOND_HOME_PATH}
         target: /nas/second-home
-        read_only: true
         bind:
           create_host_path: false
       - type: bind

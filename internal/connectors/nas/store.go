@@ -16,10 +16,13 @@ const (
 )
 
 // Root is one directory a principal may reach, under the name the model addresses it by. Writable
-// roots are the only places a confirmed save can write.
+// roots are the only places a confirmed save can write. Shared marks a household folder rather
+// than the principal's own, and CreateFolders lets a save create folders that do not exist yet.
 type Root struct {
-	Name     string
-	Writable bool
+	Name          string
+	Writable      bool
+	Shared        bool
+	CreateFolders bool
 }
 
 // Entry is one directory entry.

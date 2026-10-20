@@ -128,6 +128,7 @@ type fixture struct {
 	store     *sqlite.Store
 	home      string
 	inbox     string
+	shared    string
 	second    string
 	proposals *recorder
 	files     *sentFiles
@@ -135,9 +136,26 @@ type fixture struct {
 	logs      *lockedBuffer
 }
 
+// fixtureOption changes the roots newFixture gives alice.
+type fixtureOption func(*[]nas.RootPath, *fixture)
+
+// withWritableHome makes alice's home accept saves into folders that already exist.
+func withWritableHome(roots *[]nas.RootPath, _ *fixture) {
+	(*roots)[0].Writable = true
+}
+
+// withSharedRoots adds a read-only household folder and a writable household inbox.
+func withSharedRoots(roots *[]nas.RootPath, f *fixture) {
+	f.shared = f.t.TempDir()
+	*roots = append(*roots,
+		nas.RootPath{Name: "shared", Path: f.shared, Shared: true},
+		nas.RootPath{Name: "shared-inbox", Path: f.t.TempDir(), Writable: true, Shared: true, CreateFolders: true},
+	)
+}
+
 // newFixture builds the connector over real directories, which is what production uses: the
 // store reads mounted directories, so there is nothing to stand in for.
-func newFixture(t *testing.T) *fixture {
+func newFixture(t *testing.T, options ...fixtureOption) *fixture {
 	t.Helper()
 	ctx := t.Context()
 	state, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
@@ -157,13 +175,18 @@ func newFixture(t *testing.T) *fixture {
 	proposals := &recorder{}
 	files := &sentFiles{records: map[string]attachment.Record{}, data: map[string][]byte{}}
 	chat := &outbox{}
+	f := &fixture{t: t, ctx: ctx, store: state, home: home, inbox: inbox, second: second, proposals: proposals, files: files, outbox: chat, logs: logs}
+	aliceRoots := []nas.RootPath{
+		{Name: "home", Path: home},
+		{Name: "inbox", Path: inbox, Writable: true, CreateFolders: true},
+	}
+	for _, option := range options {
+		option(&aliceRoots, f)
+	}
 	service, err := nas.NewService(nas.Config{Roots: []nas.PrincipalRoots{
 		{
-			PrincipalID: "alice",
-			Roots: []nas.RootPath{
-				{Name: "home", Path: home},
-				{Name: "inbox", Path: inbox, Writable: true},
-			},
+			PrincipalID:  "alice",
+			Roots:        aliceRoots,
 			DefaultWrite: "inbox",
 		},
 		{
@@ -174,7 +197,8 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &fixture{t: t, ctx: ctx, service: service, store: state, home: home, inbox: inbox, second: second, proposals: proposals, files: files, outbox: chat, logs: logs}
+	f.service = service
+	return f
 }
 
 func (f *fixture) write(directory, path, content string) {
@@ -269,7 +293,7 @@ func TestRootsAreScopedToThePrincipal(t *testing.T) {
 	f.contribute()
 
 	roots := f.execute("nas_list_files", `{}`)
-	if roots.IsError || !strings.Contains(roots.Text, "[folder, read-only] home") || !strings.Contains(roots.Text, "[folder, can be saved to] inbox") {
+	if roots.IsError || !strings.Contains(roots.Text, "[folder, yours, read-only] home") || !strings.Contains(roots.Text, "[folder, yours, can be saved to] inbox") {
 		t.Fatalf("roots = %+v", roots)
 	}
 	listing := f.execute("nas_list_files", `{"path":"home/Documents"}`)
@@ -294,7 +318,7 @@ func TestBobSeesOnlyHisOwnRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Bob has no writable root, so saving is never offered to him; browsing, reading and sending are.
-	if got := names(contribution); len(got) != 4 {
+	if got := names(contribution); len(got) != 5 {
 		t.Fatalf("bob's tools = %+v", got)
 	}
 	result, err := f.service.Execute(f.ctx, "bob", tools.Call{Name: "nas_list_files", Arguments: json.RawMessage(`{"path":"inbox"}`)})
@@ -448,10 +472,10 @@ func TestSavingIsOffUntilTheUserSwitchesItOn(t *testing.T) {
 
 	f.enableSaving()
 	after := f.contribute()
-	if got := names(after); len(got) != 5 {
+	if got := names(after); len(got) != 6 {
 		t.Fatalf("contribution after enabling = %+v", got)
 	}
-	if !strings.Contains(after.WriteGuidance, "the file goes to inbox") || !strings.Contains(after.WriteGuidance, "Only these folders can be saved to: inbox") {
+	if !strings.Contains(after.WriteGuidance, "the file goes to inbox") || !strings.Contains(after.WriteGuidance, "Folders this user can save to: inbox (their own)") {
 		t.Fatalf("guidance does not describe the destinations: %s", after.WriteGuidance)
 	}
 }
@@ -467,7 +491,8 @@ func TestSaveDefaultsToTheUsersOwnFolder(t *testing.T) {
 		t.Fatalf("proposal = %+v", result)
 	}
 	proposal := f.proposal()
-	if !strings.Contains(proposal.Summary, `Save "scan.pdf"`) || !strings.Contains(proposal.Summary, "as inbox/scan.pdf") {
+	if !strings.Contains(proposal.Summary, `Save "scan.pdf"`) || !strings.Contains(proposal.Summary, "as inbox/scan.pdf") ||
+		!strings.Contains(proposal.Summary, "to your NAS folder") {
 		t.Fatalf("summary = %q", proposal.Summary)
 	}
 	if _, found := f.read(f.inbox, "scan.pdf"); found {
@@ -708,5 +733,147 @@ func TestSendingIsAbsentWithoutADelivererAndReadingStaysGated(t *testing.T) {
 	}
 	if !result.IsError || !strings.Contains(result.Text, "cannot send files") {
 		t.Fatalf("an ungranted send succeeded: %+v", result)
+	}
+}
+
+func TestRootsListingLabelsOwnership(t *testing.T) {
+	f := newFixture(t, withSharedRoots)
+	roots := f.execute("nas_list_files", `{}`)
+	for _, want := range []string{
+		"[folder, yours, read-only] home",
+		"[folder, yours, can be saved to] inbox",
+		"[folder, shared with the household, read-only] shared\n",
+		"[folder, shared with the household, can be saved to] shared-inbox",
+	} {
+		if !strings.Contains(roots.Text+"\n", want) {
+			t.Fatalf("roots listing lacks %q: %s", want, roots.Text)
+		}
+	}
+}
+
+func TestSaveToASharedFolderSaysSo(t *testing.T) {
+	f := newFixture(t, withSharedRoots)
+	f.files.add("alice", "att1", "x.pdf", []byte("bytes"))
+	f.enableSaving()
+
+	if result := f.execute("nas_save_attachment", `{"attachment_id":"att1","folder":"shared-inbox"}`); result.IsError {
+		t.Fatalf("proposal = %+v", result)
+	}
+	if summary := f.proposal().Summary; !strings.Contains(summary, `to the shared NAS folder as shared-inbox/x.pdf`) {
+		t.Fatalf("summary = %q", summary)
+	}
+	guidance := f.contribute().WriteGuidance
+	for _, want := range []string{"inbox (their own)", "shared-inbox (shared with the household)", "never a shared folder"} {
+		if !strings.Contains(guidance, want) {
+			t.Fatalf("guidance lacks %q: %s", want, guidance)
+		}
+	}
+}
+
+func TestSaveIntoAnExistingHomeFolder(t *testing.T) {
+	f := newFixture(t, withWritableHome)
+	f.write(f.home, "Documents/readme.txt", "x")
+	f.files.add("alice", "att1", "scan.pdf", []byte("scanned bytes"))
+	f.enableSaving()
+
+	if result := f.execute("nas_save_attachment", `{"attachment_id":"att1","folder":"home/Documents"}`); result.IsError {
+		t.Fatalf("proposal = %+v", result)
+	}
+	proposal := f.proposal()
+	if !strings.Contains(proposal.Summary, "as home/Documents/scan.pdf") || strings.Contains(proposal.Summary, "Creates the folder") {
+		t.Fatalf("summary = %q", proposal.Summary)
+	}
+	if _, err := f.confirm(proposal); err != nil {
+		t.Fatal(err)
+	}
+	if content, found := f.read(f.home, "Documents/scan.pdf"); !found || content != "scanned bytes" {
+		t.Fatalf("saved file = %q %v", content, found)
+	}
+}
+
+func TestSaveIntoAMissingHomeFolderIsRefusedBeforeAnyProposal(t *testing.T) {
+	f := newFixture(t, withWritableHome)
+	f.files.add("alice", "att1", "scan.pdf", []byte("scanned bytes"))
+	f.enableSaving()
+
+	result := f.execute("nas_save_attachment", `{"attachment_id":"att1","folder":"home/Invented"}`)
+	if !result.IsError || !strings.Contains(result.Text, "home/Invented does not exist") ||
+		!strings.Contains(result.Text, "nas_list_folders") || !strings.Contains(result.Text, "leave folder out to save to inbox") {
+		t.Fatalf("save into a missing home folder = %+v", result)
+	}
+	if len(f.proposals.proposals) != 0 {
+		t.Fatalf("a refused save recorded %d proposal(s)", len(f.proposals.proposals))
+	}
+	if _, found := f.read(f.home, "Invented"); found {
+		t.Fatal("a refused save created a folder")
+	}
+}
+
+func TestSaveUsesTheCaseFoundOnDisk(t *testing.T) {
+	f := newFixture(t, withWritableHome)
+	f.write(f.home, "Docs/readme.txt", "x")
+	f.files.add("alice", "att1", "scan.pdf", []byte("scanned bytes"))
+	f.enableSaving()
+
+	if result := f.execute("nas_save_attachment", `{"attachment_id":"att1","folder":"home/docs"}`); result.IsError {
+		t.Fatalf("proposal = %+v", result)
+	}
+	proposal := f.proposal()
+	if !strings.Contains(proposal.Summary, "as home/Docs/scan.pdf") || !strings.Contains(string(proposal.Arguments), "home/Docs/scan.pdf") {
+		t.Fatalf("proposal = %+v", proposal)
+	}
+	if _, err := f.confirm(proposal); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(f.home)
+	if err != nil || len(entries) != 1 || entries[0].Name() != "Docs" {
+		t.Fatalf("home entries = %v %v", entries, err)
+	}
+	if _, found := f.read(f.home, "Docs/scan.pdf"); !found {
+		t.Fatal("file was not saved under the case on disk")
+	}
+}
+
+func TestConfirmationCreatesNoFolderInARootWithoutCreateFolders(t *testing.T) {
+	f := newFixture(t, withWritableHome)
+	f.write(f.home, "Docs/readme.txt", "x")
+	f.files.add("alice", "att1", "scan.pdf", []byte("scanned bytes"))
+	f.enableSaving()
+	if result := f.execute("nas_save_attachment", `{"attachment_id":"att1","folder":"home/Docs"}`); result.IsError {
+		t.Fatalf("proposal = %+v", result)
+	}
+	proposal := f.proposal()
+	if err := os.RemoveAll(filepath.Join(f.home, "Docs")); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := f.confirm(proposal)
+	if actionErr := actionErrorOf(t, err); actionErr.Reason != "not_found" {
+		t.Fatalf("confirmed save into a vanished folder = %+v", actionErr)
+	}
+	entries, _ := os.ReadDir(f.home)
+	if len(entries) != 0 {
+		t.Fatalf("a confirmation created %d entries in a root without create_folders", len(entries))
+	}
+}
+
+func TestSaveRefusesSystemFolderNames(t *testing.T) {
+	f := newFixture(t, withWritableHome)
+	f.write(f.home, "@Recycle/readme.txt", "x")
+	f.files.add("alice", "att1", "scan.pdf", []byte("scanned bytes"))
+	f.enableSaving()
+
+	for _, arguments := range []string{
+		`{"attachment_id":"att1","folder":"home/@Recycle"}`,
+		`{"attachment_id":"att1","folder":"inbox/.hidden"}`,
+		`{"attachment_id":"att1","folder":"inbox/#snapshot"}`,
+		`{"attachment_id":"att1","name":".profile"}`,
+	} {
+		if result := f.execute("nas_save_attachment", arguments); !result.IsError || !strings.Contains(result.Text, "reserved for system and hidden items") {
+			t.Fatalf("save %s = %+v", arguments, result)
+		}
+	}
+	if len(f.proposals.proposals) != 0 {
+		t.Fatalf("a refused save recorded %d proposal(s)", len(f.proposals.proposals))
 	}
 }
