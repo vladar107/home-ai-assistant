@@ -215,7 +215,7 @@ func joinPresent(separator string, parts ...string) string {
 	return strings.Join(kept, separator)
 }
 
-func renderTrips(v view, from, to, via station, hasVia, arriveBy bool, at time.Time, response tripsResponse) string {
+func renderTrips(v view, from, to, via station, hasVia, arriveBy bool, at time.Time, extraTransfer int, response tripsResponse) string {
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "NS trips from %s to %s", from.name, to.name)
 	if hasVia {
@@ -225,6 +225,9 @@ func renderTrips(v view, from, to, via station, hasVia, arriveBy bool, at time.T
 		fmt.Fprintf(&builder, ", arriving by %s", at.In(v.location).Format("Mon 2 Jan 15:04"))
 	} else {
 		fmt.Fprintf(&builder, ", departing from %s", at.In(v.location).Format("Mon 2 Jan 15:04"))
+	}
+	if extraTransfer > 0 {
+		fmt.Fprintf(&builder, ", with %d extra minutes for each transfer", extraTransfer)
 	}
 	builder.WriteString(" (Dutch local time):\n")
 	if len(response.Trips) == 0 {

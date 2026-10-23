@@ -466,6 +466,39 @@ func TestTripsByArrivalSendTheLocalOffset(t *testing.T) {
 	wantError(t, f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal", "date_time": "tomorrow 9"}), "YYYY-MM-DDTHH:MM")
 }
 
+// Extra transfer time is the NS app setting that makes NS plan only connections with that much more
+// time at each change, so a user who wants longer changes between trains gets them from NS itself.
+func TestTripsWithExtraTransferTimeAskNSForIt(t *testing.T) {
+	f := newFixture(t)
+	f.server.serve("v3/trips", fixtureBytes(t, "trips.json"))
+
+	wantText(t, f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal", "date_time": "2026-10-05T08:00", "extra_transfer_minutes": 10}),
+		"NS trips from Amersfoort Schothorst to Utrecht Centraal, departing from Mon 5 Oct 08:00, with 10 extra minutes for each transfer (Dutch local time):",
+		"1. on time — Depart 07:56",
+	)
+	wantText(t, f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal", "date_time": "2026-10-05T09:00", "arrive_by": true, "extra_transfer_minutes": 5}),
+		"arriving by Mon 5 Oct 09:00, with 5 extra minutes for each transfer",
+	)
+	result := f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal", "date_time": "2026-10-05T08:00"})
+	if strings.Contains(result.Text, "extra minutes") {
+		t.Fatalf("a plain plan names extra transfer time:\n%s", result.Text)
+	}
+	queries := f.server.seen("v3/trips")
+	if len(queries) != 3 {
+		t.Fatalf("NS asked %d times, want once per distinct request", len(queries))
+	}
+	if queries[0].Get("addChangeTime") != "10" || queries[1].Get("addChangeTime") != "5" || queries[1].Get("searchForArrival") != "true" || queries[2].Has("addChangeTime") {
+		t.Fatalf("trip queries = %v", queries)
+	}
+
+	wantError(t, f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal", "extra_transfer_minutes": 31}), "between 1 and 30")
+	wantError(t, f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal", "extra_transfer_minutes": -5}), "between 1 and 30")
+	wantError(t, f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal", "departures": []string{"08:04"}, "extra_transfer_minutes": 10}), "leave extra_transfer_minutes out")
+	if got := len(f.server.seen("v3/trips")); got != 3 {
+		t.Fatalf("a refused request reached NS: %d trip queries", got)
+	}
+}
+
 func TestDeparturesShowLiveChanges(t *testing.T) {
 	f := newFixture(t)
 	f.server.serve("v2/departures", fixtureBytes(t, "departures.json"))

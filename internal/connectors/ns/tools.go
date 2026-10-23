@@ -36,10 +36,14 @@ const (
 	maximumDepartures = 25
 
 	dateTimeLayout = "2006-01-02T15:04"
+
+	// maximumExtraTransfer matches the last departure-check retry step.
+	maximumExtraTransfer = 30
 )
 
 const guidance = "Trains (NS): ns_trips plans journeys between Dutch railway stations with live delays, cancellations, platform changes, transfers, and crowding; use it for any question about how or when to get from one place to another by train, with arrive_by for questions about being somewhere by a time. " +
 	"When the user asks about particular trains, such as the 08:10 or their usual departures, call ns_trips with departures set to those planned times (and date_time for the day) instead of choosing among the earliest options; it reports exactly those trains, and a departure it does not find is not in the timetable: say so, and never put a nearby or feeder train in its place. " +
+	"When the user wants more time to change between trains, as with the NS app's extra transfer time, or a train-to-train transfer in a plan is too short, call ns_trips again with extra_transfer_minutes: NS then plans only connections with that much more time at each change, which can bring back an earlier train it otherwise leaves out. It is not the wait between a bus and a train, and via only picks a station to travel through. " +
 	"ns_departures lists the next departures from one station. ns_disruptions lists disruptions, calamities, and engineering works, nationally or for one station. " +
 	"Questions about OV-fiets, NS's rental bikes, go to ns_ovfiets, which reports the bikes available now at each rental point of one station; OV-fiets is not a Home Assistant device. Its count is the current stock, not a forecast or a reservation: for a later arrival, say that the count can change by then. " +
 	"When a trip's status is not NORMAL or it carries messages, call ns_disruptions once, for the station the message or the affected leg names, before answering. " +
@@ -67,7 +71,8 @@ var definitions = []tools.Definition{
 			`"via":{"type":"string","description":"An optional station to travel through."},` +
 			dateTimeSchema + `,` +
 			`"arrive_by":{"type":"boolean","description":"True to treat date_time as the latest arrival instead of the earliest departure."},` +
-			`"departures":{"type":"array","minItems":1,"maxItems":6,"items":{"type":"string","pattern":"^[0-9]{2}:[0-9]{2}$"},"description":"Planned departure times from the from station as HH:MM, on the day of date_time, to check exactly those trains: one status line per departure, never a nearby train instead."}},` +
+			`"departures":{"type":"array","minItems":1,"maxItems":6,"items":{"type":"string","pattern":"^[0-9]{2}:[0-9]{2}$"},"description":"Planned departure times from the from station as HH:MM, on the day of date_time, to check exactly those trains: one status line per departure, never a nearby train instead."},` +
+			`"extra_transfer_minutes":{"type":"integer","minimum":1,"maximum":30,"description":"Extra minutes NS adds to every change between trains, like the NS app's extra transfer time setting; only connections with that much more time are planned. Not with departures, which already retries with extra time."}},` +
 			`"required":["from","to"],"additionalProperties":false}`),
 	},
 	{
@@ -114,12 +119,13 @@ func (s *Service) Contribute(context.Context, string) (tools.Contribution, error
 }
 
 type tripsRequest struct {
-	From       string   `json:"from"`
-	To         string   `json:"to"`
-	Via        string   `json:"via"`
-	DateTime   string   `json:"date_time"`
-	ArriveBy   bool     `json:"arrive_by"`
-	Departures []string `json:"departures"`
+	From                 string   `json:"from"`
+	To                   string   `json:"to"`
+	Via                  string   `json:"via"`
+	DateTime             string   `json:"date_time"`
+	ArriveBy             bool     `json:"arrive_by"`
+	Departures           []string `json:"departures"`
+	ExtraTransferMinutes int      `json:"extra_transfer_minutes"`
 }
 
 type departuresRequest struct {
@@ -175,6 +181,14 @@ func (s *Service) trips(ctx context.Context, principalID string, request tripsRe
 			return errorResult(err.Error())
 		}
 	}
+	if request.ExtraTransferMinutes != 0 {
+		if times != nil {
+			return errorResult("departures already asks NS again with 10, 20, and 30 extra transfer minutes for a train it does not find, so leave extra_transfer_minutes out")
+		}
+		if request.ExtraTransferMinutes < 1 || request.ExtraTransferMinutes > maximumExtraTransfer {
+			return errorResult(fmt.Sprintf("extra_transfer_minutes must be between 1 and %d", maximumExtraTransfer))
+		}
+	}
 	list, failure := s.stationList(ctx, principalID)
 	if failure != nil {
 		return *failure
@@ -202,11 +216,11 @@ func (s *Service) trips(ctx context.Context, principalID string, request tripsRe
 		departures := s.checkDepartures(ctx, principalID, from, to, via, hasVia, at, times)
 		return tools.Result{Text: renderDepartureChecks(s.view(at), from, to, via, hasVia, at, departures)}
 	}
-	response, err := s.planTrips(ctx, from, to, via, hasVia, request.ArriveBy, at, 0)
+	response, err := s.planTrips(ctx, from, to, via, hasVia, request.ArriveBy, at, request.ExtraTransferMinutes)
 	if err != nil {
 		return s.failure(ctx, principalID, toolTrips, err)
 	}
-	return tools.Result{Text: renderTrips(s.view(at), from, to, via, hasVia, request.ArriveBy, at, response)}
+	return tools.Result{Text: renderTrips(s.view(at), from, to, via, hasVia, request.ArriveBy, at, request.ExtraTransferMinutes, response)}
 }
 
 func parseDepartures(values []string, arriveBy bool) ([]transit.Clock, error) {

@@ -676,7 +676,9 @@ minute, and only a trip whose first train leaves the origin at exactly that
 minute counts. NS drops a train from its plan when a later one makes the same
 connection, so when none matches, it is asked again with `addChangeTime` 10, 20,
 and then 30 minutes until one does, and a train found that way carries a note
-about the transfer time. A cancelled train NS leaves out of its plans is looked
+about the transfer time. Free planning asks for the same setting when a user
+wants longer changes between trains: `ns_trips` with `extra_transfer_minutes`
+sends it as `addChangeTime` and names it in the result header. A cancelled train NS leaves out of its plans is looked
 up on the station's departure board. A bus is matched by stop, minute, line, and optionally
 direction, live from OVapi within the next hour and otherwise from the
 Transitous timetable. A departure that is not found is reported as not in the
