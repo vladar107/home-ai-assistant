@@ -209,3 +209,50 @@ func TestMovieWritesRefuseATableTooLongToRead(t *testing.T) {
 	f.refuse("movies_schedule", `{"data_source_id":"ds-films","film":"Паразиты","date":"2026-10-31"}`, "more rows than can be read")
 	f.refuse("movies_set_score", `{"data_source_id":"ds-films","film":"Дюна","score":8}`, "more rows than can be read")
 }
+
+func shareNonMovieDataSource(f *fixture, id, title string) {
+	f.sim.ShareDataSource(token, notionsim.DataSource{
+		ID: id, Title: title, URL: "https://notion.so/" + id,
+		Properties: map[string]any{"Заметки": notionsim.SchemaProperty("rich_text")},
+	})
+}
+
+func TestNextMovieFindsTheSharedMovieTableWithoutAnID(t *testing.T) {
+	f := newFixture(t)
+	f.contribute()
+	shareNonMovieDataSource(f, "ds-recipes", "Рецепты")
+	shareMovieTable(f)
+	*f.now = time.Date(2026, time.October, 3, 12, 0, 0, 0, f.now.Location())
+
+	explicit := f.execute("movies_next", `{"data_source_id":"ds-films"}`)
+	found := f.execute("movies_next", `{}`)
+	if want := explicit.Text + "\nThe movie table's data_source_id is ds-films."; explicit.IsError || found.IsError || found.Text != want {
+		t.Fatalf("next movie without an ID = %+v, want the answer of the explicit ID %+v and the table's ID", found, explicit)
+	}
+}
+
+func TestNextMovieWithoutAnIDRefusesWhenNoSharedDataSourceLooksLikeTheMovieTable(t *testing.T) {
+	f := newFixture(t)
+	f.contribute()
+	shareNonMovieDataSource(f, "ds-recipes", "Рецепты")
+
+	result := f.execute("movies_next", `{}`)
+	if !result.IsError || !strings.Contains(result.Text, "no shared data source looks like the movie table") {
+		t.Fatalf("next movie with no movie table shared = %+v, want the no-table error", result)
+	}
+}
+
+func TestNextMovieWithoutAnIDListsEveryCandidateWhenSeveralLookLikeTheMovieTable(t *testing.T) {
+	f := newFixture(t)
+	f.contribute()
+	shareMovieTable(f)
+	f.sim.ShareDataSource(token, notionsim.DataSource{
+		ID: "ds-watchlist", Title: "Хотим посмотреть", URL: "https://notion.so/ds-watchlist",
+		Properties: map[string]any{"Фильм": notionsim.SchemaProperty("rich_text")},
+	})
+
+	result := f.execute("movies_next", `{}`)
+	if !result.IsError || !strings.Contains(result.Text, "ds-films") || !strings.Contains(result.Text, "ds-watchlist") || !strings.Contains(result.Text, "data_source_id") {
+		t.Fatalf("next movie with two candidates = %+v, want an error listing both IDs", result)
+	}
+}

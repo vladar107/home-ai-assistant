@@ -26,10 +26,11 @@ const (
 	movieDateInput    = "2.1.2006"
 	movieWeek         = 7
 	movieRowPages     = 10
+	movieSearchPages  = 3
 )
 
 const movieGuidance = " Movie nights live in a Notion table whose title column holds the evening's date as DD.MM.YYYY and whose Фильм column holds the film. " +
-	"For that table use movies_next to answer which film is next, never by reading the rows yourself. " +
+	"For that table use movies_next to answer which film is next, never by reading the rows yourself; call it without data_source_id unless you already have the table's ID. " +
 	"Each single-letter column of numbers holds the scores of the household member whose name starts with that letter, a Latin and a Cyrillic form of a letter counting as the same, so the user's own scores are in the column of their initial."
 
 const movieWriteGuidance = " For the movie table, movies_set_score records the user's own score in their own column and movies_schedule gives films their evening dates; " +
@@ -44,8 +45,8 @@ var movieReadDefinitions = []tools.Definition{
 		Private:     true,
 		ThirdParty:  true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
-			`"data_source_id":{"type":"string","description":"The movie table's data source or database ID from an earlier result."}},` +
-			`"required":["data_source_id"],"additionalProperties":false}`),
+			`"data_source_id":{"type":"string","description":"The movie table's data source or database ID from an earlier result. May be omitted: the table is then found among the shared data sources."}},` +
+			`"additionalProperties":false}`),
 	},
 }
 
@@ -110,7 +111,7 @@ func (s *Service) movies(ctx context.Context, principalID, token string, call to
 	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return "", err
 	}
-	if strings.TrimSpace(arguments.DataSourceID) == "" {
+	if strings.TrimSpace(arguments.DataSourceID) == "" && call.Name != toolMoviesNext {
 		return "", fmt.Errorf("data_source_id is required")
 	}
 	film := strings.TrimSpace(arguments.Film)
@@ -139,7 +140,16 @@ func (s *Service) movies(ctx context.Context, principalID, token string, call to
 		date = parsed
 	}
 
-	table, err := s.movieTable(ctx, token, arguments.DataSourceID)
+	dataSourceID := arguments.DataSourceID
+	discovered := strings.TrimSpace(dataSourceID) == ""
+	if discovered {
+		found, err := s.findMovieTable(ctx, token)
+		if err != nil {
+			return "", err
+		}
+		dataSourceID = found
+	}
+	table, err := s.movieTable(ctx, token, dataSourceID)
 	if err != nil {
 		return "", err
 	}
@@ -150,6 +160,10 @@ func (s *Service) movies(ctx context.Context, principalID, token string, call to
 	}
 	switch call.Name {
 	case toolMoviesNext:
+		if discovered {
+			// The writes still need the ID, and this call is what spared the model a search for it.
+			return s.nextMovie(table) + "\nThe movie table's data_source_id is " + dataSourceID + ".", nil
+		}
 		return s.nextMovie(table), nil
 	case toolMoviesSetScore:
 		return s.proposeScore(ctx, principalID, token, table, film, *arguments.Score)
@@ -189,7 +203,7 @@ func (s *Service) movieTable(ctx context.Context, token, id string) (movieTable,
 			letterColumns = append(letterColumns, name)
 		}
 	}
-	if _, hasFilm := dataSource.Properties[movieFilmProperty]; table.titleProperty == "" || !hasFilm {
+	if table.titleProperty == "" || !hasFilmProperty(dataSource.Properties) {
 		return movieTable{}, fmt.Errorf("this is not the movie table: it needs a title column holding dates as DD.MM.YYYY and a text column named %s", movieFilmProperty)
 	}
 	slices.Sort(letterColumns)
@@ -221,6 +235,44 @@ func (s *Service) movieTable(ctx context.Context, token, id string) (movieTable,
 		}
 	}
 	return table, nil
+}
+
+func hasFilmProperty(properties map[string]json.RawMessage) bool {
+	_, found := properties[movieFilmProperty]
+	return found
+}
+
+// findMovieTable picks the one shared data source with a Фильм column, so a call that has no ID
+// does not depend on the model's search query.
+func (s *Service) findMovieTable(ctx context.Context, token string) (string, error) {
+	var candidates []Object
+	cursor := ""
+	for range movieSearchPages {
+		list, err := s.client.Search(ctx, token, SearchRequest{ObjectType: "data_source", PageSize: apiPageSizeLimit, Cursor: cursor})
+		if err != nil {
+			return "", err
+		}
+		for _, result := range list.Results {
+			if !result.InTrash && hasFilmProperty(result.Properties) {
+				candidates = append(candidates, result)
+			}
+		}
+		if !list.HasMore || list.NextCursor == "" {
+			break
+		}
+		cursor = list.NextCursor
+	}
+	switch len(candidates) {
+	case 0:
+		return "", fmt.Errorf("no shared data source looks like the movie table: it needs a title column holding dates as DD.MM.YYYY and a text column named %s; the user must share it with their Notion connection", movieFilmProperty)
+	case 1:
+		return candidates[0].ID, nil
+	}
+	names := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		names = append(names, fmt.Sprintf("%s (%s)", objectTitle(candidate), candidate.ID))
+	}
+	return "", fmt.Errorf("several shared data sources look like the movie table: %s; pass the right one as data_source_id", strings.Join(names, " | "))
 }
 
 func (s *Service) movieRow(page Object, titleProperty string) movieRow {
