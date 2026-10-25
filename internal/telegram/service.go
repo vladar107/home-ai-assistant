@@ -406,6 +406,7 @@ func (s *Service) run(ctx context.Context, done chan<- struct{}, bot Bot, lastCo
 
 	offset := lastCommittedUpdateID + 1
 	backoff := initialRetryBackoff
+	var retryCap int64
 	for {
 		updates, err := s.client.GetUpdates(ctx, offset)
 		if err != nil {
@@ -420,7 +421,10 @@ func (s *Service) run(ctx context.Context, done chan<- struct{}, bot Bot, lastCo
 			continue
 		}
 
-		nextOffset, failureReason, failureErr := s.processBatch(ctx, bot, updates, lastCommittedUpdateID)
+		var nextOffset int64
+		var failureReason string
+		var failureErr error
+		nextOffset, retryCap, failureReason, failureErr = s.processBatch(ctx, bot, updates, lastCommittedUpdateID, retryCap)
 		if nextOffset > offset {
 			offset = nextOffset
 			lastCommittedUpdateID = nextOffset - 1
@@ -442,7 +446,12 @@ func (s *Service) run(ctx context.Context, done chan<- struct{}, bot Bot, lastCo
 	}
 }
 
-func (s *Service) processBatch(ctx context.Context, bot Bot, updates []Update, lastCommittedUpdateID int64) (int64, string, error) {
+// processBatch handles a batch in update order. Plain text messages that follow each other from
+// one user in one tab are merged into one update, so they get one turn. retryCap is the newest
+// update ID whose merged run was processed but whose cursor advance failed; a retry must not grow
+// that run, because the store deduplicates on the last update ID alone and a grown run would be a
+// new request for messages already answered.
+func (s *Service) processBatch(ctx context.Context, bot Bot, updates []Update, lastCommittedUpdateID, retryCap int64) (int64, int64, string, error) {
 	slices.SortStableFunc(updates, func(left, right Update) int {
 		switch {
 		case left.UpdateID < right.UpdateID:
@@ -455,22 +464,31 @@ func (s *Service) processBatch(ctx context.Context, bot Bot, updates []Update, l
 	})
 
 	nextOffset := lastCommittedUpdateID + 1
-	for _, update := range updates {
-		if update.UpdateID < 0 || update.UpdateID == math.MaxInt64 {
+	for index := 0; index < len(updates); {
+		original := updates[index]
+		if original.UpdateID < 0 || original.UpdateID == math.MaxInt64 {
 			_, endUpdate := s.telemetry.StartTelegramUpdate(ctx)
 			err := errors.New("Telegram update has an invalid update ID")
 			endUpdate("failed", "invalid_update", "", err)
-			return nextOffset, "invalid_update", err
+			return nextOffset, retryCap, "invalid_update", err
 		}
-		if update.UpdateID <= lastCommittedUpdateID {
+		if original.UpdateID <= lastCommittedUpdateID {
+			index++
 			continue
+		}
+
+		members, consumed := s.mergeRun(updates[index:], retryCap)
+		index += consumed
+		update := original
+		if len(members) > 1 {
+			update = mergeUpdates(members)
 		}
 
 		updateCtx, endUpdate := s.telemetry.StartTelegramUpdate(ctx)
 		result, failureReason, failureErr := s.processUpdate(updateCtx, bot, update)
 		if failureReason != "" {
 			endUpdate("failed", failureReason, "", failureErr)
-			return nextOffset, failureReason, failureErr
+			return nextOffset, retryCap, failureReason, failureErr
 		}
 
 		// A successful send is completed before its cursor commit so an ambiguous
@@ -480,7 +498,7 @@ func (s *Service) processBatch(ctx context.Context, bot Bot, updates []Update, l
 		endAdvance(err)
 		if err != nil {
 			endUpdate("failed", "advance_cursor", result.command, err)
-			return nextOffset, "advance_cursor", err
+			return nextOffset, update.UpdateID, "advance_cursor", err
 		}
 
 		lastCommittedUpdateID = update.UpdateID
@@ -494,9 +512,90 @@ func (s *Service) processBatch(ctx context.Context, bot Bot, updates []Update, l
 		}
 		endUpdate(outcome, result.reason, result.command, result.err)
 		s.logResult(updateCtx, result)
+		if len(members) > 1 {
+			for range members[:len(members)-1] {
+				_, endAbsorbed := s.telemetry.StartTelegramUpdate(ctx)
+				endAbsorbed(outcome, "merged", "", nil)
+			}
+			s.telemetry.ContextLogger(updateCtx, s.logger).InfoContext(updateCtx, "telegram.burst.merged", "messages", len(members))
+		}
 	}
 
-	return nextOffset, "", nil
+	return nextOffset, retryCap, "", nil
+}
+
+// mergeRun returns the run of mergeable updates that starts at pending[0], and how many updates of
+// pending it consumed, counting duplicates of an update ID inside the run. A run of one is a
+// single update handled as before.
+func (s *Service) mergeRun(pending []Update, retryCap int64) ([]Update, int) {
+	first := pending[0]
+	if !s.mergeable(first) {
+		return pending[:1], 1
+	}
+	members := []Update{first}
+	runes := utf8.RuneCountInString(first.Message.Text)
+	consumed := 1
+	for ; consumed < len(pending); consumed++ {
+		candidate := pending[consumed]
+		last := members[len(members)-1]
+		if candidate.UpdateID == last.UpdateID {
+			continue
+		}
+		if !s.mergeable(candidate) || last.UpdateID <= retryCap && candidate.UpdateID > retryCap {
+			break
+		}
+		message := candidate.Message
+		if message.From.ID != first.Message.From.ID || message.Chat.ID != first.Message.Chat.ID ||
+			message.MessageThreadID != first.Message.MessageThreadID || repliedTo(message) != 0 {
+			break
+		}
+		runes += len("\n\n") + utf8.RuneCountInString(message.Text)
+		if runes > conversation.MaximumMessageRunes {
+			break
+		}
+		members = append(members, candidate)
+	}
+	return members, consumed
+}
+
+// mergeable reports whether an update is plain text that may share a turn with its neighbours.
+// It is an allow-list: anything with another meaning, such as a command, media or a forward, stands
+// alone. A guarded message stands alone as well, because a secret guard only recognizes a token
+// sent as the whole message.
+func (s *Service) mergeable(update Update) bool {
+	message := update.Message
+	if update.UpdateID < 0 || update.UpdateID == math.MaxInt64 || message == nil ||
+		update.EditedMessage != nil || update.CallbackQuery != nil ||
+		update.StoppedMessageGeneration != nil || update.MessageReaction != nil {
+		return false
+	}
+	if validatePrivateMessage(message.From, message.Chat, message.MessageID) != "" {
+		return false
+	}
+	if strings.TrimSpace(message.Text) == "" || message.Caption != "" ||
+		len(message.Photo) > 0 || message.Document != nil || message.Location != nil || message.Venue != nil ||
+		message.Voice != nil || message.Audio != nil || message.Video != nil || message.VideoNote != nil ||
+		message.Sticker != nil || message.Animation != nil ||
+		message.Forwarded() || message.ForumTopicCreated != nil || message.ForumTopicEdited != nil {
+		return false
+	}
+	if strings.HasPrefix(strings.TrimSpace(message.Text), "/") {
+		return false
+	}
+	return !s.guardSecrets(message.Text).handled
+}
+
+// mergeUpdates joins a run into the update of its last message, which carries the first message's
+// reply target so the turn resumes where the run began.
+func mergeUpdates(members []Update) Update {
+	texts := make([]string, len(members))
+	for i, member := range members {
+		texts[i] = member.Message.Text
+	}
+	merged := *members[len(members)-1].Message
+	merged.Text = strings.Join(texts, "\n\n")
+	merged.ReplyToMessage = members[0].Message.ReplyToMessage
+	return Update{UpdateID: members[len(members)-1].UpdateID, Message: &merged}
 }
 
 type processingResult struct {

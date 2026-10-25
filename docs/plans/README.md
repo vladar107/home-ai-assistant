@@ -126,6 +126,7 @@ plan that links back to the earlier record.
 | 0114 | [Weekly review](0114-weekly-review.md) | done |
 | 0115 | [NAS filing in place](0115-nas-filing-in-place.md) | done |
 | 0116 | [Extra transfer time](0116-extra-transfer-time.md) | done |
+| 0117 | [Diagnosable polling failures and one turn for a burst](0117-polling-burst.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

@@ -1195,13 +1195,32 @@ func decodeResponse[T any](method string, response *http.Response) (T, error) {
 
 	var envelope apiResponse[T]
 	if err := json.Unmarshal(body, &envelope); err != nil {
-		return zero, fmt.Errorf("Telegram %s returned invalid JSON (HTTP status %d)", method, response.StatusCode)
+		contentType := response.Header.Get("Content-Type")
+		if len(contentType) > 64 {
+			contentType = contentType[:64]
+		}
+		return zero, fmt.Errorf("Telegram %s returned invalid JSON (HTTP status %d): %s in %d bytes of %q", method, response.StatusCode, describeDecodeError(err), len(body), contentType)
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices || !envelope.OK {
 		return zero, &apiError{method: method, httpStatus: response.StatusCode, errorCode: envelope.ErrorCode, description: envelope.Description}
 	}
 
 	return envelope.Result, nil
+}
+
+// describeDecodeError never uses err.Error(): json's messages quote the offending body text,
+// which holds users' private messages and must not reach logs.
+func describeDecodeError(err error) string {
+	var syntaxError *json.SyntaxError
+	if errors.As(err, &syntaxError) {
+		return fmt.Sprintf("syntax error at offset %d", syntaxError.Offset)
+	}
+	var typeError *json.UnmarshalTypeError
+	if errors.As(err, &typeError) {
+		kind, _, _ := strings.Cut(typeError.Value, " ")
+		return fmt.Sprintf("%s for %s field %q at offset %d", kind, typeError.Type, typeError.Field, typeError.Offset)
+	}
+	return fmt.Sprintf("undecodable body (%T)", err)
 }
 
 // fileURL builds the download route, which carries the token in the path like every API method

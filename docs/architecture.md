@@ -282,8 +282,12 @@ is refused as unreadable instead of exhausting the service's memory.
 
 1. `telegram` receives an update, `identity` resolves the sender to a principal, and
    anything from an unknown user or a non-private chat is dropped.
-2. The request is persisted before the polling cursor advances, so a restart never
-   loses or replays an accepted message.
+2. Consecutive plain text messages that arrive in one batch from the same user and
+   tab are joined into one request, up to the message limit. They get one turn,
+   not a turn plus busy replies. The request is persisted before the polling
+   cursor advances, so a restart never loses an accepted message. If the advance
+   fails, the running poller does not add newer messages to a request that was
+   already stored, so none is answered twice.
 3. `conversation` claims it, resolves the principal's own model connection, and
    collects only the tools that principal has granted and enabled. From the wait
    for the principal's turn slot until the turn ends, typing is resent every 4
