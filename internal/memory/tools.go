@@ -736,7 +736,8 @@ func validText(text string) string {
 	case !utf8.ValidString(text):
 		return "text must be valid UTF-8."
 	case utf8.RuneCountInString(text) > MaximumEntryRunes:
-		return fmt.Sprintf("text is %d characters; an entry holds at most %d. Shorten it.", utf8.RuneCountInString(text), MaximumEntryRunes)
+		runes := utf8.RuneCountInString(text)
+		return fmt.Sprintf("text is %d characters; an entry holds at most %d, so cut %d or more, and put unrelated points in separate entries.", runes, MaximumEntryRunes, runes-MaximumEntryRunes)
 	}
 	return ""
 }
