@@ -483,7 +483,7 @@ func TestScheduledRunReadsMemoryButCannotWriteIt(t *testing.T) {
 
 	replies := make(chan turn.ScheduledReply, 1)
 	go func() {
-		reply, err := h.engine.RunScheduled(h.ctx, "alice", "schedule/aaaa", "check the weather")
+		reply, err := h.engine.RunScheduled(h.ctx, "alice", "schedule/aaaa", "check the weather", agentruntime.ModelEffort{})
 		if err != nil {
 			t.Error(err)
 		}
@@ -509,7 +509,7 @@ func TestScheduledRunDeliversOnlyTheFinalMessage(t *testing.T) {
 
 	replies := make(chan turn.ScheduledReply, 1)
 	go func() {
-		reply, err := h.engine.RunScheduled(h.ctx, "alice", "schedule/bbbb", "check the weather")
+		reply, err := h.engine.RunScheduled(h.ctx, "alice", "schedule/bbbb", "check the weather", agentruntime.ModelEffort{})
 		if err != nil {
 			t.Error(err)
 		}
@@ -522,7 +522,7 @@ func TestScheduledRunDeliversOnlyTheFinalMessage(t *testing.T) {
 	}
 
 	go func() {
-		reply, err := h.engine.RunScheduled(h.ctx, "alice", "schedule/cccc", "check the weather")
+		reply, err := h.engine.RunScheduled(h.ctx, "alice", "schedule/cccc", "check the weather", agentruntime.ModelEffort{})
 		if err != nil {
 			t.Error(err)
 		}

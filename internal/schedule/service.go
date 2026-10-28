@@ -17,7 +17,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/modelcatalog"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
+	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
@@ -70,6 +72,27 @@ type Config struct {
 	// Feeds are the tabs that runs are delivered to while the bot has tabs on; without them every
 	// run goes to the main view.
 	Feeds thread.Feeds
+	// Models and Usage tell whether the principal's subscription offers a job's model; both are
+	// optional and neither is consulted over the network. Models also checks the model chat sets
+	// on a job.
+	Models modelcatalog.Reader
+	Usage  modelcatalog.CachedUsage
+	// ChatModel is what a job runs on without a model of its own, or when its model is not
+	// offered; HeadsUpModel is what the Heads-up job runs on without a model of its own. Empty
+	// leaves the choice to the runtime. TaskModel is offered with them when the catalog cannot be
+	// read, as /model offers it.
+	ChatModel    agentruntime.ModelEffort
+	TaskModel    agentruntime.ModelEffort
+	HeadsUpModel agentruntime.ModelEffort
+}
+
+// jobModels is what decides the model a model.turn job runs on.
+type jobModels struct {
+	catalog modelcatalog.Reader
+	usage   modelcatalog.CachedUsage
+	chat    agentruntime.ModelEffort
+	task    agentruntime.ModelEffort
+	headsUp agentruntime.ModelEffort
 }
 
 // SessionPruner removes the model session files that no conversation or open task refers to and
@@ -103,6 +126,7 @@ type Service struct {
 	safety     SafetyChecks
 	travel     Travel
 	feeds      thread.Feeds
+	models     jobModels
 	startedAt  time.Time
 
 	mu       sync.Mutex
@@ -260,6 +284,7 @@ func NewService(cfg Config, repository Repository, chats Chats, deliverer conver
 		proposer:   proposer,
 		travel:     cfg.Travel,
 		feeds:      cfg.Feeds,
+		models:     jobModels{catalog: cfg.Models, usage: cfg.Usage, chat: cfg.ChatModel, task: cfg.TaskModel, headsUp: cfg.HeadsUpModel},
 		telemetry:  cfg.Telemetry,
 		exposure:   cfg.Exposure,
 		safety:     cfg.SafetyChecks,

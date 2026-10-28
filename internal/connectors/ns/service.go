@@ -60,6 +60,7 @@ var (
 	_ module.Module        = (*Service)(nil)
 	_ integration.Switched = (*Service)(nil)
 	_ transit.Departures   = (*Service)(nil)
+	_ transit.Alternatives = (*Service)(nil)
 	_ transit.Disruptions  = (*Service)(nil)
 	_ transit.Trips        = (*Service)(nil)
 )

@@ -26,6 +26,7 @@ const (
 	// reportResultBytes keeps a full report within the broker's result limit, with room for its
 	// heading.
 	reportResultBytes = 15 << 10
+	maximumReportDays = 7
 )
 
 // Report is what a delivered run sent its owner. Its ID is the run's.
@@ -55,7 +56,7 @@ type Sent struct {
 }
 
 const reportsGuidance = "Job reports: job_reports lists the reports the user's scheduled jobs and reminders sent them in the last two weeks, optionally for one job, " +
-	"or returns one in full by its report id. Use it when the user refers to a report and the excerpt you were given is not enough."
+	"returns one in full by its report id, or, with job and days, returns that job's reports of the last days in full. Use it when the user refers to a report and the excerpt you were given is not enough."
 
 var reportsDefinition = tools.Definition{
 	Name:        toolReports,
@@ -63,7 +64,8 @@ var reportsDefinition = tools.Definition{
 	Risk:        tools.RiskRead,
 	InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 		`"report_id":{"type":"string","description":"A report id, to return that report in full."},` +
-		`"job":{"type":"string","description":"A job id or name, to list only that job's reports."}},` +
+		`"job":{"type":"string","description":"A job id or name, to list only that job's reports."},` +
+		`"days":{"type":"integer","minimum":1,"maximum":7,"description":"With job: return that job's reports of the last this many days in full, newest first, instead of excerpts."}},` +
 		`"additionalProperties":false}`),
 	// A report retells what its run read, such as web pages or mail.
 	ThirdParty: true,
@@ -209,6 +211,7 @@ func (s *Service) executeReports(ctx context.Context, principalID string, call t
 	var arguments struct {
 		ReportID string `json:"report_id"`
 		Job      string `json:"job"`
+		Days     int    `json:"days"`
 	}
 	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
@@ -228,7 +231,14 @@ func (s *Service) executeReports(ctx context.Context, principalID string, call t
 		heading := fmt.Sprintf("Report %s from %s, sent %s:\n\n", report.ID, reportSource(report), s.formatReportTime(report.DeliveredAt))
 		return tools.Result{Text: heading + text, Private: report.Private}, nil
 	}
-	reports, err := s.repository.RecentJobReports(ctx, principalID, s.now().Add(-reportRetention))
+	if arguments.Days != 0 && (arguments.Days < 1 || arguments.Days > maximumReportDays || strings.TrimSpace(arguments.Job) == "") {
+		return tools.Result{Text: fmt.Sprintf("days must be between 1 and %d and comes with job.", maximumReportDays), IsError: true}, nil
+	}
+	since := s.now().Add(-reportRetention)
+	if arguments.Days > 0 {
+		since = s.now().Add(-time.Duration(arguments.Days) * 24 * time.Hour)
+	}
+	reports, err := s.repository.RecentJobReports(ctx, principalID, since)
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -238,7 +248,13 @@ func (s *Service) executeReports(ctx context.Context, principalID string, call t
 		})
 	}
 	if len(reports) == 0 {
+		if arguments.Days > 0 {
+			return tools.Result{Text: fmt.Sprintf("There are no such reports from the last %d days.", arguments.Days)}, nil
+		}
 		return tools.Result{Text: "There are no such reports from the last two weeks."}, nil
+	}
+	if arguments.Days > 0 {
+		return s.fullReports(reports), nil
 	}
 	lines := []string{"Reports, newest first:"}
 	private := false
@@ -250,4 +266,28 @@ func (s *Service) executeReports(ctx context.Context, principalID string, call t
 		lines = append(lines, fmt.Sprintf("And %d older ones.", more))
 	}
 	return tools.Result{Text: strings.Join(lines, "\n"), Private: private}, nil
+}
+
+// fullReports is the reports, newest first, in full while they fit in one result; the oldest are
+// cut, or left out, to stay within the broker's result limit.
+func (s *Service) fullReports(reports []Report) tools.Result {
+	var builder strings.Builder
+	builder.WriteString("Reports in full, newest first:")
+	private := false
+	for index, report := range reports {
+		heading := fmt.Sprintf("\n\nReport %s from %s, sent %s:\n", report.ID, reportSource(report), s.formatReportTime(report.DeliveredAt))
+		left := reportResultBytes - builder.Len() - len(heading)
+		if left <= 0 {
+			fmt.Fprintf(&builder, "\n\n%d older reports do not fit; ask for one by its report id.", len(reports)-index)
+			break
+		}
+		builder.WriteString(heading)
+		text := report.Text
+		if len(text) > left {
+			text = strings.ToValidUTF8(text[:left], "") + "\n[The report continues beyond this point.]"
+		}
+		builder.WriteString(text)
+		private = private || report.Private
+	}
+	return tools.Result{Text: builder.String(), Private: private}
 }

@@ -10,7 +10,9 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/clip"
+	"github.com/vladar107/home-ai-assistant/internal/modelcatalog"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
+	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -24,6 +26,7 @@ const (
 	toolReminderCancel = "reminder_cancel"
 
 	upcomingShown = 3
+	modelExample  = "gpt-6.1-sol:high"
 	// listedInstructionRunes keeps a long list of jobs small in the model's context.
 	listedInstructionRunes = 200
 	// editQuoteRunes is how much of a failing edit's find text its error repeats.
@@ -59,6 +62,8 @@ func proposeGuidance(zone string) string {
 		"schedule_update changes a job by its id from schedule_list, given only the fields that change. " +
 		"To change its instructions, first read them with schedule_get, then pass prompt_edits: small find and replace pairs, each find copied exactly from the stored prompt and occurring in it once, that change only what the user asked for; the user sees just those passages, old and new. " +
 		"Never rewrite or reword the parts the user did not ask to change, and pass prompt, the complete new instructions, only when the user asks for a real rewrite. " +
+		"The Heads-up job's text is only the user's notes: how it checks the day is built in and not shown. When the user corrects a Heads-up report, add or change one short note with prompt_edits that states the lasting preference behind the correction, " +
+		"such as what an event in their calendar means or what to leave out, never a step of how to check the day and never one day's mistake. " +
 		"Never invent a value the user did not give, such as a time, a buffer, a walking time, or a threshold; ask for it instead. " +
 		"A recurring job stays recurring and a one-time job stays one-time; to switch, remove it and propose a new one. " +
 		"schedule_remove deletes a job by its id from schedule_list. Make every job change the request needs in this turn, once each. Proposals of one turn are shown together and confirmed or rejected as one batch; withdraw a wrong one with proposal_withdraw, and a proposal in a later turn replaces a batch still waiting."
@@ -121,7 +126,8 @@ var writeDefinitions = []tools.Definition{
 			`"at":{"type":"string","description":"For a one-time job instead of cron: local date and time, YYYY-MM-DD HH:MM."},` +
 			`"prompt":{"type":"string","maxLength":1000,"description":"The complete instructions for each run, at most 1000 characters."},` +
 			`"timezone":{"type":"string","description":"IANA time zone such as Europe/Amsterdam; omit to use the user's own."},` +
-			`"pause_while_traveling":{"type":"boolean","description":"Recurring jobs only: stay silent while the user is on a trip."}},` +
+			`"pause_while_traveling":{"type":"boolean","description":"Recurring jobs only: stay silent while the user is on a trip."},` +
+			`"model":{"type":"string","maxLength":200,"description":"The model and effort the job runs on, as id:effort such as ` + modelExample + `. Set it only when the user asks for a different model for this job; omit it to use the default."}},` +
 			`"required":["name","prompt"],"additionalProperties":false}`),
 	},
 	{
@@ -140,7 +146,8 @@ var writeDefinitions = []tools.Definition{
 			`"replace":{"type":"string","maxLength":1000,"description":"The text that replaces it; empty to delete the passage."}},` +
 			`"required":["find","replace"],"additionalProperties":false}},` +
 			`"timezone":{"type":"string","description":"A new IANA time zone such as Europe/Amsterdam."},` +
-			`"pause_while_traveling":{"type":"boolean","description":"Recurring jobs only: true to stay silent while the user is on a trip, false to stop doing so; omit to keep it as it is."}},` +
+			`"pause_while_traveling":{"type":"boolean","description":"Recurring jobs only: true to stay silent while the user is on a trip, false to stop doing so; omit to keep it as it is."},` +
+			`"model":{"type":"string","maxLength":200,"description":"The model and effort the job runs on, as id:effort such as ` + modelExample + `. Set it only when the user asks for a different model for this job; an empty string returns it to the default, and omitting it keeps the current one."}},` +
 			`"required":["job_id"],"additionalProperties":false}`),
 	},
 	{
@@ -188,7 +195,7 @@ func (s *Service) Execute(ctx context.Context, principalID string, call tools.Ca
 		if err != nil {
 			return tools.Result{}, err
 		}
-		return tools.Result{Text: renderJobs(jobs, s.zone)}, nil
+		return tools.Result{Text: s.renderJobs(ctx, jobs)}, nil
 	case toolGet:
 		return s.getJob(ctx, principalID, call)
 	case toolReports:
@@ -215,6 +222,7 @@ type proposeArguments struct {
 	Prompt              string `json:"prompt"`
 	Timezone            string `json:"timezone"`
 	PauseWhileTraveling bool   `json:"pause_while_traveling"`
+	Model               string `json:"model"`
 }
 
 type confirmedReminder struct {
@@ -234,6 +242,8 @@ type confirmedJob struct {
 	// TravelPause is nil unless the model set the flag, so Confirm keeps the job's current value
 	// instead of one read when the proposal was made.
 	TravelPause *bool `json:"pause_while_traveling,omitempty"`
+	// Model is the job's own "id:effort", empty for its default.
+	Model string `json:"model,omitempty"`
 }
 
 type updateArguments struct {
@@ -246,6 +256,8 @@ type updateArguments struct {
 	Timezone    string       `json:"timezone"`
 	// PauseWhileTraveling is nil when the model left the flag alone.
 	PauseWhileTraveling *bool `json:"pause_while_traveling"`
+	// Model is nil when the model left the job's model alone, and empty to return it to the default.
+	Model *string `json:"model"`
 }
 
 // promptEdit replaces the one occurrence of Find in a job's instructions with Replace.
@@ -350,7 +362,14 @@ func (s *Service) proposeJob(ctx context.Context, principalID string, call tools
 	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
-	config, err := ModelTurnConfig(arguments.Prompt)
+	model, refusal, err := s.offeredModel(ctx, principalID, arguments.Model)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	if refusal != "" {
+		return tools.Result{Text: refusal, IsError: true}, nil
+	}
+	config, err := ModelTurnConfigWithModel(arguments.Prompt, model)
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -372,7 +391,7 @@ func (s *Service) proposeJob(ctx context.Context, principalID string, call tools
 		return tools.Result{Text: tooManyText(job.OneTime()), IsError: true}, nil
 	}
 
-	confirmed := confirmedJob{Name: job.Name, Cron: job.Cron, Zone: job.Zone, Prompt: ModelTurnPrompt(job.Config)}
+	confirmed := confirmedJob{Name: job.Name, Cron: job.Cron, Zone: job.Zone, Prompt: ModelTurnPrompt(job.Config), Model: ModelTurnModel(job.Config)}
 	if job.TravelPause {
 		on := true
 		confirmed.TravelPause = &on
@@ -415,7 +434,7 @@ func (s *Service) getJob(ctx context.Context, principalID string, call tools.Cal
 	if !found || !job.FinishedAt.IsZero() {
 		return tools.Result{Text: "No pending job has that id. Use schedule_list to see the user's jobs.", IsError: true}, nil
 	}
-	return tools.Result{Text: renderJob(job, s.zone, maximumPromptRunes)}, nil
+	return tools.Result{Text: renderJob(job, s.zone, maximumPromptRunes, s.describeModel(ctx, job, true))}, nil
 }
 
 func (s *Service) proposeUpdate(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
@@ -462,6 +481,16 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 	override(&next.At, arguments.At)
 	override(&next.Prompt, arguments.Prompt)
 	override(&next.Zone, arguments.Timezone)
+	if arguments.Model != nil {
+		model, refusal, err := s.offeredModel(ctx, principalID, *arguments.Model)
+		if err != nil {
+			return tools.Result{}, err
+		}
+		if refusal != "" {
+			return tools.Result{Text: refusal, IsError: true}, nil
+		}
+		next.Model = model
+	}
 	if len(arguments.PromptEdits) > 0 {
 		edited, err := applyPromptEdits(current.Prompt, arguments.PromptEdits)
 		if err != nil {
@@ -469,7 +498,7 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 		}
 		next.Prompt = edited
 	}
-	config, err := ModelTurnConfig(next.Prompt)
+	config, err := ModelTurnConfigWithModel(next.Prompt, next.Model)
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -479,7 +508,7 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 	}
 	prepared.Job.TravelPause = travel
 	changed := prepared.Job
-	confirmed := confirmedUpdate{JobID: job.ID, UpdatedAt: job.UpdatedAt, confirmedJob: confirmedJob{Name: changed.Name, Cron: changed.Cron, Zone: changed.Zone, Prompt: ModelTurnPrompt(changed.Config), TravelPause: arguments.PauseWhileTraveling}}
+	confirmed := confirmedUpdate{JobID: job.ID, UpdatedAt: job.UpdatedAt, confirmedJob: confirmedJob{Name: changed.Name, Cron: changed.Cron, Zone: changed.Zone, Prompt: ModelTurnPrompt(changed.Config), TravelPause: arguments.PauseWhileTraveling, Model: ModelTurnModel(changed.Config)}}
 	if changed.OneTime() {
 		confirmed.At = changed.RunAt.In(prepared.Schedule.Location).Format(localTimeLayouts[0])
 	}
@@ -500,6 +529,9 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 	if len(arguments.PromptEdits) > 0 {
 		summary = patchSummary(heading, prepared, arguments.PromptEdits)
 	}
+	if next.Model == "" && current.Model != "" {
+		summary += "\nIt goes back to the default model."
+	}
 	if !job.Enabled {
 		summary += "\nIt stays paused until you resume it in /jobs."
 	}
@@ -509,7 +541,7 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 // currentJob is a stored model.turn job in the canonical form a proposal carries, with a one-time
 // job's instant as a local time in its own zone.
 func currentJob(job Job) (confirmedJob, error) {
-	current := confirmedJob{Name: job.Name, Cron: job.Cron, Zone: job.Zone, Prompt: ModelTurnPrompt(job.Config)}
+	current := confirmedJob{Name: job.Name, Cron: job.Cron, Zone: job.Zone, Prompt: ModelTurnPrompt(job.Config), Model: ModelTurnModel(job.Config)}
 	if job.OneTime() {
 		location, err := LoadZone(job.Zone)
 		if err != nil {
@@ -582,7 +614,7 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
 			return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed job could not be read; nothing was scheduled."}
 		}
-		config, err := ModelTurnConfig(confirmed.Prompt)
+		config, err := ModelTurnConfigWithModel(confirmed.Prompt, confirmed.Model)
 		if err != nil {
 			return approval.Outcome{}, err
 		}
@@ -674,7 +706,7 @@ func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (ap
 	if !job.UpdatedAt.Equal(confirmed.UpdatedAt) {
 		return approval.Outcome{}, stale
 	}
-	config, err := ModelTurnConfig(confirmed.Prompt)
+	config, err := ModelTurnConfigWithModel(confirmed.Prompt, confirmed.Model)
 	if err != nil {
 		return approval.Outcome{}, err
 	}
@@ -730,6 +762,7 @@ func (s *Service) Previewable(ctx context.Context, record approval.Record) bool 
 // run. Nothing is stored: no job and no run record, and a card the turn staged is dropped.
 func (s *Service) Preview(ctx context.Context, record approval.Record) (approval.Preview, error) {
 	var confirmed confirmedJob
+	jobID := ""
 	switch record.Tool {
 	case toolPropose:
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
@@ -740,7 +773,8 @@ func (s *Service) Preview(ctx context.Context, record approval.Record) (approval
 		if err := json.Unmarshal(record.Arguments, &update); err != nil {
 			return approval.Preview{}, err
 		}
-		confirmed = update.confirmedJob
+		// The job's ID makes a preview of the Heads-up job run with its method and default model.
+		confirmed, jobID = update.confirmedJob, update.JobID
 	default:
 		return approval.Preview{}, fmt.Errorf("preview %s: not a model turn", record.Tool)
 	}
@@ -748,7 +782,7 @@ func (s *Service) Preview(ctx context.Context, record approval.Record) (approval
 	if !known {
 		return approval.Preview{}, fmt.Errorf("preview: the model turn type is not registered")
 	}
-	config, err := ModelTurnConfig(confirmed.Prompt)
+	config, err := ModelTurnConfigWithModel(confirmed.Prompt, confirmed.Model)
 	if err != nil {
 		return approval.Preview{}, err
 	}
@@ -759,6 +793,7 @@ func (s *Service) Preview(ctx context.Context, record approval.Record) (approval
 	runID := "preview-" + record.ID
 	result, err := jobType.Handler.Run(ctx, Occurrence{
 		RunID:        runID,
+		JobID:        jobID,
 		PrincipalID:  record.PrincipalID,
 		JobName:      confirmed.Name,
 		Config:       config,
@@ -836,8 +871,12 @@ func scheduleSummary(heading string, prepared Prepared) string {
 	job := prepared.Job
 	var builder strings.Builder
 	builder.WriteString(heading + "\n")
+	model := ModelTurnModel(job.Config)
 	if job.OneTime() {
 		fmt.Fprintf(&builder, "Runs once: %s\n", FormatOccurrence(job.RunAt, prepared.Schedule.Location))
+		if model != "" {
+			fmt.Fprintf(&builder, "Model: %s\n", model)
+		}
 		builder.WriteString("It asks your model, with read-only tools, and sends you the reply")
 		return builder.String()
 	}
@@ -851,23 +890,27 @@ func scheduleSummary(heading string, prepared Prepared) string {
 	if job.TravelPause {
 		builder.WriteString("Pauses while you are traveling\n")
 	}
+	if model != "" {
+		fmt.Fprintf(&builder, "Model: %s\n", model)
+	}
 	builder.WriteString("Each run asks your model, with read-only tools, and sends you the reply")
 	return builder.String()
 }
 
-func renderJobs(jobs []Job, zone string) string {
+func (s *Service) renderJobs(ctx context.Context, jobs []Job) string {
 	if len(jobs) == 0 {
 		return "The user has no pending reminders or scheduled jobs."
 	}
 	rendered := make([]string, 0, len(jobs))
 	for _, job := range jobs {
-		rendered = append(rendered, renderJob(job, zone, listedInstructionRunes))
+		rendered = append(rendered, renderJob(job, s.zone, listedInstructionRunes, s.describeModel(ctx, job, false)))
 	}
 	return strings.Join(rendered, "\n\n")
 }
 
-// renderJob is one job as the model reads it, with its instructions cut to limit runes.
-func renderJob(job Job, zone string, limit int) string {
+// renderJob is one job as the model reads it, with its instructions cut to limit runes and the
+// model a model.turn job runs on.
+func renderJob(job Job, zone string, limit int, model string) string {
 	if job.Type == TypeReminder {
 		return fmt.Sprintf("id %s: reminder, %s\nText: %s", job.ID, DescribeJob(job, zone), clip.Runes(ReminderText(job.Config), limit))
 	}
@@ -885,7 +928,11 @@ func renderJob(job Job, zone string, limit int) string {
 	if job.TravelPause {
 		state += ", pauses while traveling"
 	}
-	return fmt.Sprintf("id %s: %q, %s\nInstructions: %s", job.ID, job.Name, state, clip.Runes(ModelTurnPrompt(job.Config), limit))
+	label := "Instructions"
+	if job.ID == HeadsUpJobID(job.PrincipalID) {
+		label = headsUpNotesLabel
+	}
+	return fmt.Sprintf("id %s: %q, %s\nModel: %s\n%s: %s", job.ID, job.Name, state, model, label, clip.Runes(ModelTurnPrompt(job.Config), limit))
 }
 
 // DescribeJob is a job's schedule as the user reads it, falling back to the default zone for a
@@ -902,4 +949,60 @@ func DescribeJob(job Job, zone string) string {
 // FormatOccurrence renders an occurrence in the job's own zone, as the user reads it.
 func FormatOccurrence(at time.Time, location *time.Location) string {
 	return at.In(location).Format("Mon 2 Jan 15:04 MST")
+}
+
+// offeredModel checks a model chat asked for, "id:effort", against the principal's catalog as
+// /model checks a choice, and returns it with the level the model runs it as. An empty request is
+// the default and returns "". A model the catalog does not offer comes back as a refusal for the
+// model to read, naming the models that are.
+func (s *Service) offeredModel(ctx context.Context, principalID, requested string) (string, string, error) {
+	requested = strings.TrimSpace(requested)
+	if requested == "" {
+		return "", "", nil
+	}
+	var models []modelcatalog.Model
+	var err error
+	if s.models.catalog != nil {
+		models, err = s.models.catalog.Models(ctx, principalID)
+	}
+	switch {
+	case s.models.catalog == nil || errors.Is(err, modelcatalog.ErrUnavailable):
+		models = modelcatalog.Fallback(s.models.chat, s.models.task, s.models.headsUp)
+	case err != nil:
+		return "", "", fmt.Errorf("read model catalog: %w", err)
+	}
+	choice, err := agentruntime.ParseModelEffort(requested)
+	if err == nil && modelcatalog.ValidChoice(choice) {
+		if canonical, ok := modelcatalog.Offered(models, choice); ok {
+			choice.Effort = canonical
+			return choice.String(), "", nil
+		}
+	}
+	offered := make([]string, 0, len(models))
+	for _, model := range models {
+		offered = append(offered, model.ID+" ("+strings.Join(model.Efforts, ", ")+")")
+	}
+	return "", fmt.Sprintf("The model %q is not available to the user; nothing was proposed. Write it as id:effort with one of these models and efforts: %s.", requested, strings.Join(offered, "; ")), nil
+}
+
+// describeModel names the model a model.turn job runs on and where that choice comes from. With
+// check, a choice the principal's subscription no longer offers is named with the chat default
+// it falls back to.
+func (s *Service) describeModel(ctx context.Context, job Job, check bool) string {
+	if job.Type != TypeModelTurn {
+		return ""
+	}
+	want, source := s.jobModel(job.PrincipalID, job.ID, ModelTurnModel(job.Config))
+	name := want.String()
+	if want.Model == "" {
+		name = "the runtime's default"
+	}
+	described := fmt.Sprintf("%s (%s)", name, source)
+	if !check || source == modelSourceChat {
+		return described
+	}
+	if model, fallback := s.effectiveModel(ctx, job.PrincipalID, want); fallback != "" {
+		described += fmt.Sprintf(", which the user's subscription does not offer now, so it runs on the chat default %s", model)
+	}
+	return described
 }

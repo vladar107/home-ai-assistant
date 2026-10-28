@@ -341,7 +341,7 @@ func TestTurnWaitingBehindAnotherKeepsTyping(t *testing.T) {
 	h := newIndicatorHarness(t, runtime)
 	scheduled := make(chan error, 1)
 	go func() {
-		_, err := h.engine.RunScheduled(h.ctx, "alice", "schedule/aaaa", "scheduled check")
+		_, err := h.engine.RunScheduled(h.ctx, "alice", "schedule/aaaa", "scheduled check", agentruntime.ModelEffort{})
 		scheduled <- err
 	}()
 	first := receive(t, h.ctx, runtime.calls)

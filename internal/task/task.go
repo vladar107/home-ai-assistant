@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/vladar107/home-ai-assistant/internal/modelcatalog"
 )
 
 const (
@@ -121,8 +123,8 @@ type Repository interface {
 
 // Why a task runs on the chat default instead of the task default.
 const (
-	FallbackCatalog = "catalog"
-	FallbackUsage   = "usage"
+	FallbackCatalog = modelcatalog.FallbackCatalog
+	FallbackUsage   = modelcatalog.FallbackUsage
 )
 
 // Chats resolves the principal's own private chat; a principal without one gets no task run.

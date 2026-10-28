@@ -465,7 +465,7 @@ func TestJobsCommandTogglesThePauseWhileTraveling(t *testing.T) {
 	h.provision("alice", "account-alice")
 	h.start()
 	job := h.createJob("alice", "a1b2c3d4e5f60718", "Daily digest", "30 7 * * *", "Summarise my day.")
-	headsUp := h.createJob("alice", schedule.HeadsUpJobID("alice"), schedule.HeadsUpName, schedule.HeadsUpCron, schedule.HeadsUpPrompt)
+	headsUp := h.createJob("alice", schedule.HeadsUpJobID("alice"), schedule.HeadsUpName, schedule.HeadsUpCron, schedule.HeadsUpNotes)
 
 	list := h.requestJobs(1)
 	if slices.Contains(buttonData(list.keyboard), "jobs:tpause:"+headsUp.ID+":1") {

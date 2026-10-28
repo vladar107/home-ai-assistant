@@ -18,8 +18,10 @@ const (
 	defaultPiProvider           = "openai-codex"
 	defaultPiVersion            = "1.0.0"
 	defaultPiTaskModel          = "gpt-6.1-sol:medium"
+	defaultPiHeadsUpModel       = "gpt-6.1-sol:high"
 	defaultPiWebSearchExtension = "/usr/local/lib/home-agent/pi-web-search/src/index.ts"
 	defaultConversationTimeout  = 2 * time.Minute
+	defaultScheduledTimeout     = 3 * time.Minute
 	minimumConversationTimeout  = 5 * time.Second
 	maximumConversationTimeout  = 10 * time.Minute
 	maximumRuntimeValueRunes    = 200
@@ -30,15 +32,18 @@ type ConversationConfig struct {
 	PiBinary     string
 	PiNodeBinary string
 	PiProvider   string
-	// PiModel is the chat default and PiTaskModel the background task default, each parsed from
-	// "<model>[:<effort>]".
-	PiModel     agentruntime.ModelEffort
-	PiTaskModel agentruntime.ModelEffort
-	PiVersion   string
+	// PiModel is the chat default, PiTaskModel the background task default, and PiHeadsUpModel
+	// the Heads-up job's default, each parsed from "<model>[:<effort>]".
+	PiModel        agentruntime.ModelEffort
+	PiTaskModel    agentruntime.ModelEffort
+	PiHeadsUpModel agentruntime.ModelEffort
+	PiVersion      string
 	// PiWebSearchExtension is the vendored search extension's entry file, loaded only for
 	// principals with web access on.
 	PiWebSearchExtension string
 	TurnTimeout          time.Duration
+	// ScheduledTurnTimeout bounds a scheduled model turn instead of TurnTimeout.
+	ScheduledTurnTimeout time.Duration
 }
 
 func defaultConversationConfig() ConversationConfig {
@@ -48,6 +53,7 @@ func defaultConversationConfig() ConversationConfig {
 		PiVersion:            defaultPiVersion,
 		PiWebSearchExtension: defaultPiWebSearchExtension,
 		TurnTimeout:          defaultConversationTimeout,
+		ScheduledTurnTimeout: defaultScheduledTimeout,
 	}
 }
 
@@ -73,6 +79,9 @@ func loadConversationConfig(cfg *ConversationConfig) error {
 	if cfg.PiTaskModel, err = parseModelSetting("HOME_AGENT_PI_TASK_MODEL", envOrDefault("HOME_AGENT_PI_TASK_MODEL", defaultPiTaskModel)); err != nil {
 		return err
 	}
+	if cfg.PiHeadsUpModel, err = parseModelSetting("HOME_AGENT_PI_HEADSUP_MODEL", envOrDefault("HOME_AGENT_PI_HEADSUP_MODEL", defaultPiHeadsUpModel)); err != nil {
+		return err
+	}
 	cfg.PiVersion = envOrDefault("HOME_AGENT_PI_VERSION", defaultPiVersion)
 	cfg.PiWebSearchExtension = envOrDefault("HOME_AGENT_PI_WEB_SEARCH_EXTENSION", defaultPiWebSearchExtension)
 
@@ -82,6 +91,13 @@ func loadConversationConfig(cfg *ConversationConfig) error {
 			return fmt.Errorf("HOME_AGENT_CONVERSATION_TURN_TIMEOUT: invalid duration")
 		}
 		cfg.TurnTimeout = timeout
+	}
+	if value := os.Getenv("HOME_AGENT_SCHEDULED_TURN_TIMEOUT"); value != "" {
+		timeout, err := time.ParseDuration(value)
+		if err != nil {
+			return fmt.Errorf("HOME_AGENT_SCHEDULED_TURN_TIMEOUT: invalid duration")
+		}
+		cfg.ScheduledTurnTimeout = timeout
 	}
 
 	return cfg.validate()
@@ -131,6 +147,9 @@ func (c ConversationConfig) validate() error {
 	}
 	if c.TurnTimeout < minimumConversationTimeout || c.TurnTimeout > maximumConversationTimeout {
 		return fmt.Errorf("HOME_AGENT_CONVERSATION_TURN_TIMEOUT: must be between 5s and 10m")
+	}
+	if c.ScheduledTurnTimeout < minimumConversationTimeout || c.ScheduledTurnTimeout > maximumConversationTimeout {
+		return fmt.Errorf("HOME_AGENT_SCHEDULED_TURN_TIMEOUT: must be between 5s and 10m")
 	}
 	return nil
 }

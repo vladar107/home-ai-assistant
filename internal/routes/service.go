@@ -127,9 +127,11 @@ const (
 // the route, zero where they cannot be worked out.
 type LegResult struct {
 	Leg Leg
-	// Departures are the leg's fixed departures as checked, for a train or bus leg.
+	// Departures are the leg's fixed departures as checked, for a train or bus leg, followed by the
+	// alternatives the train service planned when none of them can be taken, each marked
+	// Alternative.
 	Departures []transit.Departure
-	// Taken indexes the departure the route uses, or is -1.
+	// Taken indexes the departure the route uses, which may be an alternative, or is -1.
 	Taken      int
 	Start, End time.Time
 	// Failed reports that a departure of the leg could not be checked.
@@ -139,12 +141,42 @@ type LegResult struct {
 	Disabled bool
 	// Status is the leg's normalized status phrase, which replies copy word for word.
 	Status string
-	Note   string
+	// SavedStatus is why none of the saved departures can be taken when the leg continues on an
+	// alternative instead: no usable departure or connection missed. It is empty otherwise.
+	SavedStatus string
+	// Replace are the saved train departures that are not in the timetable, each with the nearest
+	// real one.
+	Replace []Replacement
+	Note    string
 }
 
-// Unusable reports that no departure of a train or bus leg can be taken: all are cancelled or
-// gone, or the ones that run leave before the route gets there.
+// Replacement is a saved departure the train service does not run, with the first departure it
+// plans at or after it.
+type Replacement struct {
+	Planned time.Time
+	// Checked reports that the alternatives asked cover Planned. Nearest is then the first of them
+	// at or after Planned, when Found.
+	Checked bool
+	Nearest transit.Departure
+	Found   bool
+}
+
+// Unusable reports that no departure of a train or bus leg can be taken, not even an alternative:
+// all are cancelled or gone, or the ones that run leave before the route gets there.
 func (l LegResult) Unusable() bool { return l.Status == statusNoUsable || l.Status == statusMissed }
+
+// SavedUnusable reports that none of the leg's saved departures can be taken, whether or not it
+// continues on an alternative.
+func (l LegResult) SavedUnusable() bool { return l.Unusable() || l.SavedStatus != "" }
+
+// Saved are the leg's own fixed departures as checked, without the alternatives.
+func (l LegResult) Saved() []transit.Departure {
+	end := len(l.Departures)
+	for end > 0 && l.Departures[end-1].Alternative {
+		end--
+	}
+	return l.Departures[:end]
+}
 
 // Result is one route checked for one day.
 type Result struct {
@@ -170,13 +202,29 @@ const (
 	statusFailed     = "check failed"
 	statusNoUsable   = "no usable departure"
 	statusMissed     = "connection missed"
+
+	// maximumAlternatives is how many trips a leg asks the train service for in place of its saved
+	// departures.
+	maximumAlternatives = 3
 )
 
 // Check checks the principal's route called name, or with no name the one whose weekdays include
 // date's, on the calendar day date has in its own zone; a zero date means today here. Train and
 // bus legs are checked through their fixed departures and timed in order through the walk and bike
-// legs, with no buffer added.
+// legs, with no buffer added. A saved train departure that is not in the timetable is named with
+// the nearest real one.
 func (s *Service) Check(ctx context.Context, principalID, name string, date time.Time) (Result, error) {
+	return s.checkRoute(ctx, principalID, name, date, true)
+}
+
+// CheckForWatch is Check for a watch that checks every few minutes: it asks for alternatives only
+// when a leg cannot go on, and leaves out the nearest real departure of one not in the timetable,
+// which costs a trip plan on each check and is for the user reading route_check.
+func (s *Service) CheckForWatch(ctx context.Context, principalID, name string, date time.Time) (Result, error) {
+	return s.checkRoute(ctx, principalID, name, date, false)
+}
+
+func (s *Service) checkRoute(ctx context.Context, principalID, name string, date time.Time, replacements bool) (Result, error) {
 	if date.IsZero() {
 		date = s.now().In(s.location)
 	}
@@ -222,6 +270,11 @@ func (s *Service) Check(ctx context.Context, principalID, name string, date time
 		item.Taken, item.Status = take(item.Departures, ready)
 		if len(item.Departures) == 0 {
 			item.Status = statusNotChecked
+		}
+		if leg.Mode == ModeTrain {
+			if err := s.alternatives(ctx, principalID, &item, ready, replacements); err != nil {
+				return Result{}, err
+			}
 		}
 		if broken {
 			result.Legs = append(result.Legs, item)
@@ -374,6 +427,72 @@ func (s *Service) checkLeg(ctx context.Context, principalID string, leg Leg, day
 		failed = append(failed, transit.Departure{Planned: clock.On(day, s.location), From: from, To: to, Status: transit.StatusCheckFailed, Note: unavailable})
 	}
 	return failed, disabled, "", nil
+}
+
+// alternatives asks the train service, at most once for the leg, for the trips it plans in place
+// of the saved departures. When none of them can be taken, the leg continues on the first
+// alternative that runs from ready, or from the first saved departure when ready is unknown. With
+// replacements, a saved departure not in the timetable is named with the first alternative at or
+// after it.
+func (s *Service) alternatives(ctx context.Context, principalID string, item *LegResult, ready time.Time, replacements bool) error {
+	planner, ok := s.trains.(transit.Alternatives)
+	if !ok {
+		return nil
+	}
+	unusable := item.Taken < 0 && (item.Status == statusNoUsable || item.Status == statusMissed)
+	var missing []time.Time
+	for _, departure := range item.Departures {
+		if departure.Status == transit.StatusNotInTimetable {
+			missing = append(missing, departure.Planned)
+		}
+	}
+	if !unusable && (len(missing) == 0 || !replacements) {
+		return nil
+	}
+	at := ready
+	switch {
+	case !unusable:
+		at = missing[0]
+	case at.IsZero():
+		at = item.Departures[0].Planned
+	}
+	found, err := planner.Alternatives(ctx, principalID, transit.AlternativeQuery{From: item.Leg.From, To: item.Leg.To, Via: item.Leg.Via, At: at, Limit: maximumAlternatives})
+	var refusal *transit.RefusalError
+	switch {
+	case errors.As(err, &refusal):
+		found = nil
+		if unusable {
+			item.Note = "No alternative could be planned: " + refusal.Text
+		}
+	case err != nil:
+		return err
+	case unusable && len(found) == 0:
+		item.Note = fmt.Sprintf("No alternative train is planned from %s.", at.In(s.location).Format("15:04"))
+	}
+	for _, planned := range missing {
+		// Alternatives start at at, so one before it has no nearest real departure among them.
+		replacement := Replacement{Planned: planned, Checked: refusal == nil && !planned.Before(at)}
+		if replacement.Checked {
+			for _, alternative := range found {
+				if !alternative.Planned.Before(planned) {
+					replacement.Nearest, replacement.Found = alternative, true
+					break
+				}
+			}
+		}
+		item.Replace = append(item.Replace, replacement)
+	}
+	if !unusable || len(found) == 0 {
+		return nil
+	}
+	saved := item.Status
+	item.Departures = append(item.Departures, found...)
+	if item.Taken, item.Status = take(item.Departures, ready); item.Taken >= 0 {
+		item.SavedStatus = saved
+	} else {
+		item.Status = saved
+	}
+	return nil
 }
 
 // take picks the first departure that runs and leaves no earlier than ready, when ready is known,

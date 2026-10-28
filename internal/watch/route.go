@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -49,7 +50,7 @@ func (e *RouteEvaluator) Resolve(ctx context.Context, principalID string, spec S
 func (e *RouteEvaluator) Evaluate(ctx context.Context, principalID string, watch Watch, occurrence Occurrence) (Observation, error) {
 	key := strings.Join([]string{KindRoute, principalID, strings.ToLower(watch.Target.Route), occurrence.Date}, "\x00")
 	result, err := Cached(ctx, occurrence.Cache, key, func(ctx context.Context) (routes.Result, error) {
-		return e.routes.Check(ctx, principalID, watch.Target.Route, occurrence.Start)
+		return e.routes.CheckForWatch(ctx, principalID, watch.Target.Route, occurrence.Start)
 	})
 	if err != nil {
 		return Observation{}, err
@@ -87,7 +88,7 @@ func allLegsFailed(result routes.Result) error {
 
 // observation normalizes a checked route to the watch's triggers. A leg counts by the departure
 // the route takes: a delay in steps as a departure watch has them, a platform change, or no
-// departure left to take. The arrival counts as missed when it is late or when a leg leaves no way
+// saved departure left to take, with the alternative the leg takes instead counted the same way. The arrival counts as missed when it is late or when a leg leaves no way
 // to get there. Legs that failed to check are not part of the state, and while some are failing an
 // alert already sent is not called off.
 func (e *RouteEvaluator) observation(spec Spec, result routes.Result, previous string) Observation {
@@ -99,27 +100,35 @@ func (e *RouteEvaluator) observation(spec Spec, result routes.Result, previous s
 				continue
 			}
 			number := index + 1
-			switch {
-			case leg.Unusable():
-				phrase := leg.Status
-				if allCancelled(leg.Departures) {
+			var legParts, legPhrases []string
+			if leg.SavedUnusable() {
+				phrase := cmp.Or(leg.SavedStatus, leg.Status)
+				if allCancelled(leg.Saved()) {
 					phrase = "cancelled"
 				}
-				parts = append(parts, fmt.Sprintf("leg%d:unusable", number))
-				phrases = append(phrases, fmt.Sprintf("leg %d %s", number, phrase))
-			case leg.Taken >= 0:
+				legParts = append(legParts, "unusable")
+				legPhrases = append(legPhrases, fmt.Sprintf("leg %d %s", number, phrase))
+			}
+			if leg.Taken >= 0 {
 				taken := leg.Departures[leg.Taken]
-				var legParts []string
+				changed := len(legParts)
 				if taken.DelayMinutes >= spec.DelayMinutes {
 					legParts = append(legParts, fmt.Sprintf("delay>=%d", delayBucket(spec.DelayMinutes, taken.DelayMinutes)))
 				}
 				if taken.PlatformChanged {
 					legParts = append(legParts, "platform="+taken.Platform)
 				}
-				if len(legParts) > 0 {
-					parts = append(parts, fmt.Sprintf("leg%d:%s", number, strings.Join(legParts, ",")))
-					phrases = append(phrases, fmt.Sprintf("leg %d %s", number, taken.StatusText()))
+				switch {
+				case len(legParts) == changed:
+				case taken.Alternative:
+					legPhrases = append(legPhrases, "alternative "+taken.StatusText())
+				default:
+					legPhrases = append(legPhrases, fmt.Sprintf("leg %d %s", number, taken.StatusText()))
 				}
+			}
+			if len(legParts) > 0 {
+				parts = append(parts, fmt.Sprintf("leg%d:%s", number, strings.Join(legParts, ",")))
+				phrases = append(phrases, strings.Join(legPhrases, ", "))
 			}
 		}
 	}

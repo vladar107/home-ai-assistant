@@ -524,6 +524,31 @@ func TestWeatherForecastFindsAPlaceNamedWithItsCountryOrRegion(t *testing.T) {
 	}
 }
 
+func TestWeatherForecastResolvesAStreetAddressToItsTown(t *testing.T) {
+	f := newFixture(t, "")
+	queries := f.openMeteo(forecastAmsterdam)
+
+	wantText(t, f.call("alice", "weather_forecast", map[string]any{"location": "Damrak 1, 1012 LG Amsterdam, Netherlands", "days": 2}),
+		"Weather for Amsterdam, North Holland, Netherlands")
+	if want := []string{"Damrak 1", "Amsterdam"}; !slices.Equal(*queries, want) {
+		t.Fatalf("geocoding queries = %v, want %v", *queries, want)
+	}
+
+	*queries = nil
+	wantText(t, f.call("alice", "weather_forecast", map[string]any{"location": "Amsterdam", "days": 2}),
+		"Weather for Amsterdam, North Holland, Netherlands")
+	if want := []string{"Amsterdam"}; !slices.Equal(*queries, want) {
+		t.Fatalf("geocoding queries for a plain name = %v, want %v", *queries, want)
+	}
+
+	*queries = nil
+	wantError(t, f.call("alice", "weather_forecast", map[string]any{"location": "Nowhere 1, 1234 AB Atlantis, Elsewhere, Void, Beyond"}),
+		`No place called "Nowhere 1, 1234 AB Atlantis, Elsewhere, Void, Beyond" was found`)
+	if want := []string{"Nowhere 1", "Atlantis", "Elsewhere", "Void"}; !slices.Equal(*queries, want) {
+		t.Fatalf("geocoding queries for an unknown address = %v, want %v", *queries, want)
+	}
+}
+
 func TestWeatherForecastPicksTheQualifiedPlaceAmongNamesakes(t *testing.T) {
 	f := newFixture(t, "")
 	f.openMeteo(forecastAmsterdam)

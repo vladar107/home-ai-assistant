@@ -675,7 +675,7 @@ func TestRouteWatchAlertsOnLegsAndTheArrivalTarget(t *testing.T) {
 	e.at("2026-10-05 06:35")
 	e.wantSentAnyOrder(101,
 		"Route \"work\": arrival target missed\nLeg 1, bike 6 min: as stated",
-		"Route \"short\": leg 2 cancelled; arrival target missed\nLeg 1, bike 6 min: as stated",
+		"Route \"short\": leg 2 cancelled\nLeg 1, bike 6 min: as stated, 07:58–08:04\nLeg 2, train Amersfoort Schothorst → Utrecht Centraal, departures 07:56: on time, taking the alternative 08:04",
 	)
 	e.at("2026-10-05 06:40")
 	e.wantSent(101)
@@ -771,4 +771,45 @@ func TestRouteWatchTellsTrainsOffApartFromNSFailing(t *testing.T) {
 	if e.telemetry.count("check alice route failed") != 1 || e.telemetry.count("check bob route failed") != 1 || e.telemetry.count("upstream route routes") != 1 {
 		t.Fatalf("checks = %v", e.telemetry.events)
 	}
+}
+
+// A leg that continues on an alternative alerts that its saved train is cancelled, and again when
+// the alternative it takes runs late.
+func TestRouteWatchAlertsWhenTheAlternativeRunsLate(t *testing.T) {
+	e := newTransitEngine(t)
+	e.saveRoute("alice", "0000000000000001", "short", "07:56")
+	e.create("alice", watchID, routeSpec("short"))
+	// cancelled is the recorded plan with the 07:56 cancelled and the 08:04 after it leaving late
+	// by lateMinutes.
+	cancelled := func(lateMinutes int) []byte {
+		var response map[string]any
+		if err := json.Unmarshal(recorded(t, "ns", "trips.json"), &response); err != nil {
+			t.Fatal(err)
+		}
+		plan := response["trips"].([]any)
+		first := plan[0].(map[string]any)
+		first["status"] = "CANCELLED"
+		first["legs"].([]any)[0].(map[string]any)["cancelled"] = true
+		origin := plan[1].(map[string]any)["legs"].([]any)[0].(map[string]any)["origin"].(map[string]any)
+		planned, err := time.Parse(nsTimeLayout, origin["plannedDateTime"].(string))
+		if err != nil {
+			t.Fatal(err)
+		}
+		origin["actualDateTime"] = planned.Add(time.Duration(lateMinutes) * time.Minute).Format(nsTimeLayout)
+		data, err := json.Marshal(response)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return data
+	}
+
+	e.gateway.serve("/ns/v3/trips", cancelled(0))
+	e.at("2026-10-05 06:30")
+	e.wantSent(101, "Route \"short\": leg 2 cancelled\nLeg 1, bike 6 min: as stated, 07:58–08:04")
+	e.at("2026-10-05 06:35")
+	e.wantSent(101)
+
+	e.gateway.serve("/ns/v3/trips", cancelled(6))
+	e.at("2026-10-05 06:40")
+	e.wantSent(101, "Route \"short\": leg 2 cancelled, alternative delayed +6 min\n")
 }

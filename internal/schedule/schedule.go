@@ -111,6 +111,8 @@ type Repository interface {
 	SetScheduledJobTravelPause(ctx context.Context, principalID, jobID string, on bool) (bool, error)
 	// ScheduledJobsWithCron returns every principal's unfinished recurring jobs with the cron.
 	ScheduledJobsWithCron(ctx context.Context, cron string) ([]Job, error)
+	// ScheduledJobsOfType returns every principal's unfinished jobs of the type.
+	ScheduledJobsOfType(ctx context.Context, jobType string) ([]Job, error)
 	// UpdateScheduledJob replaces an unfinished job's name, schedule, zone, configuration, travel
 	// flag, destination, and next run, keeping its type, owner, and pause state. A job changed since expectedUpdatedAt, including
 	// by a tick advancing it, is left alone and reported as not updated.

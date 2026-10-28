@@ -4,15 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
-	"strings"
-	"unicode"
 
 	"github.com/vladar107/home-ai-assistant/internal/modelcatalog"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 )
-
-const maximumModelIDLength = 200
 
 // ErrUnsupportedChoice means the principal's catalog does not offer the model, or the model does
 // not run on the effort.
@@ -54,13 +49,13 @@ func (s *Service) SetChoice(ctx context.Context, lane Lane, choice agentruntime.
 // A pair the list does not offer, or an invalid model id or effort, is refused with
 // ErrUnsupportedChoice; an alias level is stored as the level the model runs it as.
 func (s *Service) SetChoiceFrom(ctx context.Context, lane Lane, choice agentruntime.ModelEffort, models []modelcatalog.Model) error {
-	if !validChoice(choice) {
+	if !modelcatalog.ValidChoice(choice) {
 		return fmt.Errorf("%w: %s", ErrUnsupportedChoice, choice.Effort)
 	}
 	if models == nil {
 		models = modelcatalog.Fallback(s.config.ChatModel, s.config.TaskModel)
 	}
-	canonical, ok := offered(models, choice)
+	canonical, ok := modelcatalog.Offered(models, choice)
 	if !ok {
 		return fmt.Errorf("%w: %s", ErrUnsupportedChoice, choice)
 	}
@@ -128,7 +123,7 @@ func (s *Service) resolveChoiceWith(ctx context.Context, lane Lane, load func() 
 	if models == nil {
 		return stored, agentruntime.ModelEffort{}, epoch, nil
 	}
-	canonical, ok := offered(models, stored)
+	canonical, ok := modelcatalog.Offered(models, stored)
 	if !ok {
 		return s.config.ChatModel, stored, epoch, nil
 	}
@@ -152,22 +147,6 @@ func (s *Service) catalog(ctx context.Context, principalID string) ([]modelcatal
 		models = []modelcatalog.Model{}
 	}
 	return models, nil
-}
-
-func validChoice(choice agentruntime.ModelEffort) bool {
-	id := choice.Model
-	if id == "" || len(id) > maximumModelIDLength || id != strings.TrimSpace(id) || !agentruntime.ValidEffort(choice.Effort) {
-		return false
-	}
-	return !strings.ContainsFunc(id, unicode.IsControl)
-}
-
-func offered(models []modelcatalog.Model, choice agentruntime.ModelEffort) (string, bool) {
-	index := slices.IndexFunc(models, func(m modelcatalog.Model) bool { return m.ID == choice.Model })
-	if index < 0 {
-		return "", false
-	}
-	return models[index].Canonical(choice.Effort)
 }
 
 // resetLane forgets the lane's latest turn and invalidates the turns still running under the old

@@ -66,6 +66,9 @@ func New(config Config, runtime agentruntime.AgentRuntime, gate ConnectionGate, 
 	if config.Now == nil {
 		config.Now = time.Now
 	}
+	if config.ScheduledTurnTimeout <= 0 {
+		config.ScheduledTurnTimeout = config.TurnTimeout
+	}
 	return &Engine{
 		runtime:   runtime,
 		gate:      gate,

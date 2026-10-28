@@ -59,6 +59,25 @@ type Departures interface {
 	Checker
 }
 
+// AlternativeQuery asks for the trips a train service plans from From to To, with an optional Via,
+// leaving at or after At.
+type AlternativeQuery struct {
+	From string
+	To   string
+	Via  string
+	At   time.Time
+	// Limit is how many trips to return at most.
+	Limit int
+}
+
+// Alternatives plans the next trips between two stations under the principal's own switch for the
+// service, for a departure that cannot be taken: up to Limit, each with its first train leaving at
+// or after At, none cancelled, in order of departure. Each comes back as a departure marked
+// Alternative with its legs and its own status. A *RefusalError refuses the query as a whole.
+type Alternatives interface {
+	Alternatives(ctx context.Context, principalID string, query AlternativeQuery) ([]Departure, error)
+}
+
 // Level is how a trip is running: on time, slower than planned, or disrupted.
 type Level int
 

@@ -101,6 +101,9 @@ type Departure struct {
 	Legs []Leg
 	// Note is the service's own message about the departure, or why it was not found or checked.
 	Note string
+	// Alternative marks a departure the service planned in place of the ones asked about; Planned
+	// is then its first train's planned departure.
+	Alternative bool
 }
 
 // StatusText is the status phrase, which replies copy word for word.

@@ -425,3 +425,70 @@ func TestARenamedHeadsUpOnTheOldScheduleIsMoved(t *testing.T) {
 		t.Fatalf("renamed heads-up = %+v", got)
 	}
 }
+
+// The text Heads-up jobs were created with before the method moved into code, as stored in them.
+const legacyHeadsUpText = "Look at the user's calendar for today and tomorrow, their jobs, watches, and saved routes, " +
+	"transit disruptions on the trips those imply, the weather where they will be, Home Assistant devices that need attention " +
+	"(doors left open, errors, low batteries, a full bin), health and energy trends worth knowing, and pending reminders. " +
+	"Read the reports already sent today with job_reports and repeat none of them. " +
+	"Write only when something needs the user's attention or action: a few short lines, most important first, " +
+	"in the language of the user's memory and other jobs. A source that is off or not connected is not worth mentioning. Otherwise reply with exactly [nothing-to-add]."
+
+func TestAHeadsUpWithTheOldBuiltInTextGetsTheDefaultNotes(t *testing.T) {
+	f := newTravelFixture(t)
+	id := schedule.HeadsUpJobID("alice")
+	f.create(id, schedule.HeadsUpName, schedule.Timing{Cron: "0 8,19 * * *"}, false)
+	edited := f.create("0000000000000001", schedule.HeadsUpName, schedule.Timing{Cron: schedule.HeadsUpCron}, false)
+	legacy, err := schedule.ModelTurnConfigWithModel(legacyHeadsUpText, "gpt-test:high")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.ExecContext(t.Context(), `UPDATE scheduled_jobs SET config = ? WHERE id IN (?, ?)`, string(legacy), id, edited.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	f.set(utc(5, 9, 0))
+	f.start()
+	got := f.job(id)
+	if schedule.ModelTurnPrompt(got.Config) != schedule.HeadsUpNotes || schedule.ModelTurnModel(got.Config) != "gpt-test:high" ||
+		got.Cron != schedule.HeadsUpCron || !got.NextRunAt.Equal(utc(5, 18, 30)) {
+		t.Fatalf("migrated heads-up = %s %s next %v", got.Config, got.Cron, got.NextRunAt)
+	}
+	if other := f.job(edited.ID); schedule.ModelTurnPrompt(other.Config) != legacyHeadsUpText {
+		t.Fatalf("a job that is not the built-in Heads-up got notes: %s", other.Config)
+	}
+
+	if err := f.service.MigrateHeadsUp(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if again := f.job(id); !again.UpdatedAt.Equal(got.UpdatedAt) {
+		t.Fatal("a second migration changed the job again")
+	}
+}
+
+func TestAHeadsUpWhoseTextTheUserChangedKeepsIt(t *testing.T) {
+	f := newTravelFixture(t)
+	id := schedule.HeadsUpJobID("alice")
+	created := f.create(id, schedule.HeadsUpName, schedule.Timing{Cron: schedule.HeadsUpCron}, false)
+	f.start()
+	if got := f.job(id); schedule.ModelTurnPrompt(got.Config) != "Tell me about the day." || !got.UpdatedAt.Equal(created.UpdatedAt) {
+		t.Fatalf("a heads-up with the user's own text = %s", got.Config)
+	}
+}
+
+func TestAHeadsUpOnTheUsersOwnScheduleWithTheOldTextGetsTheDefaultNotes(t *testing.T) {
+	f := newTravelFixture(t)
+	id := schedule.HeadsUpJobID("alice")
+	f.create(id, schedule.HeadsUpName, schedule.Timing{Cron: "0 7 * * *"}, false)
+	legacy, err := schedule.ModelTurnConfig(legacyHeadsUpText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.ExecContext(t.Context(), `UPDATE scheduled_jobs SET config = ? WHERE id = ?`, string(legacy), id); err != nil {
+		t.Fatal(err)
+	}
+	f.start()
+	if got := f.job(id); schedule.ModelTurnPrompt(got.Config) != schedule.HeadsUpNotes || got.Cron != "0 7 * * *" {
+		t.Fatalf("heads-up on its own schedule = %s %s", got.Config, got.Cron)
+	}
+}

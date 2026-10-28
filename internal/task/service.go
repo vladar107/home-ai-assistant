@@ -7,14 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"slices"
 	"strings"
 	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/vladar107/home-ai-assistant/internal/chatgpt"
 	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/modelcatalog"
@@ -31,8 +29,6 @@ const (
 	DefaultToolBudget       = 100
 	DefaultModelBudget      = 150
 	DefaultProgressInterval = time.Minute
-	// usageMaxAge is how old a cached usage read may be and still mark the task model unavailable.
-	usageMaxAge = 30 * time.Minute
 
 	// maximumOpen is one running task and three queued behind it.
 	maximumOpen = 4
@@ -92,7 +88,7 @@ type Config struct {
 	// Models and Usage tell whether the subscription offers the task model; both are optional and
 	// neither is consulted over the network.
 	Models modelcatalog.Reader
-	Usage  CachedUsage
+	Usage  modelcatalog.CachedUsage
 	// Proposer records task proposals; without it a task started after outside content was read
 	// is refused.
 	Proposer Proposer
@@ -101,11 +97,6 @@ type Config struct {
 	Exposure ExposureChecker
 	// Telemetry measures task runs; nil measures nothing.
 	Telemetry Telemetry
-}
-
-// CachedUsage is the last subscription usage read of a principal, never fetched on demand.
-type CachedUsage interface {
-	CachedUsage(principalID string, maxAge time.Duration) (chatgpt.Usage, bool)
 }
 
 type Service struct {
@@ -294,31 +285,11 @@ func (s *Service) Create(ctx context.Context, principalID, requestID, title, bri
 // model or its effort, FallbackUsage when the cached usage read marks the model unavailable. An
 // unreadable catalog and a missing usage read are no reason to fall back.
 func (s *Service) EffectiveModel(ctx context.Context, principalID string) (agentruntime.ModelEffort, string) {
-	task, chat := s.config.TaskModel, s.config.ChatModel
-	if task.Model == "" || task == chat || chat.Model == "" {
-		return task, ""
+	pair, fallback, err := modelcatalog.Effective(ctx, s.config.Models, s.config.Usage, principalID, s.config.TaskModel, s.config.ChatModel)
+	if err != nil {
+		s.logger.WarnContext(ctx, "task.model_catalog.failed", "principal_id", principalID, "error", err)
 	}
-	if s.config.Models != nil {
-		models, err := s.config.Models.Models(ctx, principalID)
-		switch {
-		case errors.Is(err, modelcatalog.ErrUnavailable):
-		case err != nil:
-			s.logger.WarnContext(ctx, "task.model_catalog.failed", "principal_id", principalID, "error", err)
-		default:
-			index := slices.IndexFunc(models, func(m modelcatalog.Model) bool { return m.ID == task.Model })
-			if index < 0 || !models[index].Supports(task.Effort) {
-				return chat, FallbackCatalog
-			}
-		}
-	}
-	if s.config.Usage != nil {
-		if usage, ok := s.config.Usage.CachedUsage(principalID, usageMaxAge); ok {
-			if available, marked := usage.ModelAvailable[task.Model]; marked && !available {
-				return chat, FallbackUsage
-			}
-		}
-	}
-	return task, ""
+	return pair, fallback
 }
 
 // settleModel gives a task from before the pair was stored the one it runs on: the chat default

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
@@ -27,14 +28,15 @@ type ScheduledReply struct {
 // session so chat history stays out of it, with read tools only, and after any chat turn of the
 // same principal has finished. Failures come back as the reply a chat turn would have given. An
 // error is returned only when ctx ends, and then nothing should be delivered. The turn key names
-// the run, so what its tools stage goes out with its reply.
-func (e *Engine) RunScheduled(ctx context.Context, principalID, turn, message string) (ScheduledReply, error) {
+// the run, so what its tools stage goes out with its reply. An empty model runs on Pi's default,
+// and the run has the scheduled turn's own time limit.
+func (e *Engine) RunScheduled(ctx context.Context, principalID, turn, message string, model agentruntime.ModelEffort) (ScheduledReply, error) {
 	release, err := e.Acquire(ctx, Lane{PrincipalID: principalID})
 	if err != nil {
 		return ScheduledReply{}, err
 	}
 	defer release()
-	return e.runUnwatched(ctx, principalID, turn, message)
+	return e.runUnwatched(ctx, principalID, turn, message, model, e.config.ScheduledTurnTimeout)
 }
 
 // RunCheck runs one check of an agent watch as RunScheduled runs a scheduled turn, but under no
@@ -42,7 +44,7 @@ func (e *Engine) RunScheduled(ctx context.Context, principalID, turn, message st
 // It takes no turn slot, as a background task does not: checks run all day, and the user's chat
 // turn must not wait behind one. The caller reads the verdict from the final text.
 func (e *Engine) RunCheck(ctx context.Context, principalID, message string) (ScheduledReply, error) {
-	return e.runUnwatched(ctx, principalID, "", message)
+	return e.runUnwatched(ctx, principalID, "", message, agentruntime.ModelEffort{}, e.config.TurnTimeout)
 }
 
 // RunReview runs the turn of a weekly review on the principal's own subscription and the given
@@ -85,9 +87,9 @@ func (e *Engine) RunReview(ctx context.Context, principalID, message string, mod
 	}
 }
 
-func (e *Engine) runUnwatched(ctx context.Context, principalID, turn, message string) (ScheduledReply, error) {
+func (e *Engine) runUnwatched(ctx context.Context, principalID, turn, message string, model agentruntime.ModelEffort, timeout time.Duration) (ScheduledReply, error) {
 	run := tools.NewRun(message)
-	turnCtx, cancel := context.WithTimeout(tools.WithRun(tools.WithTurn(ctx, turn), run), e.config.TurnTimeout)
+	turnCtx, cancel := context.WithTimeout(tools.WithRun(tools.WithTurn(ctx, turn), run), timeout)
 	defer cancel()
 	connected, err := e.gate.Ready(turnCtx, principalID)
 	switch {
@@ -125,6 +127,8 @@ func (e *Engine) runUnwatched(ctx context.Context, principalID, turn, message st
 		Memory:      memory,
 		WebSearch:   webSearch,
 		SearchCheck: e.searchCheck(principalID, webSearch, false),
+		Model:       model.Model,
+		Effort:      model.Effort,
 	}, e.newCountingSink(principalID, turn, run))
 	switch {
 	case ctx.Err() != nil:

@@ -467,9 +467,10 @@ func (h *conversationHarness) wiringInputs(t *testing.T, runtime agentruntime.Ag
 		Core: wiring.CoreConfig{
 			TurnTimeout: cmp.Or(options.turnTimeout, 10*time.Second), TurnZone: options.location, Now: now,
 			TypingInterval: options.typingInterval, DraftDelay: options.draftDelay, DraftInterval: options.draftInterval,
-			ChatModel: agentruntime.ModelEffort{Model: "gpt-test", Effort: agentruntime.DefaultEffort},
-			TaskModel: agentruntime.ModelEffort{Model: "gpt-6.1-sol", Effort: agentruntime.DefaultEffort},
-			ChatGPT:   chatgpt.Config{BaseURL: chatGPT.URL(), HTTPClient: chatGPT.Client()},
+			ChatModel:    agentruntime.ModelEffort{Model: "gpt-test", Effort: agentruntime.DefaultEffort},
+			TaskModel:    agentruntime.ModelEffort{Model: "gpt-6.1-sol", Effort: agentruntime.DefaultEffort},
+			HeadsUpModel: agentruntime.ModelEffort{Model: "gpt-6.1-sol", Effort: "high"},
+			ChatGPT:      chatgpt.Config{BaseURL: chatGPT.URL(), HTTPClient: chatGPT.Client()},
 			Connection: connection.Config{
 				Provider: connection.DefaultProvider, ProfilesDir: h.profilesDir, AuthBaseURL: h.auth.URL(), HTTPClient: h.auth.Client(),
 				CodeTimeout: options.codeTimeout, Principals: []string{"alice", "bob"},

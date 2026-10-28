@@ -154,6 +154,17 @@ func (s *Store) ScheduledJobsWithCron(ctx context.Context, cron string) ([]sched
 	)
 }
 
+func (s *Store) ScheduledJobsOfType(ctx context.Context, jobType string) ([]schedule.Job, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("list scheduled jobs: SQLite store is not open")
+	}
+	return s.queryScheduledJobs(
+		ctx,
+		`SELECT `+scheduledJobColumns+` FROM scheduled_jobs WHERE job_type = ? AND finished_at IS NULL ORDER BY id`,
+		jobType,
+	)
+}
+
 func (s *Store) UpdateScheduledJob(ctx context.Context, job schedule.Job, expectedUpdatedAt time.Time) (bool, error) {
 	if s == nil || s.db == nil {
 		return false, fmt.Errorf("update scheduled job: SQLite store is not open")

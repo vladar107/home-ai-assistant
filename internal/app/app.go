@@ -313,10 +313,12 @@ func (a *App) buildAssembly(ctx context.Context, client *telegram.Client, config
 		DataDir:    cfg.DataDir,
 		Zone:       cfg.Timezone,
 		Core: wiring.CoreConfig{
-			TurnTimeout: cfg.Conversation.TurnTimeout,
-			TurnZone:    location,
-			ChatModel:   cfg.Conversation.PiModel,
-			TaskModel:   cfg.Conversation.PiTaskModel,
+			TurnTimeout:          cfg.Conversation.TurnTimeout,
+			ScheduledTurnTimeout: cfg.Conversation.ScheduledTurnTimeout,
+			TurnZone:             location,
+			ChatModel:            cfg.Conversation.PiModel,
+			TaskModel:            cfg.Conversation.PiTaskModel,
+			HeadsUpModel:         cfg.Conversation.PiHeadsUpModel,
 			Connection: connection.Config{
 				ProfilesDir: profilesDir,
 				Provider:    cfg.Conversation.PiProvider,

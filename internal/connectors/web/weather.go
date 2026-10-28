@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
@@ -23,6 +24,8 @@ const (
 	maximumHourlyDaysAhead = 15
 	// geocodingCandidates leaves room to pick the right country or region among same-named places.
 	geocodingCandidates = 10
+	// maximumGeocodeTries bounds the geocoding requests one location may cost.
+	maximumGeocodeTries = 4
 
 	currentFields = "temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m,wind_gusts_10m"
 	dailyFields   = "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,sunrise,sunset"
@@ -239,15 +242,29 @@ func placeQuery(found place) url.Values {
 
 // geocode finds a place by name. Open-Meteo matches the place name alone, so a qualifier after the
 // first comma ("Zwolle, Netherlands", "Bergen, Limburg") is matched against the candidates' country
-// and region instead of being sent along.
+// and region instead of being sent along. When the name before the first comma finds nothing, as with
+// a street address, each later part is tried in turn with its postcode stripped.
 func (s *Service) geocode(ctx context.Context, query string) (place, bool, error) {
-	name, qualifier, _ := strings.Cut(query, ",")
-	name = strings.TrimSpace(name)
+	parts := strings.Split(query, ",")
+	name := strings.TrimSpace(parts[0])
+	tries := 0
 	candidates, err := s.geocodeName(ctx, name)
+	tries++
 	if err == nil && len(candidates) == 0 {
 		if base := baseName(name); base != "" && base != name {
 			candidates, err = s.geocodeName(ctx, base)
+			tries++
 		}
+	}
+	qualifier := strings.Join(parts[1:], ",")
+	for i := 1; err == nil && len(candidates) == 0 && i < len(parts) && tries < maximumGeocodeTries; i++ {
+		town := stripPostcode(parts[i])
+		if town == "" {
+			continue
+		}
+		candidates, err = s.geocodeName(ctx, town)
+		tries++
+		qualifier = strings.Join(parts[i+1:], ",")
 	}
 	if err != nil || len(candidates) == 0 {
 		return place{}, false, err
@@ -257,6 +274,20 @@ func (s *Service) geocode(ctx context.Context, query string) (place, bool, error
 		return place{}, false, errWeatherMalformed
 	}
 	return found, true, nil
+}
+
+// stripPostcode drops the leading tokens of an address part that contain a digit, and a short
+// all-caps token right after one ("1098 NJ"), leaving the town name.
+func stripPostcode(part string) string {
+	fields := strings.Fields(part)
+	for len(fields) > 0 && strings.ContainsFunc(fields[0], unicode.IsDigit) {
+		fields = fields[1:]
+		if len(fields) > 0 && len(fields[0]) <= 3 && strings.ToUpper(fields[0]) == fields[0] &&
+			!strings.ContainsFunc(fields[0], func(r rune) bool { return !unicode.IsLetter(r) }) {
+			fields = fields[1:]
+		}
+	}
+	return strings.Join(fields, " ")
 }
 
 func (s *Service) geocodeName(ctx context.Context, name string) ([]place, error) {

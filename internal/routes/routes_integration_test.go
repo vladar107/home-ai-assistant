@@ -10,8 +10,10 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -55,15 +57,19 @@ func (c *clock) advance(by time.Duration) {
 	c.now = c.now.Add(by)
 }
 
-// gateway stands in for NS and for OVapi with its GTFS directory, serving recorded responses.
+// gateway stands in for NS, for OVapi with its GTFS directory, and for a Transitous timetable with
+// nothing in it, serving recorded responses.
 type gateway struct {
 	t *testing.T
 
-	mu      sync.Mutex
-	trips   []byte
-	status  int
-	points  map[string]json.RawMessage
-	archive []byte
+	mu    sync.Mutex
+	trips []byte
+	// longer answers a trips query that asks for extra transfer time, when set.
+	longer      []byte
+	tripQueries []url.Values
+	status      int
+	points      map[string]json.RawMessage
+	archive     []byte
 }
 
 func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -73,9 +79,14 @@ func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == nsPrefix+"v2/stations":
 		_, _ = w.Write(fixture(g.t, "ns", "stations.json"))
 	case r.URL.Path == nsPrefix+"v3/trips":
+		g.tripQueries = append(g.tripQueries, r.URL.Query())
 		if g.status != 0 {
 			w.WriteHeader(g.status)
 			_, _ = w.Write([]byte("{}"))
+			return
+		}
+		if g.longer != nil && r.URL.Query().Get("addChangeTime") != "" {
+			_, _ = w.Write(g.longer)
 			return
 		}
 		_, _ = w.Write(g.trips)
@@ -89,6 +100,8 @@ func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		_ = json.NewEncoder(w).Encode(answer)
+	case r.URL.Path == "/transitous/v5/stoptimes":
+		_, _ = w.Write([]byte(`{"stopTimes":[]}`))
 	case r.URL.Path == "/gtfs/gtfs-nl.zip":
 		http.ServeContent(w, r, "gtfs-nl.zip", time.Time{}, bytes.NewReader(g.archive))
 	default:
@@ -100,6 +113,19 @@ func (g *gateway) serveTrips(body []byte) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.trips, g.status = body, 0
+}
+
+// asked lists the trips queries answered so far.
+func (g *gateway) asked() []url.Values {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return slices.Clone(g.tripQueries)
+}
+
+func (g *gateway) serveLonger(body []byte) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.longer = body
 }
 
 func (g *gateway) fail(status int) {
@@ -193,6 +219,7 @@ type harness struct {
 	store     *sqlite.Store
 	gateway   *gateway
 	nsClock   *clock
+	trains    *ns.Service
 	service   *routes.Service
 	proposals *proposals
 	location  *time.Location
@@ -240,6 +267,7 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
+	h.trains = trains
 	if h.location, err = time.LoadLocation("Europe/Amsterdam"); err != nil {
 		t.Fatal(err)
 	}
@@ -535,5 +563,219 @@ func TestRouteUpdatesShowOnlyWhatChanges(t *testing.T) {
 		if result := h.call("alice", "route_update", test.arguments); !result.IsError || !strings.Contains(result.Text, test.want) {
 			t.Fatalf("update %v = %+v, want %q", test.arguments, result, test.want)
 		}
+	}
+}
+
+// tripsEdited is the recorded trips, each as a JSON object, changed by change. They run 07:56,
+// 08:04, 08:12, 08:26, and 08:34 from Amersfoort Schothorst; the 08:04 changes trains with 2
+// minutes to spare.
+func tripsEdited(t *testing.T, change func(trips []map[string]any) []map[string]any) []byte {
+	t.Helper()
+	var response map[string]any
+	if err := json.Unmarshal(fixture(t, "ns", "trips.json"), &response); err != nil {
+		t.Fatal(err)
+	}
+	var trips []map[string]any
+	for _, item := range response["trips"].([]any) {
+		trips = append(trips, item.(map[string]any))
+	}
+	response["trips"] = change(trips)
+	data, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+func legOf(trip map[string]any, index int) map[string]any {
+	return trip["legs"].([]any)[index].(map[string]any)
+}
+
+// bothSavedPartlyCancelled is the recorded trips with the 07:56 and the 08:12 partly cancelled.
+func bothSavedPartlyCancelled(t *testing.T) []byte {
+	return tripsEdited(t, func(trips []map[string]any) []map[string]any {
+		legOf(trips[0], 1)["cancelled"] = true
+		legOf(trips[2], 0)["partCancelled"] = true
+		return trips
+	})
+}
+
+func changeTimes(queries []url.Values) []string {
+	var steps []string
+	for _, query := range queries {
+		steps = append(steps, query.Get("addChangeTime"))
+	}
+	return steps
+}
+
+func TestRouteCheckContinuesOnAnAlternativeWhenNoSavedTrainRuns(t *testing.T) {
+	h := newHarness(t)
+	h.save("alice", work())
+	h.gateway.serveTrips(bothSavedPartlyCancelled(t))
+	// With 10 extra minutes for each transfer, NS has the 08:04 make the next IC.
+	h.gateway.serveLonger(tripsEdited(t, func(trips []map[string]any) []map[string]any {
+		trips[1]["legs"].([]any)[1] = legOf(trips[3], 1)
+		return []map[string]any{trips[1], trips[3]}
+	}))
+
+	result, err := h.service.Check(h.ctx, "alice", "work", h.day("2026-10-05"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := func(at time.Time) string { return at.In(h.location).Format("15:04") }
+	train := result.Legs[1]
+	if train.Status != "on time" || train.SavedStatus != "no usable departure" || train.Unusable() || !train.SavedUnusable() || train.Taken != 2 || len(train.Saved()) != 2 || len(train.Departures) != 5 {
+		t.Fatalf("train leg = %+v", train)
+	}
+	if !train.Departures[train.Taken].Alternative || clock(train.Start) != "08:04" || clock(train.End) != "08:23" {
+		t.Fatalf("taken = %+v, %s–%s", train.Departures[train.Taken], clock(train.Start), clock(train.End))
+	}
+	if result.Verdict != routes.VerdictMet || clock(result.Leave) != "07:58" || clock(result.Arrival) != "08:33" || len(result.FailedLegs) != 0 {
+		t.Fatalf("result = %+v", result)
+	}
+	if got := changeTimes(h.gateway.asked()); !slices.Equal(got, []string{"", "10"}) {
+		t.Fatalf("change times asked = %q, want one plain plan shared by the check and the alternatives, and one with extra transfer time", got)
+	}
+	wantText(t, h.call("alice", "route_check", map[string]any{"name": "work", "date": "2026-10-05"}).Text,
+		"Leg 1, bike 6 min: as stated, 07:58–08:04\n",
+		"Leg 2, train Amersfoort Schothorst → Utrecht Centraal, departures 07:56, 08:12: on time, taking the alternative 08:04 instead of a saved departure, 08:04–08:23\n"+
+			"   Saved departures: none usable; each is cancelled or does not run:\n"+
+			"   1. partly cancelled — the 07:56 from Amersfoort Schothorst to Utrecht Centraal\n",
+		"   2. partly cancelled — the 08:12 from Amersfoort Schothorst to Utrecht Centraal\n",
+		"   Alternatives the train service plans in their place, each with its own status:\n"+
+			"   1. on time — the 08:04 from Amersfoort Schothorst to Utrecht Centraal\n"+
+			"      - ICD 1822: Amersfoort Schothorst 08:04",
+		"If the 2-minute change is missed: IC 1724 at 08:40 from Amersfoort Centraal, arriving 08:53.\n",
+		"   2. on time — the 08:26 from Amersfoort Schothorst to Utrecht Centraal\n",
+		"   3. on time — the 08:34 from Amersfoort Schothorst to Utrecht Centraal\n",
+		"Leg 3, walk 10 min: as stated, 08:23–08:33\n",
+		"Result: arrives 08:33; the arrival target 08:45 is met with 12 min to spare. Leave by 07:58.",
+	)
+}
+
+// The second train leg's saved 08:12 runs, but the first leg only reaches the station at 08:23, so
+// the alternatives start then and the trips before it are left out. Its saved 08:10 does not run,
+// and no departure near it is looked up.
+func TestRouteCheckPlansAlternativesFromWhenTheRouteGetsThere(t *testing.T) {
+	h := newHarness(t)
+	h.save("alice", routes.Spec{
+		Name:     "twice",
+		Days:     []string{"mon"},
+		ArriveBy: "09:00",
+		Legs: []routes.Leg{
+			{Mode: routes.ModeTrain, From: "Amersfoort Schothorst", To: "Utrecht Centraal", Departures: []string{"07:56"}},
+			{Mode: routes.ModeTrain, From: "Amersfoort Schothorst", To: "Utrecht Centraal", Departures: []string{"08:10", "08:12"}},
+		},
+	})
+	result, err := h.service.Check(h.ctx, "alice", "twice", h.day("2026-10-05"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := func(at time.Time) string { return at.In(h.location).Format("15:04") }
+	second := result.Legs[1]
+	if second.Status != "on time" || second.SavedStatus != "connection missed" || clock(second.Departures[second.Taken].Planned) != "08:26" || len(second.Departures) != 4 {
+		t.Fatalf("second leg = %+v", second)
+	}
+	if len(second.Replace) != 1 || second.Replace[0].Checked || second.Replace[0].Found {
+		t.Fatalf("replace = %+v", second.Replace)
+	}
+	if result.Verdict != routes.VerdictMet || clock(result.Arrival) != "08:53" {
+		t.Fatalf("result = %+v", result)
+	}
+	queries := h.gateway.asked()
+	if last, previous := queries[len(queries)-1], queries[len(queries)-2]; last.Get("dateTime") != "2026-10-05T08:23:00+02:00" || last.Has("addChangeTime") || previous.Get("dateTime") == last.Get("dateTime") {
+		t.Fatalf("trips queries = %v", queries)
+	}
+	wantText(t, h.service.Render(result),
+		"Leg 2, train Amersfoort Schothorst → Utrecht Centraal, departures 08:10, 08:12: on time, taking the alternative 08:26 instead of a saved departure, 08:26–08:53\n"+
+			"   Saved departures: none usable; those that run leave before the route gets there:\n"+
+			"   1. not in the timetable — the 08:10 from Amersfoort Schothorst to Utrecht Centraal\n",
+		"   2. on time — the 08:12 from Amersfoort Schothorst to Utrecht Centraal\n",
+		"   The saved 08:10 is not in the timetable on this day; no nearby departure was looked up on this check. If it never runs, offer to replace it in the route.\n",
+		"   Alternatives the train service plans in their place, each with its own status:\n   1. on time — the 08:26",
+		"   2. on time — the 08:34",
+		"Result: arrives 08:53; the arrival target 09:00 is met with 7 min to spare. Leave by 07:56.",
+	)
+}
+
+func TestRouteCheckNamesASavedTrainThatIsNotInTheTimetable(t *testing.T) {
+	h := newHarness(t)
+	route := work()
+	route.Legs[1].Departures = []string{"07:56", "08:10"}
+	h.save("alice", route)
+
+	result, err := h.service.Check(h.ctx, "alice", "work", h.day("2026-10-05"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := func(at time.Time) string { return at.In(h.location).Format("15:04") }
+	train := result.Legs[1]
+	if train.Status != "on time" || train.Taken != 0 || train.SavedStatus != "" || len(train.Departures) != 2 || train.Departures[1].Status != transit.StatusNotInTimetable {
+		t.Fatalf("train leg = %+v", train)
+	}
+	if len(train.Replace) != 1 || clock(train.Replace[0].Planned) != "08:10" || !train.Replace[0].Checked || !train.Replace[0].Found || clock(train.Replace[0].Nearest.Planned) != "08:12" {
+		t.Fatalf("replace = %+v", train.Replace)
+	}
+	text := h.service.Render(result)
+	wantText(t, text,
+		"on time, taking the 07:56, 07:56–08:23\n   1. on time — the 07:56",
+		"   2. not in the timetable — the 08:10 from Amersfoort Schothorst to Utrecht Centraal\n",
+		"   The saved 08:10 is not in the timetable on this day; the nearest real departure is the 08:12. If it never runs, offer to replace it in the route.\n",
+	)
+	if strings.Contains(text, "Alternatives") {
+		t.Fatalf("a leg that runs lists alternatives:\n%s", text)
+	}
+
+	watched, err := h.service.CheckForWatch(h.ctx, "alice", "work", h.day("2026-10-05"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if train := watched.Legs[1]; train.Taken != 0 || len(train.Replace) != 0 || len(train.Departures) != 2 {
+		t.Fatalf("a watched leg that runs looked for a replacement: %+v", train)
+	}
+}
+
+// Without the alternatives a trains service may offer, and for a bus, a leg whose departures cannot
+// be taken stays unusable.
+func TestRouteCheckWithoutAlternativesKeepsTheLegUnusable(t *testing.T) {
+	h := newHarness(t)
+	h.save("alice", work())
+	h.save("alice", routes.Spec{
+		Name: "evening",
+		Days: []string{"sun"},
+		Legs: []routes.Leg{{Mode: routes.ModeBus, Stop: "Amersfoort, Stadhuis", Line: "3", Departures: []string{"18:19"}, Minutes: 12}},
+	})
+	h.gateway.serveTrips(bothSavedPartlyCancelled(t))
+	plain, err := routes.NewService(routes.Config{Location: h.location, Trains: struct{ transit.Departures }{h.trains}, Now: h.nsClock.Now}, h.store, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := plain.Check(h.ctx, "alice", "work", h.day("2026-10-05"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if train := result.Legs[1]; train.Status != "no usable departure" || train.Taken != -1 || train.SavedStatus != "" || len(train.Departures) != 2 || result.Verdict != routes.VerdictUnknown {
+		t.Fatalf("result = %+v", result)
+	}
+	if text := plain.Render(result); strings.Contains(text, "Alternatives") || strings.Contains(text, "Saved departures") {
+		t.Fatalf("alternatives without the interface:\n%s", text)
+	}
+	if got := changeTimes(h.gateway.asked()); !slices.Equal(got, []string{""}) {
+		t.Fatalf("change times asked = %q", got)
+	}
+
+	asked := len(h.gateway.asked())
+	bus, err := h.service.Check(h.ctx, "alice", "evening", h.day("2026-10-04"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leg := bus.Legs[0]; leg.Status != "no usable departure" || leg.Departures[0].Status != transit.StatusNotInTimetable || len(leg.Departures) != 1 || len(leg.Replace) != 0 {
+		t.Fatalf("bus leg = %+v", leg)
+	}
+	if text := h.service.Render(bus); strings.Contains(text, "Alternatives") || strings.Contains(text, "The saved") {
+		t.Fatalf("a bus leg with alternatives:\n%s", text)
+	}
+	if got := len(h.gateway.asked()); got != asked {
+		t.Fatalf("a bus leg asked NS for %d trips", got-asked)
 	}
 }

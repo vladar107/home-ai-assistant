@@ -420,6 +420,28 @@ the default zone, under an ID derived from the principal, so the switch finds
 the job however it was renamed, paused, or deleted in conversation. Its runs
 look over the user's day and stay quiet unless something needs attention.
 
+Heads-up is a built-in method in code plus the user's notes. The method comes
+first in every Heads-up run and is general, with nothing specific to one user:
+it sets the window (the rest of today, plus tomorrow when the run is after
+15:00 local time), builds a timeline of places from every calendar event,
+treats each move between places as a trip, including the first from home and
+the last back home, and checks every trip with a saved route or the transit
+tools. When a check fails it looks for real alternatives and gives one with its
+times. It then checks disruptions on those trips and the weather, sends one
+weather card when it writes, and looks at home devices, health and energy trends, and
+reminders. It reads the last three days of the job's own reports in full
+(`job_reports` with its job ID and `days`) and repeats a non-travel item only when it changed
+or needs action now. Last, it checks the draft against the calendar and the
+tool results of the run. The job's stored text holds the user's notes, up to
+1000 runes: preferences that override the method on style, language, and how
+to read their calendar. A new job stores short default notes. `schedule_get`,
+`schedule_list`, and the jobs list in the prompt label the text as notes, and
+chat answers a correction about a report by editing one note, not by rewriting
+the job. At start, a Heads-up job whose text is still exactly the old built-in
+instruction gets the default notes; one the user edited keeps its text as its
+notes. A Heads-up run has a budget of 30 tool calls, and the preview of an
+update to the Heads-up job runs with the method too.
+
 ### Trips
 
 `trip` keeps a principal's trips and bookings in SQLite (`trips`, `trip_bookings`)
@@ -465,7 +487,9 @@ a job or reminder is kept in SQLite for 14 days, at most 200 per principal, with
 the Telegram messages it was sent as. The next chat turn gets a one-line excerpt
 of each report no turn has heard of, the first turn of a conversation those of the
 last day, and a reply to a report's message that report in full; the
-`job_reports` read tool lists and reads them. Every lookup is keyed by principal.
+`job_reports` read tool lists and reads them; with `job` and `days` (1 to 7) it
+returns the full texts of that job's reports, newest first, within one result
+limit, cutting the oldest that do not fit. Every lookup is keyed by principal.
 A report counts as outside content when its run read outside content (a run
 recovered after a restart counts, a reminder never does), and one whose run read
 private content makes the conversation private.
@@ -567,6 +591,19 @@ A restart resumes a running task in its session; a second interruption fails it.
 A task copies the task default (`HOME_AGENT_PI_TASK_MODEL`) when it is created, and its
 report run uses the same pair; if the principal's catalog lacks that model, or the
 last cached usage read marks it unavailable, it runs on the chat default instead.
+
+A model-turn job may hold its own model (`model`, as `id:effort`), set through
+`schedule_propose` and `schedule_update` and checked against the principal's
+catalog the way `/model` checks a choice; Confirm, preview, and Undo carry it,
+and `schedule_get` shows where the choice comes from. A run resolves it then,
+not when the job was made: the job's own choice, else
+`HOME_AGENT_PI_HEADSUP_MODEL` for the Heads-up job, else the chat default,
+which leaves the choice to Pi. A choice the catalog or the cached usage read
+does not offer falls back to the chat default, by the same rule as background
+tasks (`modelcatalog.Effective`), and the fallback is logged. Scheduled model
+turns use `HOME_AGENT_SCHEDULED_TURN_TIMEOUT` instead of the chat turn timeout
+and still hold the principal's turn lane, so a chat message sent during a run
+waits for it.
 
 ### Model and effort per tab
 
@@ -693,6 +730,19 @@ which replies copy word for word. `ns.Service.CheckDepartures`,
 `bus.Service.CheckDepartures`, and `ns.Service.Disruptions` expose the same
 checks to Go callers.
 
+Planning alternatives is an optional `transit.Alternatives` interface, which
+only the NS service implements; the routes service finds it by type assertion
+on its trains service. It plans the next trips between two places, optionally
+via a third, leaving at or after a given time. When the first trip has a
+train-to-train change of 2 minutes or less, NS also asks once with 10 extra
+minutes per change and merges that result as a note on the same first train.
+A route watch still alerts when the saved trains fail, and also on delays and
+platform changes of the alternative taken.
+
+Weather for a place given as a full address tries the text before the first
+comma, then each later part with leading postcode-like tokens (those containing
+a digit) removed, with at most 4 geocoding requests.
+
 ### A saved route
 
 A route is a per-user record in `routes`: a name, the weekdays it
@@ -709,8 +759,17 @@ the named route or the one whose weekdays include that day, it runs the departur
 checks for each train and bus leg, takes the first departure that runs and leaves
 no earlier than the previous leg ends, adds the walk and bike minutes without any
 buffer, and returns one block per leg with its status, then whether the arrival
-target is met and which legs failed to check. It is one tool call, and
-`routes.Service.Check` returns the same result to Go callers. `/jobs` lists the
+target is met and which legs failed to check. When no saved departure of a train
+leg can be taken, the check asks for up to 3 alternatives from when the user can
+be at the station (or from the first saved departure if that is unknown),
+skipping cancelled trips, and continues on the first one that runs, so the
+leave time, arrival, and verdict still come out. Alternatives are marked as
+such and keep their own status. A saved departure that is not in the timetable
+is named with the nearest real one, or with a note that none was looked up, so
+chat can propose fixing the route. Buses have no alternatives. It is one tool call, and
+`routes.Service.Check` returns the same result to Go callers. Route watches use
+`CheckForWatch`, which asks for alternatives only when a leg cannot go on and
+skips the nearest real departure, since a watch checks every few minutes. `/jobs` lists the
 routes after jobs and watches, read-only, with a Delete button each.
 
 ## Security model

@@ -108,6 +108,8 @@ type SearchChecks interface {
 type Config struct {
 	// TurnTimeout bounds an unattended run; a chat turn's own deadline is the coordinator's.
 	TurnTimeout time.Duration
+	// ScheduledTurnTimeout bounds a scheduled run instead; zero uses TurnTimeout.
+	ScheduledTurnTimeout time.Duration
 	// Location is the household's time zone; each turn then tells the model the current local
 	// time. Nil leaves the time out.
 	Location *time.Location

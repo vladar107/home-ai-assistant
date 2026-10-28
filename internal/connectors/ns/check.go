@@ -34,36 +34,45 @@ func (s *Service) CheckDepartures(ctx context.Context, principalID string, query
 	if len(query.Times) == 0 || len(query.Times) > MaximumCheckedDepartures {
 		return nil, &transit.RefusalError{Text: fmt.Sprintf("give 1 to %d planned departures.", MaximumCheckedDepartures)}
 	}
-	enabled, err := s.Enabled(ctx, principalID)
+	from, to, via, hasVia, err := s.journeyStations(ctx, principalID, query.From, query.To, query.Via)
 	if err != nil {
 		return nil, err
 	}
+	return s.checkDepartures(ctx, principalID, from, to, via, hasVia, query.Date, query.Times), nil
+}
+
+// journeyStations finds the stations a journey's from, to, and optional via name, under the
+// principal's own trains switch; a *transit.RefusalError is told to the caller.
+func (s *Service) journeyStations(ctx context.Context, principalID, fromName, toName, viaName string) (from, to, via station, hasVia bool, err error) {
+	refused := func(err error) (station, station, station, bool, error) {
+		return station{}, station{}, station{}, false, err
+	}
+	enabled, err := s.Enabled(ctx, principalID)
+	if err != nil {
+		return refused(err)
+	}
 	if !enabled {
-		return nil, &transit.RefusalError{Text: Switch.OffText(), Unavailable: true, Disabled: true}
+		return refused(&transit.RefusalError{Text: Switch.OffText(), Unavailable: true, Disabled: true})
 	}
 	list, failure := s.stationList(ctx, principalID)
 	if failure != nil {
-		return nil, &transit.RefusalError{Text: failure.Text, Unavailable: true}
+		return refused(&transit.RefusalError{Text: failure.Text, Unavailable: true})
 	}
-	from, failure := pickStation(list, "from", query.From)
-	if failure != nil {
-		return nil, &transit.RefusalError{Text: failure.Text}
+	if from, failure = pickStation(list, "from", fromName); failure != nil {
+		return refused(&transit.RefusalError{Text: failure.Text})
 	}
-	to, failure := pickStation(list, "to", query.To)
-	if failure != nil {
-		return nil, &transit.RefusalError{Text: failure.Text}
+	if to, failure = pickStation(list, "to", toName); failure != nil {
+		return refused(&transit.RefusalError{Text: failure.Text})
 	}
 	if from.code == to.code {
-		return nil, &transit.RefusalError{Text: fmt.Sprintf("from and to are both %s.", from.name)}
+		return refused(&transit.RefusalError{Text: fmt.Sprintf("from and to are both %s.", from.name)})
 	}
-	var via station
-	hasVia := strings.TrimSpace(query.Via) != ""
-	if hasVia {
-		if via, failure = pickStation(list, "via", query.Via); failure != nil {
-			return nil, &transit.RefusalError{Text: failure.Text}
+	if hasVia = strings.TrimSpace(viaName) != ""; hasVia {
+		if via, failure = pickStation(list, "via", viaName); failure != nil {
+			return refused(&transit.RefusalError{Text: failure.Text})
 		}
 	}
-	return s.checkDepartures(ctx, principalID, from, to, via, hasVia, query.Date, query.Times), nil
+	return from, to, via, hasVia, nil
 }
 
 // ResolvePlace finds the one station a name means, under the principal's own trains switch, and

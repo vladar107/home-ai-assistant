@@ -1290,3 +1290,142 @@ func TestDisruptionsAreStructuredWithTheirStations(t *testing.T) {
 		t.Fatalf("NS asked %d times for the same disruptions, want once", got)
 	}
 }
+
+// tripsEdited is trips.json with its trips, as JSON objects, changed by change.
+func tripsEdited(t *testing.T, change func(trips []map[string]any) []map[string]any) []byte {
+	t.Helper()
+	var response map[string]any
+	if err := json.Unmarshal(fixtureBytes(t, "trips.json"), &response); err != nil {
+		t.Fatal(err)
+	}
+	var trips []map[string]any
+	for _, item := range response["trips"].([]any) {
+		trips = append(trips, item.(map[string]any))
+	}
+	response["trips"] = change(trips)
+	data, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+// The plan's trips run 07:56, 08:04, 08:12, 08:26, and 08:34; the 08:04 changes trains at Amersfoort
+// Centraal with 2 minutes to spare, the others with 10 or none.
+func TestAlternativesPlanTheNextTripsThatRun(t *testing.T) {
+	f := newFixture(t)
+	ctx := t.Context()
+	at := func(clock string) time.Time {
+		parsed, err := time.Parse("15:04", clock)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return time.Date(2026, 10, 5, parsed.Hour()-2, parsed.Minute(), 0, 0, time.UTC)
+	}
+	// longer is what NS plans with 10 extra minutes per transfer: the 08:04 makes the next IC
+	// instead, the 08:12 is the same trip as in the plain plan, and a train the plain plan lacks
+	// leaves at 08:26.
+	longer := tripsEdited(t, func(trips []map[string]any) []map[string]any {
+		later := trips[3]["legs"].([]any)[1]
+		trips[1]["legs"].([]any)[1] = later
+		trips[3]["legs"].([]any)[0].(map[string]any)["name"] = "SPR 5900"
+		return []map[string]any{trips[1], trips[2], trips[3]}
+	})
+	f.server.route("v3/trips", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("addChangeTime") == "10" {
+			_, _ = w.Write(longer)
+			return
+		}
+		_, _ = w.Write(fixtureBytes(t, "trips.json"))
+	})
+	summary := func(departures []transit.Departure) string {
+		var parts []string
+		for _, departure := range departures {
+			if !departure.Alternative || departure.From != "Amersfoort Schothorst" || departure.To != "Utrecht Centraal" {
+				t.Fatalf("departure = %+v", departure)
+			}
+			part := departure.Planned.Format("15:04") + "→" + departure.PlannedArrival.Format("15:04") + " " + departure.StatusText()
+			if strings.Contains(departure.Note, "10 extra minutes for each transfer") {
+				part += " +10"
+			}
+			parts = append(parts, part)
+		}
+		return strings.Join(parts, ", ")
+	}
+	changeTimes := func(from int) []string {
+		var steps []string
+		for _, query := range f.server.seen("v3/trips")[from:] {
+			steps = append(steps, query.Get("addChangeTime"))
+		}
+		return steps
+	}
+
+	// Trips that left before the time are left out, and a direct first trip needs no retry.
+	found, err := f.service.Alternatives(ctx, "alice", transit.AlternativeQuery{From: "AMFS", To: "Utrecht", At: at("08:05"), Limit: 3})
+	if err != nil || summary(found) != "08:12→08:39 on time, 08:26→08:53 on time, 08:34→08:53 on time" {
+		t.Fatalf("alternatives from 08:05 = %s %v", summary(found), err)
+	}
+	if got := changeTimes(0); !slices.Equal(got, []string{""}) || f.server.seen("v3/trips")[0].Get("dateTime") != "2026-10-05T08:05:00+02:00" {
+		t.Fatalf("change times asked = %q", got)
+	}
+	if len(found[0].Legs) != 1 || found[0].Legs[0].Name != "SPR 5622" || found[0].Platform != "1" {
+		t.Fatalf("legs = %+v", found[0])
+	}
+
+	// The first trip changes trains in 2 minutes, so NS is asked with 10 extra minutes: its later
+	// connection for the same first train is noted on that trip, and a new first train joins in.
+	asked := len(f.server.seen("v3/trips"))
+	found, err = f.service.Alternatives(ctx, "alice", transit.AlternativeQuery{From: "AMFS", To: "Utrecht", At: at("07:57"), Limit: 6})
+	if err != nil || summary(found) != "08:04→08:23 on time, 08:12→08:39 on time, 08:26→08:53 on time, 08:26→08:53 on time +10, 08:34→08:53 on time" {
+		t.Fatalf("alternatives from 07:57 = %s %v", summary(found), err)
+	}
+	if !strings.HasSuffix(found[0].Note, "If the 2-minute change is missed: IC 1724 at 08:40 from Amersfoort Centraal, arriving 08:53.") || strings.Count(found[0].Note, "If the") != 1 {
+		t.Fatalf("note = %q", found[0].Note)
+	}
+	if found[3].Legs[0].Name != "SPR 5900" || strings.Contains(found[1].Note, "If the") {
+		t.Fatalf("alternatives = %+v", found)
+	}
+	if got := changeTimes(asked); !slices.Equal(got, []string{"", "10"}) {
+		t.Fatalf("change times asked = %q, want the plain plan and the first extra step", got)
+	}
+	if found, err = f.service.Alternatives(ctx, "alice", transit.AlternativeQuery{From: "AMFS", To: "Utrecht", At: at("07:57"), Limit: 2}); err != nil || len(found) != 2 {
+		t.Fatalf("limited alternatives = %s %v", summary(found), err)
+	}
+
+	// A cancelled trip is never an alternative; the first one left changes with time to spare.
+	f.clock.advance(time.Minute)
+	f.server.serve("v3/trips", tripsEdited(t, func(trips []map[string]any) []map[string]any {
+		trips[1]["status"] = "CANCELLED"
+		trips[1]["legs"].([]any)[0].(map[string]any)["cancelled"] = true
+		trips[2]["legs"].([]any)[0].(map[string]any)["partCancelled"] = true
+		return trips
+	}))
+	asked = len(f.server.seen("v3/trips"))
+	found, err = f.service.Alternatives(ctx, "alice", transit.AlternativeQuery{From: "AMFS", To: "Utrecht", At: at("07:57"), Limit: 3})
+	if err != nil || summary(found) != "08:26→08:53 on time, 08:34→08:53 on time" {
+		t.Fatalf("alternatives without the cancelled = %s %v", summary(found), err)
+	}
+	if got := changeTimes(asked); !slices.Equal(got, []string{""}) {
+		t.Fatalf("change times asked = %q", got)
+	}
+
+	refusal := func(principalID string, query transit.AlternativeQuery, fragment string, unavailable, disabled bool) {
+		t.Helper()
+		_, err := f.service.Alternatives(ctx, principalID, query)
+		var refused *transit.RefusalError
+		if !errors.As(err, &refused) || !strings.Contains(refused.Text, fragment) || refused.Unavailable != unavailable || refused.Disabled != disabled {
+			t.Fatalf("error = %+v, want a refusal containing %q", err, fragment)
+		}
+	}
+	query := transit.AlternativeQuery{From: "AMFS", To: "Utrecht", At: at("07:57"), Limit: 3}
+	refusal("alice", transit.AlternativeQuery{From: "AMFS", To: "Utrecht", At: at("07:57")}, "ask for 1 to 6 alternatives", false, false)
+	refusal("alice", transit.AlternativeQuery{From: "AMFS", To: "Atlantis", At: at("07:57"), Limit: 3}, `No NS station matches to "Atlantis"`, false, false)
+	f.clock.advance(time.Minute)
+	f.server.fail("v3/trips", http.StatusServiceUnavailable, "{}")
+	refusal("alice", query, "NS travel information is unavailable right now.", true, false)
+	if err := f.switches.SetEnabled(ctx, "alice", ns.Switch, false); err != nil {
+		t.Fatal(err)
+	}
+	refusal("alice", query, ns.Switch.OffText(), true, true)
+}

@@ -94,7 +94,7 @@ func (h headsUpSection) act(ctx context.Context, principalID string, _ int64, ac
 			}
 			return settingsOutcome{}, nil
 		}
-		config, err := schedule.ModelTurnConfig(schedule.HeadsUpPrompt)
+		config, err := schedule.ModelTurnConfig(schedule.HeadsUpNotes)
 		if err != nil {
 			return settingsOutcome{}, err
 		}

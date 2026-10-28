@@ -2,6 +2,7 @@ package routes
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -38,6 +39,7 @@ const guidance = "Routes: the user's saved journeys, such as work, each with the
 	"route_list lists them and route_get shows one with numbered legs. " +
 	"route_check checks a route for a day in one call: each train and bus leg's fixed departures, timed in order through the walk and bike legs with no buffer added, then whether the arrival target is still met and which legs failed to check; without a name it checks the route whose weekdays include that day. " +
 	"For any question or report about a saved route, such as report my work route, call route_check once and report its legs in order, copying each status phrase word for word; never plan a leg it checked again with other tools, and say which legs failed to check instead of guessing. " +
+	"When no saved train of a leg can be taken, route_check continues on an alternative the train service plans and still lists the saved departures with why each failed: report both, with the alternative's times. A saved departure that is not in the timetable comes with the nearest real one; when it never runs, offer to replace it in the route. " +
 	"A scheduled report about a commute should only name the route to check, such as \"check my work route with route_check and report it\", or \"check today's route with route_check\" for one weekday job that serves routes differing by day, instead of spelling out legs and times in the prompt."
 
 func writeGuidance() string {
@@ -694,15 +696,29 @@ func (s *Service) Render(result Result) string {
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "Check of the route %s on %s (times in %s). Each leg starts with its status; copy it word for word:\n",
 		result.Route.Heading(), result.Date.Format("Mon 2 Jan"), s.location)
+	writeDepartures := func(departures []transit.Departure) {
+		var lines strings.Builder
+		transit.Write(&lines, s.location, departures)
+		for _, line := range strings.Split(strings.TrimRight(lines.String(), "\n"), "\n") {
+			builder.WriteString("   " + line + "\n")
+		}
+	}
 	for index, item := range result.Legs {
 		fmt.Fprintf(&builder, "Leg %d, %s: %s", index+1, item.Leg.Describe(), item.Status)
+		taken := ""
+		if item.Taken >= 0 {
+			taken = "the " + clock(item.Departures[item.Taken].Planned)
+			if item.Departures[item.Taken].Alternative {
+				taken = "the alternative " + clock(item.Departures[item.Taken].Planned) + " instead of a saved departure"
+			}
+		}
 		switch {
 		case item.Taken >= 0 && !item.Start.IsZero() && !item.End.IsZero():
-			fmt.Fprintf(&builder, ", taking the %s, %s–%s", clock(item.Departures[item.Taken].Planned), clock(item.Start), clock(item.End))
+			fmt.Fprintf(&builder, ", taking %s, %s–%s", taken, clock(item.Start), clock(item.End))
 		case item.Taken >= 0 && !item.Start.IsZero():
-			fmt.Fprintf(&builder, ", taking the %s", clock(item.Departures[item.Taken].Planned))
+			fmt.Fprintf(&builder, ", taking %s", taken)
 		case item.Taken >= 0:
-			fmt.Fprintf(&builder, ", first usable: the %s", clock(item.Departures[item.Taken].Planned))
+			fmt.Fprintf(&builder, ", first usable: %s", taken)
 		case !item.Start.IsZero():
 			fmt.Fprintf(&builder, ", %s–%s", clock(item.Start), clock(item.End))
 		}
@@ -710,12 +726,34 @@ func (s *Service) Render(result Result) string {
 		if item.Note != "" {
 			fmt.Fprintf(&builder, "   %s\n", item.Note)
 		}
-		if len(item.Departures) > 0 {
-			var departures strings.Builder
-			transit.Write(&departures, s.location, item.Departures)
-			for _, line := range strings.Split(strings.TrimRight(departures.String(), "\n"), "\n") {
-				builder.WriteString("   " + line + "\n")
+		saved := item.Saved()
+		alternatives := item.Departures[len(saved):]
+		if len(alternatives) > 0 {
+			builder.WriteString("   Saved departures: none usable; ")
+			if cmp.Or(item.SavedStatus, item.Status) == statusMissed {
+				builder.WriteString("those that run leave before the route gets there:\n")
+			} else {
+				builder.WriteString("each is cancelled or does not run:\n")
 			}
+		}
+		if len(saved) > 0 {
+			writeDepartures(saved)
+		}
+		if len(alternatives) > 0 {
+			builder.WriteString("   Alternatives the train service plans in their place, each with its own status:\n")
+			writeDepartures(alternatives)
+		}
+		for _, replacement := range item.Replace {
+			fmt.Fprintf(&builder, "   The saved %s is not in the timetable on this day; ", clock(replacement.Planned))
+			switch {
+			case replacement.Found:
+				fmt.Fprintf(&builder, "the nearest real departure is the %s.", clock(replacement.Nearest.Planned))
+			case replacement.Checked:
+				builder.WriteString("no real departure near it was found.")
+			default:
+				builder.WriteString("no nearby departure was looked up on this check.")
+			}
+			builder.WriteString(" If it never runs, offer to replace it in the route.\n")
 		}
 	}
 	builder.WriteString("Result: ")

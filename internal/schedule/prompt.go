@@ -91,7 +91,11 @@ func (s PromptSection) promptEntry(job Job) string {
 	if job.Type == TypeReminder {
 		return fmt.Sprintf("id %s: reminder, %s: %s", job.ID, DescribeJob(job, s.zone), promptExcerpt(ReminderText(job.Config)))
 	}
-	return fmt.Sprintf("id %s: %q, %s: %s", job.ID, job.Name, DescribeJob(job, s.zone), promptExcerpt(ModelTurnPrompt(job.Config)))
+	text := promptExcerpt(ModelTurnPrompt(job.Config))
+	if job.ID == HeadsUpJobID(job.PrincipalID) {
+		text = "notes: " + text
+	}
+	return fmt.Sprintf("id %s: %q, %s: %s", job.ID, job.Name, DescribeJob(job, s.zone), text)
 }
 
 func promptExcerpt(text string) string {

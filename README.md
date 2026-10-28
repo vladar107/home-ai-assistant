@@ -108,9 +108,12 @@ borrowed between users.
   A job meant to "only tell me when…" stays silent until it has something to
   say.
 - **Heads-up.** Turned on in `/settings`, the assistant looks over the user's
-  day at 07:30 and 18:30 (calendar, trips, weather, home devices, health and
-  energy trends) and writes first, only when something needs attention. It is
-  an ordinary job the user can move, reword, or pause in conversation.
+  day at 07:30 and 18:30 (every trip in the window checked against saved routes
+  and live trains, with an alternative when a train fails; weather, home
+  devices, health and energy trends) and writes first, only when something
+  needs attention. It follows a built-in method plus the user's own notes, and
+  it is an ordinary job the user can move, add notes to, or pause in
+  conversation.
 - **Trips.** A trip the user mentions ("I fly to Lisbon on 12 March and stay a
   week") is recorded with its dates and bookings, and every turn knows about the
   active or next one. With Google mail or calendar on, an optional Trips scan
