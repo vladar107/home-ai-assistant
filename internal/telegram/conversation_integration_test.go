@@ -39,6 +39,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/web"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/conversation/history"
+	"github.com/vladar107/home-ai-assistant/internal/events"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/integration"
 	"github.com/vladar107/home-ai-assistant/internal/judgment"
@@ -223,6 +224,10 @@ type harnessOptions struct {
 	topics bool
 	// typeSafe configures a TypeSafe key, which nothing in the test calls.
 	typeSafe bool
+	// events adds inbound events and their settings page, with eventBodyTimeout bounding a posted
+	// body's read and eventAssessTimeout an assessment turn when they are set.
+	events                               bool
+	eventBodyTimeout, eventAssessTimeout time.Duration
 }
 
 // testFile is one attachment the Telegram simulator will hand out through getFile.
@@ -257,6 +262,7 @@ type conversationHarness struct {
 	locations      *location.Service
 	memory         *memory.Service
 	backlog        *backlog.Service
+	events         *events.Service
 	searches       *searchcheck.Service
 	approvals      *approval.Service
 	scheduler      *schedule.Service
@@ -419,7 +425,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	h.switches, h.connections, h.attachments, h.outbox = asm.Switches, asm.Connections, asm.Attachments, asm.Outbox
 	h.conversation, h.engine, h.approvals, h.searches, h.scheduler, h.tasks, h.watches = asm.Conversation, asm.Turns, asm.Approvals, asm.SearchChecks, asm.Scheduler, asm.Tasks, asm.Watches
 	h.notion, h.nas, h.google, h.web, h.ns, h.homeAssistant, h.grafana, h.bus = asm.Notion, asm.NAS, asm.Google, asm.Web, asm.NS, asm.HomeAssistant, asm.Grafana, asm.Bus
-	h.routes, h.locations, h.memory, h.backlog, h.trips = asm.Routes, asm.Locations, asm.Memory, asm.Backlog, asm.Trips
+	h.routes, h.locations, h.memory, h.backlog, h.trips, h.events = asm.Routes, asm.Locations, asm.Memory, asm.Backlog, asm.Trips, asm.Events
 	h.service = h.telegramService(identities, logger)
 	t.Cleanup(h.stop)
 	return h
@@ -490,6 +496,10 @@ func (h *conversationHarness) wiringInputs(t *testing.T, runtime agentruntime.Ag
 	}
 	if options.watches != nil {
 		in.WatchEvaluators = map[string]watch.Evaluator{watch.KindDeparture: options.watches}
+	}
+	if options.events {
+		in.Events = EventSender{Client: h.client}
+		in.Core.EventBodyTimeout, in.Core.EventAssessTimeout = options.eventBodyTimeout, options.eventAssessTimeout
 	}
 	if options.typeSafe {
 		in.Core.TypeSafe = judgment.Config{APIKey: "test-key", Endpoint: "http://127.0.0.1:1/judge"}
@@ -597,6 +607,9 @@ func (h *conversationHarness) telegramService(identities *identity.Service, logg
 	deps.Sections = append(deps.Sections, NewHeadsUpSection(asm.Scheduler, logger, nil))
 	if asm.Locations != nil {
 		deps.Sections = append(deps.Sections, NewLocationSection(asm.Locations, logger, nil))
+	}
+	if asm.Events != nil {
+		deps.Sections = append(deps.Sections, NewEventsSection(asm.Events, time.UTC, logger, nil))
 	}
 	deps.Sections = append(deps.Sections, NewMemorySection(asm.Memory, asm.Scheduler, logger, nil))
 	if asm.Google != nil {

@@ -171,6 +171,14 @@ borrowed between users.
   subscription: "tell me when the return flight drops below €150", "tell me when a
   mail from the tax office arrives", or "watch this page for the release date". A
   watch set up in another language sends its messages in that language.
+- **Inbound events.** The user's own systems, such as a backup script or a home
+  automation, message them through an event source set up in `/settings`: each
+  source has its own token, shown once, for `POST /api/events` on the home
+  network. An event reaches only that source's owner, in the Events tab, either
+  as it is or after one model turn on the owner's subscription decides from
+  their memory whether it is worth telling them; a critical event always
+  arrives. Sources can be paused, given a new token, or deleted, and
+  conversation can ask what one reported.
 - **Routes.** Named journeys such as "work", saved in conversation with their
   weekdays, arrival target, and legs (walking or cycling minutes, fixed trains
   and buses), changed one leg at a time, and checked in one call: each leg's
@@ -227,6 +235,7 @@ internal/searchcheck/  per-query web search checks
 internal/schedule/     durable jobs, reminders, and scheduled turns
 internal/task/         background sub-agents
 internal/watch/        windowed watches, in code or by model turn
+internal/events/       event sources and inbound events from the users' own systems
 internal/routes/       saved journeys checked leg by leg
 internal/trip/         trips, bookings, and travel reminders
 internal/transit/      shared vocabulary of the train and bus services

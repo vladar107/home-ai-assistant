@@ -350,6 +350,41 @@ a session file that could not be read. `tools.outcome.dropped` counts tool outco
 the background writer had no room for, `tools.outcome.unrecorded` a failed write.
 Logs carry IDs and counts, never reply texts or memory entries.
 
+### Inbound events
+
+Migration 045 adds `event_sources`, `inbound_events`, and `event_token_messages`;
+it cannot be undone, so take a data backup before the first deploy that carries
+it. No setting is needed: inbound events are on with conversation. Each user adds
+sources in the Events page of `/settings`, which shows each token once and
+deletes that message after ten minutes, also across a restart.
+
+`POST /api/events` is served on the application's listener beside `/healthz`
+and `/api/backlog`, so the home edge proxy's site for the assistant must forward
+the path `/api/events` to the application, as it forwards `/api/backlog`. Keep it
+on the private network; the token is the boundary only if it is ever exposed
+further, which is out of scope. From a system on the home network:
+
+```sh
+curl -sS https://assistant.example/api/events \
+  -H "Authorization: Bearer $EVENT_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"Nightly backup failed","text":"Exit status 2.","severity":"warning","dedupe_key":"backup-2026-11-01"}'
+```
+
+It answers `202` with the event's ID, `401` for a missing or wrong token or a
+user no longer allowlisted, `403` while the source is paused, `400` for a body
+over 16 KiB, invalid JSON, a field out of range, or a control character, and
+`429` past 60 events in an hour; a body not sent within 10 seconds is cut off.
+A source in assess mode spends one model turn of its owner's subscription per
+event, at most 90 seconds before the event is forwarded instead, counted in the
+usual turn metrics; forward mode spends none. `home_agent_events_inbound_total` counts finished events by mode and
+outcome (`delivered`, `suppressed`, `failed`, `dropped`, `duplicate`). In the
+logs, `events.api.accepted` and `events.api.rejected` carry the source ID and
+reason, `events.event.finished` each outcome, `events.event.retry` a send to be
+retried, `events.assess.failed` an assessment that fell back to forwarding, and
+`events.token_message.deleted` a token message removed; none carries a token or
+an event's text.
+
 ## 7. Logs and rollback
 
 ```sh
@@ -395,6 +430,9 @@ sending duplicate replies.
   redeploy.
 - `grafana.admin-password`: rotate in Grafana and Keychain together.
   `grafana.secret-key` needs Grafana's re-encryption procedure.
+- Event source token: the user presses *New token* for the source in
+  `/settings`, which ends the old token at once, and updates the system that
+  posts with it; *Pause* refuses its events meanwhile.
 - Lost Mac or SSH key: revoke the public key on the NAS.
 - Treat an unexpected host-key change, plaintext registry credentials, broad NAS
   secret permissions, or a token in logs as an incident, and stop deploying.

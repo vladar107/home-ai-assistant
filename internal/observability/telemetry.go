@@ -94,6 +94,7 @@ type Telemetry struct {
 	telegramTabs                 metric.Int64Counter
 	tasks                        taskInstruments
 	watches                      watchInstruments
+	inboundEvents                metric.Int64Counter
 }
 
 func New(ctx context.Context, cfg config.ObservabilityConfig, logger *slog.Logger) (*Telemetry, error) {
@@ -455,7 +456,10 @@ func (t *Telemetry) createBusinessInstruments(meter metric.Meter) error {
 	if err := t.createTaskInstruments(meter); err != nil {
 		return err
 	}
-	return t.createWatchInstruments(meter)
+	if err := t.createWatchInstruments(meter); err != nil {
+		return err
+	}
+	return t.createEventInstruments(meter)
 }
 
 func (t *Telemetry) Shutdown(ctx context.Context) error {

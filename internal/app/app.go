@@ -23,6 +23,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/ns"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/places"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/web"
+	"github.com/vladar107/home-ai-assistant/internal/events"
 	"github.com/vladar107/home-ai-assistant/internal/health"
 	"github.com/vladar107/home-ai-assistant/internal/httpretry"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
@@ -146,12 +147,13 @@ func (a *App) Run(ctx context.Context) (runErr error) {
 		return abort(err)
 	}
 
-	// The backlog service exists only after initialization; the listener is not open yet.
+	// The backlog and event services exist only after initialization; the listener is not open yet.
 	var backlogService *backlog.Service
+	var eventsService *events.Service
 	if a.assembly != nil {
-		backlogService = a.assembly.Backlog
+		backlogService, eventsService = a.assembly.Backlog, a.assembly.Events
 	}
-	a.server.Handler = httpHandler(a, telemetry, backlogService)
+	a.server.Handler = httpHandler(a, telemetry, backlogService, eventsService)
 	_, endListen := telemetry.StartLifecycle(ctx, "http_listen")
 	listener, err := net.Listen("tcp", a.cfg.ListenAddress)
 	endListen(err)
@@ -302,6 +304,7 @@ func (a *App) buildAssembly(ctx context.Context, client *telegram.Client, config
 		Reminders:    telegram.ReminderSender{Client: client},
 		Alerts:       telegram.WatchAlertSender{Client: client},
 		TaskMessages: telegram.TaskMessenger{Client: client},
+		Events:       telegram.EventSender{Client: client},
 		Tabs: func(namer *turn.Engine, trips trip.Reader) wiring.TabServices {
 			a.tabs = telegram.NewTabs(client, a.store, trips, namer, a.logger, a.telemetry)
 			return wiring.TabServices{
@@ -438,7 +441,7 @@ func (a *App) buildTelegram(ctx context.Context, client *telegram.Client, config
 		if asm.Watches != nil {
 			deps.Watches = asm.Watches
 		}
-		deps.Sections, err = a.settingsSections(asm)
+		deps.Sections, err = a.settingsSections(asm, location)
 		if err != nil {
 			return err
 		}
@@ -458,7 +461,7 @@ func (a *App) buildTelegram(ctx context.Context, client *telegram.Client, config
 }
 
 // settingsSections are the /settings pages of what the assembly built.
-func (a *App) settingsSections(asm *wiring.Assembly) ([]telegram.Section, error) {
+func (a *App) settingsSections(asm *wiring.Assembly, location *time.Location) ([]telegram.Section, error) {
 	sections := []telegram.Section{telegram.NewModelSection(asm.Connections, asm.Conversation, a.logger, a.telemetry)}
 	if asm.Notion != nil {
 		sections = append(sections, telegram.NewNotionSection(asm.Notion, a.logger, a.telemetry))
@@ -484,6 +487,9 @@ func (a *App) settingsSections(asm *wiring.Assembly) ([]telegram.Section, error)
 	sections = append(sections, telegram.NewHeadsUpSection(asm.Scheduler, a.logger, a.telemetry))
 	if asm.Locations != nil {
 		sections = append(sections, telegram.NewLocationSection(asm.Locations, a.logger, a.telemetry))
+	}
+	if asm.Events != nil {
+		sections = append(sections, telegram.NewEventsSection(asm.Events, location, a.logger, a.telemetry))
 	}
 	sections = append(sections, telegram.NewMemorySection(asm.Memory, asm.Scheduler, a.logger, a.telemetry))
 	if asm.Google != nil {

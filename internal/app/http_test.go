@@ -49,7 +49,7 @@ func newBacklogAPI(t *testing.T) (*httptest.Server, *sqlite.Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(httpHandler(readyChecker{}, observability.Noop(), service))
+	server := httptest.NewServer(httpHandler(readyChecker{}, observability.Noop(), service, nil))
 	t.Cleanup(server.Close)
 	return server, store
 }
@@ -156,7 +156,7 @@ func TestBacklogAPIMarksItemsDone(t *testing.T) {
 }
 
 func TestHTTPHandlerWithoutBacklogServesOnlyHealth(t *testing.T) {
-	server := httptest.NewServer(httpHandler(readyChecker{}, observability.Noop(), nil))
+	server := httptest.NewServer(httpHandler(readyChecker{}, observability.Noop(), nil, nil))
 	t.Cleanup(server.Close)
 
 	var health struct {

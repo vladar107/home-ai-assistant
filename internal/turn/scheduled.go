@@ -52,16 +52,33 @@ func (e *Engine) RunCheck(ctx context.Context, principalID, message string) (Sch
 // reads, and in a fresh session. Like RunCheck it takes no turn slot. Failures come back as the
 // reply a chat turn would have given; an error is returned only when ctx ends.
 func (e *Engine) RunReview(ctx context.Context, principalID, message string, model agentruntime.ModelEffort) (ScheduledReply, error) {
+	return e.runToolless(ctx, principalID, message, model, false)
+}
+
+// RunAssess runs the turn that decides whether an inbound event is worth telling the user about:
+// like RunReview with no tools or web search, but with the principal's memory, which says what they
+// care about, and their name. Like RunCheck it takes no turn slot, and the caller reads the
+// decision from the final text.
+func (e *Engine) RunAssess(ctx context.Context, principalID, message string) (ScheduledReply, error) {
+	return e.runToolless(ctx, principalID, message, agentruntime.ModelEffort{}, true)
+}
+
+func (e *Engine) runToolless(ctx context.Context, principalID, message string, model agentruntime.ModelEffort, withMemory bool) (ScheduledReply, error) {
 	turnCtx, cancel := context.WithTimeout(ctx, e.config.TurnTimeout)
 	defer cancel()
-	connected, err := e.gate.Ready(turnCtx, principalID)
-	switch {
-	case ctx.Err() != nil:
-		return ScheduledReply{}, ctx.Err()
-	case err != nil:
-		return ScheduledReply{Text: UnavailableReply, ErrorKind: "runtime"}, nil
-	case !connected:
-		return ScheduledReply{Text: NotConnectedReply, ErrorKind: "not_connected"}, nil
+	if reply, ready, err := e.unwatchedGate(ctx, turnCtx, principalID); !ready {
+		return reply, err
+	}
+	var memory string
+	if withMemory {
+		var err error
+		if memory, err = e.memoryText(turnCtx, principalID); err != nil {
+			if ctx.Err() != nil {
+				return ScheduledReply{}, ctx.Err()
+			}
+			return ScheduledReply{Text: UnavailableReply, ErrorKind: "tool_provider"}, nil
+		}
+		message = e.withUser(principalID, message)
 	}
 	sessionID, err := NewID()
 	if err != nil {
@@ -71,34 +88,19 @@ func (e *Engine) RunReview(ctx context.Context, principalID, message string, mod
 		PrincipalID: principalID,
 		SessionID:   sessionID,
 		Message:     e.withTime(message),
+		Memory:      memory,
 		Model:       model.Model,
 		Effort:      model.Effort,
 	}, discardEvents{})
-	switch {
-	case ctx.Err() != nil:
-		return ScheduledReply{}, ctx.Err()
-	case errors.Is(turnCtx.Err(), context.DeadlineExceeded) || errors.Is(runErr, agentruntime.ErrStalled):
-		return ScheduledReply{Text: TimeoutReply, ErrorKind: "timeout"}, nil
-	case runErr != nil || strings.TrimSpace(result.Final) == "":
-		reply, kind := FailureReply(runErr)
-		return ScheduledReply{Text: reply, ErrorKind: kind}, nil
-	default:
-		return ScheduledReply{Text: result.Final}, nil
-	}
+	return unwatchedReply(ctx, turnCtx, result, runErr, nil)
 }
 
 func (e *Engine) runUnwatched(ctx context.Context, principalID, turn, message string, model agentruntime.ModelEffort, timeout time.Duration) (ScheduledReply, error) {
 	run := tools.NewRun(message)
 	turnCtx, cancel := context.WithTimeout(tools.WithRun(tools.WithTurn(ctx, turn), run), timeout)
 	defer cancel()
-	connected, err := e.gate.Ready(turnCtx, principalID)
-	switch {
-	case ctx.Err() != nil:
-		return ScheduledReply{}, ctx.Err()
-	case err != nil:
-		return ScheduledReply{Text: UnavailableReply, ErrorKind: "runtime"}, nil
-	case !connected:
-		return ScheduledReply{Text: NotConnectedReply, ErrorKind: "not_connected"}, nil
+	if reply, ready, err := e.unwatchedGate(ctx, turnCtx, principalID); !ready {
+		return reply, err
 	}
 	tools, err := e.tools.ReadOnlyToolsFor(turnCtx, principalID)
 	var webSearch bool
@@ -130,6 +132,27 @@ func (e *Engine) runUnwatched(ctx context.Context, principalID, turn, message st
 		Model:       model.Model,
 		Effort:      model.Effort,
 	}, e.newCountingSink(principalID, turn, run))
+	return unwatchedReply(ctx, turnCtx, result, runErr, run)
+}
+
+// unwatchedGate checks the principal's own connection before an unwatched turn. When the turn
+// must not run, ready is false and the reply or the ended context is what to return instead.
+func (e *Engine) unwatchedGate(ctx, turnCtx context.Context, principalID string) (reply ScheduledReply, ready bool, err error) {
+	connected, err := e.gate.Ready(turnCtx, principalID)
+	switch {
+	case ctx.Err() != nil:
+		return ScheduledReply{}, false, ctx.Err()
+	case err != nil:
+		return ScheduledReply{Text: UnavailableReply, ErrorKind: "runtime"}, false, nil
+	case !connected:
+		return ScheduledReply{Text: NotConnectedReply, ErrorKind: "not_connected"}, false, nil
+	}
+	return ScheduledReply{}, true, nil
+}
+
+// unwatchedReply turns an unwatched run's result into its reply; run, when set, says what the
+// turn's tools read.
+func unwatchedReply(ctx, turnCtx context.Context, result agentruntime.RunResult, runErr error, run *tools.Run) (ScheduledReply, error) {
 	switch {
 	case ctx.Err() != nil:
 		return ScheduledReply{}, ctx.Err()
@@ -138,6 +161,8 @@ func (e *Engine) runUnwatched(ctx context.Context, principalID, turn, message st
 	case runErr != nil || strings.TrimSpace(result.Final) == "":
 		reply, kind := FailureReply(runErr)
 		return ScheduledReply{Text: reply, ErrorKind: kind}, nil
+	case run == nil:
+		return ScheduledReply{Text: result.Final}, nil
 	default:
 		return ScheduledReply{Text: result.Final, Private: run.Private(), External: run.External()}, nil
 	}

@@ -33,6 +33,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/conversation/history"
 	"github.com/vladar107/home-ai-assistant/internal/delivery"
+	"github.com/vladar107/home-ai-assistant/internal/events"
 	"github.com/vladar107/home-ai-assistant/internal/exposure"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/imagegen"
@@ -70,6 +71,7 @@ type Telemetry interface {
 	schedule.Telemetry
 	task.Telemetry
 	watch.Telemetry
+	events.Telemetry
 	web.Telemetry
 	history.Telemetry
 	judgment.Recorder
@@ -130,6 +132,8 @@ type Inputs struct {
 	Reminders    schedule.ReminderDeliverer
 	Alerts       watch.Sender
 	TaskMessages task.Messenger
+	// Events delivers inbound events and shows event source tokens; nil leaves inbound events out.
+	Events events.Sender
 	// Tabs builds the tab services once the turn engine exists.
 	Tabs TabsFactory
 
@@ -191,6 +195,9 @@ type CoreConfig struct {
 	Watches bool
 	// Location turns shared locations on; nil leaves them off.
 	Location *LocationConfig
+	// EventBodyTimeout bounds reading a posted event's body, and EventAssessTimeout an event's
+	// assessment turn; zero keeps the defaults.
+	EventBodyTimeout, EventAssessTimeout time.Duration
 }
 
 // LocationConfig configures shared locations and the places connector that names them.
@@ -240,6 +247,7 @@ type Assembly struct {
 	Locations     *userlocation.Service
 	Memory        *usermemory.Service
 	Backlog       *backlog.Service
+	Events        *events.Service
 	Trips         *trip.Service
 	// SwitchPages are the on/off pages of the registered integrations, in registration order.
 	SwitchPages []SwitchSettings
@@ -312,6 +320,9 @@ func (a *Assembly) Steps() []Step {
 	}
 	if a.Tasks != nil {
 		steps = append(steps, Step{Name: "background tasks", Start: a.Tasks.Start, Shutdown: a.Tasks.Shutdown})
+	}
+	if a.Events != nil {
+		steps = append(steps, Step{Name: "inbound events", Start: a.Events.Start, Shutdown: a.Events.Shutdown})
 	}
 	return steps
 }
@@ -673,6 +684,23 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		// A reply to an alert quotes it, marked as the alert's own content is.
 		reports = conversation.ReportSources{scheduler, watches}
 		a.Watches = watches
+	}
+	if in.Events != nil {
+		// Events reach only their source's owner, in the owner's own chat resolved from the
+		// allowlist at delivery, and are assessed on the owner's own subscription.
+		eventsService, err := events.NewService(events.Config{
+			Now: in.Core.Now, Location: a.location, BodyTimeout: in.Core.EventBodyTimeout, AssessTimeout: in.Core.EventAssessTimeout, Feeds: tabs.Feeds, Telemetry: telemetry,
+		}, in.Store, in.Store, in.Events, engine, in.Logger)
+		if err != nil {
+			return fmt.Errorf("initialize inbound events: %w", err)
+		}
+		if err := broker.Register(eventsService); err != nil {
+			return err
+		}
+		// Event text is written by the user's systems, which may repeat text from anywhere, so a
+		// turn told of a delivered event has read outside content.
+		notices = append(notices, conversation.OutsideNotice{Notice: eventsService})
+		a.Events = eventsService
 	}
 	var transcripts conversation.Transcripts
 	if runtime, ok := in.Runtime.(conversation.Transcripts); ok {

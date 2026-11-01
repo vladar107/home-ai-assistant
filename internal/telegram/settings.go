@@ -152,6 +152,7 @@ var sectionOrder = []string{
 	typeSafeSectionPrefix,
 	locationSectionPrefix,
 	grafanaSectionPrefix,
+	eventsSectionPrefix,
 	memorySectionPrefix,
 	tripsSectionPrefix,
 }
@@ -165,6 +166,7 @@ var settingsGroups = []settingsGroup{
 	{id: "location", title: "Location", inline: true, members: []string{locationSectionPrefix}},
 	{id: "memory", title: "Memory", inline: true, members: []string{memorySectionPrefix}},
 	{id: "monitoring", title: "Monitoring", inline: true, members: []string{grafanaSectionPrefix}},
+	{id: "events", title: "Events", inline: true, members: []string{eventsSectionPrefix}},
 	{id: "safety", title: "Safety & privacy", inline: true, members: []string{typeSafeSectionPrefix}},
 }
 

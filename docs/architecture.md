@@ -10,6 +10,7 @@ built; see [plans](plans/README.md) for how each part came to be.
 flowchart TB
     users(["👤 Household users<br/>up to two, allowlisted by Telegram ID"])
     operator(["👤 Operator<br/>deploys from a Mac"])
+    systems(["⚙️ Users' own systems<br/>scripts and automations<br/>on the home network"])
 
     agent["<b>Home Agent</b><br/>Private assistant on the home NAS"]
 
@@ -40,13 +41,16 @@ flowchart TB
     agent -->|nearby places| overpass
     agent -->|judgments| typesafe
     agent -->|mounted roots| nasfiles
+    systems -->|events, per-source bearer token| agent
     operator -->|push| ghcr
     operator -->|tag-pinned deploy over SSH| agent
     ghcr -->|image pull| agent
 ```
 
 Nothing listens on the internet. Telegram is polled outbound, every integration is
-an outbound HTTPS client, and administrative interfaces stay on the LAN.
+an outbound HTTPS client, and administrative interfaces stay on the LAN. The one
+listener, for health, the backlog API, and inbound events, is reached through the
+home edge on the private network.
 
 ## 2. Containers
 
@@ -72,6 +76,7 @@ flowchart TB
         shares[("NAS shares<br/>bind-mounted per root")]
     end
     dev["Development session<br/>home network"]
+    systems["Users' own systems<br/>home network"]
 
     telegram <-->|long polling| go
     go -->|spawn, RPC over stdio| pi
@@ -84,6 +89,7 @@ flowchart TB
     go --> shares
     go -->|OTLP metrics, traces| alloy
     dev -->|HTTPS, /api/backlog| caddy
+    systems -->|HTTPS, /api/events| caddy
     caddy -->|HTTP| go
     alloy --> prom
     alloy --> tempo
@@ -134,7 +140,8 @@ flowchart TB
     delivery["<b>delivery</b><br/>outbound files"]
     card["<b>daycard / outbox</b><br/>rendered day cards"]
     pdf["<b>pdftext</b>"]
-    api["<b>HTTP</b><br/>health, backlog API"]
+    api["<b>HTTP</b><br/>health, backlog API, events"]
+    events["<b>events</b><br/>event sources, tokens,<br/>forward or assess"]
 
     subgraph connectors["connectors"]
         notion["notion"]
@@ -171,6 +178,11 @@ flowchart TB
     broker --> backlog
     approval --> backlog
     api --> backlog
+    api --> events
+    tg --> events
+    broker --> events
+    events --> turn
+    events --> store
     tg --> trip
     broker --> trip
     approval --> trip
@@ -499,7 +511,7 @@ private content makes the conversation private.
 With tabs on, the scheduler, the watch service, and the trip notifier send what
 nobody asked for to a feed tab of its kind: reminders, Trips scans, and
 suggested trips to Reminders; other job reports to Reports; Home Assistant watches to
-Home; every other watch to Watches. The tab registry records each feed tab with
+Home; every other watch to Watches; and inbound events to Events. The tab registry records each feed tab with
 the subject `feed:<kind>` under a fixed name, and the Telegram service's resolver
 makes the tab on first use, one at a time per principal and feed.
 
@@ -698,6 +710,57 @@ or reports `unavailable` or `unknown`, and skips quietly while the owner's Home
 switch is off. The service stores when the condition started holding; a state
 condition is seeded from the entity's `last_changed`, a numeric one from the first
 check that saw it hold.
+
+### An inbound event
+
+An event source belongs to one principal, at most ten each, and has a name, a mode
+(`forward` by default, or `assess`), and a token: `hae_` and 32 random bytes in
+base64url. Only the token's SHA-256 is stored, in `event_sources`; it is shown once,
+in a message whose deletion ten minutes later is recorded in `event_token_messages`,
+so a restart in between still deletes it. That table has no key to the source or
+the principal, so deleting either never cancels the deletion. `/settings` adds a source from the name
+sent after *Add event source*, switches its mode, pauses and resumes it, gives it a
+new token, which ends the old one at once, and deletes it. A token pasted into the
+chat is deleted and kept from the model, like a Notion token.
+
+`POST /api/events` sets a 10-second read deadline through `http.ResponseController`
+before anything else, and every refusal closes the connection, so no client, with
+or without a token, holds one with a body it trickles in. It takes
+`Authorization: Bearer <token>`, the scheme in any case, and a JSON body of at most
+16 KiB read through `http.MaxBytesReader`: `title` (1–200 runes), `text` (up to
+4000), `severity` (`info`, the default, `warning`, or `critical`), and an optional
+`dedupe_key` (1–100), none with control characters other than line breaks and tabs
+in `text`. The source is looked up by the token's SHA-256, so no comparison ever
+touches a stored token, and its owner must still be allowlisted and enabled on
+every request. A missing or wrong token, or a
+revoked owner, gets `401`; a paused source `403`; an invalid body `400`; a source
+past 60 events in the hour `429`, all recording nothing. Otherwise the event is
+stored in `inbound_events` as pending and `202` returns its ID; one whose
+`dedupe_key` the source posted within the hour is stored as a duplicate, which
+counts toward the limit and is never delivered. Requests are logged by source ID,
+never with the token or the body.
+
+The event service's loop, woken by each new event and ticking every minute,
+hands each principal's pending events to a delivery of their own, at most one per
+principal, so one user's slow assessment never holds another's events back.
+Failed sends are retried, an event left pending by a restart is sent after start,
+and one still pending after an hour is dropped. It resolves the owner's chat from the allowlist and sends to the Events
+feed tab. The sender builds Telegram HTML itself: the severity marker and source
+name in code, and the title and text escaped, so nothing an event's system wrote
+becomes formatting or a link. A source in `assess` mode first runs
+`turn.Engine.RunAssess`: one unwatched turn on the owner's subscription with no
+tools or web search but with their memory and name, which takes no turn slot and
+must answer `{"notify": bool, "message": "..."}` within 90 seconds. The decision,
+or its failure, is stored on the event before anything is sent, so a retried
+delivery never assesses the event again. An `info` or `warning` event
+it does not notify of is suppressed; a `critical` one is delivered whatever it
+says; its message, escaped like event text, replaces the event's text; and a
+failed, slow, or unreadable assessment forwards the event as it is. A delivered
+event reaches the owner's next turn as an outside notice, and `events_recent`, a
+`ThirdParty` read tool offered to a principal with a source, lists the last
+events, so a conversation that refers to one counts as having read outside
+content. Events are kept 30 days. `home_agent.events.inbound` counts finished
+events by principal, mode, and outcome, never by source name.
 
 ### App help
 
@@ -950,6 +1013,12 @@ routes after jobs and watches, read-only, with a Delete button each.
   reach the service over the network, and it returns all principals' items, not
   only the caller's. That is a deliberate trust boundary, unlike every other
   per-principal interface here.
+- **Inbound events.** `/api/events` shares the private listener, but unlike the
+  backlog API it authenticates: a per-source bearer token, stored only as its
+  SHA-256 and looked up by it, names the one principal an event can
+  reach, whose allowlisting is checked on every request. Paused sources, a
+  per-source rate limit, rotation, and deletion bound a leaked token, and event
+  text is escaped in Telegram and treated as outside content everywhere after.
 - **Short-lived location.** Only each user's latest shared position is stored. It is
   used while fresh, then deleted by a prune with SQLite `secure_delete` on; a user
   forgets it at once from `/settings`, and a forgotten live share stays ignored.

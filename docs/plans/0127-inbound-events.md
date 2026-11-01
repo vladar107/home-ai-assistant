@@ -1,6 +1,6 @@
 # 0127 — Inbound events from the user's own systems
 
-Status: `proposed`
+Status: `done`
 
 ## Context
 
@@ -89,6 +89,40 @@ but not for an endpoint that makes the assistant message a user.
   exposed, and writes go to the card.
 - **Telemetry.** Events are counted by mode and outcome, without source names
   in labels.
+- **Decided during implementation.**
+  - Delivery is asynchronous: `202` means the event is stored as `pending`.
+    The event service's loop, woken by each event and ticking every minute,
+    delivers it, so a failed send is retried and an event left pending by a
+    restart is sent after start; one still pending after an hour is `dropped`.
+    The outcomes therefore also include `pending` and `duplicate`, the latter
+    for an event whose `dedupe_key` the source posted within the hour.
+  - Token messages awaiting deletion live in `event_token_messages`, with no
+    key to the source or the principal, so deleting either still deletes the
+    message.
+  - Sources are looked up by the token's SHA-256, which takes the place of a
+    constant-time comparison: no comparison touches a stored token.
+  - The read deadline is set before authentication, and every refusal closes
+    the connection, so an unauthenticated slow body cannot hold one. The
+    `Bearer` scheme is matched in any case. Control characters are refused in
+    `title`, `text` (except line breaks and tabs), and `dedupe_key`.
+  - Each principal's pending events are delivered by a worker of their own, so
+    one user's slow assessment never delays another's events. An assessment
+    has 90 seconds, after which the event is forwarded. Its decision (notify
+    and message, or failed) is stored on the event before sending, and a
+    retried delivery reuses it instead of assessing again.
+  - `severity` defaults to `info` when it is left out. The `202` body carries
+    the event's ID and whether it was a duplicate; `429` adds `Retry-After`.
+  - The handler lives in `internal/events/handler.go` and is mounted from
+    `internal/app/http.go`, as the backlog API is.
+  - The assessment's message is escaped like event text, because a model wrote
+    it from that text. The assess prompt is `prompt.InboundEvent`.
+  - `RunAssess` and the shared unwatched setup live in `internal/turn`; the
+    conversation package needed nothing new, because the outside-notice
+    handoff is `conversation.OutsideNotice`, wired in `internal/wiring`.
+  - `/settings` gets its own Events group. *Add event source* takes the next
+    message as the name (1–40 runes, one line), and a token pasted into the
+    chat is deleted and kept from the model, like a Notion token.
+  - `events_recent` is offered only to a principal who has a source.
 
 ## Approach
 
@@ -110,6 +144,9 @@ but not for an endpoint that makes the assistant message a user.
 - `internal/thread`, `internal/telegram` (settings page, feed),
   `internal/turn` and `internal/conversation` (`RunAssess`)
 - `internal/wiring`, README, docs
+- Also: `internal/prompt` (`InboundEvent` and its golden file),
+  `internal/observability` (the counter), `internal/thread` (the feed),
+  `internal/app/app.go` (wiring), and the Telegram test harness
 
 ## Validation
 
