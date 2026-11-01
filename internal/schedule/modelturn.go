@@ -122,6 +122,9 @@ func (m modelTurn) Run(ctx context.Context, occurrence Occurrence) (Result, erro
 		ctx = tools.WithCallBudget(ctx, headsUpCallBudget)
 		task = HeadsUpTask(occurrence.JobID, config.Prompt)
 	}
+	if finding := occurrence.Condition; finding != nil {
+		task = prompt.JobCondition(finding.Description, finding.Value, finding.Failed) + "\n\n" + task
+	}
 	model := m.service.runModel(ctx, occurrence, config.Model)
 	reply, err := m.runner.RunScheduled(ctx, occurrence.PrincipalID, outbox.ScheduledTurn(occurrence.RunID), prompt.ScheduledJob(occurrence.JobName, occurrence.ScheduledFor, occurrence.Location, task), model)
 	if err != nil {

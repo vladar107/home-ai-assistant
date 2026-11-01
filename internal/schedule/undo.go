@@ -128,7 +128,7 @@ func (s *Service) undoUpdated(ctx context.Context, principalID string, undo jobU
 		return approval.Outcome{}, err
 	}
 	previous := *undo.Before
-	prepared, err := s.restorable(previous)
+	prepared, err := s.restorable(ctx, previous)
 	if err != nil {
 		return approval.Outcome{}, err
 	}
@@ -149,7 +149,7 @@ func (s *Service) undoRemoved(ctx context.Context, principalID string, removed J
 	if removed.PrincipalID != principalID {
 		return approval.Outcome{}, &approval.UndoRefusal{Reason: "the job belongs to someone else."}
 	}
-	prepared, err := s.restorable(removed)
+	prepared, err := s.restorable(ctx, removed)
 	if err != nil {
 		return approval.Outcome{}, err
 	}
@@ -169,8 +169,9 @@ func (s *Service) undoRemoved(ctx context.Context, principalID string, removed J
 
 // restorable validates a job as it was, to store it again, with its next run worked out from now.
 // A one-time job whose time has passed, or that has already run, cannot come back.
-func (s *Service) restorable(job Job) (Prepared, error) {
+func (s *Service) restorable(ctx context.Context, job Job) (Prepared, error) {
 	timing := Timing{Cron: job.Cron, Zone: job.Zone}
+	anchored := JobAnchor(job) != nil
 	if job.OneTime() {
 		location, err := LoadZone(job.Zone)
 		if err != nil {
@@ -179,14 +180,16 @@ func (s *Service) restorable(job Job) (Prepared, error) {
 		if !job.FinishedAt.IsZero() || !job.RunAt.After(s.now()) {
 			return Prepared{}, &approval.UndoRefusal{Reason: fmt.Sprintf("its time, %s, has passed, so it cannot be restored; schedule it again instead.", FormatOccurrence(job.RunAt, location))}
 		}
-		timing.At = job.RunAt.In(location).Format(localTimeLayouts[0])
+		if !anchored {
+			timing.At = job.RunAt.In(location).Format(localTimeLayouts[0])
+		}
 	}
-	prepared, err := s.Prepare(job.PrincipalID, job.Name, job.Type, timing, job.Config)
+	prepared, err := s.prepareJob(ctx, job.PrincipalID, job.Name, job.Type, timing, job.Config)
 	if err != nil {
 		return Prepared{}, &approval.UndoRefusal{Reason: "it can no longer be scheduled (" + err.Error() + ")."}
 	}
 	prepared.Job.TravelPause, prepared.Job.Destination = job.TravelPause, job.Destination
-	if job.OneTime() {
+	if job.OneTime() && !anchored {
 		// The stored instant may carry seconds, as a snoozed reminder's does, which the local
 		// time above drops.
 		prepared.Job.RunAt, prepared.Job.NextRunAt, prepared.Schedule.Once = job.RunAt, job.RunAt, job.RunAt

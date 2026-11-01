@@ -418,13 +418,17 @@ func (s *Service) check(ctx context.Context, watch Watch, now time.Time, cache *
 			return
 		}
 		state.Messages = sent
-		if watch.Kind == KindHome && watch.Start == startOfDay && watch.End == endOfDay {
+		if (watch.Kind == KindHome || watch.Kind == KindWeather) && watch.Start == startOfDay && watch.End == endOfDay {
 			earlier, carried, err := s.repository.LatestWatchStateBefore(ctx, watch.ID, occurrence.Date)
 			if err != nil {
 				s.logWatchError(ctx, watch, "load_state", err)
 				return
 			}
-			if carried && followsDirectly(earlier.Occurrence, occurrence.Date) && occurrence.Start.Sub(earlier.CheckedAt) <= carryGap {
+			gap := carryGap
+			if watch.Kind == KindWeather {
+				gap = 2*WeatherCheckInterval + checkSlack
+			}
+			if carried && followsDirectly(earlier.Occurrence, occurrence.Date) && occurrence.Start.Sub(earlier.CheckedAt) <= gap {
 				state.Key, state.Alerted, state.Since = earlier.Key, earlier.Alerted, earlier.Since
 			}
 		}
@@ -528,8 +532,8 @@ func wanted(watch Watch, trigger string) bool {
 	return !allDay(watch.Kind) || slices.Contains(watch.Triggers, trigger)
 }
 
-// interval is how long after a check the next one is due: a home watch is checked at a fixed
-// pace, an agent watch's evaluator is asked every AgentPollInterval and decides itself, and the
+// interval is how long after a check the next one is due: a home or weather watch is checked at a
+// fixed pace, an agent watch's evaluator is asked every AgentPollInterval and decides itself, and the
 // others are checked more often near the end of the window.
 func interval(kind string, now, end time.Time) time.Duration {
 	switch kind {
@@ -537,6 +541,8 @@ func interval(kind string, now, end time.Time) time.Duration {
 		return HomeCheckInterval
 	case KindAgent:
 		return AgentPollInterval
+	case KindWeather:
+		return WeatherCheckInterval
 	}
 	if end.Sub(now) <= FinalStretch {
 		return FinalCheckInterval

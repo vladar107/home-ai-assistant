@@ -630,6 +630,12 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		return fmt.Errorf("initialize scheduler: %w", err)
 	}
 	a.Scheduler = scheduler
+	if err := scheduler.RegisterAnchor(schedule.AnchorTrip, trip.NewAnchors(in.Store)); err != nil {
+		return err
+	}
+	if err := scheduler.RegisterAnchor(schedule.AnchorPlace, schedule.PlaceAnchors{}); err != nil {
+		return err
+	}
 	tripService, err := trip.NewService(trip.Config{Now: in.Core.Now, Tabs: tabs.Trips}, in.Store, trip.NewScheduleReminders(scheduler), in.Logger)
 	if err != nil {
 		return fmt.Errorf("initialize trips: %w", err)
@@ -692,6 +698,8 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		notices = append(notices, watches, conversation.OutsideNotice{Notice: watches.AgentNotices()})
 		// A reply to an alert quotes it, marked as the alert's own content is.
 		reports = conversation.ReportSources{scheduler, watches}
+		// A job's condition is checked by the evaluator of its kind of watch.
+		scheduler.SetConditions(watches)
 		a.Watches = watches
 	}
 	if in.Events != nil {
@@ -831,6 +839,19 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		if err := a.register(ctx, Connector{Watches: map[string]watch.Evaluator{watch.KindAgent: agent}}); err != nil {
 			return err
 		}
+		if a.Web != nil {
+			var positions watch.Positions
+			if a.Locations != nil {
+				positions = sharedPositions{locations: a.Locations}
+			}
+			weather, err := watch.NewWeatherEvaluator(weatherForecasts{web: a.Web}, positions, in.Core.Now)
+			if err != nil {
+				return fmt.Errorf("initialize weather watches: %w", err)
+			}
+			if err := a.register(ctx, Connector{Watches: map[string]watch.Evaluator{watch.KindWeather: weather}}); err != nil {
+				return err
+			}
+		}
 	}
 	a.Connections = connections
 	a.Conversation = conversationService
@@ -886,6 +907,11 @@ func (a *Assembly) buildConnectors(ctx context.Context) error {
 		}
 		if err := a.register(ctx, Connector{Module: googleService, Tools: []tools.Provider{gmailService, calendarService}}); err != nil {
 			return err
+		}
+		for _, kind := range []string{schedule.AnchorCalendarEvent, schedule.AnchorCalendarMatch} {
+			if err := a.Scheduler.RegisterAnchor(kind, calendarService); err != nil {
+				return err
+			}
 		}
 		a.tripState.google = googleService
 		a.Google = googleService

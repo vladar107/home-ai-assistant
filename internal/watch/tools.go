@@ -25,7 +25,7 @@ const (
 	actTimeout = 45 * time.Second
 )
 
-const listGuidance = "Watches: watch_list shows the user's watches with their ids. A watch checks a train or bus departure, a saved route, NS disruptions at some stations, or the state of a device or sensor at home during a daily window, in code and without a model, and messages the user only when something changes. The user manages watches with /jobs as well, and each alert has Mute today and Pause buttons."
+const listGuidance = "Watches: watch_list shows the user's watches with their ids. A watch checks a train or bus departure, a saved route, NS disruptions at some stations, the state of a device or sensor at home, or the rain forecast at a place during a daily window, in code and without a model, and messages the user only when something changes. The user manages watches with /jobs as well, and each alert has Mute today and Pause buttons."
 
 const agentListGuidance = " An agent watch instead runs one read-only model turn per check, on the user's own subscription, to check anything the tools can look at, such as a price, a mail, or a page."
 
@@ -59,6 +59,11 @@ func proposeGuidance(zone string, kinds []string) string {
 			"Its triggers are enter, when the condition starts to hold (the default), change, when the value it reports changes while the condition holds, and clear, when it stops holding after an alert; ask for change or clear only when the user wants to hear them. " +
 			"An agent watch runs every day and all day unless the user narrows it. Each user may have " + fmt.Sprint(MaximumAgentWatchesPerPrincipal) + " agent watches."
 	}
+	if slices.Contains(kinds, KindWeather) {
+		guidance += " A weather watch tells the user when rain is coming at a place, such as tell me when rain is coming at home, from the 15-minute forecast: give the place in name, as the user says it, or current_location true for wherever the user's shared location is at each check. " +
+			"within_minutes (15 to 360, 60 by default) is how far ahead it looks and threshold_mm (0.2 by default) the precipitation in one 15-minute slot that counts. Its triggers are enter, when rain becomes expected, and clear, when it no longer is; both by default. " +
+			"It checks every 10 minutes, all day unless the user narrows it, and its alerts say they are a forecast."
+	}
 	return guidance
 }
 
@@ -77,7 +82,7 @@ const specProperties = `"mode":{"type":"string","enum":["train","bus"],"descript
 	`"line":{"type":"string","description":"Bus: the line number."},` +
 	`"stations":{"type":"array","items":{"type":"string"},"maxItems":10,"description":"Disruptions: the stations to watch, such as a pair."},` +
 	`"route":{"type":"string","description":"Route: the saved route's name."},` +
-	`"name":{"type":"string","description":"Home: the name of the device or sensor as the user says it, such as Balcony door. Agent: a short label for the watch, such as Lisbon flight price."},` +
+	`"name":{"type":"string","description":"Home: the name of the device or sensor as the user says it, such as Balcony door. Agent: a short label for the watch, such as Lisbon flight price. Weather: the place, such as a town."},` +
 	`"entity":{"type":"string","description":"Home: the entity id, only when the user or a tool result gave it."},` +
 	`"condition":{"type":"object","description":"Home: what to wait for. Give exactly one of state, above, or below.","properties":{` +
 	`"state":{"type":"array","items":{"type":"string"},"maxItems":10,"description":"The states that count, such as on, off, or idle; open and detected mean on for a binary sensor."},` +
@@ -91,24 +96,27 @@ const specProperties = `"mode":{"type":"string","enum":["train","bus"],"descript
 	`"until":{"type":"string","description":"Optional last day, YYYY-MM-DD; the watch is deleted after it."}},"additionalProperties":false},` +
 	`"departure":{"type":"string","description":"Departure or route: the planned departure, local HH:MM."},` +
 	`"minutes_before":{"type":"integer","minimum":10,"maximum":240,"description":"Departure or route: how long before the departure checking starts; 90 by default."},` +
-	`"window_from":{"type":"string","description":"Disruptions, home, or agent: when checking starts, local HH:MM; a home or agent watch defaults to 00:00."},` +
-	`"window_until":{"type":"string","description":"Disruptions, home, or agent: when checking ends, local HH:MM; a home or agent watch may use 24:00 for the end of the day and defaults to it."},` +
+	`"window_from":{"type":"string","description":"Disruptions, home, agent, or weather: when checking starts, local HH:MM; a home, agent, or weather watch defaults to 00:00."},` +
+	`"window_until":{"type":"string","description":"Disruptions, home, agent, or weather: when checking ends, local HH:MM; a home, agent, or weather watch may use 24:00 for the end of the day and defaults to it."},` +
 	`"days":{"type":"array","items":{"type":"string","enum":["mon","tue","wed","thu","fri","sat","sun"]},"description":"The weekdays the watch runs on."},` +
 	`"date":{"type":"string","description":"Instead of days: the one date, YYYY-MM-DD, of a one-off watch."},` +
 	`"triggers":{"type":"array","items":{"type":"string","enum":["cancelled","partly_cancelled","delay","platform","leg","arrival","new","changed","enter","change","clear"]},"description":"What to alert on; omit for all of the kind's triggers."},` +
 	`"delay_minutes":{"type":"integer","minimum":1,"maximum":120,"description":"The delay that counts, in minutes; 5 by default."},` +
 	`"timezone":{"type":"string","description":"IANA time zone such as Europe/Amsterdam; omit to use the user's own."},` +
 	`"language":{"type":"string","description":"The language the watch's messages are written in, such as Russian: the one the user writes to you in. Omit for English."},` +
+	`"current_location":{"type":"boolean","description":"Weather: watch wherever the user's shared location is at each check, instead of a named place."},` +
+	`"within_minutes":{"type":"integer","minimum":15,"maximum":360,"description":"Weather: how far ahead to look for rain; 60 by default."},` +
+	`"threshold_mm":{"type":"number","exclusiveMinimum":0,"maximum":50,"description":"Weather: the precipitation in one 15-minute slot that counts as rain, in mm; 0.2 by default."},` +
 	`"pause_while_traveling":{"type":"boolean","description":"Stay silent while the user is on a trip. On update, omit to keep it as it is."}`
 
 var writeDefinitions = []tools.Definition{
 	{
 		Name:        toolPropose,
-		Description: "Set up a watch that checks a departure, a saved route, NS disruptions, a device or sensor at home, or, as an agent watch, anything the tools can look at, during a daily window and messages the user only when something changes. Done at once and undoable, or proposed for Confirm after outside content.",
+		Description: "Set up a watch that checks a departure, a saved route, NS disruptions, a device or sensor at home, the rain forecast at a place, or, as an agent watch, anything the tools can look at, during a daily window and messages the user only when something changes. Done at once and undoable, or proposed for Confirm after outside content.",
 		Risk:        tools.RiskWrite,
 		Timeout:     actTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
-			`"kind":{"type":"string","enum":["departure","disruptions","route","home","agent"],"description":"What to watch."},` +
+			`"kind":{"type":"string","enum":["departure","disruptions","route","home","agent","weather"],"description":"What to watch."},` +
 			specProperties + `},"required":["kind"],"additionalProperties":false}`),
 	},
 	{
@@ -155,7 +163,7 @@ func (s *Service) Contribute(context.Context, string) (tools.Contribution, error
 
 func (s *Service) kinds() []string {
 	var kinds []string
-	for _, kind := range []string{KindDeparture, KindRoute, KindDisruptions, KindHome, KindAgent} {
+	for _, kind := range []string{KindDeparture, KindRoute, KindDisruptions, KindHome, KindAgent, KindWeather} {
 		if _, known := s.evaluators[kind]; known {
 			kinds = append(kinds, kind)
 		}
@@ -206,6 +214,10 @@ type specArguments struct {
 	DelayMinutes  int        `json:"delay_minutes"`
 	Timezone      string     `json:"timezone"`
 	Language      string     `json:"language"`
+	// CurrentLocation, WithinMinutes, and ThresholdMM are a weather watch's.
+	CurrentLocation bool     `json:"current_location"`
+	WithinMinutes   int      `json:"within_minutes"`
+	ThresholdMM     *float64 `json:"threshold_mm"`
 	// PauseWhileTraveling is nil when the model left the flag alone.
 	PauseWhileTraveling *bool `json:"pause_while_traveling"`
 }
@@ -263,6 +275,9 @@ func (s *Service) prepare(ctx context.Context, principalID, kind string, argumen
 }
 
 func (s *Service) specOf(kind string, arguments specArguments) (Spec, error) {
+	if kind == KindPlace {
+		return Spec{}, fmt.Errorf("place watches are not available yet")
+	}
 	if _, known := s.evaluators[kind]; !known {
 		if _, exists := kindTriggers[kind]; exists {
 			return Spec{}, fmt.Errorf("%s watches are not available yet", kind)
@@ -274,10 +289,11 @@ func (s *Service) specOf(kind string, arguments specArguments) (Spec, error) {
 		Target: Target{
 			Mode: arguments.Mode, From: arguments.From, To: arguments.To, Via: arguments.Via,
 			Stop: arguments.Stop, Line: arguments.Line, Stations: arguments.Stations, Route: arguments.Route,
-			Entity: arguments.Entity, Name: arguments.Name,
+			Entity: arguments.Entity, Name: arguments.Name, Current: arguments.CurrentLocation,
 		},
 		Condition:    arguments.Condition,
 		Check:        arguments.Check,
+		Weather:      weatherOf(kind, arguments),
 		Triggers:     arguments.Triggers,
 		DelayMinutes: arguments.DelayMinutes,
 		Days:         arguments.Days,
@@ -321,7 +337,11 @@ func argumentsOf(spec Spec) specArguments {
 		Stop: spec.Target.Stop, Line: spec.Target.Line, Stations: spec.Target.Stations, Route: spec.Target.Route,
 		Name: spec.Target.Name, Entity: spec.Target.Entity, Condition: spec.Condition, Check: spec.Check,
 		Days: spec.Days, Date: spec.Date, Triggers: spec.Triggers, DelayMinutes: spec.DelayMinutes, Timezone: spec.Zone,
-		Language: spec.Language,
+		Language: spec.Language, CurrentLocation: spec.Target.Current,
+	}
+	if spec.Weather != nil {
+		threshold := spec.Weather.ThresholdMM
+		arguments.WithinMinutes, arguments.ThresholdMM = spec.Weather.WithinMinutes, &threshold
 	}
 	if spec.Kind == KindDisruptions || allDay(spec.Kind) {
 		arguments.WindowFrom, arguments.WindowUntil = spec.Start, spec.End
@@ -355,7 +375,16 @@ func overlay(current, change specArguments) specArguments {
 	set(&next.Line, change.Line)
 	set(&next.Route, change.Route)
 	if strings.TrimSpace(change.Name) != "" || strings.TrimSpace(change.Entity) != "" {
-		next.Name, next.Entity = change.Name, change.Entity
+		next.Name, next.Entity, next.CurrentLocation = change.Name, change.Entity, false
+	}
+	if change.CurrentLocation {
+		next.Name, next.CurrentLocation = "", true
+	}
+	if change.WithinMinutes != 0 {
+		next.WithinMinutes = change.WithinMinutes
+	}
+	if change.ThresholdMM != nil {
+		next.ThresholdMM = change.ThresholdMM
 	}
 	if change.Condition != nil {
 		numeric := func(c *Condition) bool { return c != nil && (c.Above != nil || c.Below != nil) }
@@ -435,6 +464,11 @@ func (s *Service) proposeWatch(ctx context.Context, principalID string, call too
 		summary = "Watch " + spec.Label() + "\n" + spec.Describe() + "\nYou get a message only when this changes."
 	case KindAgent:
 		summary = "Watch " + spec.Label() + "\n" + spec.Describe() + "\nYou get a message only when the answer changes."
+	case KindWeather:
+		summary = "Watch " + spec.Label() + "\n" + spec.Describe() + "\nYou get a message when rain becomes expected, by the forecast."
+		if slices.Contains(spec.Triggers, TriggerClear) {
+			summary = "Watch " + spec.Label() + "\n" + spec.Describe() + "\nYou get a message when rain becomes expected and when it no longer is, by the forecast."
+		}
 	}
 	if arguments.PauseWhileTraveling != nil && *arguments.PauseWhileTraveling {
 		summary += "\nIt stays silent while you are traveling."

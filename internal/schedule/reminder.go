@@ -90,6 +90,14 @@ func (r reminder) Run(_ context.Context, occurrence Occurrence) (Result, error) 
 		return Result{Text: FailedText, ErrorKind: "config"}, nil
 	}
 	text := config.Text
+	switch finding := occurrence.Condition; {
+	case finding == nil:
+	case finding.Failed:
+		text += "\n\n(Its condition, " + finding.Description + ", could not be checked, so it was sent anyway.)"
+	case finding.Value != "":
+		// Only weather and home conditions reach a reminder, whose values code writes.
+		text += "\n\n(" + strings.TrimSuffix(finding.Value, ".") + ".)"
+	}
 	if r.now().Sub(occurrence.ScheduledFor) > lateAfter {
 		text += "\n\n(This was due " + FormatOccurrence(occurrence.ScheduledFor, occurrence.Location) + ".)"
 	}

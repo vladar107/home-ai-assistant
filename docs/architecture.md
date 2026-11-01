@@ -517,6 +517,55 @@ A report counts as outside content when its run read outside content (a run
 recovered after a restart counts, a reminder never does), and one whose run read
 private content makes the conversation private.
 
+### Jobs relative to events, and conditions
+
+A reminder or job can be anchored to an event instead of a clock time, at an
+offset of up to two days before or a day after it: one calendar event, each
+upcoming event whose title contains some text (`calendar_match`), or a trip's
+start or end. The anchor and an optional condition live in the job's
+configuration beside its type's own fields, and the scheduler splits them off
+before the handler sees it. An anchor to one event is an ordinary one-time job
+whose instant the resolver moves; an anchor that repeats has neither cron nor an
+instant, which the `anchor = 'repeating'` column admits, and its job's
+`occurrence_key` names the occurrence `next_run_at` points at. No run is made
+ahead of time: the claim loop makes it when `next_run_at` falls due, as for
+every job. After a run, `advance` moves a repeating job to no next run (100 years
+ahead) and wakes the resolver pass, so the serial claim loop never asks a
+calendar.
+
+Resolvers are registered per kind of anchor: the Calendar connector resolves
+calendar anchors with the owner's own Google accounts, read-only, `trip` resolves
+trip anchors from the owner's trips, and a stub refuses place anchors until
+arrivals are tracked (the migration already admits them). The resolver pass is
+the scheduler's second loop: every minute it reads again each enabled anchored
+job that was just saved or run, was last read 15 minutes ago, or whose run comes
+within 30 minutes, each call bounded to 10 seconds. Each principal's jobs are
+read in a worker of their own, at most four at once, and a principal whose worker
+is still reading is left to a later pass, so a slow or hanging calendar delays
+only its own owner's anchors. A moved event moves `next_run_at` (and `run_at`);
+a cancelled one finishes a single-occurrence job with one line, `anchor_gone`,
+to the Reminders tab; a `calendar_match` job moves to the next match within 14
+days. A job already due is left to the claim loop, and a snoozed anchored
+reminder, whose snooze clears its occurrence, keeps its snoozed time. Three
+failed passes in a row tell the owner once, `anchor_failed`, and the job keeps
+its last known time. Resuming an anchored job in `/jobs` reads its occurrence
+again.
+
+A condition is a watch spec without days or window, checked once by the
+evaluator of its kind when the run is due: `weather`, `home` without
+`for_minutes`, `departure` with its planned departure, `disruptions` now, and
+`agent` with one synchronous check turn, which reminders, never asking a model,
+refuse. Unmet, the run ends `skipped` with `condition_unmet` and sends nothing;
+met, its value goes into the job's turn, quoted as untrusted data, and the run's
+report is marked private or outside content when the value is, as an agent
+check's reading or a train service's notice is. A reminder's text is never
+outside content, so a reminder takes only weather and home conditions, whose
+values code writes, and adds the value to its text. A check that fails runs the
+job with a note. A manual Run now skips the condition. A repeating anchor keeps
+the occurrence it last ran for in `last_occurrence_key` and never runs for it
+again, however that event moves, and a repeating reminder is sent without snooze
+buttons, having no single time to move.
+
 ### Feed tabs
 
 With tabs on, the scheduler, the watch service, and the trip notifier send what
@@ -670,7 +719,16 @@ The rewrite is sent only when it fits one message and keeps every number of the
 English text; otherwise, or when the call fails or takes over 30 seconds, the
 English text is sent. The next conversation turn hears the text that was sent.
 
-Departure, route, disruption, and home watches are checked; a kind is offered only when its
+A weather watch checks the precipitation forecast at a place in code: a named
+place geocoded once when it is proposed, or the user's shared location at each
+check. Every 10 minutes it reads Open-Meteo's 15-minute forecast
+(`minutely_15=precipitation`) through the web connector, under the owner's web
+access switch, and holds while one slot of the next `within_minutes` (15 to 360,
+60 by default) has `threshold_mm` (0.2 by default) or more; its alerts name the
+first such slot and say they are a forecast. Identical requests share one
+forecast for 10 minutes, whichever watch or job condition asks.
+
+Departure, route, disruption, home, and weather watches are checked; a kind is offered only when its
 connector is configured, and every check runs under the owner's own trains or
 buses switch, so a user with that switch off can neither propose nor run one.
 Proposing resolves the stations or stop for the owner and stores full station

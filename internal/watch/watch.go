@@ -1,5 +1,6 @@
-// Package watch checks a user's trains, buses, routes, stations, home devices, and anything else the
-// assistant can look at during a daily window and tells them only when something changes. An
+// Package watch checks a user's trains, buses, routes, stations, home devices, the rain forecast,
+// and anything else the assistant can look at during a daily window and tells them only when
+// something changes. An
 // evaluator registered per kind turns one check into a normalized state, the service compares it
 // with the last state stored for that day's window, and a change into a triggering state becomes a
 // durable alert. Every kind but agent checks in code, without a model; an agent watch runs one
@@ -28,6 +29,9 @@ const (
 	KindRoute       = "route"
 	KindHome        = "home"
 	KindAgent       = "agent"
+	KindWeather     = "weather"
+	// KindPlace is admitted by the store for a later plan and refused by every tool until then.
+	KindPlace = "place"
 
 	ModeTrain = "train"
 	ModeBus   = "bus"
@@ -76,6 +80,13 @@ const (
 	AgentPollInterval = time.Minute
 	// DefaultAgentIntervalMinutes is how often an agent watch checks when the user names no pace.
 	DefaultAgentIntervalMinutes = 60
+	// WeatherCheckInterval is how often a weather watch is checked, which is also how long one
+	// forecast is reused.
+	WeatherCheckInterval = 10 * time.Minute
+	// DefaultWithinMinutes and DefaultThresholdMM are how far ahead a weather watch looks and the
+	// precipitation in one 15-minute slot that counts, when the user names neither.
+	DefaultWithinMinutes = 60
+	DefaultThresholdMM   = 0.2
 
 	minimumLead          = 10 * time.Minute
 	maximumLead          = 4 * time.Hour
@@ -91,6 +102,9 @@ const (
 	maximumCheckClause   = 300
 	minimumAgentInterval = 30
 	maximumAgentInterval = 1440
+	minimumWithin        = 15
+	maximumWithin        = 360
+	maximumThresholdMM   = 50
 	endOfDay             = "24:00"
 	startOfDay           = "00:00"
 	dateLayout           = "2006-01-02"
@@ -120,6 +134,7 @@ var kindTriggers = map[string][]string{
 	KindDisruptions: {TriggerNew, TriggerChanged},
 	KindHome:        {TriggerEnter, TriggerClear},
 	KindAgent:       {TriggerEnter, TriggerChange, TriggerClear},
+	KindWeather:     {TriggerEnter, TriggerClear},
 }
 
 var triggerDescriptions = map[string]string{
@@ -139,7 +154,8 @@ var triggerDescriptions = map[string]string{
 // Target is what a watch looks at. A departure watch is a train (From, To, optional Via) or a bus
 // (Stop, Line); a disruption watch has Stations; a route watch names a saved route; a home watch
 // has the Entity ID of a Home Assistant entity and, as resolved, its friendly Name; an agent watch
-// has only a short Name the model gives it.
+// has only a short Name the model gives it; a weather watch has a place's Name with its Latitude and
+// Longitude as found, or Current for wherever the user's shared location is at each check.
 type Target struct {
 	Mode     string   `json:"mode,omitempty"`
 	From     string   `json:"from,omitempty"`
@@ -151,6 +167,17 @@ type Target struct {
 	Route    string   `json:"route,omitempty"`
 	Entity   string   `json:"entity,omitempty"`
 	Name     string   `json:"name,omitempty"`
+	// Latitude and Longitude are a weather watch's named place as found when it was saved.
+	Latitude  *float64 `json:"latitude,omitempty"`
+	Longitude *float64 `json:"longitude,omitempty"`
+	Current   bool     `json:"current,omitempty"`
+}
+
+// Weather is what a weather watch counts as rain coming: ThresholdMM or more precipitation in one
+// 15-minute slot of the next WithinMinutes.
+type Weather struct {
+	WithinMinutes int     `json:"within_minutes"`
+	ThresholdMM   float64 `json:"threshold_mm"`
 }
 
 // Condition is what a home watch waits for: the entity being in one of State, or its numeric value
@@ -204,6 +231,7 @@ type Spec struct {
 	Target       Target     `json:"target"`
 	Condition    *Condition `json:"condition,omitempty"`
 	Check        *Check     `json:"check,omitempty"`
+	Weather      *Weather   `json:"weather,omitempty"`
 	Triggers     []string   `json:"triggers"`
 	DelayMinutes int        `json:"delay_minutes,omitempty"`
 	Days         []string   `json:"days,omitempty"`
@@ -418,9 +446,19 @@ func (s Spec) Label() string {
 		return name + ": " + s.Condition.Describe()
 	case KindAgent:
 		return target.Name
+	case KindWeather:
+		return "Rain at " + s.placeName()
 	default:
 		return s.Kind
 	}
+}
+
+// placeName is where a weather watch looks.
+func (s Spec) placeName() string {
+	if s.Target.Current {
+		return "your location"
+	}
+	return s.Target.Name
 }
 
 // DescribeDays is when a watch runs, such as "Mon–Fri" or "once, Mon 5 Oct".
@@ -473,6 +511,8 @@ func (s Spec) checkEvery() string {
 	switch s.Kind {
 	case KindHome:
 		return "checked every minute"
+	case KindWeather:
+		return fmt.Sprintf("checked every %d minutes against the forecast", int(WeatherCheckInterval.Minutes()))
 	case KindAgent:
 		if s.Check != nil {
 			return fmt.Sprintf("checked every %d minutes, each check a model turn on your own subscription", s.Check.IntervalMinutes)
@@ -486,6 +526,9 @@ func (s Spec) Describe() string {
 	var lines []string
 	if s.Kind == KindAgent && s.Check != nil {
 		lines = append(lines, "Checks: "+s.Check.Instruction, "Condition: "+s.Check.Condition)
+	}
+	if s.Kind == KindWeather && s.Weather != nil {
+		lines = append(lines, "Rain: "+s.Weather.Describe())
 	}
 	lines = append(lines,
 		"Days: "+s.DescribeDays(),
@@ -546,16 +589,35 @@ func (s Spec) Expired(now time.Time) bool {
 	return err == nil && now.After(end)
 }
 
+// Describe is how much rain within how long counts, such as "0.2 mm or more in 15 minutes within
+// the next 60 minutes".
+func (w Weather) Describe() string {
+	return fmt.Sprintf("%s mm or more in 15 minutes within the next %d minutes", strconv.FormatFloat(w.ThresholdMM, 'f', -1, 64), w.WithinMinutes)
+}
+
 // allDay reports whether a kind is watched through whole days by default rather than around a
 // departure or within a short fixed window.
-func allDay(kind string) bool { return kind == KindHome || kind == KindAgent }
+func allDay(kind string) bool { return kind == KindHome || kind == KindAgent || kind == KindWeather }
 
 // normalize validates a spec and puts it in its canonical form: defaults filled in, triggers and
 // days in their fixed order, and names trimmed. now rejects a one-off window already over.
 func normalize(spec Spec, now time.Time) (Spec, error) {
+	spec, err := normalizeWhat(spec)
+	if err != nil {
+		return Spec{}, err
+	}
+	return normalizeWhen(spec, now)
+}
+
+// normalizeWhat validates what a spec watches and when it alerts, without its days and window, as
+// a job's condition, which is checked at one instant, has neither.
+func normalizeWhat(spec Spec) (Spec, error) {
+	if spec.Kind == KindPlace {
+		return Spec{}, fmt.Errorf("place watches are not available yet")
+	}
 	allowed, known := kindTriggers[spec.Kind]
 	if !known {
-		return Spec{}, fmt.Errorf("the kind must be departure, disruptions, route, home, or agent")
+		return Spec{}, fmt.Errorf("the kind must be departure, disruptions, route, home, agent, or weather")
 	}
 	target, err := normalizeTarget(spec.Kind, spec.Target)
 	if err != nil {
@@ -569,6 +631,9 @@ func normalize(spec Spec, now time.Time) (Spec, error) {
 		return Spec{}, err
 	}
 	if spec.Check, err = normalizeCheck(spec.Kind, spec.Check); err != nil {
+		return Spec{}, err
+	}
+	if spec.Weather, err = normalizeWeather(spec.Kind, spec.Weather); err != nil {
 		return Spec{}, err
 	}
 
@@ -599,7 +664,14 @@ func normalize(spec Spec, now time.Time) (Spec, error) {
 	} else {
 		spec.DelayMinutes = 0
 	}
+	if _, err := localtime.LoadZone(spec.Zone); err != nil {
+		return Spec{}, err
+	}
+	return spec, nil
+}
 
+// normalizeWhen validates a spec's days and window.
+func normalizeWhen(spec Spec, now time.Time) (Spec, error) {
 	location, err := localtime.LoadZone(spec.Zone)
 	if err != nil {
 		return Spec{}, err
@@ -624,7 +696,7 @@ func normalize(spec Spec, now time.Time) (Spec, error) {
 		if length < minimumFixedWindow || length > maximumFixedWindow {
 			return Spec{}, fmt.Errorf("the window must run forward within one day, between %d minutes and %d hours long", int(minimumFixedWindow.Minutes()), int(maximumFixedWindow.Hours()))
 		}
-	case KindHome, KindAgent:
+	case KindHome, KindAgent, KindWeather:
 		if length < minimumFixedWindow {
 			return Spec{}, fmt.Errorf("the window must run forward within one day, at least %d minutes long, and may end at 24:00", int(minimumFixedWindow.Minutes()))
 		}
@@ -722,8 +794,50 @@ func normalizeTarget(kind string, target Target) (Target, error) {
 		}
 	case KindAgent:
 		normalized.Name = field(target.Name, "name", true)
+	case KindWeather:
+		normalized.Current = target.Current
+		normalized.Name = field(target.Name, "name", !target.Current)
+		if err == nil && target.Current && normalized.Name != "" {
+			return Target{}, fmt.Errorf("give either the place's name or current_location, not both")
+		}
+		if (target.Latitude == nil) != (target.Longitude == nil) {
+			return Target{}, fmt.Errorf("latitude and longitude go together")
+		}
+		if target.Latitude != nil && !target.Current {
+			latitude, longitude := *target.Latitude, *target.Longitude
+			if math.IsNaN(latitude) || math.IsNaN(longitude) || math.Abs(latitude) > 90 || math.Abs(longitude) > 180 {
+				return Target{}, fmt.Errorf("the place's coordinates are out of range")
+			}
+			normalized.Latitude, normalized.Longitude = &latitude, &longitude
+		}
 	}
 	return normalized, err
+}
+
+// normalizeWeather fills in a weather watch's defaults and refuses Weather on any other kind.
+func normalizeWeather(kind string, weather *Weather) (*Weather, error) {
+	if kind != KindWeather {
+		if weather != nil {
+			return nil, fmt.Errorf("only a weather watch takes within_minutes and threshold_mm")
+		}
+		return nil, nil
+	}
+	normalized := Weather{WithinMinutes: DefaultWithinMinutes, ThresholdMM: DefaultThresholdMM}
+	if weather != nil {
+		if weather.WithinMinutes != 0 {
+			normalized.WithinMinutes = weather.WithinMinutes
+		}
+		if weather.ThresholdMM != 0 {
+			normalized.ThresholdMM = weather.ThresholdMM
+		}
+	}
+	if normalized.WithinMinutes < minimumWithin || normalized.WithinMinutes > maximumWithin {
+		return nil, fmt.Errorf("within_minutes must be between %d and %d", minimumWithin, maximumWithin)
+	}
+	if math.IsNaN(normalized.ThresholdMM) || normalized.ThresholdMM <= 0 || normalized.ThresholdMM > maximumThresholdMM {
+		return nil, fmt.Errorf("threshold_mm must be more than 0 and at most %d", maximumThresholdMM)
+	}
+	return &normalized, nil
 }
 
 // normalizeCondition checks a home watch's condition and refuses one on any other kind.

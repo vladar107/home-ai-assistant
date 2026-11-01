@@ -75,8 +75,33 @@ func reminderGuidance(zone string) string {
 		"It sends the text as written at that time, without asking a model, and is set at once without confirmation, except after you have read content from outside the household, such as a web page or an email, in this conversation: then reminder_set only proposes the reminder, the user sees it with Confirm and Reject buttons, and you must not claim it is set. " +
 		"at is a local date and time such as 2026-10-04 17:00 in the user's time zone, " + zone + " unless they name another; work it out from the current time. " +
 		"Write the text as the reminder the user should read, such as Call mom. Repeat the time reminder_set returns to the user exactly as it gives it. " +
-		"reminder_cancel cancels a pending reminder by its id from schedule_list, also without confirmation. A reminder that should repeat is a recurring schedule_propose job instead."
+		"reminder_cancel cancels a pending reminder by its id from schedule_list, also without confirmation. A reminder that should repeat on a clock schedule is a recurring schedule_propose job instead; one before each matching calendar event takes a calendar_match anchor."
 }
+
+// anchorGuidance says when to anchor a job to an event instead of a clock time, naming only the
+// kinds of anchor that can be resolved here.
+func (s *Service) anchorGuidance() string {
+	var kinds []string
+	if _, known := s.anchors[AnchorCalendarEvent]; known {
+		kinds = append(kinds, "calendar_event with the account, calendar_id, and event_id from calendar_events for one event")
+	}
+	if _, known := s.anchors[AnchorCalendarMatch]; known {
+		kinds = append(kinds, "calendar_match with a title for each upcoming event whose title contains it")
+	}
+	if _, known := s.anchors[AnchorTrip]; known {
+		kinds = append(kinds, "trip with a trip_id from trip_list and edge start or end")
+	}
+	if len(kinds) == 0 {
+		return ""
+	}
+	return "Anchors: when the user times a reminder or job by an event rather than a clock time, such as 30 minutes before the dentist, an hour before every meeting titled Planning, or when their trip starts, give anchor instead of cron or at: " +
+		strings.Join(kinds, "; ") + ". offset_minutes is negative for before the event and positive for after it. " +
+		"Look the event or trip up first rather than guessing its ids. An anchored job follows its event when it moves, and when the event is cancelled it ends and the user is told in one line, so prefer an anchor to a time copied from the event."
+}
+
+const conditionGuidance = "Conditions: any reminder or job can take a condition, checked once when it is due; when it does not hold, the run is skipped and nothing is sent, such as at 07:40 on weekdays, tell me only if rain is coming in the next hour, which is a weather condition with within_minutes 60. " +
+	"Prefer a code-checked kind, weather, home, departure, or disruptions, which costs no model turn, to agent, which costs one each run; a reminder takes only a weather or home condition. Prefer a condition to writing only tell me when into a job's instructions whenever a code-checked kind can tell. " +
+	"A home condition takes no for_minutes and route is not a condition. A check that fails lets the run go ahead with a note. Never invent a threshold the user did not give: weather defaults to 0.2 mm in 15 minutes."
 
 var listDefinition = tools.Definition{
 	Name:        toolList,
@@ -96,16 +121,34 @@ var getDefinition = tools.Definition{
 		`"required":["job_id"],"additionalProperties":false}`),
 }
 
+// anchorProperty and conditionProperty are the anchor and condition every job tool takes.
+const anchorProperty = `"anchor":{"type":"object","description":"Instead of cron or at: run relative to an event, and follow it when it moves.","properties":{` +
+	`"kind":{"type":"string","enum":["calendar_event","calendar_match","trip"],"description":"calendar_event: one event from calendar_events; calendar_match: each upcoming event whose title contains title; trip: a trip's start or end."},` +
+	`"account":{"type":"string","description":"calendar_event: the account calendar_events shows for the event. calendar_match: optional, to match only that account's events."},` +
+	`"calendar_id":{"type":"string","description":"calendar_event: the event's calendar id. calendar_match: optional, to match only that calendar."},` +
+	`"event_id":{"type":"string","description":"calendar_event: the event id from calendar_events."},` +
+	`"title":{"type":"string","maxLength":100,"description":"calendar_match: text the event titles contain, such as Planning."},` +
+	`"trip_id":{"type":"string","description":"trip: the trip's id from trip_list."},` +
+	`"edge":{"type":"string","enum":["start","end"],"description":"trip: whether to follow its start or its end."},` +
+	`"offset_minutes":{"type":"integer","minimum":-2880,"maximum":1440,"description":"Minutes after the event's start, or the trip's start or end; negative for before, such as -30 for half an hour before."}},` +
+	`"required":["kind","offset_minutes"],"additionalProperties":false}`
+
+const conditionProperty = `"condition":{"type":"object","description":"Run only if this holds when the job is due, checked once then; otherwise the run is skipped without a message. ` +
+	`kind is weather, home, departure, disruptions, or agent, with the fields watch_propose takes for that kind but no days, date, window, or triggers: ` +
+	`weather takes name or current_location, within_minutes, and threshold_mm; home takes name and condition without for_minutes; departure takes mode, its stations or stop and line, departure, and delay_minutes; disruptions takes stations; agent takes name and check."}`
+
 var reminderDefinitions = []tools.Definition{
 	{
 		Name:        toolReminderSet,
-		Description: "Set a reminder: the text is sent to the user once, at the given local time, without confirmation unless outside content was read in this conversation.",
+		Description: "Set a reminder: the text is sent to the user once, at the given local time or relative to an event, without confirmation unless outside content was read in this conversation.",
 		Risk:        tools.RiskWrite,
+		Timeout:     actTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"text":{"type":"string","maxLength":500,"description":"The reminder as the user should read it, at most 500 characters."},` +
-			`"at":{"type":"string","description":"Local date and time, YYYY-MM-DD HH:MM, such as 2026-10-04 17:00."},` +
+			`"at":{"type":"string","description":"Local date and time, YYYY-MM-DD HH:MM, such as 2026-10-04 17:00; or give anchor instead."},` +
+			anchorProperty + `,` + conditionProperty + `,` +
 			`"timezone":{"type":"string","description":"IANA time zone such as Europe/Amsterdam; omit to use the user's own."}},` +
-			`"required":["text","at"],"additionalProperties":false}`),
+			`"required":["text"],"additionalProperties":false}`),
 	},
 	{
 		Name:        toolReminderCancel,
@@ -130,6 +173,7 @@ var writeDefinitions = []tools.Definition{
 			`"prompt":{"type":"string","maxLength":2000,"description":"The complete instructions for each run, at most 2000 characters, because the user sees them in full to confirm. Once the job exists, prompt_edits in schedule_update can grow them to 10000 characters."},` +
 			`"timezone":{"type":"string","description":"IANA time zone such as Europe/Amsterdam; omit to use the user's own."},` +
 			`"pause_while_traveling":{"type":"boolean","description":"Recurring jobs only: stay silent while the user is on a trip."},` +
+			anchorProperty + `,` + conditionProperty + `,` +
 			`"model":{"type":"string","maxLength":200,"description":"The model and effort the job runs on, as id:effort such as ` + modelExample + `. Set it only when the user asks for a different model for this job; omit it to use the default."}},` +
 			`"required":["name","prompt"],"additionalProperties":false}`),
 	},
@@ -150,6 +194,8 @@ var writeDefinitions = []tools.Definition{
 			`"required":["find","replace"],"additionalProperties":false}},` +
 			`"timezone":{"type":"string","description":"A new IANA time zone such as Europe/Amsterdam."},` +
 			`"pause_while_traveling":{"type":"boolean","description":"Recurring jobs only: true to stay silent while the user is on a trip, false to stop doing so; omit to keep it as it is."},` +
+			anchorProperty + `,` + conditionProperty + `,` +
+			`"remove_condition":{"type":"boolean","description":"true to drop the job's condition, so it runs every time again."},` +
 			`"model":{"type":"string","maxLength":200,"description":"The model and effort the job runs on, as id:effort such as ` + modelExample + `. Set it only when the user asks for a different model for this job; an empty string returns it to the default, and omitting it keeps the current one."}},` +
 			`"required":["job_id"],"additionalProperties":false}`),
 	},
@@ -187,6 +233,14 @@ func (s *Service) Contribute(ctx context.Context, principalID string) (tools.Con
 		guidance = append(guidance, proposeGuidance(s.zone))
 		contribution.Definitions = append(contribution.Definitions, writeDefinitions...)
 	}
+	if len(guidance) > 0 {
+		if text := s.anchorGuidance(); text != "" {
+			guidance = append(guidance, text)
+		}
+		if s.conditions != nil {
+			guidance = append(guidance, conditionGuidance)
+		}
+	}
 	contribution.WriteGuidance = strings.Join(guidance, "\n")
 	return contribution, nil
 }
@@ -219,19 +273,23 @@ func (s *Service) Execute(ctx context.Context, principalID string, call tools.Ca
 }
 
 type proposeArguments struct {
-	Name                string `json:"name"`
-	Cron                string `json:"cron"`
-	At                  string `json:"at"`
-	Prompt              string `json:"prompt"`
-	Timezone            string `json:"timezone"`
-	PauseWhileTraveling bool   `json:"pause_while_traveling"`
-	Model               string `json:"model"`
+	Name                string          `json:"name"`
+	Cron                string          `json:"cron"`
+	At                  string          `json:"at"`
+	Prompt              string          `json:"prompt"`
+	Timezone            string          `json:"timezone"`
+	PauseWhileTraveling bool            `json:"pause_while_traveling"`
+	Model               string          `json:"model"`
+	Anchor              *Anchor         `json:"anchor"`
+	Condition           json.RawMessage `json:"condition"`
 }
 
 type confirmedReminder struct {
-	Text string `json:"text"`
-	At   string `json:"at"`
-	Zone string `json:"zone"`
+	Text      string     `json:"text"`
+	At        string     `json:"at"`
+	Zone      string     `json:"zone"`
+	Anchor    *Anchor    `json:"anchor,omitempty"`
+	Condition *Condition `json:"condition,omitempty"`
 }
 
 // confirmedJob is the canonical form the user confirms and the executor stores. At is the local
@@ -247,6 +305,24 @@ type confirmedJob struct {
 	TravelPause *bool `json:"pause_while_traveling,omitempty"`
 	// Model is the job's own "id:effort", empty for its default.
 	Model string `json:"model,omitempty"`
+	// Anchor and Condition are as stored, with the anchor's label as its resolver read it.
+	Anchor    *Anchor    `json:"anchor,omitempty"`
+	Condition *Condition `json:"condition,omitempty"`
+}
+
+// config is the job's stored configuration.
+func (c confirmedJob) config() (json.RawMessage, error) {
+	handler, err := ModelTurnConfigWithModel(c.Prompt, c.Model)
+	if err != nil {
+		return nil, err
+	}
+	return JoinConfig(handler, c.Anchor, c.Condition)
+}
+
+func (c confirmedJob) same(other confirmedJob) bool {
+	encoded, errA := json.Marshal(c)
+	otherEncoded, errB := json.Marshal(other)
+	return errA == nil && errB == nil && string(encoded) == string(otherEncoded)
 }
 
 type updateArguments struct {
@@ -260,7 +336,10 @@ type updateArguments struct {
 	// PauseWhileTraveling is nil when the model left the flag alone.
 	PauseWhileTraveling *bool `json:"pause_while_traveling"`
 	// Model is nil when the model left the job's model alone, and empty to return it to the default.
-	Model *string `json:"model"`
+	Model           *string         `json:"model"`
+	Anchor          *Anchor         `json:"anchor"`
+	Condition       json.RawMessage `json:"condition"`
+	RemoveCondition bool            `json:"remove_condition"`
 }
 
 // promptEdit replaces the one occurrence of Find in a job's instructions with Replace.
@@ -282,9 +361,41 @@ type removeArguments struct {
 }
 
 type reminderArguments struct {
-	Text     string `json:"text"`
-	At       string `json:"at"`
-	Timezone string `json:"timezone"`
+	Text      string          `json:"text"`
+	At        string          `json:"at"`
+	Timezone  string          `json:"timezone"`
+	Anchor    *Anchor         `json:"anchor"`
+	Condition json.RawMessage `json:"condition"`
+}
+
+// triggers reads the anchor and condition the model gave a new job; light refuses a condition that
+// needs a model turn. A failure is a refusal for the model to read.
+func (s *Service) triggers(ctx context.Context, principalID string, rawAnchor *Anchor, rawCondition json.RawMessage, light bool) (*Anchor, *Condition, error) {
+	var anchor *Anchor
+	if rawAnchor != nil {
+		normalized, err := normalizeAnchor(*rawAnchor)
+		if err != nil {
+			return nil, nil, err
+		}
+		if _, known := s.anchors[normalized.Kind]; !known {
+			return nil, nil, fmt.Errorf("%s anchors are not available, because that integration is not set up", normalized.Kind)
+		}
+		anchor = &normalized
+	}
+	var condition *Condition
+	if given(rawCondition) {
+		var err error
+		if condition, err = s.prepareCondition(ctx, principalID, rawCondition, light); err != nil {
+			return nil, nil, err
+		}
+	}
+	return anchor, condition, nil
+}
+
+// given reports whether the model passed a JSON value other than null.
+func given(raw json.RawMessage) bool {
+	trimmed := strings.TrimSpace(string(raw))
+	return trimmed != "" && trimmed != "null"
 }
 
 func (s *Service) setReminder(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
@@ -292,12 +403,20 @@ func (s *Service) setReminder(ctx context.Context, principalID string, call tool
 	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
-	config, err := ReminderConfig(arguments.Text)
+	anchor, condition, err := s.triggers(ctx, principalID, arguments.Anchor, arguments.Condition, true)
+	if err != nil {
+		return tools.Result{Text: err.Error(), IsError: true}, nil
+	}
+	text, err := ReminderConfig(arguments.Text)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	config, err := JoinConfig(text, anchor, condition)
 	if err != nil {
 		return tools.Result{}, err
 	}
 	timing := Timing{At: arguments.At, Zone: arguments.Timezone}
-	prepared, err := s.Prepare(principalID, ReminderName(arguments.Text), TypeReminder, timing, config)
+	prepared, err := s.prepareJob(ctx, principalID, ReminderName(arguments.Text), TypeReminder, timing, config)
 	if err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
@@ -314,8 +433,26 @@ func (s *Service) setReminder(ctx context.Context, principalID string, call tool
 		}
 		return tools.Result{}, err
 	}
-	at := FormatOccurrence(prepared.Job.RunAt, prepared.Schedule.Location)
-	return tools.Result{Text: fmt.Sprintf("Reminder set for %s (id %s): %s", at, id, ReminderText(config))}, nil
+	return tools.Result{Text: fmt.Sprintf("Reminder set %s (id %s): %s", reminderWhen(prepared), id, ReminderText(config))}, nil
+}
+
+// reminderWhen is when a prepared reminder goes off, as "for Mon 5 Oct 17:00" or, for an anchored
+// one, with the event it follows and its condition.
+func reminderWhen(prepared Prepared) string {
+	job := prepared.Job
+	var when string
+	switch {
+	case prepared.Anchor != nil && prepared.Anchor.Repeats():
+		when = prepared.Anchor.Describe() + "; next: " + NextRunText(job, job.Zone)
+	case prepared.Anchor != nil:
+		when = "for " + FormatOccurrence(job.RunAt, prepared.Schedule.Location) + ", " + prepared.Anchor.Describe()
+	default:
+		when = "for " + FormatOccurrence(job.RunAt, prepared.Schedule.Location)
+	}
+	if condition := JobCondition(job); condition != nil {
+		when += ", only if " + condition.Description
+	}
+	return when
 }
 
 func (s *Service) proposeReminder(ctx context.Context, principalID string, call tools.Call, text string, prepared Prepared) (tools.Result, error) {
@@ -323,12 +460,15 @@ func (s *Service) proposeReminder(ctx context.Context, principalID string, call 
 		return tools.Result{Text: "I read outside content in this conversation, so reminders need the user's confirmation, and confirming is not available. Tell the user the reminder was not set.", IsError: true}, nil
 	}
 	job := prepared.Job
-	confirmed := confirmedReminder{Text: text, At: job.RunAt.In(prepared.Schedule.Location).Format(localTimeLayouts[0]), Zone: job.Zone}
+	confirmed := confirmedReminder{Text: text, Zone: job.Zone, Anchor: prepared.Anchor, Condition: JobCondition(job)}
+	if prepared.Anchor == nil {
+		confirmed.At = job.RunAt.In(prepared.Schedule.Location).Format(localTimeLayouts[0])
+	}
 	canonical, err := json.Marshal(confirmed)
 	if err != nil {
 		return tools.Result{}, err
 	}
-	summary := fmt.Sprintf("Set a reminder for %s:\n%s\nI read outside content in this conversation, so I need your confirmation.", FormatOccurrence(job.RunAt, prepared.Schedule.Location), text)
+	summary := fmt.Sprintf("Set a reminder %s:\n%s\nI read outside content in this conversation, so I need your confirmation.", reminderWhen(prepared), text)
 	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: toolReminderSet, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "set", TargetKind: "reminder", TargetName: job.Name}}); err != nil {
 		if approval.Refused(err) {
 			return tools.Result{Text: err.Error(), IsError: true}, nil
@@ -372,12 +512,16 @@ func (s *Service) proposeJob(ctx context.Context, principalID string, call tools
 	if refusal != "" {
 		return tools.Result{Text: refusal, IsError: true}, nil
 	}
-	config, err := ModelTurnConfigWithModel(arguments.Prompt, model)
+	anchor, condition, err := s.triggers(ctx, principalID, arguments.Anchor, arguments.Condition, false)
+	if err != nil {
+		return tools.Result{Text: err.Error(), IsError: true}, nil
+	}
+	config, err := confirmedJob{Prompt: arguments.Prompt, Model: model, Anchor: anchor, Condition: condition}.config()
 	if err != nil {
 		return tools.Result{}, err
 	}
 	timing := Timing{Cron: arguments.Cron, At: arguments.At, Zone: arguments.Timezone}
-	prepared, err := s.Prepare(principalID, arguments.Name, TypeModelTurn, timing, config)
+	prepared, err := s.prepareJob(ctx, principalID, arguments.Name, TypeModelTurn, timing, config)
 	if err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
@@ -394,13 +538,16 @@ func (s *Service) proposeJob(ctx context.Context, principalID string, call tools
 		return tools.Result{Text: tooManyText(job.OneTime()), IsError: true}, nil
 	}
 
-	confirmed := confirmedJob{Name: job.Name, Cron: job.Cron, Zone: job.Zone, Prompt: ModelTurnPrompt(job.Config), Model: ModelTurnModel(job.Config)}
+	confirmed := confirmedJob{Name: job.Name, Cron: job.Cron, Zone: job.Zone, Prompt: ModelTurnPrompt(job.Config), Model: ModelTurnModel(job.Config), Anchor: prepared.Anchor, Condition: JobCondition(job)}
 	if job.TravelPause {
 		on := true
 		confirmed.TravelPause = &on
 	}
 	targetKind := "recurring job"
-	if job.OneTime() {
+	switch {
+	case prepared.Anchor != nil:
+		targetKind = "anchored job"
+	case job.OneTime():
 		confirmed.At = job.RunAt.In(prepared.Schedule.Location).Format(localTimeLayouts[0])
 		targetKind = "one-time job"
 	}
@@ -466,11 +613,18 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 	if err != nil {
 		return tools.Result{Text: "That job's stored schedule can no longer be read; remove it and propose a new one.", IsError: true}, nil
 	}
+	anchored := current.Anchor != nil
 	switch {
+	case anchored && (strings.TrimSpace(arguments.Cron) != "" || strings.TrimSpace(arguments.At) != ""):
+		return tools.Result{Text: "This job follows an event, so it takes a new anchor, not cron or at; to run it on a clock time, remove it and propose a new job.", IsError: true}, nil
+	case !anchored && arguments.Anchor != nil:
+		return tools.Result{Text: "This job runs on a clock time; to make it follow an event, remove it and propose a new job with an anchor.", IsError: true}, nil
 	case job.OneTime() && strings.TrimSpace(arguments.Cron) != "":
 		return tools.Result{Text: "This is a one-time job, so it takes at, not cron; to make it recurring, remove it and propose a new job.", IsError: true}, nil
 	case !job.OneTime() && strings.TrimSpace(arguments.At) != "":
 		return tools.Result{Text: "This is a recurring job, so it takes cron, not at; to make it run once, remove it and propose a new job.", IsError: true}, nil
+	case arguments.RemoveCondition && given(arguments.Condition):
+		return tools.Result{Text: "Give either condition or remove_condition, not both; nothing was proposed.", IsError: true}, nil
 	}
 	if strings.TrimSpace(arguments.Prompt) != "" && len(arguments.PromptEdits) > 0 {
 		return tools.Result{Text: "Give either prompt, the complete new instructions, or prompt_edits, not both; nothing was proposed.", IsError: true}, nil
@@ -505,23 +659,41 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 		}
 		next.Prompt = edited
 	}
-	config, err := ModelTurnConfigWithModel(next.Prompt, next.Model)
+	anchor, condition, err := s.triggers(ctx, principalID, arguments.Anchor, arguments.Condition, false)
+	if err != nil {
+		return tools.Result{Text: err.Error(), IsError: true}, nil
+	}
+	if anchor != nil {
+		next.Anchor = anchor
+	} else if next.Anchor != nil {
+		// A copy, since resolving the job refreshes its label.
+		copied := *next.Anchor
+		next.Anchor = &copied
+	}
+	switch {
+	case condition != nil:
+		next.Condition = condition
+	case arguments.RemoveCondition:
+		next.Condition = nil
+	}
+	config, err := next.config()
 	if err != nil {
 		return tools.Result{}, err
 	}
-	prepared, err := s.Prepare(principalID, next.Name, TypeModelTurn, Timing{Cron: next.Cron, At: next.At, Zone: next.Zone}, config)
+	prepared, err := s.prepareJob(ctx, principalID, next.Name, TypeModelTurn, Timing{Cron: next.Cron, At: next.At, Zone: next.Zone}, config)
 	if err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
 	prepared.Job.TravelPause = travel
 	changed := prepared.Job
-	confirmed := confirmedUpdate{JobID: job.ID, UpdatedAt: job.UpdatedAt, confirmedJob: confirmedJob{Name: changed.Name, Cron: changed.Cron, Zone: changed.Zone, Prompt: ModelTurnPrompt(changed.Config), TravelPause: arguments.PauseWhileTraveling, Model: ModelTurnModel(changed.Config)}}
-	if changed.OneTime() {
+	confirmed := confirmedUpdate{JobID: job.ID, UpdatedAt: job.UpdatedAt, confirmedJob: confirmedJob{Name: changed.Name, Cron: changed.Cron, Zone: changed.Zone, Prompt: ModelTurnPrompt(changed.Config), TravelPause: arguments.PauseWhileTraveling, Model: ModelTurnModel(changed.Config),
+		Anchor: prepared.Anchor, Condition: JobCondition(changed)}}
+	if changed.OneTime() && prepared.Anchor == nil {
 		confirmed.At = changed.RunAt.In(prepared.Schedule.Location).Format(localTimeLayouts[0])
 	}
 	unflagged := confirmed.confirmedJob
 	unflagged.TravelPause = nil
-	if unflagged == current && travel == job.TravelPause {
+	if unflagged.same(current) && travel == job.TravelPause {
 		return tools.Result{Text: "That changes nothing; the job already reads exactly like this.", IsError: true}, nil
 	}
 	canonical, err := json.Marshal(confirmed)
@@ -544,6 +716,9 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 	if next.Model == "" && current.Model != "" {
 		summary += "\nIt goes back to the default model."
 	}
+	if next.Condition == nil && current.Condition != nil {
+		summary += "\nIt no longer has a condition, so it runs every time."
+	}
 	if !job.Enabled {
 		summary += "\nIt stays paused until you resume it in /jobs."
 	}
@@ -551,10 +726,10 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 }
 
 // currentJob is a stored model.turn job in the canonical form a proposal carries, with a one-time
-// job's instant as a local time in its own zone.
+// job's instant as a local time in its own zone; an anchored job's instant follows its anchor.
 func currentJob(job Job) (confirmedJob, error) {
-	current := confirmedJob{Name: job.Name, Cron: job.Cron, Zone: job.Zone, Prompt: ModelTurnPrompt(job.Config), Model: ModelTurnModel(job.Config)}
-	if job.OneTime() {
+	current := confirmedJob{Name: job.Name, Cron: job.Cron, Zone: job.Zone, Prompt: ModelTurnPrompt(job.Config), Model: ModelTurnModel(job.Config), Anchor: JobAnchor(job), Condition: JobCondition(job)}
+	if job.OneTime() && current.Anchor == nil {
 		location, err := LoadZone(job.Zone)
 		if err != nil {
 			return confirmedJob{}, err
@@ -626,12 +801,12 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
 			return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed job could not be read; nothing was scheduled."}
 		}
-		config, err := ModelTurnConfigWithModel(confirmed.Prompt, confirmed.Model)
+		config, err := confirmed.config()
 		if err != nil {
 			return approval.Outcome{}, err
 		}
 		timing := Timing{Cron: confirmed.Cron, At: confirmed.At, Zone: confirmed.Zone}
-		prepared, err := s.Prepare(record.PrincipalID, confirmed.Name, TypeModelTurn, timing, config)
+		prepared, err := s.prepareJob(ctx, record.PrincipalID, confirmed.Name, TypeModelTurn, timing, config)
 		if err != nil {
 			return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "That schedule is no longer valid (" + err.Error() + "); nothing was scheduled."}
 		}
@@ -647,7 +822,10 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 			return approval.Outcome{}, err
 		}
 		at := FormatOccurrence(prepared.Job.NextRunAt, prepared.Schedule.Location)
-		if prepared.Job.OneTime() {
+		switch {
+		case prepared.Anchor != nil:
+			return approval.Outcome{Text: "Scheduled " + reminderWhen(prepared) + ".", Undo: undo}, nil
+		case prepared.Job.OneTime():
 			return approval.Outcome{Text: "Scheduled for " + at + ".", Undo: undo}, nil
 		}
 		return approval.Outcome{Text: "Scheduled. First run: " + at + ".", Undo: undo}, nil
@@ -656,11 +834,15 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
 			return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed reminder could not be read; nothing was set."}
 		}
-		config, err := ReminderConfig(confirmed.Text)
+		text, err := ReminderConfig(confirmed.Text)
 		if err != nil {
 			return approval.Outcome{}, err
 		}
-		prepared, err := s.Prepare(record.PrincipalID, ReminderName(confirmed.Text), TypeReminder, Timing{At: confirmed.At, Zone: confirmed.Zone}, config)
+		config, err := JoinConfig(text, confirmed.Anchor, confirmed.Condition)
+		if err != nil {
+			return approval.Outcome{}, err
+		}
+		prepared, err := s.prepareJob(ctx, record.PrincipalID, ReminderName(confirmed.Text), TypeReminder, Timing{At: confirmed.At, Zone: confirmed.Zone}, config)
 		if err != nil {
 			return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "That reminder can no longer be set (" + err.Error() + "); nothing was set."}
 		}
@@ -670,7 +852,7 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 			}
 			return approval.Outcome{}, err
 		}
-		return approval.Outcome{Text: "Reminder set for " + FormatOccurrence(prepared.Job.RunAt, prepared.Schedule.Location) + "."}, nil
+		return approval.Outcome{Text: "Reminder set " + reminderWhen(prepared) + "."}, nil
 	case toolUpdate:
 		return s.executeUpdate(ctx, record)
 	case toolRemove:
@@ -718,12 +900,12 @@ func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (ap
 	if !job.UpdatedAt.Equal(confirmed.UpdatedAt) {
 		return approval.Outcome{}, stale
 	}
-	config, err := ModelTurnConfigWithModel(confirmed.Prompt, confirmed.Model)
+	config, err := confirmed.config()
 	if err != nil {
 		return approval.Outcome{}, err
 	}
 	timing := Timing{Cron: confirmed.Cron, At: confirmed.At, Zone: confirmed.Zone}
-	prepared, err := s.Prepare(record.PrincipalID, confirmed.Name, TypeModelTurn, timing, config)
+	prepared, err := s.prepareJob(ctx, record.PrincipalID, confirmed.Name, TypeModelTurn, timing, config)
 	if err != nil {
 		return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "That schedule is no longer valid (" + err.Error() + "); nothing was changed."}
 	}
@@ -746,7 +928,10 @@ func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (ap
 		return approval.Outcome{Text: "Changed. It stays paused until you resume it in /jobs.", Undo: undo}, nil
 	}
 	at := FormatOccurrence(prepared.Job.NextRunAt, prepared.Schedule.Location)
-	if prepared.Job.OneTime() {
+	switch {
+	case prepared.Anchor != nil:
+		return approval.Outcome{Text: "Changed. Runs " + reminderWhen(prepared) + ".", Undo: undo}, nil
+	case prepared.Job.OneTime():
 		return approval.Outcome{Text: "Changed. Runs once: " + at + ".", Undo: undo}, nil
 	}
 	return approval.Outcome{Text: "Changed. Next run: " + at + ".", Undo: undo}, nil
@@ -891,8 +1076,22 @@ func scheduleSummary(heading string, prepared Prepared) string {
 	var builder strings.Builder
 	builder.WriteString(heading + "\n")
 	model := ModelTurnModel(job.Config)
+	if prepared.Anchor != nil {
+		if prepared.Anchor.Repeats() {
+			fmt.Fprintf(&builder, "Runs: %s\nNext: %s\n", prepared.Anchor.Describe(), NextRunText(job, job.Zone))
+		} else {
+			fmt.Fprintf(&builder, "Runs once: %s, %s, and moves with it\n", FormatOccurrence(job.RunAt, prepared.Schedule.Location), prepared.Anchor.Describe())
+		}
+		writeCondition(&builder, job)
+		if model != "" {
+			fmt.Fprintf(&builder, "Model: %s\n", model)
+		}
+		builder.WriteString("Each run asks your model, with read-only tools, and sends you the reply")
+		return builder.String()
+	}
 	if job.OneTime() {
 		fmt.Fprintf(&builder, "Runs once: %s\n", FormatOccurrence(job.RunAt, prepared.Schedule.Location))
+		writeCondition(&builder, job)
 		if model != "" {
 			fmt.Fprintf(&builder, "Model: %s\n", model)
 		}
@@ -909,11 +1108,19 @@ func scheduleSummary(heading string, prepared Prepared) string {
 	if job.TravelPause {
 		builder.WriteString("Pauses while you are traveling\n")
 	}
+	writeCondition(&builder, job)
 	if model != "" {
 		fmt.Fprintf(&builder, "Model: %s\n", model)
 	}
 	builder.WriteString("Each run asks your model, with read-only tools, and sends you the reply")
 	return builder.String()
+}
+
+// writeCondition adds the job's condition to a confirmation.
+func writeCondition(builder *strings.Builder, job Job) {
+	if condition := JobCondition(job); condition != nil {
+		fmt.Fprintf(builder, "Only if: %s, checked when it is due; otherwise it stays silent\n", condition.Description)
+	}
 }
 
 func (s *Service) renderJobs(ctx context.Context, jobs []Job) string {
@@ -935,11 +1142,7 @@ func renderJob(job Job, zone string, limit int, model string) string {
 	}
 	state := DescribeJob(job, zone)
 	if !job.OneTime() {
-		location, err := LoadZone(job.Zone)
-		if err != nil {
-			location, _ = LoadZone(zone)
-		}
-		state += ", next run " + FormatOccurrence(job.NextRunAt, location)
+		state += ", next run " + NextRunText(job, zone)
 	}
 	if !job.Enabled {
 		state += ", paused"
@@ -954,15 +1157,30 @@ func renderJob(job Job, zone string, limit int, model string) string {
 	return fmt.Sprintf("id %s: %q, %s\nModel: %s\n%s: %s", job.ID, job.Name, state, model, label, clip.Runes(ModelTurnPrompt(job.Config), limit))
 }
 
-// DescribeJob is a job's schedule as the user reads it, falling back to the default zone for a
-// zone the binary no longer knows.
+// DescribeJob is a job's schedule as the user reads it, with the event it follows and its
+// condition, falling back to the default zone for a zone the binary no longer knows.
 func DescribeJob(job Job, zone string) string {
-	schedule, err := JobSchedule(job)
+	location, err := LoadZone(job.Zone)
 	if err != nil {
-		location, _ := LoadZone(zone)
-		schedule = Schedule{Expression: job.Cron, Once: job.RunAt, Location: location}
+		location, _ = LoadZone(zone)
 	}
-	return schedule.Describe()
+	var described string
+	switch anchor := JobAnchor(job); {
+	case anchor != nil && job.OneTime():
+		described = "once, " + FormatOccurrence(job.RunAt, location) + ", " + anchor.Describe()
+	case anchor != nil:
+		described = anchor.Describe()
+	default:
+		schedule, err := JobSchedule(job)
+		if err != nil {
+			schedule = Schedule{Expression: job.Cron, Once: job.RunAt, Location: location}
+		}
+		described = schedule.Describe()
+	}
+	if condition := JobCondition(job); condition != nil {
+		described += ", only if " + condition.Description
+	}
+	return described
 }
 
 // FormatOccurrence renders an occurrence in the job's own zone, as the user reads it.

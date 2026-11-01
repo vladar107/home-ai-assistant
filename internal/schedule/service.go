@@ -128,13 +128,26 @@ type Service struct {
 	feeds      thread.Feeds
 	models     jobModels
 	startedAt  time.Time
+	anchors    map[string]AnchorResolver
+	conditions Conditions
+
+	// anchorStates is the resolver pass's own: only its loop adds and removes entries, and only the
+	// worker of a job's principal, while that principal is in anchorBusy, changes one.
+	anchorStates  map[string]*anchorState
+	anchorWake    chan struct{}
+	anchorWorkers sync.WaitGroup
 
 	mu       sync.Mutex
 	cancel   context.CancelFunc
 	done     chan struct{}
 	wake     chan struct{}
 	inflight map[string]bool
-	running  int
+	// anchorForced holds the jobs whose anchor the next resolver pass reads whatever their state.
+	anchorForced map[string]bool
+	// anchorBusy holds the principals whose anchors a worker is reading.
+	anchorBusy map[string]bool
+	anchorDone chan struct{}
+	running    int
 	// executing holds the principals that have a bounded run executing.
 	executing map[string]bool
 	pruned    time.Time
@@ -173,10 +186,10 @@ type Travel interface {
 	Traveling(ctx context.Context, principalID string, at time.Time) (bool, error)
 }
 
-// feed is the tab of the run's kind: reminders and Trips scans with the reminders, every other
-// job's report with the reports.
+// feed is the tab of the run's kind: reminders, Trips scans, and what a job's anchor tells its
+// owner with the reminders, every other job's report with the reports.
 func feed(run Run) string {
-	if run.JobType == TypeReminder || run.JobType == TripScanType {
+	if run.JobType == TypeReminder || run.JobType == TripScanType || run.ErrorKind == errorAnchorGone || run.ErrorKind == errorAnchorFailed {
 		return thread.FeedReminders
 	}
 	return thread.FeedReports
@@ -291,6 +304,12 @@ func NewService(cfg Config, repository Repository, chats Chats, deliverer conver
 		wake:       make(chan struct{}, 1),
 		inflight:   make(map[string]bool),
 		executing:  make(map[string]bool),
+		anchors:    make(map[string]AnchorResolver),
+
+		anchorStates: make(map[string]*anchorState),
+		anchorWake:   make(chan struct{}, 1),
+		anchorForced: make(map[string]bool),
+		anchorBusy:   make(map[string]bool),
 	}, nil
 }
 
@@ -329,17 +348,26 @@ func (s *Service) Start(ctx context.Context) error {
 
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	done := make(chan struct{})
+	var anchorDone chan struct{}
+	if len(s.anchors) > 0 {
+		anchorDone = make(chan struct{})
+	}
 	s.mu.Lock()
-	s.cancel, s.done = cancel, done
+	s.cancel, s.done, s.anchorDone = cancel, done, anchorDone
 	s.mu.Unlock()
 	go s.loop(runCtx, done)
+	// Anchors are read in their own loop, so a slow calendar never holds up the claim of another
+	// principal's due job.
+	if anchorDone != nil {
+		go s.anchorLoop(runCtx, anchorDone)
+	}
 	return nil
 }
 
 func (s *Service) Shutdown(ctx context.Context) error {
 	s.mu.Lock()
-	cancel, done := s.cancel, s.done
-	s.cancel, s.done = nil, nil
+	cancel, done, anchorDone := s.cancel, s.done, s.anchorDone
+	s.cancel, s.done, s.anchorDone = nil, nil, nil
 	s.mu.Unlock()
 	if cancel == nil {
 		return nil
@@ -348,6 +376,9 @@ func (s *Service) Shutdown(ctx context.Context) error {
 	finished := make(chan struct{})
 	go func() {
 		<-done
+		if anchorDone != nil {
+			<-anchorDone
+		}
 		s.workers.Wait()
 		close(finished)
 	}()
@@ -421,7 +452,9 @@ func (s *Service) runTick(ctx context.Context) {
 
 // advance queues the latest occurrence of every due job, if it is recent enough for its type's
 // catch-up window, and moves the job to its next occurrence after now. A one-time job always
-// queues its occurrence and finishes, so a run too late to execute can still tell its owner.
+// queues its occurrence and finishes, so a run too late to execute can still tell its owner. A
+// job anchored to a repeating event moves to no next run, finishing if it fires once, and the
+// resolver pass then finds its next occurrence: this loop never asks a calendar.
 func (s *Service) advance(ctx context.Context, now time.Time) error {
 	jobs, err := s.repository.DueScheduledJobs(ctx, now)
 	if err != nil {
@@ -429,7 +462,7 @@ func (s *Service) advance(ctx context.Context, now time.Time) error {
 	}
 	for _, job := range jobs {
 		jobType, known := s.types[job.Type]
-		schedule, err := JobSchedule(job)
+		latest, next, err := nextOccurrence(job, now)
 		if err != nil || !known {
 			// A job that can no longer be understood is paused rather than retried every tick.
 			if _, pauseErr := s.repository.SetScheduledJobEnabled(ctx, job.PrincipalID, job.ID, false, job.NextRunAt, now); pauseErr != nil {
@@ -437,10 +470,6 @@ func (s *Service) advance(ctx context.Context, now time.Time) error {
 			}
 			s.logger.WarnContext(ctx, "schedule.job.paused", "principal_id", job.PrincipalID, "job_id", job.ID, "reason", "invalid")
 			continue
-		}
-		latest, next := schedule.Latest(job.NextRunAt, now)
-		if next.IsZero() && !job.OneTime() {
-			next = now.AddDate(100, 0, 0)
 		}
 		var run *Run
 		if !latest.IsZero() && job.TravelPause && !job.OneTime() && s.travelingAt(ctx, job, latest) {
@@ -460,8 +489,35 @@ func (s *Service) advance(ctx context.Context, now time.Time) error {
 		if _, err := s.repository.AdvanceScheduledJob(ctx, job.ID, job.NextRunAt, next, run); err != nil {
 			return err
 		}
+		if job.AnchorRepeats && !next.IsZero() {
+			s.wakeAnchors(job.ID)
+		}
 	}
 	return nil
+}
+
+// nextOccurrence is the latest occurrence of a due job at or before now and the one after it,
+// which is zero for a job that finishes.
+func nextOccurrence(job Job, now time.Time) (time.Time, time.Time, error) {
+	if job.AnchorRepeats {
+		anchor := JobAnchor(job)
+		if anchor == nil || !anchor.Repeats() {
+			return time.Time{}, time.Time{}, fmt.Errorf("the job has no repeating anchor")
+		}
+		if anchor.Once {
+			return job.NextRunAt, time.Time{}, nil
+		}
+		return job.NextRunAt, now.AddDate(100, 0, 0), nil
+	}
+	schedule, err := JobSchedule(job)
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	latest, next := schedule.Latest(job.NextRunAt, now)
+	if next.IsZero() && !job.OneTime() {
+		next = now.AddDate(100, 0, 0)
+	}
+	return latest, next, nil
 }
 
 // travelingAt reports whether the job's owner is on a trip at the occurrence. A failed lookup
@@ -596,6 +652,22 @@ func (s *Service) execute(ctx context.Context, run Run) (Run, bool) {
 	}
 
 	began := time.Now()
+	handlerConfig, _, condition, err := SplitConfig(run.Config)
+	if err != nil {
+		handlerConfig = run.Config
+	}
+	var finding *ConditionFinding
+	if !missed && !run.Manual && condition != nil {
+		var met bool
+		met, finding = s.checkCondition(ctx, run, *condition)
+		if ctx.Err() != nil {
+			return run, false
+		}
+		if !met {
+			s.skip(ctx, run, StatusRunning, conditionUnmet)
+			return run, false
+		}
+	}
 	result := Result{Text: MissedText, ErrorKind: "missed"}
 	if !missed {
 		// Files and pictures the run sends go to the tab its report will.
@@ -604,10 +676,11 @@ func (s *Service) execute(ctx context.Context, run Run) (Run, bool) {
 			PrincipalID:  run.PrincipalID,
 			JobID:        run.JobID,
 			JobName:      run.JobName,
-			Config:       run.Config,
+			Config:       handlerConfig,
 			ScheduledFor: run.ScheduledFor,
 			Location:     location,
 			Manual:       run.Manual,
+			Condition:    finding,
 		})
 	}
 	if ctx.Err() != nil {
@@ -642,8 +715,34 @@ func (s *Service) execute(ctx context.Context, run Run) (Run, bool) {
 		"manual", run.Manual, "outcome", outcome, "error_kind", result.ErrorKind,
 		"duration_ms", time.Since(began).Milliseconds(),
 	)
+	if finding != nil {
+		// The condition's value reaches the report through the run's turn or text.
+		result.Private, result.External = result.Private || finding.Private, result.External || finding.External
+	}
 	run.Status, run.Reply, run.ErrorKind, run.Private, run.External = StatusReady, result.Text, result.ErrorKind, result.Private, result.External
 	return run, true
+}
+
+// checkCondition checks a run's condition once, now, and returns whether the run goes ahead with
+// what the check found for its turn. A check that fails lets the run go ahead with that said, so a
+// reminder is never lost to it.
+func (s *Service) checkCondition(ctx context.Context, run Run, condition Condition) (bool, *ConditionFinding) {
+	failed := &ConditionFinding{Description: condition.Description, Failed: true}
+	if s.conditions == nil {
+		return true, failed
+	}
+	result, err := s.conditions.CheckCondition(ctx, run.PrincipalID, condition.Spec, s.now())
+	if ctx.Err() != nil {
+		return false, nil
+	}
+	if err != nil {
+		s.logger.WarnContext(ctx, "schedule.condition.failed", "principal_id", run.PrincipalID, "job_id", run.JobID, "error", err)
+		return true, failed
+	}
+	if !result.Met {
+		return false, nil
+	}
+	return true, &ConditionFinding{Description: condition.Description, Value: strings.TrimSpace(result.Value), Private: result.Private, External: result.External}
 }
 
 // deliver sends a ready run to its owner's own chat under the job's name. A transient failure
@@ -660,7 +759,8 @@ func (s *Service) deliver(ctx context.Context, run Run) {
 		return
 	}
 	sendCtx := s.inFeed(ctx, run, chatID)
-	if run.JobType == TypeReminder && s.reminders != nil && run.ErrorKind == "" {
+	// A repeating reminder has no single instant to snooze, so it goes without the buttons.
+	if run.JobType == TypeReminder && s.reminders != nil && run.ErrorKind == "" && run.JobOneTime {
 		messageID, threadID, err := s.reminders.SendReminder(sendCtx, chatID, run.JobID, deliveryText(run))
 		s.finishDelivery(ctx, run, []Sent{{MessageID: messageID, ThreadID: threadID}}, err)
 		return
@@ -736,8 +836,11 @@ func (s *Service) finishDelivery(ctx context.Context, run Run, messages []Sent, 
 }
 
 func deliveryText(run Run) string {
-	if run.JobType == TypeReminder && run.ErrorKind == "" {
+	switch {
+	case run.JobType == TypeReminder && run.ErrorKind == "":
 		return "⏰ " + reportText(run)
+	case run.ErrorKind == errorAnchorGone || run.ErrorKind == errorAnchorFailed:
+		return "**" + run.JobName + "**: " + reportText(run)
 	}
 	return "**Scheduled: " + run.JobName + "**\n\n" + reportText(run)
 }
@@ -780,7 +883,8 @@ func (s *Service) Jobs(ctx context.Context, principalID string) ([]Job, error) {
 }
 
 // SetEnabled pauses or resumes one of the principal's jobs. A resumed job continues from its next
-// occurrence after now; nothing missed while it was paused runs.
+// occurrence after now, which for an anchored job its resolver reads now; nothing missed while it
+// was paused runs.
 func (s *Service) SetEnabled(ctx context.Context, principalID, jobID string, enabled bool) (bool, error) {
 	job, found, err := s.repository.LoadScheduledJob(ctx, principalID, jobID)
 	if err != nil || !found {
@@ -788,7 +892,15 @@ func (s *Service) SetEnabled(ctx context.Context, principalID, jobID string, ena
 	}
 	now := s.now()
 	next := job.NextRunAt
-	if enabled {
+	anchor := JobAnchor(job)
+	var runAt time.Time
+	var key string
+	switch {
+	case enabled && anchor != nil:
+		if runAt, next, key, err = s.enabledOccurrence(ctx, job, *anchor, now); err != nil {
+			return false, err
+		}
+	case enabled:
 		schedule, err := JobSchedule(job)
 		if err != nil {
 			return false, err
@@ -798,6 +910,9 @@ func (s *Service) SetEnabled(ctx context.Context, principalID, jobID string, ena
 		}
 	}
 	changed, err := s.repository.SetScheduledJobEnabled(ctx, principalID, jobID, enabled, next, now)
+	if err == nil && changed && enabled && anchor != nil {
+		_, err = s.repository.MoveScheduledJobOccurrence(ctx, jobID, next, runAt, next, key)
+	}
 	if err == nil && changed {
 		s.logger.InfoContext(ctx, "schedule.job.changed", "principal_id", principalID, "job_id", jobID, "enabled", enabled)
 	}
@@ -891,14 +1006,18 @@ func (s *Service) Busy(ctx context.Context, principalID, jobID string) (bool, er
 	return false, nil
 }
 
-// Prepared is a validated job ready to be proposed or stored, with its parsed schedule.
+// Prepared is a validated job ready to be proposed or stored, with its parsed schedule and, for
+// an anchored job, its anchor, whose first occurrence must be found before it is stored.
 type Prepared struct {
 	Job      Job
 	Schedule Schedule
+	Anchor   *Anchor
+	resolved bool
 }
 
 // Timing is when a job runs: a five-field cron expression, or At, a local date and time such as
-// 2026-10-04 08:30 for a job that runs once. Zone is empty for the default zone.
+// 2026-10-04 08:30 for a job that runs once. Zone is empty for the default zone. A job anchored to
+// an event has neither, and its anchor in its configuration instead.
 type Timing struct {
 	Cron string
 	At   string
@@ -920,10 +1039,29 @@ func (s *Service) Prepare(principalID, name, jobType string, timing Timing, conf
 	if zone == "" {
 		zone = s.zone
 	}
+	handlerConfig, anchor, condition, err := SplitConfig(config)
+	if err != nil {
+		return Prepared{}, err
+	}
+	if condition != nil && registered.Light && !slices.Contains(lightConditionKinds, conditionKind(*condition)) {
+		return Prepared{}, fmt.Errorf("a reminder's condition can only be weather or home, whose values code writes")
+	}
 	now := s.now()
 	var schedule Schedule
-	var err error
-	switch hasCron, hasAt := strings.TrimSpace(timing.Cron) != "", strings.TrimSpace(timing.At) != ""; {
+	hasCron, hasAt := strings.TrimSpace(timing.Cron) != "", strings.TrimSpace(timing.At) != ""
+	switch {
+	case anchor != nil:
+		if hasCron || hasAt {
+			return Prepared{}, fmt.Errorf("an anchored job takes its time from its anchor, not from cron or at")
+		}
+		if err := checkStoredAnchor(*anchor); err != nil {
+			return Prepared{}, err
+		}
+		location, err := LoadZone(zone)
+		if err != nil {
+			return Prepared{}, err
+		}
+		schedule = Schedule{Location: location}
 	case hasCron == hasAt:
 		return Prepared{}, fmt.Errorf("give either a cron expression for a recurring job or a date and time for a one-time job")
 	case hasAt:
@@ -940,10 +1078,14 @@ func (s *Service) Prepare(principalID, name, jobType string, timing Timing, conf
 			return Prepared{}, err
 		}
 	}
-	if err := registered.Handler.Validate(config); err != nil {
+	if err := registered.Handler.Validate(handlerConfig); err != nil {
 		return Prepared{}, err
 	}
-	return Prepared{
+	next := now.AddDate(100, 0, 0)
+	if anchor == nil {
+		next = schedule.Next(now)
+	}
+	prepared := Prepared{
 		Job: Job{
 			PrincipalID: principalID,
 			Name:        name,
@@ -953,16 +1095,39 @@ func (s *Service) Prepare(principalID, name, jobType string, timing Timing, conf
 			Zone:        zone,
 			Config:      config,
 			Enabled:     true,
-			NextRunAt:   schedule.Next(now),
+			NextRunAt:   next,
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		},
 		Schedule: schedule,
-	}, nil
+		resolved: anchor == nil,
+	}
+	if anchor != nil {
+		prepared.Anchor = anchor
+		prepared.Job.AnchorRepeats = anchor.Repeats()
+	}
+	return prepared, nil
+}
+
+// lightConditionKinds are the conditions a light job, such as a reminder, may carry: its text is
+// sent as written, so only a value code writes from household or public data may join it, never
+// a train service's notice or an agent check's reading.
+var lightConditionKinds = []string{"weather", "home"}
+
+// conditionKind is the watch kind a stored condition checks.
+func conditionKind(condition Condition) string {
+	var spec struct {
+		Kind string `json:"kind"`
+	}
+	_ = json.Unmarshal(condition.Spec, &spec)
+	return spec.Kind
 }
 
 // Create stores a prepared job under the given ID.
 func (s *Service) Create(ctx context.Context, id string, prepared Prepared) (bool, error) {
+	if !prepared.resolved {
+		return false, fmt.Errorf("the anchored job's first occurrence was not found before it was stored")
+	}
 	job := prepared.Job
 	job.ID = id
 	created, err := s.repository.CreateScheduledJob(ctx, job, job.Limit())
@@ -977,6 +1142,9 @@ func (s *Service) Create(ctx context.Context, id string, prepared Prepared) (boo
 // TravelPause is stored, so a caller that does not mean to change it copies the current one. A job
 // changed since expectedUpdatedAt is reported as not updated.
 func (s *Service) Update(ctx context.Context, current Job, expectedUpdatedAt time.Time, prepared Prepared) (bool, error) {
+	if !prepared.resolved {
+		return false, fmt.Errorf("the anchored job's next occurrence was not found before it was stored")
+	}
 	job := prepared.Job
 	job.ID, job.Enabled, job.CreatedAt = current.ID, current.Enabled, current.CreatedAt
 	if job.Destination == "" {

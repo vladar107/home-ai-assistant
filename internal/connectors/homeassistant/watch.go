@@ -25,8 +25,9 @@ const (
 )
 
 var (
-	_ watch.Evaluator = (*Service)(nil)
-	_ watch.Resolver  = (*Service)(nil)
+	_ watch.Evaluator      = (*Service)(nil)
+	_ watch.Resolver       = (*Service)(nil)
+	_ watch.InstantChecker = (*Service)(nil)
 )
 
 // visible returns the entities the assistant can see, by entity ID with their friendly names: the
@@ -242,6 +243,53 @@ func (s *Service) Evaluate(ctx context.Context, principalID string, w watch.Watc
 		return watch.Observation{State: watchPending, Silent: true, Since: since}, nil
 	}
 	return watch.Observation{State: watchHolding, Triggered: true, Headline: holdingHeadline(name, *condition, entity), Since: since}, nil
+}
+
+// CheckAt compares the entity's current state with a job's condition once. A condition that must
+// hold for some minutes needs a watch's history, so it is refused, and a home switched off fails
+// the check rather than skipping it.
+func (s *Service) CheckAt(ctx context.Context, principalID string, spec watch.Spec, _ time.Time) (watch.Verdict, error) {
+	condition := spec.Condition
+	if condition == nil || condition.ForMinutes > 0 {
+		return watch.Verdict{}, errors.New("a home condition compares the current state only")
+	}
+	enabled, err := s.enabled(ctx, principalID)
+	if err != nil {
+		return watch.Verdict{}, err
+	}
+	if !enabled {
+		return watch.Verdict{}, errors.New("the home is switched off in /settings")
+	}
+	snap, err := s.current(ctx)
+	if err != nil {
+		return watch.Verdict{}, &watch.UpstreamError{Service: Integration, Err: err}
+	}
+	if _, ok := snap.visible()[spec.Target.Entity]; !ok {
+		return watch.Verdict{}, fmt.Errorf("%s is no longer exposed to the assistant", spec.Target.Entity)
+	}
+	states, err := s.fetchStates(ctx)
+	if err != nil {
+		return watch.Verdict{}, &watch.UpstreamError{Service: Integration, Err: err}
+	}
+	entity, found := states[spec.Target.Entity]
+	if !found {
+		return watch.Verdict{}, fmt.Errorf("Home Assistant no longer reports %s", spec.Target.Entity)
+	}
+	name := entity.friendlyName()
+	if name == "" {
+		name = spec.Target.Name
+	}
+	if name == "" {
+		name = spec.Target.Entity
+	}
+	holds, err := conditionHolds(*condition, entity)
+	if err != nil {
+		return watch.Verdict{}, fmt.Errorf("%s: %w", name, err)
+	}
+	if !holds {
+		return watch.Verdict{Value: normalHeadline(name, *condition, entity)}, nil
+	}
+	return watch.Verdict{Met: true, Value: holdingHeadline(name, *condition, entity)}, nil
 }
 
 func (s *Service) fetchStates(ctx context.Context) (map[string]stateObject, error) {

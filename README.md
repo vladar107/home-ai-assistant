@@ -111,7 +111,13 @@ borrowed between users.
   and the reports they sent: replying to a report, or asking about "the report
   this morning", works after `/new` and restarts.
   A job meant to "only tell me when…" stays silent until it has something to
-  say.
+  say. A reminder or job can also follow an event instead of a clock time
+  ("remind me 30 minutes before the dentist", "an hour before every meeting
+  titled Planning, send me the agenda", "when my trip starts, tell me the
+  weather there"): it moves when the event moves, and ends with one line when
+  the event is cancelled. Any job can carry a condition checked when it is due
+  ("at 07:40 on weekdays, tell me only if rain is coming in the next hour"), and
+  stays silent when it does not hold.
 - **Heads-up.** Turned on in `/settings`, the assistant looks over the user's
   day at 07:30 and 18:30 (every trip in the window checked against saved routes
   and live trains, with an alternative when a train fails; weather, home
@@ -181,7 +187,9 @@ borrowed between users.
   Pause buttons; `/jobs` lists them. Train and bus departures, saved routes, and NS
   disruptions at stations are checked, and so are Home Assistant devices: "tell me
   if the balcony door stays open for 10 minutes", "warn me if the freezer goes above
-  -15 °C", or "tell me when the washing machine is done". Anything else the
+  -15 °C", or "tell me when the washing machine is done". "Tell me when rain is
+  coming" checks the 15-minute precipitation forecast at a place, also in code.
+  Anything else the
   assistant can look at is watched by a model turn per check on the user's own
   subscription: "tell me when the return flight drops below €150", "tell me when a
   mail from the tax office arrives", or "watch this page for the release date". A

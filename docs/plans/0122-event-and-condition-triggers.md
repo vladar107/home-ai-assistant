@@ -1,6 +1,6 @@
 # 0122 — Jobs relative to events, conditions on any job, and a weather source
 
-Status: `proposed`
+Status: `done`
 
 ## Context
 
@@ -168,6 +168,45 @@ forecast (`minutely_15`) that can carry this.
   existing calendar client and the user's own Google accounts. A calendar
   switched off makes the job's resolver fail, and the existing job failure
   notice tells the user.
+- **Settled during implementation.** These refine the decisions above where
+  the code asked for a concrete choice.
+  - The creation tools are `schedule_propose` and `reminder_set`; both take
+    `anchor` and `condition`, and `at` becomes optional for a reminder.
+    `schedule_update` also takes `remove_condition`. A job keeps its kind of
+    timing: a clock job cannot gain an anchor, nor an anchored one cron or
+    `at`.
+  - The condition is stored in the config as its watch spec with its
+    description, so `schedule_list` and `/jobs` can show it without the watch
+    service.
+  - After a run, `advance()` moves a repeating job to the sentinel, keeps the
+    occurrence it ran for as a new `last_occurrence_key` column, and wakes the
+    resolver pass, which finds the next match and never returns that
+    occurrence again, however the event moves; `advance()` itself never asks a
+    resolver. A long occurrence key is stored as its SHA-256 digest, and a
+    calendar ID is at most 256 characters.
+  - The resolver pass reads each principal's jobs in a worker of its own, at
+    most four at once; a principal whose worker is still reading is left to a
+    later pass, so one hanging calendar delays only its owner's anchors. A wake
+    that comes during a pass is kept for the next one.
+  - The failure notice is one line, `anchor_failed`, to the Reminders tab after
+    three failed passes in a row; the job keeps its last known time.
+  - A snooze clears the job's `occurrence_key`, which marks the time as pinned.
+    Snoozing applies to single-occurrence reminders, as it does today to every
+    one-time reminder; a repeating reminder is sent without snooze buttons.
+  - A condition's value may come from outside, so the check reports whether it
+    is private or outside content, and the run's report is marked as such. A
+    model turn gets the value quoted as untrusted data, not as a `[system]`
+    line. A reminder's text is sent as written and is never outside content,
+    so a reminder takes only weather and home conditions, whose values code
+    writes.
+  - A weather check reads enough 15-minute slots to cover the longest window
+    from a forecast reused for 10 minutes, and a forecast that stops short of
+    the window fails the check rather than reporting it dry. A failed forecast
+    request reports only its class, never the coordinates in its address.
+  - The watch package's interface is `InstantChecker`, because `Condition` is
+    already the home watch's condition type. The home check lives in the Home
+    Assistant connector beside its evaluator.
+  - A manual Run now skips the condition.
 
 ## Approach
 
@@ -186,8 +225,8 @@ forecast (`minutely_15`) that can carry this.
 
 ## Files affected
 
-- `internal/store/sqlite/migrations/NNN_anchored_jobs.sql` and
-  `NNN_weather_and_place_watches.sql`, with `schedules.go` (claim and finish
+- `internal/store/sqlite/migrations/047_anchored_jobs.sql` and
+  `048_weather_and_place_watches.sql`, with `schedules.go` (claim and finish
   queries) and the watch store
 - `internal/schedule`: the job model, `service.go` (`advance`,
   `SetEnabled`, snooze), tools and their rendering, and a new `anchor.go`
@@ -197,6 +236,8 @@ forecast (`minutely_15`) that can carry this.
 - `internal/connectors/web/weather.go`, `internal/connectors/calendar`,
   `internal/trip`, `internal/turn` (`RunCheck` used synchronously)
 - `internal/wiring`, `internal/prompt`, README, and docs
+- `internal/connectors/homeassistant/watch.go` (the home condition check) and
+  `internal/testutil/calendarsim` (moving and cancelling an event)
 
 ## Validation
 

@@ -1,5 +1,6 @@
-// Package schedule is the durable scheduler. Jobs belong to one principal and carry either a cron
-// expression or a single instant, a time zone, and a typed configuration; SQLite holds when each job is next due and
+// Package schedule is the durable scheduler. Jobs belong to one principal and carry a cron
+// expression, a single instant, or an anchor to an event, a time zone, a typed configuration,
+// and optionally a condition checked when they are due; SQLite holds when each job is next due and
 // every occurrence it produced, so an occurrence runs at most once across ticks, restarts, and
 // retries. What an occurrence does is decided by its job type, registered in code.
 package schedule
@@ -28,8 +29,10 @@ const (
 // ErrTooManyJobs reports that the principal already holds the maximum number of jobs of the kind.
 var ErrTooManyJobs = errors.New("the principal already has the maximum number of scheduled jobs")
 
-// Job runs on its cron expression or, when RunAt is set, once at that instant. A one-time job is
-// finished once its run is queued and is then kept only until it is pruned or snoozed.
+// Job runs on its cron expression, once at RunAt, or, when AnchorRepeats is set, at an offset from
+// each event its anchor matches. A one-time job is finished once its run is queued and is then kept
+// only until it is pruned or snoozed. A job anchored to one event is a one-time job whose RunAt the
+// anchor resolver moves with the event.
 type Job struct {
 	ID          string
 	PrincipalID string
@@ -49,6 +52,14 @@ type Job struct {
 	FinishedAt  time.Time
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+	// AnchorRepeats marks a job anchored to an event that repeats, which has neither Cron nor RunAt.
+	AnchorRepeats bool
+	// OccurrenceKey names the anchored event occurrence NextRunAt points at, such as a calendar
+	// event's ID; "" for a job on a clock time, and for an anchored reminder a snooze pinned.
+	OccurrenceKey string
+	// LastOccurrenceKey is the occurrence a repeating anchor last ran for, which it never runs for
+	// again, however the event moves after.
+	LastOccurrenceKey string
 }
 
 func (j Job) OneTime() bool { return !j.RunAt.IsZero() }
@@ -120,13 +131,24 @@ type Repository interface {
 	DueScheduledJobs(ctx context.Context, now time.Time) ([]Job, error)
 	// AdvanceScheduledJob moves an enabled job from the occurrence it was due at to next, or
 	// finishes a one-time job when next is zero, and, when run is set, queues that run in the same
-	// transaction. A job changed since it was read is left alone, and an occurrence already queued
+	// transaction. A repeating anchored job's occurrence becomes its last one. A job changed since it was read is left alone, and an occurrence already queued
 	// is not queued again.
 	AdvanceScheduledJob(ctx context.Context, jobID string, due, next time.Time, run *Run) (bool, error)
 	// ReviveScheduledJob moves a finished one-time job of the given type to a new instant and
-	// makes it pending again. Any other job is left alone and reported as not revived.
+	// makes it pending again, forgetting its anchored occurrence so the resolver leaves the new
+	// instant alone. Any other job is left alone and reported as not revived.
 	ReviveScheduledJob(ctx context.Context, principalID, jobID, jobType string, runAt, now time.Time) (bool, error)
 	QueueScheduledRun(ctx context.Context, run Run) error
+	// AnchoredScheduledJobs returns every principal's unfinished jobs with an anchor.
+	AnchoredScheduledJobs(ctx context.Context) ([]Job, error)
+	// MoveScheduledJobOccurrence moves an unfinished job from the next run it was read with to
+	// another occurrence, and a one-time job's instant with it, leaving its last change alone. A job
+	// moved or run since it was read is left alone and reported as not moved.
+	MoveScheduledJobOccurrence(ctx context.Context, jobID string, expectedNext, runAt, next time.Time, key string) (bool, error)
+	// QueueAnchorNotice stores a ready run that tells the job's owner about its anchor and, with
+	// finish, finishes the job in the same transaction while it still has the next run it was read
+	// with.
+	QueueAnchorNotice(ctx context.Context, run Run, finish bool, expectedNext, now time.Time) (bool, error)
 	// ScheduledRuns returns the runs in the given statuses together with their job's fields.
 	ScheduledRuns(ctx context.Context, statuses ...string) ([]Run, error)
 	// TransitionScheduledRun moves a run from one status to another. A terminal status clears the
@@ -169,6 +191,30 @@ type Occurrence struct {
 	Location     *time.Location
 	// Manual is true for a run the user asked for outside the schedule.
 	Manual bool
+	// Condition is what the job's condition found when it was checked for this run; nil for a job
+	// without one and for a manual run.
+	Condition *ConditionFinding
+}
+
+// ConditionFinding is what a run's condition check found: the value it holds at, or that it
+// failed and the run went ahead anyway. Private and External say what the value may retell, as a
+// run's own result does.
+type ConditionFinding struct {
+	Description string
+	Value       string
+	Failed      bool
+	Private     bool
+	External    bool
+}
+
+// ConditionResult is one check of a job's condition.
+type ConditionResult struct {
+	Met   bool
+	Value string
+	// Private and External are set when the value may retell private content or content from
+	// outside the household, such as a train service's notice or an agent check's reading.
+	Private  bool
+	External bool
 }
 
 // Result is the text to deliver to the job's owner. ErrorKind is empty for success and a short

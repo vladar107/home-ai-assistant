@@ -106,11 +106,7 @@ func renderJobs(ctx context.Context, principalID string, schedules ScheduleContr
 		state := schedule.DescribeJob(job, schedules.DefaultZone())
 		var row []InlineButton
 		if !job.OneTime() {
-			location, err := schedule.LoadZone(job.Zone)
-			if err != nil {
-				location, _ = schedule.LoadZone(schedules.DefaultZone())
-			}
-			state += ", next " + schedule.FormatOccurrence(job.NextRunAt, location)
+			state += ", next " + schedule.NextRunText(job, schedules.DefaultZone())
 			toggle := InlineButton{Text: "Pause " + number, CallbackData: jobCallback(jobPauseAction, job.ID, page)}
 			if !job.Enabled {
 				state = schedule.DescribeJob(job, schedules.DefaultZone()) + ", paused"

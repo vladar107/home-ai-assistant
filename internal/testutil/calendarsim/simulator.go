@@ -120,6 +120,25 @@ func (s *Simulator) AddEvents(account, calendarID string, events ...Event) {
 	s.t.Fatalf("calendarsim: %s has no calendar %q", account, calendarID)
 }
 
+// ReplaceEvent puts the event in the place of the one with its ID, as an event moved or cancelled
+// in Google Calendar is.
+func (s *Simulator) ReplaceEvent(account, calendarID string, event Event) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, data := range s.calendars[account] {
+		if data.calendar.ID != calendarID {
+			continue
+		}
+		for index := range data.events {
+			if data.events[index].ID == event.ID {
+				data.events[index] = event
+				return
+			}
+		}
+	}
+	s.t.Fatalf("calendarsim: %s has no event %q in %q", account, event.ID, calendarID)
+}
+
 // ExpireToken makes the next request carrying the token fail with 401, as an access token that
 // ran out an instant ago does; a later request with the same token succeeds again.
 func (s *Simulator) ExpireToken(accessToken string) {

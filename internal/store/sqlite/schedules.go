@@ -14,7 +14,7 @@ import (
 
 var _ schedule.Repository = (*Store)(nil)
 
-const scheduledJobColumns = `id, principal_id, name, job_type, cron, run_at, zone, config, enabled, next_run_at, finished_at, created_at, updated_at, travel_pause, destination`
+const scheduledJobColumns = `id, principal_id, name, job_type, cron, run_at, zone, config, enabled, next_run_at, finished_at, created_at, updated_at, travel_pause, destination, anchor, occurrence_key, last_occurrence_key`
 
 const scheduleRunColumns = `r.id, r.job_id, r.principal_id, r.scheduled_for, r.manual, r.status,
 	COALESCE(r.error_kind, ''), COALESCE(r.reply, ''), j.name, j.job_type, j.zone, j.run_at IS NOT NULL, j.config,
@@ -50,9 +50,10 @@ func (s *Store) CreateScheduledJob(ctx context.Context, job schedule.Job, limit 
 	}
 	if _, err := tx.ExecContext(
 		ctx,
-		`INSERT INTO scheduled_jobs (`+scheduledJobColumns+`) VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, NULLIF(?, ''))`,
+		`INSERT INTO scheduled_jobs (`+scheduledJobColumns+`) VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''))`,
 		job.ID, job.PrincipalID, job.Name, job.Type, job.Cron, optionalTime(job.RunAt), job.Zone, string(job.Config), job.Enabled,
 		formatTime(job.NextRunAt), optionalTime(job.FinishedAt), formatTime(job.CreatedAt), formatTime(job.UpdatedAt), job.TravelPause, job.Destination,
+		anchorMode(job), job.OccurrenceKey, job.LastOccurrenceKey,
 	); err != nil {
 		return false, fmt.Errorf("insert scheduled job: %w", err)
 	}
@@ -172,9 +173,10 @@ func (s *Store) UpdateScheduledJob(ctx context.Context, job schedule.Job, expect
 	result, err := s.db.ExecContext(
 		ctx,
 		`UPDATE scheduled_jobs SET name = ?, cron = NULLIF(?, ''), run_at = NULLIF(?, ''), zone = ?, config = ?, next_run_at = ?, updated_at = ?, travel_pause = ?,
-		     destination = NULLIF(?, '')
+		     destination = NULLIF(?, ''), anchor = NULLIF(?, ''), occurrence_key = NULLIF(?, '')
 		 WHERE id = ? AND principal_id = ? AND job_type = ? AND finished_at IS NULL AND updated_at = ?`,
 		job.Name, job.Cron, optionalTime(job.RunAt), job.Zone, string(job.Config), formatTime(job.NextRunAt), formatTime(job.UpdatedAt), job.TravelPause, job.Destination,
+		anchorMode(job), job.OccurrenceKey,
 		job.ID, job.PrincipalID, job.Type, formatTime(expectedUpdatedAt),
 	)
 	if err != nil {
@@ -227,10 +229,16 @@ func (s *Store) AdvanceScheduledJob(ctx context.Context, jobID string, due, next
 	defer tx.Rollback()
 
 	now := formatTime(time.Now())
-	query := `UPDATE scheduled_jobs SET next_run_at = ?, updated_at = ? WHERE id = ? AND enabled = 1 AND finished_at IS NULL AND next_run_at = ?`
+	// A repeating anchored job's occurrence becomes the last one it ran for, which its resolver
+	// then never returns again.
+	query := `UPDATE scheduled_jobs SET next_run_at = ?, updated_at = ?,
+	     last_occurrence_key = CASE WHEN anchor IS NULL THEN last_occurrence_key ELSE COALESCE(occurrence_key, last_occurrence_key) END,
+	     occurrence_key = CASE WHEN anchor IS NULL THEN occurrence_key END
+	 WHERE id = ? AND enabled = 1 AND finished_at IS NULL AND next_run_at = ?`
 	arguments := []any{formatTime(next), now, jobID, formatTime(due)}
 	if next.IsZero() {
-		query = `UPDATE scheduled_jobs SET finished_at = ?, updated_at = ? WHERE id = ? AND enabled = 1 AND finished_at IS NULL AND next_run_at = ? AND run_at IS NOT NULL`
+		query = `UPDATE scheduled_jobs SET finished_at = ?, updated_at = ? WHERE id = ? AND enabled = 1 AND finished_at IS NULL AND next_run_at = ?
+		 AND (run_at IS NOT NULL OR anchor IS NOT NULL)`
 		arguments = []any{now, now, jobID, formatTime(due)}
 	}
 	result, err := tx.ExecContext(ctx, query, arguments...)
@@ -258,14 +266,93 @@ func (s *Store) ReviveScheduledJob(ctx context.Context, principalID, jobID, jobT
 	}
 	result, err := s.db.ExecContext(
 		ctx,
-		`UPDATE scheduled_jobs SET run_at = ?, next_run_at = ?, finished_at = NULL, enabled = 1, updated_at = ?
-		 WHERE id = ? AND principal_id = ? AND job_type = ? AND finished_at IS NOT NULL`,
+		`UPDATE scheduled_jobs SET run_at = ?, next_run_at = ?, finished_at = NULL, enabled = 1, updated_at = ?, occurrence_key = NULL
+		 WHERE id = ? AND principal_id = ? AND job_type = ? AND finished_at IS NOT NULL AND run_at IS NOT NULL`,
 		formatTime(runAt), formatTime(runAt), formatTime(now), jobID, principalID, jobType,
 	)
 	if err != nil {
 		return false, fmt.Errorf("revive scheduled job: %w", err)
 	}
 	return affectedOne(result, "revived scheduled job")
+}
+
+func (s *Store) AnchoredScheduledJobs(ctx context.Context) ([]schedule.Job, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("list anchored scheduled jobs: SQLite store is not open")
+	}
+	return s.queryScheduledJobs(
+		ctx,
+		`SELECT `+scheduledJobColumns+` FROM scheduled_jobs WHERE finished_at IS NULL AND json_type(config, '$.anchor') = 'object' ORDER BY principal_id, next_run_at, id`,
+	)
+}
+
+// MoveScheduledJobOccurrence leaves updated_at alone, like the travel flag, so a pending edit is
+// not refused because the event it follows moved.
+func (s *Store) MoveScheduledJobOccurrence(ctx context.Context, jobID string, expectedNext, runAt, next time.Time, key string) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("move scheduled job: SQLite store is not open")
+	}
+	result, err := s.db.ExecContext(
+		ctx,
+		`UPDATE scheduled_jobs SET run_at = CASE WHEN run_at IS NULL THEN NULL ELSE ? END, next_run_at = ?, occurrence_key = NULLIF(?, '')
+		 WHERE id = ? AND finished_at IS NULL AND next_run_at = ? AND (run_at IS NULL OR ? <> '')`,
+		optionalTime(runAt), formatTime(next), key, jobID, formatTime(expectedNext), optionalTime(runAt),
+	)
+	if err != nil {
+		return false, fmt.Errorf("move scheduled job: %w", err)
+	}
+	return affectedOne(result, "moved scheduled job")
+}
+
+func (s *Store) QueueAnchorNotice(ctx context.Context, run schedule.Run, finish bool, expectedNext, now time.Time) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("queue anchor notice: SQLite store is not open")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin anchor notice: %w", err)
+	}
+	defer tx.Rollback()
+	stamp := formatTime(now)
+	if finish {
+		result, err := tx.ExecContext(
+			ctx,
+			`UPDATE scheduled_jobs SET finished_at = ?, updated_at = ? WHERE id = ? AND principal_id = ? AND finished_at IS NULL AND next_run_at = ?
+			 AND (run_at IS NOT NULL OR anchor IS NOT NULL)`,
+			stamp, stamp, run.JobID, run.PrincipalID, formatTime(expectedNext),
+		)
+		if err != nil {
+			return false, fmt.Errorf("finish anchored job: %w", err)
+		}
+		if finished, err := affectedOne(result, "finished anchored job"); err != nil || !finished {
+			return false, err
+		}
+	}
+	result, err := tx.ExecContext(
+		ctx,
+		`INSERT INTO schedule_runs (id, job_id, principal_id, scheduled_for, manual, status, error_kind, reply, created_at, updated_at)
+		 SELECT ?, id, principal_id, ?, 0, 'ready', ?, ?, ?, ? FROM scheduled_jobs WHERE id = ? AND principal_id = ?
+		 ON CONFLICT DO NOTHING`,
+		run.ID, formatTime(run.ScheduledFor), run.ErrorKind, run.Reply, stamp, stamp, run.JobID, run.PrincipalID,
+	)
+	if err != nil {
+		return false, fmt.Errorf("insert anchor notice: %w", err)
+	}
+	queued, err := affectedOne(result, "queued anchor notice")
+	if err != nil || !queued {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit anchor notice: %w", err)
+	}
+	return true, nil
+}
+
+func anchorMode(job schedule.Job) string {
+	if job.AnchorRepeats {
+		return "repeating"
+	}
+	return ""
 }
 
 func (s *Store) QueueScheduledRun(ctx context.Context, run schedule.Run) error {
@@ -462,10 +549,10 @@ func (s *Store) queryScheduledJobs(ctx context.Context, query string, arguments 
 func scanScheduledJob(row rowScanner) (schedule.Job, error) {
 	var job schedule.Job
 	var config, nextRunAt, createdAt, updatedAt string
-	var cron, runAt, finishedAt, destination sql.NullString
+	var cron, runAt, finishedAt, destination, anchor, occurrence, last sql.NullString
 	if err := row.Scan(
 		&job.ID, &job.PrincipalID, &job.Name, &job.Type, &cron, &runAt, &job.Zone, &config, &job.Enabled,
-		&nextRunAt, &finishedAt, &createdAt, &updatedAt, &job.TravelPause, &destination,
+		&nextRunAt, &finishedAt, &createdAt, &updatedAt, &job.TravelPause, &destination, &anchor, &occurrence, &last,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return schedule.Job{}, err
@@ -474,6 +561,7 @@ func scanScheduledJob(row rowScanner) (schedule.Job, error) {
 	}
 	job.Config = json.RawMessage(config)
 	job.Cron, job.Destination = cron.String, destination.String
+	job.AnchorRepeats, job.OccurrenceKey, job.LastOccurrenceKey = anchor.Valid, occurrence.String, last.String
 	var err error
 	if runAt.Valid {
 		if job.RunAt, err = time.Parse(time.RFC3339Nano, runAt.String); err != nil {
