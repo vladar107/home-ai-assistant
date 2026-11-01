@@ -22,7 +22,7 @@ const (
 
 	modelTurnCatchUp         = 6 * time.Hour
 	modelTurnMinimumInterval = time.Hour
-	maximumPromptRunes       = 1000
+	maximumPromptRunes       = 10000
 )
 
 // TurnRunner is the turn engine as a scheduled model turn sees it: one isolated,
@@ -94,8 +94,13 @@ func decodeModelTurn(config json.RawMessage) (modelTurnConfig, error) {
 		return modelTurnConfig{}, fmt.Errorf("the job's instructions could not be read")
 	}
 	prompt := strings.TrimSpace(decoded.Prompt)
-	if prompt == "" || !utf8.ValidString(prompt) || utf8.RuneCountInString(prompt) > maximumPromptRunes {
-		return modelTurnConfig{}, fmt.Errorf("the prompt must be between 1 and %d characters", maximumPromptRunes)
+	switch runes := utf8.RuneCountInString(prompt); {
+	case prompt == "":
+		return modelTurnConfig{}, fmt.Errorf("the job's instructions are empty")
+	case !utf8.ValidString(prompt):
+		return modelTurnConfig{}, fmt.Errorf("the job's instructions must be valid UTF-8")
+	case runes > maximumPromptRunes:
+		return modelTurnConfig{}, fmt.Errorf("the job's instructions are %d characters and may be at most %d, so cut %d or more", runes, maximumPromptRunes, runes-maximumPromptRunes)
 	}
 	decoded.Prompt = prompt
 	if decoded.Model != "" {

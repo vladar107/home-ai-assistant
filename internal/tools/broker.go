@@ -24,6 +24,7 @@ const (
 	maximumCallsPerTurn = 8
 	budgetCeilingFactor = 2
 	maximumResultBytes  = 16 << 10
+	resultBytesCeiling  = 64 << 10
 	callDeadline        = 15 * time.Second
 	maximumCallDeadline = 2 * time.Minute
 
@@ -45,12 +46,14 @@ var toolNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 
 // Definition is a tool a connector contributes. InputSchema is a JSON Schema object validated by
 // the runtime before a call is executed. Timeout is optional; zero means the default callDeadline.
+// MaxResultBytes is optional too; zero means the default result cap.
 type Definition struct {
-	Name        string
-	Description string
-	InputSchema json.RawMessage
-	Risk        RiskClass
-	Timeout     time.Duration
+	Name           string
+	Description    string
+	InputSchema    json.RawMessage
+	Risk           RiskClass
+	Timeout        time.Duration
+	MaxResultBytes int
 	// ThirdParty marks a tool whose result carries text written by someone outside the household,
 	// such as web pages or email; a call that returns, even with an error, marks the principal
 	// exposed and its result untrusted.
@@ -273,7 +276,7 @@ func (b *Broker) toolsFor(ctx context.Context, principalID string, readOnly bool
 			if _, exists := executor.bindings[definition.Name]; exists {
 				return agentruntime.ToolSet{}, fmt.Errorf("tool %q is contributed twice", definition.Name)
 			}
-			executor.bindings[definition.Name] = toolBinding{provider: provider, deadline: definition.Timeout, thirdParty: definition.ThirdParty, household: definition.Household, screen: definition.Screen, private: definition.Private, outsideBudget: definition.OutsideBudget, confirmed: definition.Confirmed}
+			executor.bindings[definition.Name] = toolBinding{provider: provider, deadline: definition.Timeout, resultBytes: definition.MaxResultBytes, thirdParty: definition.ThirdParty, household: definition.Household, screen: definition.Screen, private: definition.Private, outsideBudget: definition.OutsideBudget, confirmed: definition.Confirmed}
 			if definition.OutsideBudget && executor.handoff == "" {
 				executor.handoff = definition.Name
 			}
@@ -332,6 +335,9 @@ func validateDefinition(definition Definition) error {
 	if definition.Timeout < 0 || definition.Timeout > maximumCallDeadline {
 		return fmt.Errorf("tool %q has an invalid timeout", definition.Name)
 	}
+	if definition.MaxResultBytes < 0 || definition.MaxResultBytes > resultBytesCeiling {
+		return fmt.Errorf("tool %q has an invalid result cap", definition.Name)
+	}
 	if definition.Screen && !definition.ThirdParty {
 		return fmt.Errorf("tool %q is screened but not marked third-party", definition.Name)
 	}
@@ -353,6 +359,7 @@ func validateDefinition(definition Definition) error {
 type toolBinding struct {
 	provider      Provider
 	deadline      time.Duration
+	resultBytes   int
 	thirdParty    bool
 	household     bool
 	screen        bool
@@ -472,7 +479,7 @@ func (e *turnExecutor) perform(ctx context.Context, call agentruntime.ToolCall, 
 		return "timeout", "", agentruntime.ToolResult{Text: prompt.ToolTimedOut, IsError: true}
 	case err != nil:
 		return "failed", "", agentruntime.ToolResult{Text: prompt.ToolFailed, IsError: true}
-	case len(result.Text) > maximumResultBytes:
+	case len(result.Text) > resultLimit(binding):
 		return "oversized", "", agentruntime.ToolResult{Text: prompt.ToolOversized, IsError: true}
 	case result.IsError:
 		// A private tool's error can still quote what it read, such as a Notion table's property
@@ -567,4 +574,11 @@ func loggableToolName(name string) string {
 		return name
 	}
 	return "invalid"
+}
+
+func resultLimit(binding toolBinding) int {
+	if binding.resultBytes > 0 {
+		return binding.resultBytes
+	}
+	return maximumResultBytes
 }

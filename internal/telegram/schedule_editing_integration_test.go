@@ -35,6 +35,7 @@ func TestScheduledJobInstructionsArePatched(t *testing.T) {
 	h.start()
 	prompt := "Check the trains from Utrecht Centraal to Den Haag Centraal. Report delays over 5 minutes. Report cancellations. End with the weather."
 	job := h.createJob("alice", "a1b2c3d4e5f60718", "Morning trains", "30 7 * * 1-5", prompt)
+	long := h.createJob("alice", "b2c3d4e5f6071829", "Long notes", "0 9 * * *", "Keep this short. "+strings.Repeat("x", 9980))
 
 	h.push(textUpdate(1, 101, "only tell me about delays over 10 minutes and skip the weather"))
 	chat := receive(t, h.ctx, runtime.calls)
@@ -44,7 +45,7 @@ func TestScheduledJobInstructionsArePatched(t *testing.T) {
 		{`{"job_id":"` + job.ID + `","prompt_edits":[{"find":"over 15 minutes","replace":"over 10 minutes"}]}`, "Edit 1: its find text \"over 15 minutes\" does not occur"},
 		{`{"job_id":"` + job.ID + `","prompt_edits":[{"find":"over 5 minutes","replace":"over 10 minutes"},{"find":"Report","replace":"Tell me about"}]}`, "Edit 2: its find text \"Report\" occurs 2 times"},
 		{`{"job_id":"` + job.ID + `","prompt":"Check the trains.","prompt_edits":[{"find":"over 5 minutes","replace":"over 10 minutes"}]}`, "not both"},
-		{`{"job_id":"` + job.ID + `","prompt_edits":[{"find":"End with the weather.","replace":"` + strings.Repeat("x", 1000) + `"}]}`, "the prompt must be between 1 and 1000 characters"},
+		{`{"job_id":"` + long.ID + `","prompt_edits":[{"find":"short","replace":"` + strings.Repeat("y", 1000) + `"}]}`, "the job's instructions are 10992 characters and may be at most 10000, so cut 992 or more"},
 		{`{"job_id":"` + job.ID + `","prompt_edits":[{"find":"over 5 minutes","replace":"over 5 minutes"}]}`, "That changes nothing"},
 	} {
 		if result := call("schedule_update", refused.arguments); !result.IsError || !strings.Contains(result.Text, refused.want) {
@@ -80,11 +81,12 @@ func TestScheduledJobInstructionsArePatched(t *testing.T) {
 	}
 	h.continueTurn(runtime, 2)
 	stored, err := h.scheduler.Jobs(h.ctx, "alice")
-	if err != nil || len(stored) != 1 {
+	index := slices.IndexFunc(stored, func(stored schedule.Job) bool { return stored.ID == job.ID })
+	if err != nil || index < 0 {
 		t.Fatalf("jobs = %+v %v", stored, err)
 	}
 	want := "Check the trains from Utrecht Centraal to Den Haag Centraal. Report delays over 10 minutes. Report cancellations."
-	if got := schedule.ModelTurnPrompt(stored[0].Config); got != want {
+	if got := schedule.ModelTurnPrompt(stored[index].Config); got != want {
 		t.Fatalf("patched prompt = %q, want %q", got, want)
 	}
 }

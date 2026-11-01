@@ -62,6 +62,7 @@ func proposeGuidance(zone string) string {
 		"schedule_update changes a job by its id from schedule_list, given only the fields that change. " +
 		"To change its instructions, first read them with schedule_get, then pass prompt_edits: small find and replace pairs, each find copied exactly from the stored prompt and occurring in it once, that change only what the user asked for; the user sees just those passages, old and new. " +
 		"Never rewrite or reword the parts the user did not ask to change, and pass prompt, the complete new instructions, only when the user asks for a real rewrite. " +
+		"A new job's prompt or a rewrite must fit one confirmation, about 2000 characters; longer instructions, up to 10000 characters, are grown with prompt_edits once the job exists. " +
 		"The Heads-up job's text is only the user's notes: how it checks the day is built in and not shown. When the user corrects a Heads-up report, add or change one short note with prompt_edits that states the lasting preference behind the correction, " +
 		"such as what an event in their calendar means or what to leave out, never a step of how to check the day and never one day's mistake. " +
 		"Never invent a value the user did not give, such as a time, a buffer, a walking time, or a threshold; ask for it instead. " +
@@ -88,6 +89,8 @@ var getDefinition = tools.Definition{
 	Name:        toolGet,
 	Description: "Show one of the user's scheduled jobs or reminders in full, with its complete instructions.",
 	Risk:        tools.RiskRead,
+	// The job's header and maximumPromptRunes instructions of up to four bytes each.
+	MaxResultBytes: 48 << 10,
 	InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 		`"job_id":{"type":"string","description":"The id from schedule_list."}},` +
 		`"required":["job_id"],"additionalProperties":false}`),
@@ -124,7 +127,7 @@ var writeDefinitions = []tools.Definition{
 			`"name":{"type":"string","maxLength":60,"description":"A short name the user will recognise, such as Overdue Notion tasks."},` +
 			`"cron":{"type":"string","description":"For a recurring job: a five-field cron expression, such as 0 9 * * 1 for Mondays at 09:00."},` +
 			`"at":{"type":"string","description":"For a one-time job instead of cron: local date and time, YYYY-MM-DD HH:MM."},` +
-			`"prompt":{"type":"string","maxLength":1000,"description":"The complete instructions for each run, at most 1000 characters."},` +
+			`"prompt":{"type":"string","maxLength":2000,"description":"The complete instructions for each run, at most 2000 characters, because the user sees them in full to confirm. Once the job exists, prompt_edits in schedule_update can grow them to 10000 characters."},` +
 			`"timezone":{"type":"string","description":"IANA time zone such as Europe/Amsterdam; omit to use the user's own."},` +
 			`"pause_while_traveling":{"type":"boolean","description":"Recurring jobs only: stay silent while the user is on a trip."},` +
 			`"model":{"type":"string","maxLength":200,"description":"The model and effort the job runs on, as id:effort such as ` + modelExample + `. Set it only when the user asks for a different model for this job; omit it to use the default."}},` +
@@ -140,7 +143,7 @@ var writeDefinitions = []tools.Definition{
 			`"name":{"type":"string","maxLength":60,"description":"A new short name."},` +
 			`"cron":{"type":"string","description":"For a recurring job: a new five-field cron expression."},` +
 			`"at":{"type":"string","description":"For a one-time job: a new local date and time, YYYY-MM-DD HH:MM."},` +
-			`"prompt":{"type":"string","maxLength":1000,"description":"The complete new instructions, replacing the old ones, at most 1000 characters. Only for a real rewrite; not together with prompt_edits."},` +
+			`"prompt":{"type":"string","maxLength":2000,"description":"The complete new instructions, replacing the old ones, at most 2000 characters, because the user sees them in full to confirm; prompt_edits can grow a job's instructions to 10000 characters. Only for a real rewrite; not together with prompt_edits."},` +
 			`"prompt_edits":{"type":"array","minItems":1,"maxItems":10,"description":"Changes to the current instructions, applied in order. Prefer these to prompt.","items":{"type":"object","properties":{` +
 			`"find":{"type":"string","minLength":1,"maxLength":1000,"description":"A passage copied exactly from the current instructions; it must occur there exactly once."},` +
 			`"replace":{"type":"string","maxLength":1000,"description":"The text that replaces it; empty to delete the passage."}},` +
@@ -406,13 +409,17 @@ func (s *Service) proposeJob(ctx context.Context, principalID string, call tools
 		return tools.Result{}, err
 	}
 	summary := proposalSummary(fmt.Sprintf("Schedule %q", job.Name), prepared)
-	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolPropose, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "schedule", TargetKind: targetKind, TargetName: job.Name}})
+	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolPropose, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "schedule", TargetKind: targetKind, TargetName: job.Name}}, longNewJobText)
 }
 
-// act makes the change at once in a clean turn and proposes it otherwise.
-func (s *Service) act(ctx context.Context, principalID string, call tools.Call, proposal approval.Proposal) (tools.Result, error) {
+// act makes the change at once in a clean turn and proposes it otherwise. tooLong answers a change
+// too long to show for confirmation, saying how to make it fit; empty keeps the generic refusal.
+func (s *Service) act(ctx context.Context, principalID string, call tools.Call, proposal approval.Proposal, tooLong string) (tools.Result, error) {
 	text, err := s.proposer.Act(ctx, principalID, proposal)
 	if err != nil {
+		if errors.Is(err, approval.ErrSummaryTooLong) && tooLong != "" {
+			return tools.Result{Text: tooLong, IsError: true}, nil
+		}
 		if approval.Refused(err) {
 			return tools.Result{Text: err.Error(), IsError: true}, nil
 		}
@@ -525,9 +532,14 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 	if changed.Name != job.Name {
 		heading += fmt.Sprintf(", renamed to %q", changed.Name)
 	}
-	summary := proposalSummary(heading, prepared)
-	if len(arguments.PromptEdits) > 0 {
-		summary = patchSummary(heading, prepared, arguments.PromptEdits)
+	// Unchanged instructions are left out, so a job grown past one message by prompt_edits can still
+	// be renamed or rescheduled.
+	summary, tooLong := scheduleSummary(heading, prepared)+". Its instructions stay as they are.", ""
+	switch {
+	case len(arguments.PromptEdits) > 0:
+		summary, tooLong = patchSummary(heading, prepared, arguments.PromptEdits), longEditsText
+	case confirmed.Prompt != current.Prompt:
+		summary, tooLong = proposalSummary(heading, prepared), longRewriteText
 	}
 	if next.Model == "" && current.Model != "" {
 		summary += "\nIt goes back to the default model."
@@ -535,7 +547,7 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 	if !job.Enabled {
 		summary += "\nIt stays paused until you resume it in /jobs."
 	}
-	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolUpdate, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "change", TargetKind: "scheduled job", TargetName: job.Name, NewName: changed.Name}})
+	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolUpdate, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "change", TargetKind: "scheduled job", TargetName: job.Name, NewName: changed.Name}}, tooLong)
 }
 
 // currentJob is a stored model.turn job in the canonical form a proposal carries, with a one-time
@@ -597,7 +609,7 @@ func (s *Service) proposeRemoval(ctx context.Context, principalID string, call t
 		return tools.Result{}, err
 	}
 	summary := fmt.Sprintf("Delete the scheduled job %q (%s). It will not run again.", job.Name, DescribeJob(job, s.zone))
-	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolRemove, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "remove", TargetKind: "scheduled job", TargetName: job.Name}})
+	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolRemove, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "remove", TargetKind: "scheduled job", TargetName: job.Name}}, "")
 }
 
 func (s *Service) ActionTools() []string {
@@ -816,6 +828,13 @@ func (s *Service) Preview(ctx context.Context, record approval.Record) (approval
 const (
 	oneTimeTravelPauseText = "Only recurring jobs can pause while traveling; a one-time job or reminder is never paused, so leave pause_while_traveling out."
 	unpausableTravelText   = "This job cannot pause while traveling: only the user's own recurring jobs can, not one-time jobs, reminders, or built-in ones such as Heads-up. Leave pause_while_traveling out."
+)
+
+// What a change too long to show the user in full for confirmation is told, by how it was made.
+const (
+	longNewJobText  = "The instructions are too long to show the user in full for confirmation; nothing was proposed. Keep them under about 2000 characters, and once the job exists, after the user confirms it if it is only proposed, extend them with prompt_edits."
+	longRewriteText = "The new instructions are too long to show the user in full for confirmation; nothing was changed. Keep the rewrite under about 2000 characters, and once it is made, after the user confirms it if it is only proposed, extend it with prompt_edits."
+	longEditsText   = "The edits together are too long to show the user in full for confirmation; nothing was changed. Make fewer or shorter edits in this call, and the rest once this change is made, after the user confirms it if it is only proposed."
 )
 
 // TravelPausable reports whether a job may be flagged to pause while its owner travels.
