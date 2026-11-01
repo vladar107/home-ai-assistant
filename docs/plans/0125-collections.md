@@ -1,6 +1,6 @@
 # 0125 — Collections: typed records the assistant keeps for the user
 
-Status: `proposed`
+Status: `done`
 
 ## Context
 
@@ -65,6 +65,49 @@ Today these either end up in memory, where they crowd the prompt, or nowhere.
   names a Notion table, and a collection otherwise.
 - **Dates feed reminders.** A record with a date can be the target of an
   ordinary one-time reminder. Nothing is scheduled automatically.
+- **Decided during implementation.**
+  - Migration `046` holds both tables. Each field carries a key that record
+    values are stored under, so a rename never rewrites records. Removing a
+    field drops its values in the same transaction. A collection keeps a
+    `next_key` high-water mark that only grows, and new fields take keys above
+    it, so no key is ever given out twice.
+  - The collection line goes into the turn's message as a `[system]` line,
+    beside the place lines, not into the memory section of the system prompt
+    as procedure titles do. The record counts change with every record, and
+    the system prompt must stay cacheable. This adds an optional `Collections`
+    source to the turn engine, read by chat turns, scheduled runs, watch
+    checks, and background tasks.
+  - Read tools and the record and field tools are offered only while the user
+    keeps a collection; `collection_create` is offered whenever changes can be
+    proposed, so a user without any pays for one tool.
+  - `collection_add` takes up to 20 records in one call, so a shopping list
+    does not run out of the turn's call budget. Each record's ID is derived from
+    the approval's ID, so a second execution adds nothing twice. Undo removes
+    the records of the batch that still exist, and is refused if one of them
+    changed since.
+  - Filters also take `not_empty`. A date compares a datetime field by its
+    local day, and a bare number compares a money amount in any currency.
+    Money is totalled per currency, in cents. `!=` keeps records with no
+    value. Numbers and amounts are at most 10^12 in size, so cent sums stay
+    exact.
+  - `collection_query` keeps its result under its 64 KiB cap while it writes
+    totals, groups (with values cut to 100 characters), and records, and says
+    how many of each it left out instead.
+  - `collection_list` and `collection_query` are marked private, as the Notion
+    read tools are, since records are the user's personal data.
+  - A field added to a collection that already has records cannot be
+    required, checked when it is proposed and again when it is confirmed. A
+    field's type never changes; a rename takes only the new name.
+  - Field additions and renames act and tell like records, with an Undo that
+    restores the previous fields. Undoing an addition is refused once a record
+    holds a value in the new field, checked in the transaction that would drop
+    it.
+  - `/collections` cuts each record line to 400 UTF-16 units, Telegram's own
+    count, so a page always fits one message.
+  - Collections are deleted only from `/collections`, after a second press;
+    there is no tool for it. `/collections` lists collections with an Open
+    button each, pages of 8 records with Delete buttons, and the callbacks
+    `col:list:<page>` and `col:<open|rdel|ask|cdel>:<id>:<page>`.
 
 ## Approach
 
@@ -78,9 +121,12 @@ Today these either end up in memory, where they crowd the prompt, or nowhere.
 
 ## Files affected
 
-- `internal/store/sqlite/migrations/NNN_collections.sql`, a new store file
+- `internal/store/sqlite/migrations/046_collections.sql`,
+  `internal/store/sqlite/collections.go`
 - `internal/collection` (new)
-- `internal/telegram` (a new view and command registration)
+- `internal/telegram` (a new view, command registration, and a help line)
+- `internal/turn` (the collection line), `internal/app` (the Telegram
+  dependency)
 - `internal/wiring`, `internal/prompt`, README, docs
 
 ## Validation

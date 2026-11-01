@@ -154,6 +154,7 @@ type Service struct {
 	schedules    ScheduleController
 	locations    LocationController
 	memory       MemoryController
+	collections  CollectionController
 	backlog      BacklogController
 	tasks        TaskController
 	watches      WatchController
@@ -194,6 +195,7 @@ type Dependencies struct {
 	Schedules    ScheduleController
 	Locations    LocationController
 	Memory       MemoryController
+	Collections  CollectionController
 	Backlog      BacklogController
 	Tasks        TaskController
 	Watches      WatchController
@@ -235,6 +237,7 @@ func NewService(deps Dependencies) (*Service, error) {
 		schedules:    deps.Schedules,
 		locations:    deps.Locations,
 		memory:       deps.Memory,
+		collections:  deps.Collections,
 		backlog:      deps.Backlog,
 		tasks:        deps.Tasks,
 		watches:      deps.Watches,
@@ -296,6 +299,7 @@ func (s *Service) botCommands() []BotCommand {
 		{BotCommand{Command: "backlog", Description: "Show and export your ideas for developing me"}, s.backlog != nil},
 		{BotCommand{Command: "cancel", Description: "Stop the current response"}, conversationEnabled},
 		{BotCommand{Command: "close", Description: "Close this tab"}, conversationEnabled && s.tabs.enabled()},
+		{BotCommand{Command: "collections", Description: "Show and delete the lists I keep for you"}, s.collections != nil},
 		{BotCommand{Command: "jobs", Description: "Show and manage your reminders and scheduled jobs"}, s.schedules != nil},
 		{BotCommand{Command: "memory", Description: "Show and delete what I remember about you"}, s.memory != nil},
 		{BotCommand{Command: "model", Description: ModelCommandDescription}, modelEnabled},
@@ -1003,6 +1007,9 @@ func (s *Service) processCallback(ctx context.Context, bot Bot, updateID int64, 
 	if press, isMemory := parseMemoryCallback(callback.Data); isMemory && s.memory != nil {
 		return s.processMemoryPress(ctx, callback, principalID, press)
 	}
+	if press, isCollection := parseCollectionCallback(callback.Data); isCollection && s.collections != nil {
+		return s.processCollectionPress(ctx, callback, principalID, press)
+	}
 	if press, isBacklog := parseBacklogCallback(callback.Data); isBacklog && s.backlog != nil {
 		return s.processBacklogPress(ctx, callback, principalID, press)
 	}
@@ -1296,6 +1303,11 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 			return s.helpReply(), nil, nil
 		}
 		return renderMemory(ctx, principalID, s.memory, 1)
+	case "collections":
+		if s.collections == nil {
+			return s.helpReply(), nil, nil
+		}
+		return renderCollections(ctx, principalID, s.collections)
 	case "backlog":
 		if s.backlog == nil {
 			return s.helpReply(), nil, nil

@@ -90,6 +90,12 @@ type Trips interface {
 	TurnLine(ctx context.Context, principalID string) (string, error)
 }
 
+// Collections names a principal's collections with their record counts for a turn, or returns ""
+// when there are none.
+type Collections interface {
+	TurnLine(ctx context.Context, principalID string) (string, error)
+}
+
 // Memory is the principal's remembered instructions and facts, which every turn starts from.
 type Memory interface {
 	// Render is the memory as prompt text, or "" when it is off or empty.
@@ -134,4 +140,6 @@ type Config struct {
 	Locations Locations
 	// Trips tells each turn about the user's active or next trip; nil leaves it out.
 	Trips Trips
+	// Collections tells each turn which collections the user keeps; nil leaves it out.
+	Collections Collections
 }

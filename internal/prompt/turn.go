@@ -60,6 +60,15 @@ func Place(place string) string {
 	return Marker + " " + place
 }
 
+// Collections names the user's collections with their record counts, as the collection service
+// words it; empty gives no line. It goes in the message, since the counts change with every record.
+func Collections(line string) string {
+	if line == "" {
+		return ""
+	}
+	return Marker + " " + line
+}
+
 // Notice carries what happened since the user's last turn, such as a confirmed proposal's outcome;
 // empty gives no line.
 func Notice(notice string) string {

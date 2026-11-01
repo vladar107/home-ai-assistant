@@ -15,8 +15,8 @@ borrowed between users.
 
 - **Conversation.** Natural-language chat with per-user context, backed by the
   [Pi](https://github.com/badlogic/pi-mono) agent runtime on the user's own model
-  subscription. `/backlog`, `/cancel`, `/jobs`, `/memory`, `/model`, `/new`, `/sessions`,
-  `/settings`, and `/tasks` are deterministic shortcuts in the slash menu, with
+  subscription. `/backlog`, `/cancel`, `/collections`, `/jobs`, `/memory`, `/model`, `/new`,
+  `/sessions`, `/settings`, and `/tasks` are deterministic shortcuts in the slash menu, with
   `/close` there too while tabs are on, and
   `/status` and `/privacy` answer when typed. Asked how to
   set something up, the assistant reads its own help, built from the same
@@ -151,6 +151,16 @@ borrowed between users.
   `/memory` lists and deletes entries and procedures, marking learned ones, and
   `/settings` turns memory, learning from 👎, learning procedures, or the
   weekly review on and off.
+- **Collections.** Small typed lists kept in the assistant's own database, with
+  no integration: "keep a list of things I lend out, with who and when" proposes
+  a collection with typed fields (text, number, money, date, date and time, yes
+  or no, choice, or person) on a Confirm card, and records are then added,
+  changed, checked off, and removed in conversation, at once with Undo. "What
+  have I lent to Sam?" or "how much did I spend on gifts?" is answered from the
+  records, with filtering, sorting, totals, and grouping done in code. Each turn
+  carries only the collection names and record counts. `/collections` shows
+  each collection's records and deletes records or whole collections. A user
+  keeps at most 20 collections of 20 fields and 2000 records each.
 - **Backlog.** Ideas for developing the assistant itself ("add to the backlog:
   answer weather questions with a chart") are kept as a per-user backlog that
   never changes how the assistant behaves. `/backlog` marks items done or
@@ -248,6 +258,7 @@ internal/modelcatalog/ models a subscription offers
 internal/location/     shared positions and their expiry
 internal/memory/       per-user memory, its tools, and prompt rendering
 internal/backlog/      per-user backlog of ideas for developing the assistant
+internal/collection/   per-user typed collections, their tools, and the query engine
 internal/clip/ localtime/ weekday/ httpretry/ testutil/  small shared helpers
 internal/store/sqlite/ persistence and migrations
 deploy/                Compose files and configuration examples

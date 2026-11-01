@@ -132,7 +132,7 @@ func (e *Engine) Compose(ctx context.Context, principalID string, parts Parts) s
 	}
 	message = prompt.Prepend(prompt.ToolHint(parts.Hint), message)
 	message = prompt.Prepend(prompt.Notice(parts.Notice), message)
-	message = e.withUser(principalID, withPlace(e.placeLines(ctx, principalID), message))
+	message = e.withUser(principalID, withPlace(e.placeLines(ctx, principalID), e.withCollections(ctx, principalID, message)))
 	message = prompt.Prepend(parts.Subject, message)
 	message = e.withTime(message)
 	if parts.Attachments == "" {
@@ -401,6 +401,20 @@ func (e *Engine) tripLine(ctx context.Context, principalID string) string {
 		return ""
 	}
 	return line
+}
+
+// withCollections starts a turn's message with the principal's collections. A failed lookup leaves
+// the line out rather than failing the turn.
+func (e *Engine) withCollections(ctx context.Context, principalID, message string) string {
+	if e.config.Collections == nil {
+		return message
+	}
+	line, err := e.config.Collections.TurnLine(ctx, principalID)
+	if err != nil {
+		e.telemetry.ContextLogger(ctx, e.logger).WarnContext(ctx, "conversation.collections.failed", "principal_id", principalID, "error", err)
+		return message
+	}
+	return prompt.Prepend(prompt.Collections(line), message)
 }
 
 // placeLines is where the principal is and where they are going, for the turn's message.

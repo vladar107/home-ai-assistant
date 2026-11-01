@@ -78,7 +78,7 @@ func (e *Engine) RunTask(ctx context.Context, run TaskRun) (TaskReply, error) {
 		}
 		return TaskReply{Text: UnavailableReply, ErrorKind: ErrorKindToolProvider}, nil
 	}
-	message := e.withTime(e.withUser(run.PrincipalID, withPlace(e.placeLines(runCtx, run.PrincipalID), run.Message)))
+	message := e.withTime(e.withUser(run.PrincipalID, withPlace(e.placeLines(runCtx, run.PrincipalID), e.withCollections(runCtx, run.PrincipalID, run.Message))))
 	var sink agentruntime.EventSink = e.newCountingSink(run.PrincipalID, run.Turn, record)
 	if run.Sink != nil {
 		sink = sinks{sink, run.Sink}

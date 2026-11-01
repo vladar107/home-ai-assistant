@@ -124,7 +124,7 @@ func (e *Engine) runUnwatched(ctx context.Context, principalID, turn, message st
 	result, runErr := e.runtime.Run(turnCtx, agentruntime.RunRequest{
 		PrincipalID: principalID,
 		SessionID:   sessionID,
-		Message:     e.withTime(e.withUser(principalID, withPlace(e.placeLines(turnCtx, principalID), message))),
+		Message:     e.withTime(e.withUser(principalID, withPlace(e.placeLines(turnCtx, principalID), e.withCollections(turnCtx, principalID, message)))),
 		Tools:       tools,
 		Memory:      memory,
 		WebSearch:   webSearch,

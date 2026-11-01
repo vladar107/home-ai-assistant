@@ -18,6 +18,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
 	"github.com/vladar107/home-ai-assistant/internal/backlog"
 	"github.com/vladar107/home-ai-assistant/internal/chatgpt"
+	"github.com/vladar107/home-ai-assistant/internal/collection"
 	"github.com/vladar107/home-ai-assistant/internal/connection"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/bus"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/calendar"
@@ -246,6 +247,7 @@ type Assembly struct {
 	Routes        *routes.Service
 	Locations     *userlocation.Service
 	Memory        *usermemory.Service
+	Collections   *collection.Service
 	Backlog       *backlog.Service
 	Events        *events.Service
 	Trips         *trip.Service
@@ -491,6 +493,10 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		return fmt.Errorf("initialize memory: %w", err)
 	}
 	memoryService.SetTelemetry(telemetry)
+	collections, err := collection.NewService(collection.Config{Location: a.location, Now: in.Core.Now}, in.Store, approvals, in.Logger)
+	if err != nil {
+		return fmt.Errorf("initialize collections: %w", err)
+	}
 	exposures, err := exposure.NewService(in.Store, in.Logger)
 	if err != nil {
 		return fmt.Errorf("initialize exposure: %w", err)
@@ -604,6 +610,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		Exposure:             exposures,
 		Locations:            turnLocations,
 		Trips:                tripReader,
+		Collections:          collections,
 	}, in.Runtime, connections, broker, in.Logger, telemetry)
 	if err != nil {
 		return fmt.Errorf("initialize turn engine: %w", err)
@@ -759,6 +766,13 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		return err
 	}
 	a.Memory = memoryService
+	if err := broker.Register(collections); err != nil {
+		return err
+	}
+	if err := approvals.RegisterExecutor(collections); err != nil {
+		return err
+	}
+	a.Collections = collections
 	tripTools, err := trip.NewTools(trip.ToolsConfig{Zone: scheduler.DefaultZone()}, tripService, approvals, in.Logger)
 	if err != nil {
 		return fmt.Errorf("initialize trip tools: %w", err)

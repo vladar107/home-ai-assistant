@@ -134,6 +134,7 @@ flowchart TB
     integration["<b>integration</b><br/>per-user enable / disable"]
     loc["<b>location</b><br/>latest shared position, expiry"]
     mem["<b>memory</b><br/>per-user instructions, facts,<br/>and procedures"]
+    coll["<b>collection</b><br/>per-user typed lists,<br/>queried in code"]
     backlog["<b>backlog</b><br/>per-user ideas for developing<br/>the assistant"]
     trip["<b>trip</b><br/>trips, bookings, check-in reminders,<br/>start and end notices"]
     attach["<b>attachment</b><br/>inbound photos and files"]
@@ -233,6 +234,10 @@ flowchart TB
     broker --> routes
     approval --> routes
     routes --> nsc & busc & store
+    tg --> coll
+    broker --> coll
+    approval --> coll
+    coll --> store
     nasc --> delivery
     web --> pdf
     connectors --> integration
@@ -245,7 +250,8 @@ are small helpers the components above import, and `testutil` holds the test
 fixtures.
 
 `turn` is the model turn engine: the connection gate, the tools, the web search
-switch, memory, the jobs and place lines, the search check, and the error replies.
+switch, memory, the jobs, place, and collections lines, the search check, and the
+error replies.
 `conversation` runs chat turns through it in phases, while the scheduler, the
 watches, and the background tasks run their unattended turns on it without
 importing the coordinator for a run; they still use `conversation`'s delivery
@@ -323,8 +329,8 @@ is refused as unreadable instead of exhausting the service's memory.
 5. Every tool call returns over loopback to `tools`, which rechecks the grant and
    bounds it to 15 seconds, 16 KiB, and 8 calls per turn.
 6. A write either acts at once or becomes a proposal. Tools that act and tell
-   (scheduled jobs, watches, routes, memory instructions, and Notion property
-   updates) call `approval.Act`, which acts directly only in a clean turn:
+   (scheduled jobs, watches, routes, collection records and field additions,
+   memory instructions, and Notion property updates) call `approval.Act`, which acts directly only in a clean turn:
    - a chat turn whose run answers the user's own message, so not a
      reconsider or continuation turn;
    - a conversation that has not read outside content;
@@ -835,6 +841,46 @@ chat can propose fixing the route. Buses have no alternatives. It is one tool ca
 skips the nearest real departure, since a watch checks every few minutes. `/jobs` lists the
 routes after jobs and watches, read-only, with a Delete button each.
 
+### A collection
+
+A collection is a per-user typed list in `collections`: a name (unique per user
+without case), a description, and up to 20 fields stored as checked JSON. A
+field has a name, a type (`text`, `number`, `money`, `date`, `datetime`,
+`bool`, `choice` with up to 20 options, or `person`), and may be required. Each
+field also has a key that the values in `collection_records` are stored under,
+so a rename never rewrites records; a removed field's values are dropped in the
+same transaction. New fields take keys above the collection's `next_key`, a
+high-water mark that only grows, so a later field never reuses a removed one's
+key. A user keeps at most
+20 collections of 2000 records each, enforced in the store transaction that
+inserts.
+
+`collection_create` always proposes, because a schema is hard to undo once
+records exist, and the approval's ID becomes the collection's. `collection_alter`
+acts and tells when it only adds or renames fields and proposes when it removes
+one. `collection_add` (up to 20 records per call), `collection_update`, and
+`collection_remove` act and tell, and Undo deletes the records added that still
+exist, restores the values replaced or the fields as they were, or recreates the
+record removed, refusing anything changed since; undoing a field addition is
+also refused once a record holds a value in it. Every value is checked against its field in Go, and checked again on
+execution against the collection as it is then. `collection_query` is code too:
+it loads the collection's records, applies filters (`=`, `!=`, `<`, `>`,
+`contains`, `empty`, `not_empty`), sorts on one field with empty values last,
+lists at most 50 records with their IDs, and returns the count, sum, min, max,
+and mean of every number and money field over all matches (money per currency,
+summed in cents), with an optional `group_by` on one field. It stops each part
+before its 64 KiB result cap and says how much it left out. The read tools are
+private, as the Notion read tools are.
+
+The read tools and the change tools are offered only while the user keeps a
+collection, and `collection_create` whenever changes can be proposed. Only the
+collection names and record counts reach the model unprompted, as a `[system]`
+line of the turn's message rather than the cacheable system prompt, since the
+counts change with every record. `/collections` lists the collections, opens
+one into pages of 8 records with a Delete button each, and deletes a whole
+collection after a second press; its `col:` callbacks are parsed against a
+fixed vocabulary and act only on the presser's own rows.
+
 ## Security model
 
 - **Identity before anything.** Only allowlisted numeric Telegram IDs in private
@@ -853,8 +899,8 @@ routes after jobs and watches, read-only, with a Delete button each.
   still bounds a turn.
 - **Read first, act and tell, confirm the rest.** Writes to Notion and the NAS
   are off until the user turns them on. In a clean turn, scheduled jobs,
-  watches, routes, memory instructions, and Notion property updates act at
-  once with Undo. New Notion pages, appended blocks, and NAS saves are
+  watches, routes, collection records, memory instructions, and Notion property
+  updates act at once with Undo. New Notion pages, appended blocks, and NAS saves are
   always confirmed per action. A
   reminder is set and cancelled without confirmation, since it only sends its
   owner's own text to their own chat, and scheduled turns cannot set one. Background
