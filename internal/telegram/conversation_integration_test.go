@@ -570,7 +570,7 @@ func (h *conversationHarness) telegramService(identities *identity.Service, logg
 	deps := Dependencies{
 		Client: h.client, Identities: identities, Cursors: h.store, Logger: logger, Tabs: h.tabSet,
 		Conversation: asm.Conversation, Attachments: asm.Attachments, Approvals: asm.Approvals, Schedules: asm.Scheduler,
-		Trips: asm.Trips, Routes: asm.Routes, Memory: asm.Memory, Collections: asm.Collections, Projects: asm.Projects, Backlog: asm.Backlog, Why: asm.Why, Transcriber: asm.ChatGPT,
+		Trips: asm.Trips, Routes: asm.Routes, Memory: asm.Memory, Collections: asm.Collections, Projects: asm.Projects, Backlog: asm.Backlog, Why: asm.Why, Exports: asm.Exports, Transcriber: asm.ChatGPT,
 	}
 	if asm.Locations != nil {
 		deps.Locations = asm.Locations
@@ -1563,7 +1563,7 @@ func TestBotCommandsRegisteredOnceAtStartup(t *testing.T) {
 	t.Parallel()
 	h := newConversationHarness(t, newControlledRuntime())
 	h.start()
-	want := []string{"backlog", "cancel", "collections", "jobs", "memory", "model", "new", "projects", "sessions", "settings", "usage", "why"}
+	want := []string{"backlog", "cancel", "collections", "export", "jobs", "memory", "model", "new", "projects", "restore", "sessions", "settings", "usage", "why"}
 	for _, wantScope := range [][]string{nil, {`{"type":"all_private_chats"}`}} {
 		registration := receive(t, h.ctx, h.registrations)
 		if !slices.Equal(registration.scope, wantScope) {

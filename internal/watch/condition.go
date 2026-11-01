@@ -87,6 +87,50 @@ func (s *Service) PrepareCondition(ctx context.Context, principalID string, raw 
 	return encoded, describeCondition(spec), nil
 }
 
+// ValidateCondition checks a job's stored condition as PrepareCondition checks a new one, without
+// looking anything up, and returns it in its canonical form: the kind must be one that is available
+// and can be checked at one instant, a home condition cannot wait for minutes, and with light only
+// weather and home conditions are taken.
+func (s *Service) ValidateCondition(raw json.RawMessage, light bool) (json.RawMessage, error) {
+	var spec Spec
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		return nil, fmt.Errorf("the condition could not be read")
+	}
+	switch kind := spec.Kind; {
+	case kind == KindRoute || kind == KindPlace:
+		return nil, fmt.Errorf("a %s cannot be a condition", kind)
+	case light && kind != KindWeather && kind != KindHome:
+		return nil, fmt.Errorf("a reminder's condition can only be weather or home")
+	case kind == KindHome && spec.Condition != nil && spec.Condition.ForMinutes > 0:
+		return nil, fmt.Errorf("a condition is checked once, so it cannot wait for minutes")
+	case len(spec.Days) > 0 || spec.Date != "" || spec.Start != "":
+		return nil, fmt.Errorf("a condition takes no days, date, or window")
+	}
+	evaluator, known := s.evaluators[spec.Kind]
+	if !known {
+		return nil, fmt.Errorf("%s conditions are not available here", spec.Kind)
+	}
+	if _, ok := evaluator.(InstantChecker); !ok {
+		return nil, fmt.Errorf("a %s watch cannot be a condition", spec.Kind)
+	}
+	end := spec.End
+	normalized, err := normalizeWhat(spec)
+	if err != nil {
+		return nil, err
+	}
+	normalized.End = end
+	if normalized.Kind == KindHome && normalized.Target.Entity == "" {
+		return nil, fmt.Errorf("the device could not be matched to one entity")
+	}
+	return json.Marshal(normalized)
+}
+
+// KindAvailable reports whether watches of the kind can be checked here, which needs its connector.
+func (s *Service) KindAvailable(kind string) bool {
+	_, known := s.evaluators[kind]
+	return known
+}
+
 // conditionSpec is a condition's spec: what it checks, and for a departure the planned departure
 // as its End, with no days or window.
 func (s *Service) conditionSpec(kind string, arguments specArguments) (Spec, error) {

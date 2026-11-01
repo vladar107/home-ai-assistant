@@ -15,8 +15,8 @@ borrowed between users.
 
 - **Conversation.** Natural-language chat with per-user context, backed by the
   [Pi](https://github.com/badlogic/pi-mono) agent runtime on the user's own model
-  subscription. `/backlog`, `/cancel`, `/collections`, `/jobs`, `/memory`, `/model`, `/new`,
-  `/projects`, `/sessions`, `/settings`, `/tasks`, and `/why` are deterministic shortcuts in the slash menu, with
+  subscription. `/backlog`, `/cancel`, `/collections`, `/export`, `/jobs`, `/memory`, `/model`, `/new`,
+  `/projects`, `/restore`, `/sessions`, `/settings`, `/tasks`, and `/why` are deterministic shortcuts in the slash menu, with
   `/close` there too while tabs are on, and
   `/status` and `/privacy` answer when typed. Asked how to
   set something up, the assistant reads its own help, built from the same
@@ -224,6 +224,17 @@ borrowed between users.
   deletes them, and `/backlog export` sends them as Markdown to paste into a
   development session. On the home network, a development session reads the
   whole backlog and marks items done through `/api/backlog`.
+- **Export and restore.** `/export` sends the user one file with what they set
+  up and keep here: memory and procedures, jobs and reminders, watches, routes,
+  trips with their bookings, saved places, collections, projects, kept facts
+  from incoming content, event source names, and the memory and integration
+  switches. Secrets, connections, tokens, conversations, and records of what
+  ran are never in it. Sending the file back with `/restore` as its caption
+  first lists everything it would add, every memory entry, procedure, job
+  instruction, and agent watch check in full, then adds only what is missing,
+  never changing what is there, once confirmed. The file is signed by the
+  installation, so an edited file, one from elsewhere, or another user's is
+  refused.
 - **Background tasks.** Long requests, such as a month of mail or research across
   many pages, run as a sub-agent beside the chat and report back as a reply;
   `/tasks` shows and cancels them.
@@ -323,6 +334,7 @@ internal/backlog/      per-user backlog of ideas for developing the assistant
 internal/collection/   per-user typed collections, their tools, and the query engine
 internal/project/      per-user projects with checklists, their tools, and tab summaries
 internal/intake/       intake records of incoming content and the inbox check
+internal/export/       a user's own data as a signed file, and restoring it
 internal/clip/ localtime/ weekday/ httpretry/ testutil/  small shared helpers
 internal/store/sqlite/ persistence and migrations
 deploy/                Compose files and configuration examples

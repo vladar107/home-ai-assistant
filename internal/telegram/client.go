@@ -531,6 +531,22 @@ func (c *Client) SendTrackedReply(ctx context.Context, chatID, replyToMessageID 
 	return message.MessageID, message.MessageThreadID, nil
 }
 
+// SendPlainReply is SendReply with the text sent exactly as written: no markup is read from it, so
+// a link, a quote, or code in it shows as it is.
+func (c *Client) SendPlainReply(ctx context.Context, chatID, replyToMessageID int64, text string) error {
+	params := url.Values{"chat_id": {strconv.FormatInt(chatID, 10)}}
+	if replyToMessageID > 0 {
+		params.Set("reply_parameters", fmt.Sprintf(`{"message_id":%d,"allow_sending_without_reply":true}`, replyToMessageID))
+	}
+	return c.inTab(ctx, chatID, true, func(ctx context.Context) error {
+		params.Del("message_thread_id")
+		setThread(ctx, params)
+		setPlainText(params, text)
+		_, err := execute[Message](c, ctx, "sendMessage", params)
+		return err
+	})
+}
+
 // SendKeyboard sends a message with inline buttons, quoting the request like SendReply.
 func (c *Client) SendKeyboard(ctx context.Context, chatID, replyToMessageID int64, text string, keyboard InlineKeyboard) error {
 	return c.send(ctx, chatID, replyToMessageID, text, keyboard)

@@ -36,6 +36,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/conversation/history"
 	"github.com/vladar107/home-ai-assistant/internal/delivery"
 	"github.com/vladar107/home-ai-assistant/internal/events"
+	"github.com/vladar107/home-ai-assistant/internal/export"
 	"github.com/vladar107/home-ai-assistant/internal/exposure"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/imagegen"
@@ -261,6 +262,8 @@ type Assembly struct {
 	Events        *events.Service
 	Why           *provenance.Service
 	Trips         *trip.Service
+	// Exports gives each user their own data as a signed file and restores it.
+	Exports *export.Service
 	// SwitchPages are the on/off pages of the registered integrations, in registration order.
 	SwitchPages []SwitchSettings
 
@@ -312,6 +315,9 @@ func Build(ctx context.Context, in Inputs) (*Assembly, error) {
 		return nil, err
 	}
 	if err := a.buildConnectors(ctx); err != nil {
+		return nil, err
+	}
+	if err := a.buildExports(); err != nil {
 		return nil, err
 	}
 	if err := a.registerTestWatches(ctx); err != nil {

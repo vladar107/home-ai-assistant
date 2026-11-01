@@ -516,6 +516,20 @@ backup until the replacement is verified.
 
 ## 8. Backup and restore
 
+A user's `/export` and the operator's backup do different jobs. `/export` gives
+one user a file with what they set up and keep here, which `/restore` adds back
+into the same user's account, adding only what is missing. It holds no secrets,
+connections, conversations, or records of what ran, so it is no replacement
+for the operator's backup, which alone recovers the whole installation.
+
+The file is signed with the installation's export key, `export.key` in the data
+directory: 32 bytes, mode 0600, created on the first export. The data backup
+below keeps it, so exports made before a recovery still restore after it.
+Losing the key makes every earlier export unrestorable, and restoring a user's
+export into another installation needs that installation to hold the same key,
+which only the operator copies, deliberately. A restored event source has no
+token until its owner presses *New token* in `/settings`.
+
 For a consistent backup, stop `home-agent`, snapshot or copy the whole data
 directory, and start it again. Application state matters more than telemetry, and
 Prometheus, Tempo, and Alloy state can be recreated. A full recovery needs the

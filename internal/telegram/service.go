@@ -38,6 +38,7 @@ type botAPI interface {
 	GetMe(context.Context) (Bot, error)
 	GetUpdates(context.Context, int64) ([]Update, error)
 	SendReply(context.Context, int64, int64, string) error
+	SendPlainReply(context.Context, int64, int64, string) error
 	GetFile(context.Context, string) (FileReference, error)
 	DownloadFile(context.Context, string, int64) ([]byte, error)
 	SendKeyboard(context.Context, int64, int64, string, InlineKeyboard) error
@@ -162,6 +163,7 @@ type Service struct {
 	trips        TripController
 	routes       RouteController
 	why          WhyController
+	exports      ExportController
 	transcriber  Transcriber
 	model        *ModelCommand
 	tabs         *Tabs
@@ -205,7 +207,9 @@ type Dependencies struct {
 	Trips        TripController
 	Routes       RouteController
 	// Why answers /why, and a short "how do you know?" in reply to one of the bot's messages.
-	Why         WhyController
+	Why WhyController
+	// Exports answers /export and /restore.
+	Exports     ExportController
 	Transcriber Transcriber
 	// Model enables /model; it also needs Conversation.
 	Model *ModelCommand
@@ -250,6 +254,7 @@ func NewService(deps Dependencies) (*Service, error) {
 		trips:        deps.Trips,
 		routes:       deps.Routes,
 		why:          deps.Why,
+		exports:      deps.Exports,
 		transcriber:  deps.Transcriber,
 		model:        deps.Model,
 		tabs:         cmp.Or(deps.Tabs, NewTabs(deps.Client, nil, nil, nil, nil, deps.Logger, deps.Telemetry)),
@@ -307,11 +312,13 @@ func (s *Service) botCommands() []BotCommand {
 		{BotCommand{Command: "cancel", Description: "Stop the current response"}, conversationEnabled},
 		{BotCommand{Command: "close", Description: "Close this tab"}, conversationEnabled && s.tabs.enabled()},
 		{BotCommand{Command: "collections", Description: "Show and delete the lists I keep for you"}, s.collections != nil},
+		{BotCommand{Command: "export", Description: "Get a file with what you set up and keep here"}, s.exports != nil},
 		{BotCommand{Command: "jobs", Description: "Show and manage your reminders and scheduled jobs"}, s.schedules != nil},
 		{BotCommand{Command: "memory", Description: "Show and delete what I remember about you"}, s.memory != nil},
 		{BotCommand{Command: "model", Description: ModelCommandDescription}, modelEnabled},
 		{BotCommand{Command: "new", Description: "Start a fresh conversation"}, conversationEnabled},
 		{BotCommand{Command: "projects", Description: "Show your projects and what is left in each"}, s.projects != nil},
+		{BotCommand{Command: "restore", Description: "Restore what is missing from an export file"}, s.exports != nil},
 		{BotCommand{Command: "sessions", Description: "Return to a recent conversation"}, conversationEnabled},
 		{BotCommand{Command: "settings", Description: "Show and change your settings"}, len(s.sections) > 0},
 		{BotCommand{Command: "usage", Description: "Show your ChatGPT subscription usage"}, modelEnabled && s.model.Usage != nil},
@@ -659,6 +666,10 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 	s.tabs.noteTab(ctx, bot, authorization.Principal.ID, message)
 
 	command, isCommand := ParseCommand(message.Text, bot.Username)
+	// An export file is sent back with /restore as its caption, the only command read from one.
+	if captioned, ok := ParseCommand(message.Caption, bot.Username); !isCommand && ok && captioned == "restore" && message.Document != nil && s.exports != nil {
+		command, isCommand = captioned, true
+	}
 	if threadID := thread.From(ctx); isCommand && s.openedForCommand(message.Chat.ID, threadID) {
 		return s.processMainViewCommand(ctx, bot, message, authorization.Principal.ID, command, threadID)
 	}
@@ -1383,6 +1394,12 @@ func (s *Service) dispatchCommand(ctx context.Context, bot Bot, message *Message
 	}
 	if command == "close" && bot.HasTopicsEnabled && s.conversation != nil {
 		return s.processCloseCommand(ctx, message, principalID)
+	}
+	if command == "export" && s.exports != nil {
+		return s.processExport(ctx, message, principalID)
+	}
+	if command == "restore" && s.exports != nil {
+		return s.processRestore(ctx, message, principalID)
 	}
 	if command == "why" && s.why != nil {
 		result, _, failure, err := s.processWhy(ctx, message, principalID, true)

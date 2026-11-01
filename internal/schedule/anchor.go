@@ -144,6 +144,9 @@ func (s *Service) guardAnchor(ctx context.Context, job Job, store func() error) 
 // that needs a model turn. CheckCondition checks a stored spec once at the instant.
 type Conditions interface {
 	PrepareCondition(ctx context.Context, principalID string, raw json.RawMessage, light bool) (json.RawMessage, string, error)
+	// ValidateCondition checks a stored condition as a new one is checked, without looking anything
+	// up, and returns it in its canonical form, as a restore stores it.
+	ValidateCondition(spec json.RawMessage, light bool) (json.RawMessage, error)
 	CheckCondition(ctx context.Context, principalID string, spec json.RawMessage, at time.Time) (ConditionResult, error)
 }
 
