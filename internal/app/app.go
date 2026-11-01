@@ -31,6 +31,7 @@ import (
 	userlocation "github.com/vladar107/home-ai-assistant/internal/location"
 	"github.com/vladar107/home-ai-assistant/internal/module"
 	"github.com/vladar107/home-ai-assistant/internal/observability"
+	"github.com/vladar107/home-ai-assistant/internal/project"
 	piruntime "github.com/vladar107/home-ai-assistant/internal/runtime/pi"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
 	"github.com/vladar107/home-ai-assistant/internal/task"
@@ -305,11 +306,12 @@ func (a *App) buildAssembly(ctx context.Context, client *telegram.Client, config
 		Alerts:       telegram.WatchAlertSender{Client: client},
 		TaskMessages: telegram.TaskMessenger{Client: client},
 		Events:       telegram.EventSender{Client: client},
-		Tabs: func(namer *turn.Engine, trips trip.Reader) wiring.TabServices {
-			a.tabs = telegram.NewTabs(client, a.store, trips, namer, a.logger, a.telemetry)
+		Tabs: func(namer *turn.Engine, trips trip.Reader, projects project.Reader) wiring.TabServices {
+			a.tabs = telegram.NewTabs(client, a.store, trips, projects, namer, a.logger, a.telemetry)
 			return wiring.TabServices{
 				Feeds: a.tabs, Replies: a.tabs,
-				Trips: &telegram.TripNotifier{Client: client, Chats: a.store, Feeds: a.tabs},
+				Trips:    &telegram.TripNotifier{Client: client, Chats: a.store, Feeds: a.tabs},
+				Projects: telegram.ProjectNotifier{Chats: a.store, Feeds: a.tabs},
 			}
 		},
 		Principals: configured,
@@ -398,7 +400,7 @@ func (a *App) buildTelegram(ctx context.Context, client *telegram.Client, config
 	}
 
 	if a.tabs == nil {
-		a.tabs = telegram.NewTabs(client, a.store, nil, nil, a.logger, a.telemetry)
+		a.tabs = telegram.NewTabs(client, a.store, nil, nil, nil, a.logger, a.telemetry)
 	}
 	deps := telegram.Dependencies{
 		Client:     client,
@@ -423,6 +425,7 @@ func (a *App) buildTelegram(ctx context.Context, client *telegram.Client, config
 		deps.Routes = asm.Routes
 		deps.Memory = asm.Memory
 		deps.Collections = asm.Collections
+		deps.Projects = asm.Projects
 		deps.Backlog = asm.Backlog
 		deps.Transcriber = asm.ChatGPT
 		deps.Model = &telegram.ModelCommand{

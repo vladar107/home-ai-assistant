@@ -12,6 +12,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
+	"github.com/vladar107/home-ai-assistant/internal/thread"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 	"github.com/vladar107/home-ai-assistant/internal/turn"
 	"github.com/vladar107/home-ai-assistant/internal/turnstate"
@@ -140,13 +141,21 @@ type OpenElsewhereError struct {
 func (e *OpenElsewhereError) Error() string { return "the conversation is open in another tab" }
 
 // The kinds of subject a conversation can be about: one scheduled job, reminders included, one
-// watch, or one trip. A subject is its kind and the job's, watch's, or trip's ID. A trip's subject
-// is also the destination of its messages and what the tab registry records its tab as serving.
+// watch, or one object with a tab of its own, such as a trip or a project. A subject is its kind
+// and the job's, watch's, or object's ID. An object's subject is also the destination of its
+// messages and what the tab registry records its tab as serving.
 const (
-	SubjectJob   = "job"
-	SubjectWatch = "watch"
-	SubjectTrip  = "trip"
+	SubjectJob     = "job"
+	SubjectWatch   = "watch"
+	SubjectTrip    = thread.ObjectTrip
+	SubjectProject = thread.ObjectProject
 )
+
+// ProjectLines gives the line a conversation about a project starts from, with what the project
+// holds now, or "" when the project is gone.
+type ProjectLines interface {
+	ProjectLine(ctx context.Context, principalID, projectID string) (string, error)
+}
 
 func JobSubject(jobID string) string { return SubjectJob + ":" + jobID }
 
@@ -167,15 +176,26 @@ func SubjectLine(label string, resumedFrom time.Time) string {
 	return "About “" + label + "”, back in the conversation from " + resumedFrom.Format("2 January 2006") + "."
 }
 
-// subjectContext is the line every turn of a conversation about a job, watch, or trip starts from.
-func subjectContext(subject, name string) string {
-	switch kind, id := SplitSubject(subject); kind {
+// subjectContext is the line every turn of a conversation about a job, watch, trip, or project
+// starts from. A project's line reads what the project holds now; one that cannot be read names it
+// only.
+func (s *Service) subjectContext(ctx context.Context, request Request) string {
+	switch kind, id := SplitSubject(request.Subject); kind {
 	case SubjectJob:
-		return prompt.AboutJob(name, id)
+		return prompt.AboutJob(request.SubjectName, id)
 	case SubjectWatch:
-		return prompt.AboutWatch(name, id)
+		return prompt.AboutWatch(request.SubjectName, id)
 	case SubjectTrip:
-		return prompt.AboutTrip(name, id)
+		return prompt.AboutTrip(request.SubjectName, id)
+	case SubjectProject:
+		if s.config.Projects != nil {
+			line, err := s.config.Projects.ProjectLine(ctx, request.PrincipalID, id)
+			if err == nil {
+				return line
+			}
+			s.logger.WarnContext(ctx, "conversation.subject_unread", "principal_id", request.PrincipalID, "subject_kind", kind, "error", err)
+		}
+		return prompt.AboutProject(request.SubjectName, id, "its items could not be read.")
 	}
 	return ""
 }
@@ -579,6 +599,8 @@ type Config struct {
 	// TabReplies hears of each plain reply delivered in a tab, so the tab can be named after its
 	// conversation; nil leaves tabs with their first name.
 	TabReplies TabReplies
+	// Projects gives the line a turn about a project starts from; nil names the project only.
+	Projects ProjectLines
 }
 
 // Reactions answers a chat turn with a reaction instead of its emoji-only reply. ReplyAsReaction

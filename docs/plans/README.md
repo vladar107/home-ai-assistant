@@ -135,7 +135,7 @@ plan that links back to the earlier record.
 | 0123 | [Saved places, and arriving or leaving as a trigger](0123-places-and-arrival-triggers.md) | done |
 | 0124 | [History over any time series, with charts](0124-history-charts.md) | done |
 | 0125 | [Collections: typed records the assistant keeps for the user](0125-collections.md) | done |
-| 0126 | [Projects: a goal with its own tab, checklist, and nudges](0126-projects.md) | proposed |
+| 0126 | [Projects: a goal with its own tab, checklist, and nudges](0126-projects.md) | done |
 | 0127 | [Inbound events from the user's own systems](0127-inbound-events.md) | done |
 | 0128 | ["Why did you say that?": what a reply was based on](0128-reply-provenance.md) | proposed |
 | 0129 | [Export and restore a user's own data](0129-export-and-restore.md) | proposed |

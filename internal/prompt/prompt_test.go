@@ -79,6 +79,7 @@ func TestTurnLines(t *testing.T) {
 	checkGolden(t, "turn-lines", message)
 	checkGolden(t, "turn-about-watch", AboutWatch("", "w1"))
 	checkGolden(t, "turn-about-trip", AboutTrip("Conference", "t1"))
+	checkGolden(t, "turn-about-project", AboutProject("Find a dentist", "p1", `status active; open items (1 of 2): [a1] "Call the clinic" due 2026-11-03; next due 2026-11-03.`))
 	checkGolden(t, "turn-continue", Continue)
 	checkGolden(t, "turn-reconsider", ReconsiderAt(now.In(zone), false))
 	checkGolden(t, "turn-reconsider-learn", ReconsiderAt(now.In(zone), true))

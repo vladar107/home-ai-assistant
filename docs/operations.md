@@ -429,6 +429,19 @@ presence step, which never fails the share. Place checks count in
 `home_agent_watch_checks_total` with kind `place`. No log line, metric label, or
 span attribute carries a place's point or a position.
 
+### Projects
+
+Migration 050 adds `projects`, `project_items`, and `project_links`; it cannot be
+undone, so take a data backup before the first deploy that carries it. No setting
+is needed: projects are on with conversation, and with tabs on each open project
+gets its own tab like a trip's. `/projects` lists them. A project's nudges and
+reminders are ordinary jobs whose `destination` is `project:<id>`, so they show
+in `/jobs` and count toward the job limits. In the logs, `project.created` and
+`project.changed` carry the project ID, the tool, and item and link counts, and
+`telegram.project_tab.created`, `telegram.project_tab.failed`, and
+`telegram.project_tab.pin_failed` follow its tab as the `telegram.trip_tab.*`
+events follow a trip's; none carries a title, an item, or a link.
+
 ## 7. Logs and rollback
 
 ```sh

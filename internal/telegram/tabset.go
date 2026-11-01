@@ -22,14 +22,15 @@ type TripReader interface {
 	Now() time.Time
 }
 
-// Tabs is what the bot knows of the tabs in its users' chats: the tab registry, the feed and trip
-// tabs that messages nobody asked for are delivered to, and the names tabs get after their
-// conversations. It is built before the services that deliver into tabs, and works before the
-// poller starts.
+// Tabs is what the bot knows of the tabs in its users' chats: the tab registry, the feed tabs and
+// the tabs of objects such as trips that messages nobody asked for are delivered to, and the names
+// tabs get after their conversations. It is built before the services that deliver into tabs, and
+// works before the poller starts.
 type Tabs struct {
-	client    botAPI
-	store     TabStore
-	trips     TripReader
+	client botAPI
+	store  TabStore
+	// objects are the kinds of object with a tab of their own that this bot keeps, by kind.
+	objects   map[string]objectKind
 	namer     TabNamer
 	logger    *slog.Logger
 	telemetry Telemetry
@@ -42,13 +43,13 @@ type Tabs struct {
 	confirmedTabs sync.Map
 	// knownTabs holds the tabs the registry has a row for, so a message there adds none.
 	knownTabs sync.Map
-	// feedLocks holds a lock per principal and feed or trip, so deliveries to one of them at once
+	// feedLocks holds a lock per principal and feed or object, so deliveries to one of them at once
 	// make one tab.
 	feedLocks sync.Map
-	// iconedFeeds holds the feed and trip tabs whose fixed icon was settled since start.
+	// iconedFeeds holds the feed and object tabs whose fixed icon was settled since start.
 	iconedFeeds sync.Map
-	// pinFailures holds the trips whose summary could not be pinned since start, so each is logged
-	// once.
+	// pinFailures holds the objects whose summary could not be pinned since start, so each is
+	// logged once.
 	pinFailures sync.Map
 	// namedTabs holds the conversation each tab was last considered for naming after, so a reply
 	// there asks the registry once per conversation.
@@ -57,10 +58,17 @@ type Tabs struct {
 }
 
 // NewTabs returns the tabs over the registry. A nil store leaves tabs unrecorded and unnamed and
-// takes every refused tab for gone, a nil trips leaves trips without tabs, and a nil namer leaves
-// tabs with their first name.
-func NewTabs(client botAPI, store TabStore, trips TripReader, namer TabNamer, logger *slog.Logger, telemetry Telemetry) *Tabs {
-	return &Tabs{client: client, store: store, trips: trips, namer: namer, logger: logger, telemetry: telemetryOrNoop(telemetry)}
+// takes every refused tab for gone, a nil trips or projects leaves those without tabs, and a nil
+// namer leaves tabs with their first name.
+func NewTabs(client botAPI, store TabStore, trips TripReader, projects ProjectReader, namer TabNamer, logger *slog.Logger, telemetry Telemetry) *Tabs {
+	objects := make(map[string]objectKind)
+	if trips != nil {
+		objects[thread.ObjectTrip] = tripKind(trips)
+	}
+	if projects != nil {
+		objects[thread.ObjectProject] = projectKind(projects)
+	}
+	return &Tabs{client: client, store: store, objects: objects, namer: namer, logger: logger, telemetry: telemetryOrNoop(telemetry)}
 }
 
 // setTopics records the bot's tabs switch as getMe reported it.

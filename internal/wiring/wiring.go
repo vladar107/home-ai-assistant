@@ -46,6 +46,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/modelcatalog"
 	"github.com/vladar107/home-ai-assistant/internal/module"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
+	"github.com/vladar107/home-ai-assistant/internal/project"
 	"github.com/vladar107/home-ai-assistant/internal/reaction"
 	"github.com/vladar107/home-ai-assistant/internal/routes"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
@@ -102,16 +103,18 @@ type TripNotices interface {
 }
 
 // TabServices are the tabs the services deliver into: where scheduled runs and watch alerts go,
-// where a tab's first reply names it, and where trip notices go.
+// where a tab's first reply names it, where trip notices go, and what keeps each project's tab.
 type TabServices struct {
 	Feeds   thread.Feeds
 	Replies conversation.TabReplies
 	Trips   TripNotices
+	// Projects keeps each project's tab; nil leaves projects without tabs.
+	Projects project.Tabs
 }
 
 // TabsFactory builds the tab services over what only Build can supply: the engine that names tabs
-// and the trip reader.
-type TabsFactory func(namer *turn.Engine, trips trip.Reader) TabServices
+// and the trip and project readers.
+type TabsFactory func(namer *turn.Engine, trips trip.Reader, projects project.Reader) TabServices
 
 // Inputs is everything Build needs. The connector configurations are nil for a connector the
 // operator did not configure; Build fills the fields they leave empty that it knows, such as the
@@ -250,6 +253,7 @@ type Assembly struct {
 	Locations     *userlocation.Service
 	Memory        *usermemory.Service
 	Collections   *collection.Service
+	Projects      *project.Service
 	Backlog       *backlog.Service
 	Events        *events.Service
 	Trips         *trip.Service
@@ -621,13 +625,15 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		return fmt.Errorf("initialize turn engine: %w", err)
 	}
 	a.Turns = engine
-	tabs := in.Tabs(engine, tripReader)
+	projectReader := project.NewReader(in.Store, a.location, in.Core.Now)
+	tabs := in.Tabs(engine, tripReader, projectReader)
 	// Scheduled runs reach only the owner's own chat, resolved from the allowlist at delivery.
 	scheduler, err := schedule.NewService(schedule.Config{
 		Zone: in.Zone, TickInterval: in.Core.ScheduleTick, Now: in.Core.Now,
 		Cards: cards, Photos: in.Chat, Reminders: in.Reminders, Sessions: in.Sessions,
 		Travel: trip.NewTravel(in.Store), Telemetry: telemetry, Exposure: exposures, SafetyChecks: safetyChecks,
 		Feeds: tabs.Feeds, Models: a.Models, Usage: a.ChatGPT, ChatModel: a.ChatModel, TaskModel: a.TaskModel, HeadsUpModel: in.Core.HeadsUpModel,
+		Projects: projectReader,
 	}, in.Store, in.Store, in.Chat, approvals, in.Logger)
 	if err != nil {
 		return fmt.Errorf("initialize scheduler: %w", err)
@@ -646,6 +652,12 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		return fmt.Errorf("initialize trips: %w", err)
 	}
 	a.Trips = tripService
+	projects, err := project.NewService(project.Config{
+		Now: in.Core.Now, Tabs: tabs.Projects, Jobs: in.Store, Collections: in.Store,
+	}, in.Store, approvals, in.Logger)
+	if err != nil {
+		return fmt.Errorf("initialize projects: %w", err)
+	}
 	var conversationHistory conversation.History
 	// The weekly review reads the replies the user marked 👎 from the same files.
 	var exchanges usermemory.Exchanges
@@ -750,6 +762,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 			History:        conversationHistory,
 			Reactions:      reactions,
 			TabReplies:     tabs.Replies,
+			Projects:       projectReader,
 			TypingInterval: in.Core.TypingInterval,
 			DraftDelay:     in.Core.DraftDelay,
 			DraftInterval:  in.Core.DraftInterval,
@@ -788,6 +801,13 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		return err
 	}
 	a.Collections = collections
+	if err := broker.Register(projects); err != nil {
+		return err
+	}
+	if err := approvals.RegisterExecutor(projects); err != nil {
+		return err
+	}
+	a.Projects = projects
 	tripTools, err := trip.NewTools(trip.ToolsConfig{Zone: scheduler.DefaultZone()}, tripService, approvals, in.Logger)
 	if err != nil {
 		return fmt.Errorf("initialize trip tools: %w", err)

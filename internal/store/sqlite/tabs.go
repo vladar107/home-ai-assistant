@@ -5,11 +5,32 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
+
+// objectTables are the tables of the kinds of object with a tab of their own. Each has id,
+// principal_id, title, and summary_message_id.
+var objectTables = map[string]string{
+	thread.ObjectTrip:    "trips",
+	thread.ObjectProject: "projects",
+}
+
+// objectDestinationMatch matches the column against the destinations of every kind of object with a
+// tab of its own, with the arguments it takes.
+func objectDestinationMatch(column string) (string, []any) {
+	kinds := thread.ObjectKinds()
+	conditions := make([]string, 0, len(kinds))
+	arguments := make([]any, 0, len(kinds))
+	for _, kind := range kinds {
+		conditions = append(conditions, column+" LIKE ?")
+		arguments = append(arguments, thread.ObjectDestination(kind, "%"))
+	}
+	return "(" + strings.Join(conditions, " OR ") + ")", arguments
+}
 
 // AddTab records a tab the registry does not know yet and reports whether it did; a known tab is
 // left as it is.
@@ -167,8 +188,8 @@ func (s *Store) NameBotTab(ctx context.Context, principalID string, threadID int
 	return named > 0, nil
 }
 
-// DeleteTab forgets a tab. A trip's tab takes the trip's summary with it, since that message was in
-// the tab.
+// DeleteTab forgets a tab. The tab of an object such as a trip or a project takes the object's
+// summary with it, since that message was in the tab.
 func (s *Store) DeleteTab(ctx context.Context, principalID string, threadID int64) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("delete tab: SQLite store is not open")
@@ -191,14 +212,14 @@ func (s *Store) DeleteTab(ctx context.Context, principalID string, threadID int6
 	if err != nil {
 		return fmt.Errorf("delete tab: %w", err)
 	}
-	if tripID, isTrip := thread.TripOf(subject.String); isTrip {
+	if kind, id, isObject := thread.ObjectOf(subject.String); isObject {
 		if _, err := tx.ExecContext(
 			ctx,
-			`UPDATE trips SET summary_message_id = NULL WHERE principal_id = ? AND id = ?`,
+			`UPDATE `+objectTables[kind]+` SET summary_message_id = NULL WHERE principal_id = ? AND id = ?`,
 			principalID,
-			tripID,
+			id,
 		); err != nil {
-			return fmt.Errorf("forget trip summary: %w", err)
+			return fmt.Errorf("forget %s summary: %w", kind, err)
 		}
 	}
 	if err := tx.Commit(); err != nil {

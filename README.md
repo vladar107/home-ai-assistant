@@ -16,7 +16,7 @@ borrowed between users.
 - **Conversation.** Natural-language chat with per-user context, backed by the
   [Pi](https://github.com/badlogic/pi-mono) agent runtime on the user's own model
   subscription. `/backlog`, `/cancel`, `/collections`, `/jobs`, `/memory`, `/model`, `/new`,
-  `/sessions`, `/settings`, and `/tasks` are deterministic shortcuts in the slash menu, with
+  `/projects`, `/sessions`, `/settings`, and `/tasks` are deterministic shortcuts in the slash menu, with
   `/close` there too while tabs are on, and
   `/status` and `/privacy` answer when typed. Asked how to
   set something up, the assistant reads its own help, built from the same
@@ -179,6 +179,18 @@ borrowed between users.
   carries only the collection names and record counts. `/collections` shows
   each collection's records and deletes records or whole collections. A user
   keeps at most 20 collections of 20 fields and 2000 records each.
+- **Projects.** A goal worked toward over days or weeks, such as "let's make a
+  project for finding a dentist": a title, a goal, a checklist of items with
+  optional due dates and notes, and links to related Notion pages, NAS paths,
+  collections, intake records, or web addresses, all changed in conversation at
+  once with Undo. With tabs on, each project gets its own tab with a 📝 icon and
+  a pinned summary of its open items and next due date that stays current;
+  talking there is about that project, and each turn names its open items.
+  A nudge ("every Sunday, tell me what's next on the bathroom") or a reminder
+  for an item is an ordinary job routed to the project's tab. A done project
+  keeps its tab until `/close`, and the assistant offers to delete the jobs
+  still routed to it. `/projects` lists them. Trips stay trips. A user keeps
+  at most 20 open projects of 100 items each.
 - **Backlog.** Ideas for developing the assistant itself ("add to the backlog:
   answer weather questions with a chart") are kept as a per-user backlog that
   never changes how the assistant behaves. `/backlog` marks items done or
@@ -281,6 +293,7 @@ internal/location/     shared positions, their expiry, and saved places
 internal/memory/       per-user memory, its tools, and prompt rendering
 internal/backlog/      per-user backlog of ideas for developing the assistant
 internal/collection/   per-user typed collections, their tools, and the query engine
+internal/project/      per-user projects with checklists, their tools, and tab summaries
 internal/clip/ localtime/ weekday/ httpretry/ testutil/  small shared helpers
 internal/store/sqlite/ persistence and migrations
 deploy/                Compose files and configuration examples

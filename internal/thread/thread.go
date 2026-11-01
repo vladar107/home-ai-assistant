@@ -4,6 +4,7 @@ package thread
 
 import (
 	"context"
+	"slices"
 	"strings"
 )
 
@@ -55,26 +56,67 @@ func FeedSubject(feed string) string {
 	return "feed:" + feed
 }
 
-// tripDestination opens the destination of a trip's messages.
-const tripDestination = "trip:"
+// The kinds of object whose messages go to a tab of their own. An object's destination is its kind
+// and its ID, such as trip:<id>, and the tab registry records its tab as serving that destination.
+const (
+	ObjectTrip    = "trip"
+	ObjectProject = "project"
+)
+
+// objectKinds are the kinds of object with a tab of their own, in a fixed order.
+var objectKinds = []string{ObjectTrip, ObjectProject}
+
+// ObjectKinds returns the kinds of object with a tab of their own.
+func ObjectKinds() []string { return slices.Clone(objectKinds) }
+
+// ObjectDestination is where an object's messages go: its own tab.
+func ObjectDestination(kind, id string) string {
+	return kind + ":" + id
+}
+
+// ObjectOf returns the object a destination names, if it names one of a kind with a tab of its own.
+func ObjectOf(destination string) (kind, id string, found bool) {
+	kind, id, cut := strings.Cut(destination, ":")
+	if !cut || id == "" || !slices.Contains(objectKinds, kind) {
+		return "", "", false
+	}
+	return kind, id, true
+}
 
 // TripDestination is where a trip's messages go: the trip's own tab, which the tab registry records
 // as serving the same value.
 func TripDestination(tripID string) string {
-	return tripDestination + tripID
+	return ObjectDestination(ObjectTrip, tripID)
 }
 
-// TripOf returns the trip a destination names, if it names one.
+// TripOf returns the trip a destination names, if it names one, and "" otherwise.
 func TripOf(destination string) (string, bool) {
-	tripID, found := strings.CutPrefix(destination, tripDestination)
-	return tripID, found && tripID != ""
+	return objectOfKind(destination, ObjectTrip)
+}
+
+// ProjectDestination is where a project's messages go: the project's own tab.
+func ProjectDestination(projectID string) string {
+	return ObjectDestination(ObjectProject, projectID)
+}
+
+// ProjectOf returns the project a destination names, if it names one, and "" otherwise.
+func ProjectOf(destination string) (string, bool) {
+	return objectOfKind(destination, ObjectProject)
+}
+
+func objectOfKind(destination, wanted string) (string, bool) {
+	kind, id, found := ObjectOf(destination)
+	if !found || kind != wanted {
+		return "", false
+	}
+	return id, true
 }
 
 // Feeds resolves the tab of a principal's feed, making it on first use. Zero is the main view,
 // which is where everything goes while the bot has tabs off.
 type Feeds interface {
 	Thread(ctx context.Context, principalID string, chatID int64, feed string) (int64, error)
-	// Destination resolves a destination such as TripDestination, and the feed when the
+	// Destination resolves a destination such as TripDestination or ProjectDestination, and the feed when the
 	// destination has no tab to offer.
 	Destination(ctx context.Context, principalID string, chatID int64, destination, feed string) (int64, error)
 }

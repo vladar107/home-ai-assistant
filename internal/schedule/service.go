@@ -84,6 +84,17 @@ type Config struct {
 	ChatModel    agentruntime.ModelEffort
 	TaskModel    agentruntime.ModelEffort
 	HeadsUpModel agentruntime.ModelEffort
+	// Projects checks the project a job is routed to with project_id; without it the tools refuse
+	// project_id.
+	Projects Projects
+}
+
+// Projects reports whether one of the principal's own projects is open, so a job may be routed to
+// its tab, and gives the line a run of a job routed to it starts from.
+type Projects interface {
+	OpenProject(ctx context.Context, principalID, projectID string) (bool, error)
+	// ProjectLine is what the project holds now, or "" when it no longer exists.
+	ProjectLine(ctx context.Context, principalID, projectID string) (string, error)
 }
 
 // jobModels is what decides the model a model.turn job runs on.
@@ -130,6 +141,7 @@ type Service struct {
 	startedAt  time.Time
 	anchors    map[string]AnchorResolver
 	conditions Conditions
+	projects   Projects
 
 	// anchorStates is the resolver pass's own: only its loop adds and removes entries, and only the
 	// worker of a job's principal, while that principal is in anchorBusy, changes one.
@@ -297,6 +309,7 @@ func NewService(cfg Config, repository Repository, chats Chats, deliverer conver
 		proposer:   proposer,
 		travel:     cfg.Travel,
 		feeds:      cfg.Feeds,
+		projects:   cfg.Projects,
 		models:     jobModels{catalog: cfg.Models, usage: cfg.Usage, chat: cfg.ChatModel, task: cfg.TaskModel, headsUp: cfg.HeadsUpModel},
 		telemetry:  cfg.Telemetry,
 		exposure:   cfg.Exposure,
@@ -681,6 +694,7 @@ func (s *Service) execute(ctx context.Context, run Run) (Run, bool) {
 			Location:     location,
 			Manual:       run.Manual,
 			Condition:    finding,
+			Destination:  run.Destination,
 		})
 	}
 	if ctx.Err() != nil {
@@ -1015,6 +1029,9 @@ type Prepared struct {
 	resolved bool
 	// note is what the anchor's resolver tells the user when the job is saved.
 	note string
+	// exactDestination is set for a job whose destination, none included, is stored as it is, such
+	// as one an Undo puts back or one taken off its project.
+	exactDestination bool
 }
 
 // Timing is when a job runs: a five-field cron expression, or At, a local date and time such as
@@ -1144,7 +1161,8 @@ func (s *Service) Create(ctx context.Context, id string, prepared Prepared) (boo
 }
 
 // Update replaces one of the principal's jobs with a prepared one under the same ID, keeping its
-// pause state, and its destination unless the prepared job names one. The prepared job's
+// pause state, and its destination unless the prepared job names one or sets its destination
+// exactly, as an Undo does. The prepared job's
 // TravelPause is stored, so a caller that does not mean to change it copies the current one. A job
 // changed since expectedUpdatedAt is reported as not updated.
 func (s *Service) Update(ctx context.Context, current Job, expectedUpdatedAt time.Time, prepared Prepared) (bool, error) {
@@ -1153,7 +1171,7 @@ func (s *Service) Update(ctx context.Context, current Job, expectedUpdatedAt tim
 	}
 	job := prepared.Job
 	job.ID, job.Enabled, job.CreatedAt = current.ID, current.Enabled, current.CreatedAt
-	if job.Destination == "" {
+	if job.Destination == "" && !prepared.exactDestination {
 		job.Destination = current.Destination
 	}
 	var updated bool

@@ -273,7 +273,7 @@ wiring's inputs, builds the Telegram service on the result, and runs the
 lifecycle: the modules in registration order, then the core services the
 assembly lists, then Telegram, each a step that starts in turn, while everything
 started stops together; the Telegram tests build through the same wiring. The tab
-services (`telegram.Tabs`: the feed and trip tabs, tab naming, and the tab registry)
+services (`telegram.Tabs`: the feed tabs, the trip and project tabs, tab naming, and the tab registry)
 come in through a factory input, since `wiring` cannot import `telegram` and the
 tabs need the turn engine that `wiring` builds.
 
@@ -334,7 +334,7 @@ is refused as unreadable instead of exhausting the service's memory.
 5. Every tool call returns over loopback to `tools`, which rechecks the grant and
    bounds it to 15 seconds, 16 KiB, and 8 calls per turn.
 6. A write either acts at once or becomes a proposal. Tools that act and tell
-   (scheduled jobs, watches, routes, collection records and field additions,
+   (scheduled jobs, watches, routes, collection records and field additions, projects,
    memory instructions, and Notion property updates) call `approval.Act`, which acts directly only in a clean turn:
    - a chat turn whose run answers the user's own message, so not a
      reconsider or continuation turn;
@@ -696,6 +696,71 @@ subject `trip:<id>` under a fixed name, which is the only record of it.
   are quoted with `strconv.Quote`, because a trip's title can come from mail.
 - **Privacy.** Logs carry trip, tab, and message IDs only.
 
+### Object tabs
+
+Trips and projects (plan 0126) are the kinds of object with a tab of their own,
+and both go through one subject registry. `thread.ObjectKinds` lists the kinds,
+and an object's destination and tab subject is `<kind>:<id>`. Each layer keeps
+what it needs per kind:
+
+- `internal/store/sqlite` maps each kind to its table, which has `id`,
+  `principal_id`, `title`, and `summary_message_id`. The tab and conversation
+  queries match subjects by the registered prefixes: a tab whose subject names
+  an object routes as a feed tab does, a report delivered to an object has it as
+  its subject, a conversation that starts in the tab is about the object while
+  it exists, and deleting the tab clears the object's summary message.
+- `telegram.Tabs` holds one `objectKind` per kind it was given a reader for:
+  how to load one object (its title, summary, recorded summary message, and
+  whether it is open), how to record its summary, its icon, and its log events.
+  `Destination` resolves any registered kind the way the trip tabs above
+  describe, and an open object without a tab gets one.
+
+### A project
+
+A project is a per-user goal in `projects`: a title, a goal, a status (`active`,
+`paused`, `done`, or `abandoned`), and the summary message pinned in its tab.
+Its checklist is `project_items` (text, an optional local due date, a note, and
+when it was checked off) and its links `project_links` (`notion`, `nas`,
+`collection` by the collection's ID, `intake`, or `url`); both carry
+`principal_id` with a composite foreign key to their project. A user keeps at
+most 20 open projects of 100 items and 30 links each, enforced in the store
+transaction that opens one.
+
+`project_create` and `project_update` (title, goal, or status), the item tools
+`project_item_add`, `project_item_update`, `project_item_check`, and
+`project_item_remove`, and `project_link` act and tell. Each executes on the
+project as it is then, under a per-project lock, and saves the whole project
+only while it is unchanged since it was read; the approval's ID names the
+project and its new items, so a second execution creates nothing twice. Undo
+puts back the title, goal, status, items, and links as the change found them,
+refusing a project changed since; undoing a start abandons the project, so its
+tab says so. `project_list` and `project_get` are read tools, offered with the
+change tools only while the user keeps a project; `project_create` is always
+offered.
+
+After each write the project service tells `telegram.ProjectNotifier`, which
+keeps the tab: an open project gets its tab and pinned summary on its first
+write with tabs on, the summary (title, goal, open items with due dates, and the
+next one due) is edited in place, and the tab is renamed when the title changes.
+A done or abandoned project keeps its tab until `/close`, and gets no new one.
+A turn in the project's conversation starts from a line with its status, goal,
+up to ten open items with their IDs, and the next due date, read when the turn
+starts and quoted like a trip's title.
+
+Nudges and item reminders are ordinary jobs: `schedule_propose`, `reminder_set`,
+and `schedule_update` take an optional `project_id`, checked against the
+caller's own open projects when proposed and again when executed, and stored as
+the destination `project:<id>`. The model can name no other destination, and a
+job whose destination is a trip's is refused a project; `project_id` `none` on
+`schedule_update` takes a job off its project. A run of a job routed to a project
+starts from the project's line, as a chat turn there does. An update's Undo puts
+the destination back only when that update moved the job, and is refused once the
+job has moved since, so undoing an older change never reverts a later move.
+Closing a project names the jobs still routed to it, so the model offers to delete
+them. With tabs off, everything stays in the main view. The summary and
+`/projects` are clipped to Telegram's 4096 UTF-16 units, and the turn line cuts
+each item to 80 runes and the goal to 200.
+
 ### A background task
 
 A request that needs many lookups is handed by the model to `task_start`, which
@@ -1033,8 +1098,8 @@ fixed vocabulary and act only on the presser's own rows.
   still bounds a turn.
 - **Read first, act and tell, confirm the rest.** Writes to Notion and the NAS
   are off until the user turns them on. In a clean turn, scheduled jobs,
-  watches, routes, collection records, memory instructions, and Notion property
-  updates act at once with Undo. New Notion pages, appended blocks, and NAS saves are
+  watches, routes, collection records, projects, memory instructions, and Notion
+  property updates act at once with Undo. New Notion pages, appended blocks, and NAS saves are
   always confirmed per action. A
   reminder is set and cancelled without confirmation, since it only sends its
   owner's own text to their own chat, and scheduled turns cannot set one. Background

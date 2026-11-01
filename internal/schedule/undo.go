@@ -21,6 +21,11 @@ type jobUndo struct {
 	// TravelChanged is true when the update changed the travel flag, which is then the only case an
 	// Undo restores it; an older payload lacks it and leaves the flag as it is.
 	TravelChanged bool `json:"travel_changed,omitempty"`
+	// DestinationChanged is true when the update moved the job to or off a project, which is then
+	// the only case an Undo restores the destination, and only while it is still Destination, the
+	// one the update left; an older payload lacks it and leaves the destination as it is.
+	DestinationChanged bool   `json:"destination_changed,omitempty"`
+	Destination        string `json:"destination,omitempty"`
 }
 
 // jobDefinition is what the user can change about a job. Every run moves a job's UpdatedAt, so an
@@ -65,7 +70,10 @@ func (s *Service) undoUpdate(ctx context.Context, before Job, travelChanged bool
 		return nil, err
 	}
 	after := definitionOf(job)
-	return json.Marshal(jobUndo{JobID: before.ID, After: &after, Before: &before, TravelChanged: travelChanged})
+	return json.Marshal(jobUndo{
+		JobID: before.ID, After: &after, Before: &before, TravelChanged: travelChanged,
+		DestinationChanged: job.Destination != before.Destination, Destination: job.Destination,
+	})
 }
 
 // Undo reverses a direct job action: it deletes a created job, puts back the job an update
@@ -127,6 +135,9 @@ func (s *Service) undoUpdated(ctx context.Context, principalID string, undo jobU
 	if err != nil {
 		return approval.Outcome{}, err
 	}
+	if undo.DestinationChanged && job.Destination != undo.Destination {
+		return approval.Outcome{}, &approval.UndoRefusal{Reason: "the job was moved since; change it in /jobs instead."}
+	}
 	previous := *undo.Before
 	prepared, err := s.restorable(ctx, previous)
 	if err != nil {
@@ -134,6 +145,9 @@ func (s *Service) undoUpdated(ctx context.Context, principalID string, undo jobU
 	}
 	if !undo.TravelChanged {
 		prepared.Job.TravelPause = job.TravelPause
+	}
+	if !undo.DestinationChanged {
+		prepared.Job.Destination = job.Destination
 	}
 	updated, err := s.Update(ctx, job, job.UpdatedAt, prepared)
 	if err != nil {
@@ -188,7 +202,7 @@ func (s *Service) restorable(ctx context.Context, job Job) (Prepared, error) {
 	if err != nil {
 		return Prepared{}, &approval.UndoRefusal{Reason: "it can no longer be scheduled (" + err.Error() + ")."}
 	}
-	prepared.Job.TravelPause, prepared.Job.Destination = job.TravelPause, job.Destination
+	prepared.Job.TravelPause, prepared.Job.Destination, prepared.exactDestination = job.TravelPause, job.Destination, true
 	if job.OneTime() && !anchored {
 		// The stored instant may carry seconds, as a snoozed reminder's does, which the local
 		// time above drops.

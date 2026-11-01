@@ -13,6 +13,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
+	"github.com/vladar107/home-ai-assistant/internal/thread"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 	"github.com/vladar107/home-ai-assistant/internal/turn"
 )
@@ -125,6 +126,9 @@ func (m modelTurn) Run(ctx context.Context, occurrence Occurrence) (Result, erro
 	if finding := occurrence.Condition; finding != nil {
 		task = prompt.JobCondition(finding.Description, finding.Value, finding.Failed) + "\n\n" + task
 	}
+	if line := m.service.projectLine(ctx, occurrence); line != "" {
+		task = line + "\n\n" + task
+	}
 	model := m.service.runModel(ctx, occurrence, config.Model)
 	reply, err := m.runner.RunScheduled(ctx, occurrence.PrincipalID, outbox.ScheduledTurn(occurrence.RunID), prompt.ScheduledJob(occurrence.JobName, occurrence.ScheduledFor, occurrence.Location, task), model)
 	if err != nil {
@@ -181,4 +185,19 @@ func (s *Service) runModel(ctx context.Context, occurrence Occurrence, own strin
 		s.logger.InfoContext(ctx, "schedule.model.fallback", "principal_id", occurrence.PrincipalID, "job_id", occurrence.JobID, "model", want.String(), "reason", fallback)
 	}
 	return model
+}
+
+// projectLine is what the project a run is routed to holds now, so a nudge can say what is next;
+// "" for a run routed elsewhere, and when the project cannot be read, which is logged.
+func (s *Service) projectLine(ctx context.Context, occurrence Occurrence) string {
+	projectID, isProject := thread.ProjectOf(occurrence.Destination)
+	if !isProject || s.projects == nil {
+		return ""
+	}
+	line, err := s.projects.ProjectLine(ctx, occurrence.PrincipalID, projectID)
+	if err != nil {
+		s.logger.WarnContext(ctx, "schedule.project_line.failed", "principal_id", occurrence.PrincipalID, "job_id", occurrence.JobID, "error", err)
+		return ""
+	}
+	return line
 }

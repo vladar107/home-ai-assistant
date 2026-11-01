@@ -47,6 +47,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/memory"
 	"github.com/vladar107/home-ai-assistant/internal/observability"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
+	"github.com/vladar107/home-ai-assistant/internal/project"
 	"github.com/vladar107/home-ai-assistant/internal/routes"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
@@ -468,7 +469,9 @@ func (h *conversationHarness) wiringInputs(t *testing.T, runtime agentruntime.Ag
 		Store: h.store, Logger: logger, Telemetry: &integrationTelemetry{Telemetry: cmp.Or(options.telemetry, observability.Noop()), h: h},
 		Runtime: runtime, SessionFiles: sessionFiles,
 		Chat: h.client, Reminders: ReminderSender{Client: h.client}, Alerts: WatchAlertSender{Client: h.client},
-		TaskMessages: TaskMessenger{Client: h.client}, Tabs: func(namer *turn.Engine, trips trip.Reader) wiring.TabServices { return h.newTabs(logger, namer, trips) },
+		TaskMessages: TaskMessenger{Client: h.client}, Tabs: func(namer *turn.Engine, trips trip.Reader, projects project.Reader) wiring.TabServices {
+			return h.newTabs(logger, namer, trips, projects)
+		},
 		Principals: unnamed, DataDir: filepath.Dir(h.attachmentsDir), Zone: zone,
 		Core: wiring.CoreConfig{
 			TurnTimeout: cmp.Or(options.turnTimeout, 10*time.Second), TurnZone: options.location, Now: now,
@@ -554,10 +557,10 @@ func (h *conversationHarness) wiringInputs(t *testing.T, runtime agentruntime.Ag
 
 // newTabs builds the tab services as the application does, once the engine and the trip reader
 // exist.
-func (h *conversationHarness) newTabs(logger *slog.Logger, namer *turn.Engine, trips trip.Reader) wiring.TabServices {
-	h.tabSet = NewTabs(h.client, h.store, trips, namer, logger, nil)
+func (h *conversationHarness) newTabs(logger *slog.Logger, namer *turn.Engine, trips trip.Reader, projects project.Reader) wiring.TabServices {
+	h.tabSet = NewTabs(h.client, h.store, trips, projects, namer, logger, nil)
 	h.tripNotifier = &TripNotifier{Client: h.client, Chats: h.store, Feeds: h.tabSet}
-	return wiring.TabServices{Feeds: h.tabSet, Replies: h.tabSet, Trips: h.tripNotifier}
+	return wiring.TabServices{Feeds: h.tabSet, Replies: h.tabSet, Trips: h.tripNotifier, Projects: ProjectNotifier{Chats: h.store, Feeds: h.tabSet}}
 }
 
 // telegramService builds the Telegram service on the assembly as the application does.
@@ -567,7 +570,7 @@ func (h *conversationHarness) telegramService(identities *identity.Service, logg
 	deps := Dependencies{
 		Client: h.client, Identities: identities, Cursors: h.store, Logger: logger, Tabs: h.tabSet,
 		Conversation: asm.Conversation, Attachments: asm.Attachments, Approvals: asm.Approvals, Schedules: asm.Scheduler,
-		Trips: asm.Trips, Routes: asm.Routes, Memory: asm.Memory, Collections: asm.Collections, Backlog: asm.Backlog, Transcriber: asm.ChatGPT,
+		Trips: asm.Trips, Routes: asm.Routes, Memory: asm.Memory, Collections: asm.Collections, Projects: asm.Projects, Backlog: asm.Backlog, Transcriber: asm.ChatGPT,
 	}
 	if asm.Locations != nil {
 		deps.Locations = asm.Locations
@@ -1559,7 +1562,7 @@ func TestBotCommandsRegisteredOnceAtStartup(t *testing.T) {
 	t.Parallel()
 	h := newConversationHarness(t, newControlledRuntime())
 	h.start()
-	want := []string{"backlog", "cancel", "collections", "jobs", "memory", "model", "new", "sessions", "settings", "usage"}
+	want := []string{"backlog", "cancel", "collections", "jobs", "memory", "model", "new", "projects", "sessions", "settings", "usage"}
 	for _, wantScope := range [][]string{nil, {`{"type":"all_private_chats"}`}} {
 		registration := receive(t, h.ctx, h.registrations)
 		if !slices.Equal(registration.scope, wantScope) {

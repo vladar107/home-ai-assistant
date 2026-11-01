@@ -1,0 +1,1 @@
+[system] This conversation is about the user's project "Find a dentist" (id p1): status active; open items (1 of 2): [a1] "Call the clinic" due 2026-11-03; next due 2026-11-03. project_get shows it in full.

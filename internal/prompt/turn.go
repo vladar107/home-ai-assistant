@@ -100,6 +100,12 @@ func AboutTrip(name, id string) string {
 	return Marker + " This conversation is about the user's trip" + quotedName(name) + " (id " + id + "); trip_list with its id shows it in full."
 }
 
+// AboutProject names the project a conversation is about with what it holds now, as the project
+// tools describe it in details.
+func AboutProject(name, id, details string) string {
+	return Marker + " This conversation is about the user's project" + quotedName(name) + " (id " + id + "): " + details + " project_get shows it in full."
+}
+
 // quotedName quotes a name in a way its own text cannot close, because a name can come from
 // outside, as a trip's title from mail can.
 func quotedName(name string) string {

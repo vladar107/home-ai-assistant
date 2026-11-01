@@ -740,7 +740,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 			Forwarded:   request.Forwarded,
 			Hint:        hint.name,
 			Notice:      notice.text,
-			Subject:     subjectContext(request.Subject, request.SubjectName),
+			Subject:     s.subjectContext(turnCtx, request),
 			Attachments: attachments.Summary,
 		})
 		result, err := s.engine.Run(turnCtx, turn.Run{

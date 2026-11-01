@@ -194,6 +194,8 @@ type Occurrence struct {
 	// Condition is what the job's condition found when it was checked for this run; nil for a job
 	// without one and for a manual run.
 	Condition *ConditionFinding
+	// Destination is the job's, such as the project its runs go to, or "".
+	Destination string
 }
 
 // ConditionFinding is what a run's condition check found: the value it holds at, or that it

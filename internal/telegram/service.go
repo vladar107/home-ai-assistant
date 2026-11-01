@@ -155,6 +155,7 @@ type Service struct {
 	locations    LocationController
 	memory       MemoryController
 	collections  CollectionController
+	projects     ProjectController
 	backlog      BacklogController
 	tasks        TaskController
 	watches      WatchController
@@ -196,6 +197,7 @@ type Dependencies struct {
 	Locations    LocationController
 	Memory       MemoryController
 	Collections  CollectionController
+	Projects     ProjectController
 	Backlog      BacklogController
 	Tasks        TaskController
 	Watches      WatchController
@@ -238,6 +240,7 @@ func NewService(deps Dependencies) (*Service, error) {
 		locations:    deps.Locations,
 		memory:       deps.Memory,
 		collections:  deps.Collections,
+		projects:     deps.Projects,
 		backlog:      deps.Backlog,
 		tasks:        deps.Tasks,
 		watches:      deps.Watches,
@@ -245,7 +248,7 @@ func NewService(deps Dependencies) (*Service, error) {
 		routes:       deps.Routes,
 		transcriber:  deps.Transcriber,
 		model:        deps.Model,
-		tabs:         cmp.Or(deps.Tabs, NewTabs(deps.Client, nil, nil, nil, deps.Logger, deps.Telemetry)),
+		tabs:         cmp.Or(deps.Tabs, NewTabs(deps.Client, nil, nil, nil, nil, deps.Logger, deps.Telemetry)),
 		sections:     inSectionOrder(deps.Sections),
 		logger:       deps.Logger,
 		telemetry:    telemetryOrNoop(deps.Telemetry),
@@ -304,6 +307,7 @@ func (s *Service) botCommands() []BotCommand {
 		{BotCommand{Command: "memory", Description: "Show and delete what I remember about you"}, s.memory != nil},
 		{BotCommand{Command: "model", Description: ModelCommandDescription}, modelEnabled},
 		{BotCommand{Command: "new", Description: "Start a fresh conversation"}, conversationEnabled},
+		{BotCommand{Command: "projects", Description: "Show your projects and what is left in each"}, s.projects != nil},
 		{BotCommand{Command: "sessions", Description: "Return to a recent conversation"}, conversationEnabled},
 		{BotCommand{Command: "settings", Description: "Show and change your settings"}, len(s.sections) > 0},
 		{BotCommand{Command: "usage", Description: "Show your ChatGPT subscription usage"}, modelEnabled && s.model.Usage != nil},
@@ -1308,6 +1312,11 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 			return s.helpReply(), nil, nil
 		}
 		return renderCollections(ctx, principalID, s.collections)
+	case "projects":
+		if s.projects == nil {
+			return s.helpReply(), nil, nil
+		}
+		return renderProjects(ctx, principalID, s.projects)
 	case "backlog":
 		if s.backlog == nil {
 			return s.helpReply(), nil, nil

@@ -13,6 +13,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/modelcatalog"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
+	"github.com/vladar107/home-ai-assistant/internal/thread"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -147,6 +148,17 @@ const conditionProperty = `"condition":{"type":"object","description":"Run only 
 	`kind is weather, home, departure, disruptions, or agent, with the fields watch_propose takes for that kind but no days, date, window, or triggers: ` +
 	`weather takes name or current_location, within_minutes, and threshold_mm; home takes name and condition without for_minutes; departure takes mode, its stations or stop and line, departure, and delay_minutes; disruptions takes stations; agent takes name and check."}`
 
+// projectProperty routes a job's runs to one of the user's projects; no other destination can be
+// named by the model.
+const projectProperty = `"project_id":{"type":"string","description":"Only when this belongs to one of the user's projects: the project's id from project_list, so its runs arrive in the project's tab."}`
+
+// projectUpdateProperty is projectProperty for a change, which can also take a job off its
+// project.
+const projectUpdateProperty = `"project_id":{"type":"string","description":"Only when the user ties this job to one of their projects: the project's id from project_list, so its runs arrive in the project's tab; none takes the job off its project; omit it to keep the job where it goes."}`
+
+// noProject is the project_id that takes a job off its project.
+const noProject = "none"
+
 var reminderDefinitions = []tools.Definition{
 	{
 		Name:        toolReminderSet,
@@ -156,7 +168,7 @@ var reminderDefinitions = []tools.Definition{
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"text":{"type":"string","maxLength":500,"description":"The reminder as the user should read it, at most 500 characters."},` +
 			`"at":{"type":"string","description":"Local date and time, YYYY-MM-DD HH:MM, such as 2026-10-04 17:00; or give anchor instead."},` +
-			anchorProperty + `,` + conditionProperty + `,` +
+			anchorProperty + `,` + conditionProperty + `,` + projectProperty + `,` +
 			`"timezone":{"type":"string","description":"IANA time zone such as Europe/Amsterdam; omit to use the user's own."}},` +
 			`"required":["text"],"additionalProperties":false}`),
 	},
@@ -183,7 +195,7 @@ var writeDefinitions = []tools.Definition{
 			`"prompt":{"type":"string","maxLength":2000,"description":"The complete instructions for each run, at most 2000 characters, because the user sees them in full to confirm. Once the job exists, prompt_edits in schedule_update can grow them to 10000 characters."},` +
 			`"timezone":{"type":"string","description":"IANA time zone such as Europe/Amsterdam; omit to use the user's own."},` +
 			`"pause_while_traveling":{"type":"boolean","description":"Recurring jobs only: stay silent while the user is on a trip."},` +
-			anchorProperty + `,` + conditionProperty + `,` +
+			anchorProperty + `,` + conditionProperty + `,` + projectProperty + `,` +
 			`"model":{"type":"string","maxLength":200,"description":"The model and effort the job runs on, as id:effort such as ` + modelExample + `. Set it only when the user asks for a different model for this job; omit it to use the default."}},` +
 			`"required":["name","prompt"],"additionalProperties":false}`),
 	},
@@ -204,7 +216,7 @@ var writeDefinitions = []tools.Definition{
 			`"required":["find","replace"],"additionalProperties":false}},` +
 			`"timezone":{"type":"string","description":"A new IANA time zone such as Europe/Amsterdam."},` +
 			`"pause_while_traveling":{"type":"boolean","description":"Recurring jobs only: true to stay silent while the user is on a trip, false to stop doing so; omit to keep it as it is."},` +
-			anchorProperty + `,` + conditionProperty + `,` +
+			anchorProperty + `,` + conditionProperty + `,` + projectUpdateProperty + `,` +
 			`"remove_condition":{"type":"boolean","description":"true to drop the job's condition, so it runs every time again."},` +
 			`"model":{"type":"string","maxLength":200,"description":"The model and effort the job runs on, as id:effort such as ` + modelExample + `. Set it only when the user asks for a different model for this job; an empty string returns it to the default, and omitting it keeps the current one."}},` +
 			`"required":["job_id"],"additionalProperties":false}`),
@@ -292,6 +304,7 @@ type proposeArguments struct {
 	Model               string          `json:"model"`
 	Anchor              *Anchor         `json:"anchor"`
 	Condition           json.RawMessage `json:"condition"`
+	ProjectID           string          `json:"project_id"`
 }
 
 type confirmedReminder struct {
@@ -300,6 +313,7 @@ type confirmedReminder struct {
 	Zone      string     `json:"zone"`
 	Anchor    *Anchor    `json:"anchor,omitempty"`
 	Condition *Condition `json:"condition,omitempty"`
+	ProjectID string     `json:"project_id,omitempty"`
 }
 
 // confirmedJob is the canonical form the user confirms and the executor stores. At is the local
@@ -318,6 +332,8 @@ type confirmedJob struct {
 	// Anchor and Condition are as stored, with the anchor's label as its resolver read it.
 	Anchor    *Anchor    `json:"anchor,omitempty"`
 	Condition *Condition `json:"condition,omitempty"`
+	// ProjectID is the project the job's runs go to, or "".
+	ProjectID string `json:"project_id,omitempty"`
 }
 
 // config is the job's stored configuration.
@@ -350,6 +366,7 @@ type updateArguments struct {
 	Anchor          *Anchor         `json:"anchor"`
 	Condition       json.RawMessage `json:"condition"`
 	RemoveCondition bool            `json:"remove_condition"`
+	ProjectID       string          `json:"project_id"`
 }
 
 // promptEdit replaces the one occurrence of Find in a job's instructions with Replace.
@@ -376,6 +393,27 @@ type reminderArguments struct {
 	Timezone  string          `json:"timezone"`
 	Anchor    *Anchor         `json:"anchor"`
 	Condition json.RawMessage `json:"condition"`
+	ProjectID string          `json:"project_id"`
+}
+
+// projectDestination checks a project the model named for a job against the principal's own open
+// projects and returns its id; "" names none. A failure is a refusal for the model to read.
+func (s *Service) projectDestination(ctx context.Context, principalID, projectID string) (string, error) {
+	id := strings.TrimSpace(projectID)
+	if id == "" {
+		return "", nil
+	}
+	if s.projects == nil {
+		return "", fmt.Errorf("projects are not available here, so leave project_id out")
+	}
+	open, err := s.projects.OpenProject(ctx, principalID, id)
+	if err != nil {
+		return "", fmt.Errorf("the project could not be checked; try again")
+	}
+	if !open {
+		return "", fmt.Errorf("no open project has the id %q; find it with project_list", id)
+	}
+	return id, nil
 }
 
 // triggers reads the anchor and condition the model gave a new job; light refuses a condition that
@@ -425,13 +463,20 @@ func (s *Service) setReminder(ctx context.Context, principalID string, call tool
 	if err != nil {
 		return tools.Result{}, err
 	}
+	projectID, err := s.projectDestination(ctx, principalID, arguments.ProjectID)
+	if err != nil {
+		return tools.Result{Text: err.Error(), IsError: true}, nil
+	}
 	timing := Timing{At: arguments.At, Zone: arguments.Timezone}
 	prepared, err := s.prepareJob(ctx, principalID, ReminderName(arguments.Text), TypeReminder, timing, config)
 	if err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
+	if projectID != "" {
+		prepared.Job.Destination = thread.ProjectDestination(projectID)
+	}
 	if s.exposure != nil && s.exposure.External(ctx, principalID) {
-		return s.proposeReminder(ctx, principalID, call, ReminderText(config), prepared)
+		return s.proposeReminder(ctx, principalID, call, ReminderText(config), prepared, projectID)
 	}
 	id, err := newRunID()
 	if err != nil {
@@ -478,12 +523,12 @@ func withNote(text string, prepared Prepared) string {
 	return text + " " + prepared.note
 }
 
-func (s *Service) proposeReminder(ctx context.Context, principalID string, call tools.Call, text string, prepared Prepared) (tools.Result, error) {
+func (s *Service) proposeReminder(ctx context.Context, principalID string, call tools.Call, text string, prepared Prepared, projectID string) (tools.Result, error) {
 	if s.proposer == nil {
 		return tools.Result{Text: "I read outside content in this conversation, so reminders need the user's confirmation, and confirming is not available. Tell the user the reminder was not set.", IsError: true}, nil
 	}
 	job := prepared.Job
-	confirmed := confirmedReminder{Text: text, Zone: job.Zone, Anchor: prepared.Anchor, Condition: JobCondition(job)}
+	confirmed := confirmedReminder{Text: text, Zone: job.Zone, Anchor: prepared.Anchor, Condition: JobCondition(job), ProjectID: projectID}
 	if prepared.Anchor == nil {
 		confirmed.At = job.RunAt.In(prepared.Schedule.Location).Format(localTimeLayouts[0])
 	}
@@ -539,6 +584,10 @@ func (s *Service) proposeJob(ctx context.Context, principalID string, call tools
 	if err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
+	projectID, err := s.projectDestination(ctx, principalID, arguments.ProjectID)
+	if err != nil {
+		return tools.Result{Text: err.Error(), IsError: true}, nil
+	}
 	config, err := confirmedJob{Prompt: arguments.Prompt, Model: model, Anchor: anchor, Condition: condition}.config()
 	if err != nil {
 		return tools.Result{}, err
@@ -561,7 +610,7 @@ func (s *Service) proposeJob(ctx context.Context, principalID string, call tools
 		return tools.Result{Text: tooManyText(job.OneTime()), IsError: true}, nil
 	}
 
-	confirmed := confirmedJob{Name: job.Name, Cron: job.Cron, Zone: job.Zone, Prompt: ModelTurnPrompt(job.Config), Model: ModelTurnModel(job.Config), Anchor: prepared.Anchor, Condition: JobCondition(job)}
+	confirmed := confirmedJob{Name: job.Name, Cron: job.Cron, Zone: job.Zone, Prompt: ModelTurnPrompt(job.Config), Model: ModelTurnModel(job.Config), Anchor: prepared.Anchor, Condition: JobCondition(job), ProjectID: projectID}
 	if job.TravelPause {
 		on := true
 		confirmed.TravelPause = &on
@@ -648,6 +697,8 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 		return tools.Result{Text: "This is a recurring job, so it takes cron, not at; to make it run once, remove it and propose a new job.", IsError: true}, nil
 	case arguments.RemoveCondition && given(arguments.Condition):
 		return tools.Result{Text: "Give either condition or remove_condition, not both; nothing was proposed.", IsError: true}, nil
+	case strings.TrimSpace(arguments.ProjectID) != "" && job.Destination != "" && current.ProjectID == "":
+		return tools.Result{Text: "This job's runs go where its trip sends them, so it cannot be moved to a project; nothing was proposed.", IsError: true}, nil
 	}
 	if strings.TrimSpace(arguments.Prompt) != "" && len(arguments.PromptEdits) > 0 {
 		return tools.Result{Text: "Give either prompt, the complete new instructions, or prompt_edits, not both; nothing was proposed.", IsError: true}, nil
@@ -665,6 +716,15 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 	override(&next.At, arguments.At)
 	override(&next.Prompt, arguments.Prompt)
 	override(&next.Zone, arguments.Timezone)
+	if strings.EqualFold(strings.TrimSpace(arguments.ProjectID), noProject) {
+		next.ProjectID = ""
+	} else {
+		projectID, err := s.projectDestination(ctx, principalID, arguments.ProjectID)
+		if err != nil {
+			return tools.Result{Text: err.Error(), IsError: true}, nil
+		}
+		override(&next.ProjectID, projectID)
+	}
 	if arguments.Model != nil {
 		model, refusal, err := s.offeredModel(ctx, principalID, *arguments.Model)
 		if err != nil {
@@ -710,7 +770,7 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 	prepared.Job.TravelPause = travel
 	changed := prepared.Job
 	confirmed := confirmedUpdate{JobID: job.ID, UpdatedAt: job.UpdatedAt, confirmedJob: confirmedJob{Name: changed.Name, Cron: changed.Cron, Zone: changed.Zone, Prompt: ModelTurnPrompt(changed.Config), TravelPause: arguments.PauseWhileTraveling, Model: ModelTurnModel(changed.Config),
-		Anchor: prepared.Anchor, Condition: JobCondition(changed)}}
+		Anchor: prepared.Anchor, Condition: JobCondition(changed), ProjectID: next.ProjectID}}
 	if changed.OneTime() && prepared.Anchor == nil {
 		confirmed.At = changed.RunAt.In(prepared.Schedule.Location).Format(localTimeLayouts[0])
 	}
@@ -742,6 +802,12 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 	if next.Condition == nil && current.Condition != nil {
 		summary += "\nIt no longer has a condition, so it runs every time."
 	}
+	switch {
+	case next.ProjectID != current.ProjectID && next.ProjectID == "":
+		summary += "\nIts runs no longer go to the tab of the project it belonged to."
+	case next.ProjectID != current.ProjectID:
+		summary += "\nIts runs go to the tab of the project it belongs to."
+	}
 	if !job.Enabled {
 		summary += "\nIt stays paused until you resume it in /jobs."
 	}
@@ -752,6 +818,7 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 // job's instant as a local time in its own zone; an anchored job's instant follows its anchor.
 func currentJob(job Job) (confirmedJob, error) {
 	current := confirmedJob{Name: job.Name, Cron: job.Cron, Zone: job.Zone, Prompt: ModelTurnPrompt(job.Config), Model: ModelTurnModel(job.Config), Anchor: JobAnchor(job), Condition: JobCondition(job)}
+	current.ProjectID, _ = thread.ProjectOf(job.Destination)
 	if job.OneTime() && current.Anchor == nil {
 		location, err := LoadZone(job.Zone)
 		if err != nil {
@@ -834,6 +901,9 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 			return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "That schedule is no longer valid (" + err.Error() + "); nothing was scheduled."}
 		}
 		prepared.Job.TravelPause = confirmed.TravelPause != nil && *confirmed.TravelPause && !prepared.Job.OneTime()
+		if err := s.confirmedProject(ctx, record.PrincipalID, confirmed.ProjectID, &prepared, "scheduled"); err != nil {
+			return approval.Outcome{}, err
+		}
 		if _, err := s.Create(ctx, record.ID, prepared); err != nil {
 			if errors.Is(err, ErrTooManyJobs) {
 				return approval.Outcome{}, &approval.ActionError{Reason: "too_many", Text: tooManyText(prepared.Job.OneTime()) + " Nothing was scheduled."}
@@ -868,6 +938,9 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		prepared, err := s.prepareJob(ctx, record.PrincipalID, ReminderName(confirmed.Text), TypeReminder, Timing{At: confirmed.At, Zone: confirmed.Zone}, config)
 		if err != nil {
 			return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "That reminder can no longer be set (" + err.Error() + "); nothing was set."}
+		}
+		if err := s.confirmedProject(ctx, record.PrincipalID, confirmed.ProjectID, &prepared, "set"); err != nil {
+			return approval.Outcome{}, err
 		}
 		if _, err := s.Create(ctx, record.ID, prepared); err != nil {
 			if errors.Is(err, ErrTooManyJobs) {
@@ -907,6 +980,20 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 	}
 }
 
+// confirmedProject checks again the project a confirmed job goes to and routes the prepared job
+// there; "" leaves it as it is. what says what was not done, such as scheduled.
+func (s *Service) confirmedProject(ctx context.Context, principalID, projectID string, prepared *Prepared, what string) error {
+	if projectID == "" {
+		return nil
+	}
+	id, err := s.projectDestination(ctx, principalID, projectID)
+	if err != nil {
+		return &approval.ActionError{Reason: "invalid", Text: "That project can no longer take jobs (" + err.Error() + "); nothing was " + what + "."}
+	}
+	prepared.Job.Destination = thread.ProjectDestination(id)
+	return nil
+}
+
 func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (approval.Outcome, error) {
 	var confirmed confirmedUpdate
 	if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
@@ -935,6 +1022,16 @@ func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (ap
 	prepared.Job.TravelPause = job.TravelPause
 	if confirmed.TravelPause != nil {
 		prepared.Job.TravelPause = *confirmed.TravelPause && TravelPausable(job)
+	}
+	if current, _ := thread.ProjectOf(job.Destination); confirmed.ProjectID != current {
+		if job.Destination != "" && current == "" {
+			return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "That job's runs go where its trip sends them, so it cannot be moved to a project; nothing was changed."}
+		}
+		if err := s.confirmedProject(ctx, record.PrincipalID, confirmed.ProjectID, &prepared, "changed"); err != nil {
+			return approval.Outcome{}, err
+		}
+		// Taken off its project, the job goes to the feed of its kind again.
+		prepared.exactDestination = confirmed.ProjectID == ""
 	}
 	updated, err := s.Update(ctx, job, confirmed.UpdatedAt, prepared)
 	if err != nil {
