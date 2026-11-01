@@ -132,7 +132,7 @@ flowchart TB
     chatgpt["<b>chatgpt</b><br/>transcription, image generation,<br/>usage on the user's subscription"]
     modelcatalog["<b>modelcatalog</b><br/>models a subscription offers,<br/>read from Pi's cache"]
     integration["<b>integration</b><br/>per-user enable / disable"]
-    loc["<b>location</b><br/>latest shared position, expiry"]
+    loc["<b>location</b><br/>latest shared position, expiry,<br/>saved places, arrivals"]
     mem["<b>memory</b><br/>per-user instructions, facts,<br/>and procedures"]
     coll["<b>collection</b><br/>per-user typed lists,<br/>queried in code"]
     backlog["<b>backlog</b><br/>per-user ideas for developing<br/>the assistant"]
@@ -535,8 +535,9 @@ calendar.
 
 Resolvers are registered per kind of anchor: the Calendar connector resolves
 calendar anchors with the owner's own Google accounts, read-only, `trip` resolves
-trip anchors from the owner's trips, and a stub refuses place anchors until
-arrivals are tracked (the migration already admits them). The resolver pass is
+trip anchors from the owner's trips, and the location service resolves a place
+anchor to the owner's own saved place; a place anchor is moved by arrivals and
+leavings rather than read (see Saved places and arrivals). The resolver pass is
 the scheduler's second loop: every minute it reads again each enabled anchored
 job that was just saved or run, was last read 15 minutes ago, or whose run comes
 within 30 minutes, each call bounded to 10 seconds. Each principal's jobs are
@@ -565,6 +566,51 @@ job with a note. A manual Run now skips the condition. A repeating anchor keeps
 the occurrence it last ran for in `last_occurrence_key` and never runs for it
 again, however that event moves, and a repeating reminder is sent without snooze
 buttons, having no single time to move.
+
+### Saved places and arrivals
+
+A user saves a named place from their latest shared position, a pin, a venue, or
+a live location, with `place_save`; the tool takes no coordinates, so a place's
+point never comes from anything but a position the user shared, and only when
+they ask. `places` holds each principal's places (a name of 1 to 40 characters,
+unique per principal regardless of case, a point, and a radius of 50 to 2000 m,
+150 by default), at most 20, until the user deletes them; `place_update` renames
+or resizes one and `place_delete` deletes one that no watch or anchored job uses,
+naming those that do. Each acts at once with Undo in the user's own turn and
+proposes a card otherwise. A point is kept only in `places`: approvals, which are
+never pruned, name the shared position a save comes from rather than copying its
+point, and a deleted place is only marked `deleted_at`, so its Undo carries its
+ID; the location prune removes it for good once the 24-hour undo window ends.
+Deleting checks for dependents and deletes under one lock that storing a place
+watch or a place-anchored job also holds, so neither is left on a deleted place.
+Tool results round a point to four decimals, and no log line, metric label, or
+span attribute carries one.
+
+While the user shares a live location, every update (the first share and each
+edit of its message) is compared with each saved place in code. A fix is inside
+when it is within the radius and its accuracy is no wider than the radius,
+outside when it is farther than 1.5 times the radius plus its accuracy, and tells
+nothing in between or without an accuracy. A change counts once two fixes that
+tell agree on it, or once the first of them is two minutes old with none telling
+otherwise since, which a 30-second pass of the location loop confirms for a phone
+that stops sending. `place_presence` keeps the state per place with the live
+message it came from. A pin or venue never moves it; a pin replacing a live
+share, the share ending or running out (which the prune notices, resetting only
+that share's rows), forgetting the location, and resizing the place make it
+unknown, and the next fix sets it without an event. A share that only falls
+silent keeps its presence, since an edit of its message may still come and
+restore it. An arrival or leaving more than five minutes old, from edits Telegram
+queued while the bot was down, moves presence but is not told.
+
+Arriving and leaving go to the scheduler, which makes each enabled job anchored
+to that place and edge due at the event plus its offset (0 to 240 minutes) unless
+it already waits to run, and to the watch service, which queues one alert for each
+`place` watch on that place and edge inside its window, counted against the
+window's messages as any alert is; the loop never checks place watches. A job or
+watch set up while the user shares no live location says it works only while one
+is. The turn line adds "At Gym (saved place)" while the live share shows the user
+inside one, naming the smallest, then the nearest, of places that overlap. A saved place's name also serves the weather forecast and weather
+watches, which find it before geocoding.
 
 ### Feed tabs
 
@@ -719,14 +765,19 @@ The rewrite is sent only when it fits one message and keeps every number of the
 English text; otherwise, or when the call fails or takes over 30 seconds, the
 English text is sent. The next conversation turn hears the text that was sent.
 
-A weather watch checks the precipitation forecast at a place in code: a named
-place geocoded once when it is proposed, or the user's shared location at each
-check. Every 10 minutes it reads Open-Meteo's 15-minute forecast
+A weather watch checks the precipitation forecast at a place in code: one of the
+user's saved places or a named place geocoded, either once when it is proposed,
+or the user's shared location at each check. Every 10 minutes it reads Open-Meteo's 15-minute forecast
 (`minutely_15=precipitation`) through the web connector, under the owner's web
 access switch, and holds while one slot of the next `within_minutes` (15 to 360,
 60 by default) has `threshold_mm` (0.2 by default) or more; its alerts name the
 first such slot and say they are a forecast. Identical requests share one
 forecast for 10 minutes, whichever watch or job condition asks.
+
+A place watch alerts on arriving at or leaving one of the user's saved places,
+which the location service reports from the live share (see Saved places and
+arrivals) rather than the loop checking it; it takes the usual days, window, mute,
+and travel pause.
 
 Departure, route, disruption, home, and weather watches are checked; a kind is offered only when its
 connector is configured, and every check runs under the owner's own trains or
@@ -1152,6 +1203,9 @@ fixed vocabulary and act only on the presser's own rows.
 - **Short-lived location.** Only each user's latest shared position is stored. It is
   used while fresh, then deleted by a prune with SQLite `secure_delete` on; a user
   forgets it at once from `/settings`, and a forgotten live share stays ignored.
+  Saved places, which the user creates, are kept until deleted and 24 hours more
+  for Undo, nowhere but in `places`, and their points only ever come from a
+  position the user shared and asked to save.
 
 ## Key decisions
 

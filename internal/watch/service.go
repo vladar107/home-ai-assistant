@@ -127,6 +127,9 @@ type Service struct {
 
 	cycleMu sync.Mutex
 	pruned  time.Time
+	// placeMu keeps two arrivals or leavings from counting one window's messages at once; the loop
+	// never checks place watches, so it does not wait for a cycle.
+	placeMu sync.Mutex
 
 	mu       sync.Mutex
 	cancel   context.CancelFunc
@@ -380,7 +383,7 @@ func (s *Service) Cycle(ctx context.Context) {
 // check runs one watch's check when it is inside its window and due, and stores what changed,
 // queueing at most one message.
 func (s *Service) check(ctx context.Context, watch Watch, now time.Time, cache *Cache) {
-	if !watch.Enabled {
+	if !watch.Enabled || watch.Kind == KindPlace {
 		return
 	}
 	occurrence, active := watch.OccurrenceAt(now)

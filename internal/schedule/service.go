@@ -1013,6 +1013,8 @@ type Prepared struct {
 	Schedule Schedule
 	Anchor   *Anchor
 	resolved bool
+	// note is what the anchor's resolver tells the user when the job is saved.
+	note string
 }
 
 // Timing is when a job runs: a five-field cron expression, or At, a local date and time such as
@@ -1130,7 +1132,11 @@ func (s *Service) Create(ctx context.Context, id string, prepared Prepared) (boo
 	}
 	job := prepared.Job
 	job.ID = id
-	created, err := s.repository.CreateScheduledJob(ctx, job, job.Limit())
+	var created bool
+	err := s.guardAnchor(ctx, job, func() (err error) {
+		created, err = s.repository.CreateScheduledJob(ctx, job, job.Limit())
+		return err
+	})
 	if err == nil && created {
 		s.logger.InfoContext(ctx, "schedule.job.created", "principal_id", job.PrincipalID, "job_id", id, "job_type", job.Type)
 	}
@@ -1150,7 +1156,11 @@ func (s *Service) Update(ctx context.Context, current Job, expectedUpdatedAt tim
 	if job.Destination == "" {
 		job.Destination = current.Destination
 	}
-	updated, err := s.repository.UpdateScheduledJob(ctx, job, expectedUpdatedAt)
+	var updated bool
+	err := s.guardAnchor(ctx, job, func() (err error) {
+		updated, err = s.repository.UpdateScheduledJob(ctx, job, expectedUpdatedAt)
+		return err
+	})
 	if err == nil && updated {
 		s.logger.InfoContext(ctx, "schedule.job.updated", "principal_id", job.PrincipalID, "job_id", job.ID, "job_type", job.Type)
 	}

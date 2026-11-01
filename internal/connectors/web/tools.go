@@ -97,7 +97,7 @@ var definitions = []tools.Definition{
 		Activity:    tools.ActivityWeather,
 		Timeout:     toolTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
-			`"location":{"type":"string","description":"A town or city name, optionally with its country, such as Zwolle, Netherlands."},` +
+			`"location":{"type":"string","description":"A town or city name, optionally with its country, such as Zwolle, Netherlands, or the name of one of the user's saved places."},` +
 			`"latitude":{"type":"number","minimum":-90,"maximum":90,"description":"Latitude in decimal degrees, with longitude; use instead of location for a point such as the user's shared location."},` +
 			`"longitude":{"type":"number","minimum":-180,"maximum":180,"description":"Longitude in decimal degrees, with latitude; use instead of location for a point such as the user's shared location."},` +
 			`"days":{"type":"integer","minimum":1,"maximum":7,"description":"Days of forecast including today, default 3; ignored when date is given."},` +

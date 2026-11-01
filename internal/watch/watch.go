@@ -30,7 +30,8 @@ const (
 	KindHome        = "home"
 	KindAgent       = "agent"
 	KindWeather     = "weather"
-	// KindPlace is admitted by the store for a later plan and refused by every tool until then.
+	// KindPlace alerts on arriving at or leaving a saved place, on the user's live location
+	// updates rather than on the check loop.
 	KindPlace = "place"
 
 	ModeTrain = "train"
@@ -52,6 +53,9 @@ const (
 	TriggerClear = "clear"
 	// Agent trigger: the reported value changing while the condition keeps holding.
 	TriggerChange = "change"
+	// Place triggers: arriving at the place and leaving it.
+	TriggerArrive = "arrive"
+	TriggerLeave  = "leave"
 
 	MaximumWatchesPerPrincipal = 20
 	// MaximumAgentWatchesPerPrincipal is how many of a principal's watches may be agent watches,
@@ -135,6 +139,7 @@ var kindTriggers = map[string][]string{
 	KindHome:        {TriggerEnter, TriggerClear},
 	KindAgent:       {TriggerEnter, TriggerChange, TriggerClear},
 	KindWeather:     {TriggerEnter, TriggerClear},
+	KindPlace:       {TriggerArrive, TriggerLeave},
 }
 
 var triggerDescriptions = map[string]string{
@@ -149,13 +154,16 @@ var triggerDescriptions = map[string]string{
 	TriggerEnter:           "the condition starting to hold",
 	TriggerClear:           "the condition ending",
 	TriggerChange:          "the value changing while it holds",
+	TriggerArrive:          "arriving",
+	TriggerLeave:           "leaving",
 }
 
 // Target is what a watch looks at. A departure watch is a train (From, To, optional Via) or a bus
 // (Stop, Line); a disruption watch has Stations; a route watch names a saved route; a home watch
 // has the Entity ID of a Home Assistant entity and, as resolved, its friendly Name; an agent watch
 // has only a short Name the model gives it; a weather watch has a place's Name with its Latitude and
-// Longitude as found, or Current for wherever the user's shared location is at each check.
+// Longitude as found, or Current for wherever the user's shared location is at each check; a place
+// watch has the saved place's Name and, as resolved, its ID in Place.
 type Target struct {
 	Mode     string   `json:"mode,omitempty"`
 	From     string   `json:"from,omitempty"`
@@ -171,6 +179,7 @@ type Target struct {
 	Latitude  *float64 `json:"latitude,omitempty"`
 	Longitude *float64 `json:"longitude,omitempty"`
 	Current   bool     `json:"current,omitempty"`
+	Place     string   `json:"place,omitempty"`
 }
 
 // Weather is what a weather watch counts as rain coming: ThresholdMM or more precipitation in one
@@ -448,6 +457,14 @@ func (s Spec) Label() string {
 		return target.Name
 	case KindWeather:
 		return "Rain at " + s.placeName()
+	case KindPlace:
+		switch {
+		case len(s.Triggers) == 1 && s.Triggers[0] == TriggerArrive:
+			return "Arriving at " + target.Name
+		case len(s.Triggers) == 1 && s.Triggers[0] == TriggerLeave:
+			return "Leaving " + target.Name
+		}
+		return "Arriving at or leaving " + target.Name
 	default:
 		return s.Kind
 	}
@@ -513,6 +530,8 @@ func (s Spec) checkEvery() string {
 		return "checked every minute"
 	case KindWeather:
 		return fmt.Sprintf("checked every %d minutes against the forecast", int(WeatherCheckInterval.Minutes()))
+	case KindPlace:
+		return "noticed on your live location's updates, only while you share it"
 	case KindAgent:
 		if s.Check != nil {
 			return fmt.Sprintf("checked every %d minutes, each check a model turn on your own subscription", s.Check.IntervalMinutes)
@@ -597,7 +616,9 @@ func (w Weather) Describe() string {
 
 // allDay reports whether a kind is watched through whole days by default rather than around a
 // departure or within a short fixed window.
-func allDay(kind string) bool { return kind == KindHome || kind == KindAgent || kind == KindWeather }
+func allDay(kind string) bool {
+	return kind == KindHome || kind == KindAgent || kind == KindWeather || kind == KindPlace
+}
 
 // normalize validates a spec and puts it in its canonical form: defaults filled in, triggers and
 // days in their fixed order, and names trimmed. now rejects a one-off window already over.
@@ -612,12 +633,9 @@ func normalize(spec Spec, now time.Time) (Spec, error) {
 // normalizeWhat validates what a spec watches and when it alerts, without its days and window, as
 // a job's condition, which is checked at one instant, has neither.
 func normalizeWhat(spec Spec) (Spec, error) {
-	if spec.Kind == KindPlace {
-		return Spec{}, fmt.Errorf("place watches are not available yet")
-	}
 	allowed, known := kindTriggers[spec.Kind]
 	if !known {
-		return Spec{}, fmt.Errorf("the kind must be departure, disruptions, route, home, agent, or weather")
+		return Spec{}, fmt.Errorf("the kind must be departure, disruptions, route, home, agent, weather, or place")
 	}
 	target, err := normalizeTarget(spec.Kind, spec.Target)
 	if err != nil {
@@ -696,7 +714,7 @@ func normalizeWhen(spec Spec, now time.Time) (Spec, error) {
 		if length < minimumFixedWindow || length > maximumFixedWindow {
 			return Spec{}, fmt.Errorf("the window must run forward within one day, between %d minutes and %d hours long", int(minimumFixedWindow.Minutes()), int(maximumFixedWindow.Hours()))
 		}
-	case KindHome, KindAgent, KindWeather:
+	case KindHome, KindAgent, KindWeather, KindPlace:
 		if length < minimumFixedWindow {
 			return Spec{}, fmt.Errorf("the window must run forward within one day, at least %d minutes long, and may end at 24:00", int(minimumFixedWindow.Minutes()))
 		}
@@ -810,6 +828,9 @@ func normalizeTarget(kind string, target Target) (Target, error) {
 			}
 			normalized.Latitude, normalized.Longitude = &latitude, &longitude
 		}
+	case KindPlace:
+		normalized.Name = field(target.Name, "the place's name", true)
+		normalized.Place = field(target.Place, "place", false)
 	}
 	return normalized, err
 }

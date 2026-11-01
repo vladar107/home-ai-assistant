@@ -23,11 +23,11 @@ const (
 
 	LocationDisabledReply = "Location sharing is not enabled on this assistant."
 	LocationRefusedReply  = "I could not read that location, so I did not keep it."
-	LocationSharedLine    = "Your latest shared location is used in your conversation until it expires; only the latest one is kept, and nothing is kept once it expires or you forget it."
+	LocationSharedLine    = "Your latest shared location is used in your conversation until it expires; only the latest one is kept, and nothing is kept once it expires or you forget it. Places you save by name are kept until you delete them, and a day more so you can undo it, and are only ever saved when you ask."
 	LocationNotSharedLine = "Share a location or a live location in this chat to ask about places, buses, and weather near you."
 	LocationForgottenNote = "Location forgotten."
 	// LocationPrivacyLine is added to /privacy while location sharing is enabled.
-	LocationPrivacyLine = "Location: only the latest is kept, until it expires; it goes to your model, Transitous, and OpenStreetMap."
+	LocationPrivacyLine = "Location: only the latest is kept, until it expires; it goes to your model, Transitous, and OpenStreetMap. Places you save by name are kept until a day after you delete them, never saved from a location without your asking."
 )
 
 // LocationController is implemented by the location service; nil turns shared locations away.

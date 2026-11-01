@@ -68,6 +68,7 @@ type Service struct {
 	trains       transit.Trips
 	telemetry    Telemetry
 	exposure     ExposureChecker
+	places       SavedPlaces
 
 	running atomic.Bool
 }
@@ -92,6 +93,18 @@ type ExposureChecker interface {
 // before turns start. Without one, fetch_page opens any public address.
 func (s *Service) SetExposure(exposure ExposureChecker) {
 	s.exposure = exposure
+}
+
+// SavedPlaces finds one of the principal's saved places by name, so a forecast for it needs no
+// geocoding.
+type SavedPlaces interface {
+	FindSavedPlace(ctx context.Context, principalID, name string) (Place, bool, error)
+}
+
+// SetSavedPlaces lets weather_forecast and weather watches name the user's saved places, at wiring
+// time before turns start.
+func (s *Service) SetSavedPlaces(places SavedPlaces) {
+	s.places = places
 }
 
 // SetTelemetry sets where render metrics are recorded, at wiring time before turns start.

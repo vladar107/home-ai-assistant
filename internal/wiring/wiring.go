@@ -592,11 +592,14 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("initialize locations: %w", err)
 		}
-		if err := a.Registry.Register(locationService); err != nil {
+		if err := a.register(ctx, Connector{Module: locationService, Tools: []tools.Provider{locationService}, Executor: locationService}); err != nil {
 			return err
 		}
 		a.Locations = locationService
 		turnLocations = locationService
+		if a.Web != nil {
+			a.Web.SetSavedPlaces(webPlaces{locations: locationService})
+		}
 	}
 	tripReader := trip.NewReader(in.Store, in.Core.Now)
 	engine, err := turn.New(turn.Config{
@@ -633,8 +636,10 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	if err := scheduler.RegisterAnchor(schedule.AnchorTrip, trip.NewAnchors(in.Store)); err != nil {
 		return err
 	}
-	if err := scheduler.RegisterAnchor(schedule.AnchorPlace, schedule.PlaceAnchors{}); err != nil {
-		return err
+	if a.Locations != nil {
+		if err := scheduler.RegisterAnchor(schedule.AnchorPlace, placeAnchors{locations: a.Locations}); err != nil {
+			return err
+		}
 	}
 	tripService, err := trip.NewService(trip.Config{Now: in.Core.Now, Tabs: tabs.Trips}, in.Store, trip.NewScheduleReminders(scheduler), in.Logger)
 	if err != nil {
@@ -852,6 +857,21 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 				return err
 			}
 		}
+		if a.Locations != nil {
+			place, err := watch.NewPlaceEvaluator(watchPlaces{locations: a.Locations})
+			if err != nil {
+				return fmt.Errorf("initialize place watches: %w", err)
+			}
+			if err := a.register(ctx, Connector{Watches: map[string]watch.Evaluator{watch.KindPlace: place}}); err != nil {
+				return err
+			}
+		}
+	}
+	if a.Locations != nil {
+		// Arrivals and leavings reach only the jobs and watches of the principal whose live share
+		// showed them.
+		a.Locations.SetPlaceListener(placeEvents{scheduler: scheduler, watches: a.Watches, logger: in.Logger})
+		a.Locations.SetPlaceTools(approvals, placeDependents{scheduler: scheduler, watches: a.Watches})
 	}
 	a.Connections = connections
 	a.Conversation = conversationService

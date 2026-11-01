@@ -91,12 +91,20 @@ func (s *Service) anchorGuidance() string {
 	if _, known := s.anchors[AnchorTrip]; known {
 		kinds = append(kinds, "trip with a trip_id from trip_list and edge start or end")
 	}
+	_, place := s.anchors[AnchorPlace]
+	if place {
+		kinds = append(kinds, "place with a place_id from place_list and edge arrive or leave, which runs on every arrival or leaving unless once is set")
+	}
 	if len(kinds) == 0 {
 		return ""
 	}
-	return "Anchors: when the user times a reminder or job by an event rather than a clock time, such as 30 minutes before the dentist, an hour before every meeting titled Planning, or when their trip starts, give anchor instead of cron or at: " +
+	guidance := "Anchors: when the user times a reminder or job by an event rather than a clock time, such as 30 minutes before the dentist, an hour before every meeting titled Planning, or when their trip starts, give anchor instead of cron or at: " +
 		strings.Join(kinds, "; ") + ". offset_minutes is negative for before the event and positive for after it. " +
 		"Look the event or trip up first rather than guessing its ids. An anchored job follows its event when it moves, and when the event is cancelled it ends and the user is told in one line, so prefer an anchor to a time copied from the event."
+	if place {
+		guidance += " A place anchor, such as when I get home remind me to water the plants, runs 0 to 240 minutes after the arrival or leaving, and only while the user shares their live location; tell the user so, and that it may notice the arrival late."
+	}
+	return guidance
 }
 
 const conditionGuidance = "Conditions: any reminder or job can take a condition, checked once when it is due; when it does not hold, the run is skipped and nothing is sent, such as at 07:40 on weekdays, tell me only if rain is coming in the next hour, which is a weather condition with within_minutes 60. " +
@@ -123,14 +131,16 @@ var getDefinition = tools.Definition{
 
 // anchorProperty and conditionProperty are the anchor and condition every job tool takes.
 const anchorProperty = `"anchor":{"type":"object","description":"Instead of cron or at: run relative to an event, and follow it when it moves.","properties":{` +
-	`"kind":{"type":"string","enum":["calendar_event","calendar_match","trip"],"description":"calendar_event: one event from calendar_events; calendar_match: each upcoming event whose title contains title; trip: a trip's start or end."},` +
+	`"kind":{"type":"string","enum":["calendar_event","calendar_match","trip","place"],"description":"calendar_event: one event from calendar_events; calendar_match: each upcoming event whose title contains title; trip: a trip's start or end; place: each arrival at or leaving of a saved place."},` +
 	`"account":{"type":"string","description":"calendar_event: the account calendar_events shows for the event. calendar_match: optional, to match only that account's events."},` +
 	`"calendar_id":{"type":"string","description":"calendar_event: the event's calendar id. calendar_match: optional, to match only that calendar."},` +
 	`"event_id":{"type":"string","description":"calendar_event: the event id from calendar_events."},` +
 	`"title":{"type":"string","maxLength":100,"description":"calendar_match: text the event titles contain, such as Planning."},` +
 	`"trip_id":{"type":"string","description":"trip: the trip's id from trip_list."},` +
-	`"edge":{"type":"string","enum":["start","end"],"description":"trip: whether to follow its start or its end."},` +
-	`"offset_minutes":{"type":"integer","minimum":-2880,"maximum":1440,"description":"Minutes after the event's start, or the trip's start or end; negative for before, such as -30 for half an hour before."}},` +
+	`"place_id":{"type":"string","description":"place: the saved place's id from place_list."},` +
+	`"edge":{"type":"string","enum":["start","end","arrive","leave"],"description":"trip: start or end. place: arrive or leave."},` +
+	`"once":{"type":"boolean","description":"place: run on the next arrival or leaving only, then finish; by default it runs on every one."},` +
+	`"offset_minutes":{"type":"integer","minimum":-2880,"maximum":1440,"description":"Minutes after the event's start, or the trip's start or end; negative for before, such as -30 for half an hour before. place: 0 to 240 minutes after arriving or leaving."}},` +
 	`"required":["kind","offset_minutes"],"additionalProperties":false}`
 
 const conditionProperty = `"condition":{"type":"object","description":"Run only if this holds when the job is due, checked once then; otherwise the run is skipped without a message. ` +
@@ -428,12 +438,16 @@ func (s *Service) setReminder(ctx context.Context, principalID string, call tool
 		return tools.Result{}, err
 	}
 	if _, err := s.Create(ctx, id, prepared); err != nil {
-		if errors.Is(err, ErrTooManyJobs) {
+		var refusal *approval.ActionError
+		switch {
+		case errors.Is(err, ErrTooManyJobs):
 			return tools.Result{Text: tooManyText(true), IsError: true}, nil
+		case errors.As(err, &refusal):
+			return tools.Result{Text: refusal.Text, IsError: true}, nil
 		}
 		return tools.Result{}, err
 	}
-	return tools.Result{Text: fmt.Sprintf("Reminder set %s (id %s): %s", reminderWhen(prepared), id, ReminderText(config))}, nil
+	return tools.Result{Text: withNote(fmt.Sprintf("Reminder set %s (id %s): %s", reminderWhen(prepared), id, ReminderText(config)), prepared)}, nil
 }
 
 // reminderWhen is when a prepared reminder goes off, as "for Mon 5 Oct 17:00" or, for an anchored
@@ -453,6 +467,15 @@ func reminderWhen(prepared Prepared) string {
 		when += ", only if " + condition.Description
 	}
 	return when
+}
+
+// withNote adds what the anchor's resolver tells the user, such as that arrivals need a live
+// location shared, after a line about a saved job.
+func withNote(text string, prepared Prepared) string {
+	if prepared.note == "" {
+		return text
+	}
+	return text + " " + prepared.note
 }
 
 func (s *Service) proposeReminder(ctx context.Context, principalID string, call tools.Call, text string, prepared Prepared) (tools.Result, error) {
@@ -824,7 +847,7 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		at := FormatOccurrence(prepared.Job.NextRunAt, prepared.Schedule.Location)
 		switch {
 		case prepared.Anchor != nil:
-			return approval.Outcome{Text: "Scheduled " + reminderWhen(prepared) + ".", Undo: undo}, nil
+			return approval.Outcome{Text: withNote("Scheduled "+reminderWhen(prepared)+".", prepared), Undo: undo}, nil
 		case prepared.Job.OneTime():
 			return approval.Outcome{Text: "Scheduled for " + at + ".", Undo: undo}, nil
 		}
@@ -852,7 +875,7 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 			}
 			return approval.Outcome{}, err
 		}
-		return approval.Outcome{Text: "Reminder set " + reminderWhen(prepared) + "."}, nil
+		return approval.Outcome{Text: withNote("Reminder set "+reminderWhen(prepared)+".", prepared)}, nil
 	case toolUpdate:
 		return s.executeUpdate(ctx, record)
 	case toolRemove:
@@ -930,7 +953,7 @@ func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (ap
 	at := FormatOccurrence(prepared.Job.NextRunAt, prepared.Schedule.Location)
 	switch {
 	case prepared.Anchor != nil:
-		return approval.Outcome{Text: "Changed. Runs " + reminderWhen(prepared) + ".", Undo: undo}, nil
+		return approval.Outcome{Text: withNote("Changed. Runs "+reminderWhen(prepared)+".", prepared), Undo: undo}, nil
 	case prepared.Job.OneTime():
 		return approval.Outcome{Text: "Changed. Runs once: " + at + ".", Undo: undo}, nil
 	}

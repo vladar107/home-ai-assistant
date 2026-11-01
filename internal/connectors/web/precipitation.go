@@ -38,7 +38,8 @@ func (s *Service) WeatherEnabled(ctx context.Context, principalID string) (bool,
 	return s.switches.Enabled(ctx, principalID, Switch)
 }
 
-// FindPlace geocodes a place name as weather_forecast does; an empty name is the household's home.
+// FindPlace finds a place name as weather_forecast does: one of the principal's saved places, or
+// else geocoded; an empty name is the household's home.
 func (s *Service) FindPlace(ctx context.Context, principalID, name string) (Place, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -50,6 +51,9 @@ func (s *Service) FindPlace(ctx context.Context, principalID, name string) (Plac
 	if len([]rune(name)) > maximumPlaceRunes {
 		return Place{}, fmt.Errorf("the place must be at most %d characters", maximumPlaceRunes)
 	}
+	if saved, found, err := s.savedPlace(ctx, principalID, name); err != nil || found {
+		return saved, err
+	}
 	found, ok, err := s.geocode(ctx, name)
 	if err != nil {
 		s.logger.InfoContext(ctx, "web.weather.failed", "principal_id", principalID, "error_class", errorClass(err))
@@ -59,6 +63,14 @@ func (s *Service) FindPlace(ctx context.Context, principalID, name string) (Plac
 		return Place{}, fmt.Errorf("no place called %q was found; ask the user for a nearby town or a more precise name", name)
 	}
 	return Place{Name: placeName(found), Latitude: found.Latitude, Longitude: found.Longitude}, nil
+}
+
+// savedPlace is the principal's saved place with the name, if there is one.
+func (s *Service) savedPlace(ctx context.Context, principalID, name string) (Place, bool, error) {
+	if s.places == nil {
+		return Place{}, false, nil
+	}
+	return s.places.FindSavedPlace(ctx, principalID, name)
 }
 
 // Precipitation is Open-Meteo's 15-minute precipitation forecast at the coordinates for the next

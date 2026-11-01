@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/module"
 )
 
@@ -66,6 +67,18 @@ type Service struct {
 	pruneInterval time.Duration
 	now           func() time.Time
 	logger        *slog.Logger
+
+	// listener, dependents, and proposer are set at wiring time, before the service starts.
+	listener   PlaceListener
+	dependents PlaceDependents
+	proposer   Proposer
+
+	// presenceMu keeps two fixes of one share, or a fix and a resize, from changing a place's
+	// presence at once.
+	presenceMu sync.Mutex
+	// placeUse keeps a place from being deleted between the check that nothing uses it and the
+	// deletion, while a watch or job that names it is stored under GuardPlace.
+	placeUse sync.Mutex
 
 	mu      sync.Mutex
 	cancel  context.CancelFunc
@@ -149,26 +162,46 @@ func (s *Service) pruneLoop(ctx context.Context, stopped chan<- struct{}) {
 	defer close(stopped)
 	ticker := time.NewTicker(s.pruneInterval)
 	defer ticker.Stop()
+	settling := time.NewTicker(settleInterval)
+	defer settling.Stop()
+	if err := s.Prune(ctx); err != nil && ctx.Err() == nil {
+		s.logger.WarnContext(ctx, "location.prune.failed", "error", err)
+	}
 	for {
-		if err := s.Prune(ctx); err != nil && ctx.Err() == nil {
-			s.logger.WarnContext(ctx, "location.prune.failed", "error", err)
-		}
 		select {
 		case <-ctx.Done():
 			return
+		case <-settling.C:
+			if err := s.SettlePresence(ctx); err != nil && ctx.Err() == nil {
+				s.logger.WarnContext(ctx, "location.presence.failed", "stage", "settle", "error", err)
+			}
 		case <-ticker.C:
+			if err := s.Prune(ctx); err != nil && ctx.Err() == nil {
+				s.logger.WarnContext(ctx, "location.prune.failed", "error", err)
+			}
 		}
 	}
 }
 
-// Prune deletes every position that is no longer usable.
+// Prune deletes every position that is no longer usable, and every place deleted longer ago than
+// it can be undone. A live share that ran out or was stopped sends nothing more, so its presence is
+// forgotten as well, and the next share sets it again without an arrival or a leaving. A share that
+// only fell silent keeps its presence, since its message may still move again.
 func (s *Service) Prune(ctx context.Context) error {
 	fixes, err := s.repository.ListLocations(ctx)
 	if err != nil {
 		return err
 	}
 	now := s.now()
+	if err := s.repository.PurgePlaces(ctx, now.Add(-approval.UndoWindow)); err != nil {
+		return err
+	}
 	for _, fix := range fixes {
+		if fix.Source == SourceLive && !fix.Live(now) {
+			if err := s.resetPresence(ctx, fix.PrincipalID, fix.LiveMessageID); err != nil {
+				return err
+			}
+		}
 		if now.Before(s.policy.ExpiresAt(fix)) {
 			continue
 		}
@@ -186,6 +219,13 @@ func (s *Service) Share(ctx context.Context, fix Fix) (string, error) {
 	}
 	if err := s.repository.PutLocation(ctx, fix); err != nil {
 		return "", err
+	}
+	// A pin or venue may be somewhere the user is not, so it never moves presence, and a live share
+	// it replaces sends nothing more.
+	if fix.Source == SourceLive {
+		s.track(ctx, fix)
+	} else if err := s.resetPresence(ctx, fix.PrincipalID, 0); err != nil {
+		s.logger.WarnContext(ctx, "location.presence.failed", "principal_id", fix.PrincipalID, "stage", "reset", "error", err)
 	}
 	near := s.describe(ctx, fix)
 	now := s.now()
@@ -209,7 +249,16 @@ func (s *Service) Move(ctx context.Context, fix Fix) (bool, error) {
 	if fix.Source != SourceLive {
 		return false, fmt.Errorf("only a live location moves")
 	}
-	return s.repository.MoveLiveLocation(ctx, fix)
+	moved, err := s.repository.MoveLiveLocation(ctx, fix)
+	if err != nil || !moved {
+		return moved, err
+	}
+	if fix.EndedAt.IsZero() {
+		s.track(ctx, fix)
+	} else if err := s.resetPresence(ctx, fix.PrincipalID, fix.LiveMessageID); err != nil {
+		s.logger.WarnContext(ctx, "location.presence.failed", "principal_id", fix.PrincipalID, "stage", "reset", "error", err)
+	}
+	return true, nil
 }
 
 // Current is the principal's usable position, if any.
@@ -224,9 +273,17 @@ func (s *Service) Current(ctx context.Context, principalID string) (Fix, bool, e
 	return fix, true, nil
 }
 
-// Forget removes the principal's position and reports whether one was stored.
+// Forget removes the principal's position and reports whether one was stored. Presence goes with
+// it, since the share it was computed from is ignored from now on.
 func (s *Service) Forget(ctx context.Context, principalID string) (bool, error) {
-	return s.repository.ForgetLocation(ctx, principalID, s.now())
+	forgotten, err := s.repository.ForgetLocation(ctx, principalID, s.now())
+	if err != nil {
+		return false, err
+	}
+	if err := s.resetPresence(ctx, principalID, 0); err != nil {
+		return false, err
+	}
+	return forgotten, nil
 }
 
 // TurnLine tells a turn where its user is; empty when no usable position is stored.
@@ -261,6 +318,11 @@ func (s *Service) TurnLine(ctx context.Context, principalID string) (string, err
 		builder.WriteString(", near " + near)
 	}
 	builder.WriteString(".")
+	if fix.Live(now) {
+		if place := s.insidePlace(ctx, fix); place != "" {
+			builder.WriteString(" At " + oneLine(place) + " (saved place).")
+		}
+	}
 	return builder.String(), nil
 }
 

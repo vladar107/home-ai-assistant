@@ -49,7 +49,7 @@ func (s *Service) PrepareCondition(ctx context.Context, principalID string, raw 
 	case kind == KindRoute:
 		return nil, "", fmt.Errorf("a route cannot be a condition, because whether a route works depends on the legs it would take; use a departure condition for the train or bus instead")
 	case kind == KindPlace:
-		return nil, "", fmt.Errorf("place conditions are not available yet")
+		return nil, "", fmt.Errorf("a place cannot be a condition, since arriving and leaving are events rather than something that holds at one instant; anchor the job to the place instead")
 	case light && kind != KindWeather && kind != KindHome:
 		return nil, "", fmt.Errorf("a reminder is sent as written, so its condition can only be weather or home, whose values code writes; for a departure, disruptions, or agent condition, make it a scheduled job")
 	case kind == KindHome && arguments.Condition != nil && arguments.Condition.ForMinutes > 0:

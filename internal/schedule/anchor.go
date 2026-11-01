@@ -12,6 +12,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/vladar107/home-ai-assistant/internal/approval"
 )
 
 // The kinds of event a job can be anchored to. A calendar_event or trip anchor fires once, so its
@@ -92,11 +94,14 @@ type Condition struct {
 }
 
 // AnchorOccurrence is the event occurrence an anchor points at: its key, the instant of the edge
-// the anchor names, and the event's title. A zero Key means no occurrence is known.
+// the anchor names, and the event's title. A zero Key means no occurrence is known. Note is a line
+// for the user about what the anchor needs, such as a live location shared for a place; it is told
+// when the job is saved.
 type AnchorOccurrence struct {
 	Key   string
 	At    time.Time
 	Label string
+	Note  string
 }
 
 // AnchorResolver finds the occurrence of one kind of anchor for its owner, with the owner's own
@@ -106,6 +111,31 @@ type AnchorOccurrence struct {
 // A repeating anchor never returns the occurrence whose key is exclude, the one it last ran for.
 type AnchorResolver interface {
 	ResolveAnchor(ctx context.Context, principalID string, anchor Anchor, after time.Time, exclude string) (AnchorOccurrence, error)
+}
+
+// AnchorGuard is a resolver that keeps what an anchor names from being deleted while a job naming
+// it is stored with store, and returns ErrAnchorGone without storing once it is gone, such as a
+// saved place deleted between a job's proposal and its confirmation.
+type AnchorGuard interface {
+	GuardAnchor(ctx context.Context, principalID string, anchor Anchor, store func() error) error
+}
+
+// guardAnchor stores the job with store under its anchor's guard, if its resolver has one. A gone
+// anchor is refused as an action error, which the tools tell the user.
+func (s *Service) guardAnchor(ctx context.Context, job Job, store func() error) error {
+	anchor := JobAnchor(job)
+	if anchor == nil {
+		return store()
+	}
+	guard, ok := s.anchors[anchor.Kind].(AnchorGuard)
+	if !ok {
+		return store()
+	}
+	err := guard.GuardAnchor(ctx, job.PrincipalID, *anchor, store)
+	if errors.Is(err, ErrAnchorGone) {
+		return &approval.ActionError{Reason: errorAnchorGone, Text: "What this job follows no longer exists, so it was not saved."}
+	}
+	return err
 }
 
 // Conditions checks job conditions: the watch service, whose code-checked kinds and agent turn
@@ -271,9 +301,21 @@ func normalizeAnchor(anchor Anchor) (Anchor, error) {
 			return Anchor{}, fmt.Errorf("a trip anchor takes trip_id, edge, and offset_minutes only")
 		}
 	case AnchorPlace:
-		return Anchor{}, fmt.Errorf("anchors to arriving at or leaving a place are not available yet")
+		normalized.PlaceID = field(anchor.PlaceID, "place_id", maximumAnchorTitle, true)
+		normalized.Edge = strings.TrimSpace(anchor.Edge)
+		normalized.Once = anchor.Once
+		if err == nil && normalized.Edge != EdgeArrive && normalized.Edge != EdgeLeave {
+			return Anchor{}, fmt.Errorf("a place anchor's edge must be arrive or leave")
+		}
+		if !unused(anchor.Account, anchor.CalendarID, anchor.EventID, anchor.Title, anchor.TripID) {
+			return Anchor{}, fmt.Errorf("a place anchor takes place_id, edge, optionally once, and offset_minutes only")
+		}
+		if err == nil && (normalized.OffsetMinutes < 0 || normalized.OffsetMinutes > maximumPlaceOffset) {
+			return Anchor{}, fmt.Errorf("a place anchor's offset_minutes must be between 0 and %d, since it runs on or after arriving or leaving", maximumPlaceOffset)
+		}
+		return normalized, err
 	default:
-		return Anchor{}, fmt.Errorf("the anchor's kind must be calendar_event, calendar_match, or trip")
+		return Anchor{}, fmt.Errorf("the anchor's kind must be calendar_event, calendar_match, trip, or place")
 	}
 	if err != nil {
 		return Anchor{}, err
@@ -284,26 +326,16 @@ func normalizeAnchor(anchor Anchor) (Anchor, error) {
 	return normalized, nil
 }
 
-// checkStoredAnchor checks an anchor as stored, which may be a place anchor another plan's code
-// writes, without refusing it.
+// checkStoredAnchor checks an anchor as stored, with the label its resolver set.
 func checkStoredAnchor(anchor Anchor) error {
-	if anchor.Kind != AnchorPlace {
-		label := anchor.Label
-		normalized, err := normalizeAnchor(anchor)
-		if err != nil {
-			return err
-		}
-		normalized.Label = label
-		if normalized != anchor {
-			return fmt.Errorf("the job's anchor is not in its stored form")
-		}
-		return nil
+	label := anchor.Label
+	normalized, err := normalizeAnchor(anchor)
+	if err != nil {
+		return err
 	}
-	if strings.TrimSpace(anchor.PlaceID) == "" || (anchor.Edge != EdgeArrive && anchor.Edge != EdgeLeave) {
-		return fmt.Errorf("a place anchor needs a place and arrive or leave")
-	}
-	if anchor.OffsetMinutes < 0 || anchor.OffsetMinutes > maximumPlaceOffset {
-		return fmt.Errorf("a place anchor's offset_minutes must be between 0 and %d", maximumPlaceOffset)
+	normalized.Label = label
+	if normalized != anchor {
+		return fmt.Errorf("the job's anchor is not in its stored form")
 	}
 	return nil
 }
@@ -435,6 +467,7 @@ func (s *Service) resolvePrepared(ctx context.Context, prepared *Prepared) error
 	if label := strings.TrimSpace(occurrence.Label); label != "" && anchor.Kind != AnchorCalendarMatch {
 		anchor.Label = clipLabel(label)
 	}
+	prepared.note = clipLabel(occurrence.Note)
 	if anchor.Repeats() {
 		job.NextRunAt, job.OccurrenceKey = now.AddDate(100, 0, 0), ""
 		if occurrence.Key != "" {
@@ -811,10 +844,34 @@ func StoredKey(key string) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-// PlaceAnchors stands in for the place resolver until arrivals and leavings are tracked: no place
-// anchor can be proposed, and a stored one waits for the arrival or leaving that sets its run.
-type PlaceAnchors struct{}
-
-func (PlaceAnchors) ResolveAnchor(context.Context, string, Anchor, time.Time, string) (AnchorOccurrence, error) {
-	return AnchorOccurrence{}, errors.New("anchors to arriving at or leaving a place are not available yet")
+// PlaceEvent makes each of the principal's enabled jobs anchored to arriving at or leaving the place
+// due at the event plus its offset. A job that already waits to run for an earlier one keeps that
+// run, and a job's own next run is never moved for another principal's place. The claim loop then
+// runs it as any due job.
+func (s *Service) PlaceEvent(ctx context.Context, principalID, placeID, edge string, at time.Time) error {
+	jobs, err := s.repository.ListScheduledJobs(ctx, principalID)
+	if err != nil {
+		return err
+	}
+	due := false
+	for _, job := range jobs {
+		anchor := JobAnchor(job)
+		if !job.Enabled || !job.AnchorRepeats || anchor == nil || anchor.Kind != AnchorPlace || anchor.PlaceID != placeID || anchor.Edge != edge || !waiting(job) {
+			continue
+		}
+		next := at.Add(anchor.offset()).UTC()
+		key := StoredKey(placeID + ":" + edge + ":" + at.UTC().Format(time.RFC3339Nano))
+		moved, err := s.repository.MoveScheduledJobOccurrence(ctx, job.ID, job.NextRunAt, job.RunAt, next, key)
+		if err != nil {
+			return err
+		}
+		if moved {
+			s.logger.InfoContext(ctx, "schedule.anchor.moved", "principal_id", principalID, "job_id", job.ID, "kind", AnchorPlace)
+			due = due || !next.After(s.now())
+		}
+	}
+	if due {
+		s.Wake()
+	}
+	return nil
 }

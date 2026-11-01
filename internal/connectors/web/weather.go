@@ -141,8 +141,12 @@ func (s *Service) weatherForecast(ctx context.Context, principalID string, reque
 			Latitude:  *request.Latitude,
 			Longitude: *request.Longitude,
 		}
+	} else if saved, ok, err := s.savedPlace(ctx, principalID, location); err != nil {
+		s.logger.WarnContext(ctx, "web.weather.failed", "principal_id", principalID, "stage", "saved_place", "error", err)
+		return errorResult("The user's saved places could not be read right now.")
+	} else if ok {
+		found = place{Name: saved.Name + " (saved place)", Latitude: saved.Latitude, Longitude: saved.Longitude}
 	} else {
-		var ok bool
 		found, ok, err = s.geocode(ctx, location)
 		if err != nil {
 			return s.weatherFailure(ctx, principalID, err)

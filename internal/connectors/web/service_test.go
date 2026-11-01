@@ -769,3 +769,53 @@ func TestWeatherForecastConvertsWindToTheAskedUnit(t *testing.T) {
 		"wind 11 kn gusting 23 kn")
 	wantError(t, f.call("alice", "weather_forecast", map[string]any{"location": "Amsterdam", "wind_unit": "mph"}), `wind_unit must be "kmh", "ms", "kn", or "bft"`)
 }
+
+// savedPlaces holds alice's one saved place.
+type savedPlaces struct{}
+
+func (savedPlaces) FindSavedPlace(_ context.Context, principalID, name string) (web.Place, bool, error) {
+	if principalID != "alice" || !strings.EqualFold(name, "gym") {
+		return web.Place{}, false, nil
+	}
+	return web.Place{Name: "Gym", Latitude: 10, Longitude: 20}, true, nil
+}
+
+func TestWeatherForecastFindsTheUsersSavedPlaceBeforeGeocoding(t *testing.T) {
+	f := newFixture(t, "Amsterdam")
+	f.service.SetSavedPlaces(savedPlaces{})
+	var mu sync.Mutex
+	var geocoded int
+	var forecasted []url.Values
+	f.route("geocoding.test/v1/search", func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		geocoded++
+		mu.Unlock()
+		http.Error(w, "unexpected geocoding", http.StatusBadRequest)
+	})
+	f.route("forecast.test/v1/forecast", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		forecasted = append(forecasted, r.URL.Query())
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, forecastAmsterdam)
+	})
+
+	wantText(t, f.call("alice", "weather_forecast", map[string]any{"location": "gym", "days": 2}), "Weather for Gym (saved place)")
+	place, err := f.service.FindPlace(f.ctx, "alice", "Gym")
+	if err != nil || place.Name != "Gym" || place.Latitude != 10 || place.Longitude != 20 {
+		t.Fatalf("FindPlace = %+v %v", place, err)
+	}
+	mu.Lock()
+	if geocoded != 0 || len(forecasted) != 1 || forecasted[0].Get("latitude") != "10.0000" || forecasted[0].Get("longitude") != "20.0000" {
+		t.Fatalf("geocoded = %d, forecasts = %v", geocoded, forecasted)
+	}
+	mu.Unlock()
+
+	// Bob has no saved place of that name, so his request is geocoded.
+	wantError(t, f.call("bob", "weather_forecast", map[string]any{"location": "Gym", "days": 2}), "unavailable")
+	mu.Lock()
+	defer mu.Unlock()
+	if geocoded == 0 {
+		t.Fatal("bob's request used alice's saved place")
+	}
+}

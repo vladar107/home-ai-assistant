@@ -93,7 +93,14 @@ borrowed between users.
   one planned departure of a line.
 - **Shared location.** Share a pin or a live location in the chat and ask about
   "here": buses and weather at that point, and nearby pharmacies, shops, or cafés
-  from OpenStreetMap. Only the latest position is kept, briefly.
+  from OpenStreetMap. Only the latest position is kept, briefly. "Save this as
+  Gym" keeps a shared position as a named place with a radius, until a day
+  after the user deletes it, for Undo; places are only ever saved when the user
+  asks. While a live
+  location is shared, the assistant knows which saved place the user is at, and
+  arriving or leaving can alert a watch ("tell me when I leave the office") or
+  run a reminder or job ("when I get home, remind me to water the plants").
+  Saved places also work as weather places.
 - **Voice and pictures.** Voice notes and audio files are transcribed and
   answered like typed messages, and the assistant draws pictures, or edits a
   photo the user sent, on the user's own ChatGPT subscription.
@@ -114,8 +121,8 @@ borrowed between users.
   say. A reminder or job can also follow an event instead of a clock time
   ("remind me 30 minutes before the dentist", "an hour before every meeting
   titled Planning, send me the agenda", "when my trip starts, tell me the
-  weather there"): it moves when the event moves, and ends with one line when
-  the event is cancelled. Any job can carry a condition checked when it is due
+  weather there", "when I get home, remind me to water the plants"): it moves
+  when the event moves, and ends with one line when the event is cancelled. Any job can carry a condition checked when it is due
   ("at 07:40 on weekdays, tell me only if rain is coming in the next hour"), and
   stays silent when it does not hold.
 - **Heads-up.** Turned on in `/settings`, the assistant looks over the user's
@@ -188,7 +195,9 @@ borrowed between users.
   disruptions at stations are checked, and so are Home Assistant devices: "tell me
   if the balcony door stays open for 10 minutes", "warn me if the freezer goes above
   -15 °C", or "tell me when the washing machine is done". "Tell me when rain is
-  coming" checks the 15-minute precipitation forecast at a place, also in code.
+  coming" checks the 15-minute precipitation forecast at a place, also in code,
+  and "tell me when I leave the office" alerts on leaving a saved place while a
+  live location is shared.
   Anything else the
   assistant can look at is watched by a model turn per check on the user's own
   subscription: "tell me when the return flight drops below €150", "tell me when a
@@ -268,7 +277,7 @@ internal/chatgpt/      transcription, image generation, and usage
 internal/imagegen/     drawn pictures on the user's own subscription
 internal/reaction/     emoji reaction tool
 internal/modelcatalog/ models a subscription offers
-internal/location/     shared positions and their expiry
+internal/location/     shared positions, their expiry, and saved places
 internal/memory/       per-user memory, its tools, and prompt rendering
 internal/backlog/      per-user backlog of ideas for developing the assistant
 internal/collection/   per-user typed collections, their tools, and the query engine

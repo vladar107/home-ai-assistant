@@ -64,6 +64,11 @@ func proposeGuidance(zone string, kinds []string) string {
 			"within_minutes (15 to 360, 60 by default) is how far ahead it looks and threshold_mm (0.2 by default) the precipitation in one 15-minute slot that counts. Its triggers are enter, when rain becomes expected, and clear, when it no longer is; both by default. " +
 			"It checks every 10 minutes, all day unless the user narrows it, and its alerts say they are a forecast."
 	}
+	if slices.Contains(kinds, KindPlace) {
+		guidance += " A place watch tells the user when they arrive at or leave one of their saved places, such as tell me when I leave Office: give the place's name as place_list shows it in name, and triggers arrive or leave as the user asks; both by default. " +
+			"It works only while the user shares their live location in this chat, all day unless the user narrows it, and may notice an arrival late when the phone pauses its updates, so tell the user that. " +
+			"To run a job or a reminder on arriving or leaving instead of only alerting, anchor it to the place."
+	}
 	return guidance
 }
 
@@ -82,7 +87,7 @@ const specProperties = `"mode":{"type":"string","enum":["train","bus"],"descript
 	`"line":{"type":"string","description":"Bus: the line number."},` +
 	`"stations":{"type":"array","items":{"type":"string"},"maxItems":10,"description":"Disruptions: the stations to watch, such as a pair."},` +
 	`"route":{"type":"string","description":"Route: the saved route's name."},` +
-	`"name":{"type":"string","description":"Home: the name of the device or sensor as the user says it, such as Balcony door. Agent: a short label for the watch, such as Lisbon flight price. Weather: the place, such as a town."},` +
+	`"name":{"type":"string","description":"Home: the name of the device or sensor as the user says it, such as Balcony door. Agent: a short label for the watch, such as Lisbon flight price. Weather: the place, such as a town or one of the user's saved places. Place: the saved place's name."},` +
 	`"entity":{"type":"string","description":"Home: the entity id, only when the user or a tool result gave it."},` +
 	`"condition":{"type":"object","description":"Home: what to wait for. Give exactly one of state, above, or below.","properties":{` +
 	`"state":{"type":"array","items":{"type":"string"},"maxItems":10,"description":"The states that count, such as on, off, or idle; open and detected mean on for a binary sensor."},` +
@@ -96,11 +101,11 @@ const specProperties = `"mode":{"type":"string","enum":["train","bus"],"descript
 	`"until":{"type":"string","description":"Optional last day, YYYY-MM-DD; the watch is deleted after it."}},"additionalProperties":false},` +
 	`"departure":{"type":"string","description":"Departure or route: the planned departure, local HH:MM."},` +
 	`"minutes_before":{"type":"integer","minimum":10,"maximum":240,"description":"Departure or route: how long before the departure checking starts; 90 by default."},` +
-	`"window_from":{"type":"string","description":"Disruptions, home, agent, or weather: when checking starts, local HH:MM; a home, agent, or weather watch defaults to 00:00."},` +
-	`"window_until":{"type":"string","description":"Disruptions, home, agent, or weather: when checking ends, local HH:MM; a home, agent, or weather watch may use 24:00 for the end of the day and defaults to it."},` +
+	`"window_from":{"type":"string","description":"Disruptions, home, agent, weather, or place: when checking starts, local HH:MM; a home, agent, weather, or place watch defaults to 00:00."},` +
+	`"window_until":{"type":"string","description":"Disruptions, home, agent, weather, or place: when checking ends, local HH:MM; a home, agent, weather, or place watch may use 24:00 for the end of the day and defaults to it."},` +
 	`"days":{"type":"array","items":{"type":"string","enum":["mon","tue","wed","thu","fri","sat","sun"]},"description":"The weekdays the watch runs on."},` +
 	`"date":{"type":"string","description":"Instead of days: the one date, YYYY-MM-DD, of a one-off watch."},` +
-	`"triggers":{"type":"array","items":{"type":"string","enum":["cancelled","partly_cancelled","delay","platform","leg","arrival","new","changed","enter","change","clear"]},"description":"What to alert on; omit for all of the kind's triggers."},` +
+	`"triggers":{"type":"array","items":{"type":"string","enum":["cancelled","partly_cancelled","delay","platform","leg","arrival","new","changed","enter","change","clear","arrive","leave"]},"description":"What to alert on; omit for all of the kind's triggers."},` +
 	`"delay_minutes":{"type":"integer","minimum":1,"maximum":120,"description":"The delay that counts, in minutes; 5 by default."},` +
 	`"timezone":{"type":"string","description":"IANA time zone such as Europe/Amsterdam; omit to use the user's own."},` +
 	`"language":{"type":"string","description":"The language the watch's messages are written in, such as Russian: the one the user writes to you in. Omit for English."},` +
@@ -112,11 +117,11 @@ const specProperties = `"mode":{"type":"string","enum":["train","bus"],"descript
 var writeDefinitions = []tools.Definition{
 	{
 		Name:        toolPropose,
-		Description: "Set up a watch that checks a departure, a saved route, NS disruptions, a device or sensor at home, the rain forecast at a place, or, as an agent watch, anything the tools can look at, during a daily window and messages the user only when something changes. Done at once and undoable, or proposed for Confirm after outside content.",
+		Description: "Set up a watch that checks a departure, a saved route, NS disruptions, a device or sensor at home, the rain forecast at a place, arriving at or leaving a saved place, or, as an agent watch, anything the tools can look at, during a daily window and messages the user only when something changes. Done at once and undoable, or proposed for Confirm after outside content.",
 		Risk:        tools.RiskWrite,
 		Timeout:     actTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
-			`"kind":{"type":"string","enum":["departure","disruptions","route","home","agent","weather"],"description":"What to watch."},` +
+			`"kind":{"type":"string","enum":["departure","disruptions","route","home","agent","weather","place"],"description":"What to watch."},` +
 			specProperties + `},"required":["kind"],"additionalProperties":false}`),
 	},
 	{
@@ -163,7 +168,7 @@ func (s *Service) Contribute(context.Context, string) (tools.Contribution, error
 
 func (s *Service) kinds() []string {
 	var kinds []string
-	for _, kind := range []string{KindDeparture, KindRoute, KindDisruptions, KindHome, KindAgent, KindWeather} {
+	for _, kind := range []string{KindDeparture, KindRoute, KindDisruptions, KindHome, KindAgent, KindWeather, KindPlace} {
 		if _, known := s.evaluators[kind]; known {
 			kinds = append(kinds, kind)
 		}
@@ -271,13 +276,13 @@ func (s *Service) prepare(ctx context.Context, principalID, kind string, argumen
 	if kind == KindHome && spec.Target.Entity == "" {
 		return Spec{}, fmt.Errorf("the device could not be matched to one entity")
 	}
+	if kind == KindPlace && spec.Target.Place == "" {
+		return Spec{}, fmt.Errorf("the place could not be matched to one of the user's saved places")
+	}
 	return spec, nil
 }
 
 func (s *Service) specOf(kind string, arguments specArguments) (Spec, error) {
-	if kind == KindPlace {
-		return Spec{}, fmt.Errorf("place watches are not available yet")
-	}
 	if _, known := s.evaluators[kind]; !known {
 		if _, exists := kindTriggers[kind]; exists {
 			return Spec{}, fmt.Errorf("%s watches are not available yet", kind)
@@ -469,6 +474,11 @@ func (s *Service) proposeWatch(ctx context.Context, principalID string, call too
 		if slices.Contains(spec.Triggers, TriggerClear) {
 			summary = "Watch " + spec.Label() + "\n" + spec.Describe() + "\nYou get a message when rain becomes expected and when it no longer is, by the forecast."
 		}
+	case KindPlace:
+		summary = "Watch " + spec.Label() + "\n" + spec.Describe() + "\nYou get a message each time, by your live location."
+		if note := s.placeNote(ctx, principalID); note != "" {
+			summary += "\n" + note
+		}
 	}
 	if arguments.PauseWhileTraveling != nil && *arguments.PauseWhileTraveling {
 		summary += "\nIt stays silent while you are traveling."
@@ -582,10 +592,17 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		}
 		now := s.now()
 		watch := Watch{ID: record.ID, PrincipalID: record.PrincipalID, Spec: spec, Enabled: true, TravelPause: confirmed.TravelPause, CreatedAt: now, UpdatedAt: now}
-		created, err := s.repository.CreateWatch(ctx, watch, MaximumWatchesPerPrincipal)
+		var created bool
+		err = s.guardPlace(ctx, watch, func() (err error) {
+			created, err = s.repository.CreateWatch(ctx, watch, MaximumWatchesPerPrincipal)
+			return err
+		})
 		if err != nil {
 			if errors.Is(err, ErrTooManyWatches) {
 				return approval.Outcome{}, &approval.ActionError{Reason: "too_many", Text: tooManyText() + " Nothing was set up."}
+			}
+			if errors.Is(err, ErrPlaceGone) {
+				return approval.Outcome{}, &approval.ActionError{Reason: "place_gone", Text: placeGoneText(spec) + " Nothing was set up."}
 			}
 			return approval.Outcome{}, err
 		}
@@ -596,7 +613,13 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		if err != nil {
 			return approval.Outcome{}, err
 		}
-		return approval.Outcome{Text: "Watching. " + s.nextWindow(spec), Undo: undo}, nil
+		text := "Watching. " + s.nextWindow(spec)
+		if spec.Kind == KindPlace {
+			if note := s.placeNote(ctx, record.PrincipalID); note != "" {
+				text += " " + note
+			}
+		}
+		return approval.Outcome{Text: text, Undo: undo}, nil
 	case toolUpdate:
 		return s.executeUpdate(ctx, record)
 	case toolRemove:
@@ -662,7 +685,14 @@ func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (ap
 		if travelChanged {
 			next.TravelPause = *confirmed.TravelPause
 		}
-		updated, err := s.repository.UpdateWatch(ctx, next, confirmed.UpdatedAt)
+		var updated bool
+		err := s.guardPlace(ctx, next, func() (err error) {
+			updated, err = s.repository.UpdateWatch(ctx, next, confirmed.UpdatedAt)
+			return err
+		})
+		if errors.Is(err, ErrPlaceGone) {
+			return approval.Outcome{}, &approval.ActionError{Reason: "place_gone", Text: placeGoneText(spec) + " Nothing was changed."}
+		}
 		if err != nil {
 			return approval.Outcome{}, err
 		}

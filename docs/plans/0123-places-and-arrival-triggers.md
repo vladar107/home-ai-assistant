@@ -1,6 +1,6 @@
 # 0123 — Saved places, and arriving or leaving as a trigger
 
-Status: `proposed`
+Status: `done`
 
 ## Context
 
@@ -69,9 +69,11 @@ store a destination name.
 
   When live sharing ends, the presence state becomes `unknown`, and the next
   fix sets it without triggering. Telegram sends an edit only when the user
-  stops a share early. A share that runs out (`live_until`) or goes silent
-  sends nothing, so the location prune loop also resets presence when it
-  expires the live fix.
+  stops a share early. A share that runs out (`live_until`) sends nothing, so
+  the location prune loop also resets presence once `live_until` has passed.
+  A share that only goes silent is not reset: its message may move again,
+  and an edit restores a pruned share, so its presence is kept to notice the
+  leaving.
 
   Presence is also reset to `unknown` whenever the stored live fix stops
   being the one presence was computed from. A pin or venue that replaces it
@@ -93,6 +95,58 @@ store a destination name.
   fix silently.
 - **Turn line.** "At Office (saved place)" replaces or follows the coordinate
   line when the user is inside a place.
+- **Settled during implementation.** These refine the decisions above where the
+  code, as plan 0122 left it, asked for a concrete choice.
+  - `place_save` takes a name and an optional radius but no coordinates: the
+    user's latest shared position, a pin, a venue, or a live location, is both
+    "current location" and "what the user just shared", so the model can never
+    supply a point of its own. The proposal names the position it was made from
+    (a pin or venue by when it was shared, a live share by its message, whose
+    latest position is saved) rather than copying its point, and Confirm refuses
+    once that position is no longer shared.
+  - A point is kept only in `places`. Approvals are never pruned, so no
+    proposal, summary, outcome, or Undo payload carries one. `place_delete`
+    acts at once with Undo, as `route_remove` does, by marking the place
+    deleted (`deleted_at`); the Undo restores it by ID, and the location prune
+    removes a deleted place once the 24-hour undo window has ended. Undoing a
+    save is refused while a watch or anchored job uses the place.
+  - Deleting checks for dependents and deletes under one lock, which a place
+    watch or a place-anchored job also holds while it is stored
+    (`GuardPlace`, through the scheduler's `AnchorGuard` and the watch service),
+    so neither can be left on a deleted place; confirming one whose place is
+    gone is refused.
+  - Migration 049 adds the two tables; `place_presence` keeps the live message
+    its state came from, and a fix of any other live message sets the state
+    again without an event. From unknown, the first fix that tells sets the
+    state at once.
+  - A fix that cannot tell, between the two bounds, neither confirms nor
+    contradicts a change. The two-minute rule is checked at the next fix and by
+    a 30-second pass in the location loop, so a phone that stops sending after
+    arriving still counts.
+  - Resizing a place forgets its presence, under the same lock as the
+    presence step; renaming keeps it. A reset after a share ran out removes
+    only that share's rows, so a newer share's presence survives it.
+  - An arrival or leaving more than five minutes old, such as from edits
+    Telegram queued while the bot was down, moves presence but is not told, so
+    no job runs or alert goes out late.
+  - Where saved places overlap, the turn line names the smallest the user is
+    inside, and of those the nearest.
+  - The `place` anchor resolver is the location service, through an adapter in
+    `internal/wiring`; it checks the place is the owner's and returns the
+    "only while live location is shared" line as a note the job's reply ends
+    with. The scheduler's `PlaceEvent` makes a waiting job due at the event plus
+    its offset; a job that already waits to run for an earlier event keeps that
+    run.
+  - The watch service's `PlaceEvent` queues the alert itself, counted against
+    the window's messages, and the check loop skips place watches. A place
+    watch's triggers default to both, and its label is "Arriving at", "Leaving",
+    or "Arriving at or leaving" the place. A place cannot be a job condition.
+  - A weather watch or forecast that names a saved place copies its point when
+    it is proposed, as for a geocoded place, so a weather watch is not a
+    dependent of the place. The web connector looks saved places up before
+    geocoding, for `weather_forecast` too.
+  - Watch and anchor labels keep the place's name as it was saved; an alert
+    names the place as it is now.
 
 ## Approach
 
@@ -107,11 +161,13 @@ store a destination name.
 
 ## Files affected
 
-- `internal/store/sqlite/migrations/NNN_places.sql`, a new store file
+- `internal/store/sqlite/migrations/049_places.sql`, a new store file
 - `internal/location`, `internal/telegram/location.go`
-- `internal/watch`, `internal/schedule` (resolver),
-  `internal/connectors/web/weather.go`
-- `internal/wiring`, `internal/prompt`, README, docs
+- `internal/watch`, `internal/schedule` (the place anchor, its arrivals, and
+  the tools' guidance), `internal/connectors/web` (`weather.go`,
+  `precipitation.go`, and the saved places it is given)
+- `internal/wiring` (the adapters between them), README, docs; the guidance
+  lives in the tools' contributions, so `internal/prompt` needs no change
 
 ## Validation
 

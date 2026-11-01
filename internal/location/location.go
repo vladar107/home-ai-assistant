@@ -1,6 +1,8 @@
 // Package location holds a principal's latest shared position: what Telegram delivered, how long
 // it stays usable, and the line that tells a turn where its user is. Only the latest position is
-// kept, and nothing about it is ever logged.
+// kept, and nothing about it is ever logged. It also keeps the places a principal saved by name and,
+// while they share a live location, whether they are at each, so arriving and leaving can alert a
+// watch or run a job.
 package location
 
 import (
@@ -86,4 +88,5 @@ type Repository interface {
 	// edits of that message are ignored for good, even once another position came and went. It
 	// reports whether a position existed.
 	ForgetLocation(ctx context.Context, principalID string, now time.Time) (bool, error)
+	PlaceRepository
 }

@@ -109,7 +109,14 @@ func (s *Service) undoUpdated(ctx context.Context, principalID string, undo watc
 	if undo.TravelChanged {
 		next.TravelPause = undo.Before.TravelPause
 	}
-	updated, err := s.repository.UpdateWatch(ctx, next, watch.UpdatedAt)
+	var updated bool
+	err = s.guardPlace(ctx, next, func() (err error) {
+		updated, err = s.repository.UpdateWatch(ctx, next, watch.UpdatedAt)
+		return err
+	})
+	if errors.Is(err, ErrPlaceGone) {
+		return approval.Outcome{}, &approval.UndoRefusal{Reason: placeGoneText(spec)}
+	}
 	if err != nil {
 		return approval.Outcome{}, err
 	}
@@ -142,7 +149,14 @@ func (s *Service) undoRemoved(ctx context.Context, principalID string, removed W
 		}
 	}
 	watch := Watch{ID: removed.ID, PrincipalID: principalID, Spec: spec, Enabled: removed.Enabled, MutedOn: removed.MutedOn, TravelPause: removed.TravelPause, CreatedAt: removed.CreatedAt, UpdatedAt: now}
-	created, err := s.repository.CreateWatch(ctx, watch, MaximumWatchesPerPrincipal)
+	var created bool
+	err = s.guardPlace(ctx, watch, func() (err error) {
+		created, err = s.repository.CreateWatch(ctx, watch, MaximumWatchesPerPrincipal)
+		return err
+	})
+	if errors.Is(err, ErrPlaceGone) {
+		return approval.Outcome{}, &approval.UndoRefusal{Reason: placeGoneText(spec)}
+	}
 	if errors.Is(err, ErrTooManyWatches) {
 		return approval.Outcome{}, &approval.UndoRefusal{Reason: tooManyText()}
 	}
