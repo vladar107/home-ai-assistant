@@ -264,11 +264,11 @@ func (s *Store) SaveWatchCheck(ctx context.Context, state watch.State, alert *wa
 	if alert != nil {
 		if _, err := tx.ExecContext(
 			ctx,
-			`INSERT INTO watch_alerts (id, watch_id, principal_id, occurrence, sequence, type, text, status, expires_at, private, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?, ?, ?)
+			`INSERT INTO watch_alerts (id, watch_id, principal_id, occurrence, sequence, type, text, status, expires_at, private, trace_key, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?, ?, ?, ?)
 			 ON CONFLICT DO NOTHING`,
 			alert.ID, alert.WatchID, alert.PrincipalID, alert.Occurrence, alert.Sequence, alert.Type, alert.Text,
-			formatTime(alert.ExpiresAt), alert.Private, formatTime(now), formatTime(now),
+			formatTime(alert.ExpiresAt), alert.Private, alert.Trace, formatTime(now), formatTime(now),
 		); err != nil {
 			return fmt.Errorf("queue watch alert: %w", err)
 		}
@@ -285,7 +285,7 @@ func (s *Store) ReadyWatchAlerts(ctx context.Context) ([]watch.Alert, error) {
 	}
 	rows, err := s.db.QueryContext(
 		ctx,
-		`SELECT a.id, a.watch_id, a.principal_id, a.occurrence, a.sequence, a.type, a.text, a.expires_at, a.private, w.kind, w.enabled, COALESCE(w.muted_on, ''), w.travel_pause,
+		`SELECT a.id, a.watch_id, a.principal_id, a.occurrence, a.sequence, a.type, a.text, a.expires_at, a.private, a.trace_key, w.kind, w.enabled, COALESCE(w.muted_on, ''), w.travel_pause,
 		        COALESCE(json_extract(w.config, '$.language'), ''), w.config
 		 FROM watch_alerts a JOIN watches w ON w.id = a.watch_id
 		 WHERE a.status = 'ready' ORDER BY a.created_at, a.sequence, a.id`,
@@ -300,13 +300,14 @@ func (s *Store) ReadyWatchAlerts(ctx context.Context) ([]watch.Alert, error) {
 		var expiresAt, config string
 		if err := rows.Scan(
 			&alert.ID, &alert.WatchID, &alert.PrincipalID, &alert.Occurrence, &alert.Sequence, &alert.Type, &alert.Text,
-			&expiresAt, &alert.Private, &alert.Kind, &alert.Enabled, &alert.MutedOn, &alert.TravelPause, &alert.Language, &config,
+			&expiresAt, &alert.Private, &alert.Trace, &alert.Kind, &alert.Enabled, &alert.MutedOn, &alert.TravelPause, &alert.Language, &config,
 		); err != nil {
 			return nil, fmt.Errorf("scan watch alert: %w", err)
 		}
 		var spec watch.Spec
 		if err := json.Unmarshal([]byte(config), &spec); err == nil {
 			alert.Label = spec.Label()
+			alert.Rules = spec.Describe()
 		}
 		if alert.ExpiresAt, err = time.Parse(time.RFC3339Nano, expiresAt); err != nil {
 			return nil, fmt.Errorf("parse watch alert expiry: %w", err)

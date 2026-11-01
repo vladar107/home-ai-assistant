@@ -21,6 +21,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
+	"github.com/vladar107/home-ai-assistant/internal/turn"
 )
 
 const (
@@ -31,7 +32,12 @@ const (
 	maximumNoticeRunes    = 2000
 	runRetention          = 30 * 24 * time.Hour
 	pruneInterval         = time.Hour
-	deliveryStoreTimeout  = 5 * time.Second
+	// traceRetention is how long a turn's trace keeps its reply explainable, and
+	// unlinkedTraceRetention how long the trace of a check or assessment waits for the message it
+	// may raise.
+	traceRetention         = 30 * 24 * time.Hour
+	unlinkedTraceRetention = 2 * 24 * time.Hour
+	deliveryStoreTimeout   = 5 * time.Second
 
 	InterruptedText = "This run was interrupted by a restart and was not retried. It will run again at its next scheduled time."
 	FailedText      = "This run could not be completed."
@@ -59,6 +65,9 @@ type Config struct {
 	Reminders ReminderDeliverer
 	// Sessions removes old model sessions of finished runs and tasks; nil keeps them.
 	Sessions SessionPruner
+	// Traces links each delivered report to its run's trace and removes old traces; nil links
+	// nothing and keeps them.
+	Traces Traces
 	// Travel is the trip lookup that jobs flagged to pause while traveling consult; without it
 	// nobody is ever traveling.
 	Travel Travel
@@ -112,6 +121,15 @@ type SessionPruner interface {
 	PruneSessions(ctx context.Context, before time.Time) error
 }
 
+// Traces are the records of what turns did, which the scheduler's pruning keeps to their retention.
+type Traces interface {
+	turn.MessageRecorder
+	// PruneTurnTraces removes the traces finished before before with the messages linked to them,
+	// and those of checks and assessments finished before unlinkedBefore that no delivered message
+	// is linked to.
+	PruneTurnTraces(ctx context.Context, before, unlinkedBefore time.Time) error
+}
+
 // ReminderDeliverer sends one reminder to its owner's chat with buttons that snooze the job, and
 // returns the sent message's ID and the tab it landed in.
 type ReminderDeliverer interface {
@@ -126,6 +144,7 @@ type Service struct {
 	photos     conversation.PhotoDeliverer
 	reminders  ReminderDeliverer
 	sessions   SessionPruner
+	traces     Traces
 	logger     *slog.Logger
 	zone       string
 	tick       time.Duration
@@ -303,6 +322,7 @@ func NewService(cfg Config, repository Repository, chats Chats, deliverer conver
 		photos:     cfg.Photos,
 		reminders:  cfg.Reminders,
 		sessions:   cfg.Sessions,
+		traces:     cfg.Traces,
 		logger:     logger,
 		zone:       cfg.Zone,
 		tick:       tick,
@@ -451,6 +471,11 @@ func (s *Service) runTick(ctx context.Context) {
 		if s.sessions != nil {
 			if err := s.sessions.PruneSessions(ctx, now.Add(-runRetention)); err != nil && ctx.Err() == nil {
 				s.logger.WarnContext(ctx, "schedule.tick.failed", "stage", "prune_sessions", "error", err)
+			}
+		}
+		if s.traces != nil {
+			if err := s.traces.PruneTurnTraces(ctx, now.Add(-traceRetention), now.Add(-unlinkedTraceRetention)); err != nil && ctx.Err() == nil {
+				s.logger.WarnContext(ctx, "schedule.tick.failed", "stage", "prune_traces", "error", err)
 			}
 		}
 	}
@@ -668,6 +693,9 @@ func (s *Service) execute(ctx context.Context, run Run) (Run, bool) {
 	}
 
 	began := time.Now()
+	// Every turn of the run, its condition's check and the job's own, keeps its trace under the run,
+	// which its report is linked to.
+	ctx = turn.WithTraceKey(ctx, outbox.ScheduledTurn(run.ID))
 	handlerConfig, _, condition, err := SplitConfig(run.Config)
 	if err != nil {
 		handlerConfig = run.Config
@@ -779,7 +807,7 @@ func (s *Service) deliver(ctx context.Context, run Run) {
 	// A repeating reminder has no single instant to snooze, so it goes without the buttons.
 	if run.JobType == TypeReminder && s.reminders != nil && run.ErrorKind == "" && run.JobOneTime {
 		messageID, threadID, err := s.reminders.SendReminder(sendCtx, chatID, run.JobID, deliveryText(run))
-		s.finishDelivery(ctx, run, []Sent{{MessageID: messageID, ThreadID: threadID}}, err)
+		s.finishDelivery(ctx, run, chatID, []Sent{{MessageID: messageID, ThreadID: threadID}}, err)
 		return
 	}
 	chunks := conversation.SplitReply(deliveryText(run))
@@ -800,7 +828,7 @@ func (s *Service) deliver(ctx context.Context, run Run) {
 	for index := sent; index < len(chunks); index++ {
 		messageID, threadID, err := s.deliverer.SendTrackedReply(sendCtx, chatID, 0, chunks[index])
 		if err != nil {
-			s.finishDelivery(ctx, run, nil, err)
+			s.finishDelivery(ctx, run, chatID, nil, err)
 			return
 		}
 		messages = append(messages, Sent{MessageID: messageID, ThreadID: threadID})
@@ -810,7 +838,7 @@ func (s *Service) deliver(ctx context.Context, run Run) {
 		}
 		cancel()
 	}
-	s.finishDelivery(ctx, run, messages, nil)
+	s.finishDelivery(ctx, run, chatID, messages, nil)
 }
 
 // deliveryStoreContext records what a delivery already sent. It outlives a shutdown that has begun,
@@ -821,7 +849,7 @@ func deliveryStoreContext(ctx context.Context) (context.Context, context.CancelF
 
 // finishDelivery records how sending a ready run ended, keeping a delivered run's report with the
 // messages it was sent as. A transient failure leaves it ready.
-func (s *Service) finishDelivery(ctx context.Context, run Run, messages []Sent, err error) {
+func (s *Service) finishDelivery(ctx context.Context, run Run, chatID int64, messages []Sent, err error) {
 	if err != nil {
 		if isPermanent(err) {
 			if _, err := s.repository.TransitionScheduledRun(ctx, run.ID, StatusReady, StatusFailed, "", "undeliverable", s.now()); err != nil {
@@ -842,7 +870,13 @@ func (s *Service) finishDelivery(ctx context.Context, run Run, messages []Sent, 
 	defer cancel()
 	// The report is kept before the run is marked delivered, which clears its text, so a crash
 	// between the two cannot lose it.
-	s.saveReport(storeCtx, run, slices.DeleteFunc(messages, func(message Sent) bool { return message.MessageID <= 0 }))
+	messages = slices.DeleteFunc(messages, func(message Sent) bool { return message.MessageID <= 0 })
+	s.saveReport(storeCtx, run, messages)
+	if s.traces != nil {
+		for _, message := range messages {
+			turn.RecordMessage(storeCtx, s.traces, s.logger, run.PrincipalID, outbox.ScheduledTurn(run.ID), chatID, message.MessageID)
+		}
+	}
 	if _, err := s.repository.TransitionScheduledRun(storeCtx, run.ID, StatusReady, StatusDelivered, "", run.ErrorKind, s.now()); err != nil {
 		s.logRunError(ctx, run, "store_delivery", err)
 		return

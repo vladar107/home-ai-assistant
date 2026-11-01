@@ -466,6 +466,30 @@ follow-up dropped because an earlier check failed while offering it, and
 stored or sent. Logs carry IDs and counts, never record text. Turning Inbox
 intake off forgets where it read to, so turning it on again reads the last day.
 
+### Reply traces and /why
+
+Migration 052 adds `turn_traces`, `turn_trace_calls`, and `turn_messages`, and
+a `trace_key` column on `watch_alerts`; it cannot be undone, so take a data
+backup before the first deploy that carries it. No setting is needed. Each
+keyed turn writes one trace row and a row per tool call when it ends, and each
+delivered message one link row. The scheduler's hourly prune removes traces
+after 30 days, with their calls and links, and the traces of watch checks and
+event assessments that raised no message after 2 days. Messages sent before the
+deploy have no trace, so `/why` on them answers that the record is gone.
+
+A trace holds no arguments or results, but its source labels can name private
+things, such as a mail's sender and subject or a file path, so they stay in the
+database: logs carry only `turn.trace.failed` and
+`turn.trace.message_failed` with the principal and error, and
+`provenance.reply.sent`, `provenance.reply.failed`,
+`provenance.explanation.failed`, and `provenance.history.failed` with the
+principal, the trace's kind, and a call count. Each `/why`, or "how do you
+know?" in reply, on a model-written message costs one turn without tools on the
+asker's own subscription and the runtime's default model, counted in the usual
+model metrics as a `chat` process; each user has at most one running, and a
+bare "why?" goes to the conversation instead. A chat trace still being written
+at shutdown is waited for by the "turn traces" step.
+
 ## 7. Logs and rollback
 
 ```sh

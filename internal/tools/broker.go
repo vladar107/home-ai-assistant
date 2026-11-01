@@ -79,6 +79,9 @@ type Definition struct {
 	// Activity names what a call of the tool is doing, for showing the user while the turn runs; it
 	// is one of the Activity keys or empty, and never reaches the model.
 	Activity string
+	// SourceLabel names what a call of the tool looked at, for explaining a reply later; nil
+	// records the tool's name alone.
+	SourceLabel SourceLabel
 }
 
 // Activity keys a connector's tools carry. A label belongs to a connector rather than to each tool.
@@ -248,7 +251,11 @@ func (b *Broker) toolsFor(ctx context.Context, principalID string, readOnly bool
 	if principalID == "" {
 		return agentruntime.ToolSet{}, fmt.Errorf("tool broker requires a principal")
 	}
-	executor := &turnExecutor{broker: b, principalID: principalID, turn: TurnFrom(ctx), run: RunFrom(ctx), log: CallLogFrom(ctx), budget: callBudgetFrom(ctx), bindings: make(map[string]toolBinding)}
+	log := CallLogFrom(ctx)
+	if log == nil {
+		log = &CallLog{}
+	}
+	executor := &turnExecutor{broker: b, principalID: principalID, turn: TurnFrom(ctx), run: RunFrom(ctx), log: log, budget: callBudgetFrom(ctx), bindings: make(map[string]toolBinding)}
 	var guidance []string
 	var definitions []agentruntime.ToolDefinition
 	activities := make(map[string]string)
@@ -276,7 +283,7 @@ func (b *Broker) toolsFor(ctx context.Context, principalID string, readOnly bool
 			if _, exists := executor.bindings[definition.Name]; exists {
 				return agentruntime.ToolSet{}, fmt.Errorf("tool %q is contributed twice", definition.Name)
 			}
-			executor.bindings[definition.Name] = toolBinding{provider: provider, deadline: definition.Timeout, resultBytes: definition.MaxResultBytes, thirdParty: definition.ThirdParty, household: definition.Household, screen: definition.Screen, private: definition.Private, outsideBudget: definition.OutsideBudget, confirmed: definition.Confirmed}
+			executor.bindings[definition.Name] = toolBinding{provider: provider, deadline: definition.Timeout, resultBytes: definition.MaxResultBytes, thirdParty: definition.ThirdParty, household: definition.Household, screen: definition.Screen, private: definition.Private, outsideBudget: definition.OutsideBudget, confirmed: definition.Confirmed, label: definition.SourceLabel}
 			if definition.OutsideBudget && executor.handoff == "" {
 				executor.handoff = definition.Name
 			}
@@ -366,6 +373,7 @@ type toolBinding struct {
 	private       bool
 	outsideBudget bool
 	confirmed     bool
+	label         SourceLabel
 }
 
 // turnExecutor binds one turn to its principal and the grant collected when the turn started. The
@@ -400,8 +408,11 @@ func (e *turnExecutor) Execute(ctx context.Context, call agentruntime.ToolCall) 
 	if e.broker.telemetry != nil {
 		spanCtx, finishSpan = e.broker.telemetry.StartToolCall(ctx, e.principalID, tool)
 	}
-	outcome, screened, result := e.execute(spanCtx, call)
+	outcome, screened, result, label := e.execute(spanCtx, call)
 	finishSpan(outcome)
+	// The label stays in the call log, which only the turn's record reads: it can be private, so it
+	// is kept off the span, the metrics, and the log line below.
+	e.log.record(call.ID, outcome, label)
 	if e.broker.telemetry != nil {
 		e.broker.telemetry.RecordToolCall(ctx, e.principalID, tool, outcome, time.Since(started))
 	}
@@ -425,43 +436,59 @@ func (e *turnExecutor) Execute(ctx context.Context, call agentruntime.ToolCall) 
 // execute charges the call to the turn's budget. A call that ends in an error gives its slot back,
 // so a mistyped place or a failing service does not cost the rest of the turn; the ceiling of
 // budgetCeilingFactor times the budget, failed calls included, still bounds a looping model.
-func (e *turnExecutor) execute(ctx context.Context, call agentruntime.ToolCall) (string, string, agentruntime.ToolResult) {
+func (e *turnExecutor) execute(ctx context.Context, call agentruntime.ToolCall) (string, string, agentruntime.ToolResult, string) {
 	binding, known := e.bindings[call.Name]
 	charged := !binding.outsideBudget
 	if charged && (e.attempts.Add(1) > budgetCeilingFactor*e.budget || e.calls.Add(1) > e.budget) {
-		if e.log != nil {
-			e.log.refused()
-		}
-		return "budget_exhausted", "", agentruntime.ToolResult{Text: prompt.ToolBudgetExhausted(e.handoff), IsError: true}
+		e.log.refused()
+		return "budget_exhausted", "", agentruntime.ToolResult{Text: prompt.ToolBudgetExhausted(e.handoff), IsError: true}, ""
 	}
-	outcome, screened, result := e.perform(ctx, call, binding, known)
+	outcome, screened, result, label := e.perform(ctx, call, binding, known)
 	if charged && result.IsError {
 		e.calls.Add(-1)
 	}
-	return outcome, screened, result
+	return outcome, screened, result, label
 }
 
-func (e *turnExecutor) perform(ctx context.Context, call agentruntime.ToolCall, binding toolBinding, known bool) (string, string, agentruntime.ToolResult) {
+// CallLog is where the executor keeps what it learned of each call: the log the tools were
+// collected under, or its own.
+func (e *turnExecutor) CallLog() *CallLog {
+	return e.log
+}
+
+// perform runs a call that the budget allows; the label names what the call looked at, once the
+// provider was asked.
+func (e *turnExecutor) perform(ctx context.Context, call agentruntime.ToolCall, binding toolBinding, known bool) (string, string, agentruntime.ToolResult, string) {
 	if !known {
-		return "unknown_tool", "", agentruntime.ToolResult{Text: prompt.ToolUnavailable, IsError: true}
+		return "unknown_tool", "", agentruntime.ToolResult{Text: prompt.ToolUnavailable, IsError: true}, ""
 	}
 	// The switch and the grant are rechecked so an integration switched off or a connection removed
 	// during the turn fails closed.
 	off, sw, err := e.broker.switchedOff(ctx, binding.provider, e.principalID)
 	if err != nil {
-		return "grant_check_failed", "", agentruntime.ToolResult{Text: prompt.ToolUnavailableNow, IsError: true}
+		return "grant_check_failed", "", agentruntime.ToolResult{Text: prompt.ToolUnavailableNow, IsError: true}, ""
 	}
 	if off {
-		return "switched_off", "", agentruntime.ToolResult{Text: sw.OffText(), IsError: true}
+		return "switched_off", "", agentruntime.ToolResult{Text: sw.OffText(), IsError: true}, ""
 	}
 	contribution, err := binding.provider.Contribute(ctx, e.principalID)
 	if err != nil {
-		return "grant_check_failed", "", agentruntime.ToolResult{Text: prompt.ToolUnavailableNow, IsError: true}
+		return "grant_check_failed", "", agentruntime.ToolResult{Text: prompt.ToolUnavailableNow, IsError: true}, ""
 	}
 	if !granted(contribution, call.Name) {
-		return "not_granted", "", agentruntime.ToolResult{Text: prompt.ToolUnavailableNow, IsError: true}
+		return "not_granted", "", agentruntime.ToolResult{Text: prompt.ToolUnavailableNow, IsError: true}, ""
 	}
+	outcome, screened, result, provided := e.call(ctx, call, binding)
+	label := ""
+	if binding.label != nil {
+		label = CleanLabel(binding.label(call.Arguments, provided))
+	}
+	return outcome, screened, result, label
+}
 
+// call runs a granted call through its provider; provided is what the provider returned, before the
+// broker framed it for the model.
+func (e *turnExecutor) call(ctx context.Context, call agentruntime.ToolCall, binding toolBinding) (string, string, agentruntime.ToolResult, Result) {
 	deadline := binding.deadline
 	if deadline <= 0 {
 		deadline = callDeadline
@@ -470,9 +497,7 @@ func (e *turnExecutor) perform(ctx context.Context, call agentruntime.ToolCall, 
 	if e.run != nil {
 		callCtx = WithRun(callCtx, e.run)
 	}
-	if e.log != nil {
-		callCtx = WithCallLog(callCtx, e.log)
-	}
+	callCtx = WithCallLog(callCtx, e.log)
 	callCtx, cancel := context.WithTimeout(callCtx, deadline)
 	defer cancel()
 	// The run is marked before the outside call runs, so a write the model makes in parallel with
@@ -483,11 +508,11 @@ func (e *turnExecutor) perform(ctx context.Context, call agentruntime.ToolCall, 
 	result, err := binding.provider.Execute(callCtx, e.principalID, Call{Name: call.Name, Arguments: call.Arguments})
 	switch {
 	case err != nil && errors.Is(callCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil:
-		return "timeout", "", agentruntime.ToolResult{Text: prompt.ToolTimedOut, IsError: true}
+		return "timeout", "", agentruntime.ToolResult{Text: prompt.ToolTimedOut, IsError: true}, Result{}
 	case err != nil:
-		return "failed", "", agentruntime.ToolResult{Text: prompt.ToolFailed, IsError: true}
+		return "failed", "", agentruntime.ToolResult{Text: prompt.ToolFailed, IsError: true}, Result{}
 	case len(result.Text) > resultLimit(binding):
-		return "oversized", "", agentruntime.ToolResult{Text: prompt.ToolOversized, IsError: true}
+		return "oversized", "", agentruntime.ToolResult{Text: prompt.ToolOversized, IsError: true}, result
 	case result.IsError:
 		// A private tool's error can still quote what it read, such as a Notion table's property
 		// names and options, and a third-party tool's error can quote the outside service.
@@ -497,7 +522,7 @@ func (e *turnExecutor) perform(ctx context.Context, call agentruntime.ToolCall, 
 			e.markExposed(ctx, binding, result)
 			text = prompt.ToolResultUntrusted + text
 		}
-		return "tool_error", "", agentruntime.ToolResult{Text: text, IsError: true}
+		return "tool_error", "", agentruntime.ToolResult{Text: text, IsError: true}, result
 	default:
 		if binding.thirdParty {
 			e.markExposed(ctx, binding, result)
@@ -514,7 +539,7 @@ func (e *turnExecutor) perform(ctx context.Context, call agentruntime.ToolCall, 
 				text += prompt.ToolResultScreened
 			}
 		}
-		return "success", screened, agentruntime.ToolResult{Text: text + result.Text}
+		return "success", screened, agentruntime.ToolResult{Text: text + result.Text}, result
 	}
 }
 

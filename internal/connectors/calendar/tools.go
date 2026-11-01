@@ -39,6 +39,7 @@ var definitions = []tools.Definition{
 		Description: "List this user's calendar events between two moments, across their calendars and Google accounts, with account, calendar, event id, title, times, location, and their own response.",
 		Risk:        tools.RiskRead,
 		Activity:    tools.ActivityCalendar,
+		SourceLabel: tools.ArgumentLabel("query", "start", "end"),
 		Timeout:     eventsTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"start":{"type":"string","description":"Start of the range: an RFC 3339 date-time, or a date YYYY-MM-DD meaning the start of that day in the user's time zone."},` +
@@ -54,6 +55,7 @@ var definitions = []tools.Definition{
 		Description: "Read one calendar event by its account, calendar id, and event id, with organizer, attendees and their responses, conference link, recurrence, and description text.",
 		Risk:        tools.RiskRead,
 		Activity:    tools.ActivityCalendar,
+		SourceLabel: eventTitleLabel,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"account":{"type":"string","description":"The Google account address, as shown by calendar_events."},` +
 			`"calendar_id":{"type":"string","description":"The calendar id from calendar_events."},` +
@@ -357,4 +359,16 @@ func describe(err error) string {
 		return "Google Calendar is limiting requests right now; try again shortly."
 	}
 	return unavailableText
+}
+
+// eventTitleLabel is a read event's title, the line after the result's time zone line.
+func eventTitleLabel(_ json.RawMessage, result tools.Result) string {
+	if result.IsError {
+		return ""
+	}
+	lines := strings.SplitN(result.Text, "\n", 3)
+	if len(lines) < 2 {
+		return ""
+	}
+	return lines[1]
 }

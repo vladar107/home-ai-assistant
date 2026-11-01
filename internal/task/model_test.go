@@ -85,6 +85,10 @@ type sinkDeliverer struct{ conversation.Deliverer }
 
 func (sinkDeliverer) SendReply(context.Context, int64, int64, string) error { return nil }
 
+func (sinkDeliverer) SendTrackedReply(context.Context, int64, int64, string) (int64, int64, error) {
+	return 1, 0, nil
+}
+
 type modelEnv struct {
 	store     *sqlite.Store
 	requestID string

@@ -161,6 +161,7 @@ type Service struct {
 	watches      WatchController
 	trips        TripController
 	routes       RouteController
+	why          WhyController
 	transcriber  Transcriber
 	model        *ModelCommand
 	tabs         *Tabs
@@ -203,7 +204,9 @@ type Dependencies struct {
 	Watches      WatchController
 	Trips        TripController
 	Routes       RouteController
-	Transcriber  Transcriber
+	// Why answers /why, and a short "how do you know?" in reply to one of the bot's messages.
+	Why         WhyController
+	Transcriber Transcriber
 	// Model enables /model; it also needs Conversation.
 	Model *ModelCommand
 
@@ -246,6 +249,7 @@ func NewService(deps Dependencies) (*Service, error) {
 		watches:      deps.Watches,
 		trips:        deps.Trips,
 		routes:       deps.Routes,
+		why:          deps.Why,
 		transcriber:  deps.Transcriber,
 		model:        deps.Model,
 		tabs:         cmp.Or(deps.Tabs, NewTabs(deps.Client, nil, nil, nil, nil, deps.Logger, deps.Telemetry)),
@@ -312,6 +316,7 @@ func (s *Service) botCommands() []BotCommand {
 		{BotCommand{Command: "settings", Description: "Show and change your settings"}, len(s.sections) > 0},
 		{BotCommand{Command: "usage", Description: "Show your ChatGPT subscription usage"}, modelEnabled && s.model.Usage != nil},
 		{BotCommand{Command: "tasks", Description: "Show and cancel your background tasks"}, s.tasks != nil},
+		{BotCommand{Command: "why", Description: "Reply with it to one of my messages to see what it was based on"}, s.why != nil},
 	})
 }
 
@@ -726,6 +731,12 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 			}
 			if result.handled {
 				return s.finishInterception(ctx, message, authorization.Principal.ID, result)
+			}
+		}
+		if s.why != nil && isProvenanceQuestion(text) {
+			result, handled, failure, err := s.processWhy(ctx, message, authorization.Principal.ID, false)
+			if handled {
+				return result, failure, err
 			}
 		}
 	}
@@ -1372,6 +1383,10 @@ func (s *Service) dispatchCommand(ctx context.Context, bot Bot, message *Message
 	}
 	if command == "close" && bot.HasTopicsEnabled && s.conversation != nil {
 		return s.processCloseCommand(ctx, message, principalID)
+	}
+	if command == "why" && s.why != nil {
+		result, _, failure, err := s.processWhy(ctx, message, principalID, true)
+		return result, failure, err
 	}
 	reply, keyboard, err := s.handleCommand(ctx, principalID, command)
 	if err != nil {

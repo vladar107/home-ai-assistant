@@ -29,6 +29,11 @@ const (
 
 	agentMet   = "met"
 	agentUnmet = "unmet"
+
+	// checkTraceKind starts the trace key of an agent watch's check, and codeTraceKind that of an
+	// alert code decided on.
+	checkTraceKind = "check"
+	codeTraceKind  = "watch"
 )
 
 // CheckRunner runs one unwatched, read-only model turn on the principal's own subscription.
@@ -134,10 +139,17 @@ func (e *AgentEvaluator) Evaluate(_ context.Context, principalID string, watch W
 
 func (e *AgentEvaluator) run(principalID string, watch Watch, previous, message string) {
 	defer e.wg.Done()
-	reply, err := e.runner.RunCheck(e.ctx, principalID, message)
+	// The check keeps a trace of its own, which the alert it may raise is linked to. Without a key
+	// the check fails rather than raise an alert that would be explained as written by code.
 	var observation Observation
+	id, err := turn.NewID()
 	if err == nil {
-		observation, err = observe(watch, previous, reply)
+		key := checkTraceKind + "/" + id
+		var reply turn.ScheduledReply
+		if reply, err = e.runner.RunCheck(turn.WithTraceKey(e.ctx, key), principalID, message); err == nil {
+			observation, err = observe(watch, previous, reply)
+			observation.Trace = key
+		}
 	}
 	e.mu.Lock()
 	delete(e.running, principalID)

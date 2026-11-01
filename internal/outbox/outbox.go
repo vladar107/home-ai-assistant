@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -53,6 +54,12 @@ func ScheduledTurn(runID string) string { return scheduleKind + "/" + runID }
 
 // TaskTurn is the turn key of a background task's runs.
 func TaskTurn(taskID string) string { return taskKind + "/" + taskID }
+
+// TaskRun is the key of one start of a background task, which its report run shares; a task that
+// resumes after a restart starts again under the next key. It names no card.
+func TaskRun(taskID string, attempt int) string {
+	return taskKind + "/" + taskID + "/" + strconv.Itoa(attempt)
+}
 
 // Card is what one turn staged. A sent card has no bytes left: only whether its photo carried the
 // reply's first chunk as a caption, so a retried delivery sends neither again.

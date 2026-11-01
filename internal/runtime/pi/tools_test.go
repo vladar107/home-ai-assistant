@@ -127,8 +127,19 @@ func TestToolTurnBridgesCallsThroughTheBroker(t *testing.T) {
 	if calls := provider.recorded(); len(calls) != 1 || calls[0].principal != testPrincipal || calls[0].call.Name != "echo_tool" || string(calls[0].call.Arguments) != `{"text":"amber"}` {
 		t.Fatalf("provider calls = %+v", calls)
 	}
-	if !slices.Contains(sink.events, agentruntime.Event{Type: "tool_call", Text: "echo_tool"}) {
-		t.Errorf("sink did not receive the tool name: %+v", sink.events)
+	if !slices.ContainsFunc(sink.events, func(event agentruntime.Event) bool {
+		return event.Type == "tool_call" && event.Text == "echo_tool" && event.CallID == "call-1" && string(event.Arguments) == `{"text":"amber"}`
+	}) {
+		t.Errorf("sink did not receive the tool call with its id and arguments: %+v", sink.events)
+	}
+	if !slices.ContainsFunc(sink.events, func(event agentruntime.Event) bool {
+		return event.Type == "tool_result" && event.Tool == "echo_tool" && event.CallID == "call-1" && !event.IsError
+	}) {
+		t.Errorf("sink did not receive the tool's end under its call: %+v", sink.events)
+	}
+	// The bridge carries Pi's call id to the broker, which keeps what it learned of the call under it.
+	if record, found := set.Executor.(interface{ CallLog() *tools.CallLog }).CallLog().Call("call-1"); !found || record.Outcome != "success" {
+		t.Errorf("broker record of call-1 = %+v, %v; want a success", record, found)
 	}
 	for _, event := range sink.events {
 		if event.Type == "tool_call" && event.Text != "echo_tool" {
@@ -185,6 +196,31 @@ func TestToolTurnBridgesCallsThroughTheBroker(t *testing.T) {
 	report = readReport(t, cfg, testPrincipal, "plain")
 	if !slices.Contains(report.Args, "--no-tools") || slices.Contains(report.Args, "--extension") || environmentValue(report, "HOME_AGENT_TOOL_BRIDGE_URL") != "" {
 		t.Errorf("tool-less turn was not locked down: %v %v", report.Args, report.Environment)
+	}
+}
+
+// A call that fails ends with Pi's error flag, under the call's id, and the broker keeps its own
+// outcome under the same id.
+func TestToolEndCarriesTheErrorFlag(t *testing.T) {
+	cfg := config(t)
+	r := newRuntime(t, cfg)
+	provider := &echoProvider{principal: testPrincipal, respond: func(tools.Call) (tools.Result, error) {
+		return tools.Result{Text: "the source is unreachable", IsError: true}, nil
+	}}
+	set := toolSet(t, provider, testPrincipal)
+	sink := &eventSink{}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := r.Run(ctx, toolRequest("tool-error", `fixture:call echo_tool {"text":"amber"}`, set), sink); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(sink.events, func(event agentruntime.Event) bool {
+		return event.Type == "tool_result" && event.CallID == "call-1" && event.IsError
+	}) {
+		t.Errorf("sink did not receive the failed end: %+v", sink.events)
+	}
+	if record, found := set.Executor.(interface{ CallLog() *tools.CallLog }).CallLog().Call("call-1"); !found || record.Outcome != "tool_error" {
+		t.Errorf("broker record of call-1 = %+v, %v; want a tool error", record, found)
 	}
 }
 

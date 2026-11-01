@@ -71,6 +71,7 @@ var readDefinitions = []tools.Definition{
 		Name:        toolGet,
 		Description: "Show one project in full: goal, status, every item with its id, due date, and note, its links, and the jobs routed to it.",
 		Risk:        tools.RiskRead,
+		SourceLabel: tools.ArgumentLabel("project_id"),
 		Private:     true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` + projectIDProperty + `},"required":["project_id"],"additionalProperties":false}`),
 	},
@@ -80,6 +81,7 @@ var createDefinition = tools.Definition{
 	Name:        toolCreate,
 	Description: "Start a project with a title, an optional goal, and first items. Done at once and undoable, or proposed for Confirm after outside content.",
 	Risk:        tools.RiskWrite,
+	SourceLabel: tools.ArgumentLabel("title"),
 	Timeout:     actTimeout,
 	InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 		`"title":{"type":"string","maxLength":100,"description":"A short title, such as Find a dentist."},` +
@@ -93,6 +95,7 @@ var writeDefinitions = []tools.Definition{
 		Name:        toolUpdate,
 		Description: "Change a project's title, goal, or status; omitted fields keep their values. Done at once and undoable, or proposed for Confirm after outside content.",
 		Risk:        tools.RiskWrite,
+		SourceLabel: tools.ArgumentLabel("project_id"),
 		Timeout:     actTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` + projectIDProperty + `,` +
 			`"title":{"type":"string","maxLength":100},` +
@@ -104,6 +107,7 @@ var writeDefinitions = []tools.Definition{
 		Name:        toolItemAdd,
 		Description: "Add items to a project's checklist. Done at once and undoable, or proposed for Confirm after outside content.",
 		Risk:        tools.RiskWrite,
+		SourceLabel: tools.ArgumentLabel("project_id"),
 		Timeout:     actTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` + projectIDProperty + `,` +
 			`"items":{"type":"array","minItems":1,"maxItems":20,"items":` + itemSchema + `}},` +
@@ -113,6 +117,7 @@ var writeDefinitions = []tools.Definition{
 		Name:        toolItemUpdate,
 		Description: "Change one item's text, due date, or note; omitted fields keep their values. Done at once and undoable, or proposed for Confirm after outside content.",
 		Risk:        tools.RiskWrite,
+		SourceLabel: tools.ArgumentLabel("project_id", "item_id"),
 		Timeout:     actTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` + projectIDProperty + `,` +
 			`"item_id":{"type":"string","description":"The item's id from project_get or the turn's project line."},` +
@@ -125,6 +130,7 @@ var writeDefinitions = []tools.Definition{
 		Name:        toolItemCheck,
 		Description: "Check an item off, or open it again with done false. Done at once and undoable, or proposed for Confirm after outside content.",
 		Risk:        tools.RiskWrite,
+		SourceLabel: tools.ArgumentLabel("project_id", "item_id"),
 		Timeout:     actTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` + projectIDProperty + `,` +
 			`"item_id":{"type":"string","description":"The item's id from project_get or the turn's project line."},` +
@@ -135,6 +141,7 @@ var writeDefinitions = []tools.Definition{
 		Name:        toolItemRemove,
 		Description: "Remove one item from a project's checklist. Done at once and undoable, or proposed for Confirm after outside content.",
 		Risk:        tools.RiskWrite,
+		SourceLabel: tools.ArgumentLabel("project_id", "item_id"),
 		Timeout:     actTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` + projectIDProperty + `,` +
 			`"item_id":{"type":"string","description":"The item's id from project_get or the turn's project line."}},` +
@@ -144,6 +151,7 @@ var writeDefinitions = []tools.Definition{
 		Name:        toolLink,
 		Description: "Link a project to a related thing, or remove a link with remove true. Done at once and undoable, or proposed for Confirm after outside content.",
 		Risk:        tools.RiskWrite,
+		SourceLabel: tools.ArgumentLabel("project_id", "kind"),
 		Timeout:     actTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` + projectIDProperty + `,` +
 			`"kind":{"type":"string","enum":["notion","nas","collection","intake","url"]},` +

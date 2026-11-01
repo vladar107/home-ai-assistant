@@ -106,6 +106,9 @@ type ToolExecutor interface {
 }
 
 type ToolCall struct {
+	// ID is the runtime's own name for the call, which its events carry too, so what the executor
+	// learns of a call is matched to it even among parallel calls; empty when the runtime has none.
+	ID        string
 	Name      string
 	Arguments json.RawMessage
 }
@@ -118,8 +121,17 @@ type ToolResult struct {
 type Event struct {
 	Type string
 	Text string
-	// Tool names the tool of a "tool_result" event, whose Text is the result the model read.
+	// Tool names the tool of a "tool_call" event, whose Text names it too, and of a "tool_result"
+	// event, whose Text is the result the model read.
 	Tool string
+	// CallID matches a "tool_result" event to its "tool_call" event, and both to the executor's
+	// call; empty when the runtime has none.
+	CallID string
+	// Arguments are a "tool_call" event's arguments as the model wrote them. They are only read in
+	// memory, such as to name what a call looked at, and never stored, logged, or exported.
+	Arguments json.RawMessage
+	// IsError marks the "tool_result" event of a call that failed.
+	IsError bool
 	// Usage is set on a "model_call" event, sent once per finished assistant message, so a long
 	// run can be measured and bounded while it is still going.
 	Usage Usage

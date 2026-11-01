@@ -463,6 +463,7 @@ func mapTool(remote, description string, schema json.RawMessage) (mappedTool, bo
 			InputSchema: schema,
 			Risk:        risk,
 			Activity:    tools.ActivityHome,
+			SourceLabel: tools.ArgumentLabel("name", "area", "domain"),
 			Timeout:     toolTimeout,
 			ThirdParty:  true,
 			Household:   true,

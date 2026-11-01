@@ -3,7 +3,10 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -159,6 +162,71 @@ func TestExecuteTracesEachToolCallUnderTheTurnSpan(t *testing.T) {
 	}
 	if seen != len(want) {
 		t.Errorf("tool call spans = %d, want %d", seen, len(want))
+	}
+}
+
+// A call's source label is kept in the call log under the runtime's call id, cleaned to one short
+// line, and never reaches the log line or the span of the call.
+func TestSourceLabelsStayInTheCallLog(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	recorder := tracetest.NewSpanRecorder()
+	telemetry, err := observability.NewWithReader(reader, sdktrace.WithSpanProcessor(recorder))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = telemetry.Shutdown(context.Background()) })
+	var logs strings.Builder
+	broker, err := NewBroker(slog.New(slog.NewTextHandler(&logs, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	broker.SetTelemetry(telemetry)
+	labelled := testDefinition("labelled_tool", 0)
+	labelled.SourceLabel = func(arguments json.RawMessage, result Result) string {
+		return "private source\n" + strings.Repeat("x", 200) + " " + result.Text
+	}
+	provider := &fakeProvider{
+		principal:   testPrincipal,
+		definitions: []Definition{labelled, testDefinition("plain_tool", 0)},
+		respond:     func(context.Context, Call) (Result, error) { return Result{Text: "secret result"}, nil },
+	}
+	if err := broker.Register(provider); err != nil {
+		t.Fatal(err)
+	}
+	set, err := broker.ToolsFor(context.Background(), testPrincipal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range []agentruntime.ToolCall{
+		{ID: "call-1", Name: "labelled_tool", Arguments: json.RawMessage(`{}`)},
+		{ID: "call-2", Name: "plain_tool", Arguments: json.RawMessage(`{}`)},
+		{Name: "labelled_tool", Arguments: json.RawMessage(`{}`)},
+	} {
+		if _, err := set.Executor.Execute(context.Background(), call); err != nil {
+			t.Fatal(err)
+		}
+	}
+	calls := set.Executor.(interface{ CallLog() *CallLog }).CallLog()
+	record, found := calls.Call("call-1")
+	if !found || record.Outcome != "success" || !strings.HasPrefix(record.Label, "private source xxx") ||
+		utf8.RuneCountInString(record.Label) != MaximumLabelRunes || strings.Contains(record.Label, "\n") {
+		t.Fatalf("labelled call = %+v %v", record, found)
+	}
+	if record, found := calls.Call("call-2"); !found || record.Outcome != "success" || record.Label != "" {
+		t.Fatalf("unlabelled call = %+v %v", record, found)
+	}
+	if _, found := calls.Call(""); found {
+		t.Fatal("a call without an id was kept")
+	}
+	if strings.Contains(logs.String(), "private source") || !strings.Contains(logs.String(), "tools.call.completed") {
+		t.Fatalf("logs = %s", logs.String())
+	}
+	for _, span := range recorder.Ended() {
+		for _, kv := range span.Attributes() {
+			if strings.Contains(kv.Value.Emit(), "private source") {
+				t.Fatalf("span %s carries the label in %s", span.Name(), kv.Key)
+			}
+		}
 	}
 }
 

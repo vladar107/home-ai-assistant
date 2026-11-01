@@ -427,6 +427,7 @@ func (a *App) buildTelegram(ctx context.Context, client *telegram.Client, config
 		deps.Collections = asm.Collections
 		deps.Projects = asm.Projects
 		deps.Backlog = asm.Backlog
+		deps.Why = asm.Why
 		deps.Transcriber = asm.ChatGPT
 		deps.Model = &telegram.ModelCommand{
 			Lanes: asm.Conversation, Catalog: asm.Models, Usage: asm.ChatGPT,

@@ -142,4 +142,6 @@ type Config struct {
 	Trips Trips
 	// Collections tells each turn which collections the user keeps; nil leaves it out.
 	Collections Collections
+	// Traces keeps what each keyed turn did, so a reply can be explained later; nil keeps nothing.
+	Traces TraceStore
 }

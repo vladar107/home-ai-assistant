@@ -92,6 +92,7 @@ func (s *Service) Contribute(ctx context.Context, principalID string) (tools.Con
 				Description: "Search the user's earlier conversations with you for messages containing all the given words. Returns up to 8 matches, newest conversations first, each with its conversation id, date, message number, and a short excerpt; the excerpt is withheld for a conversation that read Notion or NAS content.",
 				InputSchema: searchSchema,
 				Risk:        tools.RiskRead,
+				SourceLabel: tools.ArgumentLabel("query"),
 				// An earlier conversation may retell mail or pages it read.
 				ThirdParty: true,
 			},

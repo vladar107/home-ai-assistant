@@ -425,6 +425,57 @@ feedback, and attachment rows, and the prune deletes its file. The files of
 scheduled runs and finished tasks, which no conversation refers to, are deleted
 30 days after they were last written.
 
+### What a reply was based on
+
+Every keyed turn leaves a trace in `turn_traces`, written by the turn engine's
+event sink when the run ends: the model and effort, whether outside or private
+content reached it, and in `turn_trace_calls` each tool call in the order the
+runtime started it, with its outcome, duration, result size, and a short source
+label. Pi's `tool_execution_start` and `tool_execution_end` events carry the
+call's `toolCallId`, its arguments, and the error flag; the bridge passes the
+id to the broker, which keeps the call's outcome and label under it in the
+run's `tools.CallLog`, so parallel calls are matched exactly. A tool's optional
+`SourceLabel` derives the label from the call's arguments and the provider's
+result, such as a page's host and path, a mail's sender and subject, or a
+file path; the runtime's own web search is labelled with its query, read from
+the event's arguments in memory. Arguments and results are never stored, and
+labels, which can be private, never reach a log line, a metric label, or a span
+attribute. A chat turn's trace is written beside its reply rather than before
+it; the engine holds the reply's link until the write ends, so a link never
+points at a trace still on its way.
+
+The keys are a chat turn's request, a scheduled run (its condition's check and
+its own turn share it), one start of a background task (shared by its report
+run), an agent watch's check, and an inbound event's assessment. Each delivered
+message is linked to its key in `turn_messages`; a key without a trace, such as
+a reminder's run, links nothing. An assessed event's trace marks outside
+content, since the event's text is the turn's message, and an event forwarded
+after a failed assessment is not linked. A watch alert checked in code gets a
+trace of kind `code` whose detail is the watch's label and rules; an agent
+check that cannot get a key fails rather than raise an alert explained as
+code-written.
+
+`/why` in reply to a message, or a short reply that asks about its sources,
+such as "how do you know?" or "where is that from?", looks the message up by
+the principal, chat, and message ID, so another user's message is never found.
+A bare "why?" asks about the content as often as about its sources, so it goes
+to the conversation. The record is rendered by code, listing the first 20
+calls and counting the rest, and one turn without tools, memory, or web search
+on the owner's subscription and the runtime's default model adds a few
+sentences of explanation from the record, the message, and, for a chat reply,
+the user's messages before it: from the tab's recent memory while it still
+holds them, otherwise the one before the reply in the conversation's history.
+The answer is split like any reply, its first part quoting the question. The
+explanation runs in the background so the poller never waits on it, at most
+one per principal: another question meanwhile is told to wait. It runs as a
+chat turn, since the user waits on it, so it never queues behind or takes the
+shared background slots; with one per principal it holds no more of the
+process pool than a chat turn does. A code-checked alert is answered with no
+model turn. The scheduler's
+hourly prune removes traces after 30 days, with their calls and messages, and
+the traces of checks and assessments that no delivered message links to after
+2 days.
+
 At most 5 Pi processes run at once, shared by `RunRequest.Kind`. Background
 tasks (`RunTask`) may hold at most 2 slots, and so may other background work
 (`RunBackground`: scheduled runs, checks, tab naming, and rewrites). A chat

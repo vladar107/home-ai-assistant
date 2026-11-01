@@ -37,6 +37,7 @@ var readDefinitions = []tools.Definition{
 		Description: "Search the pages and data sources shared with the user's Notion connection by title. Returns IDs, URLs, and key properties.",
 		Risk:        tools.RiskRead,
 		Activity:    tools.ActivityNotion,
+		SourceLabel: tools.ArgumentLabel("query"),
 		Private:     true,
 		ThirdParty:  true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
@@ -51,6 +52,7 @@ var readDefinitions = []tools.Definition{
 		Description: "Read one Notion page by ID: its properties and, by default, its text content.",
 		Risk:        tools.RiskRead,
 		Activity:    tools.ActivityNotion,
+		SourceLabel: tools.ResultLineLabel("Page: "),
 		Private:     true,
 		ThirdParty:  true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
@@ -63,6 +65,7 @@ var readDefinitions = []tools.Definition{
 		Description: "List entries of one Notion data source by ID, optionally filtered and sorted with Notion API filter and sorts objects.",
 		Risk:        tools.RiskRead,
 		Activity:    tools.ActivityNotion,
+		SourceLabel: tools.ArgumentLabel("data_source_id"),
 		Private:     true,
 		ThirdParty:  true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
@@ -78,6 +81,7 @@ var readDefinitions = []tools.Definition{
 		Description: "Read the content nested inside one Notion block by ID, such as the rows of a table drawn in a page or the blocks inside a toggle or column.",
 		Risk:        tools.RiskRead,
 		Activity:    tools.ActivityNotion,
+		SourceLabel: tools.ArgumentLabel("block_id"),
 		Private:     true,
 		ThirdParty:  true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +

@@ -137,7 +137,7 @@ plan that links back to the earlier record.
 | 0125 | [Collections: typed records the assistant keeps for the user](0125-collections.md) | done |
 | 0126 | [Projects: a goal with its own tab, checklist, and nudges](0126-projects.md) | done |
 | 0127 | [Inbound events from the user's own systems](0127-inbound-events.md) | done |
-| 0128 | ["Why did you say that?": what a reply was based on](0128-reply-provenance.md) | proposed |
+| 0128 | ["Why did you say that?": what a reply was based on](0128-reply-provenance.md) | done |
 | 0129 | [Export and restore a user's own data](0129-export-and-restore.md) | proposed |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`

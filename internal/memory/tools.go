@@ -44,6 +44,7 @@ var definitions = []tools.Definition{
 		Name:        toolAdd,
 		Description: "Remember something about the user for every later conversation. A fact is saved at once; an instruction is saved at once only in a conversation that has read no third-party content, and is otherwise proposed for the user to confirm.",
 		Risk:        tools.RiskWrite,
+		SourceLabel: tools.ArgumentLabel("kind"),
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"kind":{"type":"string","enum":["instruction","fact"],"description":"instruction for how the assistant should behave, fact for something about the user or household."},` +
 			`"text":{"type":"string","description":"One short self-contained sentence, at most 300 characters."}},` +
@@ -53,6 +54,7 @@ var definitions = []tools.Definition{
 		Name:        toolReplace,
 		Description: "Replace the text of one memory entry, keeping its kind. An instruction is replaced at once only in a conversation that has read no third-party content, and is otherwise proposed for the user to confirm.",
 		Risk:        tools.RiskWrite,
+		SourceLabel: tools.ArgumentLabel("id"),
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"id":{"type":"string","description":"The entry's id from the Memory section."},` +
 			`"text":{"type":"string","description":"The new text, at most 300 characters."}},` +
@@ -62,6 +64,7 @@ var definitions = []tools.Definition{
 		Name:        toolRemove,
 		Description: "Forget one memory entry, by its id from the Memory section. An instruction is forgotten at once only in a conversation that has read no third-party content, and a fact only before any; otherwise it is proposed for the user to confirm.",
 		Risk:        tools.RiskWrite,
+		SourceLabel: tools.ArgumentLabel("id"),
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"id":{"type":"string","description":"The entry's id from the Memory section."}},` +
 			`"required":["id"],"additionalProperties":false}`),

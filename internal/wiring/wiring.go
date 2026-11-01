@@ -48,6 +48,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/module"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	"github.com/vladar107/home-ai-assistant/internal/project"
+	"github.com/vladar107/home-ai-assistant/internal/provenance"
 	"github.com/vladar107/home-ai-assistant/internal/reaction"
 	"github.com/vladar107/home-ai-assistant/internal/routes"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
@@ -258,6 +259,7 @@ type Assembly struct {
 	Intake        *intake.Service
 	Backlog       *backlog.Service
 	Events        *events.Service
+	Why           *provenance.Service
 	Trips         *trip.Service
 	// SwitchPages are the on/off pages of the registered integrations, in registration order.
 	SwitchPages []SwitchSettings
@@ -327,6 +329,8 @@ func (a *Assembly) Steps() []Step {
 		{Name: "approvals", Start: a.Approvals.Start, Shutdown: a.Approvals.Shutdown},
 		{Name: "conversation service", Start: a.Conversation.Start, Shutdown: a.Conversation.Shutdown},
 		{Name: "scheduler", Start: a.Scheduler.Start, Shutdown: a.Scheduler.Shutdown},
+		{Name: "reply provenance", Start: func(context.Context) error { return nil }, Shutdown: a.Why.Shutdown},
+		{Name: "turn traces", Start: func(context.Context) error { return nil }, Shutdown: a.Turns.Shutdown},
 	}
 	if a.Tasks != nil {
 		steps = append(steps, Step{Name: "background tasks", Start: a.Tasks.Start, Shutdown: a.Tasks.Shutdown})
@@ -627,6 +631,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		Locations:            turnLocations,
 		Trips:                tripReader,
 		Collections:          collections,
+		Traces:               in.Store,
 	}, in.Runtime, connections, broker, in.Logger, telemetry)
 	if err != nil {
 		return fmt.Errorf("initialize turn engine: %w", err)
@@ -640,7 +645,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		Cards: cards, Photos: in.Chat, Reminders: in.Reminders, Sessions: in.Sessions,
 		Travel: trip.NewTravel(in.Store), Telemetry: telemetry, Exposure: exposures, SafetyChecks: safetyChecks,
 		Feeds: tabs.Feeds, Models: a.Models, Usage: a.ChatGPT, ChatModel: a.ChatModel, TaskModel: a.TaskModel, HeadsUpModel: in.Core.HeadsUpModel,
-		Projects: projectReader,
+		Projects: projectReader, Traces: in.Store,
 	}, in.Store, in.Store, in.Chat, approvals, in.Logger)
 	if err != nil {
 		return fmt.Errorf("initialize scheduler: %w", err)
@@ -685,7 +690,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		taskConfig.Cards, taskConfig.Photos = cards, in.Chat
 		taskConfig.TaskModel, taskConfig.ChatModel = a.TaskModel, a.ChatModel
 		taskConfig.Models, taskConfig.Usage = a.Models, a.ChatGPT
-		taskConfig.Proposer, taskConfig.Exposure, taskConfig.Telemetry = approvals, exposures, telemetry
+		taskConfig.Proposer, taskConfig.Exposure, taskConfig.Telemetry, taskConfig.Traces = approvals, exposures, telemetry, in.Store
 		taskConfig.Runner = engine
 		tasks, err := task.NewService(taskConfig, in.Store, in.Store, in.TaskMessages, in.Chat, in.Logger)
 		if err != nil {
@@ -702,7 +707,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	}
 	if in.Core.Watches {
 		// Alerts reach only the owner's own chat, resolved from the allowlist at delivery.
-		watches, err := watch.NewService(watch.Config{Zone: in.Zone, Now: in.Core.Now, Travel: trip.NewTravel(in.Store), Telemetry: telemetry, Rewriter: engine, Feeds: tabs.Feeds}, in.Store, in.Store, in.Alerts, approvals, in.Logger)
+		watches, err := watch.NewService(watch.Config{Zone: in.Zone, Now: in.Core.Now, Travel: trip.NewTravel(in.Store), Telemetry: telemetry, Rewriter: engine, Feeds: tabs.Feeds, Traces: in.Store}, in.Store, in.Store, in.Alerts, approvals, in.Logger)
 		if err != nil {
 			return fmt.Errorf("initialize watches: %w", err)
 		}
@@ -730,7 +735,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		// Events reach only their source's owner, in the owner's own chat resolved from the
 		// allowlist at delivery, and are assessed on the owner's own subscription.
 		eventsService, err := events.NewService(events.Config{
-			Now: in.Core.Now, Location: a.location, BodyTimeout: in.Core.EventBodyTimeout, AssessTimeout: in.Core.EventAssessTimeout, Feeds: tabs.Feeds, Telemetry: telemetry,
+			Now: in.Core.Now, Location: a.location, BodyTimeout: in.Core.EventBodyTimeout, AssessTimeout: in.Core.EventAssessTimeout, Feeds: tabs.Feeds, Telemetry: telemetry, Traces: in.Store,
 		}, in.Store, in.Store, in.Events, engine, in.Logger)
 		if err != nil {
 			return fmt.Errorf("initialize inbound events: %w", err)
@@ -749,10 +754,12 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	}
 	conversationService, err := conversation.NewService(
 		conversation.Config{
-			Engine:         engine,
-			ChatModel:      a.ChatModel,
-			TaskModel:      a.TaskModel,
-			Models:         a.Models,
+			Engine:    engine,
+			ChatModel: a.ChatModel,
+			TaskModel: a.TaskModel,
+			Models:    a.Models,
+			// The engine writes a chat turn's trace off the reply's path and holds a link until it is written.
+			Traces:         engine,
 			FollowUp:       approvals,
 			Notice:         notices,
 			Reports:        reports,
@@ -920,6 +927,12 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		a.Locations.SetPlaceListener(placeEvents{scheduler: scheduler, watches: a.Watches, logger: in.Logger})
 		a.Locations.SetPlaceTools(approvals, placeDependents{scheduler: scheduler, watches: a.Watches})
 	}
+	// An explanation reads only its asker's own traces and runs on their own subscription.
+	why, err := provenance.New(provenance.Config{Store: in.Store, Recent: recent, History: exchanges, Explainer: engine, Sender: in.Chat, Logger: in.Logger, Location: a.location})
+	if err != nil {
+		return fmt.Errorf("initialize reply provenance: %w", err)
+	}
+	a.Why = why
 	a.Connections = connections
 	a.Conversation = conversationService
 	return nil

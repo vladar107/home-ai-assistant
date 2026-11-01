@@ -20,8 +20,8 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
-// Engine runs model turns. It starts no goroutines and keeps no state beyond the per-lane turn
-// slots, so it has nothing to start or shut down.
+// Engine runs model turns. It keeps no state beyond the per-lane turn slots and the chat traces
+// being written, which Shutdown waits for; nothing else needs starting or stopping.
 type Engine struct {
 	runtime   agentruntime.AgentRuntime
 	gate      ConnectionGate
@@ -36,6 +36,12 @@ type Engine struct {
 	// race that Pi 1.0.0 removed by locking auth.json, which is why tabs and background tasks run
 	// beside each other.
 	slots map[Lane]chan struct{}
+
+	// pending holds the chat traces being written, by principal and key, each closed once written.
+	pendingMu     sync.Mutex
+	pending       map[string]chan struct{}
+	pendingClosed bool
+	pendingWG     sync.WaitGroup
 }
 
 // TurnTimeout is how long a turn may run.
@@ -77,6 +83,7 @@ func New(config Config, runtime agentruntime.AgentRuntime, gate ConnectionGate, 
 		logger:    logger,
 		telemetry: telemetry,
 		slots:     make(map[Lane]chan struct{}),
+		pending:   make(map[string]chan struct{}),
 	}, nil
 }
 
@@ -177,6 +184,7 @@ type Result struct {
 
 // Run runs the model once. The result is filled in whether or not the run failed.
 func (e *Engine) Run(ctx context.Context, run Run) (Result, error) {
+	started := e.config.Now()
 	counting := e.newCountingSink(run.PrincipalID, run.Turn, run.Run)
 	var sink agentruntime.EventSink = counting
 	if run.Sink != nil {
@@ -197,6 +205,10 @@ func (e *Engine) Run(ctx context.Context, run Run) (Result, error) {
 		Effort:      run.Effort,
 	}
 	result, err := e.runtime.Run(ctx, request, sink)
+	e.saveTraceLater(ctx, tracedRun{
+		principalID: run.PrincipalID, key: run.Turn, kind: TraceChat, model: run.Model, effort: run.Effort, started: started,
+		result: result, executor: run.Tools.Executor, run: run.Run, recorder: counting.trace,
+	})
 	calls, called := counting.snapshot()
 	return Result{RunResult: result, Calls: calls, Called: called}, err
 }
@@ -309,7 +321,8 @@ func FailureReply(err error) (string, string) {
 // broker audit line; the turn's sink records each by name instead.
 const WebSearchTool = "web_search"
 
-// countingSink remembers which tools a turn called, by name only, and logs each web search call.
+// countingSink remembers which tools a turn called, by name only, logs each web search call, and
+// follows each call for the turn's trace.
 // A web search result also marks the turn as having read third-party content, which the broker
 // cannot do for a tool that runs inside the runtime. The mark waits for the result, so the search
 // check of a call still in flight never sees that call's own exposure.
@@ -320,6 +333,7 @@ type countingSink struct {
 	telemetry   Telemetry
 	exposure    tools.TurnExposureRecorder
 	run         *tools.Run
+	trace       *traceRecorder
 
 	mu     sync.Mutex
 	calls  int
@@ -327,11 +341,16 @@ type countingSink struct {
 }
 
 func (e *Engine) newCountingSink(principalID, turn string, run *tools.Run) *countingSink {
-	return &countingSink{principalID: principalID, turn: turn, logger: e.logger, telemetry: e.telemetry, exposure: e.config.Exposure, run: run, called: make(map[string]bool)}
+	return &countingSink{principalID: principalID, turn: turn, logger: e.logger, telemetry: e.telemetry, exposure: e.config.Exposure, run: run,
+		trace: &traceRecorder{now: e.config.Now}, called: make(map[string]bool)}
 }
 
 func (c *countingSink) Emit(ctx context.Context, event agentruntime.Event) error {
-	if event.Type == "tool_result" && event.Tool == WebSearchTool {
+	if event.Type == "tool_result" {
+		c.trace.end(event)
+	}
+	// A search that ended without any text read nothing from outside.
+	if event.Type == "tool_result" && event.Tool == WebSearchTool && event.Text != "" {
 		if c.run != nil {
 			c.run.MarkExternal(event.Text)
 		}
@@ -343,6 +362,7 @@ func (c *countingSink) Emit(ctx context.Context, event agentruntime.Event) error
 	if event.Type != "tool_call" {
 		return nil
 	}
+	c.trace.start(event)
 	c.mu.Lock()
 	c.calls++
 	c.called[event.Text] = true

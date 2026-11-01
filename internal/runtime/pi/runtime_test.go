@@ -578,8 +578,16 @@ func TestWebSearchTurnLoadsOnlyTheSearchExtension(t *testing.T) {
 	if result.Response != "Searching.\n\nfound: synthetic search answer" {
 		t.Fatalf("response = %q", result.Response)
 	}
-	if !slices.Contains(sink.events, agentruntime.Event{Type: "tool_call", Text: "web_search"}) {
-		t.Errorf("sink did not receive the search tool name: %+v", sink.events)
+	// The search's query reaches the sink with its call, so the turn's record can name it.
+	if !slices.ContainsFunc(sink.events, func(event agentruntime.Event) bool {
+		return event.Type == "tool_call" && event.Text == "web_search" && event.CallID == "call-1" && string(event.Arguments) == `{"query":"synthetic query"}`
+	}) {
+		t.Errorf("sink did not receive the search call with its query: %+v", sink.events)
+	}
+	if !slices.ContainsFunc(sink.events, func(event agentruntime.Event) bool {
+		return event.Type == "tool_result" && event.CallID == "call-1" && !event.IsError && strings.Contains(event.Text, "Synthetic result")
+	}) {
+		t.Errorf("sink did not receive the search result under its call: %+v", sink.events)
 	}
 
 	report := readReport(t, cfg, testPrincipal, "web-search")

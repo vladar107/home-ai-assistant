@@ -30,11 +30,12 @@ export default function (pi: ExtensionAPI) {
 			description: tool.description,
 			// Pi validates plain JSON Schema objects before execute runs.
 			parameters: tool.parameters as any,
-			async execute(_toolCallId, params, signal) {
+			async execute(toolCallId, params, signal) {
 				const response = await fetch(url, {
 					method: "POST",
 					headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-					body: JSON.stringify({ name: tool.name, arguments: params ?? {} }),
+					// The call's id matches what the application learns of it to Pi's events about it.
+					body: JSON.stringify({ id: toolCallId, name: tool.name, arguments: params ?? {} }),
 					signal,
 				});
 				if (!response.ok) {

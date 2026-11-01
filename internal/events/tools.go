@@ -29,6 +29,7 @@ var definitions = []tools.Definition{{
 	Name:        toolRecent,
 	Description: "List the events the user's own systems posted to their event sources recently, newest first, with what became of each.",
 	Risk:        tools.RiskRead,
+	SourceLabel: tools.ArgumentLabel("source"),
 	ThirdParty:  true,
 	InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 		`"source":{"type":"string","description":"An event source's name, to list only its events."},` +

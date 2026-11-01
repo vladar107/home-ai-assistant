@@ -224,6 +224,8 @@ type Config struct {
 	Feeds thread.Feeds
 	// Telemetry counts events; nil counts nothing.
 	Telemetry Telemetry
+	// Traces links a delivered event to the trace of its assessment; nil links nothing.
+	Traces turn.MessageRecorder
 }
 
 type Service struct {
@@ -233,6 +235,7 @@ type Service struct {
 	assessor      Assessor
 	feeds         thread.Feeds
 	telemetry     Telemetry
+	traces        turn.MessageRecorder
 	logger        *slog.Logger
 	now           func() time.Time
 	location      *time.Location
@@ -297,7 +300,7 @@ func NewService(cfg Config, repository Repository, chats Chats, sender Sender, a
 	}
 	return &Service{
 		repository: repository, chats: chats, sender: sender, assessor: assessor,
-		feeds: cfg.Feeds, telemetry: cfg.Telemetry, logger: logger,
+		feeds: cfg.Feeds, telemetry: cfg.Telemetry, traces: cfg.Traces, logger: logger,
 		now: now, location: location, tick: tick, bodyTimeout: bodyTimeout, assessTimeout: assessTimeout,
 		wake: make(chan struct{}, 1), notices: make(map[string][]string),
 		delivering: make(map[string]bool), again: make(map[string]bool), decisions: make(map[string]decision),
@@ -652,8 +655,12 @@ func (s *Service) deliver(ctx context.Context, event Event) {
 		return
 	}
 	message := Message{Source: event.SourceName, Severity: event.Severity, Title: event.Title, Text: event.Text}
+	// assessed is true when an assessment decided on the event, which only then is linked to its
+	// trace: one forwarded after a failed assessment was not decided on by the model.
+	assessed := false
 	if event.SourceMode == ModeAssess {
 		decision := s.decide(ctx, event)
+		assessed = !decision.failed
 		switch {
 		case ctx.Err() != nil:
 			return
@@ -680,6 +687,9 @@ func (s *Service) deliver(ctx context.Context, event Event) {
 	defer cancel()
 	if s.finish(storeCtx, event, OutcomeDelivered, "") {
 		s.remember(event, message, messageID)
+		if assessed {
+			turn.RecordMessage(storeCtx, s.traces, s.logger, event.PrincipalID, traceKey(event), chatID, messageID)
+		}
 	}
 }
 

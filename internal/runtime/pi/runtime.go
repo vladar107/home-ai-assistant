@@ -564,6 +564,9 @@ type rpcEvent struct {
 	Success               bool                   `json:"success"`
 	ErrorMessage          string                 `json:"errorMessage"`
 	ToolName              string                 `json:"toolName"`
+	ToolCallID            string                 `json:"toolCallId"`
+	Args                  json.RawMessage        `json:"args"`
+	IsError               bool                   `json:"isError"`
 	Result                *rpcToolResult         `json:"result"`
 	Attempt               int                    `json:"attempt"`
 	WillRetry             bool                   `json:"willRetry"`
@@ -868,15 +871,15 @@ func (s *turnState) consume(ctx context.Context, event rpcEvent) (bool, error) {
 			return false, fmt.Errorf("Pi runtime emitted a tool event while tools are disabled")
 		}
 		s.toolStarted = true
-		if err := s.sink.Emit(ctx, agentruntime.Event{Type: "tool_call", Text: event.ToolName}); err != nil {
+		if err := s.sink.Emit(ctx, agentruntime.Event{Type: "tool_call", Text: event.ToolName, Tool: event.ToolName, CallID: event.ToolCallID, Arguments: event.Args}); err != nil {
 			return false, fmt.Errorf("emit Pi runtime event: %w", err)
 		}
 	case "tool_execution_update", "tool_execution_end":
 		if !s.toolsEnabled {
 			return false, fmt.Errorf("Pi runtime emitted a tool event while tools are disabled")
 		}
-		if event.Type == "tool_execution_end" && event.Result != nil {
-			if err := s.sink.Emit(ctx, agentruntime.Event{Type: "tool_result", Tool: event.ToolName, Text: event.Result.text()}); err != nil {
+		if event.Type == "tool_execution_end" {
+			if err := s.sink.Emit(ctx, agentruntime.Event{Type: "tool_result", Tool: event.ToolName, Text: event.Result.text(), CallID: event.ToolCallID, IsError: event.IsError}); err != nil {
 				return false, fmt.Errorf("emit Pi runtime event: %w", err)
 			}
 		}

@@ -80,6 +80,7 @@ var queryDefinition = tools.Definition{
 	Name:           toolQuery,
 	Description:    "Read the records of one collection: filter, sort, and limit them, with the totals of every number and money field over all matches and optional groups.",
 	Risk:           tools.RiskRead,
+	SourceLabel:    tools.ArgumentLabel("collection"),
 	Private:        true,
 	MaxResultBytes: queryResultBytes,
 	InputSchema: json.RawMessage(`{"type":"object","properties":{` +
@@ -100,6 +101,7 @@ var writeDefinitions = []tools.Definition{
 		Name:        toolAlter,
 		Description: "Add, rename, or remove fields of a collection. Adding and renaming are done at once and undoable, or proposed after outside content; removing a field always waits for Confirm.",
 		Risk:        tools.RiskWrite,
+		SourceLabel: tools.ArgumentLabel("collection"),
 		Timeout:     actTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"collection":{"type":"string","description":"The collection's name."},` +
@@ -117,6 +119,7 @@ var writeDefinitions = []tools.Definition{
 		Name:        toolAdd,
 		Description: "Add records to a collection. Done at once and undoable, or proposed for Confirm after outside content.",
 		Risk:        tools.RiskWrite,
+		SourceLabel: tools.ArgumentLabel("collection"),
 		Timeout:     actTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"collection":{"type":"string","description":"The collection's name."},` +
@@ -127,6 +130,7 @@ var writeDefinitions = []tools.Definition{
 		Name:        toolUpdate,
 		Description: "Change the values of one record; fields left out keep their values. Done at once and undoable, or proposed for Confirm after outside content.",
 		Risk:        tools.RiskWrite,
+		SourceLabel: tools.ArgumentLabel("collection", "record_id"),
 		Timeout:     actTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"collection":{"type":"string","description":"The collection's name."},` +
@@ -138,6 +142,7 @@ var writeDefinitions = []tools.Definition{
 		Name:        toolRemove,
 		Description: "Delete one record. Done at once and undoable, or proposed for Confirm after outside content.",
 		Risk:        tools.RiskWrite,
+		SourceLabel: tools.ArgumentLabel("collection", "record_id"),
 		Timeout:     actTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"collection":{"type":"string","description":"The collection's name."},` +
@@ -150,6 +155,7 @@ var createDefinition = tools.Definition{
 	Name:        toolCreate,
 	Description: "Propose a new collection with its typed fields. It always waits for the user's Confirm.",
 	Risk:        tools.RiskWrite,
+	SourceLabel: tools.ArgumentLabel("name"),
 	InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 		`"name":{"type":"string","description":"A short name, such as lent items."},` +
 		`"description":{"type":"string","description":"What the collection is for, in one line."},` +

@@ -97,6 +97,8 @@ type Config struct {
 	Exposure ExposureChecker
 	// Telemetry measures task runs; nil measures nothing.
 	Telemetry Telemetry
+	// Traces links a delivered report to the trace of the start that wrote it; nil links nothing.
+	Traces turn.MessageRecorder
 }
 
 type Service struct {
@@ -556,7 +558,7 @@ func (s *Service) run(ctx context.Context, task Task, sink *progressSink) (Outco
 		mainCtx, stopMain := context.WithCancelCause(deadlineCtx)
 		sink.begin(func() { stopMain(errModelBudget) })
 		reply, err := s.runner.RunTask(mainCtx, turn.TaskRun{
-			PrincipalID: task.PrincipalID, Turn: outbox.TaskTurn(task.ID), SessionID: task.SessionID,
+			PrincipalID: task.PrincipalID, Turn: outbox.TaskTurn(task.ID), Trace: outbox.TaskRun(task.ID, task.Attempts), SessionID: task.SessionID,
 			Message: message, Instruction: s.firstMessage(task), Continued: task.Attempts > 1, CallBudget: callBudget, Sink: sink,
 			Model: task.Model, Effort: task.Effort,
 		})
@@ -582,7 +584,7 @@ func (s *Service) run(ctx context.Context, task Task, sink *progressSink) (Outco
 	defer cancelReport()
 	sink.begin(nil)
 	reply, err := s.runner.RunTask(reportCtx, turn.TaskRun{
-		PrincipalID: task.PrincipalID, Turn: outbox.TaskTurn(task.ID), SessionID: task.SessionID,
+		PrincipalID: task.PrincipalID, Turn: outbox.TaskTurn(task.ID), Trace: outbox.TaskRun(task.ID, task.Attempts), SessionID: task.SessionID,
 		Message: prompt.BackgroundTaskLimit(limit), Instruction: s.firstMessage(task), Continued: true, Report: true, Sink: sink, Model: task.Model, Effort: task.Effort,
 	})
 	switch {
@@ -674,7 +676,8 @@ func (s *Service) deliver(ctx context.Context, task Task) error {
 		sent, replyTo = len(chunks)-len(remaining), quote
 	}
 	for index := sent; index < len(chunks); index++ {
-		if err := s.deliverer.SendReply(ctx, task.ChatID, replyTo, chunks[index]); err != nil {
+		messageID, _, err := s.deliverer.SendTrackedReply(ctx, task.ChatID, replyTo, chunks[index])
+		if err != nil {
 			if isPermanent(err) {
 				s.logger.WarnContext(ctx, "task.undeliverable", "principal_id", task.PrincipalID, "task_id", task.ID, "reason", "send_rejected")
 				return s.finishDelivery(ctx, task)
@@ -689,6 +692,7 @@ func (s *Service) deliver(ctx context.Context, task Task) error {
 			s.logger.WarnContext(ctx, "task.delivery.progress_failed", "principal_id", task.PrincipalID, "task_id", task.ID, "error", err)
 		}
 		cancelSave()
+		turn.RecordMessage(ctx, s.config.Traces, s.logger, task.PrincipalID, outbox.TaskRun(task.ID, task.Attempts), task.ChatID, messageID)
 	}
 	s.logger.InfoContext(ctx, "task.delivered", "principal_id", task.PrincipalID, "task_id", task.ID)
 	return s.finishDelivery(ctx, task)

@@ -47,6 +47,7 @@ var historyDefinition = tools.Definition{
 	Description: "Home Assistant: total change, or mean, minimum, and maximum, of one sensor over a period from Home Assistant's long-term statistics, such as energy produced yesterday or this month. Pass points for a trend instead: one value per day, week, or month (mean, or change for counters) with the first, last, and change between them, such as weight over the last year.",
 	Risk:        tools.RiskRead,
 	Activity:    tools.ActivityHome,
+	SourceLabel: tools.ArgumentLabel("name", "period"),
 	Timeout:     toolTimeout,
 	ThirdParty:  true,
 	Household:   true,
@@ -73,6 +74,7 @@ var serviceCallDefinition = tools.Definition{
 	Description: "Home Assistant: propose calling a service on a device from " + toolConfirmedDevices + ". The user must confirm before anything happens.",
 	Risk:        tools.RiskWrite,
 	Activity:    tools.ActivityHome,
+	SourceLabel: tools.ArgumentLabel("entity_id", "service"),
 	Timeout:     toolTimeout,
 	InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 		`"entity_id":{"type":"string","description":"The entity ID from ` + toolConfirmedDevices + `."},` +

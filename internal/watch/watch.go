@@ -323,6 +323,8 @@ type Observation struct {
 	// Private is set when the check read content that must stay private, such as Notion pages, so
 	// a turn that is told about the alert becomes private too.
 	Private bool
+	// Trace names the trace of the check turn that made the observation, empty for a check in code.
+	Trace string
 }
 
 // UpstreamError marks a check that failed because an outside service did, for metrics.
@@ -370,6 +372,10 @@ type Alert struct {
 	Private bool
 	// Label is the watch's Label when the alert is read for delivery.
 	Label string
+	// Rules is the watch's definition as Describe gives it when the alert is read for delivery.
+	Rules string
+	// Trace is Observation.Trace of the check that queued the alert.
+	Trace string
 }
 
 // AlertMessage is a delivered alert as it reached its owner: the Telegram message it was sent as,

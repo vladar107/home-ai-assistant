@@ -16,9 +16,11 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/localtime"
 	"github.com/vladar107/home-ai-assistant/internal/module"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
+	"github.com/vladar107/home-ai-assistant/internal/turn"
 )
 
 const (
@@ -107,6 +109,15 @@ type Config struct {
 	// Feeds are the tabs that alerts are delivered to while the bot has tabs on; without them every
 	// alert goes to the main view.
 	Feeds thread.Feeds
+	// Traces keeps what each delivered alert was based on: the check turn of an agent watch, or for
+	// the others the rules code checked; nil keeps nothing.
+	Traces Traces
+}
+
+// Traces keeps the records of what turns did and links delivered alerts to them.
+type Traces interface {
+	turn.TraceStore
+	turn.MessageRecorder
 }
 
 type Service struct {
@@ -118,6 +129,7 @@ type Service struct {
 	telemetry  Telemetry
 	travel     Travel
 	feeds      thread.Feeds
+	traces     Traces
 	logger     *slog.Logger
 	zone       string
 	tick       time.Duration
@@ -195,6 +207,7 @@ func NewService(cfg Config, repository Repository, chats Chats, sender Sender, p
 		travel:     cfg.Travel,
 		rewriter:   cfg.Rewriter,
 		feeds:      cfg.Feeds,
+		traces:     cfg.Traces,
 		telemetry:  cfg.Telemetry,
 		logger:     logger,
 		zone:       cfg.Zone,
@@ -507,7 +520,7 @@ func (s *Service) check(ctx context.Context, watch Watch, now time.Time, cache *
 			state.Key = observation.State
 		}
 		if alert != nil {
-			alert.Private = observation.Private
+			alert.Private, alert.Trace = observation.Private, observation.Trace
 		}
 	}
 	state.CheckedAt = now
@@ -672,6 +685,7 @@ func (s *Service) deliver(ctx context.Context) {
 		if s.finish(storeCtx, alert, statusDelivered, "", alertDelivered) {
 			s.remember(alert, text, messageID)
 			s.keepMessage(storeCtx, alert, text, messageID, threadID)
+			s.traceAlert(storeCtx, alert, chatID, messageID)
 		}
 		cancel()
 	}
@@ -762,6 +776,28 @@ func (s *Service) logWatchError(ctx context.Context, watch Watch, stage string, 
 
 func (s *Service) logAlertError(ctx context.Context, alert Alert, stage string, err error) {
 	s.logger.WarnContext(ctx, "watch.alert.retry", "principal_id", alert.PrincipalID, "watch_id", alert.WatchID, "stage", stage, "error", err)
+}
+
+// traceAlert links a delivered alert to what it was based on: the trace of the check turn that
+// raised an agent watch's alert, or else a trace of its own saying that code wrote it from the
+// watch's rules, with no model turn.
+func (s *Service) traceAlert(ctx context.Context, alert Alert, chatID, messageID int64) {
+	if s.traces == nil {
+		return
+	}
+	key := alert.Trace
+	if key == "" {
+		key = codeTraceKind + "/" + alert.ID
+		now := s.now()
+		detail := clip.Runes(strings.TrimSpace(alert.Label+"\n"+alert.Rules), turn.MaximumTraceDetailRunes)
+		if err := s.traces.SaveTurnTrace(ctx, turn.Trace{
+			PrincipalID: alert.PrincipalID, Key: key, Kind: turn.TraceCode, Detail: detail, StartedAt: now, FinishedAt: now, Private: alert.Private,
+		}); err != nil {
+			s.logAlertError(ctx, alert, "store_trace", err)
+			return
+		}
+	}
+	turn.RecordMessage(ctx, s.traces, s.logger, alert.PrincipalID, key, chatID, messageID)
 }
 
 // remember keeps the delivered message for the owner's next conversation turn, so a reply to it has

@@ -1033,6 +1033,7 @@ func (s *Service) deliver(ctx context.Context, request Request) error {
 			if err := s.repository.RecordConversationReply(storeCtx, request.PrincipalID, request.SessionID, request.ID, messageID); err != nil {
 				s.logWorkerError(ctx, request.PrincipalID, "record_reply")
 			}
+			turn.RecordMessage(storeCtx, s.config.Traces, s.telemetry.ContextLogger(ctx, s.logger), request.PrincipalID, outbox.ChatTurn(request.ID), request.ChatID, messageID)
 		}
 		cancelStore()
 	}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
+	"github.com/vladar107/home-ai-assistant/internal/turn"
 )
 
 type decision struct {
@@ -72,7 +73,7 @@ type assessment struct {
 // without a valid decision is an error, and the caller forwards the event instead.
 func (s *Service) assess(ctx context.Context, event Event) (decision, error) {
 	message := prompt.InboundEvent(event.SourceName, event.ReceivedAt, s.location, event.Severity, event.Title, event.Text)
-	reply, err := s.assessor.RunAssess(ctx, event.PrincipalID, message)
+	reply, err := s.assessor.RunAssess(turn.WithTraceKey(ctx, traceKey(event)), event.PrincipalID, message)
 	if err != nil {
 		return decision{}, err
 	}
@@ -80,6 +81,11 @@ func (s *Service) assess(ctx context.Context, event Event) (decision, error) {
 		return decision{}, fmt.Errorf("the assessment turn failed: %s", reply.ErrorKind)
 	}
 	return parseAssessment(reply.Text)
+}
+
+// traceKey names the trace of an event's assessment, which the delivered event is linked to.
+func traceKey(event Event) string {
+	return "event/" + event.ID
 }
 
 // parseAssessment reads the JSON object an assessment's reply ends with, allowing a code fence

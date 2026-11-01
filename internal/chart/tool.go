@@ -241,6 +241,7 @@ func definition(home, metrics bool) tools.Definition {
 		Description: "Draw a chart of up to four time series as a picture sent with your reply, and compute each series' first and last value, change, minimum and maximum with their times, mean, total, gaps, and outliers.",
 		Risk:        tools.RiskRead,
 		Activity:    tools.ActivityImage,
+		SourceLabel: tools.ArgumentLabel("title"),
 		Timeout:     toolTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"title":{"type":"string","maxLength":80,"description":"The chart's title, in the language of your reply."},` +

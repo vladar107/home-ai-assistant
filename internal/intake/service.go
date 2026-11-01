@@ -59,6 +59,7 @@ var readDefinitions = []tools.Definition{
 		Name:        toolList,
 		Description: "List the user's newest intake records, the facts kept from letters, bills, notices, and mail, optionally of one kind.",
 		Risk:        tools.RiskRead,
+		SourceLabel: tools.ArgumentLabel("kind"),
 		ThirdParty:  true,
 		Screen:      true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
@@ -69,6 +70,7 @@ var readDefinitions = []tools.Definition{
 		Name:        toolGet,
 		Description: "Show one intake record in full: its source, sender, dates, amounts, references, and what the user must do.",
 		Risk:        tools.RiskRead,
+		SourceLabel: tools.ArgumentLabel("id"),
 		ThirdParty:  true,
 		Screen:      true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
@@ -81,12 +83,14 @@ var writeDefinitions = []tools.Definition{
 		Name:        toolRecord,
 		Description: "Keep the facts read from one item of content the user sent or mail you read, so later questions can be answered without it. A new item is kept at once and returns the record id; a change to an item already kept is made at once in a clean conversation and proposed for Confirm after outside content.",
 		Risk:        tools.RiskWrite,
+		SourceLabel: tools.ArgumentLabel("title", "sender"),
 		InputSchema: recordSchema,
 	},
 	{
 		Name:        toolDelete,
 		Description: "Delete one of the user's intake records. Done at once and told, or proposed for Confirm after outside content.",
 		Risk:        tools.RiskWrite,
+		SourceLabel: tools.ArgumentLabel("id"),
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"id":{"type":"string","description":"The record id."}},"required":["id"],"additionalProperties":false}`),
 	},

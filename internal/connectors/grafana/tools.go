@@ -55,6 +55,7 @@ var definitions = []tools.Definition{
 		Description: "Grafana: without uid, list the dashboards; with uid, list that dashboard's variables and panels with their units and PromQL or LogQL queries.",
 		Risk:        tools.RiskRead,
 		Activity:    tools.ActivityGrafana,
+		SourceLabel: tools.ArgumentLabel("uid"),
 		Timeout:     toolTimeout,
 		ThirdParty:  true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
@@ -66,6 +67,7 @@ var definitions = []tools.Definition{
 		Description: "Grafana: run a PromQL query against Prometheus, either for its current value or over a range, summarised per series.",
 		Risk:        tools.RiskRead,
 		Activity:    tools.ActivityGrafana,
+		SourceLabel: tools.ArgumentLabel("query", "range"),
 		Timeout:     toolTimeout,
 		ThirdParty:  true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
@@ -80,6 +82,7 @@ var definitions = []tools.Definition{
 		Description: "Grafana: run a LogQL query against Loki. A log query returns matching lines; a metric query such as count_over_time returns series.",
 		Risk:        tools.RiskRead,
 		Activity:    tools.ActivityGrafana,
+		SourceLabel: tools.ArgumentLabel("query", "range"),
 		Timeout:     toolTimeout,
 		ThirdParty:  true,
 		Screen:      true,
@@ -96,6 +99,7 @@ var definitions = []tools.Definition{
 		Description: "Grafana: the alerts firing or pending now and any rules that fail to evaluate (view active, the default), or the alert state changes of a recent range, newest first (view history).",
 		Risk:        tools.RiskRead,
 		Activity:    tools.ActivityGrafana,
+		SourceLabel: tools.ArgumentLabel("view", "range"),
 		Timeout:     toolTimeout,
 		ThirdParty:  true,
 		Household:   true,

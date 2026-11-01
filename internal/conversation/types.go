@@ -560,7 +560,9 @@ type Config struct {
 	// catalog cannot be read.
 	TaskModel agentruntime.ModelEffort
 	// Models is the catalog a lane's choice is checked against; nil trusts every stored choice.
-	Models   modelcatalog.Reader
+	Models modelcatalog.Reader
+	// Traces links each delivered reply to its turn's trace; nil links nothing.
+	Traces   turn.MessageRecorder
 	FollowUp FollowUp
 	Notice   Notice
 	// Reports tells each chat turn about the scheduled job reports it should know of; nil leaves

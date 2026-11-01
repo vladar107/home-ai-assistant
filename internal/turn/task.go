@@ -14,7 +14,10 @@ import (
 type TaskRun struct {
 	PrincipalID string
 	// Turn names the task, so what its tools stage goes out with its report.
-	Turn      string
+	Turn string
+	// Trace names the trace the run adds its calls to: one per start of the task, which its report
+	// run shares, so the report can be explained from everything that start did.
+	Trace     string
 	SessionID string
 	Message   string
 	// Instruction is the trusted text the run may open links from, the confirmed brief; empty means
@@ -79,7 +82,9 @@ func (e *Engine) RunTask(ctx context.Context, run TaskRun) (TaskReply, error) {
 		return TaskReply{Text: UnavailableReply, ErrorKind: ErrorKindToolProvider}, nil
 	}
 	message := e.withTime(e.withUser(run.PrincipalID, withPlace(e.placeLines(runCtx, run.PrincipalID), e.withCollections(runCtx, run.PrincipalID, run.Message))))
-	var sink agentruntime.EventSink = e.newCountingSink(run.PrincipalID, run.Turn, record)
+	started := e.config.Now()
+	counting := e.newCountingSink(run.PrincipalID, run.Turn, record)
+	var sink agentruntime.EventSink = counting
 	if run.Sink != nil {
 		sink = sinks{sink, run.Sink}
 	}
@@ -96,6 +101,10 @@ func (e *Engine) RunTask(ctx context.Context, run TaskRun) (TaskReply, error) {
 		Model:       run.Model,
 		Effort:      run.Effort,
 	}, sink)
+	e.saveTrace(ctx, tracedRun{
+		principalID: run.PrincipalID, key: run.Trace, kind: TraceTask, model: run.Model, effort: run.Effort, started: started,
+		result: result, executor: toolSet.Executor, run: record, recorder: counting.trace,
+	})
 	switch {
 	case ctx.Err() != nil:
 		return TaskReply{}, ctx.Err()

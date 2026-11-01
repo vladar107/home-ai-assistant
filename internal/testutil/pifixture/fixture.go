@@ -51,6 +51,7 @@ type Image struct {
 
 // BridgeCall is what the tool scenario posts to the application, mirroring the real extension.
 type BridgeCall struct {
+	ID        string          `json:"id"`
 	Name      string          `json:"name"`
 	Arguments json.RawMessage `json:"arguments"`
 }
@@ -190,8 +191,12 @@ func run() error {
 		emit(map[string]any{"type": "message_start", "message": map[string]string{"role": "assistant"}})
 		delta("Checking.")
 		emit(map[string]any{"type": "message_update", "assistantMessageEvent": map[string]string{"type": "toolcall_start"}})
-		emit(map[string]any{"type": "tool_execution_start", "toolCallId": "call-1", "toolName": name})
-		text, isError, err := callBridge(name, arguments)
+		var args any = map[string]any{}
+		if arguments != "" {
+			args = json.RawMessage(arguments)
+		}
+		emit(map[string]any{"type": "tool_execution_start", "toolCallId": "call-1", "toolName": name, "args": args})
+		text, isError, err := callBridge("call-1", name, arguments)
 		if err != nil {
 			return err
 		}
@@ -213,7 +218,7 @@ func run() error {
 		emit(map[string]any{"type": "message_start", "message": map[string]string{"role": "assistant"}})
 		delta("Searching.")
 		emit(map[string]any{"type": "message_update", "assistantMessageEvent": map[string]string{"type": "toolcall_start"}})
-		emit(map[string]any{"type": "tool_execution_start", "toolCallId": "call-1", "toolName": "web_search"})
+		emit(map[string]any{"type": "tool_execution_start", "toolCallId": "call-1", "toolName": "web_search", "args": map[string]string{"query": query}})
 		text, err := checkSearch(query)
 		if err != nil {
 			text = "Web search is unavailable right now; the search was not run."
@@ -329,7 +334,7 @@ func run() error {
 		emit(map[string]any{"type": "message_start", "message": map[string]string{"role": "assistant"}})
 		delta("Searching.")
 		emit(map[string]any{"type": "message_update", "assistantMessageEvent": map[string]string{"type": "toolcall_start"}})
-		emit(map[string]any{"type": "tool_execution_start", "toolCallId": "call-1", "toolName": "web_search"})
+		emit(map[string]any{"type": "tool_execution_start", "toolCallId": "call-1", "toolName": "web_search", "args": map[string]string{"query": "synthetic query"}})
 		emit(map[string]any{"type": "tool_execution_end", "toolCallId": "call-1", "toolName": "web_search", "isError": false,
 			"result": map[string]any{"content": []map[string]string{{"type": "text", "text": "Synthetic result: https://example.com/found?id=1"}}}})
 		emit(map[string]any{"type": "message_start", "message": map[string]string{"role": "assistant"}})
@@ -562,11 +567,11 @@ func appendLines(path string, lines []any) error {
 
 // callBridge posts the call the way the real extension does and returns the text the model would
 // read; a rejected request is reported as an error result naming the HTTP status.
-func callBridge(name, arguments string) (string, bool, error) {
+func callBridge(id, name, arguments string) (string, bool, error) {
 	if arguments == "" {
 		arguments = "{}"
 	}
-	body, err := json.Marshal(BridgeCall{Name: name, Arguments: json.RawMessage(arguments)})
+	body, err := json.Marshal(BridgeCall{ID: id, Name: name, Arguments: json.RawMessage(arguments)})
 	if err != nil {
 		return "", false, err
 	}

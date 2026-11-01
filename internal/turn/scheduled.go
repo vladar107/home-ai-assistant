@@ -36,15 +36,16 @@ func (e *Engine) RunScheduled(ctx context.Context, principalID, turn, message st
 		return ScheduledReply{}, err
 	}
 	defer release()
-	return e.runUnwatched(ctx, principalID, turn, message, model, e.config.ScheduledTurnTimeout)
+	return e.runUnwatched(ctx, principalID, turn, message, model, e.config.ScheduledTurnTimeout, TraceScheduled, turn)
 }
 
 // RunCheck runs one check of an agent watch as RunScheduled runs a scheduled turn, but under no
 // turn key: nothing goes out with the reply but the watch's own alert, so its tools stage nothing.
 // It takes no turn slot, as a background task does not: checks run all day, and the user's chat
-// turn must not wait behind one. The caller reads the verdict from the final text.
+// turn must not wait behind one. The caller reads the verdict from the final text. The check keeps
+// a trace under the key ctx names, if any.
 func (e *Engine) RunCheck(ctx context.Context, principalID, message string) (ScheduledReply, error) {
-	return e.runUnwatched(ctx, principalID, "", message, agentruntime.ModelEffort{}, e.config.TurnTimeout)
+	return e.runUnwatched(ctx, principalID, "", message, agentruntime.ModelEffort{}, e.config.TurnTimeout, TraceCheck, TraceKeyFrom(ctx))
 }
 
 // RunReview runs the turn of a weekly review on the principal's own subscription and the given
@@ -52,18 +53,29 @@ func (e *Engine) RunCheck(ctx context.Context, principalID, message string) (Sch
 // reads, and in a fresh session. Like RunCheck it takes no turn slot. Failures come back as the
 // reply a chat turn would have given; an error is returned only when ctx ends.
 func (e *Engine) RunReview(ctx context.Context, principalID, message string, model agentruntime.ModelEffort) (ScheduledReply, error) {
-	return e.runToolless(ctx, principalID, message, model, false)
+	return e.runToolless(ctx, principalID, message, model, false, "", agentruntime.RunBackground)
 }
 
 // RunAssess runs the turn that decides whether an inbound event is worth telling the user about:
 // like RunReview with no tools or web search, but with the principal's memory, which says what they
 // care about, and their name. Like RunCheck it takes no turn slot, and the caller reads the
-// decision from the final text.
+// decision from the final text. The turn keeps a trace under the key ctx names, if any.
 func (e *Engine) RunAssess(ctx context.Context, principalID, message string) (ScheduledReply, error) {
-	return e.runToolless(ctx, principalID, message, agentruntime.ModelEffort{}, true)
+	return e.runToolless(ctx, principalID, message, agentruntime.ModelEffort{}, true, TraceAssess, agentruntime.RunBackground)
 }
 
-func (e *Engine) runToolless(ctx context.Context, principalID, message string, model agentruntime.ModelEffort, withMemory bool) (ScheduledReply, error) {
+// RunExplain runs the turn that explains what one of the assistant's messages was based on, from
+// the record the message's turn kept: like RunReview with no tools, memory, or web search, on the
+// runtime's default model. The user is waiting on it, so it runs as a chat turn and never queues
+// behind the shared background slots or takes one; the caller runs at most one per principal. It
+// keeps no trace of its own.
+func (e *Engine) RunExplain(ctx context.Context, principalID, message string) (ScheduledReply, error) {
+	return e.runToolless(ctx, principalID, message, agentruntime.ModelEffort{}, false, "", agentruntime.RunChat)
+}
+
+// runToolless runs a turn without tools; a kind traces it under the key ctx names.
+func (e *Engine) runToolless(ctx context.Context, principalID, message string, model agentruntime.ModelEffort, withMemory bool, kind string, runKind agentruntime.RunKind) (ScheduledReply, error) {
+	started := e.config.Now()
 	turnCtx, cancel := context.WithTimeout(ctx, e.config.TurnTimeout)
 	defer cancel()
 	if reply, ready, err := e.unwatchedGate(ctx, turnCtx, principalID); !ready {
@@ -89,13 +101,21 @@ func (e *Engine) runToolless(ctx context.Context, principalID, message string, m
 		SessionID:   sessionID,
 		Message:     e.withTime(message),
 		Memory:      memory,
+		Kind:        runKind,
 		Model:       model.Model,
 		Effort:      model.Effort,
 	}, discardEvents{})
+	if kind != "" {
+		e.saveTrace(ctx, tracedRun{principalID: principalID, key: TraceKeyFrom(ctx), kind: kind, model: model.Model, effort: model.Effort, started: started, result: result,
+			// An assessed event's text is the turn's message, written by the user's own system, which may
+			// repeat text from anywhere.
+			external: kind == TraceAssess})
+	}
 	return unwatchedReply(ctx, turnCtx, result, runErr, nil)
 }
 
-func (e *Engine) runUnwatched(ctx context.Context, principalID, turn, message string, model agentruntime.ModelEffort, timeout time.Duration) (ScheduledReply, error) {
+func (e *Engine) runUnwatched(ctx context.Context, principalID, turn, message string, model agentruntime.ModelEffort, timeout time.Duration, kind, traceKey string) (ScheduledReply, error) {
+	started := e.config.Now()
 	run := tools.NewRun(message)
 	turnCtx, cancel := context.WithTimeout(tools.WithRun(tools.WithTurn(ctx, turn), run), timeout)
 	defer cancel()
@@ -121,6 +141,7 @@ func (e *Engine) runUnwatched(ctx context.Context, principalID, turn, message st
 	if err != nil {
 		return ScheduledReply{}, err
 	}
+	sink := e.newCountingSink(principalID, turn, run)
 	result, runErr := e.runtime.Run(turnCtx, agentruntime.RunRequest{
 		PrincipalID: principalID,
 		SessionID:   sessionID,
@@ -131,7 +152,11 @@ func (e *Engine) runUnwatched(ctx context.Context, principalID, turn, message st
 		SearchCheck: e.searchCheck(principalID, webSearch, false),
 		Model:       model.Model,
 		Effort:      model.Effort,
-	}, e.newCountingSink(principalID, turn, run))
+	}, sink)
+	e.saveTrace(ctx, tracedRun{
+		principalID: principalID, key: traceKey, kind: kind, model: model.Model, effort: model.Effort, started: started,
+		result: result, executor: tools.Executor, run: run, recorder: sink.trace,
+	})
 	return unwatchedReply(ctx, turnCtx, result, runErr, run)
 }
 

@@ -64,6 +64,7 @@ var definitions = []tools.Definition{
 		Description: "Plan NS train trips between two Dutch stations: up to five options with planned and live departure and arrival times, delays, tracks and track changes, each leg and transfer, duration, crowding, status, cancellations, and messages.",
 		Risk:        tools.RiskRead,
 		Activity:    tools.ActivityTransit,
+		SourceLabel: tools.RouteLabel("from", "via", "to"),
 		Timeout:     toolTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"from":{"type":"string","description":"Departure station name or code, such as Den Haag or GVC."},` +
@@ -80,6 +81,7 @@ var definitions = []tools.Definition{
 		Description: "List the next NS departures from one Dutch station with live times, delays, tracks and track changes, cancellations, and messages.",
 		Risk:        tools.RiskRead,
 		Activity:    tools.ActivityTransit,
+		SourceLabel: tools.ArgumentLabel("station"),
 		Timeout:     toolTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"station":{"type":"string","description":"Station name or code."},` +
@@ -92,6 +94,7 @@ var definitions = []tools.Definition{
 		Description: "List NS calamities, disruptions, and engineering works in effect at a moment, nationally or touching one station, with the situation, cause, advice, and expected end.",
 		Risk:        tools.RiskRead,
 		Activity:    tools.ActivityTransit,
+		SourceLabel: tools.ArgumentLabel("station"),
 		Timeout:     toolTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"station":{"type":"string","description":"Optional station name or code; leave it out for the whole country."},` +
@@ -103,6 +106,7 @@ var definitions = []tools.Definition{
 		Description: "Report the OV-fiets rental bikes available now at one Dutch station: each rental point with its bike count, staffed or self-service, whether it is open, today's opening hours, and its address.",
 		Risk:        tools.RiskRead,
 		Activity:    tools.ActivityTransit,
+		SourceLabel: tools.ArgumentLabel("station"),
 		Timeout:     toolTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"station":{"type":"string","description":"Station name or code, such as Utrecht Centraal or UT."}},` +

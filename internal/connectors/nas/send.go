@@ -45,6 +45,7 @@ var sendDefinitions = []tools.Definition{
 		Description: "Send one file from the NAS to the user in this chat, as a document. Use this when the user asks for the file itself.",
 		Risk:        tools.RiskRead,
 		Activity:    tools.ActivityFiles,
+		SourceLabel: tools.ArgumentLabel("path"),
 		Timeout:     sendTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"path":{"type":"string","description":"The full path from a listing, such as home/Documents/report.pdf."}},` +

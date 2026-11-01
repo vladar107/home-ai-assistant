@@ -174,6 +174,7 @@ func (b *bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var call struct {
+		ID        string          `json:"id"`
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`
 	}
@@ -185,7 +186,7 @@ func (b *bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		call.Arguments = json.RawMessage("{}")
 	}
 
-	result, err := b.executor.Execute(r.Context(), agentruntime.ToolCall{Name: call.Name, Arguments: call.Arguments})
+	result, err := b.executor.Execute(r.Context(), agentruntime.ToolCall{ID: call.ID, Name: call.Name, Arguments: call.Arguments})
 	if err != nil {
 		result = agentruntime.ToolResult{Text: bridgeCallFailedText, IsError: true}
 	}

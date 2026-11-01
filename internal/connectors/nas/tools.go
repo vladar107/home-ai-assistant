@@ -36,6 +36,7 @@ var readDefinitions = []tools.Definition{
 		Description: "List the folders on the NAS this user can reach, or the folders and files inside one of them.",
 		Risk:        tools.RiskRead,
 		Activity:    tools.ActivityFiles,
+		SourceLabel: tools.ArgumentLabel("path"),
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"path":{"type":"string","description":"A folder such as home/Documents; omit to list the folders this user can reach."}},` +
 			`"additionalProperties":false}`),
@@ -45,6 +46,7 @@ var readDefinitions = []tools.Definition{
 		Description: "Find files and folders on the NAS whose name contains the query, searching inside one folder.",
 		Risk:        tools.RiskRead,
 		Activity:    tools.ActivityFiles,
+		SourceLabel: tools.ArgumentLabel("query", "path"),
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"query":{"type":"string","description":"Text matched against file and folder names, ignoring case."},` +
 			`"path":{"type":"string","description":"The folder to search inside, such as home/Documents."},` +
@@ -56,6 +58,7 @@ var readDefinitions = []tools.Definition{
 		Description: "List the folders, without files, under one NAS folder, several levels deep, to choose where a file belongs.",
 		Risk:        tools.RiskRead,
 		Activity:    tools.ActivityFiles,
+		SourceLabel: tools.ArgumentLabel("path"),
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"path":{"type":"string","description":"A root name alone such as home, or a folder such as home/Documents."},` +
 			`"depth":{"type":"integer","minimum":1,"maximum":6,"description":"How many levels of folders to list, default 3."}},` +
@@ -66,6 +69,7 @@ var readDefinitions = []tools.Definition{
 		Description: "Read the text content of one file on the NAS, or the text of a PDF. Call this only when the user has asked what the file says, never to find, identify, or send it.",
 		Risk:        tools.RiskRead,
 		Activity:    tools.ActivityFiles,
+		SourceLabel: tools.ArgumentLabel("path"),
 		Private:     true,
 		ThirdParty:  true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +

@@ -77,6 +77,7 @@ var writeDefinitions = []tools.Definition{
 		Description: "Propose saving a file or photo the user sent in this conversation to a folder on the NAS. The user must confirm, and an existing name is refused rather than replaced.",
 		Risk:        tools.RiskWrite,
 		Activity:    tools.ActivityFiles,
+		SourceLabel: tools.ArgumentLabel("path"),
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"attachment_id":{"type":"string","description":"The id of the file the user sent, as listed by list_attachments."},` +
 			`"folder":{"type":"string","description":"An existing folder, for example one from nas_list_folders such as home/Documents. Omit to use this user's default folder. Missing folders are created only in the folders the guidance names."},` +

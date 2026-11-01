@@ -16,7 +16,7 @@ borrowed between users.
 - **Conversation.** Natural-language chat with per-user context, backed by the
   [Pi](https://github.com/badlogic/pi-mono) agent runtime on the user's own model
   subscription. `/backlog`, `/cancel`, `/collections`, `/jobs`, `/memory`, `/model`, `/new`,
-  `/projects`, `/sessions`, `/settings`, and `/tasks` are deterministic shortcuts in the slash menu, with
+  `/projects`, `/sessions`, `/settings`, `/tasks`, and `/why` are deterministic shortcuts in the slash menu, with
   `/close` there too while tabs are on, and
   `/status` and `/privacy` answer when typed. Asked how to
   set something up, the assistant reads its own help, built from the same
@@ -25,6 +25,18 @@ borrowed between users.
   and replying to an earlier answer continues its conversation. The assistant
   can search and read the user's own earlier conversations when asked about
   something discussed before.
+- **"Why did you say that?"** Replying `/why`, or a short "how do you know?" or
+  "where is that from?", to any of the assistant's messages, a chat reply, a
+  scheduled report, a background task's report, a watch alert, or an assessed
+  event, shows what it was based on: the tools that ran in order with their
+  outcomes, a short label of what each looked at, such as a page's address or a
+  search's query, whether outside or private content was read, and the model
+  that answered, all from a record code kept, then a few sentences of
+  explanation from one turn without tools on the user's own subscription and
+  the runtime's default model. A bare "why?" goes to the conversation as
+  before. A watch alert checked in code is explained from the watch's rules
+  with no model turn. The record holds no arguments or results and is kept 30
+  days.
 - **Tabs.** With topics turned on for the bot in BotFather, each tab of the
   private chat is its own conversation, and tabs answer in parallel. `/new`,
   `/cancel`, and `/sessions` act on the tab they are sent in. Resuming an
@@ -286,6 +298,7 @@ internal/runtime/pi/   Pi subprocess and tool bridge
 internal/prompt/       system prompt and [system] lines the model reads
 internal/turn/         one model turn, chat or unattended
 internal/turnstate/    recent messages and trust per tab
+internal/provenance/   "why?" about a message, from its turn's trace
 internal/tools/        tool broker
 internal/approval/     Confirm / Reject proposals and direct actions with Undo
 internal/exposure/     which conversations read outside content

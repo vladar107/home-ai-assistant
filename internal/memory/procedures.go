@@ -38,6 +38,7 @@ var (
 		Name:        toolProcedureRead,
 		Description: "Read the steps of a procedure listed in the Memory section, by its id, before following it.",
 		Risk:        tools.RiskRead,
+		SourceLabel: tools.ArgumentLabel("id"),
 		Confirmed:   true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"id":{"type":"string","description":"The procedure's id from the Memory section."}},` +
@@ -47,6 +48,7 @@ var (
 		Name:        toolProcedureSave,
 		Description: "Propose keeping how a request was done as a procedure to read before similar later requests; the user confirms it after your reply. With an id, it replaces that procedure.",
 		Risk:        tools.RiskWrite,
+		SourceLabel: tools.FirstLabel(tools.ArgumentLabel("title"), tools.ArgumentLabel("id")),
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"title":{"type":"string","description":"The kind of request it is for, at most 80 characters."},` +
 			`"steps":{"type":"string","description":"The tools, the arguments that mattered, the order, and what to avoid, at most 1000 characters."},` +
