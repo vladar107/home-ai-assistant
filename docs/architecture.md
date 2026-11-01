@@ -135,6 +135,7 @@ flowchart TB
     loc["<b>location</b><br/>latest shared position, expiry,<br/>saved places, arrivals"]
     mem["<b>memory</b><br/>per-user instructions, facts,<br/>and procedures"]
     coll["<b>collection</b><br/>per-user typed lists,<br/>queried in code"]
+    intake["<b>intake</b><br/>facts read from incoming content,<br/>the inbox check"]
     backlog["<b>backlog</b><br/>per-user ideas for developing<br/>the assistant"]
     trip["<b>trip</b><br/>trips, bookings, check-in reminders,<br/>start and end notices"]
     attach["<b>attachment</b><br/>inbound photos and files"]
@@ -185,6 +186,9 @@ flowchart TB
     broker --> events
     events --> turn
     events --> store
+    broker --> intake
+    schedule --> intake
+    intake --> approval
     tg --> trip
     broker --> trip
     approval --> trip
@@ -617,7 +621,8 @@ watches, which find it before geocoding.
 With tabs on, the scheduler, the watch service, and the trip notifier send what
 nobody asked for to a feed tab of its kind: reminders, Trips scans, and
 suggested trips to Reminders; other job reports to Reports; Home Assistant watches to
-Home; every other watch to Watches; and inbound events to Events. The tab registry records each feed tab with
+Home; every other watch to Watches; inbound events to Events; and the inbox check's
+summaries and cards to Inbox. The tab registry records each feed tab with
 the subject `feed:<kind>` under a fixed name, and the Telegram service's resolver
 makes the tab on first use, one at a time per principal and feed.
 
@@ -1079,6 +1084,70 @@ counts change with every record. `/collections` lists the collections, opens
 one into pages of 8 records with a Delete button each, and deletes a whole
 collection after a second press; its `col:` callbacks are parsed against a
 fixed vocabulary and act only on the presser's own rows.
+
+### Content intake
+
+A photo, file, or forwarded message marks its turn as outside content on
+arrival, so every write the turn makes is a proposal. The intake guidance asks
+the model to say what the item is, who it is from, its dates, amounts, and
+references as found, and what the user must do, to call `intake_record` once
+per item, and to propose at most five follow-ups through the write tools that
+own them (`reminder_set`, `nas_save_attachment`, a Notion row,
+`collection_add`, `watch_propose`, or `trip_add` for a booking). They share the
+turn's one bundle, so no new action machinery exists: each follow-up keeps its
+own connector's validation, switch, and executor.
+
+A new `intake_record` writes the user's own derived data, not an outside system,
+so it needs no card and is kept even after outside content. Code validates and
+cleans every field (single lines, link-like words dropped, ISO dates, three-letter
+currencies, at most 10 dates and 5 amounts and references) into
+`intake_records`, which holds the facts, never the content. `UNIQUE(principal_id,
+source, source_ref)` makes one record per attachment or mail message, and a
+forwarded message is its own item. Recording an item already kept with other
+facts, and `intake_delete`, go through `approval.Act`: done and told in a clean
+conversation, a card after outside content, and applied on Confirm only while the
+record is unchanged. `intake_list` and `intake_get` are third-party reads,
+screened like mail, so a turn that reads a record is exposed and a follow-up it
+suggests needs a card.
+
+The inbox check is a built-in job of type `intake.scan` that the Inbox intake
+switch in `/settings` creates the way the Trips switch does, offered only while
+a Google account has Mail on; its default runs every three hours between 08:00
+and 22:00, at most hourly, and turning the switch off forgets its read position
+and waiting follow-ups. Each run is a `RunCheck` turn with read-only tools and a
+budget of 40 calls that reads the mail received after `intake_scans.read_until`
+less five minutes (a day back the first time, never more than a week, which the
+summary then says), opens at most ten messages, skips travel bookings, and
+answers in strict JSON. The run carries a `tools.CallLog`: the broker marks it
+when the budget refuses a call, and the Gmail connector records Gmail's own
+received time of each message read in full. With messages left, or the budget
+spent, the next check starts at the newest such time, never at one the model
+reports. A run that cannot move on, or whose reply is not the JSON asked for,
+counts a stall; the first unreadable reply sends the failure notice, and the
+second stall in a row skips the window and says so once.
+
+Code validates the reply field by field: a field too long is cut, a bad fact is
+left out, only a message without a title or kind is dropped, and the summary
+counts what was dropped. A message already recorded is skipped, so a later check
+never records or proposes it again. The record keeps up to three follow-ups in
+`pending_actions`: a one-time reminder or an agent watch, built by
+`schedule.ReminderProposal` and `watch.AgentProposal`, the same builders the
+tools use, so the watch caps hold. A watch needs a last day at most 60 days
+ahead, and one whose instruction or condition names a link is dropped. Each card
+item carries an outside-content warning, or the stronger one when the screener
+flags it, and so does the summary.
+
+At most ten follow-ups go on one card through `approval.OfferIfIdle`, which
+checks for a waiting bundle in the tab and offers under the same proposal lock,
+returning `ErrBundleWaiting` instead of replacing a chat turn's bundle or an
+earlier card. Actions are marked as being offered before the offer, and one
+still marked at the next check is dropped rather than offered twice. A follow-up
+keeps the approval it was offered as and leaves `pending_actions` only once that
+approval is confirmed, rejected, or done; one whose card a chat proposal
+replaced waits again, and one whose card expired, swept or not, waits again for
+at most three cards. The card goes out during the run, and the summary is the
+run's report after it, marked as outside content; a run with nothing to tell
+sends nothing.
 
 ## Security model
 

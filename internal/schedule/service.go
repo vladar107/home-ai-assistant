@@ -199,10 +199,13 @@ type Travel interface {
 }
 
 // feed is the tab of the run's kind: reminders, Trips scans, and what a job's anchor tells its
-// owner with the reminders, every other job's report with the reports.
+// owner with the reminders, inbox checks with the inbox, every other job's report with the reports.
 func feed(run Run) string {
-	if run.JobType == TypeReminder || run.JobType == TripScanType || run.ErrorKind == errorAnchorGone || run.ErrorKind == errorAnchorFailed {
+	switch {
+	case run.JobType == TypeReminder || run.JobType == TripScanType || run.ErrorKind == errorAnchorGone || run.ErrorKind == errorAnchorFailed:
 		return thread.FeedReminders
+	case run.JobType == InboxScanType:
+		return thread.FeedInbox
 	}
 	return thread.FeedReports
 }

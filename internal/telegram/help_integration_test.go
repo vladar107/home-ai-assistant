@@ -12,11 +12,12 @@ import (
 
 // coreToolNames are the tools every chat turn is offered without an integration, in the order the
 // application registers them: pictures, withdrawing a proposal, reactions, jobs and reminders,
-// memory, collections, projects, trips, and the backlog.
+// memory, collections, projects, intake records, trips, and the backlog.
 var coreToolNames = []string{
 	"generate_image", "proposal_withdraw", "react",
 	"schedule_list", "schedule_get", "reminder_set", "reminder_cancel", "schedule_propose", "schedule_update", "schedule_remove",
 	"memory_add", "memory_replace", "memory_remove", "procedure_save", "collection_create", "project_create",
+	"intake_list", "intake_get", "intake_record", "intake_delete",
 	"trip_list", "trip_add", "trip_update",
 	"backlog_add", "backlog_list", "backlog_update",
 }

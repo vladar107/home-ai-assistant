@@ -445,23 +445,51 @@ func (s *Service) proposeWatch(ctx context.Context, principalID string, call too
 	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return tools.Result{Text: err.Error(), IsError: true}, nil
 	}
-	spec, err := s.prepare(ctx, principalID, strings.TrimSpace(arguments.Kind), arguments.specArguments)
+	proposal, refusal, err := s.newWatchProposal(ctx, principalID, strings.TrimSpace(arguments.Kind), arguments.specArguments)
 	if err != nil {
-		return tools.Result{Text: err.Error(), IsError: true}, nil
+		return tools.Result{}, err
+	}
+	if refusal != "" {
+		return tools.Result{Text: refusal, IsError: true}, nil
+	}
+	return s.act(ctx, principalID, call, proposal)
+}
+
+// AgentProposal builds the proposal of an agent watch named name that runs check every day and
+// all day, in the principal's default zone, for a caller outside a chat turn to offer, such as the
+// inbox check. It is the proposal watch_propose makes, refused past the watch caps; an error says
+// why the watch cannot be set up.
+func (s *Service) AgentProposal(ctx context.Context, principalID, name string, check Check) (approval.Proposal, error) {
+	proposal, refusal, err := s.newWatchProposal(ctx, principalID, KindAgent, specArguments{Name: name, Check: &check})
+	if err != nil {
+		return approval.Proposal{}, err
+	}
+	if refusal != "" {
+		return approval.Proposal{}, errors.New(refusal)
+	}
+	return proposal, nil
+}
+
+// newWatchProposal builds the proposal of a new watch of the kind, or the refusal the model reads:
+// a spec that cannot be checked, or one more watch than the caps allow.
+func (s *Service) newWatchProposal(ctx context.Context, principalID, kind string, arguments specArguments) (approval.Proposal, string, error) {
+	spec, err := s.prepare(ctx, principalID, kind, arguments)
+	if err != nil {
+		return approval.Proposal{}, err.Error(), nil
 	}
 	existing, err := s.repository.ListWatches(ctx, principalID)
 	if err != nil {
-		return tools.Result{}, err
+		return approval.Proposal{}, "", err
 	}
 	if len(existing) >= MaximumWatchesPerPrincipal {
-		return tools.Result{Text: tooManyText(), IsError: true}, nil
+		return approval.Proposal{}, tooManyText(), nil
 	}
 	if spec.Kind == KindAgent && agentWatches(existing) >= MaximumAgentWatchesPerPrincipal {
-		return tools.Result{Text: tooManyAgentText(), IsError: true}, nil
+		return approval.Proposal{}, tooManyAgentText(), nil
 	}
 	canonical, err := json.Marshal(confirmedWatch{Spec: spec, TravelPause: arguments.PauseWhileTraveling != nil && *arguments.PauseWhileTraveling})
 	if err != nil {
-		return tools.Result{}, err
+		return approval.Proposal{}, "", err
 	}
 	summary := "Watch " + spec.Label() + "\n" + spec.Describe() + "\nYou get a message only when something changes, and once more when it is back to normal."
 	switch spec.Kind {
@@ -483,7 +511,7 @@ func (s *Service) proposeWatch(ctx context.Context, principalID string, call too
 	if arguments.PauseWhileTraveling != nil && *arguments.PauseWhileTraveling {
 		summary += "\nIt stays silent while you are traveling."
 	}
-	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolPropose, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "watch", TargetKind: spec.Kind + " watch", TargetName: intentName(spec)}})
+	return approval.Proposal{Tool: toolPropose, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "watch", TargetKind: spec.Kind + " watch", TargetName: intentName(spec)}}, "", nil
 }
 
 func (s *Service) proposeUpdate(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {

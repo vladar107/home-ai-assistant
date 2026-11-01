@@ -39,6 +39,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/exposure"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/imagegen"
+	"github.com/vladar107/home-ai-assistant/internal/intake"
 	"github.com/vladar107/home-ai-assistant/internal/integration"
 	"github.com/vladar107/home-ai-assistant/internal/judgment"
 	userlocation "github.com/vladar107/home-ai-assistant/internal/location"
@@ -254,6 +255,7 @@ type Assembly struct {
 	Memory        *usermemory.Service
 	Collections   *collection.Service
 	Projects      *project.Service
+	Intake        *intake.Service
 	Backlog       *backlog.Service
 	Events        *events.Service
 	Trips         *trip.Service
@@ -503,6 +505,10 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("initialize collections: %w", err)
 	}
+	intakeService, err := intake.NewService(intake.Config{Location: a.location, Now: in.Core.Now}, in.Store, approvals, in.Logger)
+	if err != nil {
+		return fmt.Errorf("initialize content intake: %w", err)
+	}
 	exposures, err := exposure.NewService(in.Store, in.Logger)
 	if err != nil {
 		return fmt.Errorf("initialize exposure: %w", err)
@@ -541,6 +547,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		screener := judgment.NewScreener(judge, typeSafe, registry)
 		broker.SetScreener(screener)
 		memoryService.SetScreener(screener)
+		intakeService.SetScreener(screener)
 		approvals.SetIntentChecker(judgment.NewIntentChecker(judge, typeSafe, registry, registry))
 		searchChecks.SetJudge(judgment.NewSearchJudge(judge, typeSafe, registry, registry))
 		toolHint = judgment.NewToolHinter(judge, typeSafe)
@@ -808,6 +815,13 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		return err
 	}
 	a.Projects = projects
+	if err := broker.Register(intakeService); err != nil {
+		return err
+	}
+	if err := approvals.RegisterExecutor(intakeService); err != nil {
+		return err
+	}
+	a.Intake = intakeService
 	tripTools, err := trip.NewTools(trip.ToolsConfig{Zone: scheduler.DefaultZone()}, tripService, approvals, in.Logger)
 	if err != nil {
 		return fmt.Errorf("initialize trip tools: %w", err)
@@ -854,6 +868,19 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		return fmt.Errorf("initialize the weekly review: %w", err)
 	}
 	if err := scheduler.Register(reviewJob); err != nil {
+		return err
+	}
+	// The inbox check reads mail on the principal's own subscription with read-only tools, and code
+	// offers what it found; a nil watch service must reach it as a nil interface.
+	inboxConfig := intake.ScanConfig{Checker: tripScanChecker{engine}, Mail: a.tripState, Approvals: in.Store, Offers: approvals, Chats: in.Store, Reminders: scheduler}
+	if a.Watches != nil {
+		inboxConfig.Watches = a.Watches
+	}
+	inboxJob, err := intakeService.ScanJobType(inboxConfig)
+	if err != nil {
+		return fmt.Errorf("initialize the inbox check: %w", err)
+	}
+	if err := scheduler.Register(inboxJob); err != nil {
 		return err
 	}
 	if a.Watches != nil {

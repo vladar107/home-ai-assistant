@@ -617,6 +617,7 @@ func (h *conversationHarness) telegramService(identities *identity.Service, logg
 	deps.Sections = append(deps.Sections, NewMemorySection(asm.Memory, asm.Scheduler, logger, nil))
 	if asm.Google != nil {
 		deps.Sections = append(deps.Sections, NewTripsSection(asm.Scheduler, asm.Google, logger, nil))
+		deps.Sections = append(deps.Sections, NewInboxSection(asm.Scheduler, asm.Google, asm.Intake, logger, nil))
 	}
 	service, err := NewService(deps)
 	if err != nil {

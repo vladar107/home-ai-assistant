@@ -1,6 +1,6 @@
 # 0121 — Content intake: incoming content becomes facts and proposed actions
 
-Status: `proposed`
+Status: `done`
 
 ## Context
 
@@ -123,13 +123,84 @@ handled the same way.
 - **The NAS stays add-only.** Filing means saving the attachment into an
   existing folder with `nas_save_attachment`. Moving files the user already
   has stays out of scope.
+- **Adapted to the code that landed after review** (plans 0122, 0124, 0125,
+  and 0127):
+  - The guidance names the tools as they are now: `reminder_set` for a
+    deadline, `nas_save_attachment`, a Notion row, `collection_add` for a
+    collection the user keeps (plan 0125 made it a valid follow-up),
+    `watch_propose`, and `trip_add` for a booking.
+  - The chat guidance is the intake provider's own write guidance, as every
+    connector's is. `internal/prompt` is unchanged: the check's task text
+    lives in `internal/intake`, as the Trips scan's lives in `internal/trip`,
+    under the shared `prompt.ScheduledScan` framing.
+  - The tools are registered with the tool broker, not the module registry,
+    because the service has nothing to start or stop.
+  - Plan 0127 added an `events` feed, so the Inbox feed is the sixth.
+- **Decided while implementing:**
+  - The check's card goes out during the run and its summary is the run's
+    report after it, marked as outside content, as the Trips scan and the
+    weekly review do. That keeps the report on the scheduler's delivery path,
+    so a reply to it is treated as outside content. Code writes the summary
+    from the validated records, not from model prose.
+  - Where the next check starts reading does not depend on what the model
+    reports:
+    - It is kept in `intake_scans.read_until`. The first check reads a day
+      back, and no check reads more than a week back; a check the cap cut
+      off says so in its summary.
+    - Each check reads from five minutes before that point, for mail Gmail
+      indexed late. A message read twice is skipped by its record.
+    - The prompt says that `left` counts every message found and not
+      opened, including those left when the call budget ran out. A run whose
+      budget refused a call counts as having messages left, whatever the
+      model says.
+    - With messages left, the next check starts at Gmail's own received time
+      of the newest message the run opened in full. The Gmail connector
+      records that time in a `tools.CallLog` the check puts on the run; the
+      sender's Date header and any time the model reports are never used.
+    - A check that opened nothing newer, or whose reply is not the JSON
+      asked for, counts a stall in `intake_scans.stalls`. The first
+      unreadable reply sends the usual failure notice. The second stall in a
+      row skips the window, records the skip, and says so once, so mail
+      written to derail the model cannot fail the check every three hours.
+  - One field the check cannot read does not drop the message. A field too
+    long is cut, and a bad date, amount, or reference is left out, as are
+    facts past the caps. Only a message without a title or kind is dropped.
+    The summary counts what was dropped. Dates may carry seconds, which are
+    dropped.
+  - A watch the check proposes must give a last day, at most 60 days ahead.
+    Its instruction and condition are cleaned like every other mail-derived
+    field, and a watch whose instruction or condition names a link or a web
+    address is dropped.
+  - The check sees what became of an offered action by reading its approval
+    at the start of each run. The approval service needs no hook for it.
+    Before an offer, the actions are marked as being offered. If recording
+    their approvals then fails, the next check drops them rather than offer
+    them twice. An action whose card expired is offered again, at most three
+    times, and is then dropped, which the summary says once.
+  - An inbox card stays confirmable for 24 hours, as the weekly review's
+    does.
+  - `intake_record` keeps one record per attachment or mail message. A
+    forwarded message has no reference, so its record's own ID is its source
+    reference. A new record is kept at once. A change to an existing record,
+    and `intake_delete`, go through `approval.Act`. They are made at once and
+    told in a clean conversation, and are a card after outside content, so
+    content cannot silently rewrite or remove a record. The intake service is
+    their executor, and a confirmed change applies only while the record is
+    unchanged.
+  - `intake_list` by kind narrows in SQL with `lower(kind)`, which lets
+    every non-ASCII kind through, and then compares with full case folding.
+  - Turning the Inbox intake switch off forgets the read position and the
+    waiting follow-ups. Turning it on again therefore reads from the last
+    day, with nothing old to offer.
+  - A check while no mailbox can be read runs no turn and sends nothing,
+    unless the user asked for it.
 
 ## Approach
 
 1. Migration and store for `intake_records`. Add the `internal/intake`
    package with the tools `intake_record`, `intake_list`, `intake_get`, and
-   `intake_delete`, and register it in the module registry.
-2. Guidance in the prompt scaffolding (plan 0105): when content arrives
+   `intake_delete`, and register it with the tool broker.
+2. Guidance in the intake provider's write guidance: when content arrives
    without a question, summarise, record, and propose. Propose a trip
    instead of a reminder for a booking. Never propose more than five
    follow-ups.
@@ -143,11 +214,12 @@ handled the same way.
 
 - `internal/store/sqlite/migrations/NNN_intake_records.sql`, a new store file
 - `internal/intake` (new)
-- `internal/prompt`, `internal/thread`, `internal/telegram` feeds and
-  settings
+- `internal/thread`, `internal/telegram` feeds and settings
 - `internal/schedule` (job type registration, `ReminderProposal` extracted
   from `tools.go`), `internal/watch/tools.go` (`AgentProposal` extracted)
 - `internal/approval` (`OfferIfIdle`), `internal/wiring`, `internal/app`
+- `internal/tools` (`CallLog`) and `internal/connectors/gmail` (received
+  times of messages read)
 - README, `docs/architecture.md`, `docs/operations.md`
 
 ## Validation
@@ -164,7 +236,15 @@ handled the same way.
   - a chat proposal that replaces an Inbox card returns its actions to
     pending;
   - `OfferIfIdle` racing a chat proposal in the same tab never replaces it;
-  - malformed scan JSON is a failed run and writes nothing;
+  - malformed scan JSON is a failed run and records nothing, and a second
+    one in a row on the same window skips it once;
+  - with messages left, the next check reads from the newest message opened;
+    the first check reads a day back and none more than a week;
+  - a field the check cannot read leaves out only that fact, and a watch
+    with a link or without a near last day is dropped;
+  - a card that expired before the sweep returns its actions to pending, at
+    most three times;
+  - after outside content, changing or deleting a record is a card;
   - a later turn that reads a record is exposed and cannot act directly;
   - a second scan does not record or propose for the same mail again;
   - a scan with nothing actionable sends no message;

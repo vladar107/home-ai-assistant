@@ -45,10 +45,11 @@ borrowed between users.
   before.
 - **Feed tabs.** With tabs on, nothing arrives in the main view unasked, so it
   can be muted without losing a notification. Messages nobody asked for go to
-  four tabs the bot makes on first use, each with a fixed icon: Reminders
+  tabs the bot makes on first use, each with a fixed icon: Reminders
   (reminders, Trips scans, and suggested trips), Reports (scheduled job reports
-  and Heads-up), Home (Home Assistant watches), and Watches (the other
-  watches). Every message keeps its sound; muting a feed tab quiets it. A
+  and Heads-up), Home (Home Assistant watches), Watches (the other
+  watches), Events (inbound events), and Inbox (the inbox check's summaries and
+  cards). Every message keeps its sound; muting a feed tab quiets it. A
   deleted feed tab comes back with its next message. In a feed tab each job
   and watch has its own conversation: replying to a report or an alert
   discusses it, and typing right after one does too, without replying. An
@@ -191,6 +192,20 @@ borrowed between users.
   keeps its tab until `/close`, and the assistant offers to delete the jobs
   still routed to it. `/projects` lists them. Trips stay trips. A user keeps
   at most 20 open projects of 100 items each.
+- **Content intake.** A photo, PDF, or forwarded message sent without a
+  question, or with "what is this?", is answered with what it is and who it is
+  from, its dates, amounts, and references as found, and what the user must do
+  and by when. The same reply proposes up to five follow-ups on one Confirm
+  card, such as a reminder before a deadline, filing the file in a NAS folder,
+  a Notion row, a collection record, a watch for a delivery, or a trip; nothing
+  runs without Confirm, because the content is someone else's. The facts are
+  kept as an intake record, never the content itself, so "when was that
+  invoice due?" is answered later. With Google mail on, an optional Inbox
+  intake switch in `/settings` checks new mail every three hours between 08:00
+  and 22:00, and *Check now* runs it at once: mail that needs action is
+  summed up in the Inbox tab with its follow-ups on one card, at most ten at a
+  time, and mail that needs nothing sends nothing. While an inbox card waits,
+  later checks send their summary and keep their follow-ups for the next card.
 - **Backlog.** Ideas for developing the assistant itself ("add to the backlog:
   answer weather questions with a chart") are kept as a per-user backlog that
   never changes how the assistant behaves. `/backlog` marks items done or
@@ -294,6 +309,7 @@ internal/memory/       per-user memory, its tools, and prompt rendering
 internal/backlog/      per-user backlog of ideas for developing the assistant
 internal/collection/   per-user typed collections, their tools, and the query engine
 internal/project/      per-user projects with checklists, their tools, and tab summaries
+internal/intake/       intake records of incoming content and the inbox check
 internal/clip/ localtime/ weekday/ httpretry/ testutil/  small shared helpers
 internal/store/sqlite/ persistence and migrations
 deploy/                Compose files and configuration examples

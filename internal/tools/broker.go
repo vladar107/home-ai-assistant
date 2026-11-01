@@ -248,7 +248,7 @@ func (b *Broker) toolsFor(ctx context.Context, principalID string, readOnly bool
 	if principalID == "" {
 		return agentruntime.ToolSet{}, fmt.Errorf("tool broker requires a principal")
 	}
-	executor := &turnExecutor{broker: b, principalID: principalID, turn: TurnFrom(ctx), run: RunFrom(ctx), budget: callBudgetFrom(ctx), bindings: make(map[string]toolBinding)}
+	executor := &turnExecutor{broker: b, principalID: principalID, turn: TurnFrom(ctx), run: RunFrom(ctx), log: CallLogFrom(ctx), budget: callBudgetFrom(ctx), bindings: make(map[string]toolBinding)}
 	var guidance []string
 	var definitions []agentruntime.ToolDefinition
 	activities := make(map[string]string)
@@ -376,6 +376,7 @@ type turnExecutor struct {
 	principalID string
 	turn        string
 	run         *Run
+	log         *CallLog
 	bindings    map[string]toolBinding
 	budget      int32
 	// handoff names a tool outside the budget that the exhausted-budget result points to.
@@ -428,6 +429,9 @@ func (e *turnExecutor) execute(ctx context.Context, call agentruntime.ToolCall) 
 	binding, known := e.bindings[call.Name]
 	charged := !binding.outsideBudget
 	if charged && (e.attempts.Add(1) > budgetCeilingFactor*e.budget || e.calls.Add(1) > e.budget) {
+		if e.log != nil {
+			e.log.refused()
+		}
 		return "budget_exhausted", "", agentruntime.ToolResult{Text: prompt.ToolBudgetExhausted(e.handoff), IsError: true}
 	}
 	outcome, screened, result := e.perform(ctx, call, binding, known)
@@ -465,6 +469,9 @@ func (e *turnExecutor) perform(ctx context.Context, call agentruntime.ToolCall, 
 	callCtx := WithTurn(ctx, e.turn)
 	if e.run != nil {
 		callCtx = WithRun(callCtx, e.run)
+	}
+	if e.log != nil {
+		callCtx = WithCallLog(callCtx, e.log)
 	}
 	callCtx, cancel := context.WithTimeout(callCtx, deadline)
 	defer cancel()

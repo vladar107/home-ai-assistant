@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,6 +19,17 @@ import (
 // leaves no notice for the tab's next turn. A delivery that fails is retried by the sweep until the
 // bundle expires; the records are returned either way.
 func (s *Service) Offer(ctx context.Context, principalID string, chatID, threadID int64, heading string, lifetime time.Duration, proposals []Proposal) ([]Record, error) {
+	return s.offer(ctx, principalID, chatID, threadID, heading, lifetime, proposals, false)
+}
+
+// OfferIfIdle is Offer that leaves a tab alone while a bundle there still waits for the user, a
+// chat turn's or one offered before, and then returns ErrBundleWaiting. The check and the offer
+// hold the proposal lock together, so a chat turn proposing in the same tab is never replaced.
+func (s *Service) OfferIfIdle(ctx context.Context, principalID string, chatID, threadID int64, heading string, lifetime time.Duration, proposals []Proposal) ([]Record, error) {
+	return s.offer(ctx, principalID, chatID, threadID, heading, lifetime, proposals, true)
+}
+
+func (s *Service) offer(ctx context.Context, principalID string, chatID, threadID int64, heading string, lifetime time.Duration, proposals []Proposal, ifIdle bool) ([]Record, error) {
 	if principalID == "" || chatID == 0 || strings.TrimSpace(heading) == "" || lifetime <= 0 || len(proposals) == 0 {
 		return nil, fmt.Errorf("approval offer is incomplete")
 	}
@@ -66,6 +78,18 @@ func (s *Service) Offer(ctx context.Context, principalID string, chatID, threadI
 	// as afterDelivery holds it.
 	proposing := s.proposalLock(principalID)
 	proposing.Lock()
+	if ifIdle {
+		pending, err := s.repository.PendingApprovals(ctx, principalID, thread.From(ctx))
+		if err != nil {
+			proposing.Unlock()
+			return nil, fmt.Errorf("load pending approvals: %w", err)
+		}
+		// A record past its expiry that the sweep has not reached yet waits for nobody.
+		if slices.ContainsFunc(pending, func(record Record) bool { return now.Before(record.ExpiresAt) }) {
+			proposing.Unlock()
+			return nil, ErrBundleWaiting
+		}
+	}
 	replaced, err := s.repository.CreateApprovals(ctx, records)
 	if err != nil {
 		proposing.Unlock()

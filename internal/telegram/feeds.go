@@ -15,6 +15,7 @@ var feedNames = map[string]string{
 	thread.FeedHome:      "Home",
 	thread.FeedWatches:   "Watches",
 	thread.FeedEvents:    "Events",
+	thread.FeedInbox:     "Inbox",
 }
 
 // feedIcons are the emoji of the feed tabs' icons, used when Telegram's icon set offers them.
@@ -24,6 +25,7 @@ var feedIcons = map[string]string{
 	thread.FeedHome:      "🏠",
 	thread.FeedWatches:   "👀",
 	thread.FeedEvents:    "🔔",
+	thread.FeedInbox:     "📥",
 }
 
 var _ thread.Feeds = (*Tabs)(nil)

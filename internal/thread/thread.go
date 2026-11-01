@@ -49,6 +49,7 @@ const (
 	FeedHome      = "home"
 	FeedWatches   = "watches"
 	FeedEvents    = "events"
+	FeedInbox     = "inbox"
 )
 
 // FeedSubject is what the tab registry records a feed's tab as serving.

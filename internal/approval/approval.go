@@ -86,6 +86,9 @@ const (
 // ErrBundleFull is returned for a proposal that no longer fits the bundle waiting for confirmation.
 var ErrBundleFull = errors.New("the batch of changes waiting for the user's confirmation is full; nothing was added. Tell the user to confirm or reject it first, then propose the rest")
 
+// ErrBundleWaiting is returned by OfferIfIdle while a bundle in the tab still waits for the user.
+var ErrBundleWaiting = errors.New("a batch of changes in this tab is still waiting for the user's confirmation; nothing was offered")
+
 // ErrSummaryTooLong is returned for a proposal whose rendering cannot fit one message. It is
 // refused instead of cut, because the confirmation must show the exact action.
 var ErrSummaryTooLong = errors.New("the proposal is too long to show the user in full for confirmation; nothing was added. Propose a shorter one")

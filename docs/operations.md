@@ -442,6 +442,30 @@ in `/jobs` and count toward the job limits. In the logs, `project.created` and
 `telegram.project_tab.pin_failed` follow its tab as the `telegram.trip_tab.*`
 events follow a trip's; none carries a title, an item, or a link.
 
+### Content intake
+
+Migration 051 adds `intake_records` and `intake_scans`; it cannot be undone, so
+take a data backup before the first deploy that carries it. No setting is
+needed: the intake tools are on with conversation. Each user turns the inbox
+check on as Inbox intake in the Everyday tools page of `/settings`; it is
+offered only while Google mail is on for them, runs as the job "Inbox intake"
+(also visible in `/jobs`) every three hours between 08:00 and 22:00 in the
+household zone, and each run is one model turn on the user's own subscription
+with a budget of 40 tool calls. With tabs on, its summaries and cards go to the
+Inbox tab.
+
+In the logs, `intake.recorded`, `intake.updated`, and `intake.deleted` mark
+records, `intake.scan.done` sums up a check with counts of what it recorded,
+dropped, offered, kept waiting, and its stalls, `intake.scan.unreadable` a reply
+that was not the JSON asked for (the run fails and records nothing; a second one
+in a row skips that stretch of mail and tells the user once),
+`intake.scan.refused` a follow-up its builder refused, such as a reminder time
+already past or one agent watch more than the cap, `intake.scan.lost` a
+follow-up dropped because an earlier check failed while offering it, and
+`intake.scan.offer_failed` or `intake.scan.undelivered` a card that could not be
+stored or sent. Logs carry IDs and counts, never record text. Turning Inbox
+intake off forgets where it read to, so turning it on again reads the last day.
+
 ## 7. Logs and rollback
 
 ```sh

@@ -527,17 +527,12 @@ func (s *Service) proposeReminder(ctx context.Context, principalID string, call 
 	if s.proposer == nil {
 		return tools.Result{Text: "I read outside content in this conversation, so reminders need the user's confirmation, and confirming is not available. Tell the user the reminder was not set.", IsError: true}, nil
 	}
-	job := prepared.Job
-	confirmed := confirmedReminder{Text: text, Zone: job.Zone, Anchor: prepared.Anchor, Condition: JobCondition(job), ProjectID: projectID}
-	if prepared.Anchor == nil {
-		confirmed.At = job.RunAt.In(prepared.Schedule.Location).Format(localTimeLayouts[0])
-	}
-	canonical, err := json.Marshal(confirmed)
+	proposal, err := reminderProposal(text, prepared, projectID)
 	if err != nil {
 		return tools.Result{}, err
 	}
-	summary := fmt.Sprintf("Set a reminder %s:\n%s\nI read outside content in this conversation, so I need your confirmation.", reminderWhen(prepared), text)
-	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: toolReminderSet, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "set", TargetKind: "reminder", TargetName: job.Name}}); err != nil {
+	proposal.Summary += "\nI read outside content in this conversation, so I need your confirmation."
+	if _, err := s.proposer.Propose(ctx, principalID, proposal); err != nil {
 		if approval.Refused(err) {
 			return tools.Result{Text: err.Error(), IsError: true}, nil
 		}
@@ -545,6 +540,40 @@ func (s *Service) proposeReminder(ctx context.Context, principalID string, call 
 		return tools.Result{Text: "the proposal could not be recorded", IsError: true}, nil
 	}
 	return tools.Result{Text: approval.ProposedText}, nil
+}
+
+// reminderProposal is the proposal that sets the prepared reminder of text once confirmed.
+func reminderProposal(text string, prepared Prepared, projectID string) (approval.Proposal, error) {
+	job := prepared.Job
+	confirmed := confirmedReminder{Text: text, Zone: job.Zone, Anchor: prepared.Anchor, Condition: JobCondition(job), ProjectID: projectID}
+	if prepared.Anchor == nil {
+		confirmed.At = job.RunAt.In(prepared.Schedule.Location).Format(localTimeLayouts[0])
+	}
+	canonical, err := json.Marshal(confirmed)
+	if err != nil {
+		return approval.Proposal{}, err
+	}
+	return approval.Proposal{
+		Tool: toolReminderSet, Arguments: canonical,
+		Summary: fmt.Sprintf("Set a reminder %s:\n%s", reminderWhen(prepared), text),
+		Intent:  approval.Intent{Verb: "set", TargetKind: "reminder", TargetName: job.Name},
+	}, nil
+}
+
+// ReminderProposal builds the proposal of a one-time reminder of text at the local time at,
+// YYYY-MM-DD HH:MM in the principal's default zone, for a caller outside a chat turn to offer, such
+// as the inbox check. It is the proposal reminder_set makes after outside content, without the line
+// about the conversation; an error says why the reminder cannot be set.
+func (s *Service) ReminderProposal(ctx context.Context, principalID, text, at string) (approval.Proposal, error) {
+	config, err := ReminderConfig(text)
+	if err != nil {
+		return approval.Proposal{}, err
+	}
+	prepared, err := s.prepareJob(ctx, principalID, ReminderName(text), TypeReminder, Timing{At: at}, config)
+	if err != nil {
+		return approval.Proposal{}, err
+	}
+	return reminderProposal(ReminderText(config), prepared, "")
 }
 
 func (s *Service) cancelReminder(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {

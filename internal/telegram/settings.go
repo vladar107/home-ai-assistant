@@ -155,6 +155,7 @@ var sectionOrder = []string{
 	eventsSectionPrefix,
 	memorySectionPrefix,
 	tripsSectionPrefix,
+	inboxSectionPrefix,
 }
 
 // settingsGroups orders the overview; a section missing from it is never shown.
@@ -162,7 +163,7 @@ var settingsGroups = []settingsGroup{
 	{id: "model", title: "Model", members: []string{modelSectionPrefix}},
 	{id: "accounts", title: "Accounts", members: []string{googleSectionPrefix, notionSectionPrefix}},
 	{id: "home", title: "Home & files", inline: true, members: []string{homeAssistantSectionPrefix, nasSectionPrefix}},
-	{id: "tools", title: "Everyday tools", inline: true, members: []string{webSectionPrefix, nsSectionPrefix, busSectionPrefix, headsUpSectionPrefix, tripsSectionPrefix}},
+	{id: "tools", title: "Everyday tools", inline: true, members: []string{webSectionPrefix, nsSectionPrefix, busSectionPrefix, headsUpSectionPrefix, tripsSectionPrefix, inboxSectionPrefix}},
 	{id: "location", title: "Location", inline: true, members: []string{locationSectionPrefix}},
 	{id: "memory", title: "Memory", inline: true, members: []string{memorySectionPrefix}},
 	{id: "monitoring", title: "Monitoring", inline: true, members: []string{grafanaSectionPrefix}},

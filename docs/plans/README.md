@@ -130,7 +130,7 @@ plan that links back to the earlier record.
 | 0118 | [movies_next finds the movie table](0118-movie-table-discovery.md) | done |
 | 0119 | [A Heads-up that plans the day well](0119-heads-up-quality.md) | done |
 | 0120 | [Longer scheduled job instructions](0120-longer-job-instructions.md) | done |
-| 0121 | [Content intake: incoming content becomes facts and proposed actions](0121-content-intake.md) | proposed |
+| 0121 | [Content intake: incoming content becomes facts and proposed actions](0121-content-intake.md) | done |
 | 0122 | [Jobs relative to events, conditions on any job, and a weather source](0122-event-and-condition-triggers.md) | done |
 | 0123 | [Saved places, and arriving or leaving as a trigger](0123-places-and-arrival-triggers.md) | done |
 | 0124 | [History over any time series, with charts](0124-history-charts.md) | done |
