@@ -15,6 +15,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/integration"
 	"github.com/vladar107/home-ai-assistant/internal/module"
+	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	"github.com/vladar107/home-ai-assistant/internal/transit"
 )
 
@@ -49,9 +50,9 @@ type Config struct {
 	Trains transit.Trips
 }
 
-// Cards stages a PNG for the reply of a principal's turn.
+// Cards stages a PNG for the reply of a principal's turn, once per run.
 type Cards interface {
-	Stage(principalID, turn string, png []byte) error
+	StageOnce(once *outbox.Once, principalID, turn string, png []byte) error
 }
 
 type Service struct {

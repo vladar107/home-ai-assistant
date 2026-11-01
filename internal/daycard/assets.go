@@ -12,9 +12,11 @@ import (
 
 	scale "golang.org/x/image/draw"
 	"golang.org/x/image/font/opentype"
+
+	"github.com/vladar107/home-ai-assistant/internal/fonts"
 )
 
-//go:embed assets/fonts/*.ttf assets/icons/large/*.png assets/icons/small/*.png
+//go:embed assets/icons/large/*.png assets/icons/small/*.png
 var assetFiles embed.FS
 
 type iconVariants struct {
@@ -40,13 +42,11 @@ type assetSet struct {
 
 var loadAssets = sync.OnceValues(func() (*assetSet, error) {
 	set := &assetSet{large: map[string]*image.NRGBA{}, small: map[string]*image.NRGBA{}}
-	var err error
-	if set.regular, err = loadFont("assets/fonts/Inter-Regular.ttf"); err != nil {
+	inter, err := fonts.Inter()
+	if err != nil {
 		return nil, err
 	}
-	if set.semibold, err = loadFont("assets/fonts/Inter-SemiBold.ttf"); err != nil {
-		return nil, err
-	}
+	set.regular, set.semibold = inter.Regular, inter.SemiBold
 	for _, variants := range iconFiles {
 		for _, name := range []string{variants.day, variants.night} {
 			if set.large[name], err = loadIcon("assets/icons/large/"+name+".png", largeIconLimit); err != nil {
@@ -66,18 +66,6 @@ func (set *assetSet) icon(size map[string]*image.NRGBA, condition Condition, nig
 		return size[variants.night]
 	}
 	return size[variants.day]
-}
-
-func loadFont(name string) (*opentype.Font, error) {
-	data, err := assetFiles.ReadFile(name)
-	if err != nil {
-		return nil, err
-	}
-	parsed, err := opentype.Parse(data)
-	if err != nil {
-		return nil, fmt.Errorf("parse %s: %w", name, err)
-	}
-	return parsed, nil
 }
 
 // Icons are cropped to their visible pixels and shrunk to fit these boxes. Meteocons draw inside a

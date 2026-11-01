@@ -3,7 +3,8 @@
 // by the turn, beside the durable delivery row, so a restart in between still sends them; delivery
 // removes them, and a sweep collects what a cancelled or abandoned turn left behind. Chat turns and
 // scheduled runs keep their cards in separate subdirectories, so starting a new conversation
-// discards only the chat's; background tasks keep theirs apart too.
+// discards only the chat's; background tasks keep theirs apart too. A reply carries one photo, so
+// the tools that draw one stage it once per run.
 package outbox
 
 import (
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
@@ -78,8 +80,34 @@ func New(directory string) (*Box, error) {
 	return &Box{root: root}, nil
 }
 
+// ErrImageStaged refuses a second image in one run of a turn, whichever tool staged the first.
+var ErrImageStaged = errors.New("This reply already has its one image, so this one was not added; give what it would have shown in the text.")
+
+// Once records whether one run of a turn has staged its image. Each run starts its own, so what a
+// run staged is tracked rather than what is on disk, and a re-run of the turn is not blocked by
+// the file its earlier run left.
+type Once struct {
+	mu     sync.Mutex
+	staged bool
+}
+
+// StageOnce stages the run's image unless the run already staged one, and then fails with
+// ErrImageStaged, leaving the staged image as it was.
+func (b *Box) StageOnce(once *Once, principalID, turn string, png []byte) error {
+	once.mu.Lock()
+	defer once.mu.Unlock()
+	if once.staged {
+		return ErrImageStaged
+	}
+	if err := b.Stage(principalID, turn, png); err != nil {
+		return err
+	}
+	once.staged = true
+	return nil
+}
+
 // Stage keeps a PNG for the reply of the principal's turn. A later card of the same turn replaces
-// the earlier one.
+// the earlier one; tools stage through StageOnce instead.
 func (b *Box) Stage(principalID, turn string, png []byte) error {
 	if len(png) == 0 {
 		return fmt.Errorf("outbox card is empty")

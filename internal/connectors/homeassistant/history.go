@@ -63,6 +63,49 @@ type statisticPoint struct {
 	State  *float64 `json:"state"`
 }
 
+// statistics reads one statistic per bucket of the period: the mean, the change, and the state,
+// whichever the sensor keeps.
+func (s *Service) statistics(ctx context.Context, entityID string, start, end time.Time, bucket string) ([]statisticPoint, error) {
+	results, err := s.client.websocketCommands(ctx, map[string]any{
+		"type":          "recorder/statistics_during_period",
+		"start_time":    start.Format(time.RFC3339),
+		"end_time":      end.Format(time.RFC3339),
+		"statistic_ids": []string{entityID},
+		"period":        bucket,
+		"types":         []string{"mean", "change", "state"},
+	})
+	if err != nil {
+		return nil, err
+	}
+	var series map[string][]statisticPoint
+	if err := json.Unmarshal(results[0], &series); err != nil {
+		return nil, errMalformed
+	}
+	return series[entityID], nil
+}
+
+// statisticOf picks what a series of buckets shows: the mean of a measurement, or what a counter
+// added in each bucket, which reports changes, or else the state.
+func statisticOf(points []statisticPoint) (pick func(statisticPoint) *float64, changes bool) {
+	switch {
+	case points[0].Mean != nil:
+		return func(point statisticPoint) *float64 { return point.Mean }, false
+	case points[0].Change != nil:
+		return func(point statisticPoint) *float64 { return point.Change }, true
+	default:
+		return func(point statisticPoint) *float64 { return point.State }, false
+	}
+}
+
+// unitOf is the sensor's unit of measurement, or empty when it has none or cannot be read.
+func (s *Service) unitOf(ctx context.Context, entityID string) string {
+	var state stateObject
+	if err := s.client.getJSON(ctx, "/api/states/"+entityID, &state); err != nil {
+		return ""
+	}
+	return state.unit()
+}
+
 // historyPoints answers a trend: one value per bucket from the statistics of the period, using the
 // next coarser bucket while a bucket would give more than maximumHistoryPoints.
 func (s *Service) historyPoints(ctx context.Context, snap *snapshot, arguments historyArguments, entityID string) tools.Result {
@@ -77,22 +120,10 @@ func (s *Service) historyPoints(ctx context.Context, snap *snapshot, arguments h
 	bucket := arguments.Points
 	for index := slices.Index(historyBuckets, bucket); ; index++ {
 		bucket = historyBuckets[index]
-		results, err := s.client.websocketCommands(ctx, map[string]any{
-			"type":          "recorder/statistics_during_period",
-			"start_time":    start.Format(time.RFC3339),
-			"end_time":      end.Format(time.RFC3339),
-			"statistic_ids": []string{entityID},
-			"period":        bucket,
-			"types":         []string{"mean", "change", "state"},
-		})
-		if err != nil {
+		var err error
+		if points, err = s.statistics(ctx, entityID, start, end, bucket); err != nil {
 			return failure(err)
 		}
-		var series map[string][]statisticPoint
-		if err := json.Unmarshal(results[0], &series); err != nil {
-			return failure(errMalformed)
-		}
-		points = series[entityID]
 		if len(points) <= maximumHistoryPoints || index == len(historyBuckets)-1 {
 			break
 		}
@@ -101,21 +132,8 @@ func (s *Service) historyPoints(ctx context.Context, snap *snapshot, arguments h
 		return tools.Result{Text: fmt.Sprintf("%s has no statistics for %s.", arguments.Name, label)}
 	}
 
-	pick := func(point statisticPoint) *float64 { return point.Mean }
-	changes := false
-	switch {
-	case points[0].Mean != nil:
-	case points[0].Change != nil:
-		pick = func(point statisticPoint) *float64 { return point.Change }
-		changes = true
-	default:
-		pick = func(point statisticPoint) *float64 { return point.State }
-	}
-	unit := ""
-	var state stateObject
-	if err := s.client.getJSON(ctx, "/api/states/"+entityID, &state); err == nil {
-		unit = state.unit()
-	}
+	pick, changes := statisticOf(points)
+	unit := s.unitOf(ctx, entityID)
 
 	var lines []string
 	var values []float64

@@ -1,6 +1,6 @@
 # 0124 — History over any time series, with charts
 
-Status: `proposed`
+Status: `done`
 
 ## Context
 
@@ -54,32 +54,61 @@ The day card (plan 0028) shows that the service can render a PNG in Go with
 
   Each series has a label, an optional unit, and an optional
   `shift: "1w" | "1M" | "1y"` for comparisons.
+
+  No text from a device or service reaches the result except a sensor's unit,
+  cut to 12 printable characters, so the tool needs no third-party marking: a
+  `grafana` query must return exactly one series, a rejected query gets a
+  fixed message rather than the data source's, which can quote labels, and a
+  Home Assistant failure never lists other sensors' names. The schema and
+  guidance offer only the sources the principal may read when the turn
+  starts; each call checks the switch and the allowlist again.
+
+  A month or year shift keeps a day past the end of a shorter month on its
+  last day, so a shifted point never lands in the following month. A period
+  still under way, such as this month, ends now, and its shifted fetch ends at
+  the same point of the earlier period.
 - **Rendering in Go, no new dependency.** A new `internal/chart` package draws
   with `golang.org/x/image/vector` and the fonts the day card embeds:
   - chart types: line, step, and bar;
   - a shared time axis, up to two value axes when units differ, a legend,
     and min and max markers;
   - a colour palette checked for contrast;
-  - a fixed 1200×700 size.
+  - a fixed 1200×700 size, with bars at least 2 pixels wide;
+  - values that are zero or between 1e-9 and 1e15 in size, so the axis
+    arithmetic stays exact; anything else is refused;
+  - numeric date and time labels and value labels without words, so no
+    language is assumed; the title and series labels come from the model.
 
-  Rendering time is recorded as the day card's is.
+  Rendering time is recorded as the day card's is. One rasterizer is reused
+  for every shape, sized to the box the shape covers.
 - **Statistics in code.** For each series, the tool computes:
   - first and last value, change, min and max with their times, and mean;
-  - for a shifted comparison, the difference of means and totals;
-  - outliers: points more than 3 median absolute deviations from the median.
+  - a total only where values add up: Home Assistant amounts per bucket, such
+    as energy per day, and values the model passes, never a temperature;
+  - for a shifted comparison, the difference of means, and of totals where
+    both add up, over only the span both series cover once shifted, with the
+    point counts on each side; a shifted series is compared only with an
+    unshifted one of the same sensor, the same query, or the model's values;
+  - outliers: points more than 3 median absolute deviations from the median,
+    or, when most points equal the median, 3 mean absolute deviations scaled
+    by 1.2533, so a single spike in a flat series still shows.
 
-  The tool result returns these as text, so the reply is grounded (plan
-  0056).
+  The statistics come from every fetched point; only the drawing is
+  downsampled. The tool result returns these as text, so the reply is grounded
+  (plan 0056).
 - **Privacy and outside data.** `ha` and `grafana` sources are private reads.
   A `values` series carries whatever trust its origin had. The tool does not
   change exposure.
 - **One image per reply.** The outbox keeps one PNG per turn, and a later
   stage replaces an earlier one. The outbox gains a stage-once rule that the
   day card and `chart` both use. A second image staged by the same turn run
-  fails with "this reply already has an image; combine series instead",
-  whichever tool staged first. The rule tracks what this run staged, not
+  fails with "This reply already has its one image, so this one was not
+  added; give what it would have shown in the text", whichever tool staged
+  first. The rule tracks what this run staged, not
   what is on disk, so a re-run of a turn is not blocked by its own earlier
-  file. The day card's guidance, which today says a later card replaces it,
+  file: the record lives on the run's `tools.Run`, which every tool call of
+  the run shares, and a call without a run fails as one without a turn does.
+  The day card's guidance, which today says a later card replaces it,
   changes to match.
 
   Several images per reply, through a media-group outbox, is a follow-up.
@@ -87,7 +116,9 @@ The day card (plan 0028) shows that the service can render a PNG in Go with
   tasks can send a chart. Agent watch checks have no turn key, so `chart`
   fails there, as the day card does.
 - **Limits.** At most four series and 2000 points in total after fetching,
-  downsampled by bucket mean.
+  downsampled by bucket mean over equal stretches of time, so gaps stay gaps,
+  keeping each series' lowest and highest point. Hourly Home Assistant
+  statistics cover periods of at most 90 days.
 
 ## Approach
 
@@ -106,9 +137,13 @@ The day card (plan 0028) shows that the service can render a PNG in Go with
   `internal/fonts` package that both renderers use
 - `internal/connectors/homeassistant` (statistics at resolution),
   `internal/connectors/grafana` (raw range points)
-- `internal/outbox` (stage-once), `internal/connectors/web/card.go` (day
-  card uses it), `internal/wiring`, `internal/prompt`
-- README, `docs/architecture.md`
+- `internal/outbox` (stage-once), `internal/tools/run.go` (the run's record of
+  its image), `internal/connectors/web/card.go` and `service.go` (day card
+  uses it), `internal/wiring`, `internal/observability` (chart render time)
+- Guidance: the chart tool's own, and pointers in the Home Assistant and
+  Grafana guidance; `internal/prompt` needs no change, since tool guidance
+  lives with its provider
+- README, `docs/architecture.md`, `third_party/inter/VENDORED.md` (font path)
 
 ## Validation
 

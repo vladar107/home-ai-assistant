@@ -103,7 +103,7 @@ flowchart TB
 | `home-agent` | Everything with authority: identity, policy, tools, credentials, approvals, scheduling, delivery, telemetry |
 | Pi runtime | The model loop only. It gets no built-in tools, skills, or project context; its tools are the bridge extension that calls back into `home-agent` |
 | SQLite | Durable control-plane state through `modernc.org/sqlite` (pure Go, no CGO) |
-| Data directory | Mode `0700`; Pi session history, per-user integration credentials, and pending day cards |
+| Data directory | Mode `0700`; Pi session history, per-user integration credentials, and pending day cards and charts |
 | Monitoring | Separate repository and Compose project, joined through a private Docker network |
 
 ## 3. Components of `home-agent`
@@ -140,6 +140,7 @@ flowchart TB
     attach["<b>attachment</b><br/>inbound photos and files"]
     delivery["<b>delivery</b><br/>outbound files"]
     card["<b>daycard / outbox</b><br/>rendered day cards"]
+    chart["<b>chart</b><br/>history charts and<br/>their statistics"]
     pdf["<b>pdftext</b>"]
     api["<b>HTTP</b><br/>health, backlog API, events"]
     events["<b>events</b><br/>event sources, tokens,<br/>forward or assess"]
@@ -203,6 +204,9 @@ flowchart TB
     approval --> exposure
     broker --> reaction
     broker --> imagegen
+    broker --> chart
+    chart --> card
+    chart --> hac & grafanac
     imagegen --> chatgpt
     tg --> chatgpt
     tg --> modelcatalog
@@ -245,8 +249,9 @@ flowchart TB
 ```
 
 `httpretry`, `transit` (the shared vocabulary of the train and bus services),
-`thread` (the tab a piece of work belongs to), `localtime`, `weekday`, and `clip`
-are small helpers the components above import, and `testutil` holds the test
+`thread` (the tab a piece of work belongs to), `fonts` (the typefaces the day card
+and charts draw with), `localtime`, `weekday`, and `clip` are small helpers the
+components above import, and `testutil` holds the test
 fixtures.
 
 `turn` is the model turn engine: the connection gate, the tools, the web search
@@ -360,8 +365,8 @@ is refused as unreadable instead of exhausting the service's memory.
    stays silent when nothing is left to do. A Confirm pressed while another turn
    is in flight continues once that turn is delivered, unless a turn has taken
    the outcome first.
-7. The reply goes back through Telegram, as a day card photo with a caption when the
-   turn produced one. Message bodies are then cleared from SQLite; the sent
+7. The reply goes back through Telegram, as a day card or chart photo with a caption
+   when the turn produced one. Message bodies are then cleared from SQLite; the sent
    message's ID is kept with its session, so replying to it later returns to
    that conversation. A turn answering a message the user wrote, not the
    continuation after Confirm, can also set one emoji reaction on that message
@@ -778,6 +783,26 @@ the same rendering and strings as the pages themselves, so the model's setup
 instructions cannot drift from the app. Turns therefore always carry the tool
 bridge; web search is still offered only while the principal's web access is on, and its extension asks the bridge to check each query.
 
+### Charts
+
+`chart` draws up to four time series as one 1200×700 PNG for the reply. The model
+names each series and the tool fetches it: an exposed Home Assistant sensor's
+long-term statistics by hour, day, week, or month (the same recorder statistics as
+`ha_history`), a PromQL range query through the Grafana connector's client over at
+most 30 days and 500 points that must return one series, or up to 200 values the
+model passes from a tool result of the turn. A series can be shifted a week, month,
+or year to compare with the same series earlier. The statistics in the result are
+computed in code from every fetched point: first and last, change, minimum and
+maximum with their times, mean, a total where values add up, gaps, and outliers
+more than three median absolute deviations from the median. A shifted series is
+compared with the unshifted series of the same sensor or query over only the span
+both cover, so this month so far meets the same days of last month. The drawing is reduced to 2000 points across the chart by bucket
+mean, keeping the extremes. Each source keeps its own grant: the calling
+principal's home or Grafana switch, and the Grafana allowlist. `chart` and the
+day card share the Inter fonts in `internal/fonts` and stage through the outbox's
+stage-once rule: a run of a turn stages one image, and a second fails rather than
+replacing the first.
+
 ### Departure checks
 
 `ns_trips` with `departures`, and `bus_stop_status` with `departure`, check the
@@ -978,8 +1003,9 @@ fixed vocabulary and act only on the presser's own rows.
   the tool, exposure, and label snapshot is cached for 5 minutes, and a name
   that matches nothing refreshes it once, at most every 30 seconds.
 - **Grafana scope.** One Viewer service-account token, offered only to the
-  principals in `HOME_AGENT_GRAFANA_PRINCIPALS`. Queries go through Grafana's
-  data source proxy and are bounded in range, resolution, series, and lines.
+  principals in `HOME_AGENT_GRAFANA_PRINCIPALS`, including as a `chart` source.
+  Queries go through Grafana's data source proxy and are bounded in range,
+  resolution, series, and lines.
 - **Untrusted input.** Tool results, web pages, email, and model output are marked
   and treated as data. Private and loopback addresses are refused by the web tools.
 - **NAS isolation by mount.** The shared folder is mounted read-only; homes and

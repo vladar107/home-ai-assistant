@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image/png"
 	"io"
+	"log/slog"
 	"maps"
 	"net/http"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/chart"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/web"
 	"github.com/vladar107/home-ai-assistant/internal/daycard"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
@@ -120,7 +122,7 @@ func newCardFixture(t *testing.T) (*fixture, *outbox.Box) {
 // conversation and the scheduler set it.
 func (f *fixture) callInTurn(turn string, arguments any) agentruntime.ToolResult {
 	f.t.Helper()
-	set, err := f.broker.ToolsFor(tools.WithTurn(f.ctx, turn), "alice")
+	set, err := f.broker.ToolsFor(tools.WithRun(tools.WithTurn(f.ctx, turn), tools.NewRun("")), "alice")
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -256,6 +258,64 @@ func TestWeatherCardRefusals(t *testing.T) {
 	wantError(t, f.call("alice", "weather_card", card(leg)), "A card can only be attached during a conversation turn.")
 	if _, found, err := box.Card("alice", turn); err != nil || found {
 		t.Fatalf("a refused call staged a card: %v %v", found, err)
+	}
+}
+
+// TestAReplyCarriesOneImage runs the day card and a chart in one run of a turn, in either order:
+// whichever stages first stays, and the other is refused.
+func TestAReplyCarriesOneImage(t *testing.T) {
+	f, box := newCardFixture(t)
+	f.openMeteoDay()
+	charts, err := chart.NewService(chart.Config{Images: box, Switches: f.switches}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.broker.Register(charts); err != nil {
+		t.Fatal(err)
+	}
+	turn := outbox.ChatTurn(turnID)
+	run := func() agentruntime.ToolSet {
+		set, err := f.broker.ToolsFor(tools.WithRun(tools.WithTurn(f.ctx, turn), tools.NewRun("")), "alice")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return set
+	}
+	dayCard := map[string]any{"title": "Today", "summary": "Mild.", "legs": []map[string]any{{"place": "Amsterdam", "date": "2026-09-28", "from_hour": 8, "to_hour": 9}}}
+	prices := map[string]any{"title": "Prices", "series": []map[string]any{{"label": "Price", "unit": "EUR", "source": "values", "points": []map[string]any{
+		{"time": "2026-09-01", "value": 12.5}, {"time": "2026-09-08", "value": 13}, {"time": "2026-09-15", "value": 11.75},
+	}}}}
+	staged := func() []byte {
+		t.Helper()
+		card, found, err := box.Card("alice", turn)
+		if err != nil || !found {
+			t.Fatalf("staged = %v %v", found, err)
+		}
+		return card.PNG
+	}
+	const refusal = "This reply already has its one image, so this one was not added"
+
+	cardFirst := run()
+	wantText(t, f.callWith(cardFirst, "weather_card", dayCard), "this reply's one image")
+	card := staged()
+	wantError(t, f.callWith(cardFirst, "chart", prices), refusal)
+	wantError(t, f.callWith(cardFirst, "weather_card", dayCard), refusal)
+	if !bytes.Equal(staged(), card) {
+		t.Fatal("a refused image replaced the day card")
+	}
+
+	// A new run of the same turn, as after a restart, is not held back by the file its earlier
+	// run left.
+	chartFirst := run()
+	wantText(t, f.callWith(chartFirst, "chart", prices), "mean 12.42 EUR; total 37.25 EUR")
+	drawn := staged()
+	if decoded, err := png.Decode(bytes.NewReader(drawn)); err != nil || decoded.Bounds().Dx() != chart.Width {
+		t.Fatalf("the chart did not replace the earlier run's card: %v", err)
+	}
+	wantError(t, f.callWith(chartFirst, "weather_card", dayCard), refusal)
+	wantError(t, f.callWith(chartFirst, "chart", prices), refusal)
+	if !bytes.Equal(staged(), drawn) {
+		t.Fatal("a refused image replaced the chart")
 	}
 }
 
@@ -415,7 +475,7 @@ func TestWeatherCardShowsTrainStatuses(t *testing.T) {
 			f.openMeteoDay()
 			turn := outbox.ChatTurn(turnID)
 
-			set, err := f.broker.ToolsFor(tools.WithTurn(f.ctx, turn), "alice")
+			set, err := f.broker.ToolsFor(tools.WithRun(tools.WithTurn(f.ctx, turn), tools.NewRun("")), "alice")
 			if err != nil {
 				t.Fatal(err)
 			}

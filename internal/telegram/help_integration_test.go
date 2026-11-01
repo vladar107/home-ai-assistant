@@ -22,9 +22,10 @@ var coreToolNames = []string{
 }
 
 // chatTools is a chat turn's tool list: a test's own tools first, then the core tools, then the
-// integrations' tools, and app_help last.
+// integrations' tools, chart, which charts their series as well as the model's own values, and
+// app_help last.
 func chatTools(own []string, integrations ...string) []string {
-	return slices.Concat(own, coreToolNames, integrations, []string{"app_help"})
+	return slices.Concat(own, coreToolNames, integrations, []string{"chart", "app_help"})
 }
 
 // privacyLines is the /privacy answer of a conversation with these lines below the opening

@@ -79,6 +79,9 @@ type simulator struct {
 	statistics   map[string]any
 	timeZone     string
 	series       map[string]map[string][]map[string]any
+	// windowed answers a series with only the points between the command's start and end times,
+	// as Home Assistant does; otherwise a series is answered whole.
+	windowed bool
 
 	httpCalls    []httpCall
 	listCalls    int
@@ -251,6 +254,9 @@ func (s *simulator) websocket(conn *websocket.Conn) {
 			ids, _ := command["statistic_ids"].([]any)
 			for _, id := range ids {
 				if points, ok := s.series[fmt.Sprint(id)][fmt.Sprint(command["period"])]; ok {
+					if s.windowed {
+						points = within(points, fmt.Sprint(command["start_time"]), fmt.Sprint(command["end_time"]))
+					}
 					result.(map[string]any)[fmt.Sprint(id)] = points
 				}
 			}

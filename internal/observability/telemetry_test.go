@@ -29,6 +29,7 @@ func TestBusinessMetricsAreRecordedWithNormalizedLabels(t *testing.T) {
 	telemetry.RecordToolCall(ctx, "alice", "calendar", "", time.Millisecond)
 	telemetry.RecordToolCallsPerTurn(ctx, "alice", "on", 1)
 	telemetry.RecordDayCardRender(ctx, "success", time.Millisecond)
+	telemetry.RecordChartRender(ctx, "success", time.Millisecond)
 	telemetry.RecordApproval(ctx, "alice", "notion_create_page", "executed", true)
 	telemetry.RecordJudgmentDecision(ctx, "alice", "hint", "hinted")
 	telemetry.RecordSearchCheck(ctx, "alice", "confirm", "pattern")
@@ -80,6 +81,7 @@ func TestBusinessMetricsAreRecordedWithNormalizedLabels(t *testing.T) {
 		{"home_agent.tool.duration", map[string]string{"home_agent.tool": "calendar", "home_agent.outcome": "unknown"}, 1},
 		{"home_agent.tool.calls_per_turn", map[string]string{"home_agent.principal": "alice"}, 1},
 		{"home_agent.daycard.render.duration", map[string]string{"home_agent.outcome": "success"}, 1},
+		{"home_agent.chart.render.duration", map[string]string{"home_agent.outcome": "success"}, 1},
 		{"home_agent.approvals", map[string]string{"home_agent.status": "executed", "home_agent.warned": "true"}, 1},
 		{"home_agent.judgment.decisions", map[string]string{"home_agent.purpose": "hint", "home_agent.result": "hinted"}, 1},
 		{"home_agent.search.checks", map[string]string{"home_agent.verdict": "confirm", "home_agent.reason": "pattern"}, 1},

@@ -10,7 +10,7 @@
 - Vendored: 2026-09-28, for plan
   [0028](../../docs/plans/0028-day-card.md).
 
-`internal/daycard/assets/fonts/` holds `extras/ttf/Inter-Regular.ttf` and
+`internal/fonts/inter/` holds `extras/ttf/Inter-Regular.ttf` and
 `extras/ttf/Inter-SemiBold.ttf` from the archive, unmodified. They are the
 static TrueType instances, which cover Latin and Cyrillic; the variable font
 is not used because `golang.org/x/image/font/opentype` renders only the
@@ -22,4 +22,5 @@ default instance.
 | `Inter-SemiBold.ttf` | `78a843fade9d4612a5567302fb595b56976eb5fcebf4fea5a5912d638bafcde3` |
 
 To refresh, copy the same two files from a new release, update this file, and
-review the sample cards from `internal/daycard` again.
+review the sample cards from `internal/daycard` and the chart golden images
+from `internal/chart` again.

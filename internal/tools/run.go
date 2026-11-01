@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/vladar107/home-ai-assistant/internal/outbox"
 )
 
 // maximumSeenURLs bounds what one run remembers; a run that reads more links than this can still
@@ -29,6 +31,7 @@ type Run struct {
 	lesson       bool
 	reacted      bool
 	seen         map[string]struct{}
+	image        outbox.Once
 }
 
 // NewRun starts the record of a run whose trusted instruction is the given text: the user's own
@@ -153,6 +156,11 @@ func (r *Run) Reacted() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.reacted
+}
+
+// Image is the record of the image the run staged for its reply.
+func (r *Run) Image() *outbox.Once {
+	return &r.image
 }
 
 // Seen reports whether the address appeared whole in the run's instruction or in outside text the

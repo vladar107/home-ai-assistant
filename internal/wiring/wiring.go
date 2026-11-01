@@ -17,6 +17,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/approval/withdrawal"
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
 	"github.com/vladar107/home-ai-assistant/internal/backlog"
+	"github.com/vladar107/home-ai-assistant/internal/chart"
 	"github.com/vladar107/home-ai-assistant/internal/chatgpt"
 	"github.com/vladar107/home-ai-assistant/internal/collection"
 	"github.com/vladar107/home-ai-assistant/internal/connection"
@@ -74,6 +75,7 @@ type Telemetry interface {
 	watch.Telemetry
 	events.Telemetry
 	web.Telemetry
+	chart.Telemetry
 	history.Telemetry
 	judgment.Recorder
 	// ZeroRareOutcomes and ZeroWatchOutcomes create the series of outcomes that may not happen for
@@ -925,6 +927,22 @@ func (a *Assembly) buildConnectors(ctx context.Context) error {
 			return err
 		}
 		a.Grafana = grafanaService
+	}
+	// Typed nils would hide a missing source, so only the configured ones are passed.
+	chartConfig := chart.Config{Images: a.Outbox, Switches: a.Switches, Location: a.location}
+	if a.HomeAssistant != nil {
+		chartConfig.Home = a.HomeAssistant
+	}
+	if a.Grafana != nil {
+		chartConfig.Metrics = a.Grafana
+	}
+	charts, err := chart.NewService(chartConfig, in.Logger)
+	if err != nil {
+		return fmt.Errorf("initialize charts: %w", err)
+	}
+	charts.SetTelemetry(in.Telemetry)
+	if err := a.register(ctx, Connector{Tools: []tools.Provider{charts}}); err != nil {
+		return err
 	}
 	if in.Bus != nil {
 		busService, err := bus.NewService(*in.Bus, a.Switches, in.Logger)

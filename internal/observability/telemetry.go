@@ -73,6 +73,7 @@ type Telemetry struct {
 	toolDuration                 metric.Float64Histogram
 	toolCallsPerTurn             metric.Int64Histogram
 	dayCardRenderDuration        metric.Float64Histogram
+	chartRenderDuration          metric.Float64Histogram
 	approvals                    metric.Int64Counter
 	judgmentDecisions            metric.Int64Counter
 	searchChecks                 metric.Int64Counter
@@ -394,6 +395,9 @@ func (t *Telemetry) createBusinessInstruments(meter metric.Meter) error {
 		return err
 	}
 	if t.dayCardRenderDuration, err = seconds("home_agent.daycard.render.duration", "Day card render duration.", requestDurationBoundaries); err != nil {
+		return err
+	}
+	if t.chartRenderDuration, err = seconds("home_agent.chart.render.duration", "Chart render duration.", requestDurationBoundaries); err != nil {
 		return err
 	}
 	if t.approvals, err = counter("home_agent.approvals", "Approval lifecycle events.", "{approval}"); err != nil {
@@ -804,6 +808,12 @@ func (t *Telemetry) RecordToolCallsPerTurn(ctx context.Context, principal, safet
 
 func (t *Telemetry) RecordDayCardRender(ctx context.Context, outcome string, duration time.Duration) {
 	t.dayCardRenderDuration.Record(ctx, duration.Seconds(), metric.WithAttributes(
+		labelAttr("home_agent.outcome", outcome, "unknown"),
+	))
+}
+
+func (t *Telemetry) RecordChartRender(ctx context.Context, outcome string, duration time.Duration) {
+	t.chartRenderDuration.Record(ctx, duration.Seconds(), metric.WithAttributes(
 		labelAttr("home_agent.outcome", outcome, "unknown"),
 	))
 }

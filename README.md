@@ -99,6 +99,11 @@ borrowed between users.
   photo the user sent, on the user's own ChatGPT subscription.
 - **Day cards.** A rendered image with the day's weather and trains, sent with
   the reply as its caption.
+- **Charts.** "Show the living room temperature this week" or "compare solar
+  production this month with last month" draws up to four series from Home
+  Assistant history, the household's metrics, or numbers a tool just found, and
+  the reply's figures (change, extremes, mean, totals, outliers) are computed in
+  code from every point.
 - **Schedules.** Recurring or one-time model turns ("every weekday at 07:30, plan
   my trip to work") that are set up when the user asks, can change later in conversation, and
   that survive restarts, and reminders ("remind me at five to call mom") that are

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/daycard"
+	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 	"github.com/vladar107/home-ai-assistant/internal/transit"
 )
@@ -130,8 +131,8 @@ type legReading struct {
 }
 
 func (s *Service) weatherCard(ctx context.Context, principalID string, request cardRequest) (tools.Result, error) {
-	turn := tools.TurnFrom(ctx)
-	if turn == "" {
+	turn, run := tools.TurnFrom(ctx), tools.RunFrom(ctx)
+	if turn == "" || run == nil {
 		return errorResult(noTurnText), nil
 	}
 	language := request.Language
@@ -315,11 +316,14 @@ func (s *Service) weatherCard(ctx context.Context, principalID string, request c
 	if err != nil {
 		return tools.Result{}, fmt.Errorf("render day card: %w", err)
 	}
-	if err := s.cards.Stage(principalID, turn, png); err != nil {
+	if err := s.cards.StageOnce(run.Image(), principalID, turn, png); err != nil {
+		if errors.Is(err, outbox.ErrImageStaged) {
+			return errorResult(err.Error()), nil
+		}
 		return tools.Result{}, fmt.Errorf("stage day card: %w", err)
 	}
 	s.logger.InfoContext(ctx, "web.card.staged", "principal_id", principalID, "legs", len(card.Legs), "trains", len(card.Trains), "bytes", len(png))
-	return tools.Result{Text: "The day card is ready and goes out as a photo with your reply, which becomes its caption; a later card in this turn would replace it.\n" +
+	return tools.Result{Text: "The day card is ready and goes out as a photo with your reply, which becomes its caption; it is this reply's one image, so no chart or other card can go with it.\n" +
 		report.String() +
 		"The card already shows these numbers: keep the reply to about 800 characters and do not repeat them."}, nil
 }
