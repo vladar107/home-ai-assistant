@@ -20,26 +20,30 @@ const (
 	toolMoviesNext     = "movies_next"
 	toolMoviesSetScore = "movies_set_score"
 	toolMoviesSchedule = "movies_schedule"
+	toolMoviesAdd      = "movies_add"
 
-	movieFilmProperty = "Фильм"
-	movieDateLayout   = "02.01.2006"
-	movieDateInput    = "2.1.2006"
-	movieWeek         = 7
-	movieRowPages     = 10
-	movieSearchPages  = 3
+	movieFilmProperty   = "Фильм"
+	moviePickerProperty = "Кто"
+	movieDateLayout     = "02.01.2006"
+	movieDateInput      = "2.1.2006"
+	movieWeek           = 7
+	movieRowPages       = 10
+	movieSearchPages    = 3
 )
 
 const movieGuidance = " Movie nights live in a Notion table whose title column holds the evening's date as DD.MM.YYYY and whose Фильм column holds the film. " +
 	"For that table use movies_next to answer which film is next, never by reading the rows yourself; call it without data_source_id unless you already have the table's ID. " +
 	"Each single-letter column of numbers holds the scores of the household member whose name starts with that letter, a Latin and a Cyrillic form of a letter counting as the same, so the user's own scores are in the column of their initial."
 
-const movieWriteGuidance = " For the movie table, movies_set_score records the user's own score in their own column and movies_schedule gives films their evening dates; " +
-	"use them instead of notion_update_page, because they pick the column and compute the dates."
+const movieWriteGuidance = " For the movie table, movies_add adds films to the user's next turns, movies_schedule gives films that have no date their evening dates, and movies_set_score records the user's own score in their own column. " +
+	"They are the only way to add, schedule, or score films, because they follow the two pickers' weekly turns and compute the dates and columns. " +
+	"Never create or update rows of the movie table with notion_create_page or notion_update_page. " +
+	"Call movies_add or movies_schedule at most once per turn: the evenings one call proposes are not in the table until the user confirms them, so a second call would plan the same evenings again."
 
 var movieReadDefinitions = []tools.Definition{
 	{
 		Name:        toolMoviesNext,
-		Description: "Find the next movie night in the movie table: the evening with the earliest date on or after today, its film, and who picked it.",
+		Description: "Find the next movie night in the movie table: the evening with the earliest date on or after today, its film, who picked it, and whose turn it is when it has no film yet.",
 		Risk:        tools.RiskRead,
 		Activity:    tools.ActivityNotion,
 		Private:     true,
@@ -66,9 +70,9 @@ var movieWriteDefinitions = []tools.Definition{
 	},
 	{
 		Name: toolMoviesSchedule,
-		Description: "Set evening dates in the movie table. Without film, every film without a date gets one, in table order, each a week after the latest date in the table. " +
-			"With film, only that film is scheduled: on date when given, otherwise a week after the latest other date. " +
-			"The dates are written at once when the user asked for them in a conversation that has read no outside content; otherwise they are proposed for the user to confirm.",
+		Description: "Set evening dates in the movie table. Without film, every film without a date goes to its picker's next turn after the latest date, in table order, with an empty reserved evening added for each turn of the other picker in between. " +
+			"With film, only that film is scheduled: on date when given, otherwise in its picker's next turn after the latest other date. " +
+			"A call that adds evenings is proposed as one batch for the user to confirm; a call that only sets dates is written at once when the user asked for it in a conversation that has read no outside content, and is otherwise proposed.",
 		Risk:     tools.RiskWrite,
 		Activity: tools.ActivityNotion,
 		Private:  true,
@@ -79,18 +83,33 @@ var movieWriteDefinitions = []tools.Definition{
 			`"date":{"type":"string","description":"A specific evening date as YYYY-MM-DD; requires film."}},` +
 			`"required":["data_source_id"],"additionalProperties":false}`),
 	},
+	{
+		Name: toolMoviesAdd,
+		Description: "Add films to the movie table in one call. The films fill the picker's empty reserved evenings in date order, then continue after the latest date week by week, with an empty reserved evening added for each turn of the other picker in between. " +
+			"The picker is the current user unless picker names someone else. A call that adds evenings is proposed as one batch for the user to confirm, and nothing changes until then; a call that only fills reserved evenings is written at once when the user asked for it in a conversation that has read no outside content, and is otherwise proposed. At most 10 changes fit in one batch.",
+		Risk:     tools.RiskWrite,
+		Activity: tools.ActivityNotion,
+		Private:  true,
+		Timeout:  updateTimeout,
+		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
+			`"data_source_id":{"type":"string","description":"The movie table's data source or database ID from an earlier result."},` +
+			`"films":{"type":"array","minItems":1,"items":{"type":"string","minLength":1},"description":"The film titles, in the order they should be watched, each at most once."},` +
+			`"picker":{"type":"string","description":"The initial of the household member who picks these films; defaults to the current user."}},` +
+			`"required":["data_source_id","films"],"additionalProperties":false}`),
+	},
 }
 
 func isMovieTool(name string) bool {
-	return name == toolMoviesNext || name == toolMoviesSetScore || name == toolMoviesSchedule
+	return name == toolMoviesNext || name == toolMoviesSetScore || name == toolMoviesSchedule || name == toolMoviesAdd
 }
 
 type movieTable struct {
-	titleProperty string
-	scoreColumns  []string
-	pickerColumns []string
-	rows          []movieRow
-	truncated     bool
+	dataSourceID   string
+	titleProperty  string
+	pickerProperty string
+	scoreColumns   []string
+	rows           []movieRow
+	truncated      bool
 }
 
 type movieRow struct {
@@ -107,6 +126,8 @@ func (s *Service) movies(ctx context.Context, principalID, token string, call to
 		Film         string   `json:"film"`
 		Score        *float64 `json:"score"`
 		Date         string   `json:"date"`
+		Films        []string `json:"films"`
+		Picker       string   `json:"picker"`
 	}
 	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return "", err
@@ -129,6 +150,10 @@ func (s *Service) movies(ctx context.Context, principalID, token string, call to
 	case toolMoviesSchedule:
 		if arguments.Date != "" && film == "" {
 			return "", fmt.Errorf("date requires film")
+		}
+	case toolMoviesAdd:
+		if err := validateMovieFilms(arguments.Films); err != nil {
+			return "", err
 		}
 	}
 	var date time.Time
@@ -167,9 +192,29 @@ func (s *Service) movies(ctx context.Context, principalID, token string, call to
 		return s.nextMovie(table), nil
 	case toolMoviesSetScore:
 		return s.proposeScore(ctx, principalID, token, table, film, *arguments.Score)
+	case toolMoviesAdd:
+		return s.proposeAdd(ctx, principalID, token, table, arguments.Films, arguments.Picker)
 	default:
 		return s.proposeSchedule(ctx, principalID, token, table, film, date)
 	}
+}
+
+func validateMovieFilms(films []string) error {
+	if len(films) == 0 {
+		return fmt.Errorf("films must name at least one film")
+	}
+	seen := map[string]bool{}
+	for _, film := range films {
+		title := strings.ToLower(strings.TrimSpace(film))
+		if title == "" {
+			return fmt.Errorf("films must not hold a blank title")
+		}
+		if seen[title] {
+			return fmt.Errorf("films names %q more than once", strings.TrimSpace(film))
+		}
+		seen[title] = true
+	}
+	return nil
 }
 
 // movieTable reads every row of the movie table in creation order, because the API exposes
@@ -189,7 +234,7 @@ func (s *Service) movieTable(ctx context.Context, token, id string) (movieTable,
 			return movieTable{}, err
 		}
 	}
-	table := movieTable{}
+	table := movieTable{dataSourceID: dataSource.ID}
 	var letterColumns []string
 	for name, raw := range dataSource.Properties {
 		var property struct {
@@ -199,6 +244,8 @@ func (s *Service) movieTable(ctx context.Context, token, id string) (movieTable,
 		switch {
 		case property.Type == "title":
 			table.titleProperty = name
+		case property.Type == "rich_text" && name == moviePickerProperty:
+			table.pickerProperty = name
 		case property.Type == "rich_text" && name != movieFilmProperty && utf8.RuneCountInString(strings.TrimSpace(name)) == 1:
 			letterColumns = append(letterColumns, name)
 		}
@@ -227,12 +274,16 @@ func (s *Service) movieTable(ctx context.Context, token, id string) (movieTable,
 	}
 	table.truncated = cursor != ""
 
+	var letterPickers []string
 	for _, column := range letterColumns {
 		if table.numericColumn(column) {
 			table.scoreColumns = append(table.scoreColumns, column)
 		} else {
-			table.pickerColumns = append(table.pickerColumns, column)
+			letterPickers = append(letterPickers, column)
 		}
+	}
+	if table.pickerProperty == "" && len(letterPickers) == 1 {
+		table.pickerProperty = letterPickers[0]
 	}
 	return table, nil
 }
@@ -316,8 +367,7 @@ func (t movieTable) numericColumn(column string) bool {
 }
 
 func (s *Service) nextMovie(table movieTable) string {
-	now := s.now().In(s.location)
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, s.location)
+	today := s.today()
 	var next, latest *movieRow
 	for i := range table.rows {
 		row := &table.rows[i]
@@ -340,6 +390,9 @@ func (s *Service) nextMovie(table movieTable) string {
 		fmt.Fprintf(&builder, "No upcoming movie night is scheduled. The latest was %s on %s.", movieFilm(*latest), movieDay(latest.date))
 	case next.film == "":
 		fmt.Fprintf(&builder, "The next movie night is %s, but no film is set for it yet.", movieDay(next.date))
+		if picker := table.picker(*next); picker != "" {
+			fmt.Fprintf(&builder, " It is %s's turn.", picker)
+		}
 	default:
 		fmt.Fprintf(&builder, "Next movie: %s on %s", next.film, movieDay(next.date))
 		if picker := table.picker(*next); picker != "" {
@@ -360,11 +413,16 @@ func (s *Service) nextMovie(table movieTable) string {
 	return builder.String()
 }
 
+func (s *Service) today() time.Time {
+	now := s.now().In(s.location)
+	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, s.location)
+}
+
 func (t movieTable) picker(row movieRow) string {
-	if len(t.pickerColumns) != 1 {
+	if t.pickerProperty == "" {
 		return ""
 	}
-	return row.values[t.pickerColumns[0]]
+	return row.values[t.pickerProperty]
 }
 
 func (t movieTable) undated() []movieRow {
@@ -375,19 +433,6 @@ func (t movieTable) undated() []movieRow {
 		}
 	}
 	return rows
-}
-
-// latestDate is the anchor new evenings continue from: the latest date anywhere in the table,
-// whatever the row order, leaving out the row being rescheduled.
-func (t movieTable) latestDate(except string) (time.Time, bool) {
-	var latest time.Time
-	found := false
-	for _, row := range t.rows {
-		if row.dated && row.page.ID != except && (!found || row.date.After(latest)) {
-			latest, found = row.date, true
-		}
-	}
-	return latest, found
 }
 
 func (t movieTable) matching(film string) []movieRow {
@@ -494,23 +539,303 @@ func initialLetters(first rune) []rune {
 	return letters
 }
 
-func (s *Service) proposeSchedule(ctx context.Context, principalID, token string, table movieTable, film string, date time.Time) (string, error) {
-	type evening struct {
-		row  movieRow
-		date time.Time
+// moviePicker is one of the two household members who take turns choosing the film. A picker is
+// identified by the folded first letter of the value in the picker column, and spelling is the
+// value as the table writes it.
+type moviePicker struct {
+	letter   rune
+	spelling string
+}
+
+// movieTurns is the weekly rotation continuing from the latest evening: evening k is k weeks after
+// it and belongs to the other picker when k is odd.
+type movieTurns struct {
+	latest  time.Time
+	pickers [2]moviePicker
+	first   int
+}
+
+func (t movieTurns) evening(k int) time.Time {
+	return t.latest.AddDate(0, 0, movieWeek*k)
+}
+
+func pickerLetter(value string) rune {
+	first, _ := utf8.DecodeRuneInString(strings.TrimSpace(value))
+	if first == utf8.RuneError {
+		return 0
 	}
-	var evenings []evening
+	return foldLookalike(first)
+}
+
+// turns reads the rotation from the latest dated row and the most recent dated row with a different
+// picker, leaving out the row being rescheduled. New evenings are never before today.
+func (t movieTable) turns(except string, today time.Time) (movieTurns, error) {
+	if t.pickerProperty == "" {
+		return movieTurns{}, fmt.Errorf("the movie table has no picker column (a text column named %s), so whose turn an evening is cannot be told; nothing was proposed. A single film can still be scheduled by giving film and date", moviePickerProperty)
+	}
+	var latest *movieRow
+	for i := range t.rows {
+		row := &t.rows[i]
+		if row.dated && row.page.ID != except && (latest == nil || !row.date.Before(latest.date)) {
+			latest = row
+		}
+	}
+	if latest == nil {
+		return movieTurns{}, fmt.Errorf("no evening in the movie table has a date to continue from; schedule one film with a specific date first")
+	}
+	first := pickerLetter(t.picker(*latest))
+	if first == 0 {
+		return movieTurns{}, fmt.Errorf("the latest evening, %s, has no picker in column %s, so the turns cannot continue from it; set it first, nothing was proposed", movieDay(latest.date), moviePickerProperty)
+	}
+	var other *movieRow
+	for i := range t.rows {
+		row := &t.rows[i]
+		letter := pickerLetter(t.picker(*row))
+		if row.dated && row.page.ID != except && letter != 0 && letter != first && (other == nil || !row.date.Before(other.date)) {
+			other = row
+		}
+	}
+	if other == nil {
+		return movieTurns{}, fmt.Errorf("no dated evening in the movie table has a picker other than %s, so the turns cannot alternate; nothing was proposed", t.picker(*latest))
+	}
+	turns := movieTurns{
+		latest:  latest.date,
+		pickers: [2]moviePicker{{first, t.picker(*latest)}, {pickerLetter(t.picker(*other)), t.picker(*other)}},
+		first:   1,
+	}
+	for turns.evening(turns.first).Before(today) {
+		turns.first++
+	}
+	return turns, nil
+}
+
+func (t movieTurns) names() string {
+	return t.pickers[0].spelling + " | " + t.pickers[1].spelling
+}
+
+func (t movieTurns) pickerOf(value string) (int, bool) {
+	letter := pickerLetter(value)
+	for index, picker := range t.pickers {
+		if letter != 0 && letter == picker.letter {
+			return index, true
+		}
+	}
+	return 0, false
+}
+
+// pickerByInitial matches a person to a picker like a score column: the initial of their name, in
+// its Latin or Cyrillic form, must be the picker's letter, and exactly one picker may match.
+func (t movieTurns) pickerByInitial(name string) (int, error) {
+	first, _ := utf8.DecodeRuneInString(strings.TrimSpace(name))
+	if first == utf8.RuneError {
+		return 0, fmt.Errorf("there is no name to tell which picker is meant; give picker (one of %s)", t.names())
+	}
+	initials := initialLetters(first)
+	matched := -1
+	for index, picker := range t.pickers {
+		if !slices.Contains(initials, picker.letter) {
+			continue
+		}
+		if matched >= 0 {
+			return 0, fmt.Errorf("the initial of %s matches both pickers (%s); nothing was proposed", name, t.names())
+		}
+		matched = index
+	}
+	if matched < 0 {
+		return 0, fmt.Errorf("the initial of %s matches neither picker (%s); give picker as one of them, nothing was proposed", name, t.names())
+	}
+	return matched, nil
+}
+
+// movieChange is one row write of a movies call, recorded as an ordinary notion_create_page or
+// notion_update_page.
+type movieChange struct {
+	tool      string
+	arguments json.RawMessage
+	line      string
+}
+
+// moviePlan collects the changes of one call. filmEnds[i] is how many changes the first i+1 films
+// need, so a batch that is too large can say how many films fit.
+type moviePlan struct {
+	table    movieTable
+	turns    movieTurns
+	next     int
+	changes  []movieChange
+	filmEnds []int
+}
+
+func newMoviePlan(table movieTable, turns movieTurns) *moviePlan {
+	return &moviePlan{table: table, turns: turns, next: turns.first}
+}
+
+// place puts a film in the picker's next free turn, reserving each turn of the other picker that
+// it passes. An existing row is given its date; without one a new row is created.
+func (p *moviePlan) place(picker int, film string, existing *movieRow) error {
+	for p.next%2 != picker {
+		change, err := p.create(p.turns.evening(p.next), p.turns.pickers[p.next%2], "")
+		if err != nil {
+			return err
+		}
+		p.changes = append(p.changes, change)
+		p.next++
+	}
+	date := p.turns.evening(p.next)
+	p.next++
+	var change movieChange
+	var err error
+	if existing != nil {
+		change, err = movieDateChange(p.table, *existing, date)
+	} else {
+		change, err = p.create(date, p.turns.pickers[picker], film)
+	}
+	if err != nil {
+		return err
+	}
+	p.changes = append(p.changes, change)
+	p.filmEnds = append(p.filmEnds, len(p.changes))
+	return nil
+}
+
+func (p *moviePlan) create(date time.Time, picker moviePicker, film string) (movieChange, error) {
+	values := map[string]any{p.table.pickerProperty: richTextValue(picker.spelling)}
+	if film != "" {
+		values[movieFilmProperty] = richTextValue(film)
+	}
+	properties, err := encodeProperties(values)
+	if err != nil {
+		return movieChange{}, err
+	}
+	arguments, err := json.Marshal(createArguments{ParentType: "data_source", ParentID: p.table.dataSourceID, Title: date.Format(movieDateLayout), Properties: properties})
+	if err != nil {
+		return movieChange{}, err
+	}
+	line := fmt.Sprintf("%s reserved for %s", movieDay(date), picker.spelling)
+	if film != "" {
+		line = fmt.Sprintf("%s on %s (new evening, %s's turn)", film, movieDay(date), picker.spelling)
+	}
+	return movieChange{tool: toolCreatePage, arguments: arguments, line: line}, nil
+}
+
+func encodeProperties(values map[string]any) (map[string]json.RawMessage, error) {
+	encoded := make(map[string]json.RawMessage, len(values))
+	for name, value := range values {
+		raw, err := json.Marshal(value)
+		if err != nil {
+			return nil, err
+		}
+		encoded[name] = raw
+	}
+	return encoded, nil
+}
+
+func movieUpdateChange(pageID string, values map[string]any, line string) (movieChange, error) {
+	properties, err := encodeProperties(values)
+	if err != nil {
+		return movieChange{}, err
+	}
+	arguments, err := json.Marshal(updateArguments{PageID: pageID, Properties: properties})
+	if err != nil {
+		return movieChange{}, err
+	}
+	return movieChange{tool: toolUpdatePage, arguments: arguments, line: line}, nil
+}
+
+func movieDateChange(table movieTable, row movieRow, date time.Time) (movieChange, error) {
+	properties := map[string]any{table.titleProperty: map[string]any{"title": []any{map[string]any{"text": map[string]any{"content": date.Format(movieDateLayout)}}}}}
+	return movieUpdateChange(row.page.ID, properties, fmt.Sprintf("%s → %s", row.film, movieDay(date)))
+}
+
+// checkBundle refuses a batch the approval service could not hold in one confirmation before any
+// of it is recorded, and says how many films fit.
+func (p *moviePlan) checkBundle() error {
+	if len(p.changes) <= approval.MaximumBundleItems {
+		return nil
+	}
+	fit := 0
+	for _, end := range p.filmEnds {
+		if end <= approval.MaximumBundleItems {
+			fit++
+		}
+	}
+	return fmt.Errorf("these %d films need %d changes, but only %d can be confirmed together; only the first %d films fit, so nothing was proposed. Ask the user to confirm that part, then call again with the rest", len(p.filmEnds), len(p.changes), approval.MaximumBundleItems, fit)
+}
+
+func (s *Service) proposeAdd(ctx context.Context, principalID, token string, table movieTable, films []string, pickerName string) (string, error) {
+	if waiting := table.undated(); len(waiting) > 0 {
+		names := make([]string, 0, len(waiting))
+		for _, row := range waiting {
+			names = append(names, row.film)
+		}
+		return "", fmt.Errorf("the movie table still holds films without a date (%s); schedule them with movies_schedule first so nothing lands ahead of them; nothing was proposed", strings.Join(names, ", "))
+	}
+	for _, film := range films {
+		if rows := table.matching(strings.TrimSpace(film)); len(rows) > 0 {
+			return "", fmt.Errorf("%q is already in the movie table (%s); a film is never added twice, so nothing was proposed", strings.TrimSpace(film), movieDay(rows[len(rows)-1].date))
+		}
+	}
+	today := s.today()
+	turns, err := table.turns("", today)
+	if err != nil {
+		return "", err
+	}
+	name := strings.TrimSpace(pickerName)
+	if name == "" {
+		name = s.displayNames[principalID]
+	}
+	picker, err := turns.pickerByInitial(name)
+	if err != nil {
+		return "", err
+	}
+
+	var reserved []movieRow
+	for _, row := range table.rows {
+		if row.dated && !row.date.Before(today) && row.film == "" && pickerLetter(table.picker(row)) == turns.pickers[picker].letter {
+			reserved = append(reserved, row)
+		}
+	}
+	slices.SortStableFunc(reserved, func(a, b movieRow) int { return a.date.Compare(b.date) })
+
+	plan := newMoviePlan(table, turns)
+	for index, film := range films {
+		film = strings.TrimSpace(film)
+		if index >= len(reserved) {
+			if err := plan.place(picker, film, nil); err != nil {
+				return "", err
+			}
+			continue
+		}
+		change, err := movieUpdateChange(reserved[index].page.ID, map[string]any{movieFilmProperty: richTextValue(film)},
+			fmt.Sprintf("%s fills the reserved evening of %s", film, movieDay(reserved[index].date)))
+		if err != nil {
+			return "", err
+		}
+		plan.changes = append(plan.changes, change)
+		plan.filmEnds = append(plan.filmEnds, len(plan.changes))
+	}
+	if err := plan.checkBundle(); err != nil {
+		return "", err
+	}
+	return s.recordMovieChanges(ctx, principalID, token, plan.changes, "Films: ", "Proposed films: ")
+}
+
+func (s *Service) proposeSchedule(ctx context.Context, principalID, token string, table movieTable, film string, date time.Time) (string, error) {
+	today := s.today()
+	var plan *moviePlan
 	if film == "" {
-		anchor, found := table.latestDate("")
 		waiting := table.undated()
 		if len(waiting) == 0 {
 			return "Every film in the movie table already has a date; nothing was proposed.", nil
 		}
-		if !found {
-			return "", fmt.Errorf("no evening in the movie table has a date to continue from; schedule one film with a specific date first")
+		turns, err := table.turns("", today)
+		if err != nil {
+			return "", err
 		}
-		for i, row := range waiting {
-			evenings = append(evenings, evening{row: row, date: anchor.AddDate(0, 0, movieWeek*(i+1))})
+		plan = newMoviePlan(table, turns)
+		for _, row := range waiting {
+			if err := plan.placeScheduled(row); err != nil {
+				return "", err
+			}
 		}
 	} else {
 		rows := table.matching(film)
@@ -524,60 +849,109 @@ func (s *Service) proposeSchedule(ctx context.Context, principalID, token string
 				break
 			}
 		}
-		if date.IsZero() {
-			anchor, found := table.latestDate(row.page.ID)
-			if !found {
-				return "", fmt.Errorf("no other evening in the movie table has a date to continue from; give a specific date")
+		if !date.IsZero() {
+			change, err := movieDateChange(table, row, date)
+			if err != nil {
+				return "", err
 			}
-			date = anchor.AddDate(0, 0, movieWeek)
+			return s.recordMovieChanges(ctx, principalID, token, []movieChange{change}, "Dates: ", "Proposed dates: ")
 		}
-		evenings = append(evenings, evening{row: row, date: date})
+		turns, err := table.turns(row.page.ID, today)
+		if err != nil {
+			return "", err
+		}
+		plan = newMoviePlan(table, turns)
+		if err := plan.placeScheduled(row); err != nil {
+			return "", err
+		}
+	}
+	if err := plan.checkBundle(); err != nil {
+		return "", err
+	}
+	return s.recordMovieChanges(ctx, principalID, token, plan.changes, "Dates: ", "Proposed dates: ")
+}
+
+func (p *moviePlan) placeScheduled(row movieRow) error {
+	value := p.table.picker(row)
+	if pickerLetter(value) == 0 {
+		return fmt.Errorf("%q has no picker in column %s, so its turn cannot be told; set it first, nothing was proposed", row.film, moviePickerProperty)
+	}
+	picker, found := p.turns.pickerOf(value)
+	if !found {
+		return fmt.Errorf("the picker %q of %q is neither of the current pickers (%s); nothing was proposed", value, row.film, p.turns.names())
+	}
+	return p.place(picker, row.film, &row)
+}
+
+// recordMovieChanges records a call's changes. A call that creates a row proposes every change,
+// its updates too, so rejecting the batch leaves the table untouched; a call of updates alone
+// records them like any other update.
+func (s *Service) recordMovieChanges(ctx context.Context, principalID, token string, changes []movieChange, done, proposed string) (string, error) {
+	if s.proposer == nil {
+		return "", fmt.Errorf("Notion writes are not available")
+	}
+	lines := make([]string, 0, len(changes))
+	for _, change := range changes {
+		lines = append(lines, change.line)
+	}
+	if slices.ContainsFunc(changes, func(change movieChange) bool { return change.tool == toolCreatePage }) {
+		return s.proposeMovieBatch(ctx, principalID, token, changes, lines, proposed)
 	}
 
-	lines := make([]string, 0, len(evenings))
-	results := make([]string, 0, len(evenings))
-	for _, evening := range evenings {
-		properties := map[string]any{table.titleProperty: map[string]any{"title": []any{map[string]any{"text": map[string]any{"content": evening.date.Format(movieDateLayout)}}}}}
-		result, err := s.proposeRowUpdate(ctx, principalID, token, evening.row.page.ID, properties)
+	results := make([]string, 0, len(changes))
+	for index, change := range changes {
+		result, err := s.record(ctx, principalID, token, change.tool, change.arguments)
 		if err != nil {
-			if len(lines) > 0 {
-				return "", fmt.Errorf("%w; the evenings before it were already handled: %s", err, strings.Join(lines, ", "))
+			if index > 0 {
+				return "", fmt.Errorf("%w; the changes before it were already handled: %s", err, strings.Join(lines[:index], ", "))
 			}
 			return "", err
 		}
-		lines = append(lines, fmt.Sprintf("%s → %s", evening.row.film, movieDay(evening.date)))
 		results = append(results, result)
 	}
 	if !slices.ContainsFunc(results, func(result string) bool { return result != results[0] }) {
-		heading := "Dates: "
+		heading := done
 		if results[0] == approval.ProposedText {
-			heading = "Proposed dates: "
+			heading = proposed
 		}
 		return heading + strings.Join(lines, ", ") + ". " + results[0], nil
 	}
-	// Some evenings were set and others proposed, so each keeps its own result.
+	// Some changes were made and others proposed, so each keeps its own result.
 	for index := range lines {
 		lines[index] += ": " + results[index]
 	}
-	return "Dates:\n" + strings.Join(lines, "\n"), nil
+	return done + "\n" + strings.Join(lines, "\n"), nil
+}
+
+// proposeMovieBatch checks every change against its target and then proposes them whole or not at
+// all, because an update made at once would survive the user rejecting the creates beside it.
+func (s *Service) proposeMovieBatch(ctx context.Context, principalID, token string, changes []movieChange, lines []string, heading string) (string, error) {
+	proposals := make([]approval.Proposal, 0, len(changes))
+	for _, change := range changes {
+		summary, intent, err := s.prepareProposal(ctx, token, change.tool, change.arguments)
+		if err != nil {
+			return "", err
+		}
+		proposals = append(proposals, approval.Proposal{Tool: change.tool, Arguments: change.arguments, Summary: summary, Intent: intent})
+	}
+	if _, err := s.proposer.ProposeAll(ctx, principalID, proposals); err != nil {
+		if approval.Refused(err) {
+			return "", err
+		}
+		s.logger.WarnContext(ctx, "notion.proposal.failed", "principal_id", principalID, "tool", toolCreatePage, "error", err)
+		return "", fmt.Errorf("the changes could not be recorded; nothing was proposed")
+	}
+	return heading + strings.Join(lines, ", ") + ". " + approval.ProposedText, nil
 }
 
 // proposeRowUpdate records the change as an ordinary notion_update_page call, so it is checked,
 // made or proposed, and executed exactly like a property change the model asked for itself.
-func (s *Service) proposeRowUpdate(ctx context.Context, principalID, token, pageID string, properties map[string]any) (string, error) {
-	encoded := make(map[string]json.RawMessage, len(properties))
-	for name, value := range properties {
-		raw, err := json.Marshal(value)
-		if err != nil {
-			return "", err
-		}
-		encoded[name] = raw
-	}
-	arguments, err := json.Marshal(updateArguments{PageID: pageID, Properties: encoded})
+func (s *Service) proposeRowUpdate(ctx context.Context, principalID, token, pageID string, values map[string]any) (string, error) {
+	change, err := movieUpdateChange(pageID, values, "")
 	if err != nil {
 		return "", err
 	}
-	return s.record(ctx, principalID, token, toolUpdatePage, arguments)
+	return s.record(ctx, principalID, token, change.tool, change.arguments)
 }
 
 func richTextValue(text string) map[string]any {

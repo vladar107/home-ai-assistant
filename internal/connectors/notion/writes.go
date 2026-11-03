@@ -87,6 +87,7 @@ var writeDefinitions = []tools.Definition{
 // Proposer is the core approval service as the connector sees it.
 type Proposer interface {
 	Propose(context.Context, string, approval.Proposal) (approval.Record, error)
+	ProposeAll(context.Context, string, []approval.Proposal) ([]approval.Record, error)
 	Act(context.Context, string, approval.Proposal) (string, error)
 }
 
@@ -318,6 +319,22 @@ func validateAgainstSchema(schema, properties map[string]json.RawMessage) error 
 	return nil
 }
 
+// refuseTitleProperty refuses a create that sends the title property in properties as well: the
+// title argument already fills it, and Notion rejects the doubled title only after the user has
+// confirmed.
+func refuseTitleProperty(schema, properties map[string]json.RawMessage) error {
+	for _, name := range sortedKeys(properties) {
+		var property struct {
+			Type string `json:"type"`
+		}
+		_ = json.Unmarshal(schema[name], &property)
+		if name == "title" || property.Type == "title" {
+			return fmt.Errorf("property %q is this table's title; the title argument already fills it, so drop it from properties", name)
+		}
+	}
+	return nil
+}
+
 // validateOptions refuses an option the property does not already hold. A value explicitly set to
 // null clears the property and names no option.
 func validateOptions(name, propertyType string, definition, value json.RawMessage) error {
@@ -421,6 +438,9 @@ func (s *Service) prepareProposal(ctx context.Context, token, tool string, argum
 		if create.ParentType == "data_source" {
 			parent = "data source " + create.ParentID
 			if dataSource, found := s.dataSourceSchema(ctx, token, create.ParentID); found {
+				if err := refuseTitleProperty(dataSource.Properties, create.Properties); err != nil {
+					return "", approval.Intent{}, err
+				}
 				if err := validateAgainstSchema(dataSource.Properties, create.Properties); err != nil {
 					return "", approval.Intent{}, err
 				}
@@ -509,10 +529,10 @@ func renderPropertyChanges(current, proposed map[string]json.RawMessage) []strin
 	for _, name := range names {
 		value := renderInputProperty(proposed[name])
 		switch before := currentPropertyValue(current[name]); {
-		case before == value:
+		case before == value, before == "" && value == emptyValue:
 			lines = append(lines, name+": "+value+" (no change)")
 		case before == "":
-			lines = append(lines, name+": (empty) → "+value)
+			lines = append(lines, name+": "+emptyValue+" → "+value)
 		default:
 			lines = append(lines, name+": "+before+" → "+value)
 		}
@@ -520,13 +540,19 @@ func renderPropertyChanges(current, proposed map[string]json.RawMessage) []strin
 	return lines
 }
 
+const emptyValue = "(empty)"
+
 // renderInputProperty renders a property value input, which may omit the "type" field, by the
 // single value key it carries.
 func renderInputProperty(raw json.RawMessage) string {
 	var value map[string]json.RawMessage
 	_ = json.Unmarshal(raw, &value)
-	rendered := renderPropertyValue(inputPropertyType(value), raw)
+	propertyType := inputPropertyType(value)
+	rendered := renderPropertyValue(propertyType, raw)
 	if rendered == "" {
+		if _, present := value[propertyType]; present && (propertyType == "title" || propertyType == "rich_text") {
+			return emptyValue
+		}
 		rendered = compactJSON(raw)
 	}
 	return clip.Runes(rendered, maximumPropertyText)

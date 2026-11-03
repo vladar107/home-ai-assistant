@@ -192,3 +192,44 @@ func TestLongBatchExpiryEditsTheButtonMessageOnly(t *testing.T) {
 	}
 	h.expectNoEdit(300 * time.Millisecond)
 }
+
+func TestProposeAllRecordsNothingWhenTheTurnsBundleCannotHoldIt(t *testing.T) {
+	t.Parallel()
+	runtime := newControlledRuntime()
+	clock := newTestClock(t, mondayMorning)
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
+	h.provision("alice", "account-alice")
+	h.start()
+
+	job := func(index int) approval.Proposal {
+		arguments, err := json.Marshal(map[string]string{"name": fmt.Sprintf("Check %d", index), "at": fmt.Sprintf("2026-09-28 %02d:00", 8+index), "zone": "Europe/Berlin", "prompt": "Look up the forecast."})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return approval.Proposal{Tool: "schedule_propose", Arguments: arguments, Summary: fmt.Sprintf("Schedule check %d", index)}
+	}
+	h.push(textUpdate(1, 101, "schedule all of these"))
+	call := receive(t, h.ctx, runtime.calls)
+	for index := 1; index <= 8; index++ {
+		if _, err := h.approvals.Propose(call.ctx, "alice", job(index)); err != nil {
+			t.Fatalf("proposal %d: %v", index, err)
+		}
+	}
+
+	if _, err := h.approvals.ProposeAll(call.ctx, "alice", []approval.Proposal{job(9), job(10), job(11)}); !errors.Is(err, approval.ErrBundleFull) {
+		t.Fatalf("a batch past the bundle's room = %v, want ErrBundleFull", err)
+	}
+	if count := h.countRows(`SELECT count(*) FROM approvals`); count != 8 {
+		t.Fatalf("approvals after a refused batch = %d, want the 8 proposed before it", count)
+	}
+	if _, err := h.approvals.ProposeAll(call.ctx, "alice", []approval.Proposal{job(8), job(9), job(10)}); err != nil {
+		t.Fatalf("a batch that fits once its pending duplicate is counted = %v", err)
+	}
+	if count := h.countRows(`SELECT count(*) FROM approvals`); count != 10 {
+		t.Fatalf("approvals after a batch that fits = %d, want 10", count)
+	}
+
+	call.answer <- agentruntime.RunResult{Response: "proposed"}
+	h.wantReply(101, 1, "proposed")
+	h.waitState(1, "delivered")
+}

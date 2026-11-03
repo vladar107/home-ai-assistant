@@ -33,7 +33,7 @@ func (s *Service) offer(ctx context.Context, principalID string, chatID, threadI
 	if principalID == "" || chatID == 0 || strings.TrimSpace(heading) == "" || lifetime <= 0 || len(proposals) == 0 {
 		return nil, fmt.Errorf("approval offer is incomplete")
 	}
-	if len(proposals) > maximumBundleItems {
+	if len(proposals) > MaximumBundleItems {
 		return nil, ErrBundleFull
 	}
 	ctx = thread.With(ctx, threadID)

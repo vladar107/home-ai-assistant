@@ -158,7 +158,7 @@ func TestNotionWritesAreProposedConfirmedAndExecutedOnce(t *testing.T) {
 
 	h.push(textUpdate(4, 101, "add a milk task"))
 	call = receive(t, h.ctx, runtime.calls)
-	if len(call.request.Tools.Definitions) != len(chatTools(nil))+10 || !strings.Contains(call.request.Tools.Guidance, "notion_create_page") {
+	if len(call.request.Tools.Definitions) != len(chatTools(nil))+11 || !strings.Contains(call.request.Tools.Guidance, "notion_create_page") {
 		t.Fatalf("tools with writes on = %d guidance=%q", len(call.request.Tools.Definitions), call.request.Tools.Guidance)
 	}
 	result, err = call.request.Tools.Executor.Execute(call.ctx, agentruntime.ToolCall{Name: "notion_create_page", Arguments: json.RawMessage(

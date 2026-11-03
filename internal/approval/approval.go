@@ -73,7 +73,8 @@ const (
 	executionTimeout = 45 * time.Second
 	idBytes          = 8
 
-	maximumBundleItems = 10
+	// MaximumBundleItems is how many actions one confirmation holds.
+	MaximumBundleItems = 10
 	// bundleSummaryUnits is the summary budget of one bundle message; it leaves room in Telegram's
 	// 4096-unit message for the header, the expiry line, and a cut outcome line per item.
 	bundleSummaryUnits = 2500
@@ -571,40 +572,118 @@ func (s *Service) sweep(ctx context.Context, done chan<- struct{}) {
 // Propose records an exact action for the principal. It joins the bundle of this turn's
 // undelivered proposals, or starts a new bundle that replaces any pending one.
 func (s *Service) Propose(ctx context.Context, principalID string, proposal Proposal) (Record, error) {
-	if principalID == "" || proposal.Tool == "" || strings.TrimSpace(proposal.Summary) == "" {
-		return Record{}, fmt.Errorf("approval proposal is incomplete")
-	}
-	s.mu.Lock()
-	_, executable := s.executors[proposal.Tool]
-	s.mu.Unlock()
-	if !executable {
-		return Record{}, fmt.Errorf("approval proposal names a tool without an executor")
-	}
-	canonical, err := canonicalJSON(proposal.Arguments)
-	if err != nil {
-		return Record{}, fmt.Errorf("canonicalize approval arguments: %w", err)
-	}
-	id, err := newID()
+	records, err := s.ProposeAll(ctx, principalID, []Proposal{proposal})
 	if err != nil {
 		return Record{}, err
 	}
-	digest := sha256.Sum256(canonical)
+	return records[0], nil
+}
+
+// ProposeAll records several actions that only make sense together, like Propose, but whole or not
+// at all: a batch that does not fit the turn's bundle, or one of whose summaries is too long,
+// records none of them.
+func (s *Service) ProposeAll(ctx context.Context, principalID string, proposals []Proposal) ([]Record, error) {
+	type prepared struct {
+		canonical json.RawMessage
+		hash, id  string
+	}
+	if len(proposals) == 0 {
+		return nil, fmt.Errorf("approval proposal is incomplete")
+	}
+	items := make([]prepared, 0, len(proposals))
+	for _, proposal := range proposals {
+		if principalID == "" || proposal.Tool == "" || strings.TrimSpace(proposal.Summary) == "" {
+			return nil, fmt.Errorf("approval proposal is incomplete")
+		}
+		s.mu.Lock()
+		_, executable := s.executors[proposal.Tool]
+		s.mu.Unlock()
+		if !executable {
+			return nil, fmt.Errorf("approval proposal names a tool without an executor")
+		}
+		if !SummaryFits(proposal.Summary) {
+			return nil, ErrSummaryTooLong
+		}
+		canonical, err := canonicalJSON(proposal.Arguments)
+		if err != nil {
+			return nil, fmt.Errorf("canonicalize approval arguments: %w", err)
+		}
+		id, err := newID()
+		if err != nil {
+			return nil, err
+		}
+		digest := sha256.Sum256(canonical)
+		items = append(items, prepared{canonical: canonical, hash: hex.EncodeToString(digest[:]), id: id})
+	}
+
 	proposing := s.proposalLock(principalID)
 	proposing.Lock()
-	record, replaced, err := s.store(ctx, principalID, proposal.Tool, canonical, hex.EncodeToString(digest[:]), proposal.Summary, id)
+	tools := make([]string, 0, len(items))
+	hashes := make([]string, 0, len(items))
+	for index, item := range items {
+		tools, hashes = append(tools, proposals[index].Tool), append(hashes, item.hash)
+	}
+	if err := s.checkRoom(ctx, principalID, tools, hashes); err != nil {
+		proposing.Unlock()
+		return nil, err
+	}
+	records := make([]Record, 0, len(items))
+	replacedBy := make([][]Record, 0, len(items))
+	for index, item := range items {
+		record, replaced, err := s.store(ctx, principalID, proposals[index].Tool, item.canonical, item.hash, proposals[index].Summary, item.id)
+		if err != nil {
+			proposing.Unlock()
+			return nil, err
+		}
+		records = append(records, record)
+		replacedBy = append(replacedBy, replaced)
+	}
 	proposing.Unlock()
-	if err != nil || record.ID != id {
-		return record, err
+
+	for index, record := range records {
+		proposal := proposals[index]
+		if record.ID != items[index].id {
+			continue
+		}
+		if proposal.Intent != (Intent{}) {
+			s.mu.Lock()
+			s.intents[record.ID] = proposal.Intent
+			s.mu.Unlock()
+		}
+		s.logger.InfoContext(ctx, "approval.proposed", "principal_id", principalID, "approval_id", record.ID, "bundle_id", record.BundleID, "tool", proposal.Tool, "replaced", len(replacedBy[index]) > 0)
+		s.recordStatus(ctx, Record{PrincipalID: principalID, Tool: proposal.Tool}, "proposed")
+		s.report(ctx, replacedBy[index])
 	}
-	if proposal.Intent != (Intent{}) {
-		s.mu.Lock()
-		s.intents[id] = proposal.Intent
-		s.mu.Unlock()
+	return records, nil
+}
+
+// checkRoom refuses a batch that the bundle it would join cannot hold, before any of it is stored.
+// A proposal identical to one already pending in that bundle takes no room, as store returns the
+// pending one instead.
+func (s *Service) checkRoom(ctx context.Context, principalID string, tools, hashes []string) error {
+	if len(tools) > MaximumBundleItems {
+		return ErrBundleFull
 	}
-	s.logger.InfoContext(ctx, "approval.proposed", "principal_id", principalID, "approval_id", id, "bundle_id", record.BundleID, "tool", proposal.Tool, "replaced", len(replaced) > 0)
-	s.recordStatus(ctx, Record{PrincipalID: principalID, Tool: proposal.Tool}, "proposed")
-	s.report(ctx, replaced)
-	return record, nil
+	pending, err := s.repository.PendingApprovals(ctx, principalID, thread.From(ctx))
+	if err != nil {
+		return fmt.Errorf("load pending approvals: %w", err)
+	}
+	s.mu.Lock()
+	lifetime := s.lifetime
+	s.mu.Unlock()
+	if !joinable(pending, s.now(), lifetime) {
+		return nil
+	}
+	room := MaximumBundleItems - len(pending)
+	for index, tool := range tools {
+		if !slices.ContainsFunc(pending, func(item Record) bool { return item.Tool == tool && item.Hash == hashes[index] }) {
+			room--
+		}
+	}
+	if room < 0 {
+		return ErrBundleFull
+	}
+	return nil
 }
 
 func (s *Service) proposalLock(principalID string) *sync.Mutex {
@@ -651,7 +730,7 @@ func (s *Service) store(ctx context.Context, principalID, tool string, canonical
 				return item, nil, nil
 			}
 		}
-		if len(pending) >= maximumBundleItems {
+		if len(pending) >= MaximumBundleItems {
 			return Record{}, nil, ErrBundleFull
 		}
 		// The position follows every record of the bundle, withdrawn ones included, which pending

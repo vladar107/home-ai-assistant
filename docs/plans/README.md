@@ -140,6 +140,7 @@ plan that links back to the earlier record.
 | 0128 | ["Why did you say that?": what a reply was based on](0128-reply-provenance.md) | done |
 | 0129 | [Export and restore a user's own data](0129-export-and-restore.md) | done |
 | 0130 | [Stop trusting mode bits on the NAS](0130-mode-bits-on-the-nas.md) | done |
+| 0131 | [Movie tools follow the turn order](0131-movie-turn-order.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

@@ -52,6 +52,15 @@ func (r *recorder) Propose(_ context.Context, principalID string, proposal appro
 	return approval.Record{ID: fmt.Sprintf("approval-%d", len(r.proposals)), PrincipalID: principalID, Tool: proposal.Tool, Arguments: proposal.Arguments, Summary: proposal.Summary}, nil
 }
 
+func (r *recorder) ProposeAll(ctx context.Context, principalID string, proposals []approval.Proposal) ([]approval.Record, error) {
+	records := make([]approval.Record, 0, len(proposals))
+	for _, proposal := range proposals {
+		record, _ := r.Propose(ctx, principalID, proposal)
+		records = append(records, record)
+	}
+	return records, nil
+}
+
 // Act proposes, as the approval service does outside a clean chat turn.
 func (r *recorder) Act(ctx context.Context, principalID string, proposal approval.Proposal) (string, error) {
 	if _, err := r.Propose(ctx, principalID, proposal); err != nil {
@@ -667,5 +676,41 @@ func TestQueryResultsStateTheirOrder(t *testing.T) {
 	sorted := f.execute("notion_query_data_source", `{"data_source_id":"ds-movies","sorts":[{"property":"Date","direction":"ascending"},{"timestamp":"created_time","direction":"descending"}]}`)
 	if sorted.IsError || !strings.HasPrefix(sorted.Text, "Data source entries (sorted by Date ascending, then created time descending): 1 result(s)") {
 		t.Fatalf("sorted query = %+v", sorted)
+	}
+}
+
+func TestProposedCreationRefusesTheTitlePropertyBecauseTheTitleArgumentFillsIt(t *testing.T) {
+	f := newFixture(t)
+	shareMentoringTable(f)
+	f.contribute()
+
+	f.refuse("notion_create_page", `{"parent_type":"data_source","parent_id":"ds-mentoring","title":"2026-10-01","properties":{"Name":{"title":[{"text":{"content":"2026-10-01"}}]}}}`,
+		`the title argument already fills it, so drop it from properties`)
+	f.refuse("notion_create_page", `{"parent_type":"data_source","parent_id":"ds-mentoring","title":"2026-10-01","properties":{"title":{"title":[{"text":{"content":"2026-10-01"}}]}}}`,
+		`the title argument already fills it, so drop it from properties`)
+}
+
+func TestProposedRowChangeReadsAClearedTextValueAsEmpty(t *testing.T) {
+	f := newFixture(t)
+	shareMentoringTable(f)
+	f.sim.SharePage(token, notionsim.Page{
+		ID: "row-filled", Title: "Filled", URL: "https://notion.so/row-filled", LastEdited: "2026-09-01T00:00:00.000Z",
+		DataSourceID: "ds-mentoring",
+		Properties:   map[string]any{"Week": notionsim.RichTextProperty("draft")},
+	})
+	f.enableWrites()
+
+	if result := f.execute("notion_update_page", `{"page_id":"row-filled","properties":{"Week":{"rich_text":[]}}}`); result.IsError {
+		t.Fatalf("clearing update = %+v", result)
+	}
+	if summary := f.proposal().Summary; !strings.HasSuffix(summary, "\nWeek: draft → (empty)") {
+		t.Fatalf("proposal clearing a filled value = %q", summary)
+	}
+
+	if result := f.execute("notion_update_page", `{"page_id":"row-session","properties":{"Week":{"rich_text":[]}}}`); result.IsError {
+		t.Fatalf("clearing update = %+v", result)
+	}
+	if summary := f.proposal().Summary; !strings.HasSuffix(summary, "\nWeek: (empty) (no change)") {
+		t.Fatalf("proposal clearing an empty value = %q", summary)
 	}
 }
