@@ -37,8 +37,8 @@ func NewCredentials(root string) (*Credentials, error) {
 }
 
 // Read returns the token for the principal's integration. A missing file reads as not connected;
-// a file readable by others, or one that is not a plain token record, is an error so an unsafe
-// operator placement is reported rather than silently used.
+// one that is not a plain token record is an error so an unsafe operator placement is reported
+// rather than silently used.
 func (c *Credentials) Read(principalID, integration string) (string, bool, error) {
 	path, err := c.path(principalID, integration)
 	if err != nil {
@@ -51,8 +51,8 @@ func (c *Credentials) Read(principalID, integration string) (string, bool, error
 	if err != nil {
 		return "", false, fmt.Errorf("inspect %s credentials: %w", integration, err)
 	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
-		return "", false, fmt.Errorf("%s credentials file must be a regular file without group or other permissions", integration)
+	if !info.Mode().IsRegular() {
+		return "", false, fmt.Errorf("%s credentials file must be a regular file", integration)
 	}
 	contents, err := os.ReadFile(path)
 	if err != nil {
@@ -138,9 +138,6 @@ func preparePrivateDirectory(path string) error {
 	case err == nil:
 		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 			return fmt.Errorf("integration credentials directory %q must be a real directory", path)
-		}
-		if info.Mode().Perm()&0o077 != 0 {
-			return fmt.Errorf("integration credentials directory %q must not be accessible by group or others", path)
 		}
 	case errors.Is(err, os.ErrNotExist):
 		if err := os.MkdirAll(path, 0o700); err != nil {

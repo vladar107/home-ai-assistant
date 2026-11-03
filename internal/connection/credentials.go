@@ -116,9 +116,6 @@ func preparePrivateDirectory(path string) error {
 		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 			return fmt.Errorf("model profile directory %q must be a real directory", path)
 		}
-		if permissions := info.Mode().Perm(); permissions != 0o700 {
-			return fmt.Errorf("model profile directory %q permissions are %04o, want 0700", path, permissions)
-		}
 	case errors.Is(err, os.ErrNotExist):
 		if err := os.MkdirAll(path, 0o700); err != nil {
 			return fmt.Errorf("create model profile directory: %w", err)

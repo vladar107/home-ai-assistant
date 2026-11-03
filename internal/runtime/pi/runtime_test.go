@@ -260,8 +260,8 @@ func TestUnconnectedPrincipalNeverStartsAProcess(t *testing.T) {
 		prepare         func(*testing.T, pi.Config)
 	}{
 		{name: "missing profile", principal: "unprovisioned"},
-		{name: "shared profile", principal: "loose", prepare: func(t *testing.T, cfg pi.Config) {
-			if err := os.Chmod(prepareProfile(t, cfg, "loose"), 0o755); err != nil {
+		{name: "shared profile", principal: "borrower", prepare: func(t *testing.T, cfg pi.Config) {
+			if err := os.Symlink(prepareProfile(t, cfg, "owner"), agentDir(cfg, "borrower")); err != nil {
 				t.Fatal(err)
 			}
 		}},

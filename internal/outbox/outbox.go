@@ -313,9 +313,6 @@ func preparePrivateDirectory(path string) error {
 		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 			return fmt.Errorf("outbox directory %q must be a real directory", filepath.Base(path))
 		}
-		if info.Mode().Perm() != 0o700 {
-			return fmt.Errorf("outbox directory %q permissions are %04o, want 0700", filepath.Base(path), info.Mode().Perm())
-		}
 		return nil
 	case errors.Is(err, os.ErrNotExist):
 		if err := os.MkdirAll(path, 0o700); err != nil {

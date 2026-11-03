@@ -56,9 +56,6 @@ func validateTokenFile(info os.FileInfo) error {
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("Telegram token file must be a regular file")
 	}
-	if info.Mode().Perm()&0o077 != 0 {
-		return fmt.Errorf("Telegram token file must not grant group or other permissions")
-	}
 	if info.Size() > tokenFileSizeLimit {
 		return fmt.Errorf("Telegram token file is too large")
 	}

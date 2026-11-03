@@ -73,8 +73,8 @@ func readGrafanaTokenFile(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("HOME_AGENT_GRAFANA_TOKEN_FILE: metadata could not be read")
 	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 || info.Size() > grafanaTokenFileSizeLimit {
-		return "", fmt.Errorf("HOME_AGENT_GRAFANA_TOKEN_FILE: must be a small regular file without group or other permissions")
+	if !info.Mode().IsRegular() || info.Size() > grafanaTokenFileSizeLimit {
+		return "", fmt.Errorf("HOME_AGENT_GRAFANA_TOKEN_FILE: must be a small regular file")
 	}
 	contents, err := os.ReadFile(path)
 	if err != nil {

@@ -544,14 +544,14 @@ func randomString(bytes int) (string, error) {
 
 const secretFileSizeLimit = 4 << 10
 
-// LoadClientSecretFile reads the OAuth client secret from a file only its owner can read.
+// LoadClientSecretFile reads the OAuth client secret from a small regular file.
 func LoadClientSecretFile(path string) (string, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return "", fmt.Errorf("Google client secret file metadata could not be read")
 	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 || info.Size() > secretFileSizeLimit {
-		return "", fmt.Errorf("Google client secret file must be a small regular file without group or other permissions")
+	if !info.Mode().IsRegular() || info.Size() > secretFileSizeLimit {
+		return "", fmt.Errorf("Google client secret file must be a small regular file")
 	}
 	contents, err := os.ReadFile(path)
 	if err != nil {

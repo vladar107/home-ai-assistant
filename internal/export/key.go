@@ -33,11 +33,6 @@ func loadKey(path string, create bool) ([]byte, error) {
 	case info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular():
 		return nil, fmt.Errorf("export key %q is not a regular file; restore it from the data backup", path)
 	}
-	if info.Mode().Perm() != 0o600 {
-		if err := os.Chmod(path, 0o600); err != nil {
-			return nil, fmt.Errorf("secure export key: %w", err)
-		}
-	}
 	key, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read export key: %w", err)

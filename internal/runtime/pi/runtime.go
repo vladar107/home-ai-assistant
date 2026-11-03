@@ -522,7 +522,7 @@ func (r *Runtime) principalDirectories(principalID string) (string, string, stri
 	}
 	agentDir := filepath.Join(r.profilesDir, name)
 	info, err := os.Lstat(agentDir)
-	if err != nil || !isPrivateDirectory(info) {
+	if err != nil || !isRealDirectory(info) {
 		return "", "", "", &agentruntime.ProviderError{Category: agentruntime.FailureAuth}
 	}
 	sessionDir := filepath.Join(agentDir, "sessions")
@@ -1030,9 +1030,6 @@ func preparePrivateDirectory(path, purpose string) error {
 		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 			return fmt.Errorf("Pi %s directory must be a real directory", purpose)
 		}
-		if info.Mode().Perm() != 0o700 {
-			return fmt.Errorf("Pi %s directory permissions are %04o, want 0700", purpose, info.Mode().Perm())
-		}
 	case errors.Is(err, os.ErrNotExist):
 		if err := os.Mkdir(path, 0o700); err != nil {
 			return fmt.Errorf("create Pi %s directory: %w", purpose, err)
@@ -1043,8 +1040,8 @@ func preparePrivateDirectory(path, purpose string) error {
 	return nil
 }
 
-func isPrivateDirectory(info os.FileInfo) bool {
-	return info.Mode()&os.ModeSymlink == 0 && info.IsDir() && info.Mode().Perm() == 0o700
+func isRealDirectory(info os.FileInfo) bool {
+	return info.Mode()&os.ModeSymlink == 0 && info.IsDir()
 }
 
 // firstLine keeps a failed command's report to one short line for the startup error.

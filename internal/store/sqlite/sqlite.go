@@ -97,9 +97,6 @@ func prepareDataDir(path string) error {
 		if !info.IsDir() {
 			return fmt.Errorf("data directory %q is not a directory", path)
 		}
-		if permissions := info.Mode().Perm(); permissions != 0o700 {
-			return fmt.Errorf("data directory %q permissions are %04o, want 0700", path, permissions)
-		}
 		return nil
 	case !errors.Is(err, os.ErrNotExist):
 		return fmt.Errorf("inspect data directory %q: %w", path, err)
@@ -134,10 +131,6 @@ func prepareDatabaseFile(path string) error {
 		}
 	case err != nil:
 		return fmt.Errorf("inspect database file %q: %w", path, err)
-	}
-
-	if err := os.Chmod(path, 0o600); err != nil {
-		return fmt.Errorf("secure database file %q: %w", path, err)
 	}
 	return nil
 }
