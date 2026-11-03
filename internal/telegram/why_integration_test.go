@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -104,6 +105,19 @@ func (h *conversationHarness) waitTurnMessage(messageID int64) {
 	}
 }
 
+func (h *conversationHarness) waitRecentReply(recent *turnstate.Registry, principalID string) {
+	h.t.Helper()
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for !slices.ContainsFunc(recent.RecentExchange(principalID, 0), func(line turnstate.Line) bool { return line.Role == turnstate.RoleAssistant }) {
+		select {
+		case <-ticker.C:
+		case <-h.ctx.Done():
+			h.t.Fatalf("the reply never joined %s's recent exchange", principalID)
+		}
+	}
+}
+
 // explain asks why about the message, answers the explanation turn, and returns that turn's
 // request and the reply.
 func (h *conversationHarness) explain(runtime *controlledRuntime, updateID int64, question string, replied sentMessage, explanation string) (agentruntime.RunRequest, sentMessage) {
@@ -139,7 +153,8 @@ func wantContains(t *testing.T, what, text string, parts ...string) {
 func TestWhyExplainsAChatTurnFromItsTrace(t *testing.T) {
 	t.Parallel()
 	runtime := newControlledRuntime()
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{providers: []tools.Provider{sourceProvider{}}, recent: turnstate.New(nil)})
+	recent := turnstate.New(nil)
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{providers: []tools.Provider{sourceProvider{}}, recent: recent})
 	h.provision("alice", "account-alice")
 	h.provision("bob", "account-bob")
 	h.start()
@@ -161,6 +176,8 @@ func TestWhyExplainsAChatTurnFromItsTrace(t *testing.T) {
 	reply := h.nextMessage()
 	h.waitState(1, "delivered")
 	h.waitTurnMessage(reply.messageID)
+	// The reply joins the recent exchange only after the turn's follow-up, which runs after delivery.
+	h.waitRecentReply(recent, "alice")
 
 	trace, found, err := h.store.TurnTraceByMessage(h.ctx, "alice", 101, reply.messageID)
 	if err != nil || !found {
