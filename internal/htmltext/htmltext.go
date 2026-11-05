@@ -46,6 +46,19 @@ func Reduce(body io.Reader, base *url.URL) (string, string, error) {
 	return findTitle(document), tidy(reducer.text.String()), nil
 }
 
+// ReduceMail returns the text a mail client shows of an HTML message. Unlike a page, a message
+// hides text with inline styles and pads its preview line with invisible characters, and a link
+// reads as its text alone, because mail links are long tracking addresses.
+func ReduceMail(body io.Reader) (string, error) {
+	document, err := html.Parse(body)
+	if err != nil {
+		return "", err
+	}
+	reducer := &reducer{mail: true}
+	reducer.walk(document, false)
+	return tidy(reducer.text.String()), nil
+}
+
 // findTitle returns the document's own title, not one inside an embedded SVG drawing.
 func findTitle(node *html.Node) string {
 	if node.Type == html.ElementNode && node.DataAtom == atom.Title && node.Namespace == "" {
@@ -61,6 +74,7 @@ func findTitle(node *html.Node) string {
 
 type reducer struct {
 	base *url.URL
+	mail bool
 	text strings.Builder
 	// breaks is the number of line breaks owed before the next text, so that nested and adjacent
 	// block elements produce one separation between them rather than one each.
@@ -85,14 +99,18 @@ func (r *reducer) lineBreak(count int) {
 func (r *reducer) walk(node *html.Node, preformatted bool) {
 	switch node.Type {
 	case html.TextNode:
+		text := node.Data
+		if r.mail {
+			text = strings.Map(dropInvisible, text)
+		}
 		if preformatted {
-			r.write(node.Data)
+			r.write(text)
 		} else {
-			r.write(collapse(node.Data))
+			r.write(collapse(text))
 		}
 		return
 	case html.ElementNode:
-		if skippedElements[node.DataAtom] || hidden(node) {
+		if skippedElements[node.DataAtom] || hidden(node) || r.mail && hiddenByStyle(attribute(node, "style")) {
 			return
 		}
 		switch {
@@ -112,8 +130,10 @@ func (r *reducer) walk(node *html.Node, preformatted bool) {
 		case atom.Pre:
 			preformatted = true
 		case atom.A:
-			r.link(node, preformatted)
-			return
+			if !r.mail {
+				r.link(node, preformatted)
+				return
+			}
 		case atom.Img:
 			if alt := strings.TrimSpace(collapse(attribute(node, "alt"))); alt != "" {
 				r.write(" [image: " + alt + "] ")
@@ -176,6 +196,38 @@ func hidden(node *html.Node) bool {
 		}
 	}
 	return false
+}
+
+// hiddenByStyle reports whether an inline style declares display: none or visibility: hidden.
+// Declarations are parsed rather than searched, because mail layouts set overflow: hidden on
+// containers whose text is shown, and the last declaration of a property wins, as in CSS.
+func hiddenByStyle(style string) bool {
+	var display, visibility string
+	for _, declaration := range strings.Split(style, ";") {
+		property, value, found := strings.Cut(declaration, ":")
+		if !found {
+			continue
+		}
+		value, _, _ = strings.Cut(value, "!")
+		value = strings.ToLower(strings.TrimSpace(value))
+		switch strings.ToLower(strings.TrimSpace(property)) {
+		case "display":
+			display = value
+		case "visibility":
+			visibility = value
+		}
+	}
+	return display == "none" || visibility == "hidden"
+}
+
+// dropInvisible removes the zero-width and soft-hyphen characters mail pads its preview line
+// with; strings.Fields does not count them as space, so they would survive tidying.
+func dropInvisible(letter rune) rune {
+	switch letter {
+	case '\u200b', '\u200c', '\u200d', '\u034f', '\u00ad', '\ufeff':
+		return -1
+	}
+	return letter
 }
 
 func attribute(node *html.Node, key string) string {

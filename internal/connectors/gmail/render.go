@@ -4,13 +4,16 @@ import (
 	"encoding/base64"
 	"fmt"
 	"html"
-	"regexp"
+	"mime"
 	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"golang.org/x/net/html/charset"
+
 	"github.com/vladar107/home-ai-assistant/internal/clip"
+	"github.com/vladar107/home-ai-assistant/internal/htmltext"
 )
 
 const (
@@ -26,12 +29,6 @@ var (
 		"UNREAD": true, "IMPORTANT": true, "STARRED": true, "INBOX": true, "SENT": true, "DRAFT": true, "SPAM": true,
 		"CATEGORY_PERSONAL": true, "CATEGORY_SOCIAL": true, "CATEGORY_PROMOTIONS": true, "CATEGORY_UPDATES": true, "CATEGORY_FORUMS": true,
 	}
-
-	hiddenElements = regexp.MustCompile(`(?is)<(script|style|head)\b.*?</(script|style|head)\s*>`)
-	lineBreaks     = regexp.MustCompile(`(?i)<\s*(br|/p|/div|/li|/tr|/h[1-6]|/table|hr)\b[^>]*>`)
-	tags           = regexp.MustCompile(`(?s)<[^>]*>`)
-	blankRuns      = regexp.MustCompile(`[ \t\x{00a0}]+`)
-	blankLines     = regexp.MustCompile(`\n\s*\n\s*\n+`)
 )
 
 func renderSearch(query string, messages []Message, more bool, failures []string) string {
@@ -116,20 +113,46 @@ func renderMessage(message Message, offset int) string {
 	return builder.String()
 }
 
-// messageText prefers the plain-text alternative and falls back to HTML reduced to text.
+// messageText reads the message's first body, skipping attachments. Of a body's alternatives it
+// reads the HTML reduced to the text a mail client shows, and the plain text only when the HTML
+// has none: senders write the two separately, and when they disagree the user sees the HTML.
 func messageText(part Part) string {
-	if text := firstBody(part, "text/plain"); text != "" {
-		return strings.TrimSpace(text)
+	if part.Filename != "" {
+		return ""
 	}
-	if markup := firstBody(part, "text/html"); markup != "" {
-		return htmlToText(markup)
+	switch {
+	case strings.EqualFold(part.MimeType, "multipart/alternative"):
+		if text := mailText(firstBody(part, "text/html")); text != "" {
+			return text
+		}
+		return strings.TrimSpace(firstBody(part, "text/plain"))
+	case strings.EqualFold(part.MimeType, "text/html"):
+		return mailText(firstBody(part, "text/html"))
+	case strings.EqualFold(part.MimeType, "text/plain"):
+		return strings.TrimSpace(firstBody(part, "text/plain"))
+	}
+	for _, child := range part.Parts {
+		if text := messageText(child); text != "" {
+			return text
+		}
 	}
 	return ""
 }
 
+func mailText(markup string) string {
+	if markup == "" {
+		return ""
+	}
+	text, err := htmltext.ReduceMail(strings.NewReader(markup))
+	if err != nil {
+		return ""
+	}
+	return text
+}
+
 func firstBody(part Part, mimeType string) string {
 	if strings.EqualFold(part.MimeType, mimeType) && part.Filename == "" && part.Body.Data != "" {
-		if decoded, err := decodeBody(part.Body.Data); err == nil {
+		if decoded, err := decodeBody(part.Body.Data, header(part, "Content-Type")); err == nil {
 			return decoded
 		}
 	}
@@ -141,7 +164,10 @@ func firstBody(part Part, mimeType string) string {
 	return ""
 }
 
-func decodeBody(data string) (string, error) {
+// decodeBody decodes a part's data from the charset its Content-Type declares. A missing or
+// unknown charset is read as UTF-8, and so are UTF-8 and US-ASCII, because the browser label
+// table maps US-ASCII to windows-1252 and senders label UTF-8 bodies US-ASCII.
+func decodeBody(data, contentType string) (string, error) {
 	decoded, err := base64.URLEncoding.DecodeString(data)
 	if err != nil {
 		decoded, err = base64.RawURLEncoding.DecodeString(strings.TrimRight(data, "="))
@@ -149,21 +175,22 @@ func decodeBody(data string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if _, params, err := mime.ParseMediaType(contentType); err == nil && !readAsUTF8(params["charset"]) {
+		if encoding, name := charset.Lookup(params["charset"]); encoding != nil && name != "replacement" {
+			if converted, err := encoding.NewDecoder().Bytes(decoded); err == nil {
+				decoded = converted
+			}
+		}
+	}
 	return strings.ToValidUTF8(string(decoded), "�"), nil
 }
 
-func htmlToText(markup string) string {
-	text := hiddenElements.ReplaceAllString(markup, "")
-	text = lineBreaks.ReplaceAllString(text, "\n")
-	text = tags.ReplaceAllString(text, "")
-	text = html.UnescapeString(text)
-	text = blankRuns.ReplaceAllString(text, " ")
-	lines := strings.Split(text, "\n")
-	for index, line := range lines {
-		lines[index] = strings.TrimSpace(line)
+func readAsUTF8(label string) bool {
+	switch strings.ToLower(strings.TrimSpace(label)) {
+	case "", "utf-8", "utf8", "us-ascii":
+		return true
 	}
-	text = blankLines.ReplaceAllString(strings.Join(lines, "\n"), "\n\n")
-	return strings.TrimSpace(text)
+	return false
 }
 
 func collectAttachments(part Part, names *[]string) {

@@ -82,11 +82,21 @@ func (h *harness) connect(address string, granted googlesim.Grant) {
 
 func (h *harness) search(arguments map[string]any) tools.Result {
 	h.t.Helper()
+	return h.execute(toolSearch, arguments)
+}
+
+func (h *harness) read(account, id string) tools.Result {
+	h.t.Helper()
+	return h.execute(toolRead, map[string]any{"account": account, "id": id})
+}
+
+func (h *harness) execute(name string, arguments map[string]any) tools.Result {
+	h.t.Helper()
 	raw, err := json.Marshal(arguments)
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	result, err := h.service.Execute(context.Background(), "principal-1", tools.Call{Name: toolSearch, Arguments: raw})
+	result, err := h.service.Execute(context.Background(), "principal-1", tools.Call{Name: name, Arguments: raw})
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -153,4 +163,52 @@ func TestARefusedMailboxSaysSoInsteadOfUnavailable(t *testing.T) {
 	h.sim.AddMailbox(work, invoices("w", 1)...)
 
 	requireText(t, h.search(map[string]any{"query": "invoice"}), true, forbiddenText)
+}
+
+// A message is read as its HTML shows it, the way a mail client shows it, even when the sender's
+// plain-text alternative says something else.
+func TestAMessageIsReadAsItsHTMLShowsIt(t *testing.T) {
+	h := newHarness(t)
+	h.connect(work, googlesim.Grant{Mail: true})
+	received := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	booking := `<html><head><title>Head title</title><style>td{}</style></head><body>
+<div style="display:none!important;max-height:0">Your trip is booked</div>
+<span style="opacity:0;max-height:0;overflow:hidden">Preview&zwnj;&nbsp;&zwnj;&nbsp;&#847;&shy;&#8203;&#65279;</span>
+<table><tr><td>Date of birth</td><td>12 May 1980</td></tr><tr><td>Seat</td><td>14C</td></tr></table>
+<p style="Visibility: Hidden !important">Hidden note</p>
+<div style="overflow:hidden; max-height:0">Shown despite overflow</div>
+<div style="display:none; display:block">Shown by the last declaration</div>
+<p><a href="https://track.example/c/abc?u=1">Manage your booking</a> or <a href="cid:logo"><img src="cid:logo" alt="Airline"></a></p>
+</body></html>`
+	h.sim.AddMailbox(work,
+		googlesim.Message{ID: "both", ThreadID: "both", From: "booking@airline.example", Subject: "Booking", Received: received,
+			PlainText: "Date of birth 01-01-1970", HTML: booking},
+		googlesim.Message{ID: "empty", ThreadID: "empty", From: "news@shop.example", Subject: "News", Received: received,
+			PlainText: "Plain only text", HTML: `<html><body><div style="display:none">x</div><a href="https://shop.example/"></a></body></html>`},
+		googlesim.Message{ID: "image", ThreadID: "image", From: "news@shop.example", Subject: "Sale", Received: received,
+			PlainText: "Plain sale text", HTML: `<img src="https://shop.example/sale.png" alt="Sale until Sunday">`},
+		googlesim.Message{ID: "latin", ThreadID: "latin", From: "cafe@example.com", Subject: "Menu", Received: received,
+			HTML: "<p>Caf\xe9 cr\xe8me</p>", Charset: "windows-1252"},
+		googlesim.Message{ID: "ascii", ThreadID: "ascii", From: "cafe@example.com", Subject: "Menu", Received: received,
+			HTML: "<p>Café crème</p>", Charset: "us-ascii"},
+		googlesim.Message{ID: "plain", ThreadID: "plain", From: "friend@example.com", Subject: "Hi", Received: received,
+			PlainText: "Just plain text.\n\nSecond paragraph."},
+	)
+
+	read := h.read(work, "both")
+	requireText(t, read, false, "Preview\n", "Date of birth 12 May 1980\nSeat 14C", "Shown despite overflow", "Shown by the last declaration",
+		"Manage your booking or [image: Airline]")
+	for _, absent := range []string{"1970", "Your trip is booked", "Hidden note", "track.example", "cid:", "Head title", "td{}", "\u200c", "\u034f", "\u00ad", "\u200b", "\ufeff"} {
+		if strings.Contains(read.Text, absent) {
+			t.Fatalf("read message contains %q:\n%s", absent, read.Text)
+		}
+	}
+
+	requireText(t, h.read(work, "empty"), false, "\n\nPlain only text")
+	if image := h.read(work, "image"); !strings.Contains(image.Text, "[image: Sale until Sunday]") || strings.Contains(image.Text, "Plain sale text") {
+		t.Fatalf("image-only HTML = %+v", image)
+	}
+	requireText(t, h.read(work, "latin"), false, "Café crème")
+	requireText(t, h.read(work, "ascii"), false, "Café crème")
+	requireText(t, h.read(work, "plain"), false, "\n\nJust plain text.\n\nSecond paragraph.")
 }

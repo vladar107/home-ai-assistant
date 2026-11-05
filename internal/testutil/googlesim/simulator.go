@@ -46,16 +46,18 @@ func (g Grant) scope() string {
 }
 
 type Message struct {
-	ID          string
-	ThreadID    string
-	From        string
-	To          string
-	Subject     string
-	Snippet     string
-	Labels      []string
-	Received    time.Time
-	PlainText   string
-	HTML        string
+	ID        string
+	ThreadID  string
+	From      string
+	To        string
+	Subject   string
+	Snippet   string
+	Labels    []string
+	Received  time.Time
+	PlainText string
+	HTML      string
+	// Charset, when set, is declared on both alternatives, whose text then holds bytes in it.
+	Charset     string
 	Attachments map[string]int
 }
 
@@ -393,10 +395,10 @@ func resource(message Message, format string) map[string]any {
 		var parts []map[string]any
 		alternative := []map[string]any{}
 		if message.PlainText != "" {
-			alternative = append(alternative, bodyPart("text/plain", message.PlainText))
+			alternative = append(alternative, bodyPart("text/plain", message.PlainText, message.Charset))
 		}
 		if message.HTML != "" {
-			alternative = append(alternative, bodyPart("text/html", message.HTML))
+			alternative = append(alternative, bodyPart("text/html", message.HTML, message.Charset))
 		}
 		parts = append(parts, map[string]any{"mimeType": "multipart/alternative", "parts": alternative})
 		for name, size := range message.Attachments {
@@ -410,8 +412,12 @@ func resource(message Message, format string) map[string]any {
 	}
 }
 
-func bodyPart(mimeType, text string) map[string]any {
-	return map[string]any{"mimeType": mimeType, "body": map[string]any{"size": len(text), "data": base64.URLEncoding.EncodeToString([]byte(text))}}
+func bodyPart(mimeType, text, charset string) map[string]any {
+	part := map[string]any{"mimeType": mimeType, "body": map[string]any{"size": len(text), "data": base64.URLEncoding.EncodeToString([]byte(text))}}
+	if charset != "" {
+		part["headers"] = []map[string]string{{"name": "Content-Type", "value": mimeType + "; charset=" + charset}}
+	}
+	return part
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
