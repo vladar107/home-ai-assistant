@@ -643,9 +643,12 @@ func TestMovieGuidanceSendsFilmChangesThroughTheMovieTools(t *testing.T) {
 	if !slices.ContainsFunc(contribution.Definitions, func(definition tools.Definition) bool { return definition.Name == "movies_add" }) {
 		t.Fatalf("definitions = %+v, want movies_add", contribution.Definitions)
 	}
-	for _, want := range []string{"movies_add", "movies_schedule", "movies_set_score", "Never create or update rows of the movie table with notion_create_page or notion_update_page"} {
+	for _, want := range []string{"movies_add", "movies_schedule", "movies_set_score", "never create rows of the movie table with notion_create_page", "update those rows with notion_update_page"} {
 		if !strings.Contains(contribution.WriteGuidance, want) {
 			t.Fatalf("write guidance lacks %q: %s", want, contribution.WriteGuidance)
 		}
+	}
+	if strings.Contains(contribution.WriteGuidance, "update rows of the movie table with") {
+		t.Fatalf("write guidance still forbids updating movie rows: %s", contribution.WriteGuidance)
 	}
 }

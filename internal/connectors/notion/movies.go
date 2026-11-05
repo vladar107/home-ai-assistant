@@ -36,8 +36,9 @@ const movieGuidance = " Movie nights live in a Notion table whose title column h
 	"Each single-letter column of numbers holds the scores of the household member whose name starts with that letter, a Latin and a Cyrillic form of a letter counting as the same, so the user's own scores are in the column of their initial."
 
 const movieWriteGuidance = " For the movie table, movies_add adds films to the user's next turns, movies_schedule gives films that have no date their evening dates, and movies_set_score records the user's own score in their own column. " +
-	"They are the only way to add, schedule, or score films, because they follow the two pickers' weekly turns and compute the dates and columns. " +
-	"Never create or update rows of the movie table with notion_create_page or notion_update_page. " +
+	"They are the only way to add evenings or record scores, because they follow the two pickers' weekly turns and compute the dates and columns, so never create rows of the movie table with notion_create_page. " +
+	"To change evenings already in the table, such as swapping two films, putting a different film on an evening, filling a reserved evening, or changing an evening's picker or date, update those rows with notion_update_page. " +
+	"To swap films, change the Фильм column of both rows and keep their dates. " +
 	"Call movies_add or movies_schedule at most once per turn: the evenings one call proposes are not in the table until the user confirms them, so a second call would plan the same evenings again."
 
 var movieReadDefinitions = []tools.Definition{
