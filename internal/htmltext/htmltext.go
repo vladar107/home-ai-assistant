@@ -1,4 +1,5 @@
-package web
+// Package htmltext reduces an HTML document to the text a reader of it sees.
+package htmltext
 
 import (
 	"io"
@@ -33,9 +34,9 @@ var lineElements = map[atom.Atom]bool{
 	atom.Tbody: true, atom.Thead: true, atom.Tfoot: true,
 }
 
-// reduceHTML returns a page's title and its visible text, with a link written as its text and
+// Reduce returns a document's title and its visible text, with a link written as its text and
 // its absolute address when the two differ.
-func reduceHTML(body io.Reader, base *url.URL) (string, string, error) {
+func Reduce(body io.Reader, base *url.URL) (string, string, error) {
 	document, err := html.Parse(body)
 	if err != nil {
 		return "", "", err

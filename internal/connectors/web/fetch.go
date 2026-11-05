@@ -16,6 +16,7 @@ import (
 	"golang.org/x/net/html/charset"
 
 	"github.com/vladar107/home-ai-assistant/internal/clip"
+	"github.com/vladar107/home-ai-assistant/internal/htmltext"
 	"github.com/vladar107/home-ai-assistant/internal/pdftext"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
@@ -147,7 +148,7 @@ func (s *Service) readPage(ctx context.Context, target *url.URL) (page, error) {
 		if err != nil {
 			return page{}, pageRefusal("The page uses a text encoding that cannot be read.")
 		}
-		title, text, err := reduceHTML(reader, resp.finalURL)
+		title, text, err := htmltext.Reduce(reader, resp.finalURL)
 		if err != nil {
 			return page{}, pageRefusal("The page's HTML could not be read.")
 		}
