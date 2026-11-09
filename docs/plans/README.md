@@ -143,6 +143,7 @@ plan that links back to the earlier record.
 | 0131 | [Movie tools follow the turn order](0131-movie-turn-order.md) | done |
 | 0132 | [Let the model edit existing movie rows](0132-movie-row-edits.md) | done |
 | 0133 | [Gmail reads the message as the user sees it](0133-gmail-reads-what-the-user-sees.md) | done |
+| 0134 | [Calendar listings that page instead of failing](0134-calendar-listing-pages.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

@@ -295,6 +295,37 @@ func TestFailedCardIsRetriedAndReported(t *testing.T) {
 	}
 }
 
+// The calendar is read in three contiguous windows of 60 days from the scan's date, both ends inclusive.
+func TestScanNamesThreeContiguousCalendarWindows(t *testing.T) {
+	s := newScanFixture(t)
+	s.clock.Set(time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC))
+	s.checker.text = `{"trips":[]}`
+	if result := s.run(); !result.Quiet {
+		t.Fatalf("result = %+v", result)
+	}
+	windows := [][2]string{
+		{"2026-11-08", "2027-01-06"},
+		{"2027-01-07", "2027-03-07"},
+		{"2027-03-08", "2027-05-06"},
+	}
+	for _, window := range windows {
+		from, err := time.Parse(time.DateOnly, window[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		to, err := time.Parse(time.DateOnly, window[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if days := int(to.Sub(from)/(24*time.Hour)) + 1; days != 60 {
+			t.Fatalf("window %s to %s spans %d days", window[0], window[1], days)
+		}
+		if !strings.Contains(s.checker.messages[0], window[0]+" to "+window[1]) {
+			t.Fatalf("the prompt does not name the window %s to %s: %q", window[0], window[1], s.checker.messages[0])
+		}
+	}
+}
+
 // The first scan searches 180 days of mail on the larger budget, and keeps its start even when the
 // budget ran out; a scan within a week of it searches 8 days on the smaller one, and a scan more
 // than a week after the last success searches far again.

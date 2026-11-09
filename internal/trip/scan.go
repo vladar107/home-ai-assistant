@@ -30,11 +30,19 @@ const (
 )
 
 // ScanPrompt asks for strict JSON so code, not the model, validates, deduplicates, and decides
-// what is offered. days is how far back it searches mail.
-func ScanPrompt(days int) string {
+// what is offered. days is how far back it searches mail, and today is the scan's date in the
+// user's location.
+func ScanPrompt(days int, today time.Time) string {
+	first := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC)
+	window := func(offset int) string {
+		from := first.AddDate(0, 0, offset)
+		return from.Format(time.DateOnly) + " to " + from.AddDate(0, 0, 59).Format(time.DateOnly)
+	}
 	return fmt.Sprintf("Find the user's upcoming trips. Search Gmail for travel booking confirmations (flights, hotels, trains, car rentals) "+
-		"received in the last %d days, with newer_than:%dd in every gmail_search, and Calendar for travel events in the next 180 days; "+
-		"calendar_events covers at most 62 days per call, so cover the 180 days in three calls. ", days, days) +
+		"received in the last %d days, with newer_than:%dd in every gmail_search, and Calendar for travel events in the next 180 days. "+
+		"Make three calendar_events calls with exactly these start and end dates, both ends inclusive: %s, %s, and %s. "+
+		"If a calendar_events result says it stopped early, call again from the start it names. ",
+		days, days, window(0), window(60), window(120)) +
 		"Run several gmail_search queries: booking words such as booking, reservation, confirmation, itinerary, e-ticket, boarding pass, and check-in, " +
 		"both in English and in the user's language, and the senders of airlines, rail operators, hotels, booking sites, and car rentals. " +
 		"Open each likely booking in full with gmail_read_message or calendar_read_event before you report it, and never report a booking from a search snippet alone. " +
@@ -151,7 +159,7 @@ func (s scan) Run(ctx context.Context, occurrence schedule.Occurrence) (schedule
 		return schedule.Result{}, err
 	}
 	ctx = tools.WithCallBudget(ctx, budget)
-	message := prompt.ScheduledScan(occurrence.JobName, occurrence.ScheduledFor, occurrence.Location, ScanPrompt(days))
+	message := prompt.ScheduledScan(occurrence.JobName, occurrence.ScheduledFor, occurrence.Location, ScanPrompt(days, occurrence.ScheduledFor.In(occurrence.Location)))
 	text, errorKind, err := s.checker.RunCheck(ctx, occurrence.PrincipalID, message)
 	if err != nil {
 		return schedule.Result{}, err

@@ -264,13 +264,12 @@ func TestInvalidRangesAreRefused(t *testing.T) {
 	h := newHarness(t, work)
 	h.sim.AddCalendar(work, calendarsim.Calendar{ID: work, Summary: "Work"})
 	for name, arguments := range map[string]map[string]any{
-		"end before start":  {"start": "2026-10-06", "end": "2026-10-05"},
-		"empty range":       {"start": "2026-10-05T10:00:00Z", "end": "2026-10-05T10:00:00Z"},
-		"more than 62 days": {"start": "2026-10-01", "end": "2026-12-02"},
-		"bad date":          {"start": "tomorrow", "end": "2026-10-05"},
-		"long query":        {"start": "2026-10-05", "end": "2026-10-06", "query": strings.Repeat("x", 201)},
-		"unknown field":     {"start": "2026-10-05", "end": "2026-10-06", "calendar": "x"},
-		"missing end":       {"start": "2026-10-05"},
+		"end before start": {"start": "2026-10-06", "end": "2026-10-05"},
+		"empty range":      {"start": "2026-10-05T10:00:00Z", "end": "2026-10-05T10:00:00Z"},
+		"bad date":         {"start": "tomorrow", "end": "2026-10-05"},
+		"long query":       {"start": "2026-10-05", "end": "2026-10-06", "query": strings.Repeat("x", 201)},
+		"unknown field":    {"start": "2026-10-05", "end": "2026-10-06", "calendar": "x"},
+		"missing end":      {"start": "2026-10-05"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			requireText(t, h.events(arguments), true)
@@ -282,7 +281,7 @@ func TestInvalidRangesAreRefused(t *testing.T) {
 	requireText(t, h.events(map[string]any{"start": "2026-10-01", "end": "2026-12-01"}), false, "No events")
 }
 
-func TestOverTheCapIsTruncatedAndSaid(t *testing.T) {
+func TestOverTheCapIsCutAtAMomentAndSaid(t *testing.T) {
 	h := newHarness(t, work)
 	h.sim.AddCalendar(work, calendarsim.Calendar{ID: work, Summary: "Work"})
 	for index := 0; index < 130; index++ {
@@ -290,10 +289,218 @@ func TestOverTheCapIsTruncatedAndSaid(t *testing.T) {
 		h.sim.AddEvents(work, work, calendarsim.Event{ID: "e" + strconv.Itoa(index), Summary: "Slot", Start: start, End: start.Add(5 * time.Minute)})
 	}
 	result := h.events(map[string]any{"start": "2026-10-05", "end": "2026-10-06"})
-	requireText(t, result, false, "100 events", "more exist than the 100 shown", "Event id: e99\n")
-	if strings.Contains(result.Text, "Event id: e100\n") {
-		t.Fatal("more than 100 events were returned")
+	requireText(t, result, false, "call again with start ", "Event id: e0\n")
+	if strings.Contains(result.Text, "Event id: e129\n") || strings.Contains(result.Text, "more exist than the 100 shown") {
+		t.Fatalf("the listing was not cut:\n%s", result.Text)
 	}
+	if shown := strings.Count(result.Text, "Event id: "); shown > maximumEvents {
+		t.Fatalf("%d events were returned", shown)
+	}
+}
+
+func eventsResultCap(t *testing.T) int {
+	t.Helper()
+	for _, definition := range definitions {
+		if definition.Name == toolEvents {
+			if definition.MaxResultBytes <= 0 {
+				t.Fatal("calendar_events does not declare its result cap")
+			}
+			return definition.MaxResultBytes
+		}
+	}
+	t.Fatal("calendar_events is not defined")
+	return 0
+}
+
+var (
+	eventIDLine      = regexp.MustCompile(`(?m)^Event id: (.+)$`)
+	continuationLine = regexp.MustCompile(`call again with start (\S+) `)
+)
+
+// pageThrough follows the continuation each result states until a result has none. Every result
+// must fit the declared cap and show no event starting at or after its continuation; starts maps
+// event ids to their start. It returns every event id seen and the number of calls.
+func pageThrough(t *testing.T, h *harness, arguments map[string]any, starts map[string]time.Time) (map[string]bool, int) {
+	t.Helper()
+	limit := eventsResultCap(t)
+	seen := map[string]bool{}
+	for call := 1; call <= 20; call++ {
+		result := h.events(arguments)
+		requireText(t, result, false)
+		if len(result.Text) > limit {
+			t.Fatalf("call %d: result of %d bytes passes the %d byte cap", call, len(result.Text), limit)
+		}
+		next := continuationLine.FindStringSubmatch(result.Text)
+		var stop time.Time
+		if next != nil {
+			var err error
+			if stop, err = time.Parse(time.RFC3339, next[1]); err != nil {
+				t.Fatalf("call %d: continuation %q is not RFC 3339", call, next[1])
+			}
+		}
+		for _, match := range eventIDLine.FindAllStringSubmatch(result.Text, -1) {
+			seen[match[1]] = true
+			if start, known := starts[match[1]]; known && next != nil && !start.Before(stop) {
+				t.Fatalf("call %d: %s starts at %s, not before the continuation %s", call, match[1], start, stop)
+			}
+		}
+		if next == nil {
+			return seen, call
+		}
+		arguments = map[string]any{"start": next[1], "end": arguments["end"]}
+	}
+	t.Fatal("the listing never finished within 20 calls")
+	return nil, 0
+}
+
+func requireAllSeen(t *testing.T, seen map[string]bool, starts map[string]time.Time) {
+	t.Helper()
+	for id := range starts {
+		if !seen[id] {
+			t.Fatalf("event %s was never listed", id)
+		}
+	}
+}
+
+func TestBusyRangesArePagedWithoutSkippingEvents(t *testing.T) {
+	cases := map[string]struct {
+		count int
+		step  time.Duration
+		title string
+	}{
+		"short events":       {count: 130, step: 10 * time.Minute, title: "Slot"},
+		"long titled events": {count: 60, step: time.Hour, title: strings.Repeat("Quarterly planning review ", 12)},
+	}
+	for name, test := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, work)
+			h.sim.AddCalendar(work, calendarsim.Calendar{ID: work, Summary: "Work"})
+			starts := map[string]time.Time{}
+			for index := 0; index < test.count; index++ {
+				start := utc(5, 0, 0).Add(time.Duration(index) * test.step)
+				id := "e" + strconv.Itoa(index)
+				starts[id] = start
+				h.sim.AddEvents(work, work, calendarsim.Event{ID: id, Summary: test.title, Start: start, End: start.Add(5 * time.Minute)})
+			}
+			seen, calls := pageThrough(t, h, map[string]any{"start": "2026-10-05", "end": "2026-10-12"}, starts)
+			requireAllSeen(t, seen, starts)
+			if calls < 2 {
+				t.Fatalf("the listing fit one result in %d call", calls)
+			}
+		})
+	}
+}
+
+func TestACalendarCutShortEarlyDoesNotHideEvents(t *testing.T) {
+	h := newHarness(t, work)
+	h.sim.AddCalendar(work, calendarsim.Calendar{ID: work, Summary: "Work", PageSize: 3, ListsCancelled: true})
+	h.sim.AddCalendar(work, calendarsim.Calendar{ID: "busy@group.calendar.google.com", Summary: "Busy"})
+	starts := map[string]time.Time{}
+	for index := 0; index < 12; index++ {
+		start := utc(5, 0, 0).Add(time.Duration(index) * 12 * time.Hour)
+		id := "early" + strconv.Itoa(index)
+		event := calendarsim.Event{ID: id, Summary: "Early", Start: start, End: start.Add(time.Hour), Cancelled: index == 2}
+		h.sim.AddEvents(work, work, event)
+		if !event.Cancelled {
+			starts[id] = start
+		}
+	}
+	for index := 0; index < 50; index++ {
+		start := utc(8, 0, 0).Add(time.Duration(index) * time.Hour)
+		id := "busy" + strconv.Itoa(index)
+		starts[id] = start
+		h.sim.AddEvents(work, "busy@group.calendar.google.com", calendarsim.Event{ID: id, Summary: strings.Repeat("Busy ", 40), Start: start, End: start.Add(time.Minute)})
+	}
+	seen, _ := pageThrough(t, h, map[string]any{"start": "2026-10-05", "end": "2026-10-20"}, starts)
+	requireAllSeen(t, seen, starts)
+}
+
+func TestAnEmptyFirstPageWithATokenIsReadOn(t *testing.T) {
+	h := newHarness(t, work)
+	h.sim.AddCalendar(work, calendarsim.Calendar{ID: work, Summary: "Work", EmptyLeadingPages: 2})
+	h.sim.AddEvents(work, work, calendarsim.Event{ID: "late", Summary: "Found it", Start: utc(5, 8, 0), End: utc(5, 9, 0)})
+	result := h.events(map[string]any{"start": "2026-10-05", "end": "2026-10-06"})
+	requireText(t, result, false, "1 events", "Found it")
+	if strings.Contains(result.Text, "call again") {
+		t.Fatalf("a finished listing offered a continuation:\n%s", result.Text)
+	}
+}
+
+func TestACalendarThatStaysEmptyIsReportedWithoutHidingTheOthers(t *testing.T) {
+	h := newHarness(t, work)
+	h.sim.AddCalendar(work, calendarsim.Calendar{ID: work, Summary: "Work"})
+	h.sim.AddCalendar(work, calendarsim.Calendar{ID: "stuck@group.calendar.google.com", Summary: "Stuck", EmptyLeadingPages: 10})
+	h.sim.AddEvents(work, work, calendarsim.Event{ID: "w", Summary: "Planning", Start: utc(5, 8, 0), End: utc(5, 9, 0)})
+	h.sim.AddEvents(work, "stuck@group.calendar.google.com", calendarsim.Event{ID: "late", Summary: "Never reached", Start: utc(5, 8, 0), End: utc(5, 9, 0)})
+	result := h.events(map[string]any{"start": "2026-10-05", "end": "2026-10-06"})
+	requireText(t, result, false, "1 events", "Planning", "Could not read the calendar Stuck", "empty pages")
+	if strings.Contains(result.Text, "call again") || strings.Contains(result.Text, "narrow the range") {
+		t.Fatalf("the stuck calendar held back the listing:\n%s", result.Text)
+	}
+	if requests := h.sim.Requests(); len(requests) != 2+maximumEmptyPages {
+		t.Fatalf("%d requests, want the calendar list, one page of Work, and %d pages of Stuck", len(requests), maximumEmptyPages)
+	}
+}
+
+func TestEveryCalendarFailingStillFitsTheCap(t *testing.T) {
+	h := newHarness(t, work)
+	for index := 0; index < 80; index++ {
+		h.sim.AddCalendar(work, calendarsim.Calendar{ID: "shared" + strconv.Itoa(index) + "@group.calendar.google.com", Summary: strings.Repeat("Shared ", 100), Forbidden: true})
+	}
+	result := h.events(map[string]any{"start": "2026-10-05", "end": "2026-10-05"})
+	requireText(t, result, true, "Could not read the calendar ", "more calendars or accounts could not be read")
+	if limit := eventsResultCap(t); len(result.Text) > limit {
+		t.Fatalf("result of %d bytes passes the %d byte cap", len(result.Text), limit)
+	}
+}
+
+func TestALongRangeIsReadForItsFirstDaysAndSaysWhereToContinue(t *testing.T) {
+	h := newHarness(t, work)
+	h.sim.AddCalendar(work, calendarsim.Calendar{ID: work, Summary: "Work"})
+	h.sim.AddEvents(work, work,
+		calendarsim.Event{ID: "october", Summary: "In October", Start: utc(5, 8, 0), End: utc(5, 9, 0)},
+		calendarsim.Event{ID: "december", Summary: "In December", Start: time.Date(2026, 12, 10, 8, 0, 0, 0, time.UTC), End: time.Date(2026, 12, 10, 9, 0, 0, 0, time.UTC)},
+	)
+	result := h.events(map[string]any{"start": "2026-10-01", "end": "2026-12-30"})
+	requireText(t, result, false, "1 events", "In October", "between 2026-10-01 00:00 and 2026-12-02 00:00", "call again with start 2026-12-02T00:00:00+01:00 ")
+	if strings.Contains(result.Text, "In December") {
+		t.Fatalf("an event past the 62 days was listed:\n%s", result.Text)
+	}
+	result = h.events(map[string]any{"start": "2026-12-02T00:00:00+01:00", "end": "2026-12-30"})
+	requireText(t, result, false, "1 events", "In December")
+}
+
+func TestManyProblemsStillFitTheCap(t *testing.T) {
+	h := newHarness(t, work)
+	h.sim.AddCalendar(work, calendarsim.Calendar{ID: work, Summary: "Work"})
+	h.sim.AddEvents(work, work, calendarsim.Event{ID: "w", Summary: "Planning", Start: utc(5, 8, 0), End: utc(5, 9, 0)})
+	for index := 0; index < 80; index++ {
+		h.sim.AddCalendar(work, calendarsim.Calendar{ID: "shared" + strconv.Itoa(index) + "@group.calendar.google.com", Summary: strings.Repeat("Shared ", 100), Forbidden: true})
+	}
+	result := h.events(map[string]any{"start": "2026-10-05", "end": "2026-10-05"})
+	requireText(t, result, false, "1 events", "Planning", "Could not read the calendar ", "more calendars or accounts could not be read")
+	if limit := eventsResultCap(t); len(result.Text) > limit {
+		t.Fatalf("result of %d bytes passes the %d byte cap", len(result.Text), limit)
+	}
+}
+
+func TestMoreEventsAtOneInstantThanFitGetTheNarrowAdvice(t *testing.T) {
+	h := newHarness(t, work)
+	h.sim.AddCalendar(work, calendarsim.Calendar{ID: work, Summary: "Work"})
+	for index := 0; index < maximumEvents+50; index++ {
+		h.sim.AddEvents(work, work, calendarsim.Event{ID: "same" + strconv.Itoa(index), Summary: "Same moment", Start: utc(5, 6, 0), End: utc(5, 7, 0)})
+	}
+	result := h.events(map[string]any{"start": "2026-10-05T08:00:00+02:00", "end": "2026-10-06"})
+	requireText(t, result, false, "narrow the range or add a query")
+	if strings.Contains(result.Text, "call again") {
+		t.Fatalf("a continuation that would loop was offered:\n%s", result.Text)
+	}
+	if len(result.Text) > eventsResultCap(t) {
+		t.Fatalf("result of %d bytes passes the cap", len(result.Text))
+	}
+
+	result = h.events(map[string]any{"start": "2026-10-05", "end": "2026-10-06"})
+	requireText(t, result, false, "No events", "call again with start 2026-10-05T08:00:00+02:00 ")
 }
 
 func TestAFailingAccountIsReportedWithoutFailingTheCall(t *testing.T) {

@@ -15,6 +15,9 @@ const (
 	maximumDescriptionBytes = 8 << 10
 	maximumTitleRunes       = 300
 	maximumAttendees        = 50
+	headerReserveBytes      = 2 << 10
+	maximumProblemBytes     = 4 << 10
+	moreProblemsBytes       = 100
 	dayLayout               = "Mon 2006-01-02"
 	clockLayout             = "15:04"
 )
@@ -48,29 +51,83 @@ func (s *Service) bounds(event Event) (start, end time.Time, allDay, ok bool) {
 	return from, to, true, true
 }
 
-func renderEvents(events []listed, start, end time.Time, location *time.Location, query string, truncated bool, problems []string) string {
-	var builder strings.Builder
+// renderEvents lists the events that start before the continuation and fit the byte budget; the
+// first one that does not fit, or the 101st, moves the continuation back to its start, and
+// events starting at or after it are dropped. The header is written last, once the cut is known.
+func renderEvents(events []listed, start, end time.Time, location *time.Location, query string, more continuation, problems []string) string {
+	problems = boundProblems(problems)
+	budget := eventsResultBytes - headerReserveBytes - len(fmt.Sprintf("%q", query))
+	for _, problem := range problems {
+		budget -= len(problem) + 1
+	}
+	var bodies []string
+	used := 0
+	for index, entry := range events {
+		if !more.allows(entry.start) {
+			break
+		}
+		var body strings.Builder
+		writeEvent(&body, entry, location)
+		if index >= maximumEvents || (index > 0 && used+body.Len()+1 > budget) {
+			more.cutAt(entry.start)
+			break
+		}
+		used += body.Len() + 1
+		bodies = append(bodies, body.String())
+	}
+	shown := 0
+	for shown < len(bodies) && more.allows(events[shown].start) {
+		shown++
+	}
+	bodies = bodies[:shown]
+
+	continues := more.needed && more.at.After(start)
+	if continues {
+		end = more.at
+	}
 	span := fmt.Sprintf("between %s and %s", start.In(location).Format("2006-01-02 15:04"), end.In(location).Format("2006-01-02 15:04"))
 	if query != "" {
 		span += fmt.Sprintf(" matching %q", query)
 	}
-	if len(events) == 0 {
-		fmt.Fprintf(&builder, "No events %s.", span)
+	var builder strings.Builder
+	if shown == 0 {
+		fmt.Fprintf(&builder, "No events %s", span)
 	} else {
-		fmt.Fprintf(&builder, "%d events %s (times in %s)", len(events), span, location)
-		if truncated {
-			fmt.Fprintf(&builder, "; more exist than the %d shown, so narrow the range or add a query to see others", maximumEvents)
-		}
+		fmt.Fprintf(&builder, "%d events %s (times in %s)", shown, span, location)
+	}
+	switch {
+	case continues:
+		fmt.Fprintf(&builder, "; the listing stops there, so call again with start %s and the same end, query, and account to see the rest (events already listed can appear again)", more.at.In(location).Format(time.RFC3339))
+	case more.needed:
+		builder.WriteString("; more events exist than one result can hold, so narrow the range or add a query to see others")
+	}
+	if shown == 0 {
+		builder.WriteString(".")
+	} else {
 		builder.WriteString(":\n")
-		for _, entry := range events {
-			builder.WriteString("\n")
-			writeEvent(&builder, entry, location)
-		}
+	}
+	for _, body := range bodies {
+		builder.WriteString("\n")
+		builder.WriteString(body)
 	}
 	for _, problem := range problems {
 		fmt.Fprintf(&builder, "\n%s", problem)
 	}
 	return builder.String()
+}
+
+// boundProblems keeps the problem lines within maximumProblemBytes and says how many were left out.
+func boundProblems(problems []string) []string {
+	var kept []string
+	used := 0
+	for index, problem := range problems {
+		if used+len(problem)+1 > maximumProblemBytes-moreProblemsBytes {
+			return append(kept, fmt.Sprintf("and %d more calendars or accounts could not be read", len(problems)-index))
+		}
+		used += len(problem) + 1
+		kept = append(kept, problem)
+	}
+	return kept
 }
 
 func writeEvent(builder *strings.Builder, entry listed, location *time.Location) {

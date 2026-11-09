@@ -30,6 +30,14 @@ type Calendar struct {
 	// Forbidden is a calendar still listed whose events Google refuses with 403, as a shared
 	// calendar whose owner withdrew the share is.
 	Forbidden bool
+	// PageSize caps the events on a page below what the request asks for, so a calendar can
+	// answer with a short page that still carries a next-page token.
+	PageSize int
+	// EmptyLeadingPages is how many pages at the start of a listing come back without events but
+	// with a next-page token, as Google may answer.
+	EmptyLeadingPages int
+	// ListsCancelled makes lists include cancelled events, as Google does for some queries.
+	ListsCancelled bool
 }
 
 type Attendee struct {
@@ -253,7 +261,7 @@ func (s *Simulator) listEvents(query url.Values, data *calendarData) (int, any) 
 	text := strings.ToLower(query.Get("q"))
 	var matches []Event
 	for _, event := range data.events {
-		if event.Cancelled || !event.End.After(min) || !event.Start.Before(max) {
+		if (event.Cancelled && !data.calendar.ListsCancelled) || !event.End.After(min) || !event.Start.Before(max) {
 			continue
 		}
 		haystack := strings.ToLower(event.Summary + " " + event.Description + " " + event.Location)
@@ -264,12 +272,29 @@ func (s *Simulator) listEvents(query url.Values, data *calendarData) (int, any) 
 	}
 	sort.SliceStable(matches, func(i, j int) bool { return matches[i].Start.Before(matches[j].Start) })
 
-	offset, _ := strconv.Atoi(strings.TrimPrefix(query.Get("pageToken"), "page-"))
 	limit, _ := strconv.Atoi(query.Get("maxResults"))
 	if limit <= 0 || limit > 2500 {
 		limit = 250
 	}
+	if size := data.calendar.PageSize; size > 0 && size < limit {
+		limit = size
+	}
 	body := map[string]any{"kind": "calendar#events"}
+	token := query.Get("pageToken")
+	emptyPages := 0
+	if token == "" {
+		token = "empty-0"
+	}
+	if strings.HasPrefix(token, "empty-") {
+		emptyPages, _ = strconv.Atoi(strings.TrimPrefix(token, "empty-"))
+		if emptyPages < data.calendar.EmptyLeadingPages {
+			body["nextPageToken"] = "empty-" + strconv.Itoa(emptyPages+1)
+			body["items"] = []map[string]any{}
+			return http.StatusOK, body
+		}
+		token = "page-0"
+	}
+	offset, _ := strconv.Atoi(strings.TrimPrefix(token, "page-"))
 	if offset > len(matches) {
 		offset = len(matches)
 	}

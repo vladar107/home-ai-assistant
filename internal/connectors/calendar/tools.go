@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/google"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
@@ -20,8 +21,10 @@ const (
 	maximumEvents     = 100
 	maximumSpanDays   = 62
 	maximumQueryRunes = 200
+	maximumEmptyPages = 3
 	maximumIDBytes    = 1024
 	eventsTimeout     = 40 * time.Second
+	eventsResultBytes = 16 << 10
 
 	NotConnectedText = "Google Calendar is not connected for this user, switched off, or Google no longer accepts the connection; they can manage it in /settings."
 	unavailableText  = "Google Calendar is unavailable right now."
@@ -34,16 +37,17 @@ const guidance = "Google Calendar: this user's own calendars, read-only. calenda
 
 var definitions = []tools.Definition{
 	{
-		Name:        toolEvents,
-		ThirdParty:  true,
-		Description: "List this user's calendar events between two moments, across their calendars and Google accounts, with account, calendar, event id, title, times, location, and their own response.",
-		Risk:        tools.RiskRead,
-		Activity:    tools.ActivityCalendar,
-		SourceLabel: tools.ArgumentLabel("query", "start", "end"),
-		Timeout:     eventsTimeout,
+		Name:           toolEvents,
+		ThirdParty:     true,
+		Description:    "List this user's calendar events between two moments, across their calendars and Google accounts, with account, calendar, event id, title, times, location, and their own response.",
+		Risk:           tools.RiskRead,
+		Activity:       tools.ActivityCalendar,
+		SourceLabel:    tools.ArgumentLabel("query", "start", "end"),
+		Timeout:        eventsTimeout,
+		MaxResultBytes: eventsResultBytes,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"start":{"type":"string","description":"Start of the range: an RFC 3339 date-time, or a date YYYY-MM-DD meaning the start of that day in the user's time zone."},` +
-			`"end":{"type":"string","description":"End of the range: an RFC 3339 date-time, which is exclusive, or a date YYYY-MM-DD, which is inclusive and means the end of that day in the user's time zone. At most 62 days after start."},` +
+			`"end":{"type":"string","description":"End of the range: an RFC 3339 date-time, which is exclusive, or a date YYYY-MM-DD, which is inclusive and means the end of that day in the user's time zone. A range longer than 62 days is read for its first 62 days, and the result says where to continue."},` +
 			`"query":{"type":"string","description":"Optional free text to match in event titles, descriptions, locations, and attendees."},` +
 			`"account":{"type":"string","description":"Optional Google account address to read only that account; by default every connected account is read."}},` +
 			`"required":["start","end"],"additionalProperties":false}`),
@@ -121,8 +125,10 @@ func (s *Service) events(ctx context.Context, principalID string, raw json.RawMe
 	if !end.After(start) {
 		return tools.Result{Text: "end must be after start", IsError: true}
 	}
-	if end.After(start.AddDate(0, 0, maximumSpanDays)) {
-		return tools.Result{Text: fmt.Sprintf("the range can span at most %d days", maximumSpanDays), IsError: true}
+	var more continuation
+	if limit := start.AddDate(0, 0, maximumSpanDays); end.After(limit) {
+		end = limit
+		more.cutAt(limit)
 	}
 	query := strings.TrimSpace(arguments.Query)
 	if len([]rune(query)) > maximumQueryRunes {
@@ -147,7 +153,6 @@ func (s *Service) events(ctx context.Context, principalID string, raw json.RawMe
 	var all []listed
 	var problems []string
 	failed := 0
-	truncated := false
 	for _, account := range accounts {
 		read, err := s.accountEvents(ctx, principalID, account, start, end, query)
 		if err != nil {
@@ -158,16 +163,18 @@ func (s *Service) events(ctx context.Context, principalID string, raw json.RawMe
 		}
 		for _, failure := range read.failures {
 			s.logFailure(ctx, principalID, toolEvents, failure.err)
-			problems = append(problems, fmt.Sprintf("Could not read the calendar %s of %s: %s", failure.calendar.Name(), account.Address, describe(failure.err)))
+			problems = append(problems, fmt.Sprintf("Could not read the calendar %s of %s: %s", clip.Runes(failure.calendar.Name(), maximumTitleRunes), account.Address, describe(failure.err)))
 		}
 		if len(read.failures) > 0 && read.calendarsRead == 0 {
 			failed++
 		}
 		all = append(all, read.events...)
-		truncated = truncated || read.truncated
+		if read.more.needed {
+			more.cutAt(read.more.at)
+		}
 	}
 	if failed == len(accounts) {
-		return tools.Result{Text: strings.Join(problems, "\n"), IsError: true}
+		return tools.Result{Text: strings.Join(boundProblems(problems), "\n"), IsError: true}
 	}
 	sort.SliceStable(all, func(i, j int) bool {
 		if !all[i].start.Equal(all[j].start) {
@@ -178,17 +185,31 @@ func (s *Service) events(ctx context.Context, principalID string, raw json.RawMe
 		}
 		return all[i].calendar.ID < all[j].calendar.ID
 	})
-	if len(all) > maximumEvents {
-		all, truncated = all[:maximumEvents], true
-	}
-	return tools.Result{Text: renderEvents(all, start, end, s.location, query, truncated, problems)}
+	return tools.Result{Text: renderEvents(all, start, end, s.location, query, more, problems)}
 }
 
-// accountRead is what one account gave: its events, whether any calendar had more, how many
-// calendars were read, and the calendars that could not be.
+// continuation is the moment a listing stops at because more exists beyond it. Events starting
+// at or after it are left out, so a listing is complete for the span before it.
+type continuation struct {
+	at     time.Time
+	needed bool
+}
+
+func (c *continuation) cutAt(moment time.Time) {
+	if !c.needed || moment.Before(c.at) {
+		c.at, c.needed = moment, true
+	}
+}
+
+func (c continuation) allows(moment time.Time) bool {
+	return !c.needed || moment.Before(c.at)
+}
+
+// accountRead is what one account gave: its events, where its calendars that had more stop,
+// how many calendars were read, and the calendars that could not be.
 type accountRead struct {
 	events        []listed
-	truncated     bool
+	more          continuation
 	calendarsRead int
 	failures      []calendarFailure
 }
@@ -199,9 +220,12 @@ type calendarFailure struct {
 }
 
 // accountEvents reads the selected calendars of one account. Each calendar's page holds its
-// first events by start, so the first page of every calendar is enough to find the overall first
-// maximumEvents. A calendar that cannot be read is recorded and the others are still read; a
-// rejected token fails the whole account, so it can be refreshed and read again.
+// first events by start, so the first page of every calendar is enough to list the span before
+// the earliest point where a calendar has more; a calendar answering with an empty page and a
+// next-page token is read on, up to maximumEmptyPages pages, and one still empty after them is
+// reported like a calendar that cannot be read, so it does not hold back the others' events. A
+// calendar that cannot be read is recorded and the others are still read; a rejected token fails
+// the whole account, so it can be refreshed and read again.
 func (s *Service) accountEvents(ctx context.Context, principalID string, account google.Account, start, end time.Time, query string) (accountRead, error) {
 	var read accountRead
 	err := s.withAccess(ctx, principalID, account, func(access string) error {
@@ -214,9 +238,19 @@ func (s *Service) accountEvents(ctx context.Context, principalID string, account
 			if !calendar.Selected || calendar.AccessRole == "freeBusyReader" {
 				continue
 			}
-			events, next, err := s.client.ListEvents(ctx, access, calendar.ID, EventsQuery{
-				Min: start, Max: end, TimeZone: s.location.String(), Text: query, Limit: maximumEvents,
-			})
+			request := EventsQuery{Min: start, Max: end, TimeZone: s.location.String(), Text: query, Limit: maximumEvents}
+			var events []Event
+			var next string
+			var err error
+			for page := 0; page < maximumEmptyPages; page++ {
+				if events, next, err = s.client.ListEvents(ctx, access, calendar.ID, request); err != nil || len(events) > 0 || next == "" {
+					break
+				}
+				request.PageToken = next
+			}
+			if err == nil && len(events) == 0 && next != "" {
+				err = errOnlyEmptyPages
+			}
 			if err != nil {
 				if errorClass(err) == google.ErrorUnauthorized {
 					return err
@@ -225,7 +259,9 @@ func (s *Service) accountEvents(ctx context.Context, principalID string, account
 				continue
 			}
 			read.calendarsRead++
-			read.truncated = read.truncated || next != ""
+			if next != "" {
+				read.more.cutAt(s.lastStart(events, start))
+			}
 			for _, event := range events {
 				if event.Status == "cancelled" {
 					continue
@@ -240,6 +276,26 @@ func (s *Service) accountEvents(ctx context.Context, principalID string, account
 		return nil
 	})
 	return read, err
+}
+
+// lastStart is the start of the last event on a raw page whose start can be read, cancelled
+// events included; with none, it is the fallback.
+func (s *Service) lastStart(events []Event, fallback time.Time) time.Time {
+	for index := len(events) - 1; index >= 0; index-- {
+		if from, ok := s.startOf(events[index]); ok {
+			return from
+		}
+	}
+	return fallback
+}
+
+func (s *Service) startOf(event Event) (time.Time, bool) {
+	if event.Start.DateTime != "" {
+		from, err := time.Parse(time.RFC3339, event.Start.DateTime)
+		return from, err == nil
+	}
+	from, err := time.ParseInLocation(time.DateOnly, event.Start.Date, s.location)
+	return from, err == nil
 }
 
 func (s *Service) readEvent(ctx context.Context, principalID string, raw json.RawMessage) tools.Result {
@@ -345,10 +401,16 @@ func (s *Service) failure(ctx context.Context, principalID, tool string, err err
 	return tools.Result{Text: describe(err), IsError: true}
 }
 
+// errOnlyEmptyPages marks a calendar that kept answering with empty pages that promise more.
+var errOnlyEmptyPages = errors.New("calendar returned only empty pages")
+
 // describe is what the model is told about a failure; it never carries Google's own text.
 func describe(err error) string {
 	if errors.Is(err, google.ErrNotConnected) {
 		return NotConnectedText
+	}
+	if errors.Is(err, errOnlyEmptyPages) {
+		return "Google Calendar kept answering with empty pages, so it is left out of this listing."
 	}
 	switch errorClass(err) {
 	case google.ErrorInvalid:
