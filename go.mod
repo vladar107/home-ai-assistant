@@ -2,7 +2,7 @@ module github.com/vladar107/home-ai-assistant
 
 go 1.27.0
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 require (
 	github.com/ledongthuc/pdf v0.0.0-20260907135840-6c8c28e0e8a0
