@@ -161,9 +161,9 @@ func TestActActsInACleanTurnAndTheDoneMessagePrecedesTheBundle(t *testing.T) {
 	if err != nil || !strings.Contains(again, "already made in this turn") || book.executions != 1 {
 		t.Fatalf("repeated result = %q %v after %d executions, want one action", again, err, book.executions)
 	}
-	withdrawn, done, err := h.approvals.Withdraw(call.ctx, "alice", nil, true)
-	if err != nil || done || !strings.Contains(withdrawn, "Already done without asking") || !strings.Contains(withdrawn, "Save the note groceries") {
-		t.Fatalf("withdraw = %q %v %v, want the direct action named as done", withdrawn, done, err)
+	withdrawn, refused, err := h.approvals.Withdraw(call.ctx, "alice", nil, true)
+	if err != nil || !refused || !strings.Contains(withdrawn, "Already done without asking") || !strings.Contains(withdrawn, "Save the note groceries") {
+		t.Fatalf("withdraw = %q %v %v, want the direct action named as refused", withdrawn, refused, err)
 	}
 
 	if result := executeTool(t, h.ctx, call.request.Tools, "outside_read", `{}`); result.IsError {

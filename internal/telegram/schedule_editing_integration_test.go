@@ -301,3 +301,46 @@ func TestModelWithdrawsPartOfABatch(t *testing.T) {
 		t.Fatalf("jobs after withdrawing all = %d, want 2", count)
 	}
 }
+
+// A rejected proposal is no longer waiting, so the model learns that from the notice of the next
+// turn, and withdrawing it reports nothing left to withdraw as a result, not as a failure.
+func TestWithdrawingARejectedProposalIsNotAFailure(t *testing.T) {
+	t.Parallel()
+	runtime := newControlledRuntime()
+	clock := newTestClock(t, mondayMorning)
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, providers: []tools.Provider{outsideProvider{}}})
+	h.provision("alice", "account-alice")
+	h.start()
+
+	h.push(textUpdate(1, 101, "set up a weekly report"))
+	chat := receive(t, h.ctx, runtime.calls)
+	readOutside(t, chat)
+	if proposed := toolCaller(t, chat)("schedule_propose", `{"name":"Report A","cron":"0 9 * * 1","prompt":"Summarise Report A."}`); proposed.IsError {
+		t.Fatalf("schedule_propose = %+v", proposed)
+	}
+	chat.answer <- agentruntime.RunResult{Response: "proposed"}
+	h.wantReply(101, 1, "proposed")
+	h.waitState(1, "delivered")
+	proposal := h.nextMessage()
+	h.waitMessageRecorded(proposal.messageID)
+
+	_, reject := approvalButtons(t, proposal.keyboard)
+	h.push(callbackUpdate(2, 101, proposal.messageID, reject))
+	h.wantAnswer(2)
+	if edit := h.nextEdit(); edit.messageID != proposal.messageID || !strings.Contains(edit.text, "Rejected; nothing was written.") {
+		t.Fatalf("proposal after reject = %+v", edit)
+	}
+
+	h.push(textUpdate(3, 101, "forget the report"))
+	chat = receive(t, h.ctx, runtime.calls)
+	if !strings.Contains(chat.request.Message, "no longer waiting") {
+		t.Fatalf("turn after a rejected proposal = %q, want the notice that it is no longer waiting", chat.request.Message)
+	}
+	withdrawn := toolCaller(t, chat)("proposal_withdraw", `{"items":[1]}`)
+	if withdrawn.IsError || !strings.Contains(withdrawn.Text, "nothing was withdrawn") {
+		t.Fatalf("proposal_withdraw after a rejection = %+v, want a result that is not an error", withdrawn)
+	}
+	chat.answer <- agentruntime.RunResult{Response: "understood"}
+	h.wantReply(101, 3, "understood")
+	h.waitState(3, "delivered")
+}

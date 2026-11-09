@@ -30,7 +30,7 @@ var definition = tools.Definition{
 // Withdrawer is the approval service as the tool sees it.
 type Withdrawer interface {
 	// Withdraw withdraws the numbered pending items of the principal's waiting bundle, or all of
-	// them, returning the text for the model and whether anything was withdrawn.
+	// them, returning the text for the model and whether the request was refused.
 	Withdraw(ctx context.Context, principalID string, items []int, all bool) (string, bool, error)
 }
 
@@ -62,9 +62,9 @@ func (p Provider) Execute(ctx context.Context, principalID string, call tools.Ca
 	if given.All == (len(given.Items) > 0) {
 		return tools.Result{Text: "Give either items or all; nothing was withdrawn.", IsError: true}, nil
 	}
-	text, withdrawn, err := p.Withdrawer.Withdraw(ctx, principalID, given.Items, given.All)
+	text, refused, err := p.Withdrawer.Withdraw(ctx, principalID, given.Items, given.All)
 	if err != nil {
 		return tools.Result{}, err
 	}
-	return tools.Result{Text: text, IsError: !withdrawn}, nil
+	return tools.Result{Text: text, IsError: refused}, nil
 }

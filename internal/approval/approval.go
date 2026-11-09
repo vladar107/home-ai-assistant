@@ -979,6 +979,7 @@ func (s *Service) Press(ctx context.Context, principalID, action, approvalID str
 		if err := s.finishPending(ctx, bundle, StatusRejected, ""); err != nil {
 			return Pressed{}, err
 		}
+		s.rememberNotice(bundle)
 		return Pressed{Text: bundleText(bundle), Owned: true}, nil
 	case ActionConfirm:
 		confirmed, err := s.repository.ConfirmBundle(ctx, record.BundleID, principalID, s.now())
@@ -1218,9 +1219,9 @@ func noticeText(record Record) string {
 	case StatusExecuted:
 		return strings.TrimSpace("The user confirmed your " + record.Tool + " proposal and it was executed. " + record.Outcome)
 	case StatusRejected:
-		return "The user rejected your " + record.Tool + " proposal; nothing was written."
+		return "The user rejected your " + record.Tool + " proposal; nothing was written, and it is no longer waiting."
 	case StatusExpired:
-		return "Your " + record.Tool + " proposal expired without an answer; nothing was written."
+		return "Your " + record.Tool + " proposal expired without an answer; nothing was written, and it is no longer waiting."
 	case StatusFailed:
 		if record.Outcome != "" {
 			return "Your " + record.Tool + " proposal was confirmed but failed: " + record.Outcome

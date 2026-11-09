@@ -15,7 +15,9 @@ const withdrawnLabelRunes = 80
 // Withdraw moves the chosen pending records of the principal's waiting bundle, numbered as the user
 // sees them, or all of them, to rejected with ReasonWithdrawn, and updates the messages that show
 // them. Every number is checked before anything changes, so a bad one withdraws nothing. It
-// returns the text for the model and whether anything was withdrawn.
+// returns the text for the model and whether the request was refused, that is, nothing was
+// withdrawn although the model asked for something. Nothing waiting is not a refusal, because the
+// proposal is already resolved, unless the turn made direct actions that cannot be withdrawn.
 func (s *Service) Withdraw(ctx context.Context, principalID string, items []int, all bool) (string, bool, error) {
 	proposing := s.proposalLock(principalID)
 	proposing.Lock()
@@ -28,9 +30,9 @@ func (s *Service) Withdraw(ctx context.Context, principalID string, items []int,
 	// A bundle offered outside a chat turn holds no proposal of the model's to withdraw.
 	if len(pending) == 0 || offered(pending) {
 		if direct != "" {
-			return "No proposal of yours is waiting for the user's confirmation; nothing was withdrawn. " + direct, false, nil
+			return "No proposal of yours is waiting for the user's confirmation; nothing was withdrawn. " + direct, true, nil
 		}
-		return "No proposal of yours is waiting for the user's confirmation; nothing was withdrawn.", false, nil
+		return "No proposal of yours is waiting for the user's confirmation; nothing was withdrawn. A proposal the user already confirmed has been carried out and is taken back with the opposite change.", false, nil
 	}
 	bundle, err := s.repository.LoadBundle(ctx, pending[0].BundleID)
 	if err != nil {
@@ -48,10 +50,10 @@ func (s *Service) Withdraw(ctx context.Context, principalID string, items []int,
 	}
 	for _, number := range items {
 		if number < 1 || number > len(bundle) {
-			return fmt.Sprintf("There is no item %d; the batch has %d. Nothing was withdrawn.", number, len(bundle)), false, nil
+			return fmt.Sprintf("There is no item %d; the batch has %d. Nothing was withdrawn.", number, len(bundle)), true, nil
 		}
 		if record := bundle[number-1]; record.Status != StatusPending {
-			return fmt.Sprintf("Item %d is no longer waiting (%s), so it cannot be withdrawn. Nothing was withdrawn.", number, statusLine(record, bundleOutcomeRunes)), false, nil
+			return fmt.Sprintf("Item %d is no longer waiting (%s), so it cannot be withdrawn. Nothing was withdrawn.", number, statusLine(record, bundleOutcomeRunes)), true, nil
 		}
 		if !slices.Contains(chosen, number-1) {
 			chosen = append(chosen, number-1)
@@ -108,7 +110,7 @@ func (s *Service) Withdraw(ctx context.Context, principalID string, items []int,
 	if direct != "" {
 		text.WriteString(" " + direct)
 	}
-	return text.String(), len(withdrawn) > 0, nil
+	return text.String(), len(withdrawn) == 0, nil
 }
 
 // directNote names the actions this turn already made without asking, which cannot be withdrawn.
