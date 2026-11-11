@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+host=${1:-home-nas}
+[[ $host =~ ^[A-Za-z0-9][A-Za-z0-9._@-]*$ ]] || { echo "invalid SSH host or alias: $host" >&2; exit 2; }
+
+ssh -tt "$host" 'set -eu
+printf "architecture: "
+uname -m
+printf "docker server: "
+sudo docker version --format "{{.Server.Version}}"
+printf "docker compose: "
+sudo docker compose version --short
+printf "docker buildx: "
+sudo docker buildx version
+printf "home-mcp network: "
+sudo docker network inspect home-mcp --format "internal={{.Internal}}" 2>/dev/null || echo absent
+'

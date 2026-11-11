@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() { echo "usage: $0 [ssh-host] [env-file]" >&2; exit 2; }
+host=${1:-home-nas}
+env_file=${2:-.env.nas}
+[[ $host =~ ^[A-Za-z0-9][A-Za-z0-9._@-]*$ ]] || usage
+repo_root=$(git rev-parse --show-toplevel)
+[[ $env_file = /* ]] || env_file=$repo_root/$env_file
+[[ -f $env_file ]] || { echo "NAS environment file not found: $env_file" >&2; exit 2; }
+# shellcheck disable=SC1090
+source "$env_file"
+[[ ${MCP_ROOT:-} =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "MCP_ROOT must be an absolute NAS path" >&2; exit 2; }
+
+# The client check runs in a throwaway container on home-mcp, the path a real client takes; the
+# probes run inside the server container, to show what the third-party code can reach.
+remote_command=$(cat <<REMOTE
+set -Eeuo pipefail
+cd '$MCP_ROOT/deploy'
+sudo docker compose ps
+image=\$(sudo docker inspect --format '{{.Config.Image}}' "\$(sudo docker compose ps -q marktplaats-server)")
+echo '--- client path'
+sudo docker run --rm --network home-mcp --read-only --cap-drop ALL --user 1000:1000 "\$image" \
+  python -c "\$(cat smoke/client.py)" http://marktplaats:8000/mcp
+echo '--- isolation'
+sudo docker compose exec -T marktplaats-server \
+  python -c "\$(cat smoke/probes.py)" marktplaats-egress 8888 www.marktplaats.nl
+REMOTE
+)
+ssh -tt "$host" "$remote_command"

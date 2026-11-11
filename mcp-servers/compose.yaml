@@ -1,0 +1,102 @@
+name: home-mcp-servers
+
+# Each MCP server is three containers. The server runs third-party code on an internal network of
+# its own, with no route to the LAN or the internet. Its egress proxy is its only way out and
+# allows only the hosts in its filter. Its ingress relays the one port clients use, so the server
+# never shares a network with a client.
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  init: true
+  platform: linux/amd64
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  logging:
+    driver: local
+    options:
+      max-size: 10m
+      max-file: "3"
+
+x-proxy: &proxy
+  <<: *service-defaults
+  user: "65534:65534"
+  mem_limit: 32m
+  cpus: 0.25
+  pids_limit: 64
+
+services:
+  marktplaats-server:
+    <<: *service-defaults
+    image: home-mcp-servers/marktplaats:${REVISION:?set REVISION}
+    build:
+      context: ./marktplaats
+    user: "1000:1000"
+    environment:
+      MCP_TRANSPORT: http
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "8000"
+      # The name clients call the ingress by; the server refuses any other Host header.
+      MCP_ALLOWED_HOSTS: marktplaats
+      # Only HTTPS goes through the proxy, so the health check stays local.
+      HTTPS_PROXY: http://marktplaats-egress:8888
+      MARKTPLAATS_MIN_INTERVAL_MS: "500"
+      FASTMCP_CHECK_FOR_UPDATES: "off"
+      HOME: /tmp
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)"
+      interval: 60s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    networks:
+      - marktplaats
+    depends_on:
+      - marktplaats-egress
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
+
+  marktplaats-egress:
+    <<: *proxy
+    image: home-mcp-servers/marktplaats-egress:${REVISION:?set REVISION}
+    build:
+      context: .
+      dockerfile: proxy/Dockerfile
+      target: egress
+      args:
+        SERVER: marktplaats
+    networks:
+      - marktplaats
+      - outbound
+
+  marktplaats:
+    <<: *proxy
+    image: home-mcp-servers/relay:${REVISION:?set REVISION}
+    build:
+      context: .
+      dockerfile: proxy/Dockerfile
+      target: relay
+    command: ["socat", "TCP-LISTEN:8000,fork,reuseaddr", "TCP:marktplaats-server:8000"]
+    networks:
+      - marktplaats
+      - home-mcp
+    depends_on:
+      - marktplaats-server
+
+networks:
+  # Clients such as Home Agent join this network and call http://<server>:8000/mcp.
+  # scripts/deploy creates it as an internal network.
+  home-mcp:
+    external: true
+  marktplaats:
+    internal: true
+  outbound: {}

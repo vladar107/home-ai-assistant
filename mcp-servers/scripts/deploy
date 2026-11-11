@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() { echo "usage: $0 [ssh-host] [env-file]" >&2; exit 2; }
+host=${1:-home-nas}
+env_file=${2:-.env.nas}
+[[ $host =~ ^[A-Za-z0-9][A-Za-z0-9._@-]*$ ]] || usage
+repo_root=$(git rev-parse --show-toplevel)
+[[ $env_file = /* ]] || env_file=$repo_root/$env_file
+[[ -f $env_file ]] || { echo "NAS environment file not found: $env_file" >&2; exit 2; }
+# shellcheck disable=SC1090
+source "$env_file"
+[[ ${MCP_ROOT:-} =~ ^/[A-Za-z0-9._/-]+$ && $MCP_ROOT != / && $MCP_ROOT != *'/../'* && $MCP_ROOT != */.. ]] || {
+  echo "MCP_ROOT must be a safe absolute NAS path without parent traversal" >&2; exit 2;
+}
+[[ $MCP_ROOT != /volume1/@docker && $MCP_ROOT != /volume1/@docker/* ]] || {
+  echo "MCP_ROOT must not use Docker's internal data directory: $MCP_ROOT" >&2; exit 2;
+}
+
+inputs=(compose.yaml .dockerignore proxy marktplaats smoke)
+for path in "${inputs[@]}"; do
+  [[ -z $(git -C "$repo_root" status --porcelain --untracked-files=all -- "$path") ]] || {
+    echo "deployment input has uncommitted changes: $path" >&2; exit 2;
+  }
+done
+
+revision=$(git -C "$repo_root" rev-parse HEAD)
+deploy_dir=$MCP_ROOT/deploy
+staging=$MCP_ROOT/deploy.next
+ssh -o BatchMode=yes "$host" "test ! -L '$MCP_ROOT' && test ! -L '$deploy_dir' && test ! -L '$staging' && rm -rf '$staging' && { umask 077; mkdir -p '$staging'; }"
+git -C "$repo_root" archive --format=tar HEAD "${inputs[@]}" \
+  | ssh -o BatchMode=yes "$host" "tar -xf - -C '$staging'"
+# The revision tags the images, so the previous deploy's images stay for a rollback.
+ssh -o BatchMode=yes "$host" "printf 'REVISION=%s\n' '$revision' > '$staging/.env' && chmod 600 '$staging/.env'"
+
+remote_command=$(cat <<REMOTE
+set -Eeuo pipefail
+# An internal network gives its members no route out; clients keep their own.
+sudo docker network inspect home-mcp >/dev/null 2>&1 || sudo docker network create --driver bridge --internal home-mcp >/dev/null
+test "\$(sudo docker network inspect home-mcp --format '{{.Internal}}')" = true
+cd '$staging'
+sudo docker compose build
+rm -rf '$deploy_dir.prev'
+if test -d '$deploy_dir'; then mv '$deploy_dir' '$deploy_dir.prev'; fi
+mv '$staging' '$deploy_dir'
+cd '$deploy_dir'
+sudo docker compose up -d --remove-orphans
+sudo docker compose ps
+rm -rf '$deploy_dir.prev'
+printf '%s %s\\n' "\$(date -u +%Y-%m-%dT%H:%M:%SZ)" '$revision' >> '$MCP_ROOT/deployments.log'
+chmod 600 '$MCP_ROOT/deployments.log'
+REMOTE
+)
+ssh -tt "$host" "$remote_command"
+
+echo "Deployed $revision to $deploy_dir on $host." >&2
