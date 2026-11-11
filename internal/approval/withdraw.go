@@ -6,11 +6,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
-
-const withdrawnLabelRunes = 80
 
 // Withdraw moves the chosen pending records of the principal's waiting bundle, numbered as the user
 // sees them, or all of them, to rejected with ReasonWithdrawn, and updates the messages that show
@@ -157,15 +154,15 @@ func (s *Service) showWithdrawal(ctx context.Context, bundle []Record, withdrawn
 		for to < len(bundle) && bundle[to].MessageID == record.MessageID {
 			to++
 		}
-		if err := s.deliverer.EditText(ctx, record.ChatID, record.MessageID, messageText(bundle, from, to)); err != nil {
+		if err := s.deliverer.EditText(ctx, record.ChatID, record.MessageID, messageShown(bundle, from, to)); err != nil {
 			s.logger.WarnContext(ctx, "approval.withdrawal.unshown", "principal_id", record.PrincipalID, "bundle_id", record.BundleID, "error", err)
 		}
 	}
 	var err error
 	if slices.ContainsFunc(bundle, func(record Record) bool { return record.Status == StatusPending }) {
-		err = s.deliverer.EditProposal(ctx, last.ChatID, last.MessageID, bundleText(bundle), s.buttons(ctx, bundle))
+		err = s.deliverer.EditProposal(ctx, last.ChatID, last.MessageID, bundleShown(bundle), s.buttons(ctx, bundle))
 	} else {
-		err = s.deliverer.EditText(ctx, last.ChatID, last.MessageID, bundleText(bundle))
+		err = s.deliverer.EditText(ctx, last.ChatID, last.MessageID, bundleShown(bundle))
 	}
 	if err != nil {
 		s.logger.WarnContext(ctx, "approval.withdrawal.unshown", "principal_id", last.PrincipalID, "bundle_id", last.BundleID, "error", err)
@@ -174,7 +171,5 @@ func (s *Service) showWithdrawal(ctx context.Context, bundle []Record, withdrawn
 
 // itemLabel names a proposal for the model by its tool and the first line of its summary.
 func itemLabel(record Record) string {
-	summary := strings.TrimPrefix(strings.TrimPrefix(record.Summary, IntentWarning+"\n\n"), DirectIntentWarning+"\n\n")
-	line, _, _ := strings.Cut(summary, "\n")
-	return record.Tool + ": " + clip.Runes(line, withdrawnLabelRunes)
+	return record.Tool + ": " + summaryLine(record)
 }

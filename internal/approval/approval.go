@@ -79,6 +79,9 @@ const (
 	// 4096-unit message for the header, the expiry line, and a cut outcome line per item.
 	bundleSummaryUnits = 2500
 	bundleOutcomeRunes = 120
+	// summaryLineRunes is how much of a summary's first line names the proposal in a caption or to
+	// the model.
+	summaryLineRunes = 80
 
 	// ProposedText is what a write tool answers once its call is proposed for confirmation.
 	ProposedText = prompt.Proposed
@@ -168,6 +171,8 @@ type Record struct {
 	// Heading is what a bundle offered outside a chat turn is shown under; a chat turn's bundle has
 	// none.
 	Heading string
+	// Widget reports that the message showing the record is a Telegram widget, which has no text.
+	Widget bool
 }
 
 // Outcome is the content-free result line of an executed action, such as a created page URL.
@@ -267,9 +272,9 @@ type Repository interface {
 	StartApproval(ctx context.Context, id string, now time.Time) error
 	// FinishApproval moves a record to a terminal status with a reason and outcome.
 	FinishApproval(ctx context.Context, id, from, status, reason, outcome string) (bool, error)
-	// SetApprovalMessage records the chat and the message that shows the records; a zero message ID
-	// marks them as not delivered yet.
-	SetApprovalMessage(ctx context.Context, ids []string, chatID, messageID int64) error
+	// SetApprovalMessage records the chat and the message that shows the records, and whether that
+	// message is a widget; a zero message ID marks them as not delivered yet.
+	SetApprovalMessage(ctx context.Context, ids []string, chatID, messageID int64, widget bool) error
 	// SetApprovalSummary replaces the summary of a pending record.
 	SetApprovalSummary(ctx context.Context, id, summary string) error
 	// ExpireApprovals moves every pending record past its expiry, or every pending and confirmed
@@ -311,17 +316,33 @@ type Deliverer interface {
 	// SendText sends a message without buttons, for the parts of a bundle before the last.
 	SendText(ctx context.Context, chatID int64, text string) (int64, error)
 	// SendProposal sends the message with the buttons, or a widget standing for them when the
-	// buttons ask for one and it can.
-	SendProposal(ctx context.Context, chatID int64, text string, buttons Buttons) (int64, error)
-	EditText(ctx context.Context, chatID, messageID int64, text string) error
-	// EditProposal replaces the text of the message with the buttons, keeping the given buttons.
-	EditProposal(ctx context.Context, chatID, messageID int64, text string, buttons Buttons) error
+	// buttons ask for one and it can, and reports whether it sent a widget.
+	SendProposal(ctx context.Context, chatID int64, shown Shown, buttons Buttons) (int64, bool, error)
+	// EditText replaces what a message shows and removes its buttons.
+	EditText(ctx context.Context, chatID, messageID int64, shown Shown) error
+	// EditProposal replaces what the message with the buttons shows, keeping the given buttons.
+	EditProposal(ctx context.Context, chatID, messageID int64, shown Shown, buttons Buttons) error
 	// SendPreview posts a preview's output as a reply to the proposal message.
 	SendPreview(ctx context.Context, chatID, replyTo int64, text string) error
 	// SendDirectActions posts a turn's "Done" message with one Undo button per row.
 	SendDirectActions(ctx context.Context, chatID int64, actions DirectActions) (int64, error)
 	// EditDirectActions replaces the text and the Undo buttons of a "Done" message.
 	EditDirectActions(ctx context.Context, chatID, messageID int64, actions DirectActions) error
+}
+
+// Shown is what a proposal message shows. A text message shows Text. A widget shows Body, which is
+// Text without any status line ending it, with Status apart from it and Caption, a single line,
+// under it.
+type Shown struct {
+	Text string
+	Body string
+	// Status is where the proposal stands: its own status line, the line its items share, or how
+	// many of them ended which way.
+	Status string
+	// Caption names what is proposed, and what became of it once anything is resolved.
+	Caption string
+	// Widget reports that the message is a widget, as its record says.
+	Widget bool
 }
 
 // DirectActions is a turn's "Done" message: its text and the Undo buttons of the actions that can
@@ -467,7 +488,7 @@ func (s *Service) recordStatus(ctx context.Context, record Record, status string
 	if telemetry == nil {
 		return
 	}
-	telemetry.RecordApproval(ctx, record.PrincipalID, record.Tool, status, strings.HasPrefix(record.Summary, IntentWarning) || strings.HasPrefix(record.Summary, DirectIntentWarning))
+	telemetry.RecordApproval(ctx, record.PrincipalID, record.Tool, status, warned(record))
 }
 
 // SetIntentChecker enables the intent check on proposals delivered from now on.
@@ -929,23 +950,24 @@ func (s *Service) send(ctx context.Context, bundle []Record, chatID int64) error
 	}
 	ranges := messageRanges(bundle, start)
 	for index, span := range ranges {
-		text := messageText(bundle, span[0], span[1])
+		shown := messageShown(bundle, span[0], span[1])
 		var messageID int64
+		var widget bool
 		var err error
 		if index == len(ranges)-1 {
 			buttons := s.buttons(ctx, bundle)
 			buttons.Widget = s.wantsWidget(ctx, first.PrincipalID)
-			messageID, err = s.deliverer.SendProposal(ctx, chatID, text, buttons)
+			messageID, widget, err = s.deliverer.SendProposal(ctx, chatID, shown, buttons)
 		} else {
-			messageID, err = s.deliverer.SendText(ctx, chatID, text)
+			messageID, err = s.deliverer.SendText(ctx, chatID, shown.Text)
 		}
 		if err != nil {
 			// The chat is remembered so the sweep can retry the rest until the proposal expires.
-			_ = s.repository.SetApprovalMessage(ctx, recordIDs(bundle[span[0]:]), chatID, 0)
+			_ = s.repository.SetApprovalMessage(ctx, recordIDs(bundle[span[0]:]), chatID, 0, false)
 			s.logger.WarnContext(ctx, "approval.proposal.undeliverable", "principal_id", first.PrincipalID, "bundle_id", first.BundleID, "error", err)
 			return err
 		}
-		if err := s.repository.SetApprovalMessage(ctx, recordIDs(bundle[span[0]:span[1]]), chatID, messageID); err != nil {
+		if err := s.repository.SetApprovalMessage(ctx, recordIDs(bundle[span[0]:span[1]]), chatID, messageID, widget); err != nil {
 			return err
 		}
 	}
@@ -978,8 +1000,8 @@ func (s *Service) resendUndelivered(ctx context.Context) {
 
 // Pressed is what a button press did.
 type Pressed struct {
-	// Text is what the proposal message should show now.
-	Text string
+	// Shown is what the proposal message should show now.
+	Shown Shown
 	// Owned is false for a press on another principal's proposal, which is ignored.
 	Owned bool
 	// Ran reports that this press confirmed a chat turn's bundle and ran its actions, so the model
@@ -1008,13 +1030,13 @@ func (s *Service) Press(ctx context.Context, principalID, action, approvalID str
 	}
 	pending := slices.IndexFunc(bundle, func(item Record) bool { return item.Status == StatusPending })
 	if pending < 0 {
-		return Pressed{Text: bundleText(bundle), Owned: true}, nil
+		return Pressed{Shown: bundleShown(bundle), Owned: true}, nil
 	}
 	if !s.now().Before(bundle[pending].ExpiresAt) {
 		if err := s.finishPending(ctx, bundle, StatusExpired, ReasonTimeout); err != nil {
 			return Pressed{}, err
 		}
-		return Pressed{Text: bundleText(bundle), Owned: true}, nil
+		return Pressed{Shown: bundleShown(bundle), Owned: true}, nil
 	}
 	switch action {
 	case ActionReject:
@@ -1022,7 +1044,7 @@ func (s *Service) Press(ctx context.Context, principalID, action, approvalID str
 			return Pressed{}, err
 		}
 		s.rememberNotice(bundle)
-		return Pressed{Text: bundleText(bundle), Owned: true}, nil
+		return Pressed{Shown: bundleShown(bundle), Owned: true}, nil
 	case ActionConfirm:
 		confirmed, err := s.repository.ConfirmBundle(ctx, record.BundleID, principalID, s.now())
 		if err != nil {
@@ -1033,7 +1055,7 @@ func (s *Service) Press(ctx context.Context, principalID, action, approvalID str
 			if err != nil {
 				return Pressed{}, err
 			}
-			return Pressed{Text: bundleText(shown(current)), Owned: true}, nil
+			return Pressed{Shown: bundleShown(shown(current)), Owned: true}, nil
 		}
 		for index := range bundle {
 			if bundle[index].Status == StatusPending {
@@ -1042,7 +1064,7 @@ func (s *Service) Press(ctx context.Context, principalID, action, approvalID str
 			}
 		}
 		s.rememberNotice(bundle)
-		return Pressed{Text: bundleText(bundle), Owned: true, Ran: !offered(bundle)}, nil
+		return Pressed{Shown: bundleShown(bundle), Owned: true, Ran: !offered(bundle)}, nil
 	default:
 		return Pressed{}, nil
 	}
@@ -1193,7 +1215,7 @@ func (s *Service) report(ctx context.Context, records []Record) {
 		if last.ChatID == 0 || last.MessageID == 0 || last.Mode == ModeDirect {
 			continue
 		}
-		if err := s.deliverer.EditText(ctx, last.ChatID, last.MessageID, bundleText(bundle)); err != nil {
+		if err := s.deliverer.EditText(ctx, last.ChatID, last.MessageID, bundleShown(bundle)); err != nil {
 			s.logger.WarnContext(ctx, "approval.report.failed", "principal_id", last.PrincipalID, "bundle_id", last.BundleID, "error", err)
 		}
 	}
@@ -1348,26 +1370,28 @@ func shown(bundle []Record) []Record {
 	return visible
 }
 
-// bundleText renders the message that carries the bundle's buttons, which is the last one.
-func bundleText(bundle []Record) string {
+// bundleShown renders the message that carries the bundle's buttons, which is the last one.
+func bundleShown(bundle []Record) Shown {
 	last := bundle[len(bundle)-1]
 	from := len(bundle) - 1
 	for last.MessageID != 0 && from > 0 && bundle[from-1].MessageID == last.MessageID {
 		from--
 	}
-	return messageText(bundle, from, len(bundle))
+	return messageShown(bundle, from, len(bundle))
 }
 
-// messageText renders the records from to to of a bundle: a single proposal as itself, and more as
+// messageShown renders the records from to to of a bundle: a single proposal as itself, and more as
 // a numbered list with each item's result under it, or one shared result at the end of the last
 // message when they all ended the same way.
-func messageText(bundle []Record, from, to int) string {
+func messageShown(bundle []Record, from, to int) Shown {
 	heading := ""
 	if from == 0 && bundle[0].Heading != "" {
 		heading = bundle[0].Heading + "\n\n"
 	}
+	view := Shown{Caption: captionLine(bundle), Widget: bundle[to-1].Widget}
 	if len(bundle) == 1 {
-		return heading + finalText(bundle[0])
+		view.Body, view.Status = heading+bundle[0].Summary, statusLine(bundle[0], maximumSummaryRunes)
+		return withStatus(view)
 	}
 	shared := statusLine(bundle[0], bundleOutcomeRunes)
 	for _, record := range bundle[1:] {
@@ -1392,18 +1416,112 @@ func messageText(bundle []Record, from, to int) string {
 			builder.WriteString("\n" + statusLine(bundle[index], bundleOutcomeRunes))
 		}
 	}
-	if shared != "" && to == len(bundle) {
-		builder.WriteString("\n\n" + shared)
+	view.Body = builder.String()
+	switch {
+	case to < len(bundle):
+		view.Text = view.Body
+	case shared != "":
+		view.Status = shared
+		view = withStatus(view)
+	default:
+		view.Text, view.Status = view.Body, capitalize(tally(bundle))+"."
 	}
-	return builder.String()
+	return view
 }
 
-func finalText(record Record) string {
-	line := statusLine(record, maximumSummaryRunes)
-	if line == "" {
-		return record.Summary
+// withStatus ends the text with the status, which a widget shows apart from the body.
+func withStatus(shown Shown) Shown {
+	shown.Text = shown.Body
+	if shown.Status != "" {
+		shown.Text += "\n\n" + shown.Status
 	}
-	return record.Summary + "\n\n" + line
+	return shown
+}
+
+// captionLine names what a bundle proposes in one line: a single proposal by the first line of its
+// summary and more by their number, under the heading of an offered bundle and marked when the intent
+// check warned about any of them. Once anything is resolved it adds what became of them.
+func captionLine(bundle []Record) string {
+	line := fmt.Sprintf("%d changes", len(bundle))
+	if len(bundle) == 1 {
+		line = strings.TrimSuffix(summaryLine(bundle[0]), ":")
+	}
+	if slices.ContainsFunc(bundle, warned) {
+		line = "⚠️ " + line
+	}
+	if bundle[0].Heading != "" {
+		line = bundle[0].Heading + ": " + line
+	}
+	if slices.ContainsFunc(bundle, func(record Record) bool { return record.Status != StatusPending }) {
+		line += " — " + tally(bundle)
+	}
+	return line
+}
+
+// tally says what became of a bundle's records in a few words: the one word they share, or how
+// many ended each way, in the order the bundle first shows each.
+func tally(bundle []Record) string {
+	var words []string
+	counts := make(map[string]int)
+	for _, record := range bundle {
+		word := statusWord(record)
+		if counts[word] == 0 {
+			words = append(words, word)
+		}
+		counts[word]++
+	}
+	if len(words) == 1 {
+		return words[0]
+	}
+	parts := make([]string, len(words))
+	for index, word := range words {
+		parts[index] = fmt.Sprintf("%d %s", counts[word], word)
+	}
+	return strings.Join(parts, ", ")
+}
+
+func statusWord(record Record) string {
+	switch record.Status {
+	case StatusPending:
+		return "waiting"
+	case StatusConfirmed:
+		return "executing"
+	case StatusExecuted:
+		return "done"
+	case StatusRejected:
+		if record.Reason == ReasonWithdrawn {
+			return "withdrawn"
+		}
+		return "rejected"
+	case StatusExpired:
+		if record.Reason == ReasonReplaced {
+			return "replaced"
+		}
+		return "expired"
+	case StatusFailed:
+		return "failed"
+	default:
+		return record.Status
+	}
+}
+
+func capitalize(text string) string {
+	if text == "" {
+		return text
+	}
+	return strings.ToUpper(text[:1]) + text[1:]
+}
+
+func warned(record Record) bool {
+	return strings.HasPrefix(record.Summary, IntentWarning) || strings.HasPrefix(record.Summary, DirectIntentWarning)
+}
+
+// summaryLine is the first line of a record's summary after any intent warning, cut to
+// summaryLineRunes.
+func summaryLine(record Record) string {
+	summary := strings.TrimPrefix(strings.TrimPrefix(record.Summary, IntentWarning+"\n\n"), DirectIntentWarning+"\n\n")
+	line, _, _ := strings.Cut(summary, "\n")
+	return clip.Runes(line, summaryLineRunes)
 }
 
 // statusLine says where a record stands, with its outcome cut to limit runes.

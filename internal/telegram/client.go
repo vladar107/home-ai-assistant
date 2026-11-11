@@ -649,28 +649,28 @@ func (c *Client) SendText(ctx context.Context, chatID int64, text string) (int64
 
 // SendProposal posts a confirmation request with Confirm and Reject buttons, and Preview when the
 // bundle offers it, and returns the message ID so the outcome can replace the buttons later. When
-// the buttons ask for a widget, it posts one instead, unless the text does not fit its caption or
-// Telegram refuses it.
-func (c *Client) SendProposal(ctx context.Context, chatID int64, text string, buttons approval.Buttons) (int64, error) {
+// the buttons ask for a widget, it posts one instead, unless the text does not fit the widget's data
+// whole or Telegram refuses it, and reports whether it did.
+func (c *Client) SendProposal(ctx context.Context, chatID int64, shown approval.Shown, buttons approval.Buttons) (int64, bool, error) {
 	if buttons.Widget {
-		message, sent, err := c.sendWidget(ctx, chatID, text, proposalActions(buttons))
+		message, sent, err := c.sendWidget(ctx, chatID, shown, proposalActions(buttons))
 		switch {
 		case err != nil && !isPermanentAPIError(err):
-			return 0, err
+			return 0, false, err
 		case err == nil && sent && message.MessageID <= 0:
-			return 0, fmt.Errorf("Telegram sendWidget returned no message ID")
+			return 0, false, fmt.Errorf("Telegram sendWidget returned no message ID")
 		case err == nil && sent:
-			return message.MessageID, nil
+			return message.MessageID, true, nil
 		}
 	}
-	message, err := c.sendMessage(ctx, chatID, 0, text, proposalKeyboard(buttons))
+	message, err := c.sendMessage(ctx, chatID, 0, shown.Text, proposalKeyboard(buttons))
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	if message.MessageID <= 0 {
-		return 0, fmt.Errorf("Telegram sendMessage returned no message ID")
+		return 0, false, fmt.Errorf("Telegram sendMessage returned no message ID")
 	}
-	return message.MessageID, nil
+	return message.MessageID, false, nil
 }
 
 func proposalKeyboard(buttons approval.Buttons) InlineKeyboard {
@@ -720,22 +720,35 @@ func undoKeyboard(buttons []approval.UndoButton) InlineKeyboard {
 	return keyboard
 }
 
-// EditProposal replaces the text of a proposal message and keeps its buttons as given. A proposal
-// sent as a widget, which has no text, gets the text as its caption and keeps its actions.
-func (c *Client) EditProposal(ctx context.Context, chatID, messageID int64, text string, buttons approval.Buttons) error {
-	err := c.EditKeyboard(ctx, chatID, messageID, text, proposalKeyboard(buttons))
+// EditProposal replaces the text of a proposal message and keeps its buttons as given. A widget
+// shows the text in its data with its actions, and the caption line under it.
+func (c *Client) EditProposal(ctx context.Context, chatID, messageID int64, shown approval.Shown, buttons approval.Buttons) error {
+	if shown.Widget {
+		return c.editWidget(ctx, chatID, messageID, shown, proposalActions(buttons))
+	}
+	err := c.EditKeyboard(ctx, chatID, messageID, shown.Text, proposalKeyboard(buttons))
 	if hasNoText(err) {
-		return c.editWidget(ctx, chatID, messageID, text, proposalActions(buttons))
+		return c.editWidget(ctx, chatID, messageID, unflaggedWidget(shown), proposalActions(buttons))
 	}
 	return err
 }
 
-// EditText replaces a bot message's text and removes its buttons. A proposal sent as a widget,
-// which has no text, gets the text as its caption and as the outcome it shows instead of actions.
-func (c *Client) EditText(ctx context.Context, chatID, messageID int64, text string) error {
-	err := c.EditKeyboard(ctx, chatID, messageID, text, nil)
+// unflaggedWidget is what a widget sent before its record could say so shows. Its template draws
+// the text alone, so the status stays in the text.
+func unflaggedWidget(shown approval.Shown) approval.Shown {
+	shown.Body, shown.Status = shown.Text, ""
+	return shown
+}
+
+// EditText replaces a proposal message's text and removes its buttons. A widget shows the text in
+// its data with no actions, and the caption line under it.
+func (c *Client) EditText(ctx context.Context, chatID, messageID int64, shown approval.Shown) error {
+	if shown.Widget {
+		return c.editWidget(ctx, chatID, messageID, shown, nil)
+	}
+	err := c.EditKeyboard(ctx, chatID, messageID, shown.Text, nil)
 	if hasNoText(err) {
-		return c.editWidget(ctx, chatID, messageID, text, nil)
+		return c.editWidget(ctx, chatID, messageID, unflaggedWidget(shown), nil)
 	}
 	return err
 }

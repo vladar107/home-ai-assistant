@@ -340,13 +340,13 @@ type deliverer struct{}
 
 func (deliverer) SendText(context.Context, int64, string) (int64, error) { return 1, nil }
 
-func (deliverer) SendProposal(context.Context, int64, string, approval.Buttons) (int64, error) {
-	return 1, nil
+func (deliverer) SendProposal(context.Context, int64, approval.Shown, approval.Buttons) (int64, bool, error) {
+	return 1, false, nil
 }
 
-func (deliverer) EditText(context.Context, int64, int64, string) error { return nil }
+func (deliverer) EditText(context.Context, int64, int64, approval.Shown) error { return nil }
 
-func (deliverer) EditProposal(context.Context, int64, int64, string, approval.Buttons) error {
+func (deliverer) EditProposal(context.Context, int64, int64, approval.Shown, approval.Buttons) error {
 	return nil
 }
 
@@ -673,7 +673,7 @@ func TestLabelledDeviceIsProposedAndRunsOnlyAfterConfirmation(t *testing.T) {
 	}
 
 	pressed, err := f.approval.Press(t.Context(), "alice", approval.ActionConfirm, record.ID)
-	text, handled := pressed.Text, pressed.Owned
+	text, handled := pressed.Shown.Text, pressed.Owned
 	if err != nil || !handled {
 		t.Fatalf("press = %q %v %v", text, handled, err)
 	}
@@ -723,7 +723,7 @@ func TestConfirmationFailsWhenTheLabelWasRemovedMeanwhile(t *testing.T) {
 	sim.set(func(s *simulator) { s.registry = nil })
 
 	pressed, err := f.approval.Press(t.Context(), "alice", approval.ActionConfirm, record.ID)
-	text := pressed.Text
+	text := pressed.Shown.Text
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1117,7 +1117,7 @@ func TestActionAfterOutsideContentIsProposedAndRunsOnlyAfterConfirmation(t *test
 	}
 
 	pressed, err := f.approval.Press(t.Context(), "alice", approval.ActionConfirm, record.ID)
-	text, handled := pressed.Text, pressed.Owned
+	text, handled := pressed.Shown.Text, pressed.Owned
 	if err != nil || !handled {
 		t.Fatalf("press = %q %v %v", text, handled, err)
 	}
@@ -1391,7 +1391,7 @@ func TestOneStringResultObjectComesBackAsPlainText(t *testing.T) {
 		t.Fatal("no proposal")
 	}
 	pressed, err := f.approval.Press(t.Context(), "alice", approval.ActionConfirm, record.ID)
-	if err != nil || !pressed.Owned || !strings.Contains(pressed.Text, "text") || strings.Contains(pressed.Text, "summary") {
+	if err != nil || !pressed.Owned || !strings.Contains(pressed.Shown.Text, "text") || strings.Contains(pressed.Shown.Text, "summary") {
 		t.Fatalf("press = %+v %v", pressed, err)
 	}
 }

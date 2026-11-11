@@ -43,7 +43,7 @@ type botAPI interface {
 	DownloadFile(context.Context, string, int64) ([]byte, error)
 	SendKeyboard(context.Context, int64, int64, string, InlineKeyboard) error
 	EditKeyboard(context.Context, int64, int64, string, InlineKeyboard) error
-	EditText(context.Context, int64, int64, string) error
+	EditText(context.Context, int64, int64, approval.Shown) error
 	DeleteMessage(context.Context, int64, int64) error
 	AnswerCallback(context.Context, string, string) error
 	AnswerWidgetQuery(context.Context, string, string) error
@@ -1197,9 +1197,11 @@ func (s *Service) processApprovalPress(ctx context.Context, bot Bot, updateID in
 	if pressed.Ran {
 		s.continueConversation(ctx, bot, updateID, tap, principalID)
 	}
-	err = s.client.EditText(ctx, tap.chatID, tap.messageID, pressed.Text)
+	shown := pressed.Shown
+	shown.Widget = shown.Widget || tap.widget
+	err = s.client.EditText(ctx, tap.chatID, tap.messageID, shown)
 	if err != nil && isPermanentAPIError(err) {
-		err = s.client.SendReply(ctx, tap.chatID, 0, pressed.Text)
+		err = s.client.SendReply(ctx, tap.chatID, 0, shown.Text)
 	}
 	if err != nil {
 		if isPermanentAPIError(err) {
@@ -1310,12 +1312,13 @@ func (s *Service) continueConversation(ctx context.Context, bot Bot, updateID in
 }
 
 // press is a tap on a proposal's controls, from a button or from a widget: the chat and the message
-// that carry the controls, how the tap is answered, and the failure reason of an answer that may be
-// retried.
+// that carry the controls, how the tap is answered, the failure reason of an answer that may be
+// retried, and whether the message is a widget, which a tap in one proves.
 type press struct {
 	chatID, messageID int64
 	answer            func(ctx context.Context, text string) error
 	failure           string
+	widget            bool
 }
 
 func (s *Service) callbackPress(callback *CallbackQuery) press {
@@ -1346,7 +1349,7 @@ func (s *Service) processWidgetQuery(ctx context.Context, bot Bot, updateID int6
 	}
 	principalID := authorization.Principal.ID
 	tap := press{
-		chatID: chat.ID, messageID: query.MessageID, failure: "answer_widget_query",
+		chatID: chat.ID, messageID: query.MessageID, failure: "answer_widget_query", widget: true,
 		answer: func(ctx context.Context, text string) error { return s.client.AnswerWidgetQuery(ctx, query.ID, text) },
 	}
 	result := processingResult{event: "telegram.update.ignored", reason: "unknown_action", principalID: principalID}

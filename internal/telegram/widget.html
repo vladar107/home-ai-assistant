@@ -1,6 +1,10 @@
 <style>
 body{margin:0;padding:12px;font:15px/1.4 -apple-system,system-ui,sans-serif;background:var(--tg-theme-bg-color,#fff);color:var(--tg-theme-text-color,#000)}
-#text{white-space:pre-wrap;word-wrap:break-word}
+#title{font-weight:600;white-space:pre-wrap;word-wrap:break-word}
+#text{margin-top:6px;white-space:pre-wrap;word-wrap:break-word}
+#text:empty{display:none}
+#state{margin-top:10px;font-weight:600;white-space:pre-wrap;word-wrap:break-word}
+#state:empty{display:none}
 #actions{display:flex;gap:8px;margin-top:12px}
 #status{margin-top:8px;color:var(--tg-theme-hint-color,#888)}
 #status:empty{display:none}
@@ -9,7 +13,9 @@ button.quiet{background:var(--tg-theme-secondary-bg-color,#eee);color:var(--tg-t
 button.reject{background:var(--tg-theme-secondary-bg-color,#eee);color:var(--tg-theme-destructive-text-color,#d33)}
 button:disabled{opacity:.5}
 </style>
+<div id="title"></div>
 <div id="text"></div>
+<div id="state"></div>
 <div id="actions"></div>
 <div id="status"></div>
 <script>
@@ -18,7 +24,9 @@ button:disabled{opacity:.5}
   if (!widget) {
     return;
   }
+  var title = document.getElementById('title');
   var text = document.getElementById('text');
+  var state = document.getElementById('state');
   var actions = document.getElementById('actions');
   var status = document.getElementById('status');
   var drawn = 0;
@@ -98,7 +106,11 @@ button:disabled{opacity:.5}
     var list = data.actions instanceof Array ? data.actions : [];
     drawn++;
     busy = false;
-    text.textContent = String(data.text || '');
+    var whole = String(data.text || '');
+    var lineEnd = whole.indexOf('\n');
+    title.textContent = lineEnd < 0 ? whole : whole.substring(0, lineEnd);
+    text.textContent = lineEnd < 0 ? '' : whole.substring(lineEnd + 1).replace(/^\s+/, '');
+    state.textContent = String(data.status || '');
     status.textContent = '';
     while (actions.firstChild) {
       actions.removeChild(actions.firstChild);

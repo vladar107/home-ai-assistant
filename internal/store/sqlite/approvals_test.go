@@ -151,3 +151,42 @@ func TestMigrationDirectApprovalsKeepsExistingRows(t *testing.T) {
 		t.Fatalf("foreign key check = %d %v", foreignKeyProblems, err)
 	}
 }
+
+// Migration 054 flags a proposal whose message is a widget. A proposal stored before it, such as one
+// pending while the bot is upgraded, reads as a text message; the flag is then written with the
+// message and cleared with it.
+func TestMigrationApprovalWidgetsKeepsExistingRows(t *testing.T) {
+	ctx := t.Context()
+	db := migrateUpTo(t, ctx, "054")
+	hash := "0000000000000000000000000000000000000000000000000000000000000000"
+	exec(t, ctx, db,
+		`INSERT INTO principals (id, display_name) VALUES ('alice', 'Alice')`,
+		`INSERT INTO approvals (id, bundle_id, position, principal_id, tool, arguments, arguments_hash, summary, status, chat_id, message_id, created_at, expires_at, thread_id, heading)
+		 VALUES ('aaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaa', 0, 'alice', 'note_write', '{"name":"a"}', '`+hash+`', 'First', 'pending', 101, 7, '2026-10-01T10:00:00.000Z', '2099-10-01T10:10:00.000Z', 3, 'Weekly review')`,
+	)
+
+	if err := migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	store := &Store{db: db}
+	record, found, err := store.LoadApproval(ctx, "aaaaaaaaaaaaaaaa")
+	if err != nil || !found || record.Widget || record.MessageID != 7 || record.ThreadID != 3 || record.Heading != "Weekly review" || record.Summary != "First" {
+		t.Fatalf("record after migration = %+v %v %v", record, found, err)
+	}
+	if err := store.SetApprovalMessage(ctx, []string{record.ID}, 101, 8, true); err != nil {
+		t.Fatal(err)
+	}
+	if pending, err := store.PendingApprovals(ctx, "alice", 3); err != nil || len(pending) != 1 || !pending[0].Widget || pending[0].MessageID != 8 {
+		t.Fatalf("record shown in a widget = %+v %v", pending, err)
+	}
+	if err := store.SetApprovalMessage(ctx, []string{record.ID}, 101, 0, false); err != nil {
+		t.Fatal(err)
+	}
+	if undelivered, err := store.UndeliveredApprovals(ctx); err != nil || len(undelivered) != 1 || undelivered[0].Widget {
+		t.Fatalf("record after a failed delivery = %+v %v", undelivered, err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE approvals SET widget = 2 WHERE id = 'aaaaaaaaaaaaaaaa'`); err == nil {
+		t.Fatal("the widget flag took a value other than 0 and 1")
+	}
+	foreignKeysHold(t, ctx, db)
+}

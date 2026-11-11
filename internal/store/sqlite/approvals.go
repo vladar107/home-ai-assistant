@@ -17,7 +17,7 @@ var _ approval.Repository = (*Store)(nil)
 const approvalColumns = `id, bundle_id, position, principal_id, tool, arguments, arguments_hash, summary, status,
 	COALESCE(reason, ''), COALESCE(outcome, ''), COALESCE(chat_id, 0), COALESCE(message_id, 0),
 	created_at, expires_at, COALESCE(started_at, ''), COALESCE(finished_at, ''), mode, COALESCE(request_id, ''),
-	COALESCE(undo, ''), COALESCE(undo_until, ''), thread_id, COALESCE(heading, '')`
+	COALESCE(undo, ''), COALESCE(undo_until, ''), thread_id, COALESCE(heading, ''), widget`
 
 func (s *Store) CreateApproval(ctx context.Context, record approval.Record) ([]approval.Record, error) {
 	return s.CreateApprovals(ctx, []approval.Record{record})
@@ -205,20 +205,20 @@ func (s *Store) SetApprovalSummary(ctx context.Context, id, summary string) erro
 	return nil
 }
 
-func (s *Store) SetApprovalMessage(ctx context.Context, ids []string, chatID, messageID int64) error {
+func (s *Store) SetApprovalMessage(ctx context.Context, ids []string, chatID, messageID int64, widget bool) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("record approval message: SQLite store is not open")
 	}
 	if len(ids) == 0 {
 		return nil
 	}
-	arguments := []any{chatID, messageID}
+	arguments := []any{chatID, messageID, widget}
 	for _, id := range ids {
 		arguments = append(arguments, id)
 	}
 	if _, err := s.db.ExecContext(
 		ctx,
-		`UPDATE approvals SET chat_id = ?, message_id = NULLIF(?, 0) WHERE id IN (?`+strings.Repeat(", ?", len(ids)-1)+`)`,
+		`UPDATE approvals SET chat_id = ?, message_id = NULLIF(?, 0), widget = ? WHERE id IN (?`+strings.Repeat(", ?", len(ids)-1)+`)`,
 		arguments...,
 	); err != nil {
 		return fmt.Errorf("record approval message: %w", err)
@@ -519,7 +519,7 @@ func scanApprovalRow(row rowScanner) (approval.Record, error) {
 	err := row.Scan(
 		&record.ID, &record.BundleID, &record.Position, &record.PrincipalID, &record.Tool, &arguments, &record.Hash, &record.Summary, &record.Status,
 		&record.Reason, &record.Outcome, &record.ChatID, &record.MessageID, &createdAt, &expiresAt, &startedAt, &finishedAt,
-		&record.Mode, &record.RequestID, &undo, &undoUntil, &record.ThreadID, &record.Heading,
+		&record.Mode, &record.RequestID, &undo, &undoUntil, &record.ThreadID, &record.Heading, &record.Widget,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

@@ -372,16 +372,23 @@ is refused as unreadable instead of exhausting the service's memory.
    A user who turns on Proposals as a widget (the Confirmations page of
    `/settings`, off by default) gets the message with the buttons as a Telegram
    widget instead. One template, written by the operator and embedded in the
-   binary, draws the proposal text and its actions, or the outcome, from the
-   message's data; the model never supplies HTML. The caption repeats the
-   proposal, so an app without widgets still shows it, but cannot confirm it. A
-   tap arrives as a `widget_query` and is handled as the press of the button it
-   stands for, in the proposal's own tab: Confirm and Reject are answered before
-   the actions run, Preview as its button is. Outcomes replace the caption and
-   the data, and one too long for a caption is clipped there and sent in full as
-   a reply. A proposal whose text does not fit a caption, or that Telegram
-   refuses as a widget, gets buttons. The switch only decides how proposals are
-   sent: taps on widgets already in the chat are handled whatever it says.
+   binary, draws the proposal text with its first line as a title, its status
+   apart, and its actions, from the message's data; the model never supplies
+   HTML, and the text is plain. The caption is one line the approval service
+   builds: the proposal's first line or its number of changes, and what became
+   of it once resolved, so an app without widgets still names it, but cannot
+   confirm it. A proposal is a widget only when its whole text and status fit
+   the data with its actions; a longer one, or one Telegram refuses as a
+   widget, gets buttons. The proposal's record says that its message is a
+   widget, so its edits go to the caption and the data from the start; a widget
+   recorded before that flag existed is still found by Telegram's refusal of a
+   text edit. A tap arrives as a `widget_query` and is handled as the press of
+   the button it stands for, in the proposal's own tab: Confirm and Reject are
+   answered before the actions run, Preview as its button is. An outcome that
+   makes the text too long for the data shortens the text there, keeps the
+   status whole, and is sent in full as a reply once, when the data changed.
+   The switch only decides how proposals are sent: taps on widgets already in
+   the chat are handled whatever it says.
    A Confirm that ran the actions queues a
    turn that continues the request from their outcome, so a dependent next step
    needs no nudge and a question asked beside the action is still answered; it

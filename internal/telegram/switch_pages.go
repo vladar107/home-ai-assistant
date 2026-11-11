@@ -39,8 +39,8 @@ const (
 	// TypeSafePrivacyLine is added to /privacy while the principal's safety checks are on.
 	TypeSafePrivacyLine = "Safety checks: a scrubbed copy of messages, replies, outside content, and proposed actions goes to TypeSafe, never after Notion or NAS content."
 
-	WidgetOnLine  = "Proposals: shown as a widget. Confirm, Reject, and Preview are inside it, and its caption repeats the proposal. A Telegram app that cannot show widgets shows only the caption and cannot confirm the proposal there; switch back to buttons for such an app."
-	WidgetOffLine = "Proposals: shown with Confirm, Reject, and Preview buttons (the default). A widget shows them in a small view Telegram draws in the chat instead; a Telegram app that cannot show widgets shows only its caption and cannot confirm the proposal there."
+	WidgetOnLine  = "Proposals: shown as a widget. The proposal, Confirm, Reject, and Preview are inside it, and its caption names the proposal in one line. A proposal too long for a widget comes with buttons. A Telegram app that cannot show widgets shows only that line and cannot confirm the proposal there; switch back to buttons for such an app."
+	WidgetOffLine = "Proposals: shown with Confirm, Reject, and Preview buttons (the default). A widget shows the proposal and them in a small view Telegram draws in the chat instead; a Telegram app that cannot show widgets shows only a one-line caption and cannot confirm the proposal there."
 	// WidgetPrivacyLine is added to /privacy while the principal's proposals are widgets.
 	WidgetPrivacyLine = "Proposals as a widget: the proposal and its outcome are shown by a small program Telegram runs in the chat, which reaches nothing outside Telegram."
 )

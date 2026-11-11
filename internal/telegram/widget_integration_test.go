@@ -3,6 +3,7 @@ package telegram
 import (
 	"bytes"
 	"compress/zlib"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -38,8 +39,12 @@ type widgetSimulator struct {
 	ids      map[int64]bool
 	captions map[int64]string
 	data     map[int64]string
-	// sendStatus refuses sendWidget and answerStatus answerWidgetQuery when set.
-	sendStatus, answerStatus int
+	// sendStatus refuses sendWidget, editStatus editMessageCaption and editMessageWidgetData, and
+	// answerStatus answerWidgetQuery when set.
+	sendStatus, editStatus, answerStatus int
+	// sendAttempts counts the sendWidget calls, and textEdits the text edits of widget messages,
+	// which Telegram refuses.
+	sendAttempts, textEdits int
 	// answerGate holds Telegram's reply to an answer until it is closed.
 	answerGate chan struct{}
 	sent       chan sentWidget
@@ -63,6 +68,9 @@ func writeRefusal(w http.ResponseWriter, status int, description string) {
 func (h *conversationHarness) refuseWidgetText(w http.ResponseWriter, messageID int64) bool {
 	h.mu.Lock()
 	widget := h.widgets.ids[messageID]
+	if widget {
+		h.widgets.textEdits++
+	}
 	h.mu.Unlock()
 	if !widget {
 		return false
@@ -125,6 +133,7 @@ func (h *conversationHarness) serveWidgetMethod(w http.ResponseWriter, r *http.R
 			h.t.Errorf("sendWidget must carry no keyboard, allow queries, and keep to the limits: %v", r.Form)
 		}
 		h.mu.Lock()
+		h.widgets.sendAttempts++
 		if status := h.widgets.sendStatus; status != 0 {
 			h.mu.Unlock()
 			writeRefusal(w, status, "Bad Request: widgets are not available in this chat")
@@ -143,6 +152,11 @@ func (h *conversationHarness) serveWidgetMethod(w http.ResponseWriter, r *http.R
 	}
 	edit := widgetEdit{method: method, chatID: chatID, messageID: messageID}
 	h.mu.Lock()
+	if status := h.widgets.editStatus; status != 0 {
+		h.mu.Unlock()
+		writeRefusal(w, status, "Bad Request: message to edit not found")
+		return nil, true
+	}
 	known := h.widgets.ids[messageID]
 	unchanged := false
 	if method == "editMessageCaption" {
@@ -203,16 +217,50 @@ func (h *conversationHarness) nextWidgetEdit(method string, messageID int64) wid
 	return edit
 }
 
-// wantOutcome expects the caption and then the data of a widget to show an outcome, with no actions
-// left.
-func (h *conversationHarness) wantOutcome(messageID int64, want string) (widgetEdit, widgetData) {
+// wantOutcome expects the caption and then the data of a widget to show an outcome: a caption of one
+// line, and the status apart from the text, with no actions left.
+func (h *conversationHarness) wantOutcome(messageID int64, status string) (widgetEdit, widgetData) {
 	h.t.Helper()
 	caption := h.nextWidgetEdit("editMessageCaption", messageID)
 	data := decodeWidget(h.t, h.nextWidgetEdit("editMessageWidgetData", messageID).data)
-	if !strings.Contains(caption.caption, want) || !strings.Contains(data.Text, want) || len(data.Actions) != 0 {
-		h.t.Fatalf("widget outcome = %q, %+v, want %q and no actions", caption.caption, data, want)
+	if strings.Contains(caption.caption, "\n") || !strings.Contains(data.Status, status) || strings.Contains(data.Text, status) || len(data.Actions) != 0 {
+		h.t.Fatalf("widget outcome = %q, %+v, want the status %q apart and no actions", caption.caption, data, status)
 	}
 	return caption, data
+}
+
+// widgetTextEdits counts the text edits of widget messages, each of which Telegram refused.
+func (h *conversationHarness) widgetTextEdits() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.widgets.textEdits
+}
+
+func (h *conversationHarness) wantNoWidgetTextEdit() {
+	h.t.Helper()
+	if count := h.widgetTextEdits(); count != 0 {
+		h.t.Fatalf("%d text edits of a widget recorded as one", count)
+	}
+}
+
+// widgetFlagged reports whether the records shown in a message say it is a widget.
+func (h *conversationHarness) widgetFlagged(messageID int64) bool {
+	h.t.Helper()
+	return h.countRows(`SELECT count(*) FROM approvals WHERE message_id = ? AND widget = 1`, messageID) > 0
+}
+
+// waitUntil polls until done holds.
+func (h *conversationHarness) waitUntil(what string, done func() bool) {
+	h.t.Helper()
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for !done() {
+		select {
+		case <-ticker.C:
+		case <-h.ctx.Done():
+			h.t.Fatalf("never saw %s", what)
+		}
+	}
 }
 
 func (h *conversationHarness) setWidgets(principalID string, enabled bool) {
@@ -324,11 +372,16 @@ func TestWidgetSwitchDecidesHowProposalsAreSent(t *testing.T) {
 
 	h.proposeJob(runtime, 4, 0, "Weekly tasks", "List my overdue tasks.")
 	widget := h.nextWidget()
-	if widget.chatID != 101 || widget.html != widgetTemplate || !strings.Contains(widget.caption, `"Weekly tasks"`) || !strings.Contains(widget.caption, "Expires in 10 minutes.") {
-		t.Fatalf("widget = %+v", widget)
+	if widget.chatID != 101 || widget.html != widgetTemplate || strings.Contains(widget.caption, "\n") || !strings.Contains(widget.caption, `"Weekly tasks"`) ||
+		strings.Contains(widget.caption, "List my overdue tasks.") || strings.Contains(widget.caption, "Expires") {
+		t.Fatalf("widget = %+v, want a caption of one line naming the job", widget)
 	}
-	if data := decodeWidget(t, widget.data); data.Text != widget.caption {
-		t.Fatalf("widget text = %q, want the caption %q", data.Text, widget.caption)
+	if data := decodeWidget(t, widget.data); !strings.HasPrefix(data.Text, widget.caption+"\n") || !strings.Contains(data.Text, "List my overdue tasks.") ||
+		strings.Contains(data.Text, "Expires") || data.Status != "Expires in 10 minutes." {
+		t.Fatalf("widget data = %+v, want the whole proposal with its status apart", data)
+	}
+	if !h.widgetFlagged(widget.messageID) {
+		t.Fatal("the widget's records do not say it is a widget")
 	}
 	confirm, _, _ := widgetActions(t, widget.data)
 
@@ -346,7 +399,10 @@ func TestWidgetSwitchDecidesHowProposalsAreSent(t *testing.T) {
 		t.Fatalf("the actions ran before the tap was answered: %d jobs", count)
 	}
 	close(gate)
-	h.wantOutcome(widget.messageID, "Scheduled. First run:")
+	if caption, _ := h.wantOutcome(widget.messageID, "Scheduled. First run:"); caption.caption != widget.caption+" — done" {
+		t.Fatalf("caption after the confirm tap = %q", caption.caption)
+	}
+	h.wantNoWidgetTextEdit()
 	h.continueTurn(runtime, 6)
 	if status, _ := h.approvalStatus(approvalID(confirm)); status != approval.StatusExecuted {
 		t.Fatalf("approval after the confirm tap = %s", status)
@@ -354,8 +410,12 @@ func TestWidgetSwitchDecidesHowProposalsAreSent(t *testing.T) {
 
 	h.proposeJob(runtime, 7, 0, "Daily tasks", "List today's tasks.")
 	proposal := h.nextMessage()
-	if data := buttonData(proposal.keyboard); len(data) != 3 || !strings.Contains(proposal.text, `"Daily tasks"`) {
+	if data := buttonData(proposal.keyboard); len(data) != 3 || !strings.Contains(proposal.text, `"Daily tasks"`) || !strings.Contains(proposal.text, "Expires in 10 minutes.") {
 		t.Fatalf("proposal with the widget off = %+v", proposal)
+	}
+	h.waitMessageRecorded(proposal.messageID)
+	if h.widgetFlagged(proposal.messageID) {
+		t.Fatal("a proposal sent with buttons is recorded as a widget")
 	}
 	if count := len(h.widgets.sent); count != 0 {
 		t.Fatalf("%d widgets sent with the switch off", count)
@@ -473,10 +533,11 @@ func TestButtonPressThenWidgetTapActOnce(t *testing.T) {
 	}
 }
 
-// A proposal is a widget only while its text fits a caption. An outcome that no longer fits is
-// clipped in the caption and sent in full as a reply. An answer Telegram refuses does not stop the
-// tap, and a widget Telegram refuses is sent with buttons.
-func TestWidgetCaptionLimits(t *testing.T) {
+// A proposal is a widget only when its whole text fits the widget's data with its actions, counted
+// in bytes, so a shorter text in a script that takes several bytes a character gets buttons too. An
+// answer Telegram refuses does not stop the tap. A widget Telegram refuses is sent with buttons and
+// recorded as a text message, whose edits are text edits.
+func TestWidgetIsSentOnlyWhenItsTextFitsWhole(t *testing.T) {
 	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newWidgetHarness(t, runtime, harnessOptions{})
@@ -485,7 +546,7 @@ func TestWidgetCaptionLimits(t *testing.T) {
 	probe := "List my overdue tasks."
 	h.proposeJob(runtime, 1, 0, "Job one", probe)
 	widget := h.nextWidget()
-	frame := utf16Length(widget.caption) - len(probe)
+	room := widgetDataLimit - (len(widget.data) - len(probe))
 	_, reject, _ := widgetActions(t, widget.data)
 	h.setWidgetAnswer(http.StatusBadRequest, nil)
 	h.push(widgetTap(2, 101, widget.messageID, reject))
@@ -493,91 +554,158 @@ func TestWidgetCaptionLimits(t *testing.T) {
 	h.wantOutcome(widget.messageID, "Rejected; nothing was written.")
 	h.setWidgetAnswer(0, nil)
 
-	prompt := strings.TrimSpace(strings.Repeat("List the tasks. ", 80))[:captionLimit-frame-2]
-	h.proposeJob(runtime, 3, 0, "Job two", prompt)
+	// No spaces, so no trimming shortens a prompt cut anywhere.
+	latin := strings.Repeat("abcdefghij", 100)
+	h.proposeJob(runtime, 3, 0, "Job two", latin[:room])
 	widget = h.nextWidget()
-	if utf16Length(widget.caption) != captionLimit-2 {
-		t.Fatalf("caption is %d long, want %d", utf16Length(widget.caption), captionLimit-2)
+	if len(widget.data) != widgetDataLimit || !strings.Contains(decodeWidget(t, widget.data).Text, latin[:room]) {
+		t.Fatalf("widget filling the data = %d bytes, %q", len(widget.data), widget.data)
 	}
-	confirm, _, _ := widgetActions(t, widget.data)
-	h.push(widgetTap(4, 101, widget.messageID, confirm))
+	_, reject, _ = widgetActions(t, widget.data)
+	h.push(widgetTap(4, 101, widget.messageID, reject))
 	h.wantWidgetAnswer(4)
-	caption := h.nextWidgetEdit("editMessageCaption", widget.messageID)
-	if utf16Length(caption.caption) > captionLimit || !strings.Contains(caption.caption, "…") || !strings.Contains(caption.caption, "Scheduled. First run:") {
-		t.Fatalf("clipped caption = %q", caption.caption)
-	}
-	full := h.nextMessage()
-	if full.replyTo != widget.messageID || !strings.Contains(full.text, prompt) || !strings.Contains(full.text, "Scheduled. First run:") {
-		t.Fatalf("full outcome = %+v", full)
-	}
-	if data := decodeWidget(t, h.nextWidgetEdit("editMessageWidgetData", widget.messageID).data); len(data.Actions) != 0 || !strings.Contains(data.Text, "Scheduled. First run:") {
-		t.Fatalf("widget data after a long outcome = %+v", data)
-	}
-	h.continueTurn(runtime, 4)
-
-	h.proposeJob(runtime, 5, 0, "Job three", strings.Repeat("x", captionLimit))
-	if proposal := h.nextMessage(); len(buttonData(proposal.keyboard)) != 3 || !strings.Contains(proposal.text, "Job three") {
-		t.Fatalf("proposal too long for a caption = %+v", proposal)
-	}
+	h.wantOutcome(widget.messageID, "Rejected; nothing was written.")
 
 	h.mu.Lock()
+	attempts := h.widgets.sendAttempts
+	h.mu.Unlock()
+	h.proposeJob(runtime, 5, 0, "Job six", latin[:room+1])
+	if proposal := h.nextMessage(); len(buttonData(proposal.keyboard)) != 3 || !strings.Contains(proposal.text, latin[:room+1]) {
+		t.Fatalf("proposal a byte too long for a widget = %+v", proposal)
+	}
+	var cyrillic strings.Builder
+	for _, r := range strings.Repeat("Список задач на неделю. ", 60) {
+		if cyrillic.Len() > room {
+			break
+		}
+		cyrillic.WriteRune(r)
+	}
+	if utf8.RuneCountInString(cyrillic.String()) > room*2/3 {
+		t.Fatalf("the multi-byte prompt has %d characters, want far fewer than the %d bytes of room", utf8.RuneCountInString(cyrillic.String()), room)
+	}
+	h.proposeJob(runtime, 6, 0, "Job ten", cyrillic.String())
+	if proposal := h.nextMessage(); len(buttonData(proposal.keyboard)) != 3 || !strings.Contains(proposal.text, strings.TrimSpace(cyrillic.String())) {
+		t.Fatalf("multi-byte proposal too long for a widget = %+v", proposal)
+	}
+	h.mu.Lock()
+	tried := h.widgets.sendAttempts - attempts
 	h.widgets.sendStatus = http.StatusBadRequest
 	h.mu.Unlock()
-	h.proposeJob(runtime, 6, 0, "Job four", "List my tasks.")
-	if proposal := h.nextMessage(); len(buttonData(proposal.keyboard)) != 3 || !strings.Contains(proposal.text, "Job four") {
+	if tried != 0 {
+		t.Fatalf("%d widgets tried for proposals that do not fit one", tried)
+	}
+
+	h.proposeJob(runtime, 7, 0, "Job ace", "List my tasks.")
+	proposal := h.nextMessage()
+	if len(buttonData(proposal.keyboard)) != 3 || !strings.Contains(proposal.text, "Job ace") || !strings.Contains(proposal.text, "Expires in 10 minutes.") {
 		t.Fatalf("proposal after a refused widget = %+v", proposal)
 	}
-	if count := len(h.widgets.sent); count != 0 {
-		t.Fatalf("%d widgets sent past the caption limit or a refusal", count)
+	h.waitMessageRecorded(proposal.messageID)
+	if h.widgetFlagged(proposal.messageID) {
+		t.Fatal("a refused widget is recorded as one")
 	}
+	_, rejectButton := approvalButtons(t, proposal.keyboard)
+	h.push(callbackUpdate(8, 101, proposal.messageID, rejectButton))
+	h.wantAnswer(8)
+	for {
+		edit := receive(t, h.ctx, h.edits)
+		if edit.messageID != proposal.messageID {
+			continue
+		}
+		if !strings.Contains(edit.text, "Rejected; nothing was written.") || len(edit.keyboard) != 0 {
+			t.Fatalf("outcome of a proposal sent with buttons = %+v", edit)
+		}
+		break
+	}
+	h.wantNoWidgetTextEdit()
+}
+
+// proposeReports runs one chat turn of Alice's that proposes a weekly job for each prompt, named
+// Report and its number.
+func (h *conversationHarness) proposeReports(runtime *controlledRuntime, updateID int64, prompts ...string) {
+	h.t.Helper()
+	h.push(textUpdate(updateID, 101, "set up weekly reports"))
+	chat := receive(h.t, h.ctx, runtime.calls)
+	readOutside(h.t, chat)
+	for index, prompt := range prompts {
+		arguments, err := json.Marshal(map[string]string{"name": fmt.Sprintf("Report %d", index+1), "cron": "0 9 * * 1", "prompt": prompt})
+		if err != nil {
+			h.t.Fatal(err)
+		}
+		if proposed := toolCaller(h.t, chat)("schedule_propose", string(arguments)); proposed.IsError {
+			h.t.Fatalf("schedule_propose = %+v", proposed)
+		}
+	}
+	chat.answer <- agentruntime.RunResult{Response: "proposed"}
+	h.wantReply(101, updateID, "proposed")
+	h.waitState(updateID, "delivered")
 }
 
 // The model withdraws part of a widget's batch: the widget keeps its actions for the rest, and
-// loses them once nothing is left.
+// loses them once nothing is left. A withdrawal that makes the text too long for the data shortens
+// it there, keeps the status whole, and sends the whole text as a reply. No edit tries the widget's
+// text first.
 func TestWidgetShowsWithdrawals(t *testing.T) {
 	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newWidgetHarness(t, runtime, harnessOptions{})
 	h.setWidgets("alice", true)
 
-	h.push(textUpdate(1, 101, "set up two weekly reports"))
-	chat := receive(t, h.ctx, runtime.calls)
-	readOutside(t, chat)
-	for _, name := range []string{"Report A", "Report B"} {
-		if proposed := toolCaller(t, chat)("schedule_propose", `{"name":"`+name+`","cron":"0 9 * * 1","prompt":"Summarise `+name+`."}`); proposed.IsError {
-			t.Fatalf("schedule_propose = %+v", proposed)
-		}
-	}
-	chat.answer <- agentruntime.RunResult{Response: "proposed"}
-	h.wantReply(101, 1, "proposed")
-	h.waitState(1, "delivered")
+	h.proposeReports(runtime, 1, "Summarise report one.", "Summarise report two.")
 	widget := h.nextWidget()
-	widgetActions(t, widget.data)
+	frame := len(widget.data) - len("Summarise report two.")
+	if caption := widget.caption; caption != "2 changes" {
+		t.Fatalf("caption of a batch = %q", caption)
+	}
+	_, reject, _ := widgetActions(t, widget.data)
+	h.push(widgetTap(2, 101, widget.messageID, reject))
+	h.wantWidgetAnswer(2)
+	if caption, _ := h.wantOutcome(widget.messageID, "Rejected; nothing was written."); caption.caption != "2 changes — rejected" {
+		t.Fatalf("caption of a rejected batch = %q", caption.caption)
+	}
 
-	h.push(textUpdate(2, 101, "drop the second one"))
-	chat = receive(t, h.ctx, runtime.calls)
+	long := "Summarise report two" + strings.Repeat(" and its appendix", 50)
+	long = strings.TrimSpace(long[:widgetDataLimit-frame-12]) + "."
+	h.proposeReports(runtime, 3, "Summarise report one.", long)
+	widget = h.nextWidget()
+	if len(widget.data) > widgetDataLimit || len(widget.data) < widgetDataLimit-20 {
+		t.Fatalf("batch widget data = %d bytes, want just under the limit", len(widget.data))
+	}
+
+	h.push(textUpdate(4, 101, "drop the second one"))
+	chat := receive(t, h.ctx, runtime.calls)
 	if withdrawn := toolCaller(t, chat)("proposal_withdraw", `{"items":[2]}`); withdrawn.IsError {
 		t.Fatalf("proposal_withdraw = %+v", withdrawn)
 	}
 	caption := h.nextWidgetEdit("editMessageCaption", widget.messageID)
-	data := h.nextWidgetEdit("editMessageWidgetData", widget.messageID)
-	if !strings.Contains(caption.caption, "Withdrawn by the assistant") || !strings.Contains(decodeWidget(t, data.data).Text, "Withdrawn by the assistant") {
-		t.Fatalf("widget after a withdrawal = %q, %q", caption.caption, data.data)
+	data := decodeWidget(t, h.nextWidgetEdit("editMessageWidgetData", widget.messageID).data)
+	if caption.caption != "2 changes — 1 waiting, 1 withdrawn" || data.Status != "1 waiting, 1 withdrawn." || !strings.Contains(data.Text, "…") ||
+		!strings.HasPrefix(data.Text, "2 changes, confirmed or rejected together:") || !strings.HasSuffix(data.Text, "Withdrawn by the assistant; nothing was written.") {
+		t.Fatalf("widget after a withdrawal that outgrows its data = %q, %+v", caption.caption, data)
 	}
-	widgetActions(t, data.data)
+	if len(data.Actions) != 3 {
+		t.Fatalf("widget actions after a partial withdrawal = %+v", data.Actions)
+	}
+	full := h.nextMessage()
+	if full.replyTo != widget.messageID || !strings.Contains(full.text, long) || !strings.Contains(full.text, "Withdrawn by the assistant") || !strings.Contains(full.text, "Expires in 10 minutes.") {
+		t.Fatalf("whole text after the withdrawal = %+v", full)
+	}
 	chat.answer <- agentruntime.RunResult{Response: "withdrawn"}
-	h.wantReply(101, 2, "withdrawn")
-	h.waitState(2, "delivered")
+	h.wantReply(101, 4, "withdrawn")
+	h.waitState(4, "delivered")
 
-	h.push(textUpdate(3, 101, "forget all of it"))
+	h.push(textUpdate(5, 101, "forget all of it"))
 	chat = receive(t, h.ctx, runtime.calls)
 	if withdrawn := toolCaller(t, chat)("proposal_withdraw", `{"all":true}`); withdrawn.IsError {
 		t.Fatalf("withdraw all = %+v", withdrawn)
 	}
-	h.wantOutcome(widget.messageID, "Withdrawn by the assistant; nothing was written.")
+	if caption, data := h.wantOutcome(widget.messageID, "Withdrawn by the assistant; nothing was written."); caption.caption != "2 changes — withdrawn" || strings.Contains(data.Text, "…") {
+		t.Fatalf("widget once nothing is left = %q, %+v", caption.caption, data)
+	}
 	chat.answer <- agentruntime.RunResult{Response: "done"}
-	h.wantReply(101, 3, "done")
-	h.waitState(3, "delivered")
+	h.wantReply(101, 5, "done")
+	h.waitState(5, "delivered")
+	h.wantNoWidgetTextEdit()
 }
 
 // Serial: waits out a 2 s approval lifetime with a 100 ms sweep.
@@ -589,7 +717,10 @@ func TestWidgetShowsExpiry(t *testing.T) {
 	h.proposeJob(runtime, 1, 0, "Weekly tasks", "List my overdue tasks.")
 	widget := h.nextWidget()
 	confirm, _, _ := widgetActions(t, widget.data)
-	h.wantOutcome(widget.messageID, "Expired; nothing was written.")
+	if caption, _ := h.wantOutcome(widget.messageID, "Expired; nothing was written."); caption.caption != widget.caption+" — expired" {
+		t.Fatalf("caption after expiry = %q", caption.caption)
+	}
+	h.wantNoWidgetTextEdit()
 
 	h.push(widgetTap(2, 101, widget.messageID, confirm))
 	h.wantWidgetAnswer(2)
@@ -597,25 +728,36 @@ func TestWidgetShowsExpiry(t *testing.T) {
 	if count := h.countRows(`SELECT count(*) FROM scheduled_jobs`); count != 0 {
 		t.Fatalf("an expired widget proposal created %d jobs", count)
 	}
+	h.wantNoWidgetTextEdit()
 }
 
-// A widget keeps as much of a text in another script as fits, however many bytes a character takes.
+// A widget's data is decided on its encoded bytes: a text in any script is shortened in the middle
+// to fit with its status whole, and a status too long alone is shortened instead with no text.
 func TestWidgetDataKeepsTextInAnyScript(t *testing.T) {
 	t.Parallel()
 	actions := []widgetAction{{Label: "Confirm", Data: "approval:confirm:0000000000000000"}}
-	for name, character := range map[string]string{"two bytes": "ж", "three bytes": "界", "four bytes": "🙂"} {
-		raw, fits := encodeWidgetData(strings.Repeat(character, 900), actions)
-		if !fits || len(raw) > widgetDataLimit {
-			t.Fatalf("%s: fits = %t, %d bytes", name, fits, len(raw))
+	for name, character := range map[string]string{"two bytes": "ж", "three bytes": "界", "four bytes": "🙂", "escaped": `"`} {
+		if _, fits := encodeWidgetData(strings.Repeat(character, 900), "Done.", actions); fits {
+			t.Fatalf("%s: 900 characters fit the data whole", name)
 		}
-		kept := utf8.RuneCountInString(decodeWidget(t, raw).Text)
-		if most := (widgetDataLimit - 80) / len(character); kept < most*9/10 {
+		raw, shortened, fits := shortenWidgetData(strings.Repeat(character, 900), "Done.", actions)
+		data := decodeWidget(t, raw)
+		if !fits || !shortened || len(raw) > widgetDataLimit || data.Status != "Done." || !strings.Contains(data.Text, "…") {
+			t.Fatalf("%s: fits = %t, shortened = %t, %d bytes, %+v", name, fits, shortened, len(raw), data)
+		}
+		kept := utf8.RuneCountInString(data.Text)
+		encoded := len(marshalWidgetData(widgetData{Text: character})) - len(marshalWidgetData(widgetData{}))
+		if most := (widgetDataLimit - 100) / encoded; kept < most*9/10 {
 			t.Fatalf("%s: kept %d characters, want about %d", name, kept, most)
 		}
-		caption, clipped := widgetCaption(strings.Repeat(character, 2000))
-		if units := utf16Length(caption); !clipped || units > captionLimit || units < captionLimit*9/10 {
-			t.Fatalf("%s: caption of %d units, clipped = %t", name, units, clipped)
+		caption, plain := widgetCaption(strings.Repeat(character, 2000))
+		if units := utf16Length(caption); !plain || units > captionLimit || units < captionLimit*9/10 {
+			t.Fatalf("%s: caption of %d units, plain = %t", name, units, plain)
 		}
+	}
+	raw, shortened, fits := shortenWidgetData("Save the note", "Done. "+strings.Repeat("Saved. ", 200), actions)
+	if data := decodeWidget(t, raw); !fits || !shortened || len(raw) > widgetDataLimit || data.Text != "" || !strings.HasPrefix(data.Status, "Done. Saved.") || !strings.Contains(data.Status, "…") {
+		t.Fatalf("status too long for the data = %t %t %+v", fits, shortened, data)
 	}
 }
 
@@ -648,4 +790,261 @@ func TestWidgetTapMustComeFromTheProposalsMessage(t *testing.T) {
 	}
 	h.wantOutcome(widget.messageID, "Scheduled. First run:")
 	h.continueTurn(runtime, 3)
+}
+
+const outcomeTool = "outcome_write"
+
+// outcomeBook is an executor whose actions end as their arguments say: with the outcome given, and
+// failed when asked to.
+type outcomeBook struct{}
+
+func (outcomeBook) ActionTools() []string { return []string{outcomeTool} }
+
+func (outcomeBook) ExecuteApproved(_ context.Context, record approval.Record) (approval.Outcome, error) {
+	var arguments struct {
+		Outcome string `json:"outcome"`
+		Fail    bool   `json:"fail"`
+	}
+	if err := json.Unmarshal(record.Arguments, &arguments); err != nil {
+		return approval.Outcome{}, err
+	}
+	if arguments.Fail {
+		return approval.Outcome{}, &approval.ActionError{Reason: "refused", Text: arguments.Outcome}
+	}
+	return approval.Outcome{Text: arguments.Outcome}, nil
+}
+
+func outcomeProposal(t *testing.T, summary, outcome string, fail bool) approval.Proposal {
+	t.Helper()
+	arguments, err := json.Marshal(map[string]any{"summary": summary, "outcome": outcome, "fail": fail})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return approval.Proposal{Tool: outcomeTool, Arguments: arguments, Summary: summary}
+}
+
+// newOfferHarness runs the application with Alice's proposals as widgets and outcomeBook as an
+// executor, for bundles offered outside a chat turn.
+func newOfferHarness(t *testing.T, options harnessOptions) *conversationHarness {
+	t.Helper()
+	h := newConversationHarnessWithOptions(t, newControlledRuntime(), options)
+	h.provision("alice", "account-alice")
+	if err := h.approvals.RegisterExecutor(outcomeBook{}); err != nil {
+		t.Fatal(err)
+	}
+	h.start()
+	h.setWidgets("alice", true)
+	return h
+}
+
+// offerWidget offers proposals to Alice under the heading, as a scheduled review does, and returns
+// their records and the widget that shows them.
+func (h *conversationHarness) offerWidget(lifetime time.Duration, proposals ...approval.Proposal) ([]approval.Record, sentWidget) {
+	h.t.Helper()
+	records, err := h.approvals.Offer(h.ctx, "alice", 101, 0, "Weekly review", lifetime, proposals)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return records, h.nextWidget()
+}
+
+// The caption is one line the approval service builds from the records: under an offered bundle's
+// heading, a single proposal's first line or the number of changes, and once resolved what became of
+// them, as one word or as counts when they ended differently. The data holds the whole text with the
+// status apart.
+func TestWidgetCaptionNamesTheProposalInOneLine(t *testing.T) {
+	t.Parallel()
+	h := newOfferHarness(t, harnessOptions{})
+
+	_, single := h.offerWidget(10*time.Minute, outcomeProposal(t, "Save the note A\nWith every line of the list.", "Saved.", false))
+	data := decodeWidget(t, single.data)
+	if single.caption != "Weekly review: Save the note A" || data.Text != "Weekly review\n\nSave the note A\nWith every line of the list." ||
+		data.Status != "Expires in 10 minutes." || len(data.Actions) != 2 {
+		t.Fatalf("offered widget = %q, %+v", single.caption, data)
+	}
+	h.push(widgetTap(1, 101, single.messageID, data.Actions[1].Data))
+	h.wantWidgetAnswer(1)
+	if caption, _ := h.wantOutcome(single.messageID, "Rejected; nothing was written."); caption.caption != "Weekly review: Save the note A — rejected" {
+		t.Fatalf("caption of a rejected proposal = %q", caption.caption)
+	}
+
+	_, batch := h.offerWidget(10*time.Minute,
+		outcomeProposal(t, "Save the note B", "Saved.", false),
+		outcomeProposal(t, "Save the note C", "The note is locked.", true),
+		outcomeProposal(t, "Save the note D", "Saved.", false),
+	)
+	data = decodeWidget(t, batch.data)
+	if batch.caption != "Weekly review: 3 changes" || !strings.HasPrefix(data.Text, "Weekly review\n\n3 changes, confirmed or rejected together:") ||
+		data.Status != "Expires in 10 minutes." || strings.Contains(data.Text, "Expires") {
+		t.Fatalf("offered batch = %q, %+v", batch.caption, data)
+	}
+	h.push(widgetTap(2, 101, batch.messageID, data.Actions[0].Data))
+	h.wantWidgetAnswer(2)
+	caption := h.nextWidgetEdit("editMessageCaption", batch.messageID)
+	data = decodeWidget(t, h.nextWidgetEdit("editMessageWidgetData", batch.messageID).data)
+	if caption.caption != "Weekly review: 3 changes — 2 done, 1 failed" || data.Status != "2 done, 1 failed." || len(data.Actions) != 0 ||
+		!strings.Contains(data.Text, "1. Save the note B\nDone. Saved.") || !strings.Contains(data.Text, "2. Save the note C\nFailed. The note is locked.") {
+		t.Fatalf("batch whose items ended differently = %q, %+v", caption.caption, data)
+	}
+	h.waitOffset(3)
+	if count := len(h.messages); count != 0 {
+		t.Fatalf("an outcome that fits the data sent %d messages", count)
+	}
+	h.wantNoWidgetTextEdit()
+}
+
+// A proposal the intent check warns about is marked in its caption, which still names the proposal;
+// the warning is the widget's title.
+func TestWidgetCaptionMarksAWarnedProposal(t *testing.T) {
+	t.Parallel()
+	runtime := newControlledRuntime()
+	h := newWidgetHarness(t, runtime, harnessOptions{})
+	h.setWidgets("alice", true)
+	h.approvals.SetIntentChecker(flagEverything{})
+
+	h.proposeJob(runtime, 1, 0, "Weekly tasks", "List my overdue tasks.")
+	widget := h.nextWidget()
+	data := decodeWidget(t, widget.data)
+	if !strings.HasPrefix(widget.caption, "⚠️ ") || !strings.Contains(widget.caption, `"Weekly tasks"`) || strings.Contains(widget.caption, approval.IntentWarning) ||
+		!strings.HasPrefix(data.Text, approval.IntentWarning+"\n\n") || !strings.Contains(data.Text, "List my overdue tasks.") {
+		t.Fatalf("warned widget = %q, %+v", widget.caption, data)
+	}
+}
+
+// An outcome too long for the data shortens the text there and keeps the status whole, and the whole
+// text is sent as a reply once: an edit that leaves the data as it was sends nothing again.
+func TestWidgetOutcomeTooLongForTheData(t *testing.T) {
+	t.Parallel()
+	h := newOfferHarness(t, harnessOptions{})
+
+	outcome := strings.TrimSpace(strings.Repeat("Saved a line. ", 70))
+	_, widget := h.offerWidget(10*time.Minute, outcomeProposal(t, "Save the note A\nWith every line of the list.", outcome, false))
+	confirm := decodeWidget(t, widget.data).Actions[0].Data
+	h.push(widgetTap(1, 101, widget.messageID, confirm))
+	h.wantWidgetAnswer(1)
+	caption := h.nextWidgetEdit("editMessageCaption", widget.messageID)
+	data := decodeWidget(t, h.nextWidgetEdit("editMessageWidgetData", widget.messageID).data)
+	if caption.caption != "Weekly review: Save the note A — done" || data.Status != "Done. "+outcome || !strings.HasPrefix(data.Text, "Weekly") ||
+		!strings.Contains(data.Text, "…") || len(data.Actions) != 0 {
+		t.Fatalf("widget after a long outcome = %q, %+v", caption.caption, data)
+	}
+	full := h.nextMessage()
+	if full.replyTo != widget.messageID || !strings.Contains(full.text, "With every line of the list.") || !strings.Contains(full.text, "Done. "+outcome) {
+		t.Fatalf("whole outcome = %+v", full)
+	}
+
+	h.push(widgetTap(2, 101, widget.messageID, confirm))
+	h.wantWidgetAnswer(2)
+	h.nextWidgetEdit("editMessageCaption", widget.messageID)
+	if again := h.nextWidgetEdit("editMessageWidgetData", widget.messageID); again.data != h.widgetData(widget.messageID) {
+		t.Fatalf("repeated outcome data = %q", again.data)
+	}
+	h.waitOffset(3)
+	if count := len(h.messages); count != 0 {
+		t.Fatalf("a repeated outcome sent %d more messages", count)
+	}
+	h.wantNoWidgetTextEdit()
+}
+
+func (h *conversationHarness) widgetData(messageID int64) string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.widgets.data[messageID]
+}
+
+// A widget Telegram no longer lets the bot edit still gets its outcome, as a reply.
+func TestWidgetEditFailureOnATapRepliesTheOutcome(t *testing.T) {
+	t.Parallel()
+	h := newOfferHarness(t, harnessOptions{})
+
+	_, widget := h.offerWidget(10*time.Minute, outcomeProposal(t, "Save the note A", "Saved.", false))
+	h.mu.Lock()
+	h.widgets.editStatus = http.StatusBadRequest
+	h.mu.Unlock()
+	h.push(widgetTap(1, 101, widget.messageID, decodeWidget(t, widget.data).Actions[0].Data))
+	h.wantWidgetAnswer(1)
+	if reply := h.nextMessage(); !strings.Contains(reply.text, "Save the note A") || !strings.Contains(reply.text, "Done. Saved.") {
+		t.Fatalf("outcome of a widget that cannot be edited = %+v", reply)
+	}
+	h.wantNoWidgetTextEdit()
+}
+
+// A delivery that fails clears the widget flag with the message, and the resend that sends a widget
+// sets it.
+func TestWidgetFlagFollowsDelivery(t *testing.T) {
+	t.Parallel()
+	h := newOfferHarness(t, harnessOptions{approvalSweep: 50 * time.Millisecond})
+	h.mu.Lock()
+	h.widgets.sendStatus = http.StatusInternalServerError
+	h.mu.Unlock()
+
+	records, err := h.approvals.Offer(h.ctx, "alice", 101, 0, "Weekly review", 10*time.Minute, []approval.Proposal{outcomeProposal(t, "Save the note A", "Saved.", false)})
+	if err == nil {
+		t.Fatal("an offer whose widget failed was delivered")
+	}
+	unflagged := func() bool {
+		return h.countRows(`SELECT count(*) FROM approvals WHERE id = ? AND message_id IS NULL AND widget = 0`, records[0].ID) == 1
+	}
+	if !unflagged() {
+		t.Fatal("a failed delivery left the proposal flagged or shown")
+	}
+	// A stale flag, as a message recorded earlier would leave, must be cleared by the next failure.
+	if _, err := h.db.ExecContext(h.ctx, `UPDATE approvals SET widget = 1 WHERE id = ?`, records[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	h.waitUntil("a failed resend clear the widget flag", unflagged)
+
+	h.mu.Lock()
+	h.widgets.sendStatus = 0
+	h.mu.Unlock()
+	if widget := h.nextWidget(); !h.widgetFlagged(widget.messageID) {
+		t.Fatal("the resent widget is not recorded as one")
+	}
+}
+
+// The "Done" message of a direct action has buttons of its own and is never recorded as a widget.
+func TestDirectActionMessageIsNotAWidget(t *testing.T) {
+	t.Parallel()
+	h, runtime, _ := newActHarness(t, readingTools{})
+	h.setWidgets("alice", true)
+
+	h.push(textUpdate(1, 101, "save a note"))
+	call := receive(t, h.ctx, runtime.calls)
+	text, err := writeNote(call.ctx, h, "A", false)
+	wantDone(t, text, err)
+	h.finishTurn(call, 1, "saved")
+	done := h.nextMessage()
+	h.waitUntil("the Done message recorded", func() bool {
+		return h.countRows(`SELECT count(*) FROM approvals WHERE mode = 'direct' AND message_id = ?`, done.messageID) == 1
+	})
+	if h.widgetFlagged(done.messageID) || len(h.widgets.sent) != 0 {
+		t.Fatal("a direct action's message is recorded as a widget")
+	}
+}
+
+// Serial: waits out two 2 s offers with a 100 ms sweep. A flagged widget expires without a text edit;
+// one whose records predate the flag is found by Telegram's refusal of the text edit and still shows
+// its outcome, in its text, which is all its older template draws.
+func TestUnflaggedWidgetIsEditedThroughTheRefusedTextEdit(t *testing.T) {
+	h := newOfferHarness(t, harnessOptions{approvalSweep: 100 * time.Millisecond})
+
+	_, flagged := h.offerWidget(2*time.Second, outcomeProposal(t, "Save the note A", "Saved.", false))
+	h.wantOutcome(flagged.messageID, "Expired; nothing was written.")
+	h.wantNoWidgetTextEdit()
+
+	records, legacy := h.offerWidget(2*time.Second, outcomeProposal(t, "Save the note B", "Saved.", false))
+	if _, err := h.db.ExecContext(h.ctx, `UPDATE approvals SET widget = 0 WHERE bundle_id = ?`, records[0].BundleID); err != nil {
+		t.Fatal(err)
+	}
+	caption := h.nextWidgetEdit("editMessageCaption", legacy.messageID)
+	data := decodeWidget(t, h.nextWidgetEdit("editMessageWidgetData", legacy.messageID).data)
+	if caption.caption != "Weekly review: Save the note B — expired" {
+		t.Fatalf("caption of an unflagged widget after expiry = %q", caption.caption)
+	}
+	if !strings.HasSuffix(data.Text, "Expired; nothing was written.") || data.Status != "" || len(data.Actions) != 0 {
+		t.Fatalf("data of an unflagged widget after expiry = %+v, want the status in its text", data)
+	}
+	if count := h.widgetTextEdits(); count != 1 {
+		t.Fatalf("%d text edits of the unflagged widget, want the one Telegram refused", count)
+	}
 }

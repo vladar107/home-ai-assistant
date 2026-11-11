@@ -32,10 +32,11 @@ const (
 //go:embed widget.html
 var widgetTemplate string
 
-// widgetData is what a proposal widget shows: the proposal's text and either the actions still
-// open, or no actions once the text carries the outcome.
+// widgetData is what a proposal widget shows: the proposal's text, whose first line is its title,
+// where it stands, and either the actions still open or none once it is resolved.
 type widgetData struct {
 	Text    string         `json:"text"`
+	Status  string         `json:"status,omitempty"`
 	Actions []widgetAction `json:"actions,omitempty"`
 }
 
@@ -55,28 +56,57 @@ func proposalActions(buttons approval.Buttons) []widgetAction {
 	return actions
 }
 
-// encodeWidgetData renders a proposal's text as the user reads it, shortened in the middle until
-// the data fits Telegram's limit, and reports false when even no text would not fit.
-func encodeWidgetData(text string, actions []widgetAction) (string, bool) {
-	shown := captionText(renderMarkup(text))
-	encode := func(limit int) (string, bool) {
-		var encoded bytes.Buffer
-		encoder := json.NewEncoder(&encoded)
-		encoder.SetEscapeHTML(false)
-		if err := encoder.Encode(widgetData{Text: clipMiddle(shown, limit), Actions: actions}); err != nil {
-			return "", false
-		}
-		data := strings.TrimSuffix(encoded.String(), "\n")
+// encodeWidgetData renders a proposal's text and status as the user reads them, with its actions,
+// and reports whether the data fits Telegram's limit whole.
+func encodeWidgetData(text, status string, actions []widgetAction) (string, bool) {
+	data := marshalWidgetData(widgetData{Text: plainWidgetText(text), Status: plainWidgetText(status), Actions: actions})
+	return data, len(data) <= widgetDataLimit
+}
+
+// shortenWidgetData is encodeWidgetData shortening the text in the middle until the data fits, with
+// the status whole, or with no text and the status shortened when the status alone does not fit.
+// It reports whether anything was shortened, and false for fits only when the actions alone do not
+// fit.
+func shortenWidgetData(text, status string, actions []widgetAction) (data string, shortened, fits bool) {
+	if data, fits := encodeWidgetData(text, status, actions); fits {
+		return data, false, true
+	}
+	shownText, shownStatus := plainWidgetText(text), plainWidgetText(status)
+	encode := func(text, status string) (string, bool) {
+		data := marshalWidgetData(widgetData{Text: text, Status: status, Actions: actions})
 		return data, len(data) <= widgetDataLimit
 	}
-	longest := longestFit(utf8.RuneCountInString(shown), func(limit int) bool {
-		_, fits := encode(limit)
+	if longest := longestFit(utf8.RuneCountInString(shownText), func(limit int) bool {
+		_, fits := encode(clipMiddle(shownText, limit), shownStatus)
+		return fits
+	}); longest >= 0 {
+		data, _ := encode(clipMiddle(shownText, longest), shownStatus)
+		return data, true, true
+	}
+	longest := longestFit(utf8.RuneCountInString(shownStatus), func(limit int) bool {
+		_, fits := encode("", clipMiddle(shownStatus, limit))
 		return fits
 	})
 	if longest < 0 {
-		return "", false
+		return "", false, false
 	}
-	return encode(longest)
+	data, _ = encode("", clipMiddle(shownStatus, longest))
+	return data, true, true
+}
+
+// plainWidgetText is text as a message would show it, without the formatting, which a widget does
+// not draw.
+func plainWidgetText(text string) string {
+	return captionText(renderMarkup(text))
+}
+
+func marshalWidgetData(data widgetData) string {
+	var encoded bytes.Buffer
+	encoder := json.NewEncoder(&encoded)
+	encoder.SetEscapeHTML(false)
+	// Encoding strings and a slice of them cannot fail.
+	_ = encoder.Encode(data)
+	return strings.TrimSuffix(encoded.String(), "\n")
 }
 
 // longestFit is the largest limit from 0 to most that fits, or -1 when none does. A longer limit
@@ -112,13 +142,13 @@ func clipMiddle(text string, limit int) string {
 	return strings.TrimRightFunc(string(runes[:head]), unicode.IsSpace) + "…" + strings.TrimLeftFunc(string(runes[len(runes)-tail:]), unicode.IsSpace)
 }
 
-// widgetCaption is the caption of a widget showing text: the rendered text when it fits, and
-// otherwise the text the user would read, shortened in the middle, with clipped set.
-func widgetCaption(text string) (caption string, clipped bool) {
-	if utf16Length(captionText(renderMarkup(text))) <= captionLimit {
-		return text, false
+// widgetCaption is a widget's caption line, rendered when it fits a caption, and otherwise as the
+// user would read it, shortened in the middle, with plain set.
+func widgetCaption(line string) (caption string, plain bool) {
+	shown := captionText(renderMarkup(line))
+	if utf16Length(shown) <= captionLimit {
+		return line, false
 	}
-	shown := captionText(renderMarkup(text))
 	longest := longestFit(captionLimit, func(limit int) bool {
 		return utf16Length(clipMiddle(shown, limit)) <= captionLimit
 	})
@@ -136,14 +166,24 @@ func setCaption(params url.Values, caption string, plain bool) {
 	params.Set("parse_mode", "HTML")
 }
 
-// sendWidget posts text as a proposal widget with the given actions and the text as its caption.
-// It reports false, sending nothing, when the text does not fit a caption or the data does not fit
-// Telegram's limit.
-func (c *Client) sendWidget(ctx context.Context, chatID int64, text string, actions []widgetAction) (Message, bool, error) {
-	if !c.CaptionFits(text) {
-		return Message{}, false, nil
+// executeCaptioned calls method with a widget's caption line set, and once more with it plain when
+// Telegram refuses its entities.
+func executeCaptioned[T any](c *Client, ctx context.Context, method string, params url.Values, line string) (T, error) {
+	caption, plain := widgetCaption(line)
+	setCaption(params, caption, plain)
+	result, err := execute[T](c, ctx, method, params)
+	if !plain && hasUnparsableEntities(err) {
+		setCaption(params, captionText(renderMarkup(caption)), true)
+		result, err = execute[T](c, ctx, method, params)
 	}
-	data, fits := encodeWidgetData(text, actions)
+	return result, err
+}
+
+// sendWidget posts a proposal widget with the given actions, its text and status in the data and its
+// caption line under it. It reports false, sending nothing, when the text and status do not fit the
+// data whole.
+func (c *Client) sendWidget(ctx context.Context, chatID int64, shown approval.Shown, actions []widgetAction) (Message, bool, error) {
+	data, fits := encodeWidgetData(shown.Body, shown.Status, actions)
 	if !fits {
 		return Message{}, false, nil
 	}
@@ -157,56 +197,42 @@ func (c *Client) sendWidget(ctx context.Context, chatID int64, text string, acti
 	err := c.inTab(ctx, chatID, true, func(ctx context.Context) error {
 		params.Del("message_thread_id")
 		setThread(ctx, params)
-		setCaption(params, text, false)
 		var err error
-		message, err = execute[Message](c, ctx, "sendWidget", params)
-		if hasUnparsableEntities(err) {
-			setCaption(params, captionText(renderMarkup(text)), true)
-			message, err = execute[Message](c, ctx, "sendWidget", params)
-		}
+		message, err = executeCaptioned[Message](c, ctx, "sendWidget", params, shown.Caption)
 		return err
 	})
 	return message, true, err
 }
 
-// editWidget shows text on a proposal widget: as its caption, and as its data with the actions
-// given, or with none once the text is an outcome. The data is sent whatever became of the caption,
-// so the widget never keeps actions the caption says are spent. A text too long for a caption is
-// clipped there and sent in full as a reply to the widget, once: a caption already showing it is
-// not modified and sends no second reply. The first error is returned.
-func (c *Client) editWidget(ctx context.Context, chatID, messageID int64, text string, actions []widgetAction) error {
+// editWidget shows a proposal on its widget: the caption line, and the text and status in the data
+// with the actions given, or with none once the proposal is resolved. The data is sent whatever
+// became of the caption. A text too long for the data is shortened there, with the status whole, and
+// sent in full as a reply to the widget once: data already showing it is not modified and sends no
+// second reply. The first error is returned.
+func (c *Client) editWidget(ctx context.Context, chatID, messageID int64, shown approval.Shown, actions []widgetAction) error {
 	params := url.Values{
 		"chat_id":    {strconv.FormatInt(chatID, 10)},
 		"message_id": {strconv.FormatInt(messageID, 10)},
 	}
-	caption, clipped := widgetCaption(text)
-	setCaption(params, caption, clipped)
-	_, captionErr := execute[json.RawMessage](c, ctx, "editMessageCaption", params)
-	if hasUnparsableEntities(captionErr) {
-		setCaption(params, captionText(renderMarkup(caption)), true)
-		_, captionErr = execute[json.RawMessage](c, ctx, "editMessageCaption", params)
-	}
-	changed := captionErr == nil
+	_, captionErr := executeCaptioned[json.RawMessage](c, ctx, "editMessageCaption", params, shown.Caption)
 	if isNotModified(captionErr) {
 		captionErr = nil
 	}
+	var changed bool
+	var dataErr error
+	data, shortened, fits := shortenWidgetData(shown.Body, shown.Status, actions)
+	if fits {
+		changed, dataErr = c.editWidgetData(ctx, chatID, messageID, data)
+	}
 	var replyErr error
-	if clipped && changed {
-		for _, chunk := range conversation.SplitReply(text) {
+	if shortened && changed {
+		for _, chunk := range conversation.SplitReply(shown.Text) {
 			if replyErr = c.SendReply(ctx, chatID, messageID, chunk); replyErr != nil {
 				break
 			}
 		}
 	}
-	var dataErr error
-	if data, fits := encodeWidgetData(text, actions); fits {
-		dataErr = c.editWidgetData(ctx, chatID, messageID, data)
-	}
-	if captionErr == nil && isPermanentAPIError(dataErr) {
-		// The caption already shows the text; reporting the refusal would send it once more.
-		dataErr = nil
-	}
-	for _, err := range []error{captionErr, replyErr, dataErr} {
+	for _, err := range []error{captionErr, dataErr, replyErr} {
 		if err != nil {
 			return err
 		}
@@ -214,7 +240,8 @@ func (c *Client) editWidget(ctx context.Context, chatID, messageID int64, text s
 	return nil
 }
 
-func (c *Client) editWidgetData(ctx context.Context, chatID, messageID int64, data string) error {
+// editWidgetData replaces a widget's data and reports whether that changed it.
+func (c *Client) editWidgetData(ctx context.Context, chatID, messageID int64, data string) (bool, error) {
 	params := url.Values{
 		"chat_id":    {strconv.FormatInt(chatID, 10)},
 		"message_id": {strconv.FormatInt(messageID, 10)},
@@ -222,9 +249,9 @@ func (c *Client) editWidgetData(ctx context.Context, chatID, messageID int64, da
 	}
 	_, err := execute[json.RawMessage](c, ctx, "editMessageWidgetData", params)
 	if isNotModified(err) {
-		return nil
+		return false, nil
 	}
-	return err
+	return err == nil, err
 }
 
 // AnswerWidgetQuery answers a widget's request with data the widget receives as its result.

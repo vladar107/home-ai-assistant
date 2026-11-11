@@ -26,11 +26,11 @@ func (e *exposure) Exposed(context.Context, string) bool         { return e.exte
 type deliverer struct{}
 
 func (deliverer) SendText(context.Context, int64, string) (int64, error) { return 1, nil }
-func (deliverer) SendProposal(context.Context, int64, string, approval.Buttons) (int64, error) {
-	return 1, nil
+func (deliverer) SendProposal(context.Context, int64, approval.Shown, approval.Buttons) (int64, bool, error) {
+	return 1, false, nil
 }
-func (deliverer) EditText(context.Context, int64, int64, string) error { return nil }
-func (deliverer) EditProposal(context.Context, int64, int64, string, approval.Buttons) error {
+func (deliverer) EditText(context.Context, int64, int64, approval.Shown) error { return nil }
+func (deliverer) EditProposal(context.Context, int64, int64, approval.Shown, approval.Buttons) error {
 	return nil
 }
 func (deliverer) SendPreview(context.Context, int64, int64, string) error { return nil }
