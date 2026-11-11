@@ -118,7 +118,7 @@ func newScanFixture(t *testing.T) *scanFixture {
 		t.Fatal(err)
 	}
 	checker, recorded, mail := &scriptedChecker{broker: broker}, &recorder{}, &mailState{}
-	jobType := trip.ScanJobType(checker, f.store, mail, f.trips, recorded, recorded, f.clock.Now, logger)
+	jobType := trip.ScanJobType(checker, f.store, mail, f.trips, recorded, recorded, nil, f.clock.Now, logger)
 	return &scanFixture{fixture: f, checker: checker, recorded: recorded, mail: mail, handler: jobType.Handler}
 }
 

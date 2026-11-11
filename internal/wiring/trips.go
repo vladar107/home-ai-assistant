@@ -17,11 +17,14 @@ func (c tripScanChecker) RunCheck(ctx context.Context, principalID, message stri
 	return reply.Text, reply.ErrorKind, err
 }
 
-// tripScanState tells the Trips scan and trip_list what Google can be read. google stays nil
-// until the connector is set up, and while it is nil nothing can be read.
+// tripScanState tells the Trips scan, the check for trip updates, and trip_list what Google and
+// the web can be read and whether the scan is on. google stays nil until the connector is set up,
+// and while it is nil nothing can be read.
 type tripScanState struct {
 	schedules *schedule.Service
 	google    *google.Service
+	// web is nil while the web connector is not configured.
+	web turn.WebSearch
 }
 
 func (s *tripScanState) MailReadable(ctx context.Context, principalID string) (bool, error) {
@@ -30,9 +33,21 @@ func (s *tripScanState) MailReadable(ctx context.Context, principalID string) (b
 	})
 }
 
-// ScanOff is true while the principal has no enabled Trips job and a Google account whose mail or
-// calendar can be read, the test the Trips section in /settings uses.
-func (s *tripScanState) ScanOff(ctx context.Context, principalID string) (bool, error) {
+func (s *tripScanState) CalendarReadable(ctx context.Context, principalID string) (bool, error) {
+	return s.readable(ctx, principalID, func(status google.AccountStatus) bool {
+		return status.CalendarGranted && status.CalendarEnabled
+	})
+}
+
+func (s *tripScanState) WebReadable(ctx context.Context, principalID string) (bool, error) {
+	if s.web == nil {
+		return false, nil
+	}
+	return s.web.WebSearchEnabled(ctx, principalID)
+}
+
+// ScanEnabled is true while the principal's Trips job exists and is enabled.
+func (s *tripScanState) ScanEnabled(ctx context.Context, principalID string) (bool, error) {
 	jobs, err := s.schedules.Jobs(ctx, principalID)
 	if err != nil {
 		return false, err
@@ -40,8 +55,17 @@ func (s *tripScanState) ScanOff(ctx context.Context, principalID string) (bool, 
 	id := schedule.TripsJobID(principalID)
 	for _, job := range jobs {
 		if job.ID == id && job.Enabled {
-			return false, nil
+			return true, nil
 		}
+	}
+	return false, nil
+}
+
+// ScanOff is true while the principal has no enabled Trips job and a Google account whose mail or
+// calendar can be read, the test the Trips section in /settings uses.
+func (s *tripScanState) ScanOff(ctx context.Context, principalID string) (bool, error) {
+	if enabled, err := s.ScanEnabled(ctx, principalID); err != nil || enabled {
+		return false, err
 	}
 	return s.readable(ctx, principalID, func(status google.AccountStatus) bool {
 		return status.MailGranted && status.MailEnabled || status.CalendarGranted && status.CalendarEnabled

@@ -74,10 +74,11 @@ borrowed between users.
   dates, each booking with its reference, and when its check-in opens. The
   summary is kept current as the trip changes, and says when the trip ended
   or was cancelled. The trip's check-in reminders, its start and end notices,
-  and changes the Trips scan finds arrive in the tab. Talking there,
-  or replying to its reminders, is a conversation about that trip, and `/new`
-  starts another one about it. A deleted tab of a trip still ahead comes back
-  with its next message; `/close` removes the tab of a trip that is over.
+  changes the Trips scan finds, and news about the trip arrive in the tab.
+  Talking there, or replying to its reminders, is a conversation about that
+  trip, and `/new` starts another one about it. A deleted tab of a trip still
+  ahead comes back with its next message; `/close` removes the tab of a trip
+  that is over.
 - **Act and tell.** A clear request to set up or change a scheduled job, a
   watch, a saved route, a memory instruction, or a Notion property is done at
   once. A "Done" message follows the reply with an Undo button per action,
@@ -173,7 +174,16 @@ borrowed between users.
   reminder says which. Recurring jobs and watches marked "pause while
   traveling" stay silent during a trip, resume by themselves, and are named in
   one notice when the trip starts and one when it ends. `/jobs` and `/watches`
-  show and toggle the mark.
+  show and toggle the mark. While the Trips scan is on, each tracked trip is
+  also checked for important news, from three days before it starts until it
+  ends: about twice a day, between 08:00 and 21:00 at home before the trip and
+  in the trip's zone during it, the assistant reads recent mail, searches the
+  web, and compares the calendar events in the trip's dates with the last
+  check. What is new (a changed venue or time, a strike, a moved or cancelled
+  event) arrives in the trip's tab as one plain message that names each item's
+  source and says it is not verified; nothing new means no message. *Scan now*
+  also checks every trip in that window at once. No separate job is created,
+  and each check uses the user's model subscription.
 - **Memory.** Each user has a small memory of instructions and facts that the
   assistant keeps across `/new`, scheduled runs, and restarts. Facts are saved
   at once, and so are instructions the user states, with Undo, unless the

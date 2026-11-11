@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -14,6 +15,7 @@ import (
 var (
 	_ trip.Repository = (*Store)(nil)
 	_ trip.ScanLog    = (*Store)(nil)
+	_ trip.UpdateLog  = (*Store)(nil)
 )
 
 const (
@@ -385,4 +387,125 @@ func scanTrip(row rowScanner) (trip.Trip, error) {
 	}
 	item.SummaryMessageID = summary.Int64
 	return item, nil
+}
+
+func (s *Store) RecordSentUpdates(ctx context.Context, principalID, tripID string, items []trip.SentUpdate) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("record trip updates: SQLite store is not open")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin record trip updates: %w", err)
+	}
+	defer tx.Rollback()
+	for _, item := range items {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO trip_updates_sent (trip_id, principal_id, source, reference, origin, title, text, sent_at)
+			 SELECT id, principal_id, ?, ?, ?, ?, ?, ? FROM trips WHERE id = ? AND principal_id = ?
+			 ON CONFLICT (trip_id, source, reference) DO NOTHING`,
+			item.Source, item.Reference, item.Origin, item.Title, item.Text, formatTime(item.SentAt), tripID, principalID,
+		); err != nil {
+			return fmt.Errorf("record trip update: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit record trip updates: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) ListSentUpdates(ctx context.Context, principalID, tripID string, limit int) ([]trip.SentUpdate, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("list trip updates: SQLite store is not open")
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT source, reference, origin, title, text, sent_at FROM trip_updates_sent
+		 WHERE trip_id = ? AND principal_id = ? ORDER BY sent_at DESC, rowid DESC LIMIT ?`, tripID, principalID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query trip updates: %w", err)
+	}
+	defer rows.Close()
+	var items []trip.SentUpdate
+	for rows.Next() {
+		var item trip.SentUpdate
+		var sentAt string
+		if err := rows.Scan(&item.Source, &item.Reference, &item.Origin, &item.Title, &item.Text, &sentAt); err != nil {
+			return nil, fmt.Errorf("scan trip update: %w", err)
+		}
+		if item.SentAt, err = time.Parse(time.RFC3339Nano, sentAt); err != nil {
+			return nil, fmt.Errorf("parse trip update time: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read trip updates: %w", err)
+	}
+	return items, nil
+}
+
+func (s *Store) LoadUpdateState(ctx context.Context, principalID, tripID string) (trip.UpdateState, bool, error) {
+	if s == nil || s.db == nil {
+		return trip.UpdateState{}, false, fmt.Errorf("load trip update state: SQLite store is not open")
+	}
+	var state trip.UpdateState
+	var snapshot, missing string
+	var attemptAt, successAt, mailAt sql.NullString
+	err := s.db.QueryRowContext(ctx,
+		`SELECT calendar_snapshot, missing, last_attempt_at, last_success_at, mail_read_at
+		 FROM trip_update_states WHERE trip_id = ? AND principal_id = ?`, tripID, principalID,
+	).Scan(&snapshot, &missing, &attemptAt, &successAt, &mailAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return trip.UpdateState{}, false, nil
+	}
+	if err != nil {
+		return trip.UpdateState{}, false, fmt.Errorf("load trip update state: %w", err)
+	}
+	state.CalendarSnapshot = json.RawMessage(snapshot)
+	if err := json.Unmarshal([]byte(missing), &state.Missing); err != nil {
+		return trip.UpdateState{}, false, fmt.Errorf("parse missing trip events: %w", err)
+	}
+	for target, value := range map[*time.Time]sql.NullString{&state.LastAttemptAt: attemptAt, &state.LastSuccessAt: successAt, &state.MailReadAt: mailAt} {
+		if *target, err = parseOptionalTime(value); err != nil {
+			return trip.UpdateState{}, false, err
+		}
+	}
+	return state, true, nil
+}
+
+func (s *Store) SaveUpdateState(ctx context.Context, principalID, tripID string, state trip.UpdateState) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("save trip update state: SQLite store is not open")
+	}
+	snapshot := string(state.CalendarSnapshot)
+	if snapshot == "" {
+		snapshot = "[]"
+	}
+	missing, err := json.Marshal(append([]string{}, state.Missing...))
+	if err != nil {
+		return fmt.Errorf("encode missing trip events: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO trip_update_states (trip_id, principal_id, calendar_snapshot, missing, last_attempt_at, last_success_at, mail_read_at)
+		 SELECT id, principal_id, ?, ?, ?, ?, ? FROM trips WHERE id = ? AND principal_id = ?
+		 ON CONFLICT (trip_id) DO UPDATE SET calendar_snapshot = excluded.calendar_snapshot, missing = excluded.missing,
+		   last_attempt_at = excluded.last_attempt_at, last_success_at = excluded.last_success_at, mail_read_at = excluded.mail_read_at`,
+		snapshot, string(missing), nullableTime(state.LastAttemptAt), nullableTime(state.LastSuccessAt), nullableTime(state.MailReadAt),
+		tripID, principalID); err != nil {
+		return fmt.Errorf("save trip update state: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) MarkUpdateAttempt(ctx context.Context, principalID, tripID string, at time.Time) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("mark trip update attempt: SQLite store is not open")
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO trip_update_states (trip_id, principal_id, last_attempt_at)
+		 SELECT id, principal_id, ? FROM trips WHERE id = ? AND principal_id = ?
+		 ON CONFLICT (trip_id) DO UPDATE SET last_attempt_at = excluded.last_attempt_at`,
+		formatTime(at), tripID, principalID); err != nil {
+		return fmt.Errorf("mark trip update attempt: %w", err)
+	}
+	return nil
 }

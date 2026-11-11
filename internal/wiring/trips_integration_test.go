@@ -55,7 +55,7 @@ func TestTripListSaysWhenTheScanIsOff(t *testing.T) {
 		t.Fatal(err)
 	}
 	state := &tripScanState{schedules: scheduler}
-	if err := scheduler.Register(trip.ScanJobType(idleChecker{}, store, state, trips, nil, nil, now, logger)); err != nil {
+	if err := scheduler.Register(trip.ScanJobType(idleChecker{}, store, state, trips, nil, nil, nil, now, logger)); err != nil {
 		t.Fatal(err)
 	}
 	offered, err := trip.NewTools(trip.ToolsConfig{Zone: "Europe/Lisbon"}, trips, nil, logger)

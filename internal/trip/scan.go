@@ -108,11 +108,12 @@ type scanBooking struct {
 	CalendarEventID string `json:"calendar_event_id"`
 }
 
-// ScanJobType is the job type of the Trips scan.
-func ScanJobType(checker Checker, scans ScanLog, mail MailCheck, trips Suggester, cards CardSender, sender Sender, now func() time.Time, logger *slog.Logger) schedule.JobType {
+// ScanJobType is the job type of the Trips scan. A scan the user asks for also asks updates, when
+// not nil, for a check of their trips near or under way.
+func ScanJobType(checker Checker, scans ScanLog, mail MailCheck, trips Suggester, cards CardSender, sender Sender, updates UpdateRequests, now func() time.Time, logger *slog.Logger) schedule.JobType {
 	return schedule.JobType{
 		Name:            schedule.TripScanType,
-		Handler:         scan{checker: checker, scans: scans, mail: mail, trips: trips, cards: cards, sender: sender, now: now, logger: logger},
+		Handler:         scan{checker: checker, scans: scans, mail: mail, trips: trips, cards: cards, sender: sender, updates: updates, now: now, logger: logger},
 		CatchUp:         scanCatchUp,
 		MinimumInterval: scanMinimumInterval,
 	}
@@ -128,6 +129,7 @@ type scan struct {
 	trips   Suggester
 	cards   CardSender
 	sender  Sender
+	updates UpdateRequests
 	now     func() time.Time
 	logger  *slog.Logger
 }
@@ -143,6 +145,9 @@ func (scan) Validate(config json.RawMessage) error {
 }
 
 func (s scan) Run(ctx context.Context, occurrence schedule.Occurrence) (schedule.Result, error) {
+	if occurrence.Manual && s.updates != nil {
+		defer s.updates.RequestUpdates(occurrence.PrincipalID)
+	}
 	started := s.now()
 	last, scanned, err := s.scans.LastTripScan(ctx, occurrence.PrincipalID)
 	if err != nil {

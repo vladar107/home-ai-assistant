@@ -6,6 +6,7 @@ package trip
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -155,6 +156,45 @@ type Repository interface {
 	DeleteTrip(ctx context.Context, principalID, id string) error
 	// PruneTrips deletes trips of every status that ended before the instant, with their bookings.
 	PruneTrips(ctx context.Context, before time.Time) (int, error)
+}
+
+// SentUpdate is one item of news about a trip that was sent to its tab. Reference identifies the
+// item within its source: a mail message ID, a page address, or a calendar event ID with what
+// changed. Origin is the sender's or site's name and may be empty.
+type SentUpdate struct {
+	Source    string
+	Reference string
+	Origin    string
+	Title     string
+	Text      string
+	SentAt    time.Time
+}
+
+// UpdateState is what the check for news about one trip remembers between runs. CalendarSnapshot
+// is the JSON of the events from the last complete list, Missing the IDs absent from it, and
+// MailReadAt how far back mail was last read. A zero time means it never happened.
+type UpdateState struct {
+	CalendarSnapshot json.RawMessage
+	Missing          []string
+	LastAttemptAt    time.Time
+	LastSuccessAt    time.Time
+	MailReadAt       time.Time
+}
+
+// UpdateLog keeps the news sent for each trip and the check's state; it is the SQLite store. Every
+// method is scoped to the trip's owner and reads nothing of, and writes nothing for, another's.
+type UpdateLog interface {
+	// RecordSentUpdates stores the items in one transaction; an item whose source and reference
+	// were already recorded for the trip is ignored.
+	RecordSentUpdates(ctx context.Context, principalID, tripID string, items []SentUpdate) error
+	// ListSentUpdates returns up to limit of the trip's sent items, newest first.
+	ListSentUpdates(ctx context.Context, principalID, tripID string, limit int) ([]SentUpdate, error)
+	// LoadUpdateState returns the trip's state; false means none was saved.
+	LoadUpdateState(ctx context.Context, principalID, tripID string) (UpdateState, bool, error)
+	// SaveUpdateState replaces the trip's whole state.
+	SaveUpdateState(ctx context.Context, principalID, tripID string, state UpdateState) error
+	// MarkUpdateAttempt sets only the trip's last attempt time, creating its state when it has none.
+	MarkUpdateAttempt(ctx context.Context, principalID, tripID string, at time.Time) error
 }
 
 // Reminders sets the check-in reminders of planned trips; the adapter over the scheduler is

@@ -265,6 +265,8 @@ type Assembly struct {
 	Events        *events.Service
 	Why           *provenance.Service
 	Trips         *trip.Service
+	// TripLoop sends trip notices and starts the checks for news about trips.
+	TripLoop *trip.Loop
 	// Exports gives each user their own data as a signed file and restores it.
 	Exports *export.Service
 	// SwitchPages are the on/off pages of the registered integrations, in registration order.
@@ -693,6 +695,10 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		conversationHistory, exchanges = reader, reader
 	}
 	notices := conversation.Notices{approvals}
+	// Trip updates are written by a model from mail and web pages, so a turn told of one has read
+	// outside content. The loop that sends them is built later.
+	tripUpdateNotices := trip.NewUpdateNotices()
+	notices = append(notices, conversation.OutsideNotice{Notice: tripUpdateNotices})
 	var reports conversation.Reports = scheduler
 	if in.Core.Tasks != nil {
 		taskConfig := *in.Core.Tasks
@@ -848,22 +854,27 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	if err := approvals.RegisterExecutor(tripTools); err != nil {
 		return err
 	}
-	a.tripState = &tripScanState{schedules: scheduler}
+	a.tripState = &tripScanState{schedules: scheduler, web: webSearch}
 	tripTools.SetScanState(a.tripState)
-	if err := scheduler.Register(trip.ScanJobType(tripScanChecker{engine}, in.Store, a.tripState, tripService, tabs.Trips, tabs.Trips, scheduler.Now, in.Logger)); err != nil {
+	tripUpdates, err := trip.NewUpdates(trip.UpdatesConfig{Zone: a.location, Now: in.Core.Now}, in.Store, in.Store, tripScanChecker{engine}, a.tripState, tabs.Trips, tripUpdateNotices, in.Logger)
+	if err != nil {
+		return fmt.Errorf("initialize trip updates: %w", err)
+	}
+	if err := scheduler.Register(trip.ScanJobType(tripScanChecker{engine}, in.Store, a.tripState, tripService, tabs.Trips, tabs.Trips, tripUpdates, scheduler.Now, in.Logger)); err != nil {
 		return err
 	}
 	paused := []trip.Paused{scheduler}
 	if a.Watches != nil {
 		paused = append(paused, a.Watches)
 	}
-	tripLoop, err := trip.NewLoop(trip.LoopConfig{Now: in.Core.Now}, tripService, paused, tabs.Trips, in.Logger)
+	tripLoop, err := trip.NewLoop(trip.LoopConfig{Now: in.Core.Now, Updates: tripUpdates}, tripService, paused, tabs.Trips, in.Logger)
 	if err != nil {
 		return fmt.Errorf("initialize trip loop: %w", err)
 	}
 	if err := a.Registry.Register(tripLoop); err != nil {
 		return err
 	}
+	a.TripLoop = tripLoop
 	backlogService, err := backlog.NewService(backlog.Config{Location: a.location}, in.Store, approvals, in.Logger)
 	if err != nil {
 		return fmt.Errorf("initialize backlog: %w", err)

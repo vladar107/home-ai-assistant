@@ -36,12 +36,12 @@ const (
 	TripIgnoredReply   = "Ignored; I won't offer it again."
 	TripCancelledReply = "This trip was cancelled."
 
-	TripsOnLine  = "Trips: on. Each morning I look in your mail and calendar for travel bookings and offer each trip with Track and Ignore buttons; nothing is planned without your press. Press Scan now to look at once. Uses your model subscription."
-	TripsOffLine = "Trips: off. Turn it on and I look in your mail and calendar for travel bookings at once and then each morning, and offer each trip with Track and Ignore buttons; nothing is planned without your press. Needs a connected model subscription, which it uses."
+	TripsOnLine  = "Trips: on. Each morning I look in your mail and calendar for travel bookings and offer each trip with Track and Ignore buttons; nothing is planned without your press. From three days before a tracked trip until it ends, I also check your mail, the web, and your calendar for important news about it about twice a day, between 08:00 and 21:00 where you are, and post what is new in the trip's tab. Press Scan now to look at once; it checks for trip news too. Uses your model subscription."
+	TripsOffLine = "Trips: off. Turn it on and I look in your mail and calendar for travel bookings at once and then each morning, and offer each trip with Track and Ignore buttons; nothing is planned without your press. While it is on, I also check tracked trips for important news from three days before they start until they end. Needs a connected model subscription, which it uses."
 	// TripsNeedsGoogleLine explains why the switch is not offered.
 	TripsNeedsGoogleLine = "Trips: off. It reads your mail and calendar, so turn on Mail or Calendar for a connected Google account in Accounts › Google first."
 	TripsTooManyNote     = "You already have the maximum number of scheduled jobs. Remove one in /jobs, then turn Trips on."
-	TripsScanningNote    = "Scanning your mail and calendar now; any trips I find arrive here as cards."
+	TripsScanningNote    = "Scanning your mail and calendar now; any trips I find arrive here as cards, and news about trips near or under way arrives in their tabs."
 	TripsBusyNote        = "A scan is already running; any trips it finds arrive here as cards."
 )
 

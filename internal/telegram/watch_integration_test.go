@@ -11,7 +11,9 @@ import (
 	"time"
 
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
+	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
+	"github.com/vladar107/home-ai-assistant/internal/trip"
 	"github.com/vladar107/home-ai-assistant/internal/watch"
 )
 
@@ -335,6 +337,63 @@ func TestAgentWatchChecksInAReadOnlyTurnAndAlertsAsOutsideContent(t *testing.T) 
 	}
 	if listed := h.runTool(runtime, 3, 101, "watch_list", `{}`); !strings.Contains(listed.Text, "id "+id+": agent watch, Release date") {
 		t.Fatalf("alice's list = %+v", listed)
+	}
+}
+
+// A check for news about a trip is a turn of the owner's own subscription. Its message lands in the
+// trip's tab, and the next chat turn is told about it as outside content.
+func TestTripUpdateReachesTheTripsTabAndTheNextTurnAsOutsideContent(t *testing.T) {
+	t.Parallel()
+	runtime := newControlledRuntime()
+	clock := newTestClock(t, mondayMorning)
+	base := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, topics: true, web: true})
+	base.tabs.icons = append(slices.Clone(testTopicIcons), TopicIcon{Emoji: "✈️", CustomEmojiID: tripIconID})
+	base.provision("alice", "account-alice")
+	base.start()
+	receive(t, base.ctx, base.registrations)
+	receive(t, base.ctx, base.registrations)
+	h := &tripTabHarness{conversationHarness: base, runtime: runtime, clock: clock, trips: base.trips, notifier: base.tripNotifier}
+	planned := h.addTrip()
+	tab := h.wantTripTab("Example trip", planned.ID)
+	h.wantSummary(tab, planned.ID, h.summaryOf(planned.ID))
+	prepared, err := h.scheduler.Prepare("alice", schedule.TripsName, schedule.TripScanType, schedule.Timing{Cron: schedule.TripsCron}, trip.ScanConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created, err := h.scheduler.Create(h.ctx, schedule.TripsJobID("alice"), prepared); err != nil || !created {
+		t.Fatalf("create the Trips job: %v %v", created, err)
+	}
+
+	h.assembly.TripLoop.Cycle(h.ctx)
+	check := receive(t, h.ctx, runtime.calls)
+	if check.request.PrincipalID != "alice" || !strings.Contains(check.request.Message, `news about the user's trip "Example trip"`) || !check.request.WebSearch {
+		t.Fatalf("check turn = %s %v %q", check.request.PrincipalID, check.request.WebSearch, check.request.Message)
+	}
+	reply := `{"updates":[{"source":"web","origin":"Example Times","reference":"https://example.com/strike","title":"Rail strike","text":"Trains to Example City stop on Friday."}]}`
+	check.answer <- agentruntime.RunResult{Response: reply, Final: reply}
+	news := h.nextMessage()
+	if news.threadID != tab || !strings.Contains(news.text, "- Example Times (web): Rail strike. Trains to Example City stop on Friday.") {
+		t.Fatalf("update = %+v, want it in the trip's tab %d", news, tab)
+	}
+	h.assembly.TripLoop.Wait()
+
+	h.push(tabMessage(1, tab, "will the strike affect me?"))
+	chat := receive(t, h.ctx, runtime.calls)
+	if !strings.Contains(chat.request.Message, `news about their trip "Example trip"`) || !strings.Contains(chat.request.Message, "Trains to Example City stop on Friday.") {
+		t.Fatalf("chat turn message = %q", chat.request.Message)
+	}
+	if chat.request.SessionID == check.request.SessionID {
+		t.Fatal("the check ran in the chat's session")
+	}
+	chat.answer <- agentruntime.RunResult{Response: "Possibly."}
+	if answer := h.nextMessage(); answer.threadID != tab || answer.text != "Possibly." {
+		t.Fatalf("answer = %+v", answer)
+	}
+	h.waitState(1, "delivered")
+	sessionID, _ := h.requestSession(1)
+	var exposed bool
+	if err := h.db.QueryRowContext(h.ctx, `SELECT exposed_at IS NOT NULL FROM conversation_sessions WHERE id = ?`, sessionID).Scan(&exposed); err != nil || !exposed {
+		t.Fatalf("the conversation told about the update is not marked exposed: %v %v", exposed, err)
 	}
 }
 

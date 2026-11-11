@@ -53,6 +53,8 @@ var ExcludedFromExport = map[string]string{
 	"event_token_messages":        "messages that show a token",
 	"intake_scans":                "how far the inbox check has read",
 	"trip_scans":                  "how far the trips check has read",
+	"trip_updates_sent":           "what the trip update check has sent",
+	"trip_update_states":          "what the trip update check has seen",
 	"backlog_items":               "development ideas, which /backlog export gives out",
 }
 

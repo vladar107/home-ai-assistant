@@ -61,6 +61,18 @@ func ScheduledScan(name string, scheduledFor time.Time, location *time.Location,
 	return fmt.Sprintf(scheduledJob+unwatched+". Do the task below.\n\n%s", name, localtime.Format(scheduledFor, location), task)
 }
 
+// TripUpdates frames one check for news about a trip of the user's, which the application runs by
+// itself while the trip is near or under way rather than as a scheduled job. Its reply is read by
+// the application, so check says how to answer. now is local to where the user is: home before the
+// trip starts, the trip's zone after.
+func TripUpdates(title string, now time.Time, location *time.Location, check string) string {
+	return fmt.Sprintf(
+		Marker+" This is a check for news about the user's trip %q, which the assistant runs by itself while the trip is near or under way; it is no scheduled job of the user's. "+
+			"Where the user is, it is now %s. "+unwatched+readOnly+"Do the check below.\n\n%s",
+		title, localtime.Format(now, location), check,
+	)
+}
+
 // WatchCheck frames one check of an agent watch; check says what to look at and how to answer. A
 // watch's times are local to its own zone, which can differ from the household's.
 func WatchCheck(name string, now time.Time, location *time.Location, check string) string {

@@ -38,21 +38,29 @@ type LoopConfig struct {
 	Interval time.Duration
 	// Now is the clock; nil means time.Now.
 	Now func() time.Time
+	// Updates checks trips near or under way for news; nil checks none.
+	Updates *Updates
 }
 
-// Loop sends the start and end notices trips owe and prunes old trips. A notice is marked sent
-// only after it was delivered, so a failed send is retried on the next cycle and a crash between
-// the send and the mark can repeat a notice once, which beats losing it.
+// Loop sends the start and end notices trips owe, starts the checks for news about trips, and
+// prunes old trips. A notice is marked sent only after it was delivered, so a failed send is
+// retried on the next cycle and a crash between the send and the mark can repeat a notice once,
+// which beats losing it.
 type Loop struct {
 	notices  Notices
 	paused   []Paused
 	sender   Sender
+	updates  *Updates
 	logger   *slog.Logger
 	interval time.Duration
 	now      func() time.Time
 
 	cycleMu    sync.Mutex
 	lastPruned time.Time
+
+	// checkDone is closed when the running check for news ends; nil before the first.
+	checkMu   sync.Mutex
+	checkDone chan struct{}
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -79,7 +87,7 @@ func NewLoop(cfg LoopConfig, notices Notices, paused []Paused, sender Sender, lo
 	if now == nil {
 		now = time.Now
 	}
-	return &Loop{notices: notices, paused: paused, sender: sender, logger: logger, interval: interval, now: now}, nil
+	return &Loop{notices: notices, paused: paused, sender: sender, updates: cfg.Updates, logger: logger, interval: interval, now: now}, nil
 }
 
 func (l *Loop) Descriptor() module.Descriptor {
@@ -126,6 +134,7 @@ func (l *Loop) Shutdown(ctx context.Context) error {
 
 func (l *Loop) loop(ctx context.Context, done chan<- struct{}) {
 	defer close(done)
+	defer l.Wait()
 	if err := l.notices.Settle(ctx); err != nil && ctx.Err() == nil {
 		l.logger.WarnContext(ctx, "trip.loop.failed", "stage", "settle", "error", err)
 	}
@@ -141,8 +150,9 @@ func (l *Loop) loop(ctx context.Context, done chan<- struct{}) {
 	}
 }
 
-// Cycle sends every notice that is due and prunes once an hour. The loop runs it on every tick; it
-// is safe to call directly.
+// Cycle sends every notice that is due, starts the check for news about a trip that is due unless
+// one is running, and prunes once an hour. The loop runs it on every tick; it is safe to call
+// directly. The check runs under ctx after Cycle returns; Wait waits for it.
 func (l *Loop) Cycle(ctx context.Context) {
 	l.cycleMu.Lock()
 	defer l.cycleMu.Unlock()
@@ -157,11 +167,64 @@ func (l *Loop) Cycle(ctx context.Context) {
 		}
 		l.deliver(ctx, notice, now)
 	}
+	l.startCheck(ctx, now)
 	if now.Sub(l.lastPruned) >= loopPruneInterval && ctx.Err() == nil {
 		l.lastPruned = now
 		if err := l.notices.Prune(ctx, now); err != nil && ctx.Err() == nil {
 			l.logger.WarnContext(ctx, "trip.loop.failed", "stage", "prune", "error", err)
 		}
+	}
+}
+
+// startCheck starts the check for news about the trip that is due, in its own goroutine so the
+// notices of later cycles are not held up by a model turn. At most one runs at a time.
+func (l *Loop) startCheck(ctx context.Context, now time.Time) {
+	if l.updates == nil || ctx.Err() != nil {
+		return
+	}
+	l.checkMu.Lock()
+	running := l.checkDone
+	l.checkMu.Unlock()
+	if running != nil {
+		select {
+		case <-running:
+		default:
+			return
+		}
+	}
+	item, found, err := l.updates.due(ctx, now)
+	if err != nil {
+		if ctx.Err() == nil {
+			l.logger.WarnContext(ctx, "trip.loop.failed", "stage", "updates_due", "error", err)
+		}
+		return
+	}
+	if !found {
+		return
+	}
+	if err := l.updates.begin(ctx, item, now); err != nil {
+		if ctx.Err() == nil {
+			l.logger.WarnContext(ctx, "trip.loop.failed", "stage", "updates_attempt", "trip_id", item.ID, "error", err)
+		}
+		return
+	}
+	done := make(chan struct{})
+	l.checkMu.Lock()
+	l.checkDone = done
+	l.checkMu.Unlock()
+	go func() {
+		defer close(done)
+		l.updates.check(ctx, item, now)
+	}()
+}
+
+// Wait returns once the running check for news, if any, has ended.
+func (l *Loop) Wait() {
+	l.checkMu.Lock()
+	running := l.checkDone
+	l.checkMu.Unlock()
+	if running != nil {
+		<-running
 	}
 }
 
