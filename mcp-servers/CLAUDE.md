@@ -13,8 +13,8 @@
 
 ## A Server Is Three Containers
 
-- `<name>-server` runs the third-party code on an internal network named after
-  it, with no route to the LAN or the internet.
+- `<name>-server` runs the third-party code on an internal, isolated network
+  named after it, with no route to the LAN, the internet, or the NAS itself.
 - `<name>-egress` is its only way out: a forward proxy that allows CONNECT to
   port 443 of the hosts in `<name>/egress.filter` and nothing else.
 - `<name>` relays port 8000 from `home-mcp`, so the server never shares a
@@ -52,8 +52,10 @@
 - Run NAS Docker commands through `ssh -tt home-nas` with `sudo`; the NAS
   account has no Docker socket access and `sudo` always prompts for a
   password, so `sudo -n` and non-interactive sessions fail.
-- An internal network still reaches services the NAS itself listens on, through
-  the network's gateway address. `scripts/smoke` prints which ports answer.
+- A plain internal network still reaches services the NAS itself listens on,
+  through the network's gateway address. Every server network therefore also
+  sets `com.docker.network.bridge.gateway_mode_ipv4: isolated`, which gives the
+  NAS no address on it; `scripts/smoke` fails if a host port answers.
 - Container logs are shipped to Loki by the monitoring stack. Requests are
   logged without their content, but a server's error traceback can carry query
   text.

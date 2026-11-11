@@ -97,6 +97,10 @@ networks:
   # scripts/deploy creates it as an internal network.
   home-mcp:
     external: true
+  # A server's network is isolated as well as internal: the NAS gets no address on it, so the
+  # server cannot reach services the NAS itself listens on. Needs Docker Engine 28 or later.
   marktplaats:
     internal: true
+    driver_opts:
+      com.docker.network.bridge.gateway_mode_ipv4: isolated
   outbound: {}

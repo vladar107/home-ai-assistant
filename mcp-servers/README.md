@@ -43,7 +43,7 @@ deployments.log   One "<utc-timestamp> <commit>" line per deploy, mode 0600
 ## Deploy
 
 Prerequisites: an SSH alias `home-nas` with key authentication, and Docker
-Engine with Compose v2 and buildx on the NAS. Docker there requires `sudo`,
+Engine 28 or later with Compose v2 and buildx on the NAS. Docker there requires `sudo`,
 which prompts for a password, so every Docker step runs in one interactive
 `ssh -tt` session.
 
@@ -61,10 +61,9 @@ Roll back by checking out the previous commit and deploying it; its images are
 still on the NAS, so nothing is rebuilt.
 
 `scripts/smoke` passes when a client on `home-mcp` can list the tools and run a
-search, the server cannot connect to the internet or resolve outside names, and
-the proxy refuses a host that is not in the filter. It also prints which NAS
-ports answer on the internal network's gateway address, which the isolation
-does not close.
+search, the server cannot connect to the internet, to a port on the NAS itself,
+or resolve outside names, and the proxy refuses a host that is not in the
+filter.
 
 ## Update a server
 
@@ -77,5 +76,6 @@ does not close.
 ## Add a server
 
 Copy the three `marktplaats*` services in `compose.yaml` and the `marktplaats/`
-directory under the new name, with its own internal network and its own filter.
+directory under the new name, with its own internal, isolated network and its
+own filter.
 Then add the server to each client's catalog.

@@ -44,7 +44,8 @@ rm -rf '$deploy_dir.prev'
 if test -d '$deploy_dir'; then mv '$deploy_dir' '$deploy_dir.prev'; fi
 mv '$staging' '$deploy_dir'
 cd '$deploy_dir'
-sudo docker compose up -d --remove-orphans
+# Containers left running across a recreated network can no longer resolve each other.
+sudo docker compose up -d --force-recreate --remove-orphans
 sudo docker compose ps
 rm -rf '$deploy_dir.prev'
 printf '%s %s\\n' "\$(date -u +%Y-%m-%dT%H:%M:%SZ)" '$revision' >> '$MCP_ROOT/deployments.log'

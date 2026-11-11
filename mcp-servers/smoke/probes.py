@@ -41,7 +41,7 @@ check("outside names do not resolve", not resolved)
 own = socket.gethostbyname(socket.gethostname())
 gateway = own.rsplit(".", 1)[0] + ".1"
 open_ports = [port for port in HOST_PORTS if connects(gateway, port)]
-print(f"INFO host ports answering on the bridge gateway {gateway}: {open_ports or 'none'}")
+check(f"no host port answers on {gateway} ({open_ports or 'none'})", not open_ports)
 
 status = proxy_connect("example.com")
 check(f"proxy refuses a host off the list ({status})", " 200" not in status)
