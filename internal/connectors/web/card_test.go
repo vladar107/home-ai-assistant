@@ -28,7 +28,7 @@ import (
 const turnID = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
 
 const geocodingZwolle = `{"results":[{"id":2743477,"name":"Zwolle","latitude":52.5125,"longitude":6.09444,` +
-	`"timezone":"Europe/Amsterdam","country":"Netherlands","admin1":"Overijssel"}]}`
+	`"feature_code":"PPLA","population":111805,"country_code":"NL","timezone":"Europe/Amsterdam","country":"The Netherlands","admin1":"Overijssel"}]}`
 
 // hourlyZwolle is a cold, overcast 2026-09-28 with a wet evening: light rain from 17:00 to
 // 20:00, a thunderstorm at 18:00 and snow at 19:00.
@@ -180,8 +180,8 @@ func TestWeatherCardStagesTheDayForTheTurn(t *testing.T) {
 	wantText(t, result,
 		"goes out as a photo with your reply",
 		"Header: Amsterdam · 06:00, partly cloudy, 11.0 °C (feels like 9.0 °C).",
-		`- "Amsterdam · 06–09", Mon 28 Sep, 06:00 to 09:00 in Amsterdam, North Holland, Netherlands: partly cloudy, average 11.5 °C, 0.0 mm precipitation, gusts up to 38 km/h; the tile reads "dry".`,
-		`- "Evening", Mon 28 Sep, 17:00 to 21:00 in Zwolle, Overijssel, Netherlands: thunderstorm, average 5.0 °C, 2.0 mm precipitation, gusts up to 30 km/h; the tile reads "2.0 mm".`,
+		`- "Amsterdam · 06–09", Mon 28 Sep, 06:00 to 09:00 in Amsterdam, North Holland, The Netherlands: partly cloudy, average 11.5 °C, 0.0 mm precipitation, gusts up to 38 km/h; the tile reads "dry".`,
+		`- "Evening", Mon 28 Sep, 17:00 to 21:00 in Zwolle, Overijssel, The Netherlands: thunderstorm, average 5.0 °C, 2.0 mm precipitation, gusts up to 30 km/h; the tile reads "2.0 mm".`,
 		"do not repeat them",
 	)
 	stagedCard(t, box, turn)
@@ -208,8 +208,8 @@ func TestWeatherCardAggregatesLegsInRussian(t *testing.T) {
 		},
 	})
 	wantText(t, result,
-		`- "Утро", Mon 28 Sep, 06:00 to 09:00 in Amsterdam, North Holland, Netherlands: partly cloudy, average 11.5 °C, 0.0 mm precipitation, gusts up to 38 km/h; the tile reads "сухо".`,
-		`- "День", Mon 28 Sep, 10:00 to 16:00 in Amsterdam, North Holland, Netherlands: rain, average 13.3 °C, 6.0 mm precipitation, gusts up to 52 km/h; the tile reads "6.0 мм · порывы 52 км/ч".`,
+		`- "Утро", Mon 28 Sep, 06:00 to 09:00 in Amsterdam, North Holland, The Netherlands: partly cloudy, average 11.5 °C, 0.0 mm precipitation, gusts up to 38 km/h; the tile reads "сухо".`,
+		`- "День", Mon 28 Sep, 10:00 to 16:00 in Amsterdam, North Holland, The Netherlands: rain, average 13.3 °C, 6.0 mm precipitation, gusts up to 52 km/h; the tile reads "6.0 мм · порывы 52 км/ч".`,
 	)
 	stagedCard(t, box, turn)
 	if len(simulator.geocoded) != 1 || simulator.forecasts != 1 {
@@ -248,6 +248,14 @@ func TestWeatherCardRefusals(t *testing.T) {
 		{"date too far", card(with("date", "2026-10-13")), "Leg 1: date must be between 2026-09-27 and 2026-10-12"},
 		{"no place", card(with("place", "")), "no home place is configured"},
 		{"unknown place", card(with("place", "Atlantis")), `no place called "Atlantis" was found`},
+		{"latitude alone", card(map[string]any{"label": "Office", "latitude": 52.1, "date": "2026-09-28", "from_hour": 8, "to_hour": 9}),
+			"Leg 1: latitude and longitude must be given together"},
+		{"place with coordinates", card(map[string]any{"label": "Office", "place": "Amsterdam", "latitude": 52.1, "longitude": 4.3, "date": "2026-09-28", "from_hour": 8, "to_hour": 9}),
+			"Leg 1: give either place or latitude and longitude, not both"},
+		{"coordinates without a label", card(leg, map[string]any{"latitude": 52.1, "longitude": 4.3, "date": "2026-09-28", "from_hour": 8, "to_hour": 9}),
+			"Leg 2: a leg with latitude and longitude needs a label"},
+		{"coordinates out of range", card(map[string]any{"label": "Office", "latitude": 52.1, "longitude": 184.3, "date": "2026-09-28", "from_hour": 8, "to_hour": 9}),
+			"Leg 1: latitude must be between -90 and 90"},
 		{"no summary", map[string]any{"title": "Today", "legs": []any{leg}}, "a title and a one-line summary"},
 		{"unknown language", map[string]any{"title": "Today", "summary": "Mild.", "language": "nl", "legs": []any{leg}}, `language must be "en" or "ru"`},
 	} {
@@ -259,6 +267,83 @@ func TestWeatherCardRefusals(t *testing.T) {
 	if _, found, err := box.Card("alice", turn); err != nil || found {
 		t.Fatalf("a refused call staged a card: %v %v", found, err)
 	}
+}
+
+// TestWeatherToolsShareOnePlaceLookup checks that a saved place's name means the same coordinates
+// in the forecast, the card, and a weather watch, and that a card leg can give coordinates under
+// its label.
+func TestWeatherToolsShareOnePlaceLookup(t *testing.T) {
+	f, box := newCardFixture(t)
+	f.service.SetSavedPlaces(savedPlaces{})
+	var mu sync.Mutex
+	var forecasted []string
+	geocoded := 0
+	f.route("geocoding.test/v1/search", func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		geocoded++
+		mu.Unlock()
+		http.Error(w, "unexpected geocoding", http.StatusBadRequest)
+	})
+	f.route("forecast.test/v1/forecast", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		mu.Lock()
+		forecasted = append(forecasted, query.Get("latitude")+","+query.Get("longitude"))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if !query.Has("hourly") {
+			_, _ = io.WriteString(w, forecastAmsterdam)
+			return
+		}
+		_, _ = io.WriteString(w, strings.TrimSuffix(hourlyAmsterdam(), "}")+
+			`,"daily":{"time":["2026-09-28"],"sunrise":["2026-09-28T07:33"],"sunset":["2026-09-28T19:15"]}}`)
+	})
+
+	wantText(t, f.call("alice", "weather_forecast", map[string]any{"location": "gym", "days": 2}), "Weather for Gym (saved place)")
+	turn := outbox.ChatTurn(turnID)
+	wantText(t, f.callInTurn(turn, map[string]any{
+		"title":   "Mon 28.09",
+		"summary": "Dry morning, rain at midday.",
+		"legs": []map[string]any{
+			{"label": "Office", "latitude": 52.16612, "longitude": 4.48111, "date": "2026-09-28", "from_hour": 6, "to_hour": 9},
+			{"place": "gym", "date": "2026-09-28", "from_hour": 10, "to_hour": 16},
+		},
+	}),
+		"Header: Office · 06:00, partly cloudy",
+		`- "Office", Mon 28 Sep, 06:00 to 09:00 in Office (52.1661, 4.4811): partly cloudy`,
+		`- "Gym · 10–16", Mon 28 Sep, 10:00 to 16:00 in Gym (saved place): rain`,
+	)
+	stagedCard(t, box, turn)
+	watched, err := f.service.FindPlace(f.ctx, "alice", "GYM")
+	if err != nil || watched.Name != "Gym" || watched.Latitude != 10 || watched.Longitude != 20 {
+		t.Fatalf("FindPlace = %+v %v", watched, err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if want := []string{"10.0000,20.0000", "52.1661,4.4811", "10.0000,20.0000"}; geocoded != 0 || !slices.Equal(forecasted, want) {
+		t.Fatalf("geocoded %d times, forecasts at %v, want none and %v", geocoded, forecasted, want)
+	}
+}
+
+func TestWeatherCardAsksToCheckAPlaceAnIncompleteLookupChose(t *testing.T) {
+	f, box := newCardFixture(t)
+	geocoder := f.languageGeocoder(languageResults())
+	geocoder.set(map[string]bool{"de": true}, nil)
+	turn := outbox.ChatTurn(turnID)
+
+	result := f.callInTurn(turn, map[string]any{
+		"title":   "Mon 28.09",
+		"summary": "Rain at midday.",
+		"legs": []map[string]any{
+			{"place": "Wien", "date": "2026-09-28", "from_hour": 8, "to_hour": 9},
+			{"place": "Amsterdam", "date": "2026-09-28", "from_hour": 10, "to_hour": 16},
+		},
+	})
+	wantText(t, result, "The place lookup was incomplete, so Wien, Wisconsin, United States was used; check that it is the place meant.")
+	if count := strings.Count(result.Text, "incomplete"); count != 1 {
+		t.Fatalf("the result asks %d checks, want one for Wien:\n%s", count, result.Text)
+	}
+	stagedCard(t, box, turn)
 }
 
 // TestAReplyCarriesOneImage runs the day card and a chart in one run of a turn, in either order:

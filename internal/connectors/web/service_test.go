@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -416,7 +417,7 @@ func TestFetchPageLimitsAndRefusals(t *testing.T) {
 
 const geocodingAmsterdam = `{"results":[{"id":2759794,"name":"Amsterdam","latitude":52.37403,"longitude":4.88969,` +
 	`"elevation":13.0,"feature_code":"PPLC","country_code":"NL","timezone":"Europe/Amsterdam",` +
-	`"country":"Netherlands","admin1":"North Holland"}],"generationtime_ms":0.5}`
+	`"population":741636,"country":"The Netherlands","admin1":"North Holland"}],"generationtime_ms":0.5}`
 
 const forecastAmsterdam = `{"latitude":52.366,"longitude":4.901,"generationtime_ms":0.1,"utc_offset_seconds":7200,` +
 	`"timezone":"Europe/Amsterdam","timezone_abbreviation":"GMT+2","elevation":13.0,` +
@@ -455,12 +456,18 @@ func hourlyAmsterdam() string {
 		`,"weather_code":` + join(codes) + `,"wind_speed_10m":` + join(wind) + `,"wind_gusts_10m":` + join(gusts) + `}}`
 }
 
+// openMeteo answers Amsterdam's geocoding and forecast, and records each geocoding request: its
+// name, prefixed with the language when that is not English.
 func (f *fixture) openMeteo(forecast string) *[]string {
 	queries := &[]string{}
 	var mu sync.Mutex
 	f.route("geocoding.test/v1/search", func(w http.ResponseWriter, r *http.Request) {
+		asked := r.URL.Query().Get("name")
+		if language := r.URL.Query().Get("language"); language != "en" {
+			asked = language + ":" + asked
+		}
 		mu.Lock()
-		*queries = append(*queries, r.URL.Query().Get("name"))
+		*queries = append(*queries, asked)
 		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Query().Get("name") == "Amsterdam" {
@@ -500,13 +507,14 @@ func TestWeatherForecastSummarisesAPlace(t *testing.T) {
 
 	result := f.call("alice", "weather_forecast", map[string]any{"location": "Amsterdam", "days": 2})
 	wantText(t, result,
-		"Weather for Amsterdam, North Holland, Netherlands (local time zone Europe/Amsterdam)",
+		"Weather for Amsterdam, North Holland, The Netherlands (local time zone Europe/Amsterdam)",
 		"Now, at Sun 27 Sep 14:15 local time: overcast, 14.2 °C (feels like 12.9 °C), humidity 71%, precipitation 0.0 mm, wind 18 km/h gusting 35 km/h",
 		"- Sun 27 Sep: overcast, 9 to 15 °C, 20% chance of precipitation, 0.4 mm, wind up to 25 km/h, sunrise 07:31, sunset 19:17",
 		"- Mon 28 Sep: light rain, 10 to 14 °C, 85% chance of precipitation, 6.2 mm",
 	)
 
-	wantError(t, f.call("alice", "weather_forecast", map[string]any{"location": "Atlantis"}), `No place called "Atlantis" was found`)
+	wantError(t, f.call("alice", "weather_forecast", map[string]any{"location": "Atlantis"}),
+		`No place called "Atlantis" was found; try its English name with its country, such as Zwolle, Netherlands, and otherwise ask the user`)
 	wantError(t, f.call("alice", "weather_forecast", map[string]any{}), "ask the user which place")
 }
 
@@ -514,11 +522,13 @@ func TestWeatherForecastFindsAPlaceNamedWithItsCountryOrRegion(t *testing.T) {
 	f := newFixture(t, "")
 	queries := f.openMeteo(forecastAmsterdam)
 
-	for _, location := range []string{"Amsterdam, Netherlands", "Amsterdam, North Holland", "Amsterdam, NL", "Amsterdam, Atlantis", "Amsterdam (North Holland)"} {
+	for _, location := range []string{"Amsterdam, Netherlands", "Amsterdam, North Holland", "Amsterdam, NL", "Amsterdam (North Holland)"} {
 		wantText(t, f.call("alice", "weather_forecast", map[string]any{"location": location, "days": 2}),
-			"Weather for Amsterdam, North Holland, Netherlands")
+			"Weather for Amsterdam, North Holland, The Netherlands")
 	}
-	want := []string{"Amsterdam", "Amsterdam", "Amsterdam", "Amsterdam", "Amsterdam (North Holland)", "Amsterdam"}
+	// Amsterdam's answer is remembered, and the name with its suffix, which finds nothing in
+	// English, gives way to its base name before any other language is asked.
+	want := []string{"Amsterdam", "Amsterdam (North Holland)"}
 	if !slices.Equal(*queries, want) {
 		t.Fatalf("geocoding queries = %v, want %v", *queries, want)
 	}
@@ -529,22 +539,23 @@ func TestWeatherForecastResolvesAStreetAddressToItsTown(t *testing.T) {
 	queries := f.openMeteo(forecastAmsterdam)
 
 	wantText(t, f.call("alice", "weather_forecast", map[string]any{"location": "Damrak 1, 1012 LG Amsterdam, Netherlands", "days": 2}),
-		"Weather for Amsterdam, North Holland, Netherlands")
+		"Weather for Amsterdam, North Holland, The Netherlands")
 	if want := []string{"Damrak 1", "Amsterdam"}; !slices.Equal(*queries, want) {
 		t.Fatalf("geocoding queries = %v, want %v", *queries, want)
 	}
 
 	*queries = nil
 	wantText(t, f.call("alice", "weather_forecast", map[string]any{"location": "Amsterdam", "days": 2}),
-		"Weather for Amsterdam, North Holland, Netherlands")
-	if want := []string{"Amsterdam"}; !slices.Equal(*queries, want) {
-		t.Fatalf("geocoding queries for a plain name = %v, want %v", *queries, want)
+		"Weather for Amsterdam, North Holland, The Netherlands")
+	if len(*queries) != 0 {
+		t.Fatalf("geocoding queries for a name already looked up = %v, want none", *queries)
 	}
 
 	*queries = nil
 	wantError(t, f.call("alice", "weather_forecast", map[string]any{"location": "Nowhere 1, 1234 AB Atlantis, Elsewhere, Void, Beyond"}),
 		`No place called "Nowhere 1, 1234 AB Atlantis, Elsewhere, Void, Beyond" was found`)
-	if want := []string{"Nowhere 1", "Atlantis", "Elsewhere", "Void"}; !slices.Equal(*queries, want) {
+	want := slices.Concat([]string{"Nowhere 1"}, retried("Atlantis"), retried("Elsewhere"), retried("Void"))
+	if !sameRequests(*queries, want) || (*queries)[0] != "Nowhere 1" {
 		t.Fatalf("geocoding queries for an unknown address = %v, want %v", *queries, want)
 	}
 }
@@ -555,12 +566,576 @@ func TestWeatherForecastPicksTheQualifiedPlaceAmongNamesakes(t *testing.T) {
 	f.route("geocoding.test/v1/search", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"results":[`+
-			`{"name":"Amsterdam","latitude":40.0,"longitude":-74.0,"country_code":"US","timezone":"America/New_York","country":"United States","admin1":"New York"},`+
-			`{"name":"Amsterdam","latitude":52.37403,"longitude":4.88969,"country_code":"NL","timezone":"Europe/Amsterdam","country":"Netherlands","admin1":"North Holland"}]}`)
+			`{"name":"Amsterdam","latitude":40.0,"longitude":-74.0,"feature_code":"PPL","population":18008,"country_code":"US","timezone":"America/New_York","country":"United States","admin1":"New York"},`+
+			`{"name":"Amsterdam","latitude":52.37403,"longitude":4.88969,"feature_code":"PPLC","population":741636,"country_code":"NL","timezone":"Europe/Amsterdam","country":"The Netherlands","admin1":"North Holland"}]}`)
 	})
 
 	wantText(t, f.call("alice", "weather_forecast", map[string]any{"location": "Amsterdam, Netherlands", "days": 2}),
-		"Weather for Amsterdam, North Holland, Netherlands")
+		"Weather for Amsterdam, North Holland, The Netherlands")
+}
+
+// retried is a name's requests when English finds no strong match: English first, then the
+// language retry, as openMeteo and languageGeocoder record them.
+func retried(name string) []string {
+	requests := []string{name}
+	for _, language := range []string{"de", "fr", "es", "it", "pt", "nl", "pl", "ru"} {
+		requests = append(requests, language+":"+name)
+	}
+	return requests
+}
+
+// sameRequests compares requests without regard to order, since the language retry asks at once.
+func sameRequests(got, want []string) bool {
+	got, want = slices.Clone(got), slices.Clone(want)
+	slices.Sort(got)
+	slices.Sort(want)
+	return slices.Equal(got, want)
+}
+
+// languageGeocoder is a simulated Open-Meteo geocoding API shaped like the real one: it matches a
+// name only in the language it is asked in, answers at most the count asked for, and puts first
+// what the real one does, such as a city under its English name. It answers from results keyed by
+// language:name, records each request the way openMeteo does, fails the languages in failing with
+// a status the client does not retry, holds the languages in stalled until the client gives up,
+// and answers the languages in delayed only after their delay. counts keeps the candidate count of
+// each request.
+type languageGeocoder struct {
+	mu        sync.Mutex
+	results   map[string]string
+	failing   map[string]bool
+	stalled   map[string]bool
+	delayed   map[string]time.Duration
+	asked     []string
+	counts    map[string]string
+	forecasts []string
+}
+
+func (f *fixture) languageGeocoder(results map[string]string) *languageGeocoder {
+	g := &languageGeocoder{results: results, failing: map[string]bool{}, stalled: map[string]bool{}, counts: map[string]string{}}
+	f.route("geocoding.test/v1/search", func(w http.ResponseWriter, r *http.Request) {
+		name, language := r.URL.Query().Get("name"), r.URL.Query().Get("language")
+		asked := name
+		if language != "en" {
+			asked = language + ":" + name
+		}
+		g.mu.Lock()
+		g.asked = append(g.asked, asked)
+		g.counts[asked] = r.URL.Query().Get("count")
+		failing, stalled, delay := g.failing[language], g.stalled[language], g.delayed[language]
+		body, found := g.results[language+":"+name]
+		g.mu.Unlock()
+		if delay > 0 {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-time.After(delay):
+			}
+		}
+		if stalled {
+			select {
+			case <-r.Context().Done():
+			case <-time.After(30 * time.Second):
+			}
+			return
+		}
+		if failing {
+			http.Error(w, "unexpected request", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if !found {
+			_, _ = io.WriteString(w, `{"generationtime_ms":0.2}`)
+			return
+		}
+		var candidates []json.RawMessage
+		if err := json.Unmarshal([]byte("["+body+"]"), &candidates); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		count, err := strconv.Atoi(r.URL.Query().Get("count"))
+		if err != nil || count < 1 || count > 100 {
+			http.Error(w, "bad count", http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"results": candidates[:min(count, len(candidates))]})
+	})
+	f.route("forecast.test/v1/forecast", func(w http.ResponseWriter, r *http.Request) {
+		g.mu.Lock()
+		g.forecasts = append(g.forecasts, r.URL.Query().Get("latitude")+","+r.URL.Query().Get("longitude"))
+		g.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if !r.URL.Query().Has("hourly") {
+			_, _ = io.WriteString(w, forecastAmsterdam)
+			return
+		}
+		_, _ = io.WriteString(w, strings.TrimSuffix(hourlyAmsterdam(), "}")+
+			`,"daily":{"time":["2026-09-28"],"sunrise":["2026-09-28T07:33"],"sunset":["2026-09-28T19:15"]}}`)
+	})
+	return g
+}
+
+func (g *languageGeocoder) take() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	asked := g.asked
+	g.asked = nil
+	return asked
+}
+
+func (g *languageGeocoder) set(failing, stalled map[string]bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.failing, g.stalled = failing, stalled
+}
+
+// candidate is one geocoding result as Open-Meteo writes it.
+func candidate(id int, name, feature, code, country, admin1 string, admin1ID, population int, latitude, longitude float64) string {
+	return fmt.Sprintf(`{"id":%d,"name":%q,"latitude":%g,"longitude":%g,"feature_code":%q,"country_code":%q,"country":%q,`+
+		`"admin1":%q,"admin1_id":%d,"population":%d,"timezone":"Europe/Amsterdam"}`,
+		id, name, latitude, longitude, feature, code, country, admin1, admin1ID, population)
+}
+
+func candidates(list ...string) string { return strings.Join(list, ",") }
+
+// languageResults are the answers the language-aware geocoder gives, by language:name. The English
+// country of the Netherlands is "The Netherlands", as the real geocoder writes it.
+func languageResults() map[string]string {
+	const northHolland, limburg, gelderland, lowerSaxony = 2749879, 2751596, 2755634, 2862926
+	var otherBergens []string
+	for index := range 20 {
+		otherBergens = append(otherBergens, candidate(2950600+index, "Bergen", "PPL", "DE", "Germany", fmt.Sprintf("District %d", index), 2951800+index, 100+index, 48, 12))
+	}
+	return map[string]string{
+		// English answers a native name with namesakes and a loose match whose country text is
+		// the English one.
+		"en:Wien": candidates(
+			candidate(5278997, "Wien", "PPL", "US", "United States", "Wisconsin", 5279468, 0, 44.9, -90.02),
+			candidate(4414672, "Wien", "PPL", "US", "United States", "Missouri", 4398678, 0, 39.66, -92.78),
+			candidate(2761364, "Wienau", "PPL", "AT", "Austria", "Upper Austria", 2769848, 61, 48.51, 14.72)),
+		"de:Wien": candidates(
+			candidate(2761369, "Wien", "PPLC", "AT", "Österreich", "Bundesland Wien", 2761367, 1691468, 48.21, 16.37),
+			candidate(5278997, "Wien", "PPL", "US", "Vereinigte Staaten", "Wisconsin", 5279468, 0, 44.9, -90.02)),
+		"fr:Wien":    candidate(5278997, "Wien", "PPL", "US", "États-Unis", "Wisconsin", 5279468, 0, 44.9, -90.02),
+		"en:Austria": candidate(2782113, "Austria", "PCLI", "AT", "Austria", "", 0, 9208163, 47.33, 13.33),
+		// English puts the country first for Roma, and the city it knows by another name first
+		// for Praha and München.
+		"en:Roma": candidates(
+			candidate(798549, "Romania", "PCLI", "RO", "Romania", "", 0, 19020271, 46, 25),
+			candidate(668737, "Roma", "PPLA2", "RO", "Romania", "Botoșani County", 684038, 3218, 47.83, 26.6)),
+		"it:Roma": candidate(3169070, "Roma", "PPLC", "IT", "Italia", "Lazio", 3174976, 2318895, 41.89, 12.51),
+		"es:Roma": candidate(3169070, "Roma", "PPLC", "IT", "Italia", "Región de Lacio", 3174976, 2318895, 41.89, 12.51),
+		"en:Praha": candidates(
+			candidate(3067696, "Prague", "PPLC", "CZ", "Czechia", "Prague", 3067695, 1165581, 50.09, 14.42),
+			candidate(3067697, "Praha", "MT", "CZ", "Czechia", "Central Bohemia", 3339576, 0, 49.66, 13.82)),
+		"en:München": candidates(
+			candidate(2867714, "Munich", "PPLA", "DE", "Germany", "Bavaria", 2951839, 1505005, 48.14, 11.58),
+			candidate(2867711, "München", "PPL", "DE", "Germany", "Brandenburg", 2945356, 0, 51.61, 13.31),
+			candidate(2867713, "München", "PPL", "DE", "Germany", "Bavaria", 2951839, 0, 48.7, 13.46)),
+		"de:München":   candidate(2867714, "München", "PPLA", "DE", "Deutschland", "Bayern", 2951839, 1505005, 48.14, 11.58),
+		"en:Amsterdam": candidate(2759794, "Amsterdam", "PPLC", "NL", "The Netherlands", "North Holland", northHolland, 741636, 52.37403, 4.88969),
+		"en:Zwolle": candidates(
+			candidate(2743477, "Zwolle", "PPLA", "NL", "The Netherlands", "Overijssel", 2748838, 129840, 52.5125, 6.09444),
+			candidate(4346884, "Zwolle", "PPL", "US", "United States", "Louisiana", 4331987, 1972, 31.63, -93.64)),
+		// The Bergen in Limburg is past the first ten English candidates.
+		"en:Bergen": candidates(append(append([]string{
+			candidate(3161732, "Bergen", "PPLA", "NO", "Norway", "Vestland", 12110600, 294029, 60.39, 5.32),
+			candidate(2759154, "Bergen", "PPLA2", "NL", "The Netherlands", "North Holland", northHolland, 29715, 52.67, 4.7)},
+			otherBergens...),
+			candidate(2759155, "Bergen", "PPL", "NL", "The Netherlands", "Limburg", limburg, 0, 51.6, 6.03),
+			candidate(2950622, "Bergen", "PPL", "DE", "Germany", "Lower Saxony", lowerSaxony, 13609, 52.81, 9.96))...),
+		"de:Bergen": candidate(2950622, "Bergen", "PPL", "DE", "Deutschland", "Niedersachsen", lowerSaxony, 13609, 52.81, 9.96),
+		"nl:Bergen": candidates(
+			candidate(3161732, "Bergen", "PPLA", "NO", "Noorwegen", "Vestland", 12110600, 294029, 60.39, 5.32),
+			candidate(2759154, "Bergen", "PPLA2", "NL", "Nederland", "Noord-Holland", northHolland, 29715, 52.67, 4.7),
+			candidate(2759155, "Bergen", "PPL", "NL", "Nederland", "Limburg", limburg, 0, 51.6, 6.03)),
+		"en:Exampledorp": candidate(1, "Exampledorp", "PPL", "NL", "The Netherlands", "Drenthe", 2750405, 0, 52.9, 6.9),
+		"en:Kleinstad":   candidate(2, "Kleinstad", "PPL", "NL", "The Netherlands", "Gelderland", gelderland, 20000, 52.2, 5.9),
+		"de:Kleinstad":   candidate(3, "Kleinstad", "PPL", "DE", "Deutschland", "Niedersachsen", lowerSaxony, 80000, 51.5, 9.9),
+		// French puts a big city of another name first; it is no match for Kleinstad.
+		"fr:Kleinstad":    candidate(9, "Grandeville", "PPLA", "FR", "France", "Normandie", 11071621, 300000, 49.4, 1.1),
+		"fr:Allemagne":    candidate(2921044, "Allemagne", "PCLI", "DE", "Allemagne", "", 0, 82927922, 51.5, 10.5),
+		"fr:Gueldre":      candidate(gelderland, "Gueldre", "ADM1", "NL", "Pays-Bas", "", 0, 2096603, 52.06, 5.94),
+		"pl:Stadionplein": candidate(4, "Stadionplein Wola", "PPLX", "PL", "Polska", "Mazowieckie", 858787, 500, 52.2, 21),
+		"nl:Kleindorp":    candidate(5, "Kleindorp", "PPL", "NL", "Nederland", "Groningen", 2755812, 0, 53.1, 6.5),
+		"de:Kleindorp":    candidate(6, "Kleindorp", "PPL", "DE", "Deutschland", "Hessen", 2905330, 500, 50.1, 8.5),
+		// A feature that is no settlement comes first under the very name asked for.
+		"en:Exampleberg": candidates(
+			candidate(7, "Exampleberg", "MT", "NL", "The Netherlands", "Limburg", limburg, 0, 50.8, 5.9),
+			candidate(8, "Exampleberg", "PPL", "NL", "The Netherlands", "Limburg", limburg, 300, 50.85, 5.95)),
+		// An island asked by its own name comes before a village of another name.
+		"en:Exampleoog": candidates(
+			candidate(10, "Exampleoog", "ISL", "NL", "The Netherlands", "Friesland", 2755812, 0, 53.4, 5.8),
+			candidate(11, "Den Exampleoog", "PPL", "NL", "The Netherlands", "Friesland", 2755812, 3000, 53.42, 5.82)),
+		// A settlement under a longer name leads, before a namesake without population elsewhere.
+		"en:Examplecove": candidates(
+			candidate(18, "Examplecove city", "PPLA3", "IT", "Italy", "Campania", 3181042, 6770, 40.55, 14.24),
+			candidate(19, "Examplecove", "PPL", "HN", "Honduras", "Gracias a Dios Department", 3609583, 0, 15.07, -83.3)),
+		// A country of the name leads, and the settlement has another name.
+		"en:Examplia": candidates(
+			candidate(12, "Examplia", "PCLI", "XE", "Examplia", "", 0, 5000000, 10, 10),
+			candidate(13, "Examplia City", "PPLC", "XE", "Examplia", "Capital District", 14, 90000, 10.1, 10.1)),
+		// A region spelled like a country leads the list ahead of that country's namesake.
+		"en:Exampleville": candidates(
+			candidate(15, "Exampleville", "PPL", "BE", "Belgium", "Luxembourg", 2791993, 800, 49.9, 5.4),
+			candidate(16, "Exampleville", "PPL", "LU", "Luxembourg", "Diekirch", 2960316, 900, 49.9, 6.1)),
+		// Frascati has a namesake in Romania, which the qualifier "Roma" must not pick.
+		"en:Frascati": candidates(
+			candidate(3176589, "Frascati", "PPLA3", "IT", "Italy", "Lazio", 3174976, 20036, 41.81, 12.68),
+			candidate(17, "Frascati", "PPL", "RO", "Romania", "Botoșani County", 684038, 0, 47.8, 26.6)),
+	}
+}
+
+func newLanguageFixture(t *testing.T) (*fixture, *languageGeocoder) {
+	t.Helper()
+	f := newFixture(t, "")
+	return f, f.languageGeocoder(languageResults())
+}
+
+func TestWeatherPlaceNamesResolveInTheirOwnLanguage(t *testing.T) {
+	f, geocoder := newLanguageFixture(t)
+
+	for _, tc := range []struct {
+		name, location, want string
+		requests             []string
+	}{
+		{"a city in its own language", "Wien", "Weather for Wien, Bundesland Wien, Österreich (local time zone", retried("Wien")},
+		{"a name that finds a country first in English", "Roma", "Weather for Roma, Región de Lacio, Italia", retried("Roma")},
+		{"a city English puts first under its English name", "Praha", "Weather for Prague, Czechia", []string{"Praha"}},
+		{"another city English knows by another name", "München", "Weather for Munich, Bavaria, Germany", []string{"München"}},
+		{"a strong English match", "Amsterdam", "Weather for Amsterdam, North Holland, The Netherlands", []string{"Amsterdam"}},
+		{"a hamlet without population", "Exampledorp", "Weather for Exampledorp, Drenthe, The Netherlands", retried("Exampledorp")},
+		{"a small town beside a larger namesake below the bar", "Kleinstad", "Weather for Kleinstad, Gelderland, The Netherlands", retried("Kleinstad")},
+		{"a name only other languages know", "Kleindorp", "Weather for Kleindorp, Hessen, Deutschland", retried("Kleindorp")},
+		{"a settlement after a mountain of the same name", "Exampleberg", "Weather for Exampleberg, Limburg, The Netherlands", retried("Exampleberg")},
+		{"an island asked by its own name", "Exampleoog", "Weather for Exampleoog, Friesland, The Netherlands", retried("Exampleoog")},
+		{"a settlement the geocoder puts first under a longer name", "Examplecove", "Weather for Examplecove city, Campania, Italy", retried("Examplecove")},
+		{"a settlement after a country of the name", "Examplia", "Weather for Examplia City, Capital District, Examplia", retried("Examplia")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := f.call("alice", "weather_forecast", map[string]any{"location": tc.location, "days": 2})
+			wantText(t, result, tc.want)
+			if strings.Contains(result.Text, "incomplete") {
+				t.Fatalf("a complete lookup asks for a check:\n%s", result.Text)
+			}
+			if asked := geocoder.take(); !sameRequests(asked, tc.requests) {
+				t.Fatalf("geocoding requests = %v, want %v", asked, tc.requests)
+			}
+		})
+	}
+	if forecasts := geocoder.forecasts; !slices.Contains(forecasts, "50.8500,5.9500") || slices.Contains(forecasts, "50.8000,5.9000") {
+		t.Fatalf("forecasts at %v, want the settlement and not the mountain", forecasts)
+	}
+}
+
+// A looser match in another language is mostly another place: when English finds nothing, only a
+// candidate of the very name counts, so a venue's name gives way to the town after it.
+func TestWeatherFuzzyMatchInAnotherLanguageDoesNotWin(t *testing.T) {
+	f, geocoder := newLanguageFixture(t)
+
+	wantText(t, f.call("alice", "weather_forecast", map[string]any{"location": "Stadionplein, Kleinstad", "days": 2}),
+		"Weather for Kleinstad, Gelderland, The Netherlands")
+	if asked, want := geocoder.take(), slices.Concat(retried("Stadionplein"), retried("Kleinstad")); !sameRequests(asked, want) {
+		t.Fatalf("geocoding requests = %v, want %v", asked, want)
+	}
+	wantError(t, f.call("alice", "weather_forecast", map[string]any{"location": "Stadionplein", "days": 2}), `No place called "Stadionplein" was found`)
+}
+
+func TestWeatherPlaceQualifiersMustMatch(t *testing.T) {
+	f, geocoder := newLanguageFixture(t)
+
+	wantText(t, f.call("alice", "weather_forecast", map[string]any{"location": "Wien, AT", "days": 2}), "Weather for Wien, Bundesland Wien, Österreich")
+	if asked := geocoder.take(); !sameRequests(asked, retried("Wien")) {
+		t.Fatalf("geocoding requests = %v, want %v", asked, retried("Wien"))
+	}
+	wantText(t, f.call("alice", "weather_forecast", map[string]any{"location": "Wien, Missouri", "days": 2}), "Weather for Wien, Missouri, United States")
+	if asked := geocoder.take(); len(asked) != 0 {
+		t.Fatalf("a name looked up before was asked again under another qualifier: %v", asked)
+	}
+
+	for _, tc := range []struct {
+		name, location, want string
+		requests             []string
+	}{
+		{"an unknown qualifier", "Wien, Atlantis",
+			`No place called "Wien" was found in Atlantis, only in Wisconsin, United States; Missouri, United States; Bundesland Wien, Österreich; give the place's English name with its country, such as Zwolle, Netherlands, or its latitude and longitude.`,
+			retried("Atlantis")},
+		{"a qualifier that names a town", "Kleinstad, Zwolle",
+			`No place called "Kleinstad" was found in Zwolle, only in Gelderland, The Netherlands; Niedersachsen, Deutschland;`,
+			slices.Concat(retried("Kleinstad"), retried("Zwolle"))},
+		{"a made-up qualifier on a strong match", "Amsterdam, Atlantis", `No place called "Amsterdam" was found in Atlantis, only in North Holland, The Netherlands;`,
+			retried("Amsterdam")},
+		{"namesakes listed by region", "Bergen, Atlantis",
+			`No place called "Bergen" was found in Atlantis, only in Vestland, Norway; North Holland, The Netherlands; District 0, Germany; District 1, Germany;`,
+			retried("Bergen")},
+		{"a short form of a country the candidates are not in", "Kleinstad, UK", `No place called "Kleinstad" was found in UK, only in Gelderland, The Netherlands; Niedersachsen, Deutschland`,
+			nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wantError(t, f.call("alice", "weather_forecast", map[string]any{"location": tc.location, "days": 2}), tc.want)
+			if asked := geocoder.take(); !sameRequests(asked, tc.requests) {
+				t.Fatalf("geocoding requests = %v, want %v", asked, tc.requests)
+			}
+		})
+	}
+	// Bergen's many namesakes are listed whole, as far as the list's limit allows.
+	refusal := f.call("alice", "weather_forecast", map[string]any{"location": "Bergen, Atlantis", "days": 2}).Text
+	if !strings.Contains(refusal, "District 10, Germany; and 11 more; give the place's English name") {
+		t.Fatalf("refusal = %s", refusal)
+	}
+	place, err := f.service.FindPlace(f.ctx, "alice", "Wien, Atlantis")
+	if err == nil || strings.Contains(err.Error(), "latitude") || !strings.Contains(err.Error(), "only in Wisconsin, United States; Missouri, United States") {
+		t.Fatalf("FindPlace = %+v %v, want a refusal that offers no coordinates", place, err)
+	}
+}
+
+func TestWeatherPlaceQualifiersNarrowByCountryCodeAndRegion(t *testing.T) {
+	f, geocoder := newLanguageFixture(t)
+
+	for _, tc := range []struct {
+		name, location, want string
+		requests             []string
+	}{
+		{"a region past the first ten candidates", "Bergen, Limburg, Netherlands", "Weather for Bergen, Limburg, The Netherlands", []string{"Bergen"}},
+		{"a region in English", "Bergen, North Holland", "Weather for Bergen, North Holland, The Netherlands", nil},
+		{"a region another language names", "Bergen, Noord-Holland", "Weather for Bergen, North Holland, The Netherlands",
+			retried("Bergen")[1:]},
+		{"a country written without its article", "Zwolle, Netherlands", "Weather for Zwolle, Overijssel, The Netherlands", []string{"Zwolle"}},
+		{"a country a loose match names in English", "Wien, Austria", "Weather for Wien, Bundesland Wien, Österreich", retried("Wien")},
+		{"a country in its own language", "Wien, Österreich", "Weather for Wien, Bundesland Wien, Österreich", nil},
+		{"a country in the language of a city English renames", "München, Deutschland", "Weather for Munich, Bavaria, Germany", retried("München")},
+		{"the same city with its country in English", "München, Germany", "Weather for Munich, Bavaria, Germany", nil},
+		{"a region looked up in another language, matched by its id", "Kleinstad, Gueldre", "Weather for Kleinstad, Gelderland, The Netherlands",
+			slices.Concat(retried("Kleinstad"), retried("Gueldre"))},
+		{"a country looked up in another language", "Kleinstad, Allemagne", "Weather for Kleinstad, Niedersachsen, Deutschland", retried("Allemagne")},
+		{"a short form of a country", "Wien, USA", "Weather for Wien, Wisconsin, United States", nil},
+		{"a region in its local spelling after a strong English namesake", "Bergen, Niedersachsen, Germany", "Weather for Bergen, Lower Saxony, Germany", nil},
+		{"a part that names a region before a country of that name", "Exampleville, Luxembourg", "Weather for Exampleville, Luxembourg, Belgium",
+			retried("Exampleville")},
+		{"another short form of a country", "Wien, U.S.A.", "Weather for Wien, Wisconsin, United States", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wantText(t, f.call("alice", "weather_forecast", map[string]any{"location": tc.location, "days": 2}), tc.want)
+			if asked := geocoder.take(); !sameRequests(asked, tc.requests) {
+				t.Fatalf("geocoding requests = %v, want %v", asked, tc.requests)
+			}
+		})
+	}
+}
+
+// Every qualifier part must name an area that holds the place: one the English candidates do not
+// show is found through the retry languages, and one nothing knows refuses instead of being passed
+// over while another part narrows.
+func TestWeatherEveryQualifierPartMustMatch(t *testing.T) {
+	f, geocoder := newLanguageFixture(t)
+
+	wantText(t, f.call("alice", "weather_forecast", map[string]any{"location": "Bergen, Niedersachsen, Germany", "days": 2}),
+		"Weather for Bergen, Lower Saxony, Germany")
+	if asked := geocoder.take(); !sameRequests(asked, retried("Bergen")) {
+		t.Fatalf("geocoding requests = %v, want %v", asked, retried("Bergen"))
+	}
+	wantError(t, f.call("alice", "weather_forecast", map[string]any{"location": "Bergen, Atlantisregion, Germany", "days": 2}),
+		`No place called "Bergen" was found in Atlantisregion, Germany, only in Vestland, Norway;`)
+	if asked := geocoder.take(); !sameRequests(asked, retried("Atlantisregion")) {
+		t.Fatalf("geocoding requests = %v, want %v", asked, retried("Atlantisregion"))
+	}
+	if counts := geocoder.counts; counts["Bergen"] != "100" || counts["Atlantisregion"] != "10" || counts["de:Atlantisregion"] != "10" {
+		t.Fatalf("candidate counts = %v, want 100 for the name and 10 for the qualifier's lookup", counts)
+	}
+}
+
+// A qualifier is looked up as an area only when the answer is an area of that very name, so Roma
+// is no qualifier for Romania.
+func TestWeatherQualifierLookupNeedsTheAreasOwnName(t *testing.T) {
+	f, _ := newLanguageFixture(t)
+
+	wantError(t, f.call("alice", "weather_forecast", map[string]any{"location": "Frascati, Roma", "days": 2}),
+		`No place called "Frascati" was found in Roma, only in Lazio, Italy; Botoșani County, Romania;`)
+}
+
+// The qualifier's lookup, English and retry languages together, stays within one five-second limit.
+func TestWeatherQualifierLookupSharesOneLimit(t *testing.T) {
+	f, geocoder := newLanguageFixture(t)
+
+	wantText(t, f.call("alice", "weather_forecast", map[string]any{"location": "Wien, AT", "days": 2}), "Weather for Wien, Bundesland Wien, Österreich")
+	geocoder.mu.Lock()
+	geocoder.delayed = map[string]time.Duration{"en": 4 * time.Second}
+	geocoder.stalled = map[string]bool{"de": true}
+	geocoder.mu.Unlock()
+	started := time.Now()
+	wantError(t, f.call("alice", "weather_forecast", map[string]any{"location": "Wien, Narnia", "days": 2}), "The weather service did not respond in time.")
+	if elapsed := time.Since(started); elapsed >= 8*time.Second {
+		t.Fatalf("the qualifier's lookup took %s, want its one five-second limit", elapsed)
+	}
+}
+
+// With the retry incomplete, a qualifier that matches nothing may lie in what the failed language
+// would have found, so the lookup failing is reported rather than a refusal.
+func TestWeatherQualifierAfterAnIncompleteRetryIsNoRefusal(t *testing.T) {
+	f, geocoder := newLanguageFixture(t)
+	geocoder.set(map[string]bool{"de": true}, nil)
+
+	result := f.call("alice", "weather_forecast", map[string]any{"location": "Kleinstad, UK", "days": 2})
+	wantError(t, result, "The weather service is unavailable right now.")
+	if strings.Contains(result.Text, "No place called") {
+		t.Fatalf("an incomplete lookup refused the place: %s", result.Text)
+	}
+}
+
+// A qualifier whose lookup failed is the weather service failing, not proof the place is elsewhere.
+func TestWeatherQualifierLookupThatFailsIsNoRefusal(t *testing.T) {
+	f, geocoder := newLanguageFixture(t)
+
+	wantText(t, f.call("alice", "weather_forecast", map[string]any{"location": "Wien, AT", "days": 2}), "Weather for Wien, Bundesland Wien, Österreich")
+	geocoder.set(map[string]bool{"en": true}, nil)
+	result := f.call("alice", "weather_forecast", map[string]any{"location": "Wien, Atlantis", "days": 2})
+	wantError(t, result, "The weather service is unavailable right now.")
+	if strings.Contains(result.Text, "No place called") {
+		t.Fatalf("a failed qualifier lookup refused the place: %s", result.Text)
+	}
+
+	geocoder.set(map[string]bool{"de": true}, nil)
+	wantError(t, f.call("alice", "weather_forecast", map[string]any{"location": "Kleinstad, Narnia", "days": 2}), "The weather service is unavailable right now.")
+}
+
+func TestWeatherStreetAddressIsNotRetriedInOtherLanguages(t *testing.T) {
+	f, geocoder := newLanguageFixture(t)
+
+	wantText(t, f.call("alice", "weather_forecast", map[string]any{"location": "Kerkstraat 1, 1234 AB Kleinstad, Netherlands", "days": 2}),
+		"Weather for Kleinstad, Gelderland, The Netherlands")
+	asked := geocoder.take()
+	if want := append([]string{"Kerkstraat 1"}, retried("Kleinstad")...); !sameRequests(asked, want) || asked[0] != "Kerkstraat 1" || asked[1] != "Kleinstad" {
+		t.Fatalf("geocoding requests = %v, want the street once, then its town with the retry", asked)
+	}
+}
+
+func TestWeatherLanguageRetryThatFailsKeepsTheEnglishAnswer(t *testing.T) {
+	f, geocoder := newLanguageFixture(t)
+
+	geocoder.set(map[string]bool{"de": true}, nil)
+	wantText(t, f.call("alice", "weather_forecast", map[string]any{"location": "Wien", "days": 2}), "Weather for Wien, Wisconsin, United States",
+		"The place lookup was incomplete, so Wien, Wisconsin, United States was used; check that it is the place meant.")
+	if asked := geocoder.take(); !sameRequests(asked, retried("Wien")) {
+		t.Fatalf("geocoding requests = %v", asked)
+	}
+	if logs := f.logs.String(); !strings.Contains(logs, "stage=language_retry failed=1") {
+		t.Fatalf("logs lack the failed retry:\n%s", logs)
+	}
+
+	geocoder.set(nil, nil)
+	wantText(t, f.call("alice", "weather_forecast", map[string]any{"location": "Wien", "days": 2}), "Weather for Wien, Bundesland Wien, Österreich")
+	if asked, want := geocoder.take(), []string{"de:Wien"}; !slices.Equal(asked, want) {
+		t.Fatalf("after a failed retry the lookup asked %v, want %v", asked, want)
+	}
+
+	// With the languages that know the city stalled, the English answer's first settlement of the
+	// name stands, not the country before it.
+	geocoder.set(nil, map[string]bool{"it": true, "es": true})
+	started := time.Now()
+	wantText(t, f.call("alice", "weather_forecast", map[string]any{"location": "Roma", "days": 2}), "Weather for Roma, Botoșani County, Romania")
+	if asked := geocoder.take(); !sameRequests(asked, retried("Roma")) {
+		t.Fatalf("geocoding requests = %v", asked)
+	}
+	if elapsed := time.Since(started); elapsed < 5*time.Second || elapsed > 35*time.Second {
+		t.Fatalf("a stalled retry took %s, want its five-second limit within the tool's timeout", elapsed)
+	}
+
+	// A strong match found while another language fails needs no check.
+	geocoder.set(map[string]bool{"es": true}, nil)
+	result := f.call("alice", "weather_forecast", map[string]any{"location": "Roma", "days": 2})
+	wantText(t, result, "Weather for Roma, Lazio, Italia")
+	if strings.Contains(result.Text, "incomplete") {
+		t.Fatalf("a strong match asks for a check:\n%s", result.Text)
+	}
+	if asked, want := geocoder.take(), []string{"it:Roma", "es:Roma"}; !sameRequests(asked, want) {
+		t.Fatalf("after a timed-out retry the lookup asked %v, want %v", asked, want)
+	}
+}
+
+// A retry cut short by the caller's own deadline is the weather service failing, not a lookup that
+// found only the English namesakes.
+func TestWeatherRetryCutShortByTheCallerFails(t *testing.T) {
+	f, geocoder := newLanguageFixture(t)
+	geocoder.set(nil, map[string]bool{"de": true})
+
+	ctx, cancel := context.WithTimeout(f.ctx, time.Second)
+	defer cancel()
+	found, err := f.service.FindPlace(ctx, "alice", "Wien")
+	if err == nil || err.Error() != "The weather service is unavailable right now." {
+		t.Fatalf("FindPlace past its deadline = %+v %v, want the service unavailable", found, err)
+	}
+}
+
+// A weather watch keeps the coordinates it is given and has no reply to carry a note, so FindPlace
+// fails rather than return a place an incomplete lookup chose.
+func TestFindPlaceRefusesAnIncompleteLookup(t *testing.T) {
+	f, geocoder := newLanguageFixture(t)
+	geocoder.set(map[string]bool{"de": true}, nil)
+
+	found, err := f.service.FindPlace(f.ctx, "alice", "Wien")
+	if err == nil || err.Error() != "The weather service is unavailable right now." {
+		t.Fatalf("FindPlace with a failed retry language = %+v %v, want the service unavailable", found, err)
+	}
+	geocoder.set(nil, nil)
+	if found, err = f.service.FindPlace(f.ctx, "alice", "Wien"); err != nil || found.Latitude != 48.21 {
+		t.Fatalf("FindPlace once the retry is whole = %+v %v", found, err)
+	}
+}
+
+// The geocoder's answers are remembered for a day, up to a limit that drops the answer that expires
+// first.
+func TestWeatherGeocodingCacheExpiresAndIsBounded(t *testing.T) {
+	var mu sync.Mutex
+	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+	f := newFixtureWith(t, web.Config{Now: func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		return now
+	}})
+	advance := func(by time.Duration) {
+		mu.Lock()
+		defer mu.Unlock()
+		now = now.Add(by)
+	}
+	var asked []string
+	f.route("geocoding.test/v1/search", func(w http.ResponseWriter, r *http.Request) {
+		name := r.URL.Query().Get("name")
+		mu.Lock()
+		asked = append(asked, name)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"results": []map[string]any{{
+			"name": name, "latitude": 52.1, "longitude": 5.1, "feature_code": "PPLA", "population": 200000, "country_code": "NL", "country": "The Netherlands",
+		}}})
+	})
+	find := func(name string) int {
+		t.Helper()
+		mu.Lock()
+		before := len(asked)
+		mu.Unlock()
+		if _, err := f.service.FindPlace(f.ctx, "alice", name); err != nil {
+			t.Fatal(err)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		return len(asked) - before
+	}
+
+	for index := range 1001 {
+		if requests := find(fmt.Sprintf("Town %d", index)); requests != 1 {
+			t.Fatalf("Town %d made %d requests", index, requests)
+		}
+		advance(time.Second)
+	}
+	if requests := find("Town 1000"); requests != 0 {
+		t.Fatalf("a remembered answer made %d requests", requests)
+	}
+	if requests := find("Town 0"); requests != 1 {
+		t.Fatalf("the answer past the limit made %d requests, want it dropped", requests)
+	}
+	advance(24 * time.Hour)
+	if requests := find("Town 1000"); requests != 1 {
+		t.Fatalf("an answer a day old made %d requests, want it asked again", requests)
+	}
 }
 
 func TestWeatherForecastUsesTheConfiguredHome(t *testing.T) {
@@ -571,7 +1146,7 @@ func TestWeatherForecastUsesTheConfiguredHome(t *testing.T) {
 	if !strings.Contains(set.Guidance, "household's home, Amsterdam") {
 		t.Fatalf("guidance = %q", set.Guidance)
 	}
-	wantText(t, f.callWith(set, "weather_forecast", map[string]any{"days": 2}), "Weather for Amsterdam, North Holland, Netherlands")
+	wantText(t, f.callWith(set, "weather_forecast", map[string]any{"days": 2}), "Weather for Amsterdam, North Holland, The Netherlands")
 	if len(*queries) != 1 || (*queries)[0] != "Amsterdam" {
 		t.Fatalf("geocoding queries = %v", *queries)
 	}
@@ -630,7 +1205,7 @@ func TestWeatherForecastHourByHourForADay(t *testing.T) {
 
 	window := f.call("alice", "weather_forecast", map[string]any{"location": "Amsterdam", "date": "2026-09-28", "from_hour": 11, "to_hour": 16})
 	wantText(t, window,
-		"Weather for Amsterdam, North Holland, Netherlands (local time zone Europe/Amsterdam)\nHourly forecast for Mon 28 Sep, 11:00 to 16:00 local time:\n",
+		"Weather for Amsterdam, North Holland, The Netherlands (local time zone Europe/Amsterdam)\nHourly forecast for Mon 28 Sep, 11:00 to 16:00 local time:\n",
 		"- 11:00: rain, 12.7 °C (feels like 10.7 °C), 80% chance of precipitation, 1.2 mm, wind 21 km/h gusting 42 km/h\n",
 		"- 16:00: partly cloudy, 14.3 °C (feels like 12.3 °C), 10% chance of precipitation, 0.0 mm, wind 26 km/h gusting 52 km/h",
 	)

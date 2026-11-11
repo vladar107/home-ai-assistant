@@ -92,7 +92,9 @@ borrowed between users.
   chat, and file photos into an inbox after confirmation.
 - **Web.** Search, page reading, PDF text, and weather. After the conversation has read
   outside content, each search query is checked, and one that could carry data out waits
-  for Confirm.
+  for Confirm. A weather place can be named in English or in its own language, with its
+  country to tell namesakes apart; a country or region given must match, or the tool refuses
+  and names where the namesakes are instead of guessing.
 - **Trains.** NS trips, departures, and disruptions, checks of the exact
   planned departures a user names, one normalized status each, and the
   OV-fiets rental bikes available now at a station.
@@ -126,7 +128,8 @@ borrowed between users.
   answered like typed messages, and the assistant draws pictures, or edits a
   photo the user sent, on the user's own ChatGPT subscription.
 - **Day cards.** A rendered image with the day's weather and trains, sent with
-  the reply as its caption.
+  the reply as its caption. Each leg is a place name, a saved place, or coordinates
+  with a label.
 - **Charts.** "Show the living room temperature this week" or "compare solar
   production this month with last month" draws up to four series from Home
   Assistant history, the household's metrics, or numbers a tool just found, and

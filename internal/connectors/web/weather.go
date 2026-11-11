@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"math"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -22,10 +24,28 @@ const (
 	maximumAPIBytes     = 1 << 20
 	// maximumHourlyDaysAhead is how far past today Open-Meteo's hourly forecast reaches.
 	maximumHourlyDaysAhead = 15
-	// geocodingCandidates leaves room to pick the right country or region among same-named places.
+	// geocodingCandidates leaves room to pick among same-named places; qualifiedCandidates, the
+	// most Open-Meteo answers, is asked for when a qualifier names the country or region, so a
+	// smaller namesake there is among them.
 	geocodingCandidates = 10
-	// maximumGeocodeTries bounds the geocoding requests one location may cost.
+	qualifiedCandidates = 100
+	// maximumGeocodeTries bounds the names one location is looked up by, such as the parts of a
+	// street address; each name costs one request, or nine when the language retry runs.
 	maximumGeocodeTries = 4
+	// strongPopulation is the population from which a settlement of the very name asked for, or
+	// the first of its answer, is taken as the place meant, with no retry in other languages.
+	strongPopulation = 100_000
+	// lookupTimeout bounds the name's language retry, and separately a qualifier's whole lookup,
+	// English and retry together. In the usual case they fit inside the tool's timeout after the
+	// English request; when they do not, the tool's deadline cuts them off and the call fails.
+	lookupTimeout = 5 * time.Second
+	// geocodeLifetime is how long a geocoding answer is reused, so a name's extra lookups are paid
+	// once a day.
+	geocodeLifetime = 24 * time.Hour
+	// maximumGeocodeEntries bounds the remembered answers, since the names come from the model.
+	maximumGeocodeEntries = 1000
+	// maximumFoundInBytes bounds the list of namesakes a refusal names.
+	maximumFoundInBytes = 300
 
 	currentFields = "temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m,wind_gusts_10m"
 	dailyFields   = "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,sunrise,sunset"
@@ -36,6 +56,10 @@ const (
 )
 
 var errWeatherMalformed = errors.New("the weather service returned an unexpected response")
+
+// retryLanguages are the languages a name is looked up in again when English finds no strong
+// match, such as a city written in its own language.
+var retryLanguages = []string{"de", "fr", "es", "it", "pt", "nl", "pl", "ru"}
 
 type weatherRequest struct {
 	Location  string   `json:"location"`
@@ -49,6 +73,7 @@ type weatherRequest struct {
 }
 
 type place struct {
+	ID          int64   `json:"id"`
 	Name        string  `json:"name"`
 	Timezone    string  `json:"timezone"`
 	Latitude    float64 `json:"latitude"`
@@ -56,6 +81,12 @@ type place struct {
 	Country     string  `json:"country"`
 	CountryCode string  `json:"country_code"`
 	Admin1      string  `json:"admin1"`
+	Admin1ID    int64   `json:"admin1_id"`
+	// Population is absent, and so zero, for many small places.
+	Population  int64  `json:"population"`
+	FeatureCode string `json:"feature_code"`
+	// leading marks the first candidate of its answer.
+	leading bool
 }
 
 type forecast struct {
@@ -134,27 +165,18 @@ func (s *Service) weatherForecast(ctx context.Context, principalID string, reque
 		return errorResult(err.Error())
 	}
 
-	var found place
-	if byCoordinates {
-		found = place{
-			Name:      fmt.Sprintf("your location (%.4f, %.4f)", *request.Latitude, *request.Longitude),
-			Latitude:  *request.Latitude,
-			Longitude: *request.Longitude,
-		}
-	} else if saved, ok, err := s.savedPlace(ctx, principalID, location); err != nil {
-		s.logger.WarnContext(ctx, "web.weather.failed", "principal_id", principalID, "stage", "saved_place", "error", err)
-		return errorResult("The user's saved places could not be read right now.")
-	} else if ok {
-		found = place{Name: saved.Name + " (saved place)", Latitude: saved.Latitude, Longitude: saved.Longitude}
-	} else {
-		found, ok, err = s.geocode(ctx, location)
-		if err != nil {
-			return s.weatherFailure(ctx, principalID, err)
-		}
-		if !ok {
-			return errorResult(fmt.Sprintf("No place called %q was found; ask the user for a nearby town or a more precise name.", location))
-		}
+	resolved, err := s.resolvePlace(ctx, principalID, placeRequest{
+		name: location, latitude: request.Latitude, longitude: request.Longitude, offerCoordinates: true,
+	})
+	var refusal *placeRefusal
+	if errors.As(err, &refusal) {
+		return errorResult(sentence(refusal.text))
 	}
+	if err != nil {
+		return s.weatherFailure(ctx, principalID, err)
+	}
+	found := resolved.place
+	note := resolved.checkNote()
 	query := placeQuery(found)
 	if hourly {
 		if err := s.checkHourlyDate(found, window.date); err != nil {
@@ -180,6 +202,9 @@ func (s *Service) weatherForecast(ctx context.Context, principalID string, reque
 	}
 	if err != nil {
 		return s.weatherFailure(ctx, principalID, err)
+	}
+	if note != "" {
+		text += "\n" + note
 	}
 	return tools.Result{Text: text}
 }
@@ -244,40 +269,132 @@ func placeQuery(found place) url.Values {
 	}
 }
 
+// placeRequest names a weather place: coordinates with the label they go by, or else a name.
+type placeRequest struct {
+	name                string
+	latitude, longitude *float64
+	// label names coordinates; empty means the user's own location.
+	label string
+	// offerCoordinates lets a refusal suggest coordinates, for the tools that take them.
+	offerCoordinates bool
+}
+
+// resolvedPlace is a weather place and the short name it goes by: the label given with its
+// coordinates, the saved place's name, or the geocoded name. Its place.Name names it in full for a
+// result's text. incomplete marks a geocoded place that is no strong match, chosen while a language
+// of the retry failed, so another place may have been meant.
+type resolvedPlace struct {
+	place
+	shown      string
+	saved      bool
+	incomplete bool
+}
+
+// checkNote asks the model to check a place an incomplete lookup chose, or is empty.
+func (r resolvedPlace) checkNote() string {
+	if !r.incomplete {
+		return ""
+	}
+	return fmt.Sprintf("The place lookup was incomplete, so %s was used; check that it is the place meant.", placeName(r.place))
+}
+
+// placeRefusal is why a place could not be resolved as given, worded for the model.
+type placeRefusal struct{ text string }
+
+func (r *placeRefusal) Error() string { return r.text }
+
+// resolvePlace finds a place the same way for every weather tool: coordinates as given, one of the
+// principal's saved places, or else geocoded. A *placeRefusal is told to the model; any other
+// error is the weather service failing.
+func (s *Service) resolvePlace(ctx context.Context, principalID string, request placeRequest) (resolvedPlace, error) {
+	if request.latitude != nil && request.longitude != nil {
+		label := request.label
+		if label == "" {
+			label = "your location"
+		}
+		return resolvedPlace{
+			place: place{
+				Name:      fmt.Sprintf("%s (%.4f, %.4f)", label, *request.latitude, *request.longitude),
+				Latitude:  *request.latitude,
+				Longitude: *request.longitude,
+			},
+			shown: label,
+		}, nil
+	}
+	saved, ok, err := s.savedPlace(ctx, principalID, request.name)
+	if err != nil {
+		s.logger.WarnContext(ctx, "web.weather.failed", "principal_id", principalID, "stage", "saved_place", "error", err)
+		return resolvedPlace{}, &placeRefusal{"the user's saved places could not be read right now"}
+	}
+	if ok {
+		return resolvedPlace{
+			place: place{Name: saved.Name + " (saved place)", Latitude: saved.Latitude, Longitude: saved.Longitude},
+			shown: saved.Name,
+			saved: true,
+		}, nil
+	}
+	found, ok, err := s.geocode(ctx, principalID, request.name)
+	var refusal *placeRefusal
+	if errors.As(err, &refusal) && request.offerCoordinates {
+		return resolvedPlace{}, &placeRefusal{refusal.text + ", or its latitude and longitude"}
+	}
+	if err != nil {
+		return resolvedPlace{}, err
+	}
+	if !ok {
+		return resolvedPlace{}, &placeRefusal{fmt.Sprintf("no place called %q was found; try its English name with its country, such as Zwolle, Netherlands, and otherwise ask the user for a nearby town or a more precise name", request.name)}
+	}
+	return found, nil
+}
+
+// sentence makes a refusal's text a sentence of its own.
+func sentence(text string) string {
+	return strings.ToUpper(text[:1]) + text[1:] + "."
+}
+
 // geocode finds a place by name. Open-Meteo matches the place name alone, so a qualifier after the
 // first comma ("Zwolle, Netherlands", "Bergen, Limburg") is matched against the candidates' country
 // and region instead of being sent along. When the name before the first comma finds nothing, as with
-// a street address, each later part is tried in turn with its postcode stripped.
-func (s *Service) geocode(ctx context.Context, query string) (place, bool, error) {
+// a street address, each later part is tried in turn with its postcode stripped. A qualifier that
+// matches no candidate is a *placeRefusal.
+func (s *Service) geocode(ctx context.Context, principalID, query string) (resolvedPlace, bool, error) {
 	parts := strings.Split(query, ",")
-	name := strings.TrimSpace(parts[0])
-	tries := 0
-	candidates, err := s.geocodeName(ctx, name)
-	tries++
-	if err == nil && len(candidates) == 0 {
-		if base := baseName(name); base != "" && base != name {
-			candidates, err = s.geocodeName(ctx, base)
-			tries++
-		}
-	}
-	qualifier := strings.Join(parts[1:], ",")
-	for i := 1; err == nil && len(candidates) == 0 && i < len(parts) && tries < maximumGeocodeTries; i++ {
+	qualifier := parts[1:]
+	answers, err := s.lookupName(ctx, principalID, strings.TrimSpace(parts[0]), candidateCount(qualifier))
+	tries := 1
+	for i := 1; err == nil && !anyFound(answers.lists) && i < len(parts) && tries < maximumGeocodeTries; i++ {
 		town := stripPostcode(parts[i])
 		if town == "" {
 			continue
 		}
-		candidates, err = s.geocodeName(ctx, town)
+		qualifier = parts[i+1:]
+		answers, err = s.lookupName(ctx, principalID, town, candidateCount(qualifier))
 		tries++
-		qualifier = strings.Join(parts[i+1:], ",")
 	}
-	if err != nil || len(candidates) == 0 {
-		return place{}, false, err
+	if err != nil || !anyFound(answers.lists) {
+		return resolvedPlace{}, false, err
 	}
-	found := pickPlace(candidates, qualifier)
+	found, err := s.pickPlace(ctx, principalID, &answers, qualifier)
+	if err != nil {
+		return resolvedPlace{}, false, err
+	}
 	if strings.TrimSpace(found.Name) == "" || math.Abs(found.Latitude) > 90 || math.Abs(found.Longitude) > 180 {
-		return place{}, false, errWeatherMalformed
+		return resolvedPlace{}, false, errWeatherMalformed
 	}
-	return found, true, nil
+	return resolvedPlace{
+		place:      found,
+		shown:      strings.TrimSpace(found.Name),
+		incomplete: answers.incomplete && !strongMatch(found, answers.name),
+	}, true, nil
+}
+
+// candidateCount asks for more candidates when a qualifier will pick among them, so a namesake in
+// the region named is among them; Open-Meteo answers at most 100.
+func candidateCount(qualifier []string) int {
+	if strings.TrimSpace(strings.Join(qualifier, "")) != "" {
+		return qualifiedCandidates
+	}
+	return geocodingCandidates
 }
 
 // stripPostcode drops the leading tokens of an address part that contain a digit, and a short
@@ -294,15 +411,165 @@ func stripPostcode(part string) string {
 	return strings.Join(fields, " ")
 }
 
-func (s *Service) geocodeName(ctx context.Context, name string) ([]place, error) {
+// nameAnswers are what the geocoder said for one name: the English answer first, then each retry
+// language's candidates of that very name, since a looser match in another language, even a city
+// it puts first, is mostly a different place. retried tells whether the retry ran, and incomplete
+// whether one of its languages failed or ran out of time, with failure the last such error.
+type nameAnswers struct {
+	name       string
+	count      int
+	lists      [][]place
+	retried    bool
+	incomplete bool
+	failure    error
+}
+
+// lookupName asks for a name in English, then for its base name when the name finds nothing.
+// Unless English found a strong match or the name is a street address, it asks again in each of
+// retryLanguages at once, since Open-Meteo matches a name only in the language it is asked in.
+func (s *Service) lookupName(ctx context.Context, principalID, name string, count int) (nameAnswers, error) {
+	english, err := s.geocodeName(ctx, name, "en", count)
+	if err != nil {
+		return nameAnswers{}, err
+	}
+	if base := baseName(name); len(english) == 0 && base != "" && base != name {
+		name = base
+		if english, err = s.geocodeName(ctx, name, "en", count); err != nil {
+			return nameAnswers{}, err
+		}
+	}
+	answers := nameAnswers{name: name, count: count, lists: [][]place{english}}
+	if strings.ContainsFunc(name, unicode.IsDigit) || slices.ContainsFunc(english, func(candidate place) bool { return strongMatch(candidate, name) }) {
+		return answers, nil
+	}
+	return answers, s.retryName(ctx, principalID, &answers)
+}
+
+// retryName adds the language retry's answers for the name, once.
+func (s *Service) retryName(ctx context.Context, principalID string, answers *nameAnswers) error {
+	if answers.retried {
+		return nil
+	}
+	asked, err := s.askLanguages(ctx, answers.name, answers.count)
+	if err != nil {
+		return err
+	}
+	answers.retried = true
+	for _, answer := range asked.answers {
+		answers.lists = append(answers.lists, slices.DeleteFunc(slices.Clone(answer), func(candidate place) bool {
+			return !sameName(candidate.Name, answers.name)
+		}))
+	}
+	if asked.failed > 0 {
+		s.logger.InfoContext(ctx, "web.weather.failed", "principal_id", principalID, "stage", "language_retry", "failed", asked.failed, "error_class", errorClass(asked.failure))
+		answers.incomplete, answers.failure = true, asked.failure
+	}
+	return nil
+}
+
+// languageAnswers are the retry's answers in the order of retryLanguages, nil where a language
+// failed, with how many failed and the last failure.
+type languageAnswers struct {
+	answers [][]place
+	failed  int
+	failure error
+}
+
+// askLanguages asks for a name in each of retryLanguages at once under lookupTimeout. Running out
+// of that limit is a failure of the languages still waiting; ctx itself ending is an error, so a
+// tool past its own deadline never takes a partial answer for a whole one.
+func (s *Service) askLanguages(ctx context.Context, name string, count int) (languageAnswers, error) {
+	retryCtx, cancel := context.WithTimeout(ctx, lookupTimeout)
+	defer cancel()
+	answers := make([][]place, len(retryLanguages))
+	failures := make([]error, len(retryLanguages))
+	var group sync.WaitGroup
+	for index, language := range retryLanguages {
+		group.Go(func() {
+			answers[index], failures[index] = s.geocodeName(retryCtx, name, language, count)
+		})
+	}
+	group.Wait()
+	if err := ctx.Err(); err != nil {
+		return languageAnswers{}, err
+	}
+	asked := languageAnswers{answers: answers}
+	for _, err := range failures {
+		if err != nil {
+			asked.failed++
+			asked.failure = err
+		}
+	}
+	return asked, nil
+}
+
+// geocodeName asks Open-Meteo for a name in one language, or answers from what it said within the
+// last geocodeLifetime. Answers are kept by language, candidate count, and name; a longer answer
+// serves a shorter request, as its first candidates.
+func (s *Service) geocodeName(ctx context.Context, name, language string, count int) ([]place, error) {
+	key := func(count int) string {
+		return language + "\x00" + strconv.Itoa(count) + "\x00" + strings.ToLower(name)
+	}
+	if results, found := s.cachedGeocode(key(count)); found {
+		return results, nil
+	}
+	if count < qualifiedCandidates {
+		if results, found := s.cachedGeocode(key(qualifiedCandidates)); found {
+			return results[:min(count, len(results))], nil
+		}
+	}
 	var response struct {
 		Results []place `json:"results"`
 	}
-	query := url.Values{"name": {name}, "count": {strconv.Itoa(geocodingCandidates)}, "language": {"en"}, "format": {"json"}}
+	query := url.Values{"name": {name}, "count": {strconv.Itoa(count)}, "language": {language}, "format": {"json"}}
 	if err := s.getJSON(ctx, s.geocodingURL, query, &response); err != nil {
 		return nil, err
 	}
+	if len(response.Results) > 0 {
+		response.Results[0].leading = true
+	}
+	s.storeGeocode(key(count), response.Results)
 	return response.Results, nil
+}
+
+type geocodeEntry struct {
+	results []place
+	expires time.Time
+}
+
+func (s *Service) cachedGeocode(key string) ([]place, bool) {
+	s.geocodeMu.Lock()
+	defer s.geocodeMu.Unlock()
+	entry, found := s.geocoded[key]
+	if !found || !s.now().Before(entry.expires) {
+		return nil, false
+	}
+	return entry.results, true
+}
+
+// storeGeocode keeps an answer, making room by dropping expired answers and then the one that
+// expires first, since the names come from the model.
+func (s *Service) storeGeocode(key string, results []place) {
+	s.geocodeMu.Lock()
+	defer s.geocodeMu.Unlock()
+	now := s.now()
+	if len(s.geocoded) >= maximumGeocodeEntries {
+		for existing, entry := range s.geocoded {
+			if !now.Before(entry.expires) {
+				delete(s.geocoded, existing)
+			}
+		}
+	}
+	if len(s.geocoded) >= maximumGeocodeEntries {
+		oldest := ""
+		for existing, entry := range s.geocoded {
+			if oldest == "" || entry.expires.Before(s.geocoded[oldest].expires) {
+				oldest = existing
+			}
+		}
+		delete(s.geocoded, oldest)
+	}
+	s.geocoded[key] = geocodeEntry{results: results, expires: now.Add(geocodeLifetime)}
 }
 
 // baseName drops a parenthesised or dashed suffix, as in "Zwolle (Overijssel)" or "Zwolle - Centrum".
@@ -316,22 +583,332 @@ func baseName(name string) string {
 	return strings.TrimSpace(name)
 }
 
-// pickPlace returns the first candidate whose country, country code, or region matches a part of
-// the qualifier, and otherwise the first candidate, which is Open-Meteo's best match.
-func pickPlace(candidates []place, qualifier string) place {
-	for _, part := range strings.Split(qualifier, ",") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
+// sameName compares names without regard to case, surrounding space, or the suffix baseName drops;
+// accents count.
+func sameName(a, b string) bool {
+	return strings.EqualFold(baseName(a), baseName(b))
+}
+
+// settlement reports whether a candidate is a populated place rather than a country, a region, a
+// mountain, or another feature.
+func (p place) settlement() bool {
+	return strings.HasPrefix(p.FeatureCode, "PPL")
+}
+
+// strongMatch is a candidate that is plainly the place meant: a city of the very name asked for,
+// or the city the geocoder puts first, which is how English answers a native name it knows by
+// another, such as Praha with Prague. Retry answers keep only candidates of the very name, so a
+// city another language puts first under another name never counts.
+func strongMatch(candidate place, name string) bool {
+	return candidate.settlement() && candidate.Population >= strongPopulation &&
+		(candidate.leading || sameName(candidate.Name, name))
+}
+
+func anyFound(lists [][]place) bool {
+	return slices.ContainsFunc(lists, func(list []place) bool { return len(list) > 0 })
+}
+
+// countryAliases are short forms of a country's name that the geocoder resolves as a country in no
+// language, so a qualifier written with them would otherwise be refused.
+var countryAliases = map[string]string{
+	"UK": "GB", "U.K.": "GB", "GREAT BRITAIN": "GB", "BRITAIN": "GB",
+	"USA": "US", "U.S.": "US", "U.S.A.": "US", "US": "US", "AMERICA": "US",
+}
+
+// area is a country, by its code, or a first-level region, by its GeoNames id, or by its name where
+// the geocoder gave no id.
+type area struct {
+	countryCode string
+	regionID    int64
+	region      string
+}
+
+func (a area) holds(candidate place) bool {
+	switch {
+	case a.regionID != 0 && candidate.Admin1ID != 0:
+		return candidate.Admin1ID == a.regionID
+	case a.region != "":
+		return strings.EqualFold(candidate.CountryCode, a.countryCode) && sameAreaName(candidate.Admin1, a.region)
+	default:
+		return strings.EqualFold(candidate.CountryCode, a.countryCode)
+	}
+}
+
+// sameAreaName compares a country's or region's names without regard to case or a leading "The",
+// so "Netherlands" names "The Netherlands".
+func sameAreaName(a, b string) bool {
+	trim := func(name string) string {
+		name = strings.TrimSpace(name)
+		if len(name) > 4 && strings.EqualFold(name[:4], "the ") {
+			name = strings.TrimSpace(name[4:])
 		}
-		for _, candidate := range candidates {
-			if strings.EqualFold(part, candidate.Country) || strings.EqualFold(part, candidate.CountryCode) ||
-				strings.EqualFold(part, candidate.Admin1) {
-				return candidate
+		return name
+	}
+	return strings.EqualFold(trim(a), trim(b))
+}
+
+// areaNamed finds the area a qualifier part names from what is already known: a short form of a
+// country, or the first candidate whose country code, country, or region the part names, in the
+// language that candidate came in.
+func areaNamed(part string, lists [][]place) (area, bool) {
+	if code, found := countryAliases[strings.ToUpper(part)]; found {
+		return area{countryCode: code}, true
+	}
+	for _, list := range lists {
+		for _, candidate := range list {
+			switch {
+			case candidate.CountryCode != "" && (strings.EqualFold(part, candidate.CountryCode) || sameAreaName(part, candidate.Country)):
+				return area{countryCode: candidate.CountryCode}, true
+			case candidate.Admin1 != "" && sameAreaName(part, candidate.Admin1):
+				return area{countryCode: candidate.CountryCode, regionID: candidate.Admin1ID, region: candidate.Admin1}, true
 			}
 		}
 	}
-	return candidates[0]
+	return area{}, false
+}
+
+// narrowTo keeps the candidates in every area in turn, or reports false when an area holds none.
+func narrowTo(areas []area, lists [][]place) ([][]place, bool) {
+	for _, within := range areas {
+		lists = keepCandidates(lists, within.holds)
+		if !anyFound(lists) {
+			return nil, false
+		}
+	}
+	return lists, true
+}
+
+// narrowByNames narrows to the areas the parts name among the candidates, or reports false when a
+// part names none of them or names one that holds no candidate.
+func narrowByNames(parts []string, lists [][]place) ([][]place, bool) {
+	areas := make([]area, 0, len(parts))
+	for _, part := range parts {
+		named, ok := areaNamed(part, lists)
+		if !ok {
+			return nil, false
+		}
+		areas = append(areas, named)
+	}
+	return narrowTo(areas, lists)
+}
+
+// pickPlace chooses among a name's answers, narrowed to the qualifier's country or region. Each
+// qualifier part is taken for a country code or a region id and narrows the candidates of every
+// answer to those in it, in turn, so "Bergen, Limburg, Netherlands" keeps the Bergen in Limburg.
+// Comparing codes and ids rather than names lets a qualifier in one language pick a candidate found
+// in another. When a part names no area the candidates show, or the areas hold none of them, the
+// retry languages are asked for the name, whose answers name regions in their own language; a
+// part still unknown is then looked up as a country or a first-level region. Every part must name
+// an area that holds the place, or the qualifier is refused rather than ignored.
+func (s *Service) pickPlace(ctx context.Context, principalID string, answers *nameAnswers, qualifier []string) (place, error) {
+	var parts []string
+	for _, part := range qualifier {
+		if part = strings.TrimSpace(part); part != "" {
+			parts = append(parts, part)
+		}
+	}
+	if len(parts) == 0 {
+		return choosePlace(answers.name, answers.lists), nil
+	}
+	lists, ok := narrowByNames(parts, answers.lists)
+	if !ok && !answers.retried && !strings.ContainsFunc(answers.name, unicode.IsDigit) {
+		if err := s.retryName(ctx, principalID, answers); err != nil {
+			return place{}, err
+		}
+		lists, ok = narrowByNames(parts, answers.lists)
+	}
+	if !ok {
+		areas := make([]area, 0, len(parts))
+		for _, part := range parts {
+			named, found := areaNamed(part, answers.lists)
+			if !found {
+				var err error
+				if named, found, err = s.lookupArea(ctx, principalID, part); err != nil {
+					return place{}, err
+				}
+			}
+			if !found {
+				return place{}, answers.qualifierRefusal(parts)
+			}
+			areas = append(areas, named)
+		}
+		if lists, ok = narrowTo(areas, answers.lists); !ok {
+			return place{}, answers.qualifierRefusal(parts)
+		}
+	}
+	return choosePlace(answers.name, lists), nil
+}
+
+// qualifierRefusal refuses a qualifier that matches nothing, unless the retry that could have found
+// the place there failed, which is the weather service failing instead.
+func (a *nameAnswers) qualifierRefusal(parts []string) error {
+	if a.incomplete {
+		return a.failure
+	}
+	return &placeRefusal{fmt.Sprintf("no place called %q was found in %s, only in %s; give the place's English name with its country, such as Zwolle, Netherlands",
+		a.name, clip.Bytes(strings.Join(parts, ", "), 100), foundIn(a.name, a.lists))}
+}
+
+// choosePlace picks among a name's answers, English first. A strong match in English stands; else
+// the most populous strong match among the language retry's answers; else the English answer
+// stands as the geocoder ranks it: a settlement it puts first stands, whatever its name; after a
+// country or a region, its first settlement; after another feature, its first settlement of the
+// name asked for, else that feature, so an island asked by its own name is itself. When English
+// found nothing, the most populous of the retry's candidates of the name stands in for it,
+// settlements first.
+func choosePlace(name string, lists [][]place) place {
+	english, retried := lists[0], lists[1:]
+	for _, candidate := range english {
+		if strongMatch(candidate, name) {
+			return candidate
+		}
+	}
+	if best, found := mostPopulous(retried, func(candidate place) bool { return strongMatch(candidate, name) }); found {
+		return best
+	}
+	if len(english) > 0 {
+		first := english[0]
+		prefer := func(candidate place) bool { return candidate.settlement() && sameName(candidate.Name, name) }
+		switch {
+		case first.settlement():
+			return first
+		case first.country() || strings.HasPrefix(first.FeatureCode, "ADM"):
+			prefer = place.settlement
+		}
+		if index := slices.IndexFunc(english, prefer); index >= 0 {
+			return english[index]
+		}
+		return first
+	}
+	if best, found := mostPopulous(retried, func(candidate place) bool { return candidate.settlement() }); found {
+		return best
+	}
+	best, _ := mostPopulous(retried, func(place) bool { return true })
+	return best
+}
+
+func mostPopulous(lists [][]place, eligible func(place) bool) (place, bool) {
+	var best place
+	found := false
+	for _, list := range lists {
+		for _, candidate := range list {
+			if eligible(candidate) && (!found || candidate.Population > best.Population) {
+				best, found = candidate, true
+			}
+		}
+	}
+	return best, found
+}
+
+func keepCandidates(lists [][]place, keep func(place) bool) [][]place {
+	kept := make([][]place, len(lists))
+	for index, list := range lists {
+		for _, candidate := range list {
+			if keep(candidate) {
+				kept[index] = append(kept[index], candidate)
+			}
+		}
+	}
+	return kept
+}
+
+// lookupArea is the country or first-level region a qualifier names: the first answer for it in
+// English when that is one of that very name, else the first such answer among the retry
+// languages, which know names such as "Deutschland" that English does not. Only the first answer
+// is read, so few are asked for, and the retry shares the English request's five seconds. A
+// qualifier that names a town, or an area of another name such as Romania for Roma, is no area; a
+// lookup that failed is an error, not a refusal.
+func (s *Service) lookupArea(ctx context.Context, principalID, qualifier string) (area, bool, error) {
+	lookupCtx, cancel := context.WithTimeout(ctx, lookupTimeout)
+	defer cancel()
+	names := func(answer []place) bool {
+		return len(answer) > 0 && answer[0].area() && sameAreaName(answer[0].Name, qualifier)
+	}
+	english, err := s.geocodeName(lookupCtx, qualifier, "en", geocodingCandidates)
+	if err != nil {
+		s.logger.InfoContext(ctx, "web.weather.failed", "principal_id", principalID, "stage", "qualifier", "error_class", errorClass(err))
+		return area{}, false, err
+	}
+	if names(english) {
+		return english[0].asArea(), true, nil
+	}
+	asked, err := s.askLanguages(lookupCtx, qualifier, geocodingCandidates)
+	if err != nil {
+		s.logger.InfoContext(ctx, "web.weather.failed", "principal_id", principalID, "stage", "qualifier_retry", "error_class", errorClass(err))
+		return area{}, false, err
+	}
+	for _, answer := range asked.answers {
+		if names(answer) {
+			return answer[0].asArea(), true, nil
+		}
+	}
+	if asked.failed > 0 {
+		s.logger.InfoContext(ctx, "web.weather.failed", "principal_id", principalID, "stage", "qualifier_retry", "failed", asked.failed, "error_class", errorClass(asked.failure))
+		return area{}, false, asked.failure
+	}
+	return area{}, false, nil
+}
+
+// area reports whether a geocoding answer is a country or a first-level region.
+func (p place) area() bool {
+	return p.CountryCode != "" && (p.country() || p.FeatureCode == "ADM1")
+}
+
+func (p place) asArea() area {
+	if p.country() {
+		return area{countryCode: p.CountryCode}
+	}
+	return area{countryCode: p.CountryCode, regionID: p.ID, region: p.Name}
+}
+
+// country reports whether a geocoding answer is a country, which GeoNames codes PCL and PCLI,
+// PCLD, and the like.
+func (p place) country() bool {
+	return strings.HasPrefix(p.FeatureCode, "PCL")
+}
+
+// foundIn names where a name's namesakes lie, as region and country, once each, so the model can
+// name the one it means; without a namesake of the very name, it names where the candidates lie.
+func foundIn(name string, lists [][]place) string {
+	namesakes := keepCandidates(lists, func(candidate place) bool { return sameName(candidate.Name, name) })
+	if !anyFound(namesakes) {
+		namesakes = lists
+	}
+	var where []string
+	seen := map[string]bool{}
+	for _, list := range namesakes {
+		for _, candidate := range list {
+			country := strings.TrimSpace(candidate.Country)
+			if country == "" {
+				continue
+			}
+			key := strings.ToUpper(candidate.CountryCode) + "\x00" + strconv.FormatInt(candidate.Admin1ID, 10)
+			if candidate.Admin1ID == 0 {
+				key += "\x00" + candidate.Admin1
+			}
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			if admin1 := strings.TrimSpace(candidate.Admin1); admin1 != "" {
+				country = admin1 + ", " + country
+			}
+			where = append(where, country)
+		}
+	}
+	if len(where) == 0 {
+		return "places without a country"
+	}
+	listed, length := 0, 0
+	for listed < len(where) && (listed == 0 || length+len(where[listed]) <= maximumFoundInBytes) {
+		length += len(where[listed]) + 2
+		listed++
+	}
+	text := strings.Join(where[:listed], "; ")
+	if listed < len(where) {
+		text += fmt.Sprintf("; and %d more", len(where)-listed)
+	}
+	return clip.Bytes(text, maximumFoundInBytes+100)
 }
 
 func (s *Service) getJSON(ctx context.Context, endpoint *url.URL, query url.Values, into any) error {

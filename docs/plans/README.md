@@ -146,6 +146,7 @@ plan that links back to the earlier record.
 | 0134 | [Calendar listings that page instead of failing](0134-calendar-listing-pages.md) | done |
 | 0135 | [Withdrawing when nothing is waiting is not a failure](0135-withdraw-nothing-waiting.md) | done |
 | 0136 | [MCP servers from an operator catalog](0136-mcp-servers.md) | done |
+| 0137 | [Weather places resolve to the place that was meant](0137-weather-places-resolve-as-meant.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

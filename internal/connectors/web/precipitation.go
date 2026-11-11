@@ -38,8 +38,8 @@ func (s *Service) WeatherEnabled(ctx context.Context, principalID string) (bool,
 	return s.switches.Enabled(ctx, principalID, Switch)
 }
 
-// FindPlace finds a place name as weather_forecast does: one of the principal's saved places, or
-// else geocoded; an empty name is the household's home.
+// FindPlace finds a place name as weather_forecast and weather_card do: one of the principal's
+// saved places, or else geocoded; an empty name is the household's home.
 func (s *Service) FindPlace(ctx context.Context, principalID, name string) (Place, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -51,18 +51,22 @@ func (s *Service) FindPlace(ctx context.Context, principalID, name string) (Plac
 	if len([]rune(name)) > maximumPlaceRunes {
 		return Place{}, fmt.Errorf("the place must be at most %d characters", maximumPlaceRunes)
 	}
-	if saved, found, err := s.savedPlace(ctx, principalID, name); err != nil || found {
-		return saved, err
-	}
-	found, ok, err := s.geocode(ctx, name)
-	if err != nil {
+	resolved, err := s.resolvePlace(ctx, principalID, placeRequest{name: name})
+	var refusal *placeRefusal
+	switch {
+	case errors.As(err, &refusal):
+		return Place{}, errors.New(refusal.text)
+	case err != nil:
 		s.logger.InfoContext(ctx, "web.weather.failed", "principal_id", principalID, "error_class", errorClass(err))
 		return Place{}, fmt.Errorf("%s", weatherUnavailableText)
+	case resolved.incomplete:
+		// A watch keeps the coordinates and has no reply to carry a note asking to check them.
+		s.logger.InfoContext(ctx, "web.weather.failed", "principal_id", principalID, "stage", "find_place", "error_class", "incomplete_lookup")
+		return Place{}, fmt.Errorf("%s", weatherUnavailableText)
+	case resolved.saved:
+		return Place{Name: resolved.shown, Latitude: resolved.Latitude, Longitude: resolved.Longitude}, nil
 	}
-	if !ok {
-		return Place{}, fmt.Errorf("no place called %q was found; ask the user for a nearby town or a more precise name", name)
-	}
-	return Place{Name: placeName(found), Latitude: found.Latitude, Longitude: found.Longitude}, nil
+	return Place{Name: placeName(resolved.place), Latitude: resolved.Latitude, Longitude: resolved.Longitude}, nil
 }
 
 // savedPlace is the principal's saved place with the name, if there is one.

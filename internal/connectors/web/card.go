@@ -53,11 +53,13 @@ type cardTrainRequest struct {
 }
 
 type cardLegRequest struct {
-	Label    string `json:"label"`
-	Place    string `json:"place"`
-	Date     string `json:"date"`
-	FromHour *int   `json:"from_hour"`
-	ToHour   *int   `json:"to_hour"`
+	Label     string   `json:"label"`
+	Place     string   `json:"place"`
+	Latitude  *float64 `json:"latitude"`
+	Longitude *float64 `json:"longitude"`
+	Date      string   `json:"date"`
+	FromHour  *int     `json:"from_hour"`
+	ToHour    *int     `json:"to_hour"`
 }
 
 // cardWords are the fixed words on a card; everything else on it is a number or the model's text.
@@ -108,7 +110,9 @@ var severity = map[daycard.Condition]int{
 type cardLeg struct {
 	label  string
 	window hourWindow
-	place  string
+	where  placeRequest
+	// key is the leg's place as given, so legs at one place resolve it once.
+	key string
 }
 
 // legReading is one leg's hours reduced to what its tile shows.
@@ -192,33 +196,37 @@ func (s *Service) weatherCard(ctx context.Context, principalID string, request c
 		trains = outcome
 	}
 
-	places := map[string]place{}
+	places := map[string]resolvedPlace{}
 	forecasts := map[string]forecast{}
 	card := daycard.Card{Title: title, Summary: summary, FeelsLikeLabel: words.feelsLike}
 	var report strings.Builder
+	var notes []string
 	for index, leg := range legs {
-		key := strings.ToLower(leg.place)
-		found, cached := places[key]
+		resolved, cached := places[leg.key]
 		if !cached {
-			var ok bool
 			var err error
-			found, ok, err = s.geocode(ctx, leg.place)
+			resolved, err = s.resolvePlace(ctx, principalID, leg.where)
+			var refusal *placeRefusal
+			if errors.As(err, &refusal) {
+				return errorResult(fmt.Sprintf("Leg %d: %s.", index+1, refusal.text)), nil
+			}
 			if err != nil {
 				return s.weatherFailure(ctx, principalID, err), nil
 			}
-			if !ok {
-				return errorResult(fmt.Sprintf("Leg %d: no place called %q was found; ask the user for a nearby town or a more precise name.", index+1, leg.place)), nil
+			places[leg.key] = resolved
+			if note := resolved.checkNote(); note != "" {
+				notes = append(notes, note)
 			}
-			places[key] = found
 		}
+		found := resolved.place
 		if err := s.checkHourlyDate(found, leg.window.date); err != nil {
 			return errorResult(fmt.Sprintf("Leg %d: %s", index+1, err)), nil
 		}
 		date := leg.window.date.Format(time.DateOnly)
-		forecastKey := key + "\x00" + date
+		query := placeQuery(found)
+		forecastKey := query.Get("latitude") + "," + query.Get("longitude") + "\x00" + date
 		result, cached := forecasts[forecastKey]
 		if !cached {
-			query := placeQuery(found)
 			query.Set("hourly", hourlyFields)
 			query.Set("daily", daylightFields)
 			query.Set("start_date", date)
@@ -235,7 +243,7 @@ func (s *Service) weatherCard(ctx context.Context, principalID string, request c
 
 		label := leg.label
 		if label == "" {
-			label = fmt.Sprintf("%s · %02d–%02d", strings.TrimSpace(found.Name), leg.window.from, leg.window.to)
+			label = fmt.Sprintf("%s · %02d–%02d", resolved.shown, leg.window.from, leg.window.to)
 		}
 		detail := reading.detail(words, unit)
 		card.Legs = append(card.Legs, daycard.Leg{
@@ -246,7 +254,7 @@ func (s *Service) weatherCard(ctx context.Context, principalID string, request c
 			Detail:      detail,
 		})
 		if index == 0 {
-			card.HeaderLabel = fmt.Sprintf("%s · %02d:00", strings.TrimSpace(found.Name), reading.first.hour)
+			card.HeaderLabel = fmt.Sprintf("%s · %02d:00", resolved.shown, reading.first.hour)
 			card.Icon = reading.first.condition
 			card.Night = reading.first.night
 			card.Temperature = reading.first.temperature
@@ -323,24 +331,44 @@ func (s *Service) weatherCard(ctx context.Context, principalID string, request c
 		return tools.Result{}, fmt.Errorf("stage day card: %w", err)
 	}
 	s.logger.InfoContext(ctx, "web.card.staged", "principal_id", principalID, "legs", len(card.Legs), "trains", len(card.Trains), "bytes", len(png))
+	for _, note := range notes {
+		report.WriteString(note + "\n")
+	}
 	return tools.Result{Text: "The day card is ready and goes out as a photo with your reply, which becomes its caption; it is this reply's one image, so no chart or other card can go with it.\n" +
 		report.String() +
 		"The card already shows these numbers: keep the reply to about 800 characters and do not repeat them."}, nil
 }
 
 func (s *Service) parseCardLeg(requested cardLegRequest) (cardLeg, error) {
-	leg := cardLeg{label: strings.TrimSpace(requested.Label), place: strings.TrimSpace(requested.Place)}
+	leg := cardLeg{label: strings.TrimSpace(requested.Label)}
 	if len([]rune(leg.label)) > maximumLabelRunes {
 		return cardLeg{}, fmt.Errorf("label must be at most %d characters", maximumLabelRunes)
 	}
-	if leg.place == "" {
-		leg.place = s.weatherHome
-	}
-	if leg.place == "" {
-		return cardLeg{}, errors.New("no place was given and no home place is configured; ask the user where they will be")
-	}
-	if len([]rune(leg.place)) > maximumPlaceRunes {
-		return cardLeg{}, fmt.Errorf("place must be at most %d characters", maximumPlaceRunes)
+	name := strings.TrimSpace(requested.Place)
+	switch byCoordinates := requested.Latitude != nil || requested.Longitude != nil; {
+	case byCoordinates && name != "":
+		return cardLeg{}, errors.New("give either place or latitude and longitude, not both")
+	case byCoordinates && (requested.Latitude == nil || requested.Longitude == nil):
+		return cardLeg{}, errors.New("latitude and longitude must be given together")
+	case byCoordinates && !validCoordinates(*requested.Latitude, *requested.Longitude):
+		return cardLeg{}, errors.New("latitude must be between -90 and 90 and longitude between -180 and 180")
+	case byCoordinates && leg.label == "":
+		return cardLeg{}, errors.New("a leg with latitude and longitude needs a label, which names the place on the card")
+	case byCoordinates:
+		leg.where = placeRequest{latitude: requested.Latitude, longitude: requested.Longitude, label: leg.label}
+		leg.key = fmt.Sprintf("%.4f,%.4f\x00%s", *requested.Latitude, *requested.Longitude, leg.label)
+	default:
+		if name == "" {
+			name = s.weatherHome
+		}
+		if name == "" {
+			return cardLeg{}, errors.New("no place was given and no home place is configured; ask the user where they will be")
+		}
+		if len([]rune(name)) > maximumPlaceRunes {
+			return cardLeg{}, fmt.Errorf("place must be at most %d characters", maximumPlaceRunes)
+		}
+		leg.where = placeRequest{name: name, offerCoordinates: true}
+		leg.key = "\x00" + strings.ToLower(name)
 	}
 	if requested.Date == "" || requested.FromHour == nil || requested.ToHour == nil {
 		return cardLeg{}, errors.New("give the day as date, YYYY-MM-DD, and the hours as from_hour and to_hour")

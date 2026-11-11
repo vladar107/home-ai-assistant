@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -69,6 +70,10 @@ type Service struct {
 	telemetry    Telemetry
 	exposure     ExposureChecker
 	places       SavedPlaces
+
+	// geocoded keeps the geocoder's answers by language and name.
+	geocodeMu sync.Mutex
+	geocoded  map[string]geocodeEntry
 
 	running atomic.Bool
 }
@@ -150,6 +155,7 @@ func NewService(cfg Config, switches integration.SwitchReader, logger *slog.Logg
 		geocodingURL: geocoding,
 		forecastURL:  forecast,
 		logger:       logger,
+		geocoded:     make(map[string]geocodeEntry),
 	}, nil
 }
 
