@@ -81,9 +81,77 @@ func (s *Service) changed(ctx context.Context, trip Trip) {
 // runs once the lock is released and the Telegram round trips of one trip never hold up the writes
 // of another.
 func (s *Service) announce(ctx context.Context, result *Result) {
-	if result.written {
-		s.changed(ctx, result.Trip)
+	s.announceInTab(ctx, result, TabClaim{})
+}
+
+// announceInTab gives a trip just written the claimed tab in place of a tab of its own; a tab that
+// cannot be had leaves the trip to get its own, and Move says what happened.
+func (s *Service) announceInTab(ctx context.Context, result *Result, claim TabClaim) {
+	if !result.written {
+		return
 	}
+	if claim.ThreadID > 0 && s.tabs != nil {
+		move, err := s.tabs.TakeTab(ctx, result.Trip, claim.ThreadID, claim.Named)
+		if err != nil {
+			s.logger.WarnContext(ctx, "trip.tab.take_failed", "principal_id", result.Trip.PrincipalID, "trip_id", result.Trip.ID, "error", err)
+			move = TabMove{Refusal: "The tab could not be used just now."}
+		}
+		result.Move = &move
+		if move.Refusal == "" {
+			return
+		}
+	}
+	s.changed(ctx, result.Trip)
+}
+
+// CheckTab says whether the trip, or with no ID a trip about to be added, could use the tab the
+// user is in; with named, only a tab the user named will do.
+func (s *Service) CheckTab(ctx context.Context, principalID, tripID string, threadID int64, named bool) (TabMove, error) {
+	if s.tabs == nil {
+		return TabMove{Refusal: TabsOffRefusal}, nil
+	}
+	return s.tabs.CheckTab(ctx, principalID, tripID, threadID, named)
+}
+
+// UseTab moves a planned trip that has not ended to the tab the user is in. Its summary is pinned
+// there, and its reminders, notices, and news follow it, since they go to the trip and not to a
+// tab. Nothing about the trip itself is written.
+func (s *Service) UseTab(ctx context.Context, principalID, id string, threadID int64) (Result, error) {
+	existing, found, err := s.repository.LoadTrip(ctx, principalID, id)
+	if err != nil {
+		return Result{}, err
+	}
+	if !found {
+		return rejected(unknownTripText), nil
+	}
+	if text := tabMoveRefusal(existing, s.now()); text != "" {
+		return rejected(text), nil
+	}
+	if s.tabs == nil {
+		return rejected(TabsOffRefusal), nil
+	}
+	move, err := s.tabs.TakeTab(ctx, existing, threadID, false)
+	if err != nil {
+		return Result{}, err
+	}
+	if move.Refusal != "" {
+		return rejected(move.Refusal), nil
+	}
+	return Result{Trip: existing, Move: &move}, nil
+}
+
+// tabMoveRefusal says why the trip cannot move to another tab, or "" when it can: only a planned
+// trip that has not ended has a tab to move.
+func tabMoveRefusal(trip Trip, now time.Time) string {
+	switch {
+	case trip.Status == StatusSuggested:
+		return "That trip is not tracked yet, so it has no tab to move; the user decides on its card."
+	case trip.Status != StatusPlanned:
+		return "That trip is " + trip.Status + " and cannot be changed."
+	case trip.Ended(now):
+		return "That trip has ended, so it does not move to another tab."
+	}
+	return ""
 }
 
 // SetSummaryMessage records the message that sums the trip up in its tab; zero forgets it.
@@ -156,6 +224,8 @@ type Result struct {
 	// that update brought in.
 	Previous *Trip
 	Added    []string
+	// Move is what became of the tab the trip was to use; nil when it was given none.
+	Move *TabMove
 	// written is set when the write saved the trip.
 	written bool
 }
@@ -173,8 +243,14 @@ func stale(trip Trip, expectedUpdatedAt time.Time) bool {
 func rejected(text string) Result { return Result{Rejection: text} }
 
 // Add stores a planned trip and sets the reminders of its bookings.
-func (s *Service) Add(ctx context.Context, principalID string, draft Draft) (result Result, err error) {
-	defer s.announce(ctx, &result)
+func (s *Service) Add(ctx context.Context, principalID string, draft Draft) (Result, error) {
+	return s.AddInTab(ctx, principalID, draft, TabClaim{})
+}
+
+// AddInTab stores a planned trip as Add does, and gives it the claimed tab instead of a tab of
+// its own when that tab can be had.
+func (s *Service) AddInTab(ctx context.Context, principalID string, draft Draft, claim TabClaim) (result Result, err error) {
+	defer s.announceInTab(ctx, &result, claim)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if draft.Source == "" {

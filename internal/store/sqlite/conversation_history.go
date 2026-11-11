@@ -431,10 +431,16 @@ func switchActiveSession(ctx context.Context, tx *sql.Tx, lane conversation.Lane
 	if err := closeSwitchedLane(ctx, tx, lane); err != nil {
 		return switchOutcome{}, err
 	}
+	// A conversation whose subject has moved on, as a trip's does when the trip takes another tab,
+	// comes back about nothing, since one active conversation at most is about a subject.
 	if _, err := tx.ExecContext(
 		ctx,
 		`UPDATE conversation_sessions
 		 SET status = 'active', close_reason = NULL, closed_at = NULL, thread_id = ?,
+		     subject = CASE WHEN EXISTS (
+		         SELECT 1 FROM conversation_sessions AS other
+		         WHERE other.principal_id = conversation_sessions.principal_id AND other.subject = conversation_sessions.subject
+		           AND other.status = 'active') THEN NULL ELSE subject END,
 		     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 		 WHERE id = ? AND principal_id = ?`,
 		lane.ThreadID,

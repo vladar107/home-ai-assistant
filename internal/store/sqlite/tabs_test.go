@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
@@ -310,5 +311,240 @@ func TestTabRegistryKeepsFixedNamesAndConfirmsOnce(t *testing.T) {
 	}
 	if _, found, err := store.Tab(ctx, "alice", 7); err != nil || found {
 		t.Fatalf("deleted tab = %v %v", found, err)
+	}
+}
+
+// tripTakeState is what a take of a tab changes, read back from the registry and the conversations.
+type tripTakeState struct {
+	tab      int64
+	summary  int64
+	activeIn []int64
+}
+
+func readTripTakeState(t *testing.T, store *Store, tripID string) tripTakeState {
+	t.Helper()
+	ctx := t.Context()
+	var state tripTakeState
+	threadID, found, err := store.SubjectTab(ctx, "alice", thread.TripDestination(tripID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found {
+		state.tab = threadID
+	}
+	var summary sql.NullInt64
+	if err := store.db.QueryRowContext(ctx, `SELECT summary_message_id FROM trips WHERE id = ?`, tripID).Scan(&summary); err != nil {
+		t.Fatal(err)
+	}
+	state.summary = summary.Int64
+	rows, err := store.db.QueryContext(ctx, `SELECT thread_id FROM conversation_sessions WHERE principal_id = 'alice' AND subject = ? AND status = 'active' ORDER BY thread_id`, thread.TripDestination(tripID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var threadID int64
+		if err := rows.Scan(&threadID); err != nil {
+			t.Fatal(err)
+		}
+		state.activeIn = append(state.activeIn, threadID)
+	}
+	return state
+}
+
+func laneSessionSubject(t *testing.T, store *Store, threadID int64) string {
+	t.Helper()
+	var subject string
+	if err := store.db.QueryRowContext(t.Context(),
+		`SELECT COALESCE(subject, '') FROM conversation_sessions WHERE principal_id = 'alice' AND thread_id = ? AND status = 'active'`, threadID,
+	).Scan(&subject); err != nil {
+		t.Fatal(err)
+	}
+	return subject
+}
+
+// Taking a tab moves the trip's subject from its old tab to the taken one, which keeps its name,
+// forgets the trip's summary, and leaves one active conversation about the trip, the taken tab's,
+// also when the trip's conversation was in a feed tab. A tab that no longer serves what it did
+// is not taken, and a tab of an ended trip can be taken, leaving that trip without a tab.
+func TestTakingATabMovesTheTripsSubjectSummaryAndConversation(t *testing.T) {
+	store, ctx := openTestStore(t)
+	const (
+		tripTab  = 30
+		userTab  = 50
+		feedTab  = 40
+		first    = "a1a1a1a1"
+		second   = "b2b2b2b2"
+		tripName = "Example trip"
+	)
+	addTestTrip(t, store, "alice", first, tripBase.Add(120*time.Hour))
+	addTestTrip(t, store, "alice", second, tripBase.Add(240*time.Hour))
+	if err := store.AddSubjectTab(ctx, "alice", tripTab, tripName, thread.TripDestination(first)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetTripSummary(ctx, "alice", first, 900); err != nil {
+		t.Fatal(err)
+	}
+	if added, err := store.AddTab(ctx, "alice", userTab, "Packing", thread.NamedByUser); err != nil || !added {
+		t.Fatalf("add user tab = %v %v", added, err)
+	}
+	if err := store.AddSubjectTab(ctx, "alice", feedTab, "Reminders", thread.FeedSubject(thread.FeedReminders)); err != nil {
+		t.Fatal(err)
+	}
+	tabMessage(t, store, conversation.Lane{PrincipalID: "alice", ThreadID: tripTab}, 1)
+	mine := tabMessage(t, store, conversation.Lane{PrincipalID: "alice", ThreadID: userTab}, 2)
+	if state := readTripTakeState(t, store, first); state.tab != tripTab || state.summary != 900 || len(state.activeIn) != 1 || state.activeIn[0] != tripTab {
+		t.Fatalf("before the take = %+v", state)
+	}
+
+	if taken, err := store.TakeTab(ctx, "alice", userTab, thread.TripDestination(first), thread.FeedSubject(thread.FeedReminders)); err != nil || taken {
+		t.Fatalf("take of a tab that serves something else = %v %v", taken, err)
+	}
+	if taken, err := store.TakeTab(ctx, "alice", userTab, thread.TripDestination(first), ""); err != nil || !taken {
+		t.Fatalf("take = %v %v", taken, err)
+	}
+	if state := readTripTakeState(t, store, first); state.tab != userTab || state.summary != 0 || len(state.activeIn) != 1 || state.activeIn[0] != userTab {
+		t.Fatalf("after the take = %+v", state)
+	}
+	if session := tabMessage(t, store, conversation.Lane{PrincipalID: "alice", ThreadID: userTab}, 3); session != mine {
+		t.Fatalf("the taken tab's next message joined %s, want its conversation %s", session, mine)
+	}
+	left, _, err := store.Tab(ctx, "alice", tripTab)
+	if err != nil || left.Subject != "" || left.NamedBy != thread.NamedByUser || left.Name != tripName {
+		t.Fatalf("the tab the trip left = %+v %v", left, err)
+	}
+	if subject := laneSessionSubject(t, store, tripTab); subject != "" {
+		t.Fatalf("the left tab's conversation is about %q", subject)
+	}
+	taken, _, err := store.Tab(ctx, "alice", userTab)
+	if err != nil || taken.Subject != thread.TripDestination(first) || taken.NamedBy != thread.NamedByUser || taken.Name != "Packing" {
+		t.Fatalf("the taken tab = %+v %v", taken, err)
+	}
+	if renamed, err := store.RenameTab(ctx, "alice", userTab, "Packing list"); err != nil || !renamed {
+		t.Fatalf("rename of the taken tab = %v %v", renamed, err)
+	}
+
+	// The second trip's conversation is in the reminders tab, a reply to one of its notices.
+	tabMessage(t, store, conversation.Lane{PrincipalID: "alice", ThreadID: feedTab}, 4)
+	if _, err := store.db.ExecContext(ctx, `UPDATE conversation_sessions SET subject = ? WHERE principal_id = 'alice' AND thread_id = ? AND status = 'active'`,
+		thread.TripDestination(second), feedTab); err != nil {
+		t.Fatal(err)
+	}
+	if taken, err := store.TakeTab(ctx, "alice", tripTab, thread.TripDestination(second), ""); err != nil || !taken {
+		t.Fatalf("take for the second trip = %v %v", taken, err)
+	}
+	if state := readTripTakeState(t, store, second); state.tab != tripTab || len(state.activeIn) != 1 || state.activeIn[0] != tripTab {
+		t.Fatalf("second trip after the take = %+v", state)
+	}
+	if subject := laneSessionSubject(t, store, feedTab); subject != "" {
+		t.Fatalf("the reminders tab's conversation is still about %q", subject)
+	}
+
+	// The first trip ended; the second takes its tab, and the first is left without one.
+	if err := store.SetTripSummary(ctx, "alice", first, 901); err != nil {
+		t.Fatal(err)
+	}
+	if taken, err := store.TakeTab(ctx, "alice", userTab, thread.TripDestination(second), thread.TripDestination(first)); err != nil || !taken {
+		t.Fatalf("take of the ended trip's tab = %v %v", taken, err)
+	}
+	if state := readTripTakeState(t, store, first); state.tab != 0 || state.summary != 0 || len(state.activeIn) != 0 {
+		t.Fatalf("ended trip after its tab was taken = %+v", state)
+	}
+	if state := readTripTakeState(t, store, second); state.tab != userTab || len(state.activeIn) != 1 || state.activeIn[0] != userTab {
+		t.Fatalf("second trip after moving again = %+v", state)
+	}
+	if subject := laneSessionSubject(t, store, tripTab); subject != "" {
+		t.Fatalf("the tab the second trip left keeps a conversation about %q", subject)
+	}
+	if again, _, err := store.Tab(ctx, "alice", userTab); err != nil || again.Name != "Packing list" || again.NamedBy != thread.NamedByUser {
+		t.Fatalf("the taken tab after moving again = %+v %v", again, err)
+	}
+}
+
+// The tab the bot made for a trip that is over stays fixed when another trip takes it, so its name
+// follows the new trip; a tab the user or a conversation named is the user's once taken.
+func TestATakenTabOfAnEndedTripStaysFixed(t *testing.T) {
+	store, ctx := openTestStore(t)
+	addTestTrip(t, store, "alice", "a1a1a1a1", tripBase.Add(-24*time.Hour))
+	addTestTrip(t, store, "alice", "b2b2b2b2", tripBase.Add(240*time.Hour))
+	if err := store.AddSubjectTab(ctx, "alice", 30, "Example visit", thread.TripDestination("a1a1a1a1")); err != nil {
+		t.Fatal(err)
+	}
+	if added, err := store.AddTab(ctx, "alice", 31, "New chat", thread.NamedByBot); err != nil || !added {
+		t.Fatalf("add bot tab = %v %v", added, err)
+	}
+	if taken, err := store.TakeTab(ctx, "alice", 30, thread.TripDestination("b2b2b2b2"), thread.TripDestination("a1a1a1a1")); err != nil || !taken {
+		t.Fatalf("take of the ended trip's tab = %v %v", taken, err)
+	}
+	if tab, _, err := store.Tab(ctx, "alice", 30); err != nil || tab.NamedBy != thread.NamedByFixed || tab.Subject != thread.TripDestination("b2b2b2b2") {
+		t.Fatalf("the ended trip's tab after the take = %+v %v", tab, err)
+	}
+	if taken, err := store.TakeTab(ctx, "alice", 31, thread.TripDestination("b2b2b2b2"), ""); err != nil || !taken {
+		t.Fatalf("take of the bot's tab = %v %v", taken, err)
+	}
+	if tab, _, err := store.Tab(ctx, "alice", 31); err != nil || tab.NamedBy != thread.NamedByUser {
+		t.Fatalf("the bot's tab after the take = %+v %v", tab, err)
+	}
+	if tab, _, err := store.Tab(ctx, "alice", 30); err != nil || tab.NamedBy != thread.NamedByUser || tab.Subject != "" {
+		t.Fatalf("the tab the trip left = %+v %v", tab, err)
+	}
+}
+
+// A closed conversation about a trip that moved to another tab comes back about nothing, whether by
+// a reply to one of its answers in the tab it was in or from /sessions, so the trip keeps one
+// active conversation.
+func TestAConversationLeftBehindByATripComesBackAboutNothing(t *testing.T) {
+	store, ctx := openTestStore(t)
+	const tripID = "a1a1a1a1"
+	addTestTrip(t, store, "alice", tripID, tripBase.Add(240*time.Hour))
+	if err := store.AddSubjectTab(ctx, "alice", 30, "Example trip", thread.TripDestination(tripID)); err != nil {
+		t.Fatal(err)
+	}
+	if added, err := store.AddTab(ctx, "alice", 50, "Packing", thread.NamedByUser); err != nil || !added {
+		t.Fatalf("add user tab = %v %v", added, err)
+	}
+	left := conversation.Lane{PrincipalID: "alice", ThreadID: 30}
+	answered := tabMessage(t, store, left, 1)
+	resumable := tabMessage(t, store, conversation.Lane{PrincipalID: "alice", ThreadID: 60}, 2)
+	if _, err := store.db.ExecContext(ctx, `UPDATE conversation_sessions SET status = 'closed', close_reason = 'switched', closed_at = updated_at WHERE id IN (?, ?)`, answered, resumable); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.ExecContext(ctx, `UPDATE conversation_sessions SET subject = ? WHERE id = ?`, thread.TripDestination(tripID), resumable); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.ExecContext(ctx,
+		`INSERT INTO conversation_reply_messages (principal_id, telegram_message_id, session_id, request_id) VALUES ('alice', 900, ?, 'earlier')`, answered); err != nil {
+		t.Fatal(err)
+	}
+	mine := tabMessage(t, store, conversation.Lane{PrincipalID: "alice", ThreadID: 50}, 3)
+	if taken, err := store.TakeTab(ctx, "alice", 50, thread.TripDestination(tripID), ""); err != nil || !taken {
+		t.Fatalf("take = %v %v", taken, err)
+	}
+
+	result, err := store.EnqueueConversation(ctx, conversation.EnqueueInput{
+		BotUserID: 999, TelegramUpdateID: 4, TelegramMessageID: 1004, PrincipalID: "alice", ThreadID: 30, ChatID: 101,
+		Message: "about that answer", ReplyToMessageID: 900,
+	}, conversation.Session{
+		ID: "00000004-0000-4000-8000-000000000000", PrincipalID: "alice", RuntimeSessionID: "00000004-1111-4111-8111-111111111111",
+	}, "00000004-2222-4222-8222-222222222222", nil)
+	if err != nil || !result.Created || result.Request.SessionID != answered {
+		t.Fatalf("reply in the left tab = %+v %v, want it to reopen %s", result, err, answered)
+	}
+	if subject := laneSessionSubject(t, store, 30); subject != "" {
+		t.Fatalf("the reopened conversation is about %q", subject)
+	}
+	if _, err := store.CancelPendingConversation(ctx, left); err != nil {
+		t.Fatal(err)
+	}
+
+	switched, err := store.SwitchConversation(ctx, conversation.Lane{PrincipalID: "alice", ThreadID: 61}, resumable)
+	if err != nil || !switched.Switched {
+		t.Fatalf("resume from /sessions = %+v %v", switched, err)
+	}
+	if subject := laneSessionSubject(t, store, 61); subject != "" {
+		t.Fatalf("the resumed conversation is about %q", subject)
+	}
+	if state := readTripTakeState(t, store, tripID); len(state.activeIn) != 1 || state.activeIn[0] != 50 {
+		t.Fatalf("active conversations about the trip = %+v, want the taken tab's %s", state, mine)
 	}
 }

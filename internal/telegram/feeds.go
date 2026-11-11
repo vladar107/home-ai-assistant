@@ -106,7 +106,8 @@ func (s *Tabs) giveFeedIcon(ctx context.Context, principalID string, chatID, thr
 // giveFixedIcon sets a fixed tab's icon once Telegram's icon set offers it, so a tab made before
 // the set was read gets it with a later message. A tab that has its icon, or that refused it, is
 // not asked again until a restart; a failure only costs the icon, and is logged as the event with
-// the attributes that name the tab's kind.
+// the attributes that name the tab's kind. A tab the user named, such as one a trip took, keeps the
+// icon the user gave it.
 func (s *Tabs) giveFixedIcon(ctx context.Context, principalID string, chatID, threadID int64, emoji, event string, kind ...any) {
 	key := chatTab{chatID, threadID}
 	if _, done := s.iconedFeeds.Load(key); done {
@@ -127,7 +128,7 @@ func (s *Tabs) giveFixedIcon(ctx context.Context, principalID string, chatID, th
 		return
 	}
 	s.iconedFeeds.Store(key, struct{}{})
-	if !found || tab.IconCustomEmojiID == iconID {
+	if !found || tab.NamedBy != thread.NamedByFixed || tab.IconCustomEmojiID == iconID {
 		return
 	}
 	if err := s.client.EditForumTopic(ctx, chatID, threadID, "", iconID); err != nil {

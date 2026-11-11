@@ -52,6 +52,9 @@ type TabStore interface {
 	SetFixedTabIcon(ctx context.Context, principalID string, threadID int64, iconCustomEmojiID string) error
 	// SetFixedTabName records the name the bot gave a tab of a fixed kind.
 	SetFixedTabName(ctx context.Context, principalID string, threadID int64, name string) error
+	// TakeTab makes the tab, while it still serves holder, serve the object the subject names in
+	// place of the tab that served it, and reports whether it did.
+	TakeTab(ctx context.Context, principalID string, threadID int64, subject, holder string) (bool, error)
 }
 
 type chatTab struct{ chatID, threadID int64 }

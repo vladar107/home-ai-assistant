@@ -12,6 +12,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/localtime"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
+	"github.com/vladar107/home-ai-assistant/internal/thread"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -22,6 +23,12 @@ const (
 
 	actionCancel = "cancel"
 	actionEndNow = "end_now"
+	// actionMove moves the trip to the tab of the turn and leaves its content alone.
+	actionMove = "move"
+
+	// addTabLine and moveTabLine end a proposal whose trip is to use the tab it was made in.
+	addTabLine  = "The trip takes this tab."
+	moveTabLine = "The trip moves to this tab."
 
 	// listedTrips keeps a listing well inside the broker's result limit; one trip is read in
 	// full by its id.
@@ -51,7 +58,9 @@ func writeGuidance(zone string) string {
 		"After saving, say what was saved, which reminders were set and when, and every booking that got none with the reason; say so when a check-in time was assumed. " +
 		"After adding or tracking a trip, offer to set pause_while_traveling on the user's existing recurring jobs and watches that only matter at home, such as cleaning, bins, the commute, or home devices, naming them; schedule_list and watch_list show them. " +
 		"When the user's shared location is fresh, compare it with the trip; if they are clearly back home, offer to end the trip early with trip_update end_now, or to adjust it. When the user says they are back, use end_now. " +
-		"To drop a trip that is not going ahead, use cancel."
+		"To drop a trip that is not going ahead, use cancel. " +
+		"When the user says, in a tab, that it is the tab for a trip, or asks for a trip to go in this tab, pass use_this_tab: with trip_update for a trip trip_list has, or with trip_add for a new one. " +
+		"A trip added in a tab the user named takes that tab by itself."
 }
 
 type bookingArguments struct {
@@ -71,6 +80,14 @@ type addArguments struct {
 	EndsAt      string             `json:"ends_at"`
 	Timezone    string             `json:"timezone,omitempty"`
 	Bookings    []bookingArguments `json:"bookings,omitempty"`
+	UseThisTab  bool               `json:"use_this_tab,omitempty"`
+}
+
+// addRecord is the canonical, confirmed form of trip_add. NamedTab is set by the tool, never by
+// the model: the trip was added in a tab the user named, which it then takes by itself.
+type addRecord struct {
+	addArguments
+	NamedTab bool `json:"named_tab,omitempty"`
 }
 
 type bookingChange struct {
@@ -95,10 +112,12 @@ type updateArguments struct {
 	AddBookings      []bookingArguments `json:"add_bookings"`
 	ChangeBookings   []bookingChange    `json:"change_bookings"`
 	RemoveBookingIDs []string           `json:"remove_booking_ids"`
+	UseThisTab       bool               `json:"use_this_tab"`
 }
 
 // updateRecord is the canonical, confirmed form of trip_update: the trip's full replacement
-// content, or one of the two actions that leave its content alone.
+// content, which may move it to the turn's tab too, or one of the actions that leave its content
+// alone.
 type updateRecord struct {
 	ID string `json:"id"`
 	// UpdatedAt is the trip's last update time when the change was proposed, so a confirmation
@@ -111,6 +130,7 @@ type updateRecord struct {
 	EndsAt      string             `json:"ends_at,omitempty"`
 	Timezone    string             `json:"timezone,omitempty"`
 	Bookings    []bookingArguments `json:"bookings,omitempty"`
+	UseThisTab  bool               `json:"use_this_tab,omitempty"`
 }
 
 const bookingSchema = `{"type":"object","properties":{` +
@@ -141,12 +161,13 @@ var definitions = []tools.Definition{
 			`"starts_at":{"type":"string","description":"When the trip starts, local to the trip: 2026-11-02 09:30, or a date alone."},` +
 			`"ends_at":{"type":"string","description":"When the trip ends, local to the trip: 2026-11-06 18:00. A date alone means the end of that day."},` +
 			`"timezone":{"type":"string","description":"The IANA time zone of the trip, such as Europe/Lisbon; the user's own zone when left out."},` +
-			`"bookings":{"type":"array","maxItems":20,"items":` + bookingSchema + `}},` +
+			`"bookings":{"type":"array","maxItems":20,"items":` + bookingSchema + `},` +
+			`"use_this_tab":{"type":"boolean","description":"The user wants the trip in the tab this conversation is in, such as when they say it is the tab for the trip."}},` +
 			`"required":["title","destination","starts_at","ends_at"],"additionalProperties":false}`),
 	},
 	{
 		Name:        toolUpdate,
-		Description: "Change one trip by its id: its title, destination, or dates, add, change, or remove bookings, cancel it, or end it now when the user is back. Give only what changes.",
+		Description: "Change one trip by its id: its title, destination, or dates, add, change, or remove bookings, cancel it, end it now when the user is back, or move it to the tab this conversation is in. Give only what changes.",
 		Risk:        tools.RiskWrite,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"id":{"type":"string","description":"The trip's id from trip_list."},` +
@@ -165,7 +186,8 @@ var definitions = []tools.Definition{
 			`"check_in_at":{"type":"string","description":"A new check-in time, or an empty string to clear it."},` +
 			`"check_in_source":{"type":"string","enum":["stated","looked_up","default"]}},` +
 			`"required":["id"],"additionalProperties":false}},` +
-			`"remove_booking_ids":{"type":"array","items":{"type":"string"}}},` +
+			`"remove_booking_ids":{"type":"array","items":{"type":"string"}},` +
+			`"use_this_tab":{"type":"boolean","description":"The user says the tab this conversation is in is the trip's: its summary, reminders, notices, and news move here. Alone or with edits, not with cancel or end_now."}},` +
 			`"required":["id"],"additionalProperties":false}`),
 	},
 }
@@ -262,14 +284,39 @@ func (t *Tools) executeAdd(ctx context.Context, principalID string, call tools.C
 	if text != "" {
 		return tools.Result{Text: text, IsError: true}, nil
 	}
-	canonical, err := json.Marshal(addFromDraft(normalized))
+	record := addRecord{addArguments: addFromDraft(normalized)}
+	summary := "Add a trip:\n" + describeDraft(normalized)
+	threadID := thread.From(ctx)
+	// A trip that has already ended is given no tab, so it cannot use this one.
+	ended := !normalized.EndsAt.After(t.service.Now())
+	switch {
+	case arguments.UseThisTab && ended:
+		return tools.Result{Text: "That trip has already ended, so it cannot use a tab; add it without use_this_tab.", IsError: true}, nil
+	case arguments.UseThisTab:
+		check, err := t.service.CheckTab(ctx, principalID, "", threadID, false)
+		if err != nil {
+			return tools.Result{}, err
+		}
+		if check.Refusal != "" {
+			return tools.Result{Text: check.Refusal, IsError: true}, nil
+		}
+		record.UseThisTab, summary = true, summary+"\n"+addTabLine
+	case threadID > 0 && !ended:
+		check, err := t.service.CheckTab(ctx, principalID, "", threadID, true)
+		if err != nil {
+			t.logger.WarnContext(ctx, "trip.tab.check_failed", "principal_id", principalID, "error", err)
+		}
+		if err == nil && check.Refusal == "" {
+			record.NamedTab, summary = true, summary+"\n"+addTabLine
+		}
+	}
+	canonical, err := json.Marshal(record)
 	if err != nil {
 		return tools.Result{}, err
 	}
 	return t.act(ctx, principalID, approval.Proposal{
-		Tool: toolAdd, Arguments: canonical,
-		Summary: "Add a trip:\n" + describeDraft(normalized),
-		Intent:  approval.Intent{Verb: "add", TargetKind: "trip", TargetName: normalized.Title},
+		Tool: toolAdd, Arguments: canonical, Summary: summary,
+		Intent: approval.Intent{Verb: "add", TargetKind: "trip", TargetName: normalized.Title},
 	})
 }
 
@@ -296,6 +343,8 @@ func (t *Tools) executeUpdate(ctx context.Context, principalID string, call tool
 	switch {
 	case arguments.Cancel && arguments.EndNow:
 		return tools.Result{Text: "Give either cancel or end_now, not both.", IsError: true}, nil
+	case (arguments.Cancel || arguments.EndNow) && arguments.UseThisTab:
+		return tools.Result{Text: "use_this_tab does not go with cancel or end_now.", IsError: true}, nil
 	case (arguments.Cancel || arguments.EndNow) && edits:
 		return tools.Result{Text: "cancel and end_now take no other change; make the edits in a separate call.", IsError: true}, nil
 	case arguments.Cancel && existing.Status == StatusSuggested:
@@ -306,9 +355,22 @@ func (t *Tools) executeUpdate(ctx context.Context, principalID string, call tool
 		return tools.Result{Text: "That trip is not under way, so it cannot be ended now. Cancel it instead if it is not going ahead.", IsError: true}, nil
 	case arguments.EndNow:
 		record.Action, summary = actionEndNow, fmt.Sprintf("End the trip %q now.", existing.Title)
+	case !edits && !arguments.UseThisTab:
+		return tools.Result{Text: "Give a change: new fields, bookings to add, change, or remove, cancel, end_now, or use_this_tab.", IsError: true}, nil
 	case !edits:
-		return tools.Result{Text: "Give a change: new fields, bookings to add, change, or remove, cancel, or end_now.", IsError: true}, nil
+		move, result := t.checkMove(ctx, principalID, existing)
+		if !move {
+			return result, nil
+		}
+		record.Action, summary = actionMove, fmt.Sprintf("Move the trip %q to this tab.", existing.Title)
 	default:
+		if arguments.UseThisTab {
+			move, result := t.checkMove(ctx, principalID, existing)
+			if !move && result.IsError {
+				return result, nil
+			}
+			record.UseThisTab = move
+		}
 		draft, text := applyUpdate(existing, arguments)
 		if text != "" {
 			return tools.Result{Text: text, IsError: true}, nil
@@ -321,19 +383,44 @@ func (t *Tools) executeUpdate(ctx context.Context, principalID string, call tool
 		add := addFromDraft(normalized)
 		record.Title, record.Destination, record.StartsAt, record.EndsAt, record.Timezone, record.Bookings = add.Title, add.Destination, add.StartsAt, add.EndsAt, add.Timezone, add.Bookings
 		summary = fmt.Sprintf("Change the trip %q to:\n%s", existing.Title, describeDraft(normalized))
+		if record.UseThisTab {
+			summary += "\n" + moveTabLine
+		}
 	}
 	canonical, err := json.Marshal(record)
 	if err != nil {
 		return tools.Result{}, err
 	}
 	verb := "change"
-	if record.Action == actionCancel {
+	switch record.Action {
+	case actionCancel:
 		verb = "cancel"
+	case actionMove:
+		verb = "move"
 	}
 	return t.act(ctx, principalID, approval.Proposal{
 		Tool: toolUpdate, Arguments: canonical, Summary: summary,
 		Intent: approval.Intent{Verb: verb, TargetKind: "trip", TargetName: existing.Title},
 	})
+}
+
+// checkMove reports whether the trip can move to the turn's tab; otherwise the result says why, or,
+// when the tab is already the trip's, that nothing changes.
+func (t *Tools) checkMove(ctx context.Context, principalID string, existing Trip) (bool, tools.Result) {
+	if text := tabMoveRefusal(existing, t.service.Now()); text != "" {
+		return false, tools.Result{Text: text, IsError: true}
+	}
+	check, err := t.service.CheckTab(ctx, principalID, existing.ID, thread.From(ctx), false)
+	switch {
+	case err != nil:
+		t.logger.WarnContext(ctx, "trip.tab.check_failed", "principal_id", principalID, "trip_id", existing.ID, "error", err)
+		return false, tools.Result{Text: "the tab could not be checked", IsError: true}
+	case check.Refusal != "":
+		return false, tools.Result{Text: check.Refusal, IsError: true}
+	case check.Already:
+		return false, tools.Result{Text: fmt.Sprintf("The trip %q already uses this tab; nothing changed.", existing.Title)}
+	}
+	return true, tools.Result{}
 }
 
 func (t *Tools) act(ctx context.Context, principalID string, proposal approval.Proposal) (tools.Result, error) {
@@ -542,16 +629,36 @@ func (t *Tools) ExecuteApproved(ctx context.Context, record approval.Record) (ap
 	var text string
 	switch record.Tool {
 	case toolAdd:
-		var confirmed addArguments
+		var confirmed addRecord
 		if tools.DecodeArguments(record.Arguments, &confirmed) != nil {
 			return approval.Outcome{}, malformed
 		}
-		draft, reason := draftFromAdd(confirmed)
+		draft, reason := draftFromAdd(confirmed.addArguments)
 		if reason != "" {
 			return approval.Outcome{}, malformed
 		}
-		if result, err = t.service.Add(ctx, record.PrincipalID, draft); err == nil && result.Rejection == "" {
+		var claim TabClaim
+		switch {
+		case confirmed.UseThisTab:
+			check, err := t.service.CheckTab(ctx, record.PrincipalID, "", record.ThreadID, false)
+			if err != nil {
+				return approval.Outcome{}, err
+			}
+			if check.Refusal != "" {
+				return approval.Outcome{}, &approval.ActionError{Reason: "rejected", Text: check.Refusal + " Nothing was changed."}
+			}
+			claim = TabClaim{ThreadID: record.ThreadID}
+		case confirmed.NamedTab:
+			claim = TabClaim{ThreadID: record.ThreadID, Named: true}
+		}
+		if result, err = t.service.AddInTab(ctx, record.PrincipalID, draft, claim); err == nil && result.Rejection == "" {
 			text = describeSaved("Saved", result)
+			switch move := result.Move; {
+			case move != nil && move.Refusal == "":
+				text += " " + tabUsedText
+			case move != nil:
+				text += " It does not use this tab: " + move.Refusal
+			}
 		}
 	case toolUpdate:
 		var confirmed updateRecord
@@ -577,14 +684,40 @@ func (t *Tools) ExecuteApproved(ctx context.Context, record approval.Record) (ap
 			if result, err = t.service.EndNow(ctx, record.PrincipalID, confirmed.ID, expected); err == nil && result.Rejection == "" {
 				text = fmt.Sprintf("Ended the trip %q now; paused jobs resume.", result.Trip.Title)
 			}
+		case actionMove:
+			if result, err = t.service.UseTab(ctx, record.PrincipalID, confirmed.ID, record.ThreadID); err == nil && result.Rejection == "" {
+				text = movedText(result)
+			}
 		case "":
 			draft, reason := draftFromAdd(addArguments{Title: confirmed.Title, Destination: confirmed.Destination, StartsAt: confirmed.StartsAt,
 				EndsAt: confirmed.EndsAt, Timezone: confirmed.Timezone, Bookings: confirmed.Bookings})
 			if reason != "" {
 				return approval.Outcome{}, malformed
 			}
-			if result, err = t.service.Update(ctx, record.PrincipalID, confirmed.ID, expected, draft); err == nil && result.Rejection == "" {
+			// The trip moves first, so the update's summary goes to the taken tab and no tab is made
+			// for a trip whose tab is gone only to be left behind.
+			moved := ""
+			if confirmed.UseThisTab {
+				if result, err = t.service.UseTab(ctx, record.PrincipalID, confirmed.ID, record.ThreadID); err != nil {
+					return approval.Outcome{}, err
+				}
+				if result.Rejection != "" {
+					return approval.Outcome{}, &approval.ActionError{Reason: "rejected", Text: result.Rejection + " Nothing was changed."}
+				}
+				moved = movedText(result)
+			}
+			result, err = t.service.Update(ctx, record.PrincipalID, confirmed.ID, expected, draft)
+			switch {
+			case moved != "" && err != nil:
+				t.logger.WarnContext(ctx, "trip.update.failed", "principal_id", record.PrincipalID, "trip_id", confirmed.ID, "error", err)
+				return approval.Outcome{}, &approval.ActionError{Reason: "rejected", Text: moved + " The other changes could not be saved."}
+			case moved != "" && result.Rejection != "":
+				return approval.Outcome{}, &approval.ActionError{Reason: "rejected", Text: moved + " The other changes were not made: " + result.Rejection}
+			case err == nil && result.Rejection == "":
 				text = describeSaved("Updated", result)
+				if moved != "" {
+					text += " " + moved
+				}
 			}
 		default:
 			return approval.Outcome{}, malformed
@@ -599,6 +732,21 @@ func (t *Tools) ExecuteApproved(ctx context.Context, record approval.Record) (ap
 		return approval.Outcome{}, &approval.ActionError{Reason: "rejected", Text: result.Rejection + " Nothing was changed."}
 	}
 	return approval.Outcome{Text: text}, nil
+}
+
+// tabUsedText tells the model that a trip uses the tab of the turn.
+const tabUsedText = "It uses this tab: its summary is pinned here, and its reminders, notices, and news arrive here."
+
+// movedText tells what moving a trip to the turn's tab did.
+func movedText(result Result) string {
+	if result.Move != nil && result.Move.Already {
+		return fmt.Sprintf("The trip %q already uses this tab.", result.Trip.Title)
+	}
+	text := fmt.Sprintf("Moved the trip %q to this tab: its summary is pinned here, and its reminders, notices, and news arrive here.", result.Trip.Title)
+	if result.Move != nil && result.Move.Left {
+		text += " The tab it had stays as an ordinary tab with its messages, which the user can delete."
+	}
+	return text
 }
 
 // draftFromAdd reads the local times of the arguments in their zone.

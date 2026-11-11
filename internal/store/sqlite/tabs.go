@@ -117,11 +117,11 @@ func (s *Store) Tab(ctx context.Context, principalID string, threadID int64) (th
 	var created string
 	err := s.db.QueryRowContext(
 		ctx,
-		`SELECT name, named_by, COALESCE(icon_custom_emoji_id, ''), COALESCE(named_session_id, ''), confirmed_at IS NOT NULL, created_at
+		`SELECT name, named_by, COALESCE(icon_custom_emoji_id, ''), COALESCE(named_session_id, ''), COALESCE(subject, ''), confirmed_at IS NOT NULL, created_at
 		 FROM telegram_tabs WHERE principal_id = ? AND thread_id = ?`,
 		principalID,
 		threadID,
-	).Scan(&tab.Name, &tab.NamedBy, &tab.IconCustomEmojiID, &tab.NamedSessionID, &tab.Confirmed, &created)
+	).Scan(&tab.Name, &tab.NamedBy, &tab.IconCustomEmojiID, &tab.NamedSessionID, &tab.Subject, &tab.Confirmed, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return thread.Tab{}, false, nil
 	}
@@ -226,6 +226,83 @@ func (s *Store) DeleteTab(ctx context.Context, principalID string, threadID int6
 		return fmt.Errorf("commit tab delete: %w", err)
 	}
 	return nil
+}
+
+// TakeTab makes the tab serve the object the subject names, such as a trip, in place of the tab
+// that served it, and reports whether it did. The tab must still serve holder, "" for nothing, or
+// nothing changes. The tab the object left is named by the user from then on, and so is the taken
+// tab unless the bot made it for the object it served before, whose fixed name then follows the
+// new object's title. The object's summary is forgotten, since it was in the tab it left, and so is
+// that of an object the tab served before. Every active conversation about the object loses the subject, and the tab's
+// own conversation, when it is about nothing or about holder, gets it.
+func (s *Store) TakeTab(ctx context.Context, principalID string, threadID int64, subject, holder string) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("take tab: SQLite store is not open")
+	}
+	kind, id, isObject := thread.ObjectOf(subject)
+	if !isObject || subject == holder {
+		return false, fmt.Errorf("take tab: invalid subject")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin tab take: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(
+		ctx,
+		`UPDATE telegram_tabs SET subject = NULL, named_by = 'user', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+		 WHERE principal_id = ? AND subject = ?`,
+		principalID,
+		subject,
+	); err != nil {
+		return false, fmt.Errorf("leave %s tab: %w", kind, err)
+	}
+	result, err := tx.ExecContext(
+		ctx,
+		`UPDATE telegram_tabs
+		 SET subject = ?, named_by = CASE WHEN named_by = 'fixed' THEN 'fixed' ELSE 'user' END,
+		     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+		 WHERE principal_id = ? AND thread_id = ? AND COALESCE(subject, '') = ?`,
+		subject,
+		principalID,
+		threadID,
+		holder,
+	)
+	if err != nil {
+		return false, fmt.Errorf("take tab: %w", err)
+	}
+	taken, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("take tab: %w", err)
+	}
+	if taken == 0 {
+		return false, nil
+	}
+	if _, err := tx.ExecContext(
+		ctx,
+		`UPDATE `+objectTables[kind]+` SET summary_message_id = NULL WHERE principal_id = ? AND id = ?`,
+		principalID,
+		id,
+	); err != nil {
+		return false, fmt.Errorf("forget %s summary: %w", kind, err)
+	}
+	if heldKind, heldID, held := thread.ObjectOf(holder); held {
+		if _, err := tx.ExecContext(
+			ctx,
+			`UPDATE `+objectTables[heldKind]+` SET summary_message_id = NULL WHERE principal_id = ? AND id = ?`,
+			principalID,
+			heldID,
+		); err != nil {
+			return false, fmt.Errorf("forget %s summary: %w", heldKind, err)
+		}
+	}
+	if err := moveSubjectConversations(ctx, tx, conversation.Lane{PrincipalID: principalID, ThreadID: threadID}, subject, holder); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit tab take: %w", err)
+	}
+	return true, nil
 }
 
 // LaneLastRequest returns when the lane last took a message from its user, if it ever did.

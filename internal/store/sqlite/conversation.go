@@ -568,6 +568,34 @@ func newSessionSubject(ctx context.Context, tx *sql.Tx, lane conversation.Lane, 
 	return tabSubject, nil
 }
 
+// moveSubjectConversations follows a subject to the lane's tab: the subject's active conversations
+// elsewhere lose it, so the one active conversation about it can be the lane's, and the lane's
+// active conversation takes it when it is about nothing or about what the tab served before.
+func moveSubjectConversations(ctx context.Context, tx *sql.Tx, lane conversation.Lane, subject, holder string) error {
+	if _, err := tx.ExecContext(
+		ctx,
+		`UPDATE conversation_sessions SET subject = NULL
+		 WHERE principal_id = ? AND subject = ? AND status = 'active' AND thread_id IS NOT ?`,
+		lane.PrincipalID,
+		subject,
+		lane.ThreadID,
+	); err != nil {
+		return fmt.Errorf("release subject conversations: %w", err)
+	}
+	if _, err := tx.ExecContext(
+		ctx,
+		`UPDATE conversation_sessions SET subject = ?
+		 WHERE principal_id = ? AND thread_id = ? AND status = 'active' AND (subject IS NULL OR subject = ?)`,
+		subject,
+		lane.PrincipalID,
+		lane.ThreadID,
+		holder,
+	); err != nil {
+		return fmt.Errorf("give lane conversation its subject: %w", err)
+	}
+	return nil
+}
+
 // routeInFeed finds the conversation a message in a feed tab belongs to. A reply to one of the
 // bot's answers returns to its conversation, and a reply to a report or an alert goes to the
 // conversation about its job or watch. A reply to anything else, the tab's root included, counts as

@@ -18,6 +18,8 @@ type Tab struct {
 	IconCustomEmojiID string
 	// NamedSessionID is the conversation the bot last named the tab after, or "".
 	NamedSessionID string
-	Confirmed      bool
-	CreatedAt      time.Time
+	// Subject is what the tab serves, such as a feed or a trip, or "" for a tab of conversations.
+	Subject   string
+	Confirmed bool
+	CreatedAt time.Time
 }

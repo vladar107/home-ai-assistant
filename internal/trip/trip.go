@@ -233,4 +233,29 @@ type CardSender interface {
 // the trip again, and does nothing while the bot has tabs off.
 type Tabs interface {
 	TripChanged(ctx context.Context, trip Trip)
+	// CheckTab says whether the trip, or with no ID a trip about to be added, could use one of the
+	// principal's tabs, which the user is in. With named, only a tab the user named will do.
+	CheckTab(ctx context.Context, principalID, tripID string, threadID int64, named bool) (TabMove, error)
+	// TakeTab makes the tab the trip's, in place of the tab it had or a new one, checking again
+	// that it can be used; its summary is then pinned there and everything it sends goes there.
+	TakeTab(ctx context.Context, trip Trip, threadID int64, named bool) (TabMove, error)
+}
+
+// TabsOffRefusal is why no trip can use a tab while the bot has tabs off.
+const TabsOffRefusal = "Tabs are off, so a trip cannot use a tab."
+
+// TabMove is the outcome of a trip using a tab the user is in. A non-empty Refusal says in words
+// for the model why it cannot; Already that the tab is already the trip's, and Left that the trip
+// left a tab of its own for it.
+type TabMove struct {
+	Refusal string
+	Already bool
+	Left    bool
+}
+
+// TabClaim is the tab of the turn a trip is added in, for the trip to use from the start. With
+// Named, only a tab the user named is used, and any other leaves the trip to get a tab of its own.
+type TabClaim struct {
+	ThreadID int64
+	Named    bool
 }

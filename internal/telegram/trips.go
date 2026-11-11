@@ -69,6 +69,11 @@ type TripFeeds interface {
 	// Summarize gives a planned trip its tab when it has none, and keeps its pinned summary and
 	// the tab's name current.
 	Summarize(ctx context.Context, principalID string, chatID int64, tripID string)
+	// CheckTripTab says whether the trip, or with no ID a trip about to be added, could use the
+	// tab; with named, only a tab the user named will do.
+	CheckTripTab(ctx context.Context, principalID, tripID string, threadID int64, named bool) (trip.TabMove, error)
+	// TakeTripTab makes the tab the trip's in place of the tab it had, or of the one it would get.
+	TakeTripTab(ctx context.Context, principalID string, chatID int64, tripID string, threadID int64, named bool) (trip.TabMove, error)
 }
 
 // TripNotifier delivers suggested trips as cards with Track and Ignore buttons, and plain trip
@@ -115,6 +120,27 @@ func (n TripNotifier) TripChanged(ctx context.Context, changed trip.Trip) {
 		return
 	}
 	n.Feeds.Summarize(ctx, changed.PrincipalID, chatID, changed.ID)
+}
+
+// CheckTab says whether the trip, or a trip about to be added, could use the tab; with tabs off or
+// no tabs it cannot.
+func (n TripNotifier) CheckTab(ctx context.Context, principalID, tripID string, threadID int64, named bool) (trip.TabMove, error) {
+	if n.Feeds == nil {
+		return trip.TabMove{Refusal: trip.TabsOffRefusal}, nil
+	}
+	return n.Feeds.CheckTripTab(ctx, principalID, tripID, threadID, named)
+}
+
+// TakeTab makes the tab the trip's, in the principal's active chat.
+func (n TripNotifier) TakeTab(ctx context.Context, changed trip.Trip, threadID int64, named bool) (trip.TabMove, error) {
+	if n.Feeds == nil {
+		return trip.TabMove{Refusal: trip.TabsOffRefusal}, nil
+	}
+	chatID, err := n.chat(ctx, changed.PrincipalID)
+	if err != nil {
+		return trip.TabMove{}, err
+	}
+	return n.Feeds.TakeTripTab(ctx, changed.PrincipalID, chatID, changed.ID, threadID, named)
 }
 
 // inFeed returns a context whose sends go to the trip's tab, or to the reminders tab for a trip

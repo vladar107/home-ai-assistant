@@ -187,13 +187,14 @@ func (s *Tabs) sendObjectSummary(ctx context.Context, kind objectKind, principal
 	return true
 }
 
-// renameObjectTab names the tab after the object's title once the title changed.
+// renameObjectTab names the tab after the object's title once the title changed. A tab the user
+// named, such as one a trip took, keeps its name.
 func (s *Tabs) renameObjectTab(ctx context.Context, kind objectKind, principalID string, chatID, threadID int64, found tabObject) {
 	logger := s.telemetry.ContextLogger(ctx, s.logger)
 	failed := kind.event + ".failed"
 	tab, known, err := s.store.Tab(ctx, principalID, threadID)
 	name := objectTabName(kind, found)
-	if err != nil || !known || tab.Name == name {
+	if err != nil || !known || tab.NamedBy != thread.NamedByFixed || tab.Name == name {
 		if err != nil {
 			logger.WarnContext(ctx, failed, "principal_id", principalID, kind.idKey, found.ID, "thread_id", threadID, "stage", "rename", "error", err)
 		}

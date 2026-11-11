@@ -25,6 +25,14 @@ func (r *recordingTabs) TripChanged(_ context.Context, changed trip.Trip) {
 	r.changed = append(r.changed, changed.ID+" "+changed.Status)
 }
 
+func (r *recordingTabs) CheckTab(context.Context, string, string, int64, bool) (trip.TabMove, error) {
+	return trip.TabMove{Refusal: trip.TabsOffRefusal}, nil
+}
+
+func (r *recordingTabs) TakeTab(context.Context, trip.Trip, int64, bool) (trip.TabMove, error) {
+	return trip.TabMove{Refusal: trip.TabsOffRefusal}, nil
+}
+
 func (r *recordingTabs) take() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -153,6 +161,14 @@ func (b *blockingTabs) TripChanged(context.Context, trip.Trip) {
 		close(b.entered)
 		<-b.release
 	}
+}
+
+func (b *blockingTabs) CheckTab(context.Context, string, string, int64, bool) (trip.TabMove, error) {
+	return trip.TabMove{Refusal: trip.TabsOffRefusal}, nil
+}
+
+func (b *blockingTabs) TakeTab(context.Context, trip.Trip, int64, bool) (trip.TabMove, error) {
+	return trip.TabMove{Refusal: trip.TabsOffRefusal}, nil
 }
 
 // The tabs hear of a write after the trip service let go of its lock, so a slow Telegram holding
