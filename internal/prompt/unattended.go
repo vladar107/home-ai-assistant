@@ -25,6 +25,8 @@ func ScheduledJob(name string, scheduledFor time.Time, location *time.Location, 
 			"Never show a status, time, or count that no tool returned in this run, and never carry one over from an earlier run; "+
 			"if a check failed, say which one, and leave a leg out rather than guess its status. "+
 			"If the task asks to report only when something holds and it does not hold now, reply with exactly %s and nothing else, and nothing is sent; a check that failed is still reported. "+
+			"Leave out any part of the task that was checked and found nothing, and never state that something is absent, unchanged, or not needed unless the task asks for exactly that; "+
+			"a check that failed is not one that found nothing, and when every part found nothing, say so in one line. "+
 			"Do the task below and reply with the report the user should receive.\n\n%s",
 		name, localtime.Format(scheduledFor, location), NothingToAdd, task,
 	)
