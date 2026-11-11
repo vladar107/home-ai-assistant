@@ -324,6 +324,8 @@ type conversationHarness struct {
 	feedbackCounts map[string]int
 	// tabs simulates the chat's tabs while topics are on.
 	tabs tabSimulator
+	// widgets simulates the widget messages the bot sent and the methods that act on them.
+	widgets widgetSimulator
 }
 
 type setReaction struct {
@@ -391,6 +393,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		answers: make(chan callbackAnswer, 100), deletes: make(chan deletedMessage, 100), offsets: make(chan int64, 100), registrations: make(chan commandRegistration, 10),
 		turns: make(chan turnOutcome, 20), logs: &lockedBuffer{}, files: make(map[string]testFile), indicatorFailures: make(map[string]int),
 		reactionCounts: make(map[string]int), feedbackCounts: make(map[string]int), tabs: newTabSimulator(options.topics),
+		widgets: newWidgetSimulator(),
 	}
 	server := httptest.NewServer(http.HandlerFunc(h.serveHTTP))
 	t.Cleanup(server.Close)
@@ -859,6 +862,9 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 			h.t.Error(err)
 			return
 		}
+		if h.refuseWidgetText(w, messageID) {
+			return
+		}
 		h.mu.Lock()
 		status, reason := h.editStatus, h.editReason
 		h.sent = append(h.sent, r.Form.Get("text"))
@@ -897,6 +903,9 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 	default:
 		var served bool
 		if result, served = h.serveTabMethod(w, r); served {
+			break
+		}
+		if result, served = h.serveWidgetMethod(w, r); served {
 			break
 		}
 		h.t.Errorf("unexpected Telegram method: %s", r.URL.Path)

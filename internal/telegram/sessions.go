@@ -298,7 +298,8 @@ func laneOf(ctx context.Context, principalID string) conversation.Lane {
 }
 
 // updateThread is the tab an update came from, or zero for the main view. A reaction names no tab;
-// the conversation finds the tab of the reply it is on.
+// the conversation finds the tab of the reply it is on. Nor does a widget tap, which runs in the tab
+// of the proposal it names.
 func updateThread(update Update) int64 {
 	switch {
 	case update.CallbackQuery != nil && update.CallbackQuery.Message != nil:

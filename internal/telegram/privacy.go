@@ -30,6 +30,7 @@ var privacyOrder = []string{
 	grafanaSectionPrefix,
 	memorySectionPrefix,
 	typeSafeSectionPrefix,
+	widgetSectionPrefix,
 }
 
 func (s *Service) privacyReply(ctx context.Context, principalID string) (string, error) {

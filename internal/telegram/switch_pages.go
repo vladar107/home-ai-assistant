@@ -7,6 +7,7 @@ const (
 	homeAssistantSectionPrefix = "ha"
 	grafanaSectionPrefix       = "grafana"
 	typeSafeSectionPrefix      = "typesafe"
+	widgetSectionPrefix        = "widget"
 
 	WebOnLine  = "Web access: on (the default). I can search the web through your own model subscription, read links, and check the weather."
 	WebOffLine = "Web access: off. Turn it back on to let me search the web through your own model subscription, read links, and check the weather."
@@ -37,6 +38,11 @@ const (
 	TypeSafeOffLine = "Safety checks (TypeSafe): off.\n" + typeSafeDescription
 	// TypeSafePrivacyLine is added to /privacy while the principal's safety checks are on.
 	TypeSafePrivacyLine = "Safety checks: a scrubbed copy of messages, replies, outside content, and proposed actions goes to TypeSafe, never after Notion or NAS content."
+
+	WidgetOnLine  = "Proposals: shown as a widget. Confirm, Reject, and Preview are inside it, and its caption repeats the proposal. A Telegram app that cannot show widgets shows only the caption and cannot confirm the proposal there; switch back to buttons for such an app."
+	WidgetOffLine = "Proposals: shown with Confirm, Reject, and Preview buttons (the default). A widget shows them in a small view Telegram draws in the chat instead; a Telegram app that cannot show widgets shows only its caption and cannot confirm the proposal there."
+	// WidgetPrivacyLine is added to /privacy while the principal's proposals are widgets.
+	WidgetPrivacyLine = "Proposals as a widget: the proposal and its outcome are shown by a small program Telegram runs in the chat, which reaches nothing outside Telegram."
 )
 
 // The on/off pages of the integrations that run on an operator key or are opt-in.
@@ -74,11 +80,22 @@ var (
 		HelpTopic: "safety_checks", PrivacyLine: TypeSafePrivacyLine,
 		SummaryState: func(on bool) string { return "safety checks " + onOff(on) },
 	}
+	WidgetPage = SwitchPage{
+		Integration: "proposal-widget", Prefix: widgetSectionPrefix, Name: "Proposals", OnLine: WidgetOnLine, OffLine: WidgetOffLine,
+		OnButton: "Show proposals as a widget", OffButton: "Show proposals with buttons",
+		Event: "approval.widget.changed", HelpTopic: "confirmations", PrivacyLine: WidgetPrivacyLine,
+		SummaryState: func(on bool) string {
+			if on {
+				return "widget"
+			}
+			return "buttons"
+		},
+	}
 )
 
 // SwitchPageFor is the on/off page of the named integration.
 func SwitchPageFor(integration string) (SwitchPage, bool) {
-	for _, page := range []SwitchPage{WebPage, NSPage, BusPage, HomePage, GrafanaPage, TypeSafePage} {
+	for _, page := range []SwitchPage{WebPage, NSPage, BusPage, HomePage, GrafanaPage, TypeSafePage, WidgetPage} {
 		if page.Integration == integration {
 			return page, true
 		}

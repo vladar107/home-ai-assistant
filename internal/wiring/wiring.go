@@ -500,7 +500,11 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	}
 	approvals.SetTelemetry(telemetry)
 	approvals.SetSwitches(switches)
+	approvals.SetWidgets(switches.Toggle(approval.WidgetSwitch))
 	a.Approvals = approvals
+	if err := a.register(ctx, Connector{Switch: &SwitchSettings{Switch: approval.WidgetSwitch}}); err != nil {
+		return err
+	}
 	if err := broker.Register(withdrawal.Provider{Withdrawer: approvals}); err != nil {
 		return fmt.Errorf("register approval tools: %w", err)
 	}

@@ -163,6 +163,7 @@ var sectionOrder = []string{
 	busSectionPrefix,
 	headsUpSectionPrefix,
 	typeSafeSectionPrefix,
+	widgetSectionPrefix,
 	locationSectionPrefix,
 	grafanaSectionPrefix,
 	eventsSectionPrefix,
@@ -182,6 +183,7 @@ var settingsGroups = []settingsGroup{
 	{id: "memory", title: "Memory", inline: true, members: []string{memorySectionPrefix}},
 	{id: "monitoring", title: "Monitoring", inline: true, members: []string{grafanaSectionPrefix}},
 	{id: "events", title: "Events", inline: true, members: []string{eventsSectionPrefix}},
+	{id: "confirmations", title: "Confirmations", inline: true, members: []string{widgetSectionPrefix}},
 	{id: "safety", title: "Safety & privacy", inline: true, members: []string{typeSafeSectionPrefix}},
 }
 

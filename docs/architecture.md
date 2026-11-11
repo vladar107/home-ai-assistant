@@ -369,6 +369,19 @@ is refused as unreadable instead of exhausting the service's memory.
    The model can withdraw items still waiting with `proposal_withdraw`; they end
    rejected as withdrawn, the message shows them so, and it loses its buttons once
    nothing is left.
+   A user who turns on Proposals as a widget (the Confirmations page of
+   `/settings`, off by default) gets the message with the buttons as a Telegram
+   widget instead. One template, written by the operator and embedded in the
+   binary, draws the proposal text and its actions, or the outcome, from the
+   message's data; the model never supplies HTML. The caption repeats the
+   proposal, so an app without widgets still shows it, but cannot confirm it. A
+   tap arrives as a `widget_query` and is handled as the press of the button it
+   stands for, in the proposal's own tab: Confirm and Reject are answered before
+   the actions run, Preview as its button is. Outcomes replace the caption and
+   the data, and one too long for a caption is clipped there and sent in full as
+   a reply. A proposal whose text does not fit a caption, or that Telegram
+   refuses as a widget, gets buttons. The switch only decides how proposals are
+   sent: taps on widgets already in the chat are handled whatever it says.
    A Confirm that ran the actions queues a
    turn that continues the request from their outcome, so a dependent next step
    needs no nudge and a question asked beside the action is still answered; it

@@ -43,8 +43,10 @@ type botAPI interface {
 	DownloadFile(context.Context, string, int64) ([]byte, error)
 	SendKeyboard(context.Context, int64, int64, string, InlineKeyboard) error
 	EditKeyboard(context.Context, int64, int64, string, InlineKeyboard) error
+	EditText(context.Context, int64, int64, string) error
 	DeleteMessage(context.Context, int64, int64) error
 	AnswerCallback(context.Context, string, string) error
+	AnswerWidgetQuery(context.Context, string, string) error
 	SetMyCommands(context.Context, CommandScope, []BotCommand) error
 	CreateForumTopic(context.Context, int64, string) (int64, error)
 	DeleteForumTopic(context.Context, int64, int64) error
@@ -130,6 +132,9 @@ type ApprovalController interface {
 	Preview(ctx context.Context, principalID, approvalID, trigger string, chatID, messageID int64) (approval.PreviewPressed, error)
 	// Undo reverses a direct action; a press on another principal's action is not owned.
 	Undo(ctx context.Context, principalID, recordID string) (approval.Undid, error)
+	// ProposalPlace returns where a proposal is shown, and whether it is the principal's, for a
+	// widget tap, which names no tab and whose message is not proof of where the proposal is.
+	ProposalPlace(ctx context.Context, principalID, approvalID string) (approval.ProposalPlace, bool, error)
 	// DeferContinuation keeps a continuation until the tab's in-flight turn is delivered.
 	DeferContinuation(principalID string, threadID int64, continuation func(context.Context))
 }
@@ -675,6 +680,9 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 	if update.CallbackQuery != nil {
 		return s.processCallback(ctx, bot, update.UpdateID, update.CallbackQuery)
 	}
+	if update.WidgetQuery != nil {
+		return s.processWidgetQuery(ctx, bot, update.UpdateID, update.WidgetQuery)
+	}
 	if update.StoppedMessageGeneration != nil {
 		return s.processDraftStop(ctx, update.StoppedMessageGeneration)
 	}
@@ -1075,7 +1083,7 @@ func (s *Service) processCallback(ctx context.Context, bot Bot, updateID int64, 
 	chatID := message.Chat.ID
 
 	if action, approvalID, isApproval := approval.ParseCallback(callback.Data); isApproval && action == approval.ActionPreview {
-		return s.processPreviewPress(ctx, pressTrigger(bot, updateID), callback, principalID, approvalID)
+		return s.processPreviewPress(ctx, pressTrigger(bot, updateID), s.callbackPress(callback), principalID, approvalID)
 	}
 	if recordID, isUndo := approval.ParseUndoCallback(callback.Data); isUndo {
 		return s.processUndoPress(ctx, callback, principalID, recordID)
@@ -1091,7 +1099,7 @@ func (s *Service) processCallback(ctx context.Context, bot Bot, updateID int64, 
 		return processingResult{event: "telegram.callback.handled", principalID: principalID, command: "label"}, "", nil
 	}
 	if action, approvalID, isApproval := approval.ParseCallback(callback.Data); isApproval {
-		return s.processApprovalPress(ctx, bot, updateID, callback, principalID, action, approvalID)
+		return s.processApprovalPress(ctx, bot, updateID, s.callbackPress(callback), principalID, action, approvalID)
 	}
 	if action, jobID, page, isJob := parseJobCallback(callback.Data); isJob && s.schedules != nil {
 		return s.processJobPress(ctx, pressTrigger(bot, updateID), callback, principalID, action, jobID, page)
@@ -1172,7 +1180,7 @@ func (s *Service) processCallback(ctx context.Context, bot Bot, updateID int64, 
 // processApprovalPress resolves a Confirm or Reject press and replaces the proposal message with
 // its outcome; a press on another principal's proposal or without an approval service is ignored.
 // A press that ran the actions queues a turn that continues the request from their outcome.
-func (s *Service) processApprovalPress(ctx context.Context, bot Bot, updateID int64, callback *CallbackQuery, principalID, action, approvalID string) (processingResult, string, error) {
+func (s *Service) processApprovalPress(ctx context.Context, bot Bot, updateID int64, tap press, principalID, action, approvalID string) (processingResult, string, error) {
 	result := processingResult{event: "telegram.callback.handled", principalID: principalID, command: "approval." + action}
 	if s.approvals == nil {
 		result.event, result.reason = "telegram.update.ignored", "unknown_action"
@@ -1187,11 +1195,11 @@ func (s *Service) processApprovalPress(ctx context.Context, bot Bot, updateID in
 		return result, "", nil
 	}
 	if pressed.Ran {
-		s.continueConversation(ctx, bot, updateID, callback, principalID)
+		s.continueConversation(ctx, bot, updateID, tap, principalID)
 	}
-	err = s.client.EditKeyboard(ctx, callback.Message.Chat.ID, callback.Message.MessageID, pressed.Text, nil)
+	err = s.client.EditText(ctx, tap.chatID, tap.messageID, pressed.Text)
 	if err != nil && isPermanentAPIError(err) {
-		err = s.client.SendReply(ctx, callback.Message.Chat.ID, 0, pressed.Text)
+		err = s.client.SendReply(ctx, tap.chatID, 0, pressed.Text)
 	}
 	if err != nil {
 		if isPermanentAPIError(err) {
@@ -1239,18 +1247,18 @@ func (s *Service) ignoreUnknownPress(ctx context.Context, callback *CallbackQuer
 // did, leaving the proposal message and its buttons as they are. The press is answered after the
 // preview starts, so the answer can say whether one was already running; a retried update gets the
 // same answer and starts nothing.
-func (s *Service) processPreviewPress(ctx context.Context, trigger string, callback *CallbackQuery, principalID, approvalID string) (processingResult, string, error) {
+func (s *Service) processPreviewPress(ctx context.Context, trigger string, tap press, principalID, approvalID string) (processingResult, string, error) {
 	result := processingResult{event: "telegram.callback.handled", principalID: principalID, command: "approval." + approval.ActionPreview}
 	var pressed approval.PreviewPressed
 	if s.approvals != nil {
 		var err error
-		pressed, err = s.approvals.Preview(ctx, principalID, approvalID, trigger, callback.Message.Chat.ID, callback.Message.MessageID)
+		pressed, err = s.approvals.Preview(ctx, principalID, approvalID, trigger, tap.chatID, tap.messageID)
 		if err != nil {
 			return processingResult{}, "approval_preview", err
 		}
 	}
-	if err := s.client.AnswerCallback(ctx, callback.ID, pressed.Text); err != nil && !isPermanentAPIError(err) {
-		return processingResult{}, "answer_callback", err
+	if err := tap.answer(ctx, pressed.Text); err != nil && !isPermanentAPIError(err) {
+		return processingResult{}, tap.failure, err
 	}
 	switch {
 	case s.approvals == nil:
@@ -1265,23 +1273,23 @@ func (s *Service) processPreviewPress(ctx context.Context, trigger string, callb
 // edit, because a replayed press finds the bundle resolved and would not queue it again. While
 // another turn is in flight it is deferred until that turn is delivered. Failing to queue costs
 // only the automatic step: the outcome still reaches the user's next turn as a notice.
-func (s *Service) continueConversation(ctx context.Context, bot Bot, updateID int64, callback *CallbackQuery, principalID string) {
+func (s *Service) continueConversation(ctx context.Context, bot Bot, updateID int64, tap press, principalID string) {
 	if s.conversation == nil {
 		return
 	}
 	input := conversation.EnqueueInput{
 		BotUserID:         bot.ID,
 		TelegramUpdateID:  updateID,
-		TelegramMessageID: callback.Message.MessageID,
+		TelegramMessageID: tap.messageID,
 		PrincipalID:       principalID,
 		ThreadID:          thread.From(ctx),
-		ChatID:            callback.Message.Chat.ID,
+		ChatID:            tap.chatID,
 		Message:           prompt.Continue,
 	}
 	err := s.conversation.Enqueue(ctx, input)
 	if errors.Is(err, conversation.ErrBusy) && s.approvals != nil {
 		s.approvals.DeferContinuation(principalID, input.ThreadID, func(ctx context.Context) {
-			s.continueConversation(ctx, bot, updateID, callback, principalID)
+			s.continueConversation(ctx, bot, updateID, tap, principalID)
 		})
 		// The busy turn may have been delivered before the deferral was stored, so nothing would
 		// run it; queueing again closes that gap, and the turn it queues drops the deferral.
@@ -1299,6 +1307,98 @@ func (s *Service) continueConversation(ctx context.Context, bot Bot, updateID in
 	default:
 		logger.InfoContext(ctx, "telegram.continuation.queued", "principal_id", principalID)
 	}
+}
+
+// press is a tap on a proposal's controls, from a button or from a widget: the chat and the message
+// that carry the controls, how the tap is answered, and the failure reason of an answer that may be
+// retried.
+type press struct {
+	chatID, messageID int64
+	answer            func(ctx context.Context, text string) error
+	failure           string
+}
+
+func (s *Service) callbackPress(callback *CallbackQuery) press {
+	return press{
+		chatID: callback.Message.Chat.ID, messageID: callback.Message.MessageID, failure: "answer_callback",
+		answer: func(ctx context.Context, text string) error { return s.client.AnswerCallback(ctx, callback.ID, text) },
+	}
+}
+
+// processWidgetQuery handles a tap in a proposal widget as a press of the button it stands for, and
+// authorizes it the same way. The tap names no tab, so it runs in the tab of the proposal it names.
+// A Confirm or Reject tap is answered before its actions run, so the answer never waits on them; a
+// Preview tap is answered as its button is.
+func (s *Service) processWidgetQuery(ctx context.Context, bot Bot, updateID int64, query *WidgetQuery) (processingResult, string, error) {
+	if query.ID == "" {
+		return ignoredResult("malformed_widget_query"), "", nil
+	}
+	chat := widgetChat(query)
+	if reason := validatePrivateMessage(query.From, chat, query.MessageID); reason != "" {
+		return ignoredResult(reason), "", nil
+	}
+	authorization, reason, failure, err := s.resolvePrincipal(ctx, query.From)
+	if err != nil {
+		return processingResult{}, failure, err
+	}
+	if reason != "" {
+		return ignoredResult(reason), "", nil
+	}
+	principalID := authorization.Principal.ID
+	tap := press{
+		chatID: chat.ID, messageID: query.MessageID, failure: "answer_widget_query",
+		answer: func(ctx context.Context, text string) error { return s.client.AnswerWidgetQuery(ctx, query.ID, text) },
+	}
+	result := processingResult{event: "telegram.update.ignored", reason: "unknown_action", principalID: principalID}
+	action, approvalID, isApproval := approval.ParseCallback(query.Data)
+	if isApproval && s.approvals != nil {
+		place, owned, err := s.approvals.ProposalPlace(ctx, principalID, approvalID)
+		if err != nil {
+			return processingResult{}, "approval_place", err
+		}
+		if owned && place.ChatID == chat.ID && place.MessageID == query.MessageID {
+			if bot.HasTopicsEnabled {
+				ctx = thread.With(ctx, place.ThreadID)
+			}
+			if action == approval.ActionPreview {
+				return s.processPreviewPress(ctx, pressTrigger(bot, updateID), tap, principalID, approvalID)
+			}
+			if err := tap.answer(ctx, WidgetWorkingAnswer); err != nil && !isPermanentAPIError(err) {
+				return processingResult{}, tap.failure, err
+			}
+			return s.processApprovalPress(ctx, bot, updateID, tap, principalID, action, approvalID)
+		}
+		result.reason = "foreign_approval"
+		if owned {
+			result.reason = "misplaced_widget_tap"
+		}
+	}
+	if err := tap.answer(ctx, WidgetIgnoredAnswer); err != nil && !isPermanentAPIError(err) {
+		return processingResult{}, tap.failure, err
+	}
+	return result, "", nil
+}
+
+// widgetChatTypeSender is how Telegram may name the user's own chat with the bot.
+const widgetChatTypeSender = "sender"
+
+// widgetChat is the chat of a widget tap. Telegram may leave the chat out, and then a private
+// chat, whose ID is its user's, is named by the chat type alone.
+func widgetChat(query *WidgetQuery) Chat {
+	if query.Chat != nil {
+		chat := *query.Chat
+		if chat.Type == "" {
+			chat.Type = query.ChatType
+		}
+		if chat.Type == widgetChatTypeSender {
+			chat.Type = ChatTypePrivate
+		}
+		return chat
+	}
+	if (query.ChatType == ChatTypePrivate || query.ChatType == widgetChatTypeSender) && query.From != nil {
+		return Chat{ID: query.From.ID, Type: ChatTypePrivate}
+	}
+	return Chat{Type: query.ChatType}
 }
 
 // pressTrigger names a button press uniquely across retries of its update.

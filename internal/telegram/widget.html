@@ -1,0 +1,116 @@
+<style>
+body{margin:0;padding:12px;font:15px/1.4 -apple-system,system-ui,sans-serif;background:var(--tg-theme-bg-color,#fff);color:var(--tg-theme-text-color,#000)}
+#text{white-space:pre-wrap;word-wrap:break-word}
+#actions{display:flex;gap:8px;margin-top:12px}
+#status{margin-top:8px;color:var(--tg-theme-hint-color,#888)}
+#status:empty{display:none}
+button{flex:1;padding:10px 4px;border:0;border-radius:8px;font:inherit;background:var(--tg-theme-button-color,#2481cc);color:var(--tg-theme-button-text-color,#fff)}
+button.quiet{background:var(--tg-theme-secondary-bg-color,#eee);color:var(--tg-theme-text-color,#000)}
+button.reject{background:var(--tg-theme-secondary-bg-color,#eee);color:var(--tg-theme-destructive-text-color,#d33)}
+button:disabled{opacity:.5}
+</style>
+<div id="text"></div>
+<div id="actions"></div>
+<div id="status"></div>
+<script>
+(function () {
+  var widget = window.TelegramWidget;
+  if (!widget) {
+    return;
+  }
+  var text = document.getElementById('text');
+  var actions = document.getElementById('actions');
+  var status = document.getElementById('status');
+  var drawn = 0;
+  var busy = false;
+
+  function current() {
+    try {
+      var raw = widget.chatData;
+      var data = raw && typeof raw === 'object' ? raw : JSON.parse(raw || '{}');
+      return data && typeof data === 'object' ? data : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function setBusy(on) {
+    var buttons = actions.getElementsByTagName('button');
+    for (var i = 0; i < buttons.length; i++) {
+      buttons[i].disabled = on;
+    }
+    busy = on;
+  }
+
+  function failure(error) {
+    if (error && error.code === 'RATE_LIMITED') {
+      return 'Too many taps; wait a moment and try again.';
+    }
+    return 'No answer came; try again.';
+  }
+
+  function button(action) {
+    var element = document.createElement('button');
+    var data = String(action.data || '');
+    var preview = data.indexOf('approval:preview:') === 0;
+    element.textContent = String(action.label || '');
+    if (preview) {
+      element.className = 'quiet';
+    } else if (data.indexOf('approval:reject:') === 0) {
+      element.className = 'reject';
+    }
+    element.onclick = function () {
+      if (busy) {
+        return;
+      }
+      var tapped = drawn;
+      setBusy(true);
+      status.textContent = 'Working on it…';
+      widget.request(data).then(function (response) {
+        if (tapped !== drawn) {
+          return;
+        }
+        if (response && response.result) {
+          status.textContent = String(response.result);
+        }
+        if (preview) {
+          setBusy(false);
+        } else {
+          setTimeout(function () {
+            if (tapped === drawn) {
+              draw();
+            }
+          }, 20000);
+        }
+      }, function (error) {
+        if (tapped !== drawn) {
+          return;
+        }
+        status.textContent = failure(error);
+        setBusy(false);
+      });
+    };
+    return element;
+  }
+
+  function draw() {
+    var data = current();
+    var list = data.actions instanceof Array ? data.actions : [];
+    drawn++;
+    busy = false;
+    text.textContent = String(data.text || '');
+    status.textContent = '';
+    while (actions.firstChild) {
+      actions.removeChild(actions.firstChild);
+    }
+    for (var i = 0; i < list.length; i++) {
+      actions.appendChild(button(list[i]));
+    }
+    actions.style.display = list.length ? 'flex' : 'none';
+  }
+
+  draw();
+  widget.onEvent('chatDataChanged', draw);
+  widget.ready();
+})();
+</script>

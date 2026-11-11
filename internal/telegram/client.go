@@ -153,6 +153,19 @@ type Update struct {
 	// StoppedMessageGeneration is a press of a draft's stop button. Telegram names no user in it.
 	StoppedMessageGeneration *MessageGenerationStopped `json:"stopped_message_generation"`
 	MessageReaction          *MessageReactionUpdated   `json:"message_reaction"`
+	WidgetQuery              *WidgetQuery              `json:"widget_query"`
+}
+
+// WidgetQuery is a tap in a widget that sent the bot a request. It names no tab and carries no
+// message, only the message's ID; Chat may be absent, and ChatType then says what kind of chat the
+// tap came from.
+type WidgetQuery struct {
+	ID        string   `json:"id"`
+	From      *User    `json:"from"`
+	Chat      *Chat    `json:"chat"`
+	MessageID int64    `json:"message_id"`
+	ChatType  ChatType `json:"chat_type"`
+	Data      string   `json:"data"`
 }
 
 // MessageReactionUpdated is a user's change of their reactions to a message. It carries no message
@@ -350,6 +363,21 @@ func (e *apiError) Permanent() bool {
 		e.httpStatus >= 400 && e.httpStatus < 500
 }
 
+// NoText reports Telegram's refusal to edit the text of a message that has none, such as a widget.
+func (e *apiError) NoText() bool {
+	return e.errorCode == http.StatusBadRequest && strings.Contains(strings.ToLower(e.description), "no text in the message to edit")
+}
+
+func hasNoText(err error) bool {
+	var apiErr *apiError
+	return errors.As(err, &apiErr) && apiErr.NoText()
+}
+
+func isNotModified(err error) bool {
+	var apiErr *apiError
+	return errors.As(err, &apiErr) && apiErr.NotModified()
+}
+
 // ThreadGone reports Telegram's rejection of a send to a tab that no longer exists.
 func (e *apiError) ThreadGone() bool {
 	return e.errorCode == http.StatusBadRequest && strings.Contains(strings.ToLower(e.description), "message thread not found")
@@ -436,7 +464,7 @@ func (c *Client) GetMe(ctx context.Context) (Bot, error) {
 
 func (c *Client) GetUpdates(ctx context.Context, offset int64) ([]Update, error) {
 	params := url.Values{
-		"allowed_updates": {`["message","edited_message","callback_query","stopped_message_generation","message_reaction"]`},
+		"allowed_updates": {`["message","edited_message","callback_query","stopped_message_generation","message_reaction","widget_query"]`},
 		"offset":          {strconv.FormatInt(offset, 10)},
 		"timeout":         {strconv.FormatInt(c.pollSeconds, 10)},
 	}
@@ -620,8 +648,21 @@ func (c *Client) SendText(ctx context.Context, chatID int64, text string) (int64
 }
 
 // SendProposal posts a confirmation request with Confirm and Reject buttons, and Preview when the
-// bundle offers it, and returns the message ID so the outcome can replace the buttons later.
+// bundle offers it, and returns the message ID so the outcome can replace the buttons later. When
+// the buttons ask for a widget, it posts one instead, unless the text does not fit its caption or
+// Telegram refuses it.
 func (c *Client) SendProposal(ctx context.Context, chatID int64, text string, buttons approval.Buttons) (int64, error) {
+	if buttons.Widget {
+		message, sent, err := c.sendWidget(ctx, chatID, text, proposalActions(buttons))
+		switch {
+		case err != nil && !isPermanentAPIError(err):
+			return 0, err
+		case err == nil && sent && message.MessageID <= 0:
+			return 0, fmt.Errorf("Telegram sendWidget returned no message ID")
+		case err == nil && sent:
+			return message.MessageID, nil
+		}
+	}
 	message, err := c.sendMessage(ctx, chatID, 0, text, proposalKeyboard(buttons))
 	if err != nil {
 		return 0, err
@@ -679,14 +720,24 @@ func undoKeyboard(buttons []approval.UndoButton) InlineKeyboard {
 	return keyboard
 }
 
-// EditProposal replaces the text of a proposal message and keeps its buttons as given.
+// EditProposal replaces the text of a proposal message and keeps its buttons as given. A proposal
+// sent as a widget, which has no text, gets the text as its caption and keeps its actions.
 func (c *Client) EditProposal(ctx context.Context, chatID, messageID int64, text string, buttons approval.Buttons) error {
-	return c.EditKeyboard(ctx, chatID, messageID, text, proposalKeyboard(buttons))
+	err := c.EditKeyboard(ctx, chatID, messageID, text, proposalKeyboard(buttons))
+	if hasNoText(err) {
+		return c.editWidget(ctx, chatID, messageID, text, proposalActions(buttons))
+	}
+	return err
 }
 
-// EditText replaces a bot message's text and removes its buttons.
+// EditText replaces a bot message's text and removes its buttons. A proposal sent as a widget,
+// which has no text, gets the text as its caption and as the outcome it shows instead of actions.
 func (c *Client) EditText(ctx context.Context, chatID, messageID int64, text string) error {
-	return c.EditKeyboard(ctx, chatID, messageID, text, nil)
+	err := c.EditKeyboard(ctx, chatID, messageID, text, nil)
+	if hasNoText(err) {
+		return c.editWidget(ctx, chatID, messageID, text, nil)
+	}
+	return err
 }
 
 // EditKeyboard replaces the text and buttons of a bot message in place. An edit that changes

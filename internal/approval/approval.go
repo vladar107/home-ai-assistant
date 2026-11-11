@@ -310,6 +310,8 @@ type Repository interface {
 type Deliverer interface {
 	// SendText sends a message without buttons, for the parts of a bundle before the last.
 	SendText(ctx context.Context, chatID int64, text string) (int64, error)
+	// SendProposal sends the message with the buttons, or a widget standing for them when the
+	// buttons ask for one and it can.
 	SendProposal(ctx context.Context, chatID int64, text string, buttons Buttons) (int64, error)
 	EditText(ctx context.Context, chatID, messageID int64, text string) error
 	// EditProposal replaces the text of the message with the buttons, keeping the given buttons.
@@ -336,10 +338,22 @@ type UndoButton struct {
 }
 
 // Buttons is the callback data of a bundle's buttons; an empty Preview leaves that button out.
+// Widget asks for the buttons as the controls of a widget, which the deliverer sends as buttons
+// instead when it cannot.
 type Buttons struct {
 	Confirm string
 	Reject  string
 	Preview string
+	Widget  bool
+}
+
+// WidgetSwitch is each principal's choice to have proposals sent as a widget. It is off until the
+// principal turns it on.
+var WidgetSwitch = integration.Switch{Integration: "proposal-widget", Name: "Proposals as a widget"}
+
+// WidgetPreference reports whether a principal chose to have proposals sent as a widget.
+type WidgetPreference interface {
+	Enabled(ctx context.Context, principalID string) (bool, error)
 }
 
 type Config struct {
@@ -364,6 +378,7 @@ type Service struct {
 	exposure  Exposure
 	telemetry Telemetry
 	switches  integration.SwitchReader
+	widgets   WidgetPreference
 	intents   map[string]Intent
 	// notices holds what became of resolved proposals per tab, so the outcome reaches the
 	// conversation that made them.
@@ -476,6 +491,31 @@ func (s *Service) SetSwitches(switches integration.SwitchReader) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.switches = switches
+}
+
+// SetWidgets sets where the principals' choice of proposal widgets is read; without it every
+// proposal is sent with buttons.
+func (s *Service) SetWidgets(widgets WidgetPreference) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.widgets = widgets
+}
+
+// wantsWidget reports whether the principal's proposals go out as a widget; a choice that cannot
+// be read sends them with buttons.
+func (s *Service) wantsWidget(ctx context.Context, principalID string) bool {
+	s.mu.Lock()
+	widgets := s.widgets
+	s.mu.Unlock()
+	if widgets == nil {
+		return false
+	}
+	enabled, err := widgets.Enabled(ctx, principalID)
+	if err != nil {
+		s.logger.WarnContext(ctx, "approval.widget_choice.unread", "principal_id", principalID, "error", err)
+		return false
+	}
+	return enabled
 }
 
 // RegisterExecutor binds a connector to the tools it can execute once confirmed. An executor that
@@ -893,7 +933,9 @@ func (s *Service) send(ctx context.Context, bundle []Record, chatID int64) error
 		var messageID int64
 		var err error
 		if index == len(ranges)-1 {
-			messageID, err = s.deliverer.SendProposal(ctx, chatID, text, s.buttons(ctx, bundle))
+			buttons := s.buttons(ctx, bundle)
+			buttons.Widget = s.wantsWidget(ctx, first.PrincipalID)
+			messageID, err = s.deliverer.SendProposal(ctx, chatID, text, buttons)
 		} else {
 			messageID, err = s.deliverer.SendText(ctx, chatID, text)
 		}
@@ -1004,6 +1046,35 @@ func (s *Service) Press(ctx context.Context, principalID, action, approvalID str
 	default:
 		return Pressed{}, nil
 	}
+}
+
+// ProposalPlace is where a proposal's actions are shown: its tab, and the message that carries them.
+type ProposalPlace struct {
+	ThreadID  int64
+	ChatID    int64
+	MessageID int64
+}
+
+// ProposalPlace returns where the principal's proposal is shown and reports whether the proposal is
+// the principal's, for a press that names neither a tab nor a message it can be trusted on.
+func (s *Service) ProposalPlace(ctx context.Context, principalID, approvalID string) (ProposalPlace, bool, error) {
+	record, found, err := s.repository.LoadApproval(ctx, approvalID)
+	if err != nil {
+		return ProposalPlace{}, false, err
+	}
+	if !found || record.PrincipalID != principalID {
+		return ProposalPlace{}, false, nil
+	}
+	bundle, err := s.repository.LoadBundle(ctx, record.BundleID)
+	if err != nil {
+		return ProposalPlace{}, false, err
+	}
+	place := ProposalPlace{ThreadID: record.ThreadID, ChatID: record.ChatID, MessageID: record.MessageID}
+	if bundle = shown(bundle); len(bundle) > 0 {
+		last := bundle[len(bundle)-1]
+		place.ChatID, place.MessageID = last.ChatID, last.MessageID
+	}
+	return place, true, nil
 }
 
 // finishPending moves the bundle's pending records to a terminal status, in place.
