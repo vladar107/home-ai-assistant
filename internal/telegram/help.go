@@ -138,6 +138,9 @@ func (s *Service) helpText(ctx context.Context, principalID, topic string) (stri
 			if section.prefix() == memorySectionPrefix {
 				fmt.Fprintf(&builder, "\n%s", MemoryPrivacyLine)
 			}
+			if section.prefix() == mcpSectionPrefix {
+				fmt.Fprintf(&builder, "\n%s", ServicesHelp)
+			}
 		}
 	}
 	return builder.String(), nil

@@ -7,6 +7,7 @@
 /deploy/runtime.env
 /deploy/telegram-users.json
 /deploy/nas-roots.json
+/deploy/mcp-servers.json
 /credentials/
 /secrets/
 /auth/

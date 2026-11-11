@@ -149,9 +149,9 @@ scripts/deploy-app-nas home-nas deploy/.env.nas
 The script refuses uncommitted or unpushed state. Before it touches the NAS, it
 resolves the commit's release tag to its digest in GHCR from the Mac and stops if
 the tag is not published. It writes the Compose file and `runtime.env`, which pins
-`HOME_AGENT_IMAGE_DIGEST`, copies the users and NAS roots files, and syncs secrets
-from Keychain. It then pulls that digest, runs `docker compose up -d`, and appends
-tag, digest, and commit to `deployments.log`. A tag that moves after the
+`HOME_AGENT_IMAGE_DIGEST`, copies the users, NAS roots, and MCP catalog files, and
+syncs secrets from Keychain. It then pulls that digest, runs `docker compose up -d`,
+and appends tag, digest, and commit to `deployments.log`. A tag that moves after the
 resolution does not change what runs.
 
 ```sh
@@ -186,6 +186,7 @@ that user turns it on or off for themselves. Optional Compose overlays
 | Model and usage | on with conversation; `HOME_AGENT_PI_MODEL` (`<model>[:<effort>]`) is the chat default | none | `/model` lists the models in the user's own Pi catalog (`models-store.json`, refreshed by Pi) with their effort levels and changes the pair of one conversation until `/new`; background tasks use `HOME_AGENT_PI_TASK_MODEL`, not that choice; the Heads-up job runs on `HOME_AGENT_PI_HEADSUP_MODEL` (`<model>[:<effort>]`, default `gpt-6.1-sol:high`) unless it has its own model, and any model-turn job may have one; a model the user's catalog or usage does not offer falls back to the chat default. Scheduled model turns have their own limit, `HOME_AGENT_SCHEDULED_TURN_TIMEOUT` (3m, 5s–10m), and still hold the user's turn lane, so a chat message sent during a run waits for it. `/status` reads the user's subscription usage live from an undocumented ChatGPT backend endpoint (`/backend-api/wham/usage`) with that user's own login, bounded to two seconds and cached for about a minute; the plan, the 5-hour and weekly percent used, and the reset times are shown, and account identifiers are never decoded, logged, or shown. When OpenAI changes the endpoint `/status` says usage is unavailable and nothing else stops. |
 | Voice and pictures | on with conversation | none | Each user's own ChatGPT login, read from their Pi profile and refreshed under Pi's `auth.json` lock, reaches two undocumented ChatGPT backend endpoints: `/backend-api/transcribe` for voice notes and audio files (up to 20 MB; the transcript becomes the turn), and `/backend-api/codex/responses` with the hosted `image_generation` tool for `generate_image`, carried by `HOME_AGENT_PI_MODEL` without its thinking level. Pictures arrive as photos in the user's chat and spend that user's ChatGPT limits. There is no fallback: when OpenAI changes either endpoint, `telegram.voice.failed` or `imagegen.failed` logs show the status and the feature stops until the client in `internal/chatgpt` is updated. |
 | TypeSafe checks | `HOME_AGENT_TYPESAFE_ENABLED=true` | `scripts/keychain-set-secret typesafe.api-key` | Each user opts in. Nothing is sent for users who have not. A failed check leaves the turn unchanged. |
+| MCP servers | On the NAS `HOME_AGENT_MCP_SERVERS_FILE_PATH`, `HOME_AGENT_MCP_NETWORK`, optional `HOME_AGENT_MCP_SERVERS_SOURCE` (default `deploy/mcp-servers.json`); locally `HOME_AGENT_MCP_SERVERS_FILE` | none for the deployment; a `key` server takes each user's own key, connected in `/settings` | The servers the operator lists in a catalog, each with a per-user switch that is off by default; only allowlisted read tools are offered, and their results count as outside content. The overlay `deploy/compose.app.mcp.yaml` mounts the catalog and joins the sidecar project's client network, which may hold only the application and the operator's relays. See MCP servers below. |
 
 After changing a secret, run `scripts/nas-sync-secrets` and redeploy.
 
@@ -240,6 +241,300 @@ The same `Viewer` account also reads alert rules and alert annotations for
 `grafana_alerts`; no further permission is needed.
 To revoke access, delete the token in Grafana; the `claude-mcp` account is
 separate.
+
+### MCP servers
+
+The assistant can offer the read tools of Model Context Protocol servers the
+operator chose. It reaches them over streamable HTTP only and never starts a
+server process: a hosted server is called at its HTTPS address, and a server that
+only speaks stdio runs as a sidecar in a Compose project of its own, outside this
+repository.
+
+**The catalog.** Servers are listed in a JSON file, kept outside Git as
+`deploy/mcp-servers.json` (ignored) and copied to the NAS on each deploy. Start
+from the example:
+
+```sh
+cp deploy/mcp-servers.example.json deploy/mcp-servers.json
+```
+
+```json
+{
+  "servers": [
+    {
+      "name": "listings",
+      "title": "Listings",
+      "description": "Search classified listings and read a listing's details.",
+      "url": "http://example-sidecar:8000/mcp",
+      "auth": "none",
+      "tools": [
+        { "name": "search_listings" },
+        { "name": "get_listing", "description": "Read one listing by its ID." }
+      ],
+      "guidance": "Use for second-hand items; prices are in the listing's currency."
+    },
+    {
+      "name": "prices",
+      "title": "Price tracker",
+      "description": "Look up a product's current price and price history.",
+      "url": "https://mcp.example.com/mcp",
+      "auth": "key",
+      "key_pattern": "[A-Za-z0-9_-]{32,64}",
+      "tools": [{ "name": "lookup_price" }, { "name": "price_history" }],
+      "principals": ["person-one", "person-two"]
+    }
+  ]
+}
+```
+
+| Field | Rule |
+| --- | --- |
+| `name` | Required, unique, `^[a-z][a-z0-9]{0,15}$`. Names the tools (`mcp_<name>_<tool>`), the per-user switch, and the key files (`mcp-<name>`); never rename a server in use |
+| `title`, `description` | Required single lines, at most 48 and 160 characters; shown in `/settings`, and the title prefixes each tool's description |
+| `url` | Required absolute `http` or `https` URL without user info, query, or fragment; its origin (scheme, host, port) at most 128 characters |
+| `auth` | `none` (shared, no credential) or `key` (each user's own key). A `key` server must use `https` unless its host is `localhost` or a loopback address |
+| `key_header`, `key_prefix` | Only with `key`; default `Authorization` and `Bearer `. An explicit `""` prefix sends the bare key. The header cannot be hop-by-hop, `Host`, `Content-*`, `Accept`, `Mcp-Session-Id`, or `Mcp-Protocol-Version`; the prefix is at most 32 characters without control characters |
+| `key_pattern` | Only with `key`, optional; a Go regular expression of 1 to 256 characters that the whole key must match |
+| `tools` | 1 to 16 remote tool names, unique, at most 128 characters without whitespace. An optional `description` (at most 1024 characters) pins the text the model reads instead of the server's |
+| `guidance` | Optional single line of at most 300 characters, added to the prompt while the server's tools are offered |
+| `principals` | Optional; omit it to offer the server to every user. When present it must list at least one principal ID, each once |
+
+A file may list at most 12 servers; unknown fields, a missing field, or a broken
+rule stop startup with a message that names the server and the field. The
+catalog is read at startup, so a change takes effect when `home-agent` next
+starts: a deploy of a new image restarts it, and after a deploy that only copied
+a changed catalog, restart it:
+
+```sh
+ssh -tt home-nas 'cd /volume1/docker/home-ai-assistant/deploy && sudo docker compose -p home-ai-assistant --env-file runtime.env -f compose.app.yaml -f compose.app.mcp.yaml restart home-agent'
+```
+
+Add the other overlays the deployment applies to that command, as
+`scripts/deploy-app-nas` does. Locally, set `HOME_AGENT_MCP_SERVERS_FILE` in
+`.env` to the catalog's path.
+
+**Deployment.** In `deploy/.env.nas`, set `HOME_AGENT_MCP_SERVERS_FILE_PATH` to
+a path below `HOME_AGENT_NAS_ROOT`, such as the config directory, and
+`HOME_AGENT_MCP_NETWORK` to the client network the sidecar project creates. The
+deploy script applies `deploy/compose.app.mcp.yaml` only while
+`HOME_AGENT_MCP_SERVERS_FILE_PATH` is set: it checks both values, copies
+`HOME_AGENT_MCP_SERVERS_SOURCE` (default `deploy/mcp-servers.json`) to that path
+with mode 600, and stops before pulling the image when the network does not
+exist. The overlay mounts the catalog read-only at
+`/etc/home-agent/mcp-servers.json` and adds the client network to
+`home-observability`. That network may hold only the application and relays the
+operator controls, never a server's own code (see the hardened sidecar below).
+Deploy the sidecar project first. The overlay needs the
+network even when every server is hosted; then create an empty internal network
+for it (`sudo docker network create --internal <name>`).
+
+**Turning a server on.** Each user sees the servers they may use in `/settings`
+under Services. Every server is off until the user turns it on, because its tools
+send what the user asks to a service outside the household. For a `key` server
+the user connects their own key there: the next message is taken as the key when
+it is a single token of 16 to 512 characters without whitespace that matches
+`key_pattern` and is not a URL, within 10 minutes; any other message ends the
+wait and reaches no server. Either way the message is deleted from the chat and
+never reaches the model. Declare a `key_pattern` where the service's keys have a
+recognisable shape: a message of that shape is then deleted and kept from the
+model even when no wait is open, and another connector's secret pasted during
+the wait is not sent to the server. The key is checked with `initialize` and `tools/list`; a 401 or 403
+refuses it, another failure leaves it unverified, and in both cases nothing is
+stored and the user can paste it again. Connecting a key turns the server on;
+disconnecting removes the key and turns the server off. There is no household
+key and no fallback to another user's.
+
+**A hardened sidecar.** Third-party server code never joins the network named by
+`HOME_AGENT_MCP_NETWORK`. `home-agent` listens on all its interfaces, and
+anything on that network can reach its HTTP listener, including the
+unauthenticated backlog API, so the network may hold only the application and
+relays the operator controls. Each stdio-only server therefore runs as three
+containers in a Compose project of its own, outside this repository:
+
+- **the server**, running the third-party code behind a stdio-to-HTTP proxy, in
+  an image the operator builds from a pinned commit of the server and a pinned
+  version of the proxy and deploys by digest. It sits only on an internal
+  network of its own, with no route to the local network or the internet. On
+  Docker Engine 28 or later, that network's gateway is isolated
+  (`com.docker.network.bridge.gateway_mode_ipv4: isolated`), so the host gets no
+  address on it; without that, the host's own listening ports stay reachable
+  from the server through the bridge gateway.
+- **an ingress relay**, a TCP relay attached to the server's network and to the
+  client network, which forwards the one port clients use. The server never
+  shares a network with a client, and the application's catalog URL names the
+  relay (`http://example-sidecar:8000/mcp`). A server that checks the `Host`
+  header must accept that name.
+- **an egress proxy**, only when the server must reach its own service on the
+  internet: a filtering forward proxy that allows only the hosts the server
+  needs, attached to the server's network and to an outbound network. The server
+  is pointed at it with `HTTPS_PROXY`.
+
+The relay and the proxy are operator-built and minimal: non-root, read-only,
+capabilities dropped, small limits, and pinned by digest like the server. A
+sketch, where the relay and proxy settings stand for whatever the chosen images
+take:
+
+```yaml
+name: example-sidecars
+
+x-hardened: &hardened
+  restart: unless-stopped
+  init: true
+  read_only: true
+  user: "65534:65534"
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: local
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  example-sidecar-server:
+    <<: *hardened
+    image: registry.example.com/listings-mcp@sha256:<digest>
+    environment:
+      HTTPS_PROXY: http://example-sidecar-egress:3128
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 64
+    networks:
+      - server
+
+  example-sidecar:
+    <<: *hardened
+    image: registry.example.com/tcp-relay@sha256:<digest>
+    environment:
+      RELAY_LISTEN: 0.0.0.0:8000
+      RELAY_TARGET: example-sidecar-server:8000
+    mem_limit: 32m
+    cpus: 0.25
+    pids_limit: 16
+    networks:
+      - clients
+      - server
+
+  example-sidecar-egress:
+    <<: *hardened
+    image: registry.example.com/egress-proxy@sha256:<digest>
+    environment:
+      PROXY_LISTEN: 0.0.0.0:3128
+      PROXY_ALLOWED_HOSTS: api.example.com
+    mem_limit: 64m
+    cpus: 0.25
+    pids_limit: 32
+    networks:
+      - server
+      - outbound
+
+networks:
+  clients:
+    name: example-sidecars
+    internal: true
+  server:
+    internal: true
+    driver_opts:
+      com.docker.network.bridge.gateway_mode_ipv4: isolated
+  outbound: {}
+```
+
+Here `HOME_AGENT_MCP_NETWORK=example-sidecars`. Nothing publishes a port, and
+nothing mounts anything: never the application's data, configuration, secrets,
+or the Docker socket. The server has no network path to the application: its
+only network holds the relay, which forwards to the server and nowhere else, and
+the egress proxy. Drop the proxy and the outbound network for a server that needs
+no outside service. The outbound network is an ordinary bridge, which routes to
+the local network as well as the internet: container networking does not keep
+outbound traffic off the household's devices, so the proxy's host list and the
+operator's network configuration, outside both repositories, do. Since a plain
+HTTP URL cannot carry a key, a sidecar is always a `none` server; a credential
+the server needs for its own service is the sidecar project's to hold.
+
+**What may be allowlisted.** Allowlist only tools that read, and only those the
+household needs: every allowlisted tool is offered as a read, so it also runs in
+scheduled runs, background tasks, and agent watches without confirmation. Never
+allowlist a tool that takes an address or fetches on the caller's behalf, since
+after outside content a call can carry conversation text to wherever the
+argument points. Tool descriptions come from the server and reach the model as
+trusted tool definitions; for a server you do not control, pin each tool's
+`description` in the catalog. A server's tools beyond the allowlist, its tool
+titles and annotations, and its `instructions` are ignored, and every result is
+outside content: a call marks the conversation exposed, and its result is
+screened like a web page.
+
+**Removing a server.** Delete its entry from the catalog and deploy (or restart
+as above). Its tools and its row in `/settings` are gone once `home-agent`
+restarts, but each user's key and switch stay behind, and would apply again to
+a server later added under the same name. With `home-agent` stopped and a data
+backup taken, remove them for the server's `<name>`:
+
+- the key files `<HOME_AGENT_DATA_PATH>/integrations/*/mcp-<name>.json`;
+- the rows of `integration_connections` and `integration_switches` in
+  `<HOME_AGENT_DATA_PATH>/home-agent.db` whose `integration` is `mcp-<name>`:
+
+```sql
+DELETE FROM integration_connections WHERE integration = 'mcp-<name>';
+DELETE FROM integration_switches WHERE integration = 'mcp-<name>';
+```
+
+Until then a user's `/export` still carries the server's switch; restoring it
+grants nothing while the server is not in the catalog.
+
+**Troubleshooting.** `/settings` shows each server in one of these states for the
+user:
+
+| State | Meaning | Fix |
+| --- | --- | --- |
+| Off | The user's switch is off | Turn it on |
+| On | Tools are offered while the server lists them | — |
+| Needs a key | A `key` server is on without a key file and connection record | Connect a key |
+| Needs reconnection | The catalog's URL moved to another origin since the key was connected, so the key is never sent there | Connect the key again, which binds it to the new origin |
+| Problem | The server refused the connected key (401 or 403) on a call or a list refresh; its tools stay offered | Usually a revoked or expired key: connect a new one. It clears after a call succeeds, on reconnecting, or on restart |
+
+A server that is down shows no state of its own. A list it served in the last
+hour keeps being offered, so its tools stay in turns and calls to it fail with
+"The service is unavailable right now." or a timeout; once no list from the
+last hour is left, its tools are not offered until a refresh succeeds, retried
+in the background from 30 seconds up to every five minutes. A turn waits only
+for a server with no list it may serve whose last refresh did not fail, such as
+one nobody used for over an hour; all such lists of the user are refreshed at
+once, so the wait is about three seconds in total.
+
+The logs never carry a key, an argument, or what the server sent. Every event
+names the server; all but `mcp.tools.dropped`, and `mcp.refresh.failed` for a
+`none` server, name the principal too:
+
+| Event | Meaning |
+| --- | --- |
+| `mcp.refresh.failed` | A tool list refresh failed; `class` says why, and `stale` whether a list from the last hour still serves |
+| `mcp.tools.dropped` | An allowlisted tool the server listed was left out, with a `count`: an empty description, a schema over 8 KiB or not describing an object, an offered name over 64 characters, two names that become the same offered name, or a tool the server listed twice |
+| `mcp.call.failed` | A tool call failed, with its `class` |
+| `mcp.key.refused` | The server refused a connected key (401 or 403) on a call or refresh; logged once until the problem clears |
+| `mcp.connection.connected` | A key was verified and stored |
+| `mcp.connection.rejected` | The server refused a key being connected (401 or 403); nothing was stored |
+| `mcp.connection.verify_failed` | A key could not be checked because the server failed otherwise, with its `class`; nothing was stored |
+| `mcp.connection.switch_failed` | A key was stored but the server could not be turned on |
+| `mcp.connection.disconnected` | A key or its record was removed |
+| `mcp.connection.unreadable` | The connection record could not be read while offering tools; the server offered nothing in that turn |
+| `mcp.switch.changed` | A user turned a server on or off in `/settings`, with `enabled` |
+| `mcp.intake.started` | A user pressed Connect and the wait for a key began |
+| `mcp.intake.failed` | A key the server accepted could not be stored; the wait stays open |
+| `mcp.intake.yielded` | A wait ended because the message was another connector's secret; nothing was sent to the server |
+| `mcp.credentials.unreadable` | A key file could not be read, logged once per user and server; the key counts as missing |
+
+The classes `not_found` (a wrong path), `redirect_refused` (redirects are never
+followed: use the final URL), `unsupported_version` (a server that does not
+speak a revision from `2024-11-05` to `2025-11-25`), `timeout`, and
+`unavailable` point at the server or the URL; `protocol` is a request the server
+rejected, `malformed` an answer the client could not read, and `too_large` an
+answer over 4 MiB or a list over 20 pages or 1000 tools. Calls appear in the
+usual tool metrics and `home_agent.tool.call` spans under their `mcp_` names, and
+retried requests in `home_agent.http.retries` under service `mcp`.
 
 ## 6. Grafana and alerts
 
@@ -533,8 +828,8 @@ token until its owner presses *New token* in `/settings`.
 For a consistent backup, stop `home-agent`, snapshot or copy the whole data
 directory, and start it again. Application state matters more than telemetry, and
 Prometheus, Tempo, and Alloy state can be recreated. A full recovery needs the
-repository, the Keychain secrets, `deploy/.env.nas`, the users and roots files,
-and the recorded image digest.
+repository, the Keychain secrets, `deploy/.env.nas`, the users, roots, and MCP
+catalog files, and the recorded image digest.
 
 A backup counts only after a restore into an isolated directory passes the SQLite
 integrity check, readiness, identity mapping, and polling-cursor check without

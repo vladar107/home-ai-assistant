@@ -26,6 +26,7 @@ flowchart TB
     overpass["Overpass<br/>OpenStreetMap places"]
     typesafe["TypeSafe<br/>optional safety checks"]
     nasfiles["NAS shares<br/>household files"]
+    mcp["MCP servers<br/>operator catalog"]
     ghcr["GitHub + GHCR<br/>source, CI, image"]
 
     users <-->|chat, files, buttons| telegram
@@ -41,6 +42,7 @@ flowchart TB
     agent -->|nearby places| overpass
     agent -->|judgments| typesafe
     agent -->|mounted roots| nasfiles
+    agent -->|allowlisted reads, per-user keys| mcp
     systems -->|events, per-source bearer token| agent
     operator -->|push| ghcr
     operator -->|tag-pinned deploy over SSH| agent
@@ -57,7 +59,7 @@ home edge on the private network.
 ```mermaid
 flowchart TB
     telegram["Telegram Bot API"]
-    ext["External APIs<br/>model provider, Notion, Google, NS, Home Assistant, OVapi, Transitous, Overpass, Open-Meteo, TypeSafe"]
+    ext["External APIs<br/>model provider, Notion, Google, NS, Home Assistant, OVapi, Transitous, Overpass, Open-Meteo, TypeSafe,<br/>hosted MCP servers"]
 
     subgraph nas["NAS"]
         subgraph app["home-ai-assistant Compose project"]
@@ -74,6 +76,7 @@ flowchart TB
         end
         caddy["home-edge Caddy<br/>(home-edge repository)"]
         shares[("NAS shares<br/>bind-mounted per root")]
+        sidecars["MCP sidecars<br/>own Compose project,<br/>reached through a relay"]
     end
     dev["Development session<br/>home network"]
     systems["Users' own systems<br/>home network"]
@@ -87,6 +90,7 @@ flowchart TB
     go --> db
     go --> files
     go --> shares
+    go -->|streamable HTTP<br/>sidecar network| sidecars
     go -->|OTLP metrics, traces| alloy
     dev -->|HTTPS, /api/backlog| caddy
     systems -->|HTTPS, /api/events| caddy
@@ -105,6 +109,7 @@ flowchart TB
 | SQLite | Durable control-plane state through `modernc.org/sqlite` (pure Go, no CGO) |
 | Data directory | Mode `0700`; Pi session history, per-user integration credentials, and pending day cards and charts |
 | Monitoring | Separate repository and Compose project, joined through a private Docker network |
+| MCP sidecars | Optional servers that only speak stdio, each behind a stdio-to-HTTP proxy in the operator's own Compose project outside this repository. The application joins only the network that project creates for clients, which holds nothing but the application and the operator's relays; the third-party server sits on an internal network of its own behind its relay, with no mounts, secrets, Docker socket, or network path to the application |
 
 ## 3. Components of `home-agent`
 
@@ -158,6 +163,7 @@ flowchart TB
         busc["bus"]
         web["web<br/>pages, weather"]
         placesc["places<br/>nearby places, addresses"]
+        mcpc["mcp<br/>catalog servers, allowlisted reads"]
     end
 
     store[("<b>store/sqlite</b><br/>migrations")]
@@ -1200,6 +1206,134 @@ at most three cards. The card goes out during the run, and the summary is the
 run's report after it, marked as outside content; a run with nothing to tell
 sends nothing.
 
+### An MCP server
+
+The `mcp` connector offers the read tools of Model Context Protocol servers the
+operator lists in a catalog, the JSON file named by `HOME_AGENT_MCP_SERVERS_FILE`
+(see `deploy/mcp-servers.example.json`); without it the feature is off.
+`internal/config` validates the whole file at startup, and an invalid catalog
+stops it: at most 12 servers, each with a unique name matching
+`^[a-z][a-z0-9]{0,15}$`, a title and a one-line description, an absolute `http` or
+`https` URL with no user info, query, or fragment, an auth kind, 1 to 16
+allowlisted tools, an optional guidance line, and an optional list of principals.
+Unknown fields are refused.
+
+The application never starts a server process. It speaks streamable HTTP only,
+so a server that only speaks stdio runs as a sidecar behind a stdio-to-HTTP proxy
+in a Compose project of its own, outside this repository.
+`deploy/compose.app.mcp.yaml` mounts the catalog read-only and joins `home-agent`
+to the external network that project creates, named by `HOME_AGENT_MCP_NETWORK`,
+beside `home-observability`. `home-agent` listens on all its interfaces, and the
+backlog API on that listener has no authentication, so anything on that network
+can reach it: the network may hold only the application and relays the operator
+controls. Third-party server code never joins it. Each server sits on an internal
+network of its own, with no route to the local network or the internet, and a
+relay attached to both networks forwards the one port the application uses, so
+the server never shares a network with a client; a server that must reach its
+own service goes out through an egress proxy that allows only the hosts it needs.
+The server gets no mounts, secrets, or Docker socket, and no network path to the
+application. Operations describes the layout.
+
+There are two auth kinds. A `none` server is shared: one endpoint and no
+credential. A `key` server takes each user's own key in the header and with the
+prefix the entry names, `Authorization` and `Bearer ` by default; the header
+cannot be a hop-by-hop header, `Host`, `Content-*`, `Accept`, or one of the MCP
+transport headers, and the prefix holds no line breaks. A `key` server must use
+HTTPS unless its host is loopback, so a sidecar reached over plain HTTP on the
+sidecar network is always a `none` server. There is no household or fallback
+key. A user's key is kept by `integration.Credentials` in
+`data/integrations/<principal>/mcp-<server>.json`, and its non-secret record in
+`integration_connections` as a personal token whose workspace ID is the origin of
+the server's URL (scheme, host in lower case, and port). A key is sent only while
+both exist and the recorded origin is the catalog's; after the catalog's URL moves
+to another origin the key is never sent and the server shows as needing
+reconnection. Connecting runs `initialize` and `tools/list` with the key within
+15 seconds: a 401 or 403 refuses it, any other failure leaves it unverified, and
+either way nothing is stored. A verified key is stored, recorded, replaces the
+session of any earlier key, and turns the server on. Disconnect ends the session,
+waiting for calls in flight, removes the key file and the record, and turns the
+server off. A key is never logged, traced, exported, or shown to the model.
+
+A key arrives through an intake: one per principal at a time, naming its server,
+open for 10 minutes. The next message is taken as the key only when it is a
+single token of 16 to 512 characters without whitespace or control characters
+that matches the entry's optional `key_pattern` (anchored to the whole key) and
+is not a URL; any other message ends the intake and is sent to no server. Either
+way the message is deleted from the chat and kept from the model, alone or as a
+caption, and it is never merged with its neighbours while an intake is open. A
+refused or unverified key keeps the intake open until it expires, so a corrected
+key can be pasted again. What an intake consumed is remembered for its lifetime
+as a keyed hash, never as text, so a redelivered update is consumed again
+instead of becoming a turn. A message another connector recognises as its own
+secret ends the intake and goes to that connector's guard unless the server's
+`key_pattern` claims it, and without an intake a message matching the
+`key_pattern` of a server the user may use is deleted and kept from the model.
+
+Each catalog server is a tool provider with its own integration switch,
+`mcp-<server>`, named by its title and off by default, because turning one on
+sends what the user asks to a service outside the household. A `key` server
+additionally offers nothing until the user connected a usable key. The principal
+list is checked where tools are offered and again where they run, so a switch
+restored from an export cannot grant a server to a user it is not for.
+
+Only the tools the catalog allowlists by their remote name are offered; anything
+else the server lists is ignored, and so are its tool titles and annotations and
+the `instructions` it sends on `initialize`. Every tool is `RiskRead`, so
+allowlisted tools reach scheduled runs, background tasks, and agent watches as
+any read does; there are no MCP write tools. A tool is
+offered as `mcp_<server>_<tool>`, the remote name lowered with every run of other
+characters made one underscore; a name over the broker's 64 characters is left
+out rather than shortened, and two allowlisted names that become the same name
+are both left out, so no server can collide with a built-in tool or with another
+server. Tools are offered in catalog order. Each definition is checked before it
+is offered: a non-empty description, the entry's pinned one or else the
+server's, prefixed with the server's title and clipped to 1024 characters, and an
+input schema that is a JSON object of at most 8 KiB describing an object (a
+missing type becomes `object`, and the top-level `$schema` is dropped). A tool
+that fails is dropped and logged as `mcp.tools.dropped` with a count;
+contributing tools never fails a turn.
+
+Results are outside content. Every tool is `ThirdParty` and `Screen`: a call marks
+the conversation exposed, and its result is screened like a web page. Text
+content is returned, joined and clipped to 16 KiB with a note on what was cut;
+images, audio, resources, and any other kind are dropped and named in a note,
+and structured content is ignored. A failed call returns a fixed text the model
+can adapt to (needs a key, needs reconnecting, refused, timed out, rejected, too
+large, unavailable), never what the server said, and is logged as
+`mcp.call.failed` with its class only. A 401 or 403 to a connected key, on a call
+or a list refresh, marks it as a problem in `/settings` until a later call
+succeeds, the user reconnects, or the service restarts; its tools stay offered
+meanwhile. Calls have 30 seconds and are not retried once the request was sent,
+since a call need not be idempotent; every other request is retried through
+`httpretry`. The activity line reads "Checking a connected service…".
+
+A tool list is cached for five minutes, once per server for a `none` server,
+since listing carries nothing of the user, and per principal for a `key` server.
+A stale list is refreshed in the background with three seconds to answer. A turn
+waits only when a server it is offered has no list it may serve: none fetched
+yet, or the last good one over an hour old because nobody used the server. Every
+such list of that user is then refreshed at once, so the turn waits about three
+seconds in total, and a server whose last refresh failed is never waited for.
+When refreshes fail, the previous list keeps serving for up to an hour, and a
+server with nothing to serve offers nothing; failed refreshes back off from 30
+seconds, doubling to five minutes. `none` servers are listed at start, so the
+first turn rarely waits. A down or hanging server costs one background refresh
+per backoff, not a wait per turn.
+
+The client is hand-written and asks for nothing back. It sends `initialize` with
+revision `2025-11-25` and accepts a server that answers with any revision that has
+the handshake: `2024-11-05`, `2025-03-26`, `2025-06-18`, or `2025-11-25`; it sends
+`MCP-Protocol-Version` from `2025-06-18` on. It advertises no client capabilities;
+of the requests a server sends back in a stream, it answers `ping` with an empty
+result and sampling, elicitation, roots, and anything else with a
+method-not-found error, at most 8 per exchange, and a ninth fails the exchange as
+a protocol error. It accepts JSON and event-stream answers, of at most
+4 MiB each, and takes from a stream only the response to its own request. It
+follows no redirect and uses no proxy from the environment, so a key cannot be
+carried to another host. Calls run in one session per principal and server, so a
+stateful shared server cannot mix users; a session the server forgot is renewed
+once, and sessions end with an HTTP `DELETE` at shutdown, as best effort.
+
 ## Security model
 
 - **Identity before anything.** Only allowlisted numeric Telegram IDs in private
@@ -1300,6 +1434,25 @@ sends nothing.
   principals in `HOME_AGENT_GRAFANA_PRINCIPALS`, including as a `chart` source.
   Queries go through Grafana's data source proxy and are bounded in range,
   resolution, series, and lines.
+- **MCP server scope.** Only servers in the operator's catalog exist, only their
+  allowlisted tools are offered, and every one is a read whose result is outside
+  content. Each server is off for a user until they turn it on, a `key` server
+  sends only that user's own key and only to the origin it was connected for,
+  and the principal list is enforced when tools are offered and when they run.
+  Known risks remain. Tool descriptions are written by the server and reach the
+  prompt as tool definitions; the catalog limits which servers and tools exist,
+  descriptions are clipped, and an entry can pin its own, but a changed
+  description is not detected. Arguments leave the household: after outside
+  content a call can carry conversation text to the server, as a search query
+  can, and the destination is fixed only by the catalog, so a tool that takes an
+  address or fetches on the caller's behalf must never be allowlisted. A sidecar
+  is third-party code on the NAS. The network the application joins for MCP
+  exposes its listener, including the unauthenticated backlog API, to everything
+  on it, so that network holds only the application and the operator's relays,
+  and the server itself stays on an internal network of its own behind its
+  relay, with no mounts or secrets. Container networking alone does not keep a
+  server's outbound traffic off the local network; its egress proxy and the
+  operator's network configuration do.
 - **Untrusted input.** Tool results, web pages, email, and model output are marked
   and treated as data. Private and loopback addresses are refused by the web tools.
 - **NAS isolation by mount.** The shared folder is mounted read-only; homes and
@@ -1402,6 +1555,7 @@ sends nothing.
 | Application-owned tools, policy, approvals, and scheduler | These controls cannot be delegated to a prompt or to the harness |
 | SQLite through a pure-Go driver | One instance and two users need no database server; no CGO |
 | Direct APIs rather than MCP | Fewer layers; MCP only where it adds concrete value |
+| Other services' MCP servers from an operator catalog, over streamable HTTP, reads only | A service that already publishes a server needs no connector, while which servers and tools exist stays the operator's decision and the application never starts a server process |
 | Native source search rather than RAG | Every source already has search; no evidence an index is needed |
 | OpenTelemetry → Alloy → Prometheus and Tempo, Grafana on top | Metrics and traces from day one within the NAS memory budget |
 | Manual deploys of a tag resolved to its digest on the Mac; CI builds the image but has no NAS access | The operator stays the only path to production, and each deploy runs and records the digest it resolved |

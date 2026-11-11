@@ -97,6 +97,7 @@ const (
 	ActivityGrafana  = "grafana"
 	ActivityPlaces   = "places"
 	ActivityImage    = "image"
+	ActivityServices = "services"
 )
 
 // Contribution is what a provider grants one principal at one moment. WriteGuidance describes the

@@ -210,7 +210,7 @@ func (g googleSection) intercept(ctx context.Context, principalID string, text s
 	return result, nil
 }
 
-func (g googleSection) guard(text string) interception {
+func (g googleSection) guard(_ string, text string) interception {
 	if !google.LooksLikeRedirect(text) {
 		return interception{}
 	}

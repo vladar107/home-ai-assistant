@@ -25,6 +25,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
 	"github.com/vladar107/home-ai-assistant/internal/backlog"
 	"github.com/vladar107/home-ai-assistant/internal/chatgpt"
+	"github.com/vladar107/home-ai-assistant/internal/config"
 	"github.com/vladar107/home-ai-assistant/internal/connection"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/bus"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/calendar"
@@ -32,6 +33,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/google"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/grafana"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/homeassistant"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/mcp"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/ns"
@@ -45,6 +47,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/judgment"
 	"github.com/vladar107/home-ai-assistant/internal/location"
 	"github.com/vladar107/home-ai-assistant/internal/memory"
+	"github.com/vladar107/home-ai-assistant/internal/module"
 	"github.com/vladar107/home-ai-assistant/internal/observability"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	"github.com/vladar107/home-ai-assistant/internal/project"
@@ -229,6 +232,9 @@ type harnessOptions struct {
 	// body's read and eventAssessTimeout an assessment turn when they are set.
 	events                               bool
 	eventBodyTimeout, eventAssessTimeout time.Duration
+	// mcp is the operator's MCP catalog, as HOME_AGENT_MCP_SERVERS_FILE lists it; its servers point
+	// at simulators.
+	mcp []config.MCPServer
 }
 
 // testFile is one attachment the Telegram simulator will hand out through getFile.
@@ -259,6 +265,8 @@ type conversationHarness struct {
 	homeAssistant  *homeassistant.Service
 	grafana        *grafana.Service
 	bus            *bus.Service
+	mcp            *mcp.Service
+	mcpCatalog     []config.MCPServer
 	switches       *integration.Switches
 	locations      *location.Service
 	memory         *memory.Service
@@ -427,6 +435,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	h.conversation, h.engine, h.approvals, h.searches, h.scheduler, h.tasks, h.watches = asm.Conversation, asm.Turns, asm.Approvals, asm.SearchChecks, asm.Scheduler, asm.Tasks, asm.Watches
 	h.notion, h.nas, h.google, h.web, h.ns, h.homeAssistant, h.grafana, h.bus = asm.Notion, asm.NAS, asm.Google, asm.Web, asm.NS, asm.HomeAssistant, asm.Grafana, asm.Bus
 	h.routes, h.locations, h.memory, h.backlog, h.trips, h.events = asm.Routes, asm.Locations, asm.Memory, asm.Backlog, asm.Trips, asm.Events
+	h.mcp, h.mcpCatalog = asm.MCP, options.mcp
 	h.service = h.telegramService(identities, logger)
 	t.Cleanup(h.stop)
 	return h
@@ -552,6 +561,9 @@ func (h *conversationHarness) wiringInputs(t *testing.T, runtime agentruntime.Ag
 	if options.bus != "" {
 		in.Bus = &bus.Config{HomeStop: "50420100", Contact: options.busContact, OVapiURL: options.bus, GTFSURL: options.bus, TransitousURL: options.bus}
 	}
+	if len(options.mcp) > 0 {
+		in.MCP = &mcp.Config{Servers: options.mcp, Now: now}
+	}
 	return in
 }
 
@@ -608,6 +620,12 @@ func (h *conversationHarness) telegramService(identities *identity.Service, logg
 		deps.Sections = append(deps.Sections, NewSwitchSection(settings, logger, nil))
 	}
 	deps.Sections = append(deps.Sections, NewHeadsUpSection(asm.Scheduler, logger, nil))
+	if asm.MCP != nil {
+		allowed := func(principalID string) bool {
+			return slices.ContainsFunc(h.mcpCatalog, func(server config.MCPServer) bool { return server.Allows(principalID) })
+		}
+		deps.Sections = append(deps.Sections, NewServicesSection(asm.MCP, allowed, time.UTC, logger, nil))
+	}
 	if asm.Locations != nil {
 		deps.Sections = append(deps.Sections, NewLocationSection(asm.Locations, logger, nil))
 	}
@@ -989,8 +1007,8 @@ func (h *conversationHarness) parseKeyboard(raw string) InlineKeyboard {
 }
 
 // start starts what the application starts before it polls: the assembly, then the Notion and
-// Google modules the tests use, then the poller. The other modules' loops stay off, so tests run
-// their cycles themselves.
+// Google modules the tests use and the MCP module as the assembly registered it, then the poller.
+// The other modules' loops stay off, so tests run their cycles themselves.
 func (h *conversationHarness) start() {
 	h.t.Helper()
 	if err := h.assembly.Start(h.ctx); err != nil {
@@ -1003,6 +1021,11 @@ func (h *conversationHarness) start() {
 	}
 	if h.google != nil {
 		if err := h.google.Start(h.ctx); err != nil {
+			h.t.Fatal(err)
+		}
+	}
+	if h.mcp != nil {
+		if err := h.registered("mcp").Start(h.ctx); err != nil {
 			h.t.Fatal(err)
 		}
 	}
@@ -1026,6 +1049,24 @@ func (h *conversationHarness) stop() {
 			h.t.Error(err)
 		}
 	}
+	if h.mcp != nil {
+		if err := h.registered("mcp").Shutdown(ctx); err != nil {
+			h.t.Error(err)
+		}
+	}
+}
+
+// registered is the module the assembly registered under id, which production starts and stops,
+// so a connector built but never registered fails the test instead of running anyway.
+func (h *conversationHarness) registered(id string) module.Module {
+	h.t.Helper()
+	for _, registered := range h.assembly.Registry.Ordered() {
+		if registered.Descriptor().ID == id {
+			return registered
+		}
+	}
+	h.t.Fatalf("the assembly registered no %q module", id)
+	return nil
 }
 
 // provision installs a credential file and account row directly, the way a completed ceremony does.

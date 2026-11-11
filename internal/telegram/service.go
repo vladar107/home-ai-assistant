@@ -497,7 +497,7 @@ func (s *Service) processBatch(ctx context.Context, bot Bot, updates []Update, l
 			continue
 		}
 
-		members, consumed := s.mergeRun(updates[index:], retryCap)
+		members, consumed := s.mergeRun(ctx, updates[index:], retryCap)
 		index += consumed
 		update := original
 		if len(members) > 1 {
@@ -546,14 +546,17 @@ func (s *Service) processBatch(ctx context.Context, bot Bot, updates []Update, l
 
 // mergeRun returns the run of mergeable updates that starts at pending[0], and how many updates of
 // pending it consumed, counting duplicates of an update ID inside the run. A run of one is a
-// single update handled as before.
-func (s *Service) mergeRun(pending []Update, retryCap int64) ([]Update, int) {
+// single update handled as before. A guarded message stands alone, because a secret guard only
+// recognizes a token sent as the whole message, and so does every message of a sender an intake
+// is waiting for, so the intake is offered each message as it was sent.
+func (s *Service) mergeRun(ctx context.Context, pending []Update, retryCap int64) ([]Update, int) {
 	first := pending[0]
-	if !s.mergeable(first) {
+	if !mergeable(first) {
 		return pending[:1], 1
 	}
 	members := []Update{first}
 	runes := utf8.RuneCountInString(first.Message.Text)
+	principalID := ""
 	consumed := 1
 	for ; consumed < len(pending); consumed++ {
 		candidate := pending[consumed]
@@ -561,7 +564,7 @@ func (s *Service) mergeRun(pending []Update, retryCap int64) ([]Update, int) {
 		if candidate.UpdateID == last.UpdateID {
 			continue
 		}
-		if !s.mergeable(candidate) || last.UpdateID <= retryCap && candidate.UpdateID > retryCap {
+		if !mergeable(candidate) || last.UpdateID <= retryCap && candidate.UpdateID > retryCap {
 			break
 		}
 		message := candidate.Message
@@ -573,16 +576,56 @@ func (s *Service) mergeRun(pending []Update, retryCap int64) ([]Update, int) {
 		if runes > conversation.MaximumMessageRunes {
 			break
 		}
+		if principalID == "" {
+			principalID = s.mergingPrincipal(ctx, first.Message.From)
+			if principalID == "" || s.awaitsMessage(principalID) || s.guardSecrets(principalID, first.Message.Text).handled {
+				return pending[:1], 1
+			}
+		}
+		if s.guardSecrets(principalID, message.Text).handled {
+			break
+		}
 		members = append(members, candidate)
 	}
 	return members, consumed
 }
 
+// mergingPrincipal is the authorized principal of a burst's sender, or "" when there is none or it
+// cannot be told, so the burst is not merged and each message is handled on its own.
+func (s *Service) mergingPrincipal(ctx context.Context, from *User) string {
+	authorization, err := s.identities.Authorize(ctx, from.ID)
+	if err != nil || !authorization.Authorized() {
+		return ""
+	}
+	return authorization.Principal.ID
+}
+
+// awaitsMessage reports whether an intake is waiting for the principal's next message.
+func (s *Service) awaitsMessage(principalID string) bool {
+	for _, interceptor := range s.interceptors {
+		if intake, ok := interceptor.(intakeSection); ok && intake.awaiting(principalID) {
+			return true
+		}
+	}
+	return false
+}
+
+// yieldForeignSecrets ends a waiting intake that does not claim the text when a guard recognises
+// it, so one service's secret is never taken, and sent out, as another's key; the guard then
+// handles it as it would without the intake.
+func (s *Service) yieldForeignSecrets(principalID, text string) {
+	for _, interceptor := range s.interceptors {
+		intake, ok := interceptor.(intakeSection)
+		if ok && intake.awaiting(principalID) && !intake.claims(principalID, text) && s.guardSecrets(principalID, text).handled {
+			intake.yield(principalID)
+		}
+	}
+}
+
 // mergeable reports whether an update is plain text that may share a turn with its neighbours.
 // It is an allow-list: anything with another meaning, such as a command, media or a forward, stands
-// alone. A guarded message stands alone as well, because a secret guard only recognizes a token
-// sent as the whole message.
-func (s *Service) mergeable(update Update) bool {
+// alone.
+func mergeable(update Update) bool {
 	message := update.Message
 	if update.UpdateID < 0 || update.UpdateID == math.MaxInt64 || message == nil ||
 		update.EditedMessage != nil || update.CallbackQuery != nil ||
@@ -599,10 +642,7 @@ func (s *Service) mergeable(update Update) bool {
 		message.Forwarded() || message.ForumTopicCreated != nil || message.ForumTopicEdited != nil {
 		return false
 	}
-	if strings.HasPrefix(strings.TrimSpace(message.Text), "/") {
-		return false
-	}
-	return !s.guardSecrets(message.Text).handled
+	return !strings.HasPrefix(strings.TrimSpace(message.Text), "/")
 }
 
 // mergeUpdates joins a run into the update of its last message, which carries the first message's
@@ -686,6 +726,15 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 	}
 
 	text := cmp.Or(message.Text, message.Caption)
+	if message.Text == "" && message.Caption != "" && s.conversation != nil && s.awaitsMessage(authorization.Principal.ID) {
+		result, err := s.interceptCaption(ctx, authorization.Principal.ID, message.Caption)
+		if err != nil {
+			return processingResult{}, "intercept_message", err
+		}
+		if result.handled {
+			return s.finishInterception(ctx, message, authorization.Principal.ID, result)
+		}
+	}
 	transcribed := false
 	if item, found := voiceRecording(message); found && s.transcriber != nil && s.conversation != nil {
 		transcript, reply, reason, err := s.transcribe(ctx, authorization.Principal.ID, item)
@@ -693,7 +742,7 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 			return processingResult{}, "transcribe_voice", err
 		}
 		if reply == "" {
-			if result := s.guardSecrets(transcript, message.Caption); result.handled {
+			if result := s.guardSecrets(authorization.Principal.ID, transcript, message.Caption); result.handled {
 				return s.finishInterception(ctx, message, authorization.Principal.ID, result)
 			}
 			text, reply, reason = voiceTurn(transcript, message.Caption)
@@ -716,7 +765,7 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 		}, "", nil
 	}
 	if unsupported != "" || len(carried) > 0 {
-		if result := s.guardSecrets(message.Caption); result.handled {
+		if result := s.guardSecrets(authorization.Principal.ID, message.Caption); result.handled {
 			return s.finishInterception(ctx, message, authorization.Principal.ID, result)
 		}
 	}
@@ -735,6 +784,7 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 		}
 		attachments = files
 	} else if !transcribed {
+		s.yieldForeignSecrets(authorization.Principal.ID, text)
 		for _, interceptor := range s.interceptors {
 			result, err := interceptor.intercept(ctx, authorization.Principal.ID, text)
 			if err != nil {
@@ -786,15 +836,31 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 
 // guardSecrets runs only the secret guards, for a caption or transcript that cannot be an intake
 // reply, so it never consumes a pending intake.
-func (s *Service) guardSecrets(texts ...string) interception {
+func (s *Service) guardSecrets(principalID string, texts ...string) interception {
 	for _, text := range texts {
 		for _, interceptor := range s.interceptors {
-			if result := interceptor.guard(text); result.handled {
+			if result := interceptor.guard(principalID, text); result.handled {
 				return result
 			}
 		}
 	}
 	return interception{}
+}
+
+// interceptCaption offers a caption to the intakes waiting for the principal's message, as a text
+// message would be, so a key sent as a photo's or document's caption is consumed with its message.
+func (s *Service) interceptCaption(ctx context.Context, principalID, caption string) (interception, error) {
+	s.yieldForeignSecrets(principalID, caption)
+	for _, interceptor := range s.interceptors {
+		if intake, ok := interceptor.(intakeSection); !ok || !intake.awaiting(principalID) {
+			continue
+		}
+		result, err := interceptor.intercept(ctx, principalID, caption)
+		if err != nil || result.handled {
+			return result, err
+		}
+	}
+	return interception{}, nil
 }
 
 // processDraftStop cancels the turn whose draft the user stopped. The update names no user, and a

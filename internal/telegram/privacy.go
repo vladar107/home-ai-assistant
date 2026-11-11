@@ -24,6 +24,7 @@ var privacyOrder = []string{
 	nsSectionPrefix,
 	homeAssistantSectionPrefix,
 	busSectionPrefix,
+	mcpSectionPrefix,
 	locationSectionPrefix,
 	privacyVoice,
 	grafanaSectionPrefix,

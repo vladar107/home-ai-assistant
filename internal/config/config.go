@@ -31,6 +31,7 @@ type Config struct {
 	Notion        NotionConfig
 	Google        GoogleConfig
 	NAS           NASConfig
+	MCP           MCPConfig
 	Web           WebConfig
 	NS            NSConfig
 	HA            HAConfig
@@ -109,6 +110,9 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if err := loadNASConfig(&cfg.NAS); err != nil {
+		return Config{}, err
+	}
+	if err := loadMCPConfig(&cfg.MCP); err != nil {
 		return Config{}, err
 	}
 	if err := loadGoogleConfig(&cfg.Google); err != nil {
@@ -201,6 +205,9 @@ func (c Config) Validate() error {
 	}
 	if c.NAS.Enabled && !c.Conversation.Enabled {
 		return fmt.Errorf("HOME_AGENT_NAS_ENABLED: requires HOME_AGENT_CONVERSATION_ENABLED=true")
+	}
+	if c.MCP.Enabled() && !c.Conversation.Enabled {
+		return fmt.Errorf("HOME_AGENT_MCP_SERVERS_FILE: requires HOME_AGENT_CONVERSATION_ENABLED=true")
 	}
 	if err := c.Google.validate(); err != nil {
 		return err

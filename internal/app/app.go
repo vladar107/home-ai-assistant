@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/google"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/grafana"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/homeassistant"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/mcp"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/ns"
@@ -353,6 +355,9 @@ func (a *App) buildAssembly(ctx context.Context, client *telegram.Client, config
 	if cfg.NAS.Enabled {
 		in.NAS = &nas.Config{Roots: nasRoots(cfg.NAS.Roots)}
 	}
+	if cfg.MCP.Enabled() {
+		in.MCP = &mcp.Config{Servers: cfg.MCP.Servers}
+	}
 	if cfg.Google.Enabled {
 		secret := cfg.Google.ClientSecret
 		if secret == "" {
@@ -491,6 +496,13 @@ func (a *App) settingsSections(asm *wiring.Assembly, location *time.Location) ([
 		sections = append(sections, telegram.NewSwitchSection(settings, a.logger, a.telemetry))
 	}
 	sections = append(sections, telegram.NewHeadsUpSection(asm.Scheduler, a.logger, a.telemetry))
+	if asm.MCP != nil {
+		servers := a.cfg.MCP.Servers
+		allowed := func(principalID string) bool {
+			return slices.ContainsFunc(servers, func(server config.MCPServer) bool { return server.Allows(principalID) })
+		}
+		sections = append(sections, telegram.NewServicesSection(asm.MCP, allowed, location, a.logger, a.telemetry))
+	}
 	if asm.Locations != nil {
 		sections = append(sections, telegram.NewLocationSection(asm.Locations, a.logger, a.telemetry))
 	}

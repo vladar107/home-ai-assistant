@@ -108,7 +108,17 @@ type settingsView struct {
 // model, consuming no intake, for a caption or transcript that cannot be an intake reply.
 type messageInterceptor interface {
 	intercept(ctx context.Context, principalID string, text string) (interception, error)
-	guard(text string) interception
+	guard(principalID, text string) interception
+}
+
+// intakeSection is an interceptor whose intake waits for a principal's next message, whatever it
+// looks like. That message stands alone rather than joining a burst, a caption is offered to it as
+// a text message is, and it yields a message another section's guard recognises unless claims
+// says the text is its own.
+type intakeSection interface {
+	awaiting(principalID string) bool
+	claims(principalID, text string) bool
+	yield(principalID string)
 }
 
 type interception struct {
@@ -138,9 +148,12 @@ type settingsGroup struct {
 }
 
 // sectionOrder is the order of the sections whatever order they were passed in: app_help lists
-// their topics in it, and the message interceptors run in it.
+// their topics in it, and the message interceptors run in it. The services intake comes before
+// every token guard, so a key the user was asked for is taken even when it looks like another
+// service's token.
 var sectionOrder = []string{
 	modelSectionPrefix,
+	mcpSectionPrefix,
 	notionSectionPrefix,
 	nasSectionPrefix,
 	googleSectionPrefix,
@@ -164,6 +177,7 @@ var settingsGroups = []settingsGroup{
 	{id: "accounts", title: "Accounts", members: []string{googleSectionPrefix, notionSectionPrefix}},
 	{id: "home", title: "Home & files", inline: true, members: []string{homeAssistantSectionPrefix, nasSectionPrefix}},
 	{id: "tools", title: "Everyday tools", inline: true, members: []string{webSectionPrefix, nsSectionPrefix, busSectionPrefix, headsUpSectionPrefix, tripsSectionPrefix, inboxSectionPrefix}},
+	{id: "services", title: "Services", inline: true, members: []string{mcpSectionPrefix}},
 	{id: "location", title: "Location", inline: true, members: []string{locationSectionPrefix}},
 	{id: "memory", title: "Memory", inline: true, members: []string{memorySectionPrefix}},
 	{id: "monitoring", title: "Monitoring", inline: true, members: []string{grafanaSectionPrefix}},
@@ -621,10 +635,10 @@ func (n notionSection) intercept(ctx context.Context, principalID string, text s
 			return interception{handled: true, remove: true, reply: NotionConnectedReply(status), reason: "notion_intake_connected"}, nil
 		}
 	}
-	return n.guard(text), nil
+	return n.guard(principalID, text), nil
 }
 
-func (n notionSection) guard(text string) interception {
+func (n notionSection) guard(_ string, text string) interception {
 	if !notion.LooksLikeToken(text) {
 		return interception{}
 	}

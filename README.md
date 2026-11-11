@@ -104,6 +104,14 @@ borrowed between users.
 - **Buses.** Live departures, direct buses, and operator disruption notices from
   OVapi, trips at any time or with changes planned by Transitous, and checks of
   one planned departure of a line.
+- **MCP servers.** Read tools of Model Context Protocol servers the operator
+  lists in a catalog, such as a listings search or a price tracker. Each user
+  turns a server on in `/settings`, and connects their own key where the server
+  needs one; only the tools the catalog allowlists are offered, all of them
+  reads, so an agent watch can use them too ("tell me when this drops below
+  €100"). Their results count as outside content. Servers are reached over
+  HTTP; one that only speaks stdio runs as a sidecar container set up outside
+  this repository, never inside the application.
 - **Shared location.** Share a pin or a live location in the chat and ask about
   "here": buses and weather at that point, and nearby pharmacies, shops, or cafés
   from OpenStreetMap. Only the latest position is kept, briefly. "Save this as
@@ -280,7 +288,9 @@ curl http://127.0.0.1:8080/readyz
 ```
 
 Everything beyond health endpoints is opt-in through `HOME_AGENT_*_ENABLED`
-variables; `.env.example` lists them. Tests need no credentials:
+variables, and MCP servers through a catalog named by
+`HOME_AGENT_MCP_SERVERS_FILE`; `.env.example` lists them. Tests need no
+credentials:
 
 ```sh
 go test -race ./...
@@ -323,7 +333,7 @@ internal/routes/       saved journeys checked leg by leg
 internal/trip/         trips, bookings, and travel reminders
 internal/transit/      shared vocabulary of the train and bus services
 internal/connectors/   notion, google, gmail, calendar, nas, ns, bus, web,
-                       homeassistant, grafana, places
+                       homeassistant, grafana, places, mcp
 internal/chatgpt/      transcription, image generation, and usage
 internal/imagegen/     drawn pictures on the user's own subscription
 internal/reaction/     emoji reaction tool

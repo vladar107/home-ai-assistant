@@ -27,6 +27,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/google"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/grafana"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/homeassistant"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/mcp"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/ns"
@@ -160,6 +161,7 @@ type Inputs struct {
 	HA      *homeassistant.Config
 	Grafana *grafana.Config
 	Bus     *bus.Config
+	MCP     *mcp.Config
 
 	// ExtraProviders are tools offered ahead of every other, and WatchEvaluators replace or add the
 	// evaluators of their kinds; both are for tests.
@@ -252,6 +254,7 @@ type Assembly struct {
 	HomeAssistant *homeassistant.Service
 	Grafana       *grafana.Service
 	Bus           *bus.Service
+	MCP           *mcp.Service
 	Routes        *routes.Service
 	Locations     *userlocation.Service
 	Memory        *usermemory.Service
@@ -1065,6 +1068,22 @@ func (a *Assembly) buildConnectors(ctx context.Context) error {
 			return err
 		}
 		a.Bus = busService
+	}
+	if in.MCP != nil {
+		credentials, err := integration.NewCredentials(filepath.Join(in.DataDir, "integrations"))
+		if err != nil {
+			return fmt.Errorf("initialize MCP credentials: %w", err)
+		}
+		mcpConfig := *in.MCP
+		mcpConfig.Credentials, mcpConfig.Repository, mcpConfig.Switches, mcpConfig.Logger = credentials, in.Store, a.Switches, in.Logger
+		mcpService, err := mcp.NewService(mcpConfig)
+		if err != nil {
+			return fmt.Errorf("initialize MCP connector: %w", err)
+		}
+		if err := a.register(ctx, Connector{Module: mcpService, Tools: mcpService.Providers()}); err != nil {
+			return err
+		}
+		a.MCP = mcpService
 	}
 	// Typed nils would hide a missing connector, so only the configured ones are passed.
 	routeConfig := routes.Config{Location: a.location, Now: in.Core.Now}

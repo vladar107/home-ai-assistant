@@ -1,0 +1,31 @@
+{
+  "servers": [
+    {
+      "name": "listings",
+      "title": "Listings",
+      "description": "Search classified listings and read a listing's details.",
+      "url": "http://example-sidecar:8000/mcp",
+      "auth": "none",
+      "tools": [
+        { "name": "search_listings" },
+        { "name": "get_listing", "description": "Read one listing by its ID." }
+      ],
+      "guidance": "Use for second-hand items; prices are in the listing's currency."
+    },
+    {
+      "name": "prices",
+      "title": "Price tracker",
+      "description": "Look up a product's current price and price history.",
+      "url": "https://mcp.example.com/mcp",
+      "auth": "key",
+      "key_header": "Authorization",
+      "key_prefix": "Bearer ",
+      "key_pattern": "[A-Za-z0-9_-]{32,64}",
+      "tools": [
+        { "name": "lookup_price" },
+        { "name": "price_history" }
+      ],
+      "principals": ["person-one", "person-two"]
+    }
+  ]
+}

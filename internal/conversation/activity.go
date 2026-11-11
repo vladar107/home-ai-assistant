@@ -35,6 +35,7 @@ var activityLabels = map[string]string{
 	tools.ActivityGrafana:  "Checking the dashboards…",
 	tools.ActivityPlaces:   "Looking up places nearby…",
 	tools.ActivityImage:    "Drawing…",
+	tools.ActivityServices: "Checking a connected service…",
 }
 
 // turnActivity shows a chat that its request is being worked on: typing every TypingInterval and,

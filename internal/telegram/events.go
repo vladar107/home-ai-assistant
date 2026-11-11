@@ -299,7 +299,7 @@ func (e *eventsSection) act(ctx context.Context, principalID string, _ int64, ac
 // intercept takes the message after Add event source as the new source's name, and keeps any
 // token-looking message out of the model whether or not a name is awaited.
 func (e *eventsSection) intercept(ctx context.Context, principalID string, text string) (interception, error) {
-	if guarded := e.guard(text); guarded.handled {
+	if guarded := e.guard(principalID, text); guarded.handled {
 		return guarded, nil
 	}
 	if !e.consumeNaming(principalID) {
@@ -320,7 +320,7 @@ func (e *eventsSection) intercept(ctx context.Context, principalID string, text 
 	return interception{handled: true, reply: EventsCreatedReply(source.Name), reason: "events_source_created"}, nil
 }
 
-func (e *eventsSection) guard(text string) interception {
+func (e *eventsSection) guard(_ string, text string) interception {
 	if !events.LooksLikeToken(text) {
 		return interception{}
 	}

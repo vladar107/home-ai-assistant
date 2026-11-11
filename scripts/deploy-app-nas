@@ -83,6 +83,20 @@ if [[ ${HOME_AGENT_TYPESAFE_ENABLED:-false} == true ]]; then
   compose_files+=(-f compose.app.typesafe.yaml)
   compose_inputs+=(deploy/compose.app.typesafe.yaml)
 fi
+mcp_catalog=${HOME_AGENT_MCP_SERVERS_FILE_PATH:-}
+mcp_network_check=
+if [[ -n $mcp_catalog ]]; then
+  compose_files+=(-f compose.app.mcp.yaml)
+  compose_inputs+=(deploy/compose.app.mcp.yaml)
+  validate_path HOME_AGENT_MCP_SERVERS_FILE_PATH "$mcp_catalog"
+  [[ $mcp_catalog = "$HOME_AGENT_NAS_ROOT"/* ]] || {
+    echo "HOME_AGENT_MCP_SERVERS_FILE_PATH must be below HOME_AGENT_NAS_ROOT" >&2; exit 2;
+  }
+  [[ ${HOME_AGENT_MCP_NETWORK:-} =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || {
+    echo "HOME_AGENT_MCP_NETWORK must name the Docker network the sidecar project creates" >&2; exit 2;
+  }
+  mcp_network_check="sudo docker network inspect '$HOME_AGENT_MCP_NETWORK' >/dev/null"
+fi
 
 users_source=${HOME_AGENT_TELEGRAM_USERS_SOURCE:-deploy/telegram-users.json}
 if [[ $users_source = /* ]]; then
@@ -102,6 +116,19 @@ if [[ $nas_enabled == true ]]; then
     roots_source=$repo_root/$roots_source
   fi
   [[ -f $roots_source ]] || { echo "NAS roots file not found: $roots_source" >&2; exit 2; }
+fi
+if [[ -n $mcp_catalog ]]; then
+  mcp_source=${HOME_AGENT_MCP_SERVERS_SOURCE:-deploy/mcp-servers.json}
+  if [[ $mcp_source = /* ]]; then
+    [[ $mcp_source =~ ^/[A-Za-z0-9._/-]+$ && $mcp_source != *'/../'* && $mcp_source != */.. ]] || { echo "unsafe MCP servers path" >&2; exit 2; }
+  else
+    [[ $mcp_source =~ ^[A-Za-z0-9._/-]+$ && $mcp_source != ../* && $mcp_source != *'/../'* ]] || { echo "unsafe MCP servers path" >&2; exit 2; }
+    mcp_source=$repo_root/$mcp_source
+  fi
+  [[ -f $mcp_source ]] || { echo "MCP servers file not found: $mcp_source" >&2; exit 2; }
+  /usr/bin/python3 -I -m json.tool "$mcp_source" >/dev/null 2>&1 || {
+    echo "MCP servers file is not valid JSON: $mcp_source" >&2; exit 2;
+  }
 fi
 
 for path in "${compose_inputs[@]}" scripts/image-tag; do
@@ -156,12 +183,16 @@ if [[ $nas_enabled == true ]]; then
   scp -O -q "$roots_source" "$host:$HOME_AGENT_NAS_ROOTS_FILE_PATH.deploy"
   ssh -o BatchMode=yes "$host" "chmod 600 '$HOME_AGENT_NAS_ROOTS_FILE_PATH.deploy' && mv -f '$HOME_AGENT_NAS_ROOTS_FILE_PATH.deploy' '$HOME_AGENT_NAS_ROOTS_FILE_PATH'"
 fi
+if [[ -n $mcp_catalog ]]; then
+  scp -O -q "$mcp_source" "$host:$mcp_catalog.deploy"
+  ssh -o BatchMode=yes "$host" "chmod 600 '$mcp_catalog.deploy' && mv -f '$mcp_catalog.deploy' '$mcp_catalog'"
+fi
 
 awk '
   /^[[:space:]]*#/ || /^[[:space:]]*$/ { print; next }
   /^[A-Za-z_][A-Za-z0-9_]*=/ {
     key=$0; sub(/=.*/, "", key)
-    if (key == "HOME_AGENT_IMAGE" || key == "HOME_AGENT_IMAGE_TAG" || key == "HOME_AGENT_IMAGE_DIGEST" || key == "HOME_AGENT_VERSION" || key == "HOME_AGENT_TELEGRAM_USER_ID" || key == "HOME_AGENT_TELEGRAM_USERS_SOURCE" || key == "HOME_AGENT_NAS_ROOTS_SOURCE") next
+    if (key == "HOME_AGENT_IMAGE" || key == "HOME_AGENT_IMAGE_TAG" || key == "HOME_AGENT_IMAGE_DIGEST" || key == "HOME_AGENT_VERSION" || key == "HOME_AGENT_TELEGRAM_USER_ID" || key == "HOME_AGENT_TELEGRAM_USERS_SOURCE" || key == "HOME_AGENT_NAS_ROOTS_SOURCE" || key == "HOME_AGENT_MCP_SERVERS_SOURCE") next
   }
   { print }
 ' "$env_file" > "$tmp/runtime.env"
@@ -181,6 +212,7 @@ sudo chmod 700 '$HOME_AGENT_NAS_ROOT' '$deploy_dir' '$HOME_AGENT_CONFIG_PATH' '$
 test -f '$HOME_AGENT_CONFIG_PATH/telegram-users.json' && test ! -L '$HOME_AGENT_CONFIG_PATH/telegram-users.json' && chmod 600 '$HOME_AGENT_CONFIG_PATH/telegram-users.json'
 cd '$deploy_dir'
 sudo docker network inspect home-observability >/dev/null
+$mcp_network_check
 if ! sudo docker pull '$image_ref'; then
   echo 'could not pull $image_ref' >&2
   echo 'if the registry login expired, run on the NAS: sudo docker login ghcr.io' >&2

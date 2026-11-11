@@ -23,7 +23,7 @@ import (
 var ExcludedFromExport = map[string]string{
 	"model_connections":           "a model subscription's credentials",
 	"google_accounts":             "a Google account's credentials",
-	"integration_connections":     "a Notion workspace's credentials",
+	"integration_connections":     "a Notion workspace's or an MCP server's credentials",
 	"capability_grants":           "access the operator grants",
 	"telegram_allowlist":          "identity the operator configures",
 	"conversation_sessions":       "conversation history",
@@ -113,9 +113,12 @@ func (a *Assembly) buildExports() error {
 const switchesTable = "integration_switches"
 
 // switchesExporter is the integration switches section of a user's export: each integration the
-// user turned on or off. The connections themselves, and their tokens, are never in it. A switch
-// already chosen here is left as it is. It lives here because the integration package sits below
-// the approvals that the export package builds on.
+// user turned on or off, MCP servers included. The connections themselves, and their tokens and
+// keys, are never in it. A switch already chosen here is left as it is. A restored mcp-<server>
+// switch grants nothing while the catalog has no server of that name, but it applies to a server
+// the operator later adds under the same name; a server outside the user's principal list refuses
+// its tools where they are offered and run, whatever the switch says. It lives here because the
+// integration package sits below the approvals that the export package builds on.
 type switchesExporter struct{}
 
 func (switchesExporter) Section() export.Section {

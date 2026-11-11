@@ -1,0 +1,28 @@
+# MCP servers. Applied on top of compose.app.yaml only while HOME_AGENT_MCP_SERVERS_FILE_PATH is
+# set, so a deployment without a catalog mounts nothing and joins no other network.
+#
+# The application never starts a server process: it reaches each catalog server over streamable
+# HTTP. A server that only speaks stdio runs behind a stdio-to-HTTP proxy in a separate Compose
+# project outside this repository, which creates the external network named here. Anything on
+# that network can reach the application's HTTP listener, including the unauthenticated backlog
+# API, so it may hold only the application and relays the operator controls; third-party server
+# code stays on a network of its own behind such a relay. Listing the network here adds it to the
+# base file's networks rather than replacing them.
+services:
+  home-agent:
+    environment:
+      HOME_AGENT_MCP_SERVERS_FILE: /etc/home-agent/mcp-servers.json
+    volumes:
+      - type: bind
+        source: ${HOME_AGENT_MCP_SERVERS_FILE_PATH:?set HOME_AGENT_MCP_SERVERS_FILE_PATH}
+        target: /etc/home-agent/mcp-servers.json
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      - mcp-servers
+
+networks:
+  mcp-servers:
+    external: true
+    name: ${HOME_AGENT_MCP_NETWORK:?set HOME_AGENT_MCP_NETWORK to the network the sidecar project creates}

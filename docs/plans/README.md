@@ -145,6 +145,7 @@ plan that links back to the earlier record.
 | 0133 | [Gmail reads the message as the user sees it](0133-gmail-reads-what-the-user-sees.md) | done |
 | 0134 | [Calendar listings that page instead of failing](0134-calendar-listing-pages.md) | done |
 | 0135 | [Withdrawing when nothing is waiting is not a failure](0135-withdraw-nothing-waiting.md) | done |
+| 0136 | [MCP servers from an operator catalog](0136-mcp-servers.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.
