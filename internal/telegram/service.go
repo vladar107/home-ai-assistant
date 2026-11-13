@@ -1149,6 +1149,9 @@ func (s *Service) processCallback(ctx context.Context, bot Bot, updateID int64, 
 		case err != nil:
 			return processingResult{}, "settings_action", err
 		default:
+			if named, ok := section.(verbSection); ok {
+				action = named.verb(action)
+			}
 			result.command = section.prefix() + "." + action
 		}
 	} else {

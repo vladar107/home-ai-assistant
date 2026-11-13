@@ -1,6 +1,6 @@
 # 0147 — A trip moves to the user's tab from its own controls
 
-Status: `proposed`
+Status: `done`
 
 ## Context
 
@@ -27,16 +27,19 @@ there with everything it sends, with the refusals plan 0141 gives.
   it shows a button "Use this tab for <title>" when the tab the settings were opened in can be the
   trip's, by the check the tool uses. Pressing it takes the tab as the tool does and answers with
   the result. Where the tab cannot be a trip's, such as the main view or a feed's tab, the section
-  says in one line to open the settings in the tab the trip should use.
+  says in one line to open the settings in the tab the trip should use. In a trip's own tab it
+  names the trip that uses the tab instead, and with tabs off it says nothing about tabs.
 - **The section shows trips whether or not the scan is on** and whether or not mail can be read;
-  the scan's own switch stays as it is.
+  the scan's own switch stays as it is. The section itself is still there only where the operator
+  configured Google, as before.
 - **At most five trips get a button,** nearest first, and a button names the trip by its ID, which
   fits the callback limit.
 - **The settings opened as the first message of a new tab still belong to the main view,** as any
   command does, so the user opens them in a tab that already exists; the section's line says so.
 - **The trip tools lead with the tab.** The descriptions of `trip_update` and `trip_add` start
-  their tab sentence, and the tool hint gets an example of the request, so "this is the tab for
-  the trip" points at the tool.
+  their tab sentence, and the tool hint's question gets an example of the request, so "this is
+  the tab for the trip" points at the tool. The question has no tool of its own in it, so the
+  example speaks of the tool that moves the thing the tab is for.
 - **A deleted trip tab is replaced as today.** Asking first was considered: a tab taken for gone
   leaves no record, so the trip would need a marker of its own. The button makes that unnecessary.
 
@@ -55,7 +58,7 @@ there with everything it sends, with the refusals plan 0141 gives.
 
 - `internal/telegram` (trips section, its wiring to the trip reader and the tabs), tests
 - `internal/trip/tools.go`, `internal/judgment` (the hint example)
-- `internal/wiring`
+- `internal/app`
 - `README.md`
 
 ## Validation

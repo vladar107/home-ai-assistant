@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 )
 
 type recorded struct {
@@ -192,5 +194,34 @@ func TestAskRejectsInvalidAnswers(t *testing.T) {
 				t.Error("expected validation error")
 			}
 		})
+	}
+}
+
+// The hint question gives the request to make a tab a trip's as an example, beside the start of
+// each tool's description.
+func TestHintQuestionGivesTheTabRequestAsAnExample(t *testing.T) {
+	var got struct {
+		Questions map[string]struct {
+			Instructions string            `json:"instructions"`
+			Criteria     map[string]string `json:"criteria"`
+		} `json:"questions"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Error(err)
+		}
+		_, _ = io.WriteString(w, `{"model":"jev-1.13.0","answers":{"tool":{"type":"choice","choice":"trip_update","confidence":0.9}}}`)
+	}))
+	defer server.Close()
+	client := newTestClient(t, server, io.Discard, &fakeRecorder{})
+	definitions := []agentruntime.ToolDefinition{{Name: "trip_update", Description: "Move a trip to the tab this conversation is in."}}
+
+	name, answered, err := NewToolHinter(client, stubOptIn(true)).Hint(context.Background(), "alice", "this is the tab for my trip", nil, definitions)
+	if err != nil || !answered || name != "trip_update" {
+		t.Fatalf("hint = %q %v %v", name, answered, err)
+	}
+	question := got.Questions["tool"]
+	if !strings.Contains(question.Instructions, "such as 'this is the tab for the trip'") || question.Criteria["trip_update"] != definitions[0].Description {
+		t.Fatalf("question = %+v", question)
 	}
 }

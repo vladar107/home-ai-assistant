@@ -153,7 +153,7 @@ var definitions = []tools.Definition{
 	},
 	{
 		Name:        toolAdd,
-		Description: "Record a trip the user told you about, with its dates and bookings, and set a check-in reminder for each booking that has a check-in time.",
+		Description: "Put a trip not recorded yet in this conversation's tab when the user says this is the tab for it (use_this_tab), or just record a trip the user told you about, with its dates and bookings; either way set a check-in reminder for each booking with a check-in time.",
 		Risk:        tools.RiskWrite,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"title":{"type":"string","description":"A short title, at most 80 characters, no links."},` +
@@ -167,7 +167,7 @@ var definitions = []tools.Definition{
 	},
 	{
 		Name:        toolUpdate,
-		Description: "Change one trip by its id: its title, destination, or dates, add, change, or remove bookings, cancel it, end it now when the user is back, or move it to the tab this conversation is in. Give only what changes.",
+		Description: "Move a trip to this conversation's tab when the user says this is the trip's tab (use_this_tab), or change one trip by its id: its title, destination, or dates, add, change, or remove bookings, cancel it, or end it now when the user is back. Give only what changes.",
 		Risk:        tools.RiskWrite,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"id":{"type":"string","description":"The trip's id from trip_list."},` +

@@ -78,9 +78,16 @@ borrowed between users.
   Talking there, or replying to its reminders, is a conversation about that
   trip, and `/new` starts another one about it. A deleted tab of a trip still
   ahead comes back with its next message; `/close` removes the tab of a trip
-  that is over. A trip can use a tab you already have instead: say, in that
-  tab, that it is the trip's tab, and the trip moves there, keeping the tab's
-  name and icon; a trip added in a tab you named takes it from the start.
+  that is over. A trip can use a tab you already have instead: send
+  `/settings` in that tab, open *Everyday tools*, and press *Use this tab for*
+  the trip, and the trip moves there, keeping the tab's name and icon. The
+  button is there for up to five planned trips, nearest first, in a tab a trip
+  can use; the main view, a feed's tab, and the tab of another trip, a
+  project, or a watch show one line instead. Use a tab that already has a
+  message, since a command sent as the first message of a new tab is answered
+  in the main view. Saying in the tab that it is the trip's tab moves the trip
+  too, when the assistant reads it so; a trip added in a tab you named takes
+  it from the start.
 - **Act and tell.** A clear request to set up or change a scheduled job, a
   watch, a saved route, a memory instruction, or a Notion property is done at
   once. A "Done" message follows the reply with an Undo button per action,

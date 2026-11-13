@@ -58,6 +58,7 @@ func (h *ToolHinter) Hint(ctx context.Context, principalID, message string, earl
 		map[string]Question{"tool": Choice(
 			"Which one tool would the assistant most likely need to use to handle `message`? "+
 				"`earlier`, when present, is the conversation just before it: read a short follow-up such as 'yes' or 'do it' as answering the assistant's last line there. "+
+				"A message that says the tab it is in is the tab for something, such as 'this is the tab for the trip', needs the tool that moves that thing to this tab. "+
 				"Pick none when the message is conversation, a follow-up that needs no lookup, or general knowledge.",
 			options)})
 	if err != nil {

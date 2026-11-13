@@ -63,6 +63,12 @@ type helpSection interface {
 	helpTopic() string
 }
 
+// verbSection names the action a press is recorded as when the action carries an item's ID, so the
+// recorded command has one value per action.
+type verbSection interface {
+	verb(action string) string
+}
+
 // restrictedSection is a section only some principals may see, such as one the operator configured
 // for themselves alone.
 type restrictedSection interface {

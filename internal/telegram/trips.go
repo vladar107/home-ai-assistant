@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +28,10 @@ const (
 	tripsOnAction      = "on"
 	tripsOffAction     = "off"
 	tripsScanAction    = "scan"
+	tripsTabAction     = "tab"
+
+	// tripTabButtons is how many trips the Trips page offers to move to its tab.
+	tripTabButtons = 5
 
 	// tripCardBookings and tripCardRunes keep a card well inside Telegram's 4096-character limit.
 	tripCardBookings = 8
@@ -43,6 +49,13 @@ const (
 	TripsTooManyNote     = "You already have the maximum number of scheduled jobs. Remove one in /jobs, then turn Trips on."
 	TripsScanningNote    = "Scanning your mail and calendar now; any trips I find arrive here as cards, and news about trips near or under way arrives in their tabs."
 	TripsBusyNote        = "A scan is already running; any trips it finds arrive here as cards."
+
+	// TripsTabLine stands in for the buttons that move a trip where the page's tab cannot be a
+	// trip's.
+	TripsTabLine = "To move a planned trip to a tab of yours, send /settings in that tab and open this page there; a trip cannot use this one. Use a tab that already has a message, because /settings as the first message of a new tab is answered in the main view."
+	// TripsTabHelp is added to the app_help topic of the page.
+	TripsTabHelp     = "With tabs on, each planned trip that has not ended, up to five, has a button \"Use this tab for\" with its title on this page when the page is opened in a tab the trip can use: a tab of conversations the user has, or the tab of a trip that is over. Pressing it moves the trip there with its pinned summary, reminders, notices, and news; the tab keeps its name and icon. The main view, the Reminders and other feed tabs, and the tab of another trip, a project, or a watch cannot be used. The user sends /settings in a tab that already has a message, since /settings as the first message of a new tab is answered in the main view. Saying in a tab that it is the trip's tab also moves the trip."
+	TripsTabGoneNote = "That trip is over or no longer planned, so it has no tab to move."
 )
 
 // TripController is implemented by the trip service; nil leaves the buttons of trip cards and
@@ -411,15 +424,30 @@ func editPlain(ctx context.Context, client botAPI, chatID, messageID int64, text
 	return client.EditKeyboard(ctx, chatID, messageID, text, nil)
 }
 
+// tripIDPattern is the shape of the IDs the trip service gives its trips; a press with any other
+// is not one of the page's buttons.
+var tripIDPattern = regexp.MustCompile(`^[0-9a-f]{8}$`)
+
+// TripTabController is what the Trips page needs to move a trip to the tab the page is opened in;
+// the trip service implements it.
+type TripTabController interface {
+	// Trips returns the principal's suggested and planned trips that have not ended, earliest first.
+	Trips(ctx context.Context, principalID string) ([]trip.Trip, error)
+	CheckTab(ctx context.Context, principalID, tripID string, threadID int64, named bool) (trip.TabMove, error)
+	UseTab(ctx context.Context, principalID, id string, threadID int64) (trip.Result, error)
+}
+
 // NewTripsSection is the page that turns the principal's Trips scan of Google mail and calendar on
-// and off.
-func NewTripsSection(schedules ScheduleController, google GoogleController, logger *slog.Logger, telemetry Telemetry) Section {
-	return tripsSection{schedules: schedules, google: google, logger: logger, telemetry: telemetryOrNoop(telemetry)}
+// and off, and moves a planned trip to the tab the page is opened in; nil trips leaves the moves
+// out.
+func NewTripsSection(schedules ScheduleController, google GoogleController, trips TripTabController, logger *slog.Logger, telemetry Telemetry) Section {
+	return tripsSection{schedules: schedules, google: google, trips: trips, logger: logger, telemetry: telemetryOrNoop(telemetry)}
 }
 
 type tripsSection struct {
 	schedules ScheduleController
 	google    GoogleController
+	trips     TripTabController
 	logger    *slog.Logger
 	telemetry Telemetry
 }
@@ -427,6 +455,13 @@ type tripsSection struct {
 func (t tripsSection) prefix() string { return tripsSectionPrefix }
 
 func (t tripsSection) helpTopic() string { return "trips" }
+
+func (t tripsSection) verb(action string) string {
+	if strings.HasPrefix(action, tripsTabAction+":") {
+		return tripsTabAction
+	}
+	return action
+}
 
 func (t tripsSection) enabled(ctx context.Context, principalID string) (bool, error) {
 	jobs, err := t.schedules.Jobs(ctx, principalID)
@@ -469,6 +504,19 @@ func (t tripsSection) summary(ctx context.Context, principalID string) (settings
 }
 
 func (t tripsSection) render(ctx context.Context, principalID string) (settingsView, error) {
+	view, err := t.scanView(ctx, principalID)
+	if err != nil {
+		return settingsView{}, err
+	}
+	lines, rows, err := t.tabView(ctx, principalID)
+	if err != nil {
+		return settingsView{}, err
+	}
+	view.lines, view.rows = append(view.lines, lines...), rows
+	return view, nil
+}
+
+func (t tripsSection) scanView(ctx context.Context, principalID string) (settingsView, error) {
 	enabled, err := t.enabled(ctx, principalID)
 	if err != nil {
 		return settingsView{}, err
@@ -495,7 +543,97 @@ func (t tripsSection) render(ctx context.Context, principalID string) (settingsV
 	}, nil
 }
 
+// plannedTrips is the principal's planned trips that have not ended, nearest first.
+func (t tripsSection) plannedTrips(ctx context.Context, principalID string) ([]trip.Trip, error) {
+	trips, err := t.trips.Trips(ctx, principalID)
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(trips, func(found trip.Trip) bool { return found.Status != trip.StatusPlanned }), nil
+}
+
+// tabView offers the tab the page is in to each of the nearest planned trips that could use it, by
+// the check the trip tools make, and names the trip that already does. Where none can, one line
+// says where to open the page instead; with tabs off there is nothing to say.
+func (t tripsSection) tabView(ctx context.Context, principalID string) ([]string, [][]InlineButton, error) {
+	if t.trips == nil {
+		return nil, nil, nil
+	}
+	planned, err := t.plannedTrips(ctx, principalID)
+	if err != nil {
+		return nil, nil, err
+	}
+	threadID := thread.From(ctx)
+	var lines []string
+	var rows [][]InlineButton
+	for _, found := range planned[:min(len(planned), tripTabButtons)] {
+		move, err := t.trips.CheckTab(ctx, principalID, found.ID, threadID, false)
+		switch {
+		case err != nil:
+			return nil, nil, err
+		case move.Refusal == trip.TabsOffRefusal:
+			return nil, nil, nil
+		case move.Already:
+			lines = append(lines, fmt.Sprintf("%q uses this tab.", found.Title))
+		case move.Refusal == "":
+			rows = append(rows, []InlineButton{{Text: "Use this tab for " + found.Title, CallbackData: tripsSectionPrefix + ":" + tripsTabAction + ":" + found.ID}})
+		}
+	}
+	if len(planned) > 0 && len(lines) == 0 && len(rows) == 0 {
+		lines = []string{TripsTabLine}
+	}
+	return lines, rows, nil
+}
+
+// useTab moves the principal's planned trip to the tab the press came from, under the checks the
+// trip tools make, and says what happened or why not.
+func (t tripsSection) useTab(ctx context.Context, principalID, tripID string) (settingsOutcome, error) {
+	planned, err := t.plannedTrips(ctx, principalID)
+	if err != nil {
+		return settingsOutcome{}, err
+	}
+	isPlanned := func(planned []trip.Trip) bool {
+		return slices.ContainsFunc(planned, func(found trip.Trip) bool { return found.ID == tripID })
+	}
+	if !isPlanned(planned) {
+		return settingsOutcome{note: TripsTabGoneNote}, nil
+	}
+	threadID := thread.From(ctx)
+	if threadID <= 0 {
+		return settingsOutcome{note: TripsTabLine}, nil
+	}
+	result, err := t.trips.UseTab(ctx, principalID, tripID, threadID)
+	switch {
+	case err != nil:
+		return settingsOutcome{}, err
+	case result.Rejection != "":
+		// A trip that stopped being planned since the check is refused in words meant for the
+		// model; only a refusal of the tab is the user's to read.
+		if planned, err = t.plannedTrips(ctx, principalID); err != nil {
+			return settingsOutcome{}, err
+		}
+		if !isPlanned(planned) {
+			return settingsOutcome{note: TripsTabGoneNote}, nil
+		}
+		return settingsOutcome{note: result.Rejection}, nil
+	case result.Move != nil && result.Move.Already:
+		return settingsOutcome{note: fmt.Sprintf("%q already uses this tab.", result.Trip.Title)}, nil
+	}
+	t.telemetry.ContextLogger(ctx, t.logger).InfoContext(ctx, "trips.tab.moved", "principal_id", principalID, "trip_id", tripID, "thread_id", threadID)
+	note := fmt.Sprintf("Moved %q to this tab: its summary is pinned here, and its reminders, notices, and news arrive here.", result.Trip.Title)
+	if result.Move != nil && result.Move.Left {
+		note += " The tab it had stays with its messages; you can delete it."
+	}
+	return settingsOutcome{note: note}, nil
+}
+
 func (t tripsSection) act(ctx context.Context, principalID string, _ int64, action string) (settingsOutcome, error) {
+	if tripID, isTab := strings.CutPrefix(action, tripsTabAction+":"); isTab {
+		if t.trips == nil || !tripIDPattern.MatchString(tripID) {
+			return settingsOutcome{}, errUnknownSettingsAction
+		}
+		return t.useTab(ctx, principalID, tripID)
+	}
 	id := schedule.TripsJobID(principalID)
 	switch action {
 	case tripsOnAction:

@@ -141,6 +141,9 @@ func (s *Service) helpText(ctx context.Context, principalID, topic string) (stri
 			if section.prefix() == mcpSectionPrefix {
 				fmt.Fprintf(&builder, "\n%s", ServicesHelp)
 			}
+			if section.prefix() == tripsSectionPrefix {
+				fmt.Fprintf(&builder, "\n%s", TripsTabHelp)
+			}
 		}
 	}
 	return builder.String(), nil
