@@ -3,7 +3,7 @@
 #
 # The application never starts a server process: it reaches each catalog server over streamable
 # HTTP. A server that only speaks stdio runs behind a stdio-to-HTTP proxy in a separate Compose
-# project outside this repository, which creates the external network named here. Anything on
+# project, such as the one in mcp-servers/, which creates the external network named here. Anything on
 # that network can reach the application's HTTP listener, including the unauthenticated backlog
 # API, so it may hold only the application and relays the operator controls; third-party server
 # code stays on a network of its own behind such a relay. Listing the network here adds it to the

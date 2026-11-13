@@ -1,11 +1,12 @@
-# Home MCP Servers Project Instructions
+# MCP Servers Instructions
 
 ## Purpose
 
-- This repository runs Model Context Protocol servers that have no hosted
-  endpoint, as the `home-mcp-servers` Compose project on the NAS. Clients such
-  as Home Agent join the private `home-mcp` network and call
-  `http://<server>:8000/mcp`.
+- This folder runs Model Context Protocol servers that have no hosted
+  endpoint, as the `home-mcp-servers` Compose project on the NAS, separate
+  from the application's project. The application joins the private `home-mcp`
+  network and calls `http://<server>:8000/mcp`. These instructions add to the
+  repository's.
 - Only servers that every household member can share belong here: no account,
   no key, read-only tools. A server that needs one person's login does not.
 - The servers are third-party code. Treat every one as untrusted: it gets no
@@ -24,17 +25,13 @@
 
 ## Development Workflow
 
-- Work directly on `main`; this private project does not use pull requests.
-- Keep history linear with signed conventional commits, one coherent change
-  per commit. Amend the relevant commit when correcting committed work instead
-  of adding a follow-up repair commit.
 - Pin every base image by digest and every upstream source by commit and
   archive checksum. Read the upstream diff before a bump, and bump in its own
   commit.
 - Install only hash-locked wheels. No build backend or other unpinned code may
   run during an image build.
-- After changes run `bash -n scripts/*`, `shellcheck scripts/*`, and
-  `REVISION=dev docker compose config --quiet`.
+- After changes run, in this folder, `bash -n scripts/*`,
+  `shellcheck scripts/*`, and `REVISION=dev docker compose config --quiet`.
 - Before deploying a change to a server or the proxy, bring the stack up
   locally and run `smoke/client.py` and `smoke/probes.py` as `scripts/smoke`
   does.
@@ -46,7 +43,8 @@
   a container running as another user cannot read a mounted file.
 - Never commit `.env.nas`. The NAS path is configuration, not a secret, but it
   stays in the ignored file.
-- Deployment is manual from the operator's Mac with `scripts/deploy`. It builds
+- Deployment is manual from the operator's Mac with this folder's
+  `scripts/deploy`, apart from the application's. It builds
   the images on the NAS, tagged with the commit, and keeps the previous ones;
   roll back by deploying the previous commit.
 - Run NAS Docker commands through `ssh -tt home-nas` with `sudo`; the NAS

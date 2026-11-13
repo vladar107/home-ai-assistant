@@ -5,8 +5,8 @@ usage() { echo "usage: $0 [ssh-host] [env-file]" >&2; exit 2; }
 host=${1:-home-nas}
 env_file=${2:-.env.nas}
 [[ $host =~ ^[A-Za-z0-9][A-Za-z0-9._@-]*$ ]] || usage
-repo_root=$(git rev-parse --show-toplevel)
-[[ $env_file = /* ]] || env_file=$repo_root/$env_file
+stack_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+[[ $env_file = /* ]] || env_file=$stack_root/$env_file
 [[ -f $env_file ]] || { echo "NAS environment file not found: $env_file" >&2; exit 2; }
 # shellcheck disable=SC1090
 source "$env_file"

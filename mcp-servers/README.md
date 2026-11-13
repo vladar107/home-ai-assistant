@@ -1,11 +1,12 @@
-# Home MCP Servers
+# MCP Servers
 
 Model Context Protocol servers for the household NAS that have no hosted
 endpoint. Each runs as untrusted third-party code: isolated on its own internal
 network, allowed out only to the hosts it needs, and reached by clients through
-a relay. The services run as one Docker Compose project, `home-mcp-servers`.
-Clients such as [Home Agent](https://github.com/vladar107/home-ai-assistant)
-join the private `home-mcp` network and call `http://<server>:8000/mcp`.
+a relay. The services run as one Docker Compose project, `home-mcp-servers`,
+separate from the application's. The application joins the private `home-mcp`
+network and calls `http://<server>:8000/mcp`; see
+[MCP servers](../docs/operations.md#mcp-servers) for its side.
 
 ## Servers
 
@@ -48,6 +49,7 @@ which prompts for a password, so every Docker step runs in one interactive
 `ssh -tt` session.
 
 ```sh
+cd mcp-servers
 cp nas.env.example .env.nas   # once; set MCP_ROOT
 scripts/nas-preflight         # once; prints the Docker versions
 scripts/deploy

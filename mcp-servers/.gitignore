@@ -1,8 +1,0 @@
-# Operator configuration
-.env
-.env.*
-
-# Editors and operating systems
-.DS_Store
-.idea/
-.vscode/

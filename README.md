@@ -373,6 +373,7 @@ internal/export/       a user's own data as a signed file, and restoring it
 internal/clip/ localtime/ weekday/ httpretry/ testutil/  small shared helpers
 internal/store/sqlite/ persistence and migrations
 deploy/                Compose files and configuration examples
+mcp-servers/           MCP servers as a Compose project of their own
 scripts/               operator scripts (deploy, secrets, checks)
 third_party/           vendored code and assets with their licenses
 ```

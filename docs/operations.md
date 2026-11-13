@@ -247,8 +247,10 @@ separate.
 The assistant can offer the read tools of Model Context Protocol servers the
 operator chose. It reaches them over streamable HTTP only and never starts a
 server process: a hosted server is called at its HTTPS address, and a server that
-only speaks stdio runs as a sidecar in a Compose project of its own, outside this
-repository.
+only speaks stdio runs as a sidecar in a Compose project of its own. The
+[`mcp-servers`](../mcp-servers/README.md) folder holds such a project, with each
+server isolated behind an egress proxy and a relay; it is deployed apart from the
+application.
 
 **The catalog.** Servers are listed in a JSON file, kept outside Git as
 `deploy/mcp-servers.json` (ignored) and copied to the NAS on each deploy. Start

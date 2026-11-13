@@ -5,8 +5,8 @@ usage() { echo "usage: $0 [ssh-host] [env-file]" >&2; exit 2; }
 host=${1:-home-nas}
 env_file=${2:-.env.nas}
 [[ $host =~ ^[A-Za-z0-9][A-Za-z0-9._@-]*$ ]] || usage
-repo_root=$(git rev-parse --show-toplevel)
-[[ $env_file = /* ]] || env_file=$repo_root/$env_file
+stack_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+[[ $env_file = /* ]] || env_file=$stack_root/$env_file
 [[ -f $env_file ]] || { echo "NAS environment file not found: $env_file" >&2; exit 2; }
 # shellcheck disable=SC1090
 source "$env_file"
@@ -19,16 +19,16 @@ source "$env_file"
 
 inputs=(compose.yaml .dockerignore proxy marktplaats smoke)
 for path in "${inputs[@]}"; do
-  [[ -z $(git -C "$repo_root" status --porcelain --untracked-files=all -- "$path") ]] || {
+  [[ -z $(git -C "$stack_root" status --porcelain --untracked-files=all -- "$path") ]] || {
     echo "deployment input has uncommitted changes: $path" >&2; exit 2;
   }
 done
 
-revision=$(git -C "$repo_root" rev-parse HEAD)
+revision=$(git -C "$stack_root" rev-parse HEAD)
 deploy_dir=$MCP_ROOT/deploy
 staging=$MCP_ROOT/deploy.next
 ssh -o BatchMode=yes "$host" "test ! -L '$MCP_ROOT' && test ! -L '$deploy_dir' && test ! -L '$staging' && rm -rf '$staging' && { umask 077; mkdir -p '$staging'; }"
-git -C "$repo_root" archive --format=tar HEAD "${inputs[@]}" \
+git -C "$stack_root" archive --format=tar HEAD "${inputs[@]}" \
   | ssh -o BatchMode=yes "$host" "tar -xf - -C '$staging'"
 # The revision tags the images, so the previous deploy's images stay for a rollback.
 ssh -o BatchMode=yes "$host" "printf 'REVISION=%s\n' '$revision' > '$staging/.env' && chmod 600 '$staging/.env'"

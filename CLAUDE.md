@@ -45,7 +45,7 @@
 - Treat Telegram numeric user IDs and other allowlist identifiers as configuration, not secrets.
 - Keep deployments manual and tag-pinned from the operator's Mac, recording the resolved image digest; CI must not receive NAS access or deployment authority.
 - Keep NAS and observability endpoints private and reach administrative interfaces through the configured SSH alias and tunnels.
-- Deploy the application as its own project beside the `monitoring` project under the NAS Docker parent folder. The monitoring project is deployed from the separate `home-monitoring` repository; this repository deploys only the application.
+- Deploy the application as its own project beside the `monitoring` project under the NAS Docker parent folder. The monitoring project is deployed from the separate `home-monitoring` repository; this repository deploys the application and, as a separate project from `mcp-servers/` with its own instructions, the MCP servers it calls.
 - Run NAS Docker commands interactively with `sudo` over the configured SSH alias; the account has no Docker socket access and `sudo` always prompts for a password, so non-interactive sessions fail.
 - Prometheus is not published on the LAN. Verify metrics through Grafana's data source proxy.
 - Machine-specific operator details (hosts, SSH alias, Keychain items, verification URLs) live in the ignored `CLAUDE.local.md` beside this file; read it if present.

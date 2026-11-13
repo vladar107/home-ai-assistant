@@ -8,6 +8,7 @@ HANDOFF.md
 data
 deploy
 docs
+mcp-servers
 secrets
 spikes
 *.db

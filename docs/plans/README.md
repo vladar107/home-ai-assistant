@@ -157,6 +157,7 @@ plan that links back to the earlier record.
 | 0145 | [Links to what an agent watch found](0145-agent-watch-links.md) | done |
 | 0146 | [Trip updates that are true, short, and in the language of their tab](0146-trip-updates-worth-reading.md) | done |
 | 0147 | [A trip moves to the user's tab from its own controls](0147-trip-tab-from-its-controls.md) | done |
+| 0148 | [The MCP servers' Compose project lives in this repository](0148-mcp-servers-in-this-repository.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.
