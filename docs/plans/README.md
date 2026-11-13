@@ -155,6 +155,8 @@ plan that links back to the earlier record.
 | 0143 | [A fixed tab survives its own creation notice](0143-fixed-tab-survives-its-creation-notice.md) | done |
 | 0144 | [A tab of its own for each agent watch](0144-agent-watch-tabs.md) | done |
 | 0145 | [Links to what an agent watch found](0145-agent-watch-links.md) | done |
+| 0146 | [Trip updates that are true, short, and in the language of their tab](0146-trip-updates-worth-reading.md) | proposed |
+| 0147 | [A trip moves to the user's tab from its own controls](0147-trip-tab-from-its-controls.md) | proposed |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.
