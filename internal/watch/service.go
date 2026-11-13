@@ -603,6 +603,7 @@ func alertText(watch Watch, observation Observation) string {
 	if headline := strings.TrimSpace(observation.Headline); headline != "" {
 		lines = append(lines, headline)
 	}
+	lines = append(lines, observation.Links...)
 	for _, detail := range observation.Details {
 		if detail = strings.TrimSpace(detail); detail != "" {
 			lines = append(lines, detail)
@@ -698,10 +699,15 @@ func (s *Service) localize(ctx context.Context, alert Alert) string {
 	if alert.Language == "" || s.rewriter == nil {
 		return alert.Text
 	}
+	original, links := alert.Text, []placedLink(nil)
+	if alert.Kind == KindAgent {
+		original, links = withoutLinks(alert.Text)
+	}
 	started := s.now()
 	rewriteCtx, cancel := context.WithTimeout(ctx, rewriteTimeout)
-	rewritten, err := s.rewriter.RewriteAlert(rewriteCtx, alert.PrincipalID, alert.Language, alert.Text)
+	rewritten, err := s.rewriter.RewriteAlert(rewriteCtx, alert.PrincipalID, alert.Language, original)
 	cancel()
+	rewritten = strings.TrimSpace(rewritten)
 	outcome := rewriteRewritten
 	switch {
 	case ctx.Err() != nil:
@@ -710,8 +716,12 @@ func (s *Service) localize(ctx context.Context, alert Alert) string {
 		outcome = rewriteTimedOut
 	case err != nil:
 		outcome = rewriteFailed
-	case !faithful(alert.Text, rewritten):
+	case !faithful(original, rewritten):
 		outcome = rewriteRejected
+	default:
+		if rewritten = withLinks(original, rewritten, links); utf8.RuneCountInString(rewritten) > maximumMessageRunes {
+			outcome = rewriteRejected
+		}
 	}
 	if s.telemetry != nil {
 		s.telemetry.RecordWatchRewrite(ctx, alert.PrincipalID, outcome)
@@ -726,7 +736,52 @@ func (s *Service) localize(ctx context.Context, alert Alert) string {
 		return alert.Text
 	}
 	s.logger.InfoContext(ctx, "watch.alert.rewrite", attributes...)
-	return strings.TrimSpace(rewritten)
+	return rewritten
+}
+
+// placedLink is a link line taken out of an alert, with how many of the other lines stood before
+// it.
+type placedLink struct {
+	before int
+	line   string
+}
+
+// withoutLinks takes the link lines out of an agent watch's alert, so the rewrite never sees an
+// address: the rewriting model cannot alter one, and an address's digits are not held against a
+// good rewrite.
+func withoutLinks(text string) (string, []placedLink) {
+	var kept []string
+	var links []placedLink
+	for _, line := range strings.Split(text, "\n") {
+		if isLinkLine(line) {
+			links = append(links, placedLink{before: len(kept), line: line})
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n"), links
+}
+
+// withLinks puts the link lines back into the rewrite where they stood in the original. A rewrite
+// that did not keep the original's lines has no such place, and carries them at its end.
+func withLinks(original, rewritten string, links []placedLink) string {
+	if len(links) == 0 {
+		return rewritten
+	}
+	lines := strings.Split(rewritten, "\n")
+	aligned := len(lines) == strings.Count(original, "\n")+1
+	var restored []string
+	next := 0
+	for index, line := range lines {
+		for ; aligned && next < len(links) && links[next].before == index; next++ {
+			restored = append(restored, links[next].line)
+		}
+		restored = append(restored, line)
+	}
+	for ; next < len(links); next++ {
+		restored = append(restored, links[next].line)
+	}
+	return strings.Join(restored, "\n")
 }
 
 var numberPattern = regexp.MustCompile(`\d+`)
@@ -801,11 +856,23 @@ func (s *Service) traceAlert(ctx context.Context, alert Alert, chatID, messageID
 }
 
 // remember keeps the delivered message for the owner's next conversation turn, so a reply to it has
-// something to refer to.
+// something to refer to. A message too long for it is cut, before a link line that would not fit
+// whole, so the turn is never told half an address.
 func (s *Service) remember(alert Alert, sent string, messageID int64) {
 	text := []rune(strings.TrimSpace(sent))
 	if len(text) > maximumNoticeRunes {
-		text = append(text[:maximumNoticeRunes], '…')
+		cut := maximumNoticeRunes
+		start, end := cut, cut
+		for start > 0 && text[start-1] != '\n' {
+			start--
+		}
+		for end < len(text) && text[end] != '\n' {
+			end++
+		}
+		if alert.Kind == KindAgent && end > cut && isLinkLine(string(text[start:end])) {
+			cut = start
+		}
+		text = append(text[:cut], '…')
 	}
 	kept := notice{
 		text:      fmt.Sprintf("One of the user's watches (id %s) just sent them this message:\n%s", alert.WatchID, string(text)),

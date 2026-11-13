@@ -959,11 +959,31 @@ code-checked watches of the same cycle: `Evaluate` starts it and skips, and the
 first `Evaluate` after it finishes returns what it found, unless the watch was edited
 meanwhile. The turn's message carries the instruction, the condition, the value last
 reported, and the local time, and the reply must end with a JSON verdict (`met`,
-`value`, `headline`, `details`, or `error`); a reply without one, an `error`, or a
-failed turn is a failed check. The state is `met` or `unmet` with the normalized
-value: a new value is stored silently unless the condition holds and the watch
-alerts on a change, and a new window starts from the previous one's state and last
-check, so a condition that keeps holding is not reported again at midnight. Its
+`value`, `headline`, `details`, `links`, or `error`); a reply without one, an
+`error`, or a failed turn is a failed check. The state is `met` or `unmet` with the
+normalized value: a new value is stored silently unless the condition holds and the
+watch alerts on a change, and a new window starts from the previous one's state and
+last check, so a condition that keeps holding is not reported again at midnight.
+`links` are the pages of what the check found, each a title and an address the model
+copied from a tool result. Code keeps the first five whose address is an absolute
+`https` one with an ASCII host, no user info, at most 200 characters, and no
+whitespace, invisible character, backtick, bracket, or double asterisk, and drops
+the rest, and a field or entry of another shape, without failing the check. An
+address that ends in one of `.,;:!?` or holds a double quote, angle bracket, or
+vertical bar is dropped too, since the chat client would end its link there and open
+another page than the one shown. Each kept entry becomes one line of the alert
+between the headline and the details, a marker, the title, and the address written
+out; the title is made one line of at most 60 characters without markup, control,
+or invisible characters, and is the host when nothing is left, when it is not text,
+or when it reads as an address itself (`://`, a word starting with `www.`, or a
+domain), which the client would make a second link of. A marker at the start of a
+headline or details line and the invisible format characters in them are removed,
+so only these lines are link lines. They are not part of the state, and they are
+taken out of the text before it is rewritten into the watch's language and put back
+at the same lines afterwards, or at the end when the rewrite has another number of
+lines, so an address is never rewritten and its digits never fail a rewrite; a
+rewrite that no longer fits one message with them is not used. The note of the
+alert for the next turn ends before a link line it cannot hold whole. Its
 alerts were written by a model that read web pages or mail, so they reach the next
 turn as outside content, and as private when the check read private content.
 

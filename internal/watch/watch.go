@@ -314,6 +314,9 @@ type Observation struct {
 	Headline string
 	// Details are further lines of the alert, such as the reason or an alternative.
 	Details []string
+	// Links are the lines an agent watch's alert carries between the headline and the details, one
+	// for the page of each thing found.
+	Links []string
 	// Silent stores a changed State without any message, for a change the watch's triggers leave
 	// out, such as one of several disruptions ending, while what was alerted on still holds.
 	Silent bool

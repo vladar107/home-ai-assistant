@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/localtime"
@@ -26,6 +30,18 @@ const (
 	maximumValueRunes    = 200
 	maximumHeadlineRunes = 300
 	maximumDetailsRunes  = 1000
+
+	maximumLinks            = 5
+	maximumLinkAddressRunes = 200
+	maximumLinkTitleRunes   = 60
+	// linkMarker starts a link line of an alert and linkSeparator stands between its title and its
+	// address. linkMarkup is what neither may hold, besides two asterisks in a row; an address may
+	// not hold linkBreaks or end in linkEndings either.
+	linkMarker    = "🔗 "
+	linkSeparator = ": "
+	linkMarkup    = "`[]()"
+	linkBreaks    = `"<>|`
+	linkEndings   = ".,;:!?"
 
 	agentMet   = "met"
 	agentUnmet = "unmet"
@@ -186,7 +202,8 @@ func checkMessage(watch Watch, previous string, now time.Time) string {
 	return prompt.WatchCheck(watch.Target.Name, now, localtime.SavedZone(watch.Zone), fmt.Sprintf(
 		"Check: %s\nTell the user when: %s\nValue last reported: %s\n\n"+
 			"End your reply with one JSON object and nothing after it: "+
-			`{"met": true or false, "value": "the short value the condition is about, such as a price, a sender, or a date", "headline": "one line for the user saying what you found", "details": "optional short text, such as where you found it"}. `+
+			`{"met": true or false, "value": "the short value the condition is about, such as a price, a sender, or a date", "headline": "one line for the user saying what you found", "details": "optional short text, such as where you found it", "links": [{"title": "a short name of the item", "url": "its https address"}]}. `+
+			"In links give the page of each item you found, at most five, each address copied exactly from a tool result of this run; leave links out when no tool returned an address. "+
 			`If you cannot do the check, such as when a tool is missing or a page does not load, end instead with {"error": "what failed"}.`,
 		watch.Check.Instruction, watch.Check.Condition, last,
 	))
@@ -197,7 +214,9 @@ type verdict struct {
 	Value    string `json:"value"`
 	Headline string `json:"headline"`
 	Details  string `json:"details"`
-	Error    string `json:"error"`
+	// Links stays raw so that a malformed list or entry is dropped rather than failing the check.
+	Links json.RawMessage `json:"links"`
+	Error string          `json:"error"`
 }
 
 // observe turns a check turn's reply into an observation. The state is met or unmet with the
@@ -226,17 +245,128 @@ func observe(watch Watch, previous string, reply turn.ScheduledReply) (Observati
 	observation := Observation{
 		State:     state,
 		Triggered: met,
-		Headline:  clip.Runes(strings.TrimSpace(found.Headline), maximumHeadlineRunes),
+		Headline:  unmarked(clip.Runes(strings.TrimSpace(found.Headline), maximumHeadlineRunes)),
+		Links:     linkLines(found.Links),
 		Private:   reply.Private,
 		Silent:    previous != "" && previousKey == key && !(met && wanted(watch, TriggerChange)),
 	}
-	if details := clip.Runes(strings.TrimSpace(found.Details), maximumDetailsRunes); details != "" {
+	if details := unmarked(clip.Runes(strings.TrimSpace(found.Details), maximumDetailsRunes)); details != "" {
 		observation.Details = []string{details}
 	}
 	if met && observation.Headline == "" {
 		return Observation{}, fmt.Errorf("the check's answer has no headline")
 	}
 	return observation, nil
+}
+
+var (
+	asteriskRun = regexp.MustCompile(`\*{2,}`)
+	// addressLike finds what a chat client links on its own: a scheme, a word starting with www.,
+	// or a domain, taken widely as any dot between a letter, digit, or hyphen and two letters.
+	addressLike = regexp.MustCompile(`(?i)://|(^|\s)www\.|[\p{L}\p{N}-]\.\p{L}{2,}`)
+)
+
+// linkLines turns the answer's links into the alert's link lines, keeping the first maximumLinks
+// that pass. Whatever is malformed is dropped, since a check that found something must still alert.
+func linkLines(raw json.RawMessage) []string {
+	var entries []json.RawMessage
+	if json.Unmarshal(raw, &entries) != nil {
+		return nil
+	}
+	var lines []string
+	for _, entry := range entries {
+		var link struct {
+			Title any    `json:"title"`
+			URL   string `json:"url"`
+		}
+		if len(lines) == maximumLinks {
+			break
+		}
+		if json.Unmarshal(entry, &link) != nil {
+			continue
+		}
+		address := strings.TrimSpace(link.URL)
+		host, valid := linkHost(address)
+		if !valid {
+			continue
+		}
+		title, _ := link.Title.(string)
+		lines = append(lines, linkMarker+linkTitle(title, host)+linkSeparator+address)
+	}
+	return lines
+}
+
+// linkHost reports the host of an address that may be shown: absolute https with an ASCII host and
+// no user info, short, and free of whitespace, of invisible characters, and of what the message
+// markup reads, so it reaches the chat as the plain address it is. Telegram ends the link it makes
+// of a written-out address at some characters, and an address holding one of those, or ending in
+// punctuation, would open another page than the one shown.
+func linkHost(address string) (string, bool) {
+	if utf8.RuneCountInString(address) > maximumLinkAddressRunes || strings.ContainsAny(address, linkMarkup+linkBreaks) ||
+		strings.Contains(address, "**") || strings.ContainsFunc(address, func(r rune) bool { return !unicode.IsGraphic(r) || unicode.IsSpace(r) }) ||
+		strings.TrimRight(address, linkEndings) != address {
+		return "", false
+	}
+	parsed, err := url.Parse(address)
+	if err != nil || parsed.Scheme != "https" || parsed.User != nil {
+		return "", false
+	}
+	host := parsed.Hostname()
+	if host == "" || strings.ContainsFunc(host, func(r rune) bool { return r > unicode.MaxASCII }) {
+		return "", false
+	}
+	return host, true
+}
+
+// linkTitle makes a title one plain line: no control or invisible characters, none of the markup an
+// address may not hold, and at most maximumLinkTitleRunes. It is the host when nothing is left, and
+// when it reads as an address itself, which Telegram would make a second link of.
+func linkTitle(title, host string) string {
+	title = strings.Map(func(r rune) rune {
+		switch {
+		case unicode.IsSpace(r):
+			return ' '
+		case !unicode.IsGraphic(r), strings.ContainsRune(linkMarkup, r):
+			return -1
+		}
+		return r
+	}, title)
+	title = strings.Join(strings.Fields(asteriskRun.ReplaceAllString(title, "")), " ")
+	if title == "" || addressLike.MatchString(title) {
+		title = host
+	}
+	return clip.Runes(title, maximumLinkTitleRunes)
+}
+
+// isLinkLine reports whether a line of an alert is a link line as linkLines writes them.
+func isLinkLine(line string) bool {
+	rest, marked := strings.CutPrefix(line, linkMarker)
+	separator := strings.LastIndex(rest, linkSeparator)
+	if !marked || separator < 0 {
+		return false
+	}
+	host, valid := linkHost(rest[separator+len(linkSeparator):])
+	return valid && linkTitle(rest[:separator], host) == rest[:separator]
+}
+
+// unmarked takes the invisible format characters out of a headline or of details and the link
+// marker off the start of every line, so only a line that code wrote can be read back as a link
+// line or look like one.
+func unmarked(text string) string {
+	mark := strings.TrimSpace(linkMarker)
+	lines := strings.Split(strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, text), "\n")
+	for index, line := range lines {
+		for strings.HasPrefix(strings.TrimLeftFunc(line, unicode.IsSpace), mark) {
+			line = strings.TrimLeftFunc(line, unicode.IsSpace)[len(mark):]
+		}
+		lines[index] = line
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 // parseVerdict reads the JSON object a check turn's reply ends with, allowing a code fence around
