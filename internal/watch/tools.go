@@ -57,7 +57,7 @@ func proposeGuidance(zone string, kinds []string) string {
 			"Each check is one read-only model turn on the user's own subscription with the tools the user has switched on, run without this conversation, so write check.instruction (up to 600 characters) so that a fresh turn can do it alone: what to look at and how, with any URL, search, or mail query to use. Put when to tell the user in check.condition (up to 300 characters), such as the cheapest price is below 150 euros. " +
 			"Give it a short name, such as Lisbon flight price. Pick the longest check.interval_minutes (30 to 1440, 60 by default) that still serves the request and say the interval in your proposal; set check.until (YYYY-MM-DD) when the watch stops mattering after a date. " +
 			"Its triggers are enter, when the condition starts to hold (the default), change, when the value it reports changes while the condition holds, and clear, when it stops holding after an alert; ask for change or clear only when the user wants to hear them. " +
-			"An agent watch runs every day and all day unless the user narrows it. Each user may have " + fmt.Sprint(MaximumAgentWatchesPerPrincipal) + " agent watches."
+			"An agent watch runs every day and all day unless the user narrows it. With tabs on it gets its own tab with a pinned summary, where its messages go and where the user can talk about it. Each user may have " + fmt.Sprint(MaximumAgentWatchesPerPrincipal) + " agent watches."
 	}
 	if slices.Contains(kinds, KindWeather) {
 		guidance += " A weather watch tells the user when rain is coming at a place, such as tell me when rain is coming at home, from the 15-minute forecast: give the place in name, as the user says it, or current_location true for wherever the user's shared location is at each check. " +
@@ -636,6 +636,7 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		}
 		if created {
 			s.logger.InfoContext(ctx, "watch.created", "principal_id", record.PrincipalID, "watch_id", record.ID, "kind", spec.Kind)
+			s.changed(ctx, record.PrincipalID, record.ID)
 		}
 		undo, err := s.undoPayload(ctx, record.PrincipalID, record.ID, nil, false)
 		if err != nil {
@@ -729,6 +730,7 @@ func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (ap
 		}
 	}
 	s.logger.InfoContext(ctx, "watch.updated", "principal_id", record.PrincipalID, "watch_id", current.ID, "kind", spec.Kind)
+	s.changed(ctx, record.PrincipalID, current.ID)
 	undo, err := s.undoPayload(ctx, record.PrincipalID, current.ID, &current, travelChanged)
 	if err != nil {
 		return approval.Outcome{}, err

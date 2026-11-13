@@ -262,6 +262,10 @@ type Watch struct {
 	TravelPause bool
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+	// SummaryMessageID is the message pinned in an agent watch's tab that sums the watch up, zero
+	// when there is none. It means something only in the chat it was sent to, so an Undo's record
+	// of a watch leaves it out.
+	SummaryMessageID int64 `json:"-"`
 }
 
 // Occurrence is one day's window of a watch, as an evaluator receives it.
@@ -411,6 +415,8 @@ type Repository interface {
 	SetWatchEnabled(ctx context.Context, principalID, watchID string, enabled bool, now time.Time) (bool, error)
 	MuteWatch(ctx context.Context, principalID, watchID, date string) (bool, error)
 	SetWatchTravelPause(ctx context.Context, principalID, watchID string, on bool) (bool, error)
+	// SetWatchSummary records the message pinned in the watch's tab; zero forgets it.
+	SetWatchSummary(ctx context.Context, principalID, watchID string, messageID int64) error
 	DeleteWatch(ctx context.Context, principalID, watchID string) (bool, error)
 	// DeleteUnchangedWatch deletes the watch only while it was last changed at updatedAt.
 	DeleteUnchangedWatch(ctx context.Context, principalID, watchID string, updatedAt time.Time) (bool, error)

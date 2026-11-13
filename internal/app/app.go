@@ -40,6 +40,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/telegram"
 	"github.com/vladar107/home-ai-assistant/internal/trip"
 	"github.com/vladar107/home-ai-assistant/internal/turn"
+	"github.com/vladar107/home-ai-assistant/internal/watch"
 	"github.com/vladar107/home-ai-assistant/internal/wiring"
 )
 
@@ -308,12 +309,13 @@ func (a *App) buildAssembly(ctx context.Context, client *telegram.Client, config
 		Alerts:       telegram.WatchAlertSender{Client: client},
 		TaskMessages: telegram.TaskMessenger{Client: client},
 		Events:       telegram.EventSender{Client: client},
-		Tabs: func(namer *turn.Engine, trips trip.Reader, projects project.Reader) wiring.TabServices {
-			a.tabs = telegram.NewTabs(client, a.store, trips, projects, namer, a.logger, a.telemetry)
+		Tabs: func(namer *turn.Engine, trips trip.Reader, projects project.Reader, watches watch.Reader) wiring.TabServices {
+			a.tabs = telegram.NewTabs(client, a.store, trips, projects, watches, namer, a.logger, a.telemetry)
 			return wiring.TabServices{
 				Feeds: a.tabs, Replies: a.tabs,
 				Trips:    &telegram.TripNotifier{Client: client, Chats: a.store, Feeds: a.tabs},
 				Projects: telegram.ProjectNotifier{Chats: a.store, Feeds: a.tabs},
+				Watches:  telegram.WatchNotifier{Chats: a.store, Feeds: a.tabs},
 			}
 		},
 		Principals: configured,
@@ -405,7 +407,7 @@ func (a *App) buildTelegram(ctx context.Context, client *telegram.Client, config
 	}
 
 	if a.tabs == nil {
-		a.tabs = telegram.NewTabs(client, a.store, nil, nil, nil, a.logger, a.telemetry)
+		a.tabs = telegram.NewTabs(client, a.store, nil, nil, nil, nil, a.logger, a.telemetry)
 	}
 	deps := telegram.Dependencies{
 		Client:     client,

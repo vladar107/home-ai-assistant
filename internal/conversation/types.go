@@ -143,10 +143,11 @@ func (e *OpenElsewhereError) Error() string { return "the conversation is open i
 // The kinds of subject a conversation can be about: one scheduled job, reminders included, one
 // watch, or one object with a tab of its own, such as a trip or a project. A subject is its kind
 // and the job's, watch's, or object's ID. An object's subject is also the destination of its
-// messages and what the tab registry records its tab as serving.
+// messages and what the tab registry records its tab as serving; an agent watch is such an object,
+// and a watch of another kind has the same kind of subject without a tab.
 const (
 	SubjectJob     = "job"
-	SubjectWatch   = "watch"
+	SubjectWatch   = thread.ObjectWatch
 	SubjectTrip    = thread.ObjectTrip
 	SubjectProject = thread.ObjectProject
 )

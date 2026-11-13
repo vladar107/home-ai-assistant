@@ -49,6 +49,8 @@ const (
 	exportAgentWatch  = "e0a1b2c3d4e5f60c"
 	exportPlaceWatch  = "e0a1b2c3d4e5f60d"
 	exportTokenHash   = "1111111111111111111111111111111111111111111111111111111111111111"
+	// exportWatchSummary is the message pinned in the exported agent watch's tab.
+	exportWatchSummary = 4242
 
 	exportFactText        = "Prefers tea in the morning."
 	exportInstructionText = "Answer briefly."
@@ -140,6 +142,7 @@ func (h *conversationHarness) seedExport(principal string) {
 			[]any{exportPlaceJob, principal, string(placeJobConfig), stamp(now.AddDate(100, 0, 0)), created, created}},
 		{`INSERT INTO watches (id, principal_id, kind, config, enabled, created_at, updated_at, travel_pause) VALUES (?, ?, 'agent', ?, 1, ?, ?, 1), (?, ?, 'place', ?, 0, ?, ?, 0)`,
 			[]any{exportAgentWatch, principal, string(agent), created, created, exportPlaceWatch, principal, string(arrival), created, created}},
+		{`UPDATE watches SET summary_message_id = ? WHERE id = ?`, []any{exportWatchSummary, exportAgentWatch}},
 	} {
 		if _, err := h.db.ExecContext(h.ctx, statement.query, statement.args...); err != nil {
 			h.t.Fatalf("%s: %v", statement.query, err)
@@ -437,6 +440,9 @@ func TestExportRestoresEverySectionIntoAnEmptyDatabase(t *testing.T) {
 	}
 	if target.count(`SELECT count(*) FROM memory_entries WHERE principal_id = 'bob'`) != 0 {
 		t.Fatal("another user's entry was restored")
+	}
+	if source.count(`SELECT count(*) FROM watches WHERE summary_message_id = ?`, exportWatchSummary) != 1 || target.count(`SELECT count(*) FROM watches WHERE summary_message_id IS NOT NULL`) != 0 {
+		t.Fatal("a watch's summary message was exported, or the exported watch had none")
 	}
 
 	again := target.restorePreview(3, 101, data)

@@ -220,6 +220,8 @@ type harnessOptions struct {
 	// watches adds the watch service, on the schedules clock, checking departures with this
 	// evaluator; tests run its cycles themselves.
 	watches watch.Evaluator
+	// agentWatches checks agent watches in place of a model turn, when watches is set.
+	agentWatches watch.Evaluator
 	// recent keeps each chat turn's message and plain reply for the guards, as a TypeSafe key does.
 	recent *turnstate.Registry
 	// typingInterval, draftDelay, and draftInterval replace the turn indicator's timings.
@@ -481,8 +483,8 @@ func (h *conversationHarness) wiringInputs(t *testing.T, runtime agentruntime.Ag
 		Store: h.store, Logger: logger, Telemetry: &integrationTelemetry{Telemetry: cmp.Or(options.telemetry, observability.Noop()), h: h},
 		Runtime: runtime, SessionFiles: sessionFiles,
 		Chat: h.client, Reminders: ReminderSender{Client: h.client}, Alerts: WatchAlertSender{Client: h.client},
-		TaskMessages: TaskMessenger{Client: h.client}, Tabs: func(namer *turn.Engine, trips trip.Reader, projects project.Reader) wiring.TabServices {
-			return h.newTabs(logger, namer, trips, projects)
+		TaskMessages: TaskMessenger{Client: h.client}, Tabs: func(namer *turn.Engine, trips trip.Reader, projects project.Reader, watches watch.Reader) wiring.TabServices {
+			return h.newTabs(logger, namer, trips, projects, watches)
 		},
 		Principals: unnamed, DataDir: filepath.Dir(h.attachmentsDir), Zone: zone,
 		Core: wiring.CoreConfig{
@@ -511,6 +513,9 @@ func (h *conversationHarness) wiringInputs(t *testing.T, runtime agentruntime.Ag
 	}
 	if options.watches != nil {
 		in.WatchEvaluators = map[string]watch.Evaluator{watch.KindDeparture: options.watches}
+		if options.agentWatches != nil {
+			in.WatchEvaluators[watch.KindAgent] = options.agentWatches
+		}
 	}
 	if options.events {
 		in.Events = EventSender{Client: h.client}
@@ -570,12 +575,15 @@ func (h *conversationHarness) wiringInputs(t *testing.T, runtime agentruntime.Ag
 	return in
 }
 
-// newTabs builds the tab services as the application does, once the engine and the trip reader
-// exist.
-func (h *conversationHarness) newTabs(logger *slog.Logger, namer *turn.Engine, trips trip.Reader, projects project.Reader) wiring.TabServices {
-	h.tabSet = NewTabs(h.client, h.store, trips, projects, namer, logger, nil)
+// newTabs builds the tab services as the application does, once the engine and the readers exist.
+func (h *conversationHarness) newTabs(logger *slog.Logger, namer *turn.Engine, trips trip.Reader, projects project.Reader, watches watch.Reader) wiring.TabServices {
+	h.tabSet = NewTabs(h.client, h.store, trips, projects, watches, namer, logger, nil)
 	h.tripNotifier = &TripNotifier{Client: h.client, Chats: h.store, Feeds: h.tabSet}
-	return wiring.TabServices{Feeds: h.tabSet, Replies: h.tabSet, Trips: h.tripNotifier, Projects: ProjectNotifier{Chats: h.store, Feeds: h.tabSet}}
+	return wiring.TabServices{
+		Feeds: h.tabSet, Replies: h.tabSet, Trips: h.tripNotifier,
+		Projects: ProjectNotifier{Chats: h.store, Feeds: h.tabSet},
+		Watches:  WatchNotifier{Chats: h.store, Feeds: h.tabSet},
+	}
 }
 
 // telegramService builds the Telegram service on the assembly as the application does.

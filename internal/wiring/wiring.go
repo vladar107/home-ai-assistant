@@ -107,18 +107,21 @@ type TripNotices interface {
 }
 
 // TabServices are the tabs the services deliver into: where scheduled runs and watch alerts go,
-// where a tab's first reply names it, where trip notices go, and what keeps each project's tab.
+// where a tab's first reply names it, where trip notices go, and what keeps each project's and each
+// agent watch's tab.
 type TabServices struct {
 	Feeds   thread.Feeds
 	Replies conversation.TabReplies
 	Trips   TripNotices
 	// Projects keeps each project's tab; nil leaves projects without tabs.
 	Projects project.Tabs
+	// Watches keeps each agent watch's tab; nil leaves watches without tabs of their own.
+	Watches watch.Tabs
 }
 
 // TabsFactory builds the tab services over what only Build can supply: the engine that names tabs
-// and the trip and project readers.
-type TabsFactory func(namer *turn.Engine, trips trip.Reader, projects project.Reader) TabServices
+// and the trip, project, and watch readers.
+type TabsFactory func(namer *turn.Engine, trips trip.Reader, projects project.Reader, watches watch.Reader) TabServices
 
 // Inputs is everything Build needs. The connector configurations are nil for a connector the
 // operator did not configure; Build fills the fields they leave empty that it knows, such as the
@@ -653,7 +656,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	}
 	a.Turns = engine
 	projectReader := project.NewReader(in.Store, a.location, in.Core.Now)
-	tabs := in.Tabs(engine, tripReader, projectReader)
+	tabs := in.Tabs(engine, tripReader, projectReader, watch.NewReader(in.Store))
 	// Scheduled runs reach only the owner's own chat, resolved from the allowlist at delivery.
 	scheduler, err := schedule.NewService(schedule.Config{
 		Zone: in.Zone, TickInterval: in.Core.ScheduleTick, Now: in.Core.Now,
@@ -726,7 +729,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	}
 	if in.Core.Watches {
 		// Alerts reach only the owner's own chat, resolved from the allowlist at delivery.
-		watches, err := watch.NewService(watch.Config{Zone: in.Zone, Now: in.Core.Now, Travel: trip.NewTravel(in.Store), Telemetry: telemetry, Rewriter: engine, Feeds: tabs.Feeds, Traces: in.Store}, in.Store, in.Store, in.Alerts, approvals, in.Logger)
+		watches, err := watch.NewService(watch.Config{Zone: in.Zone, Now: in.Core.Now, Travel: trip.NewTravel(in.Store), Telemetry: telemetry, Rewriter: engine, Feeds: tabs.Feeds, Tabs: tabs.Watches, Traces: in.Store}, in.Store, in.Store, in.Alerts, approvals, in.Logger)
 		if err != nil {
 			return fmt.Errorf("initialize watches: %w", err)
 		}

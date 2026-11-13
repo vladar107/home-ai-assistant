@@ -252,7 +252,7 @@ func TestATakenTabKeepsTheUsersNameAndIcon(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.nextEdit()
-	restarted := NewTabs(h.client, h.store, h.trips, nil, nil, slog.New(slog.NewTextHandler(h.logs, nil)), nil)
+	restarted := NewTabs(h.client, h.store, h.trips, nil, nil, nil, slog.New(slog.NewTextHandler(h.logs, nil)), nil)
 	restarted.refreshTopicIcons(h.ctx)
 	if _, offered := restarted.IconFor(tripTabIcon); !offered {
 		t.Fatal("the restarted tabs were not offered the trip icon")
@@ -269,8 +269,9 @@ func TestATakenTabKeepsTheUsersNameAndIcon(t *testing.T) {
 	h.expectNoNewTab()
 }
 
-// The main view, a feed's tab, an open trip's tab, and a project's tab cannot be a trip's, and a
-// suggested or ended trip does not move; each is refused with the reason and changes nothing.
+// The main view, a feed's tab, an open trip's tab, a project's tab, and a watch's tab cannot be a
+// trip's, and a suggested or ended trip does not move; each is refused with the reason and changes
+// nothing.
 func TestATripRefusesTabsItCannotUse(t *testing.T) {
 	t.Parallel()
 	h := newTripTabHarness(t, true)
@@ -288,8 +289,11 @@ func TestATripRefusesTabsItCannotUse(t *testing.T) {
 	reminders := h.wantFeedTab("Reminders", thread.FeedReminders)
 	receive(t, h.ctx, h.tabs.topicEdits)
 	h.nextMessage()
-	const projectTab = 70
+	const projectTab, watchTab = 70, 72
 	if err := h.store.AddSubjectTab(h.ctx, "alice", projectTab, "Example project", thread.ProjectDestination("0000000000000001")); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.AddSubjectTab(h.ctx, "alice", watchTab, "Example watch", thread.WatchDestination("0000000000000002")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -330,6 +334,7 @@ func TestATripRefusesTabsItCannotUse(t *testing.T) {
 	past.StartsAt, past.EndsAt = past.StartsAt.Add(-10*24*time.Hour), past.EndsAt.Add(-10*24*time.Hour)
 	ended := h.addTripFrom(past)
 	h.refusedIn(10, userTab, "trip_update", `{"id":"`+ended.ID+`","use_this_tab":true}`, "That trip has ended, so it does not move to another tab.")
+	h.refusedIn(11, watchTab, "trip_update", move, "This tab is a watch's, so it cannot be a trip's tab.")
 
 	if h.tripTab(planned.ID) != tab || h.tripTab(other.ID) != otherTab || h.tripTab(ended.ID) != 0 {
 		t.Fatalf("a refused move changed the trips' tabs")

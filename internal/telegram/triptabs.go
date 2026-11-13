@@ -26,12 +26,18 @@ const (
 	tripTabMainViewRefusal = "This is the main view, which cannot be a trip's tab. The user can say it in the tab they want the trip in."
 	tripTabUnknownRefusal  = "This tab is not in my records yet, so a trip cannot use it."
 	tripTabOtherRefusal    = "This tab cannot be a trip's tab."
-	tripTabProjectRefusal  = "This tab is a project's, so it cannot be a trip's tab."
+	tripTabObjectRefusal   = "This tab is %s, so it cannot be a trip's tab."
 	tripTabUnnamedRefusal  = "The user did not name this tab."
 	tripTabChangedRefusal  = "This tab changed while the trip was moving to it; nothing moved."
 	tripGoneRefusal        = "That trip no longer exists."
 	tripClosedRefusal      = "That trip has ended or is no longer planned, so it does not move to another tab."
 )
+
+// tripTabHolders say whose tab a trip is refused, by the kind of object the tab serves.
+var tripTabHolders = map[string]string{
+	thread.ObjectProject: "a project's",
+	thread.ObjectWatch:   "a watch's",
+}
 
 var _ TripFeeds = (*Tabs)(nil)
 
@@ -157,8 +163,9 @@ func (s *Tabs) lockObjects(principalID string, subjects ...string) func() {
 // checkTripTab says whether the trip could use the tab, and returns the subject the tab serves now
 // with the trip that is over it served, if any.
 // A tab of conversations can be used, as can the tab of a trip that ended, was cancelled, or is
-// gone; the main view, a feed's tab, an open trip's or a project's, and a tab the registry does not
-// know cannot. With named, the tab must be one the user named.
+// gone; the main view, a feed's tab, an open trip's, the tab of another kind of object such as a
+// project or a watch, and a tab the registry does not know cannot. With named, the tab must be one
+// the user named.
 func (s *Tabs) checkTripTab(ctx context.Context, kind objectKind, principalID, tripID string, threadID int64, named bool) (trip.TabMove, string, tabObject, error) {
 	refused := func(text string) (trip.TabMove, string, tabObject, error) {
 		return trip.TabMove{Refusal: text}, "", tabObject{}, nil
@@ -194,7 +201,7 @@ func (s *Tabs) checkTripTab(ctx context.Context, kind objectKind, principalID, t
 	case tab.Subject == "" && tab.NamedBy == thread.NamedByFixed, tab.Subject != "" && !held:
 		return refused(tripTabOtherRefusal)
 	case held && heldKind != thread.ObjectTrip:
-		return refused(tripTabProjectRefusal)
+		return refused(fmt.Sprintf(tripTabObjectRefusal, tripTabHolders[heldKind]))
 	case held:
 		other, exists, err := kind.load(ctx, principalID, heldID)
 		if err != nil {

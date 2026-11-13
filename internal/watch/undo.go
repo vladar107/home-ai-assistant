@@ -101,6 +101,7 @@ func (s *Service) undoUpdated(ctx context.Context, principalID string, undo watc
 			if _, err := s.repository.SetWatchTravelPause(ctx, principalID, watch.ID, undo.Before.TravelPause); err != nil {
 				return approval.Outcome{}, err
 			}
+			s.changed(ctx, principalID, watch.ID)
 		}
 		return approval.Outcome{Text: "Restored the watch " + spec.Label() + " as it was."}, nil
 	}
@@ -124,6 +125,7 @@ func (s *Service) undoUpdated(ctx context.Context, principalID string, undo watc
 		return approval.Outcome{}, &approval.UndoRefusal{Reason: "the watch was changed since; change it in /jobs instead."}
 	}
 	s.logger.InfoContext(ctx, "watch.updated", "principal_id", principalID, "watch_id", watch.ID, "kind", spec.Kind)
+	s.changed(ctx, principalID, watch.ID)
 	return approval.Outcome{Text: "Restored the watch " + spec.Label() + " as it was."}, nil
 }
 
@@ -167,5 +169,6 @@ func (s *Service) undoRemoved(ctx context.Context, principalID string, removed W
 		return approval.Outcome{}, &approval.UndoRefusal{Reason: "the watch is already back."}
 	}
 	s.logger.InfoContext(ctx, "watch.created", "principal_id", principalID, "watch_id", watch.ID, "kind", spec.Kind)
+	s.changed(ctx, principalID, watch.ID)
 	return approval.Outcome{Text: "Watching " + spec.Label() + " again; its earlier alerts are not kept."}, nil
 }

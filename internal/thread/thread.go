@@ -62,10 +62,13 @@ func FeedSubject(feed string) string {
 const (
 	ObjectTrip    = "trip"
 	ObjectProject = "project"
+	// ObjectWatch is an agent watch. Its destination is the subject a conversation about any watch
+	// has, so a watch of another kind has that subject and no tab.
+	ObjectWatch = "watch"
 )
 
 // objectKinds are the kinds of object with a tab of their own, in a fixed order.
-var objectKinds = []string{ObjectTrip, ObjectProject}
+var objectKinds = []string{ObjectTrip, ObjectProject, ObjectWatch}
 
 // ObjectKinds returns the kinds of object with a tab of their own.
 func ObjectKinds() []string { return slices.Clone(objectKinds) }
@@ -105,6 +108,11 @@ func ProjectOf(destination string) (string, bool) {
 	return objectOfKind(destination, ObjectProject)
 }
 
+// WatchDestination is where an agent watch's messages go: the watch's own tab.
+func WatchDestination(watchID string) string {
+	return ObjectDestination(ObjectWatch, watchID)
+}
+
 func objectOfKind(destination, wanted string) (string, bool) {
 	kind, id, found := ObjectOf(destination)
 	if !found || kind != wanted {
@@ -117,7 +125,7 @@ func objectOfKind(destination, wanted string) (string, bool) {
 // which is where everything goes while the bot has tabs off.
 type Feeds interface {
 	Thread(ctx context.Context, principalID string, chatID int64, feed string) (int64, error)
-	// Destination resolves a destination such as TripDestination or ProjectDestination, and the feed when the
-	// destination has no tab to offer.
+	// Destination resolves a destination such as TripDestination, ProjectDestination, or
+	// WatchDestination, and the feed when the destination has no tab to offer.
 	Destination(ctx context.Context, principalID string, chatID int64, destination, feed string) (int64, error)
 }

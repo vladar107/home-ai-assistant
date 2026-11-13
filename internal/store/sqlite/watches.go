@@ -13,7 +13,7 @@ import (
 
 var _ watch.Repository = (*Store)(nil)
 
-const watchColumns = `id, principal_id, config, enabled, COALESCE(muted_on, ''), created_at, updated_at, travel_pause`
+const watchColumns = `id, principal_id, config, enabled, COALESCE(muted_on, ''), created_at, updated_at, travel_pause, COALESCE(summary_message_id, 0)`
 
 func (s *Store) CreateWatch(ctx context.Context, w watch.Watch, limit int) (bool, error) {
 	if s == nil || s.db == nil {
@@ -160,6 +160,17 @@ func (s *Store) MuteWatch(ctx context.Context, principalID, watchID, date string
 		return false, fmt.Errorf("mute watch: %w", err)
 	}
 	return affectedOne(result, "muted watch")
+}
+
+func (s *Store) SetWatchSummary(ctx context.Context, principalID, watchID string, messageID int64) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("set watch summary: SQLite store is not open")
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE watches SET summary_message_id = NULLIF(?, 0) WHERE principal_id = ? AND id = ?`, messageID, principalID, watchID); err != nil {
+		return fmt.Errorf("set watch summary: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) DeleteWatch(ctx context.Context, principalID, watchID string) (bool, error) {
@@ -430,7 +441,7 @@ func (s *Store) queryWatches(ctx context.Context, query string, arguments ...any
 func scanWatch(row rowScanner) (watch.Watch, error) {
 	var w watch.Watch
 	var config, createdAt, updatedAt string
-	if err := row.Scan(&w.ID, &w.PrincipalID, &config, &w.Enabled, &w.MutedOn, &createdAt, &updatedAt, &w.TravelPause); err != nil {
+	if err := row.Scan(&w.ID, &w.PrincipalID, &config, &w.Enabled, &w.MutedOn, &createdAt, &updatedAt, &w.TravelPause, &w.SummaryMessageID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return watch.Watch{}, err
 		}

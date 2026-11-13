@@ -109,6 +109,8 @@ type Config struct {
 	// Feeds are the tabs that alerts are delivered to while the bot has tabs on; without them every
 	// alert goes to the main view.
 	Feeds thread.Feeds
+	// Tabs keeps each agent watch's tab; nil leaves watches without tabs of their own.
+	Tabs Tabs
 	// Traces keeps what each delivered alert was based on: the check turn of an agent watch, or for
 	// the others the rules code checked; nil keeps nothing.
 	Traces Traces
@@ -129,6 +131,7 @@ type Service struct {
 	telemetry  Telemetry
 	travel     Travel
 	feeds      thread.Feeds
+	tabs       Tabs
 	traces     Traces
 	logger     *slog.Logger
 	zone       string
@@ -207,6 +210,7 @@ func NewService(cfg Config, repository Repository, chats Chats, sender Sender, p
 		travel:     cfg.Travel,
 		rewriter:   cfg.Rewriter,
 		feeds:      cfg.Feeds,
+		tabs:       cfg.Tabs,
 		traces:     cfg.Traces,
 		telemetry:  cfg.Telemetry,
 		logger:     logger,
@@ -264,13 +268,21 @@ func feed(alert Alert) string {
 	return thread.FeedWatches
 }
 
-// inFeed returns a context whose sends go to the alert's feed tab. A tab that cannot be had leaves
-// the alert in the main view, the resolver logs why, and the next alert tries again.
+// inFeed returns a context whose sends go to the alert's tab: the watch's own for an agent watch,
+// which gets one when it has none, and the feed of the alert's kind for any other and for an agent
+// watch whose tab cannot be had. A feed tab that cannot be had leaves the alert in the main view,
+// the resolver logs why, and the next alert tries again.
 func (s *Service) inFeed(ctx context.Context, alert Alert, chatID int64) context.Context {
 	if s.feeds == nil {
 		return ctx
 	}
-	threadID, err := s.feeds.Thread(ctx, alert.PrincipalID, chatID, feed(alert))
+	var threadID int64
+	var err error
+	if alert.Kind == KindAgent {
+		threadID, err = s.feeds.Destination(ctx, alert.PrincipalID, chatID, thread.WatchDestination(alert.WatchID), feed(alert))
+	} else {
+		threadID, err = s.feeds.Thread(ctx, alert.PrincipalID, chatID, feed(alert))
+	}
 	if err != nil {
 		threadID = 0
 	}
@@ -949,6 +961,7 @@ func (s *Service) SetEnabled(ctx context.Context, principalID, watchID string, e
 	changed, err := s.repository.SetWatchEnabled(ctx, principalID, watchID, enabled, s.now())
 	if err == nil && changed {
 		s.logger.InfoContext(ctx, "watch.changed", "principal_id", principalID, "watch_id", watchID, "enabled", enabled)
+		s.changed(ctx, principalID, watchID)
 	}
 	return changed, err
 }
@@ -959,6 +972,7 @@ func (s *Service) SetTravelPause(ctx context.Context, principalID, watchID strin
 	changed, err := s.repository.SetWatchTravelPause(ctx, principalID, watchID, on)
 	if err == nil && changed {
 		s.logger.InfoContext(ctx, "watch.changed", "principal_id", principalID, "watch_id", watchID, "travel_pause", on)
+		s.changed(ctx, principalID, watchID)
 	}
 	return changed, err
 }

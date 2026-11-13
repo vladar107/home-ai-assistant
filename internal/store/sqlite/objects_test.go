@@ -9,8 +9,8 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
-// Every kind of object with a tab of its own has a table, and each table has the columns the tab
-// and conversation queries read.
+// Every kind of object with a tab of its own has a table, each table has the columns the tab and
+// conversation queries read, and the name a conversation about each kind goes by can be read.
 func TestEveryObjectKindHasItsTable(t *testing.T) {
 	kinds := thread.ObjectKinds()
 	slices.Sort(kinds)
@@ -23,8 +23,11 @@ func TestEveryObjectKindHasItsTable(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	for kind, table := range objectTables {
-		if _, err := store.db.ExecContext(t.Context(), `SELECT id, principal_id, title, summary_message_id FROM `+table+` LIMIT 0`); err != nil {
+		if _, err := store.db.ExecContext(t.Context(), `SELECT id, principal_id, summary_message_id FROM `+table+` LIMIT 0`); err != nil {
 			t.Errorf("%s table %s: %v", kind, table, err)
+		}
+		if label, err := loadSubjectLabel(t.Context(), store.db, "alice", thread.ObjectDestination(kind, "0000000000000001")); err != nil || label != "" {
+			t.Errorf("%s label of an object that is not there = %q %v", kind, label, err)
 		}
 	}
 }

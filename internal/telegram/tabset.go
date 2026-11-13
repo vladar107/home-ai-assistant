@@ -58,15 +58,18 @@ type Tabs struct {
 }
 
 // NewTabs returns the tabs over the registry. A nil store leaves tabs unrecorded and unnamed and
-// takes every refused tab for gone, a nil trips or projects leaves those without tabs, and a nil
-// namer leaves tabs with their first name.
-func NewTabs(client botAPI, store TabStore, trips TripReader, projects ProjectReader, namer TabNamer, logger *slog.Logger, telemetry Telemetry) *Tabs {
+// takes every refused tab for gone, a nil trips, projects, or watches leaves those without tabs, and
+// a nil namer leaves tabs with their first name.
+func NewTabs(client botAPI, store TabStore, trips TripReader, projects ProjectReader, watches WatchReader, namer TabNamer, logger *slog.Logger, telemetry Telemetry) *Tabs {
 	objects := make(map[string]objectKind)
 	if trips != nil {
 		objects[thread.ObjectTrip] = tripKind(trips)
 	}
 	if projects != nil {
 		objects[thread.ObjectProject] = projectKind(projects)
+	}
+	if watches != nil {
+		objects[thread.ObjectWatch] = watchKind(watches)
 	}
 	return &Tabs{client: client, store: store, objects: objects, namer: namer, logger: logger, telemetry: telemetryOrNoop(telemetry)}
 }

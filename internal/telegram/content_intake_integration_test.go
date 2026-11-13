@@ -302,6 +302,11 @@ func TestInboxCheckOffersOneCardAndWaitsBehindAnUnansweredOne(t *testing.T) {
 	if h.countRows(`SELECT count(*) FROM scheduled_jobs WHERE job_type = ?`, schedule.TypeReminder) != 1 || h.countRows(`SELECT count(*) FROM watches WHERE kind = 'agent'`) != 1 {
 		t.Fatal("Confirm did not set the reminder and the watch")
 	}
+	// The watch the card set up gets its own tab with its summary.
+	watchTab := receive(t, h.ctx, h.tabs.created)
+	if summary := h.nextMessage(); watchTab.name != "Water bill paid" || summary.threadID != watchTab.threadID || !strings.HasPrefix(summary.text, "Water bill paid\nChecks: ") {
+		t.Fatalf("the confirmed watch's tab = %+v with summary %+v", watchTab, summary)
+	}
 
 	h.check("check", noMail)
 	text, card = h.nextCard()

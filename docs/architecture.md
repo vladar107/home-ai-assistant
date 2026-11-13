@@ -283,7 +283,7 @@ wiring's inputs, builds the Telegram service on the result, and runs the
 lifecycle: the modules in registration order, then the core services the
 assembly lists, then Telegram, each a step that starts in turn, while everything
 started stops together; the Telegram tests build through the same wiring. The tab
-services (`telegram.Tabs`: the feed tabs, the trip and project tabs, tab naming, and the tab registry)
+services (`telegram.Tabs`: the feed tabs, the trip, project, and agent watch tabs, tab naming, and the tab registry)
 come in through a factory input, since `wiring` cannot import `telegram` and the
 tabs need the turn engine that `wiring` builds.
 
@@ -698,8 +698,9 @@ watches, which find it before geocoding.
 With tabs on, the scheduler, the watch service, and the trip notifier send what
 nobody asked for to a feed tab of its kind: reminders, Trips scans, and
 suggested trips to Reminders; other job reports to Reports; Home Assistant watches to
-Home; every other watch to Watches; inbound events to Events; and the inbox check's
-summaries and cards to Inbox. The tab registry records each feed tab with
+Home; an agent watch to its own tab (see Watch tabs below) and every other watch
+to Watches; inbound events to Events; and the inbox check's summaries and cards
+to Inbox. The tab registry records each feed tab with
 the subject `feed:<kind>` under a fixed name, and the Telegram service's resolver
 makes the tab on first use, one at a time per principal and feed.
 
@@ -780,13 +781,15 @@ subject `trip:<id>` under a fixed name, which is the only record of it.
 
 ### Object tabs
 
-Trips and projects (plan 0126) are the kinds of object with a tab of their own,
-and both go through one subject registry. `thread.ObjectKinds` lists the kinds,
+Trips, projects (plan 0126), and agent watches (plan 0144) are the kinds of
+object with a tab of their own, and all go through one subject registry. `thread.ObjectKinds` lists the kinds,
 and an object's destination and tab subject is `<kind>:<id>`. Each layer keeps
 what it needs per kind:
 
 - `internal/store/sqlite` maps each kind to its table, which has `id`,
-  `principal_id`, `title`, and `summary_message_id`. The tab and conversation
+  `principal_id`, and `summary_message_id`; a trip and a project have a `title`
+  too, and the name a conversation about a watch goes by is the label of its
+  last alert. The tab and conversation
   queries match subjects by the registered prefixes: a tab whose subject names
   an object routes as a feed tab does, a report delivered to an object has it as
   its subject, a conversation that starts in the tab is about the object while
@@ -796,6 +799,52 @@ what it needs per kind:
   whether it is open), how to record its summary, its icon, and its log events.
   `Destination` resolves any registered kind the way the trip tabs above
   describe, and an open object without a tab gets one.
+
+### Watch tabs
+
+With tabs on, each agent watch has a tab of its own: a registry row with the
+subject `watch:<id>` under a fixed name, the watch's. That subject is the one a
+conversation about any watch already had, so only the kind's reader tells an
+agent watch from the others: it reports a watch of another kind as unknown,
+which resolves to the feed before any tab is looked up. The other kinds keep the
+Watches and Home tabs, and a reply to one of their alerts opens a conversation
+there as before.
+
+- **Delivery.** The watch service resolves an agent watch's alert, its notice
+  that the condition ended, and its notice that it cannot be checked through
+  `Destination` with the Watches feed as the fallback. A watch without a tab
+  gets one then, so a watch that existed before gets its tab with its next
+  message. While the tab cannot be made the message goes to the Watches tab,
+  and to the main view with tabs off. A send to a tab Telegram no longer has
+  falls back to the main view through the client, as for a feed tab, and the
+  next message makes the tab again with a fresh summary.
+- **The summary.** `watch.Summary` is the watch's name, its definition as the
+  user confirmed it (what it checks, the condition, its days and window, what it
+  tells of, and its language), and the stored facts a change writes: that it is
+  paused, and that it pauses while the user travels. A mute for today is left
+  out, since it ends without a write. It is clipped to one message, sent only to
+  the tab, and pinned silently. `summary_message_id` on the watch records it;
+  dropping the tab's row forgets it, the export omits it, and an Undo's record
+  of a watch leaves it out.
+- **Keeping it in step.** After a watch is created, updated, paused, resumed, or
+  its travel pause changes, also by an Undo, the watch service tells
+  `telegram.WatchNotifier`, which gives an agent watch its tab when it has none,
+  edits the summary, and renames the tab when the watch's name changed. A
+  restore tells it of every agent watch the user then has. A paused watch keeps
+  its tab. A removed or expired watch's tab stays with its messages until
+  `/close`; nothing more is sent there, and undoing the removal sends a fresh
+  summary to the same tab.
+- **Conversations.** A watch's tab routes messages as a feed tab does. A
+  conversation that starts there is about the watch, unless another tab holds
+  the watch's conversation, such as one opened by replying to an earlier alert
+  in the Watches tab, or the watch is gone; making the tab moves no
+  conversation. Each turn carries the line that names the watch with
+  `watch_list` to show it, by its ID alone before its first alert, and the
+  answer gets no "About …" line for the tab's own watch.
+- **Trips.** A trip cannot take a watch's tab, as it cannot take a project's.
+- **Icon.** The tab's icon is the magnifying glass, set only when Telegram's
+  icon set offers it.
+- **Privacy.** Logs carry watch, tab, and message IDs only.
 
 ### A project
 

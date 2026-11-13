@@ -1,6 +1,6 @@
 # 0144 — A tab of its own for each agent watch
 
-Status: `proposed`
+Status: `done`
 
 ## Context
 
@@ -44,15 +44,23 @@ knows which watch it is about.
   without a write and the summary would go stale.
 - **All of the watch's messages go to its tab:** alerts, the notice that the condition no longer
   holds, and the notice that it cannot be checked. When the tab cannot be had, the message goes to
-  the Watches tab, and to the main view while tabs are off, as today.
+  the Watches tab, and to the main view while tabs are off, as today. A message sent to a tab that
+  Telegram no longer has lands in the main view, as one sent to a gone feed or trip tab does, and
+  the next message makes the tab again.
 - **A paused watch keeps its tab; a removed watch's tab stays** with its messages until the user
   closes it. Nothing more is sent there, and a conversation started there is about nothing in
-  particular, as in the tab of a removed project.
-- **A watch's tab cannot be taken by a trip.** The refusal the trip tools give for a project's tab
-  is worded for any object's tab.
+  particular, as in the tab of a removed project. A message that follows an alert still in the
+  tab continues the conversation about that alert's watch, as a reply to the alert of a removed
+  watch does in the Watches tab.
+- **An Undo follows the same rules.** Undoing the creation of a watch removes the watch and leaves
+  its tab with the summary, as for a removed watch. Undoing a removal brings the watch back into
+  the same tab with a fresh pinned summary beside the old one.
+- **A watch's tab cannot be taken by a trip.** The refusal the trip tools give names whose tab it
+  is, a project's or a watch's.
 - **The summary message is a column on the watch,** like a trip's and a project's, so the registry
   can forget it with the tab. The watches export section omits the column, as the trips and
-  projects sections do; a restored watch gets a fresh tab and summary.
+  projects sections do; a restored watch gets a fresh tab and summary. The record an Undo keeps of
+  a watch leaves the column out as well.
 - **One active conversation is about a watch, as for a trip.** A conversation already open about
   the watch elsewhere, such as one started by replying to an earlier alert in the Watches tab,
   keeps the subject, and a conversation started in the watch's new tab is then about nothing in
@@ -69,25 +77,30 @@ knows which watch it is about.
    omits the new column, and a test pins it.
 2. **Thread.** The object kind `watch` and its destination helper.
 3. **Watch service.** A reader for one watch with its summary text and summary message; a small
-   interface the service calls after a watch is created, updated, paused, resumed, muted, or its
-   travel pause changes, including when an undo or a restore does it. Delivery resolves the
-   watch's destination with the Watches feed as the fallback, in place of the feed alone.
-4. **Telegram.** The watch kind beside the trip and project kinds, with its icon and fallback
-   name; the notifier that keeps a watch's tab in step; the trip-tab refusal wording.
+   interface the service calls after a watch is created, updated, paused, resumed, or its travel
+   pause changes, including when an undo does it, and for each agent watch after a restore added
+   watches. A mute calls nothing, since the summary leaves it out, and neither does a removal,
+   since the tab of a watch that is gone is left as it is. Delivery resolves the watch's
+   destination with the Watches feed as the fallback, in place of the feed alone.
+4. **Telegram.** The watch kind beside the trip and project kinds, with its icon, a magnifying
+   glass, and fallback name; the notifier that keeps a watch's tab in step; the trip-tab refusal
+   wording.
 5. **Wiring and tests.** Register the kind and the notifier; end-to-end tests through the Telegram
-   simulator for the success case above, a paused and a removed watch, a tab found gone, tabs off,
-   a message written in the tab, a message written in the tab while a conversation about the watch
-   is open in the Watches tab, and a reply to another kind of watch's alert.
-6. **Documentation.** The tabs section of the architecture document and the user-facing help text
-   that lists where messages go.
+   simulator for the success case above, a paused and a removed watch, a tab that cannot be made
+   and one found gone, tabs off, a restored watch, a message written in the tab, a message written
+   in the tab while a conversation about the watch is open in the Watches tab, and a reply to
+   another kind of watch's alert.
+6. **Documentation.** The tabs section of the architecture document. No help text lists where
+   messages go, so the guidance of the watch tools tells the model that an agent watch gets its
+   own tab.
 
 ## Files affected
 
-- `internal/store/sqlite` (a migration, watches, tabs, conversation), tests
+- `internal/store/sqlite` (a migration, watches, tabs), tests
 - `internal/thread`
-- `internal/watch` (service, tools, undo, export where they change a watch), tests
-- `internal/telegram` (a watch tabs file, tab set, trip tabs wording, help text), tests
-- `internal/wiring`, the integration test harness
+- `internal/watch` (service, a tabs file, tools, undo, export where they change a watch)
+- `internal/telegram` (a watch tabs file, tab set, trip tabs wording), tests
+- `internal/wiring`, `internal/app`, the integration test harness
 - `docs/architecture.md`
 
 ## Validation

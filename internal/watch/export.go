@@ -14,21 +14,32 @@ const watchesTable = "watches"
 // Exporter is the watches section of a user's export: every watch of every kind, with its switch,
 // mute, and travel pause. Window states and alerts are not in it, since they record what a check
 // found. now is the clock a one-off watch's window is judged against, and available reports whether
-// a kind can be checked here, which needs its connector.
-func Exporter(now func() time.Time, available func(kind string) bool) export.Exporter {
+// a kind can be checked here, which needs its connector. restored is told once a restore added
+// watches, so each agent watch gets its tab; nil leaves that to the watch's next alert or change.
+func Exporter(now func() time.Time, available func(kind string) bool, restored func(ctx context.Context, principalID string)) export.Exporter {
 	if now == nil {
 		now = time.Now
 	}
-	return exporter{now: now, available: available}
+	return exporter{now: now, available: available, restored: restored}
 }
 
 type exporter struct {
 	now       func() time.Time
 	available func(kind string) bool
+	restored  func(ctx context.Context, principalID string)
 }
 
+// Section leaves out the summary message, which means something only in the chat it was sent to.
 func (exporter) Section() export.Section {
-	return export.Section{Name: "watches", Label: "Watches", Version: 1, Tables: []export.Table{{Name: watchesTable}}}
+	return export.Section{Name: "watches", Label: "Watches", Version: 1, Tables: []export.Table{
+		{Name: watchesTable, Omit: []string{"summary_message_id"}},
+	}}
+}
+
+func (e exporter) Restored(ctx context.Context, principalID string) {
+	if e.restored != nil {
+		e.restored(ctx, principalID)
+	}
 }
 
 func (exporter) Keep(string, export.Row) bool { return true }

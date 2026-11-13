@@ -13,10 +13,12 @@ import (
 )
 
 // objectTables are the tables of the kinds of object with a tab of their own. Each has id,
-// principal_id, title, and summary_message_id.
+// principal_id, and summary_message_id. A trip and a project have a title as well; a watch has
+// none, and the name a conversation about one goes by is read from its last alert.
 var objectTables = map[string]string{
 	thread.ObjectTrip:    "trips",
 	thread.ObjectProject: "projects",
+	thread.ObjectWatch:   "watches",
 }
 
 // objectDestinationMatch matches the column against the destinations of every kind of object with a

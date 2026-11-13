@@ -262,7 +262,7 @@ func NewService(deps Dependencies) (*Service, error) {
 		exports:      deps.Exports,
 		transcriber:  deps.Transcriber,
 		model:        deps.Model,
-		tabs:         cmp.Or(deps.Tabs, NewTabs(deps.Client, nil, nil, nil, nil, deps.Logger, deps.Telemetry)),
+		tabs:         cmp.Or(deps.Tabs, NewTabs(deps.Client, nil, nil, nil, nil, nil, deps.Logger, deps.Telemetry)),
 		sections:     inSectionOrder(deps.Sections),
 		logger:       deps.Logger,
 		telemetry:    telemetryOrNoop(deps.Telemetry),

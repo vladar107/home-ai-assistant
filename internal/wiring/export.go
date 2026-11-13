@@ -87,6 +87,10 @@ func (a *Assembly) buildExports() error {
 		})
 	}
 	available := func(kind string) bool { return a.Watches != nil && a.Watches.KindAvailable(kind) }
+	var watchesRestored func(context.Context, string)
+	if a.Watches != nil {
+		watchesRestored = a.Watches.Restored
+	}
 	for _, exporter := range []export.Exporter{
 		userlocation.PlacesExporter(),
 		routes.Exporter(),
@@ -99,7 +103,7 @@ func (a *Assembly) buildExports() error {
 		switchesExporter{},
 		events.Exporter(),
 		a.Scheduler.Exporter(),
-		watch.Exporter(a.in.Core.Now, available),
+		watch.Exporter(a.in.Core.Now, available, watchesRestored),
 	} {
 		if err := exports.Register(exporter); err != nil {
 			return err
