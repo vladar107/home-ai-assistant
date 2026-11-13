@@ -153,6 +153,7 @@ plan that links back to the earlier record.
 | 0141 | [A trip takes a tab the user already has](0141-trip-takes-a-tab-the-user-has.md) | done |
 | 0142 | [One text on a widget proposal](0142-widget-one-text.md) | done |
 | 0143 | [A fixed tab survives its own creation notice](0143-fixed-tab-survives-its-creation-notice.md) | done |
+| 0144 | [A tab of its own for each agent watch](0144-agent-watch-tabs.md) | proposed |
 | 0145 | [Links to what an agent watch found](0145-agent-watch-links.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
