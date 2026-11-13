@@ -369,12 +369,28 @@ is refused as unreadable instead of exhausting the service's memory.
    The model can withdraw items still waiting with `proposal_withdraw`; they end
    rejected as withdrawn, the message shows them so, and it loses its buttons once
    nothing is left.
-   A user who turns on Proposals as a widget (the Confirmations page of
-   `/settings`, off by default) gets the message with the buttons as a Telegram
-   widget instead. One template, written by the operator and embedded in the
-   binary, draws the proposal text with its first line as a title, its status
-   apart, and its actions, from the message's data; the model never supplies
-   HTML, and the text is plain. The caption is one line the approval service
+   A user who turns on Widgets (the Widgets page of `/settings`, stored as the
+   `widgets` switch, off by default) gets the message with the buttons as a
+   Telegram widget instead. Every kind of widget runs a template composed once
+   at start-up from files embedded in the binary (`internal/telegram/widgets/`):
+   a shared base with the theme styles, the reading of the message's data,
+   redrawing when it changes, and one request helper that disables the
+   controls, shows "Working on it…", ignores an answer that arrives after a
+   redraw, and words a failure; after an answer the controls come back, or the
+   widget waits for its data to change and redraws after 20 seconds if it does
+   not. Each kind adds its view (styles, markup, and drawing). Each composed
+   template is a golden file checked against Telegram's size limits, and a
+   message keeps the template it was sent with, so a kind's data must stay
+   readable by its older views. The proposal view draws the proposal text with
+   its first line as a title, its status apart, and its actions, from the
+   message's data (`text`, `status`, `actions`); the model never supplies HTML,
+   and the text is plain. The client's widget send takes a kind, data, and a
+   caption line, and never an inline keyboard; an edit takes the data and the
+   caption line, because the message keeps its kind. A tap arrives as a
+   `widget_query`; it is validated and authorized once and then offered to each
+   kind's handler in turn. The handler that takes it answers it once and acts
+   only on its own stored record and message; a tap no handler takes is
+   answered as doing nothing. The caption is one line the approval service
    builds: the proposal's first line or its number of changes, and what became
    of it once resolved, so an app without widgets still names it, but cannot
    confirm it. A proposal is a widget only when its whole text and status fit
@@ -382,8 +398,8 @@ is refused as unreadable instead of exhausting the service's memory.
    widget, gets buttons. The proposal's record says that its message is a
    widget, so its edits go to the caption and the data from the start; a widget
    recorded before that flag existed is still found by Telegram's refusal of a
-   text edit. A tap arrives as a `widget_query` and is handled as the press of
-   the button it stands for, in the proposal's own tab: Confirm and Reject are
+   text edit. A proposal tap is handled as the press of the button it stands
+   for, in the proposal's own tab: Confirm and Reject are
    answered before the actions run, Preview as its button is. An outcome that
    makes the text too long for the data shortens the text there, keeps the
    status whole, and is sent in full as a reply once, when the data changed.

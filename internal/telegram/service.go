@@ -1314,7 +1314,7 @@ func (s *Service) continueConversation(ctx context.Context, bot Bot, updateID in
 	}
 }
 
-// press is a tap on a proposal's controls, from a button or from a widget: the chat and the message
+// press is a tap on a message's controls, from a button or from a widget: the chat and the message
 // that carry the controls, how the tap is answered, the failure reason of an answer that may be
 // retried, and whether the message is a widget, which a tap in one proves.
 type press struct {
@@ -1331,10 +1331,8 @@ func (s *Service) callbackPress(callback *CallbackQuery) press {
 	}
 }
 
-// processWidgetQuery handles a tap in a proposal widget as a press of the button it stands for, and
-// authorizes it the same way. The tap names no tab, so it runs in the tab of the proposal it names.
-// A Confirm or Reject tap is answered before its actions run, so the answer never waits on them; a
-// Preview tap is answered as its button is.
+// processWidgetQuery validates and authorizes a widget tap the way a button press is, and offers it
+// to each kind's handler in turn. A tap no handler takes is answered as doing nothing.
 func (s *Service) processWidgetQuery(ctx context.Context, bot Bot, updateID int64, query *WidgetQuery) (processingResult, string, error) {
 	if query.ID == "" {
 		return ignoredResult("malformed_widget_query"), "", nil
@@ -1355,34 +1353,66 @@ func (s *Service) processWidgetQuery(ctx context.Context, bot Bot, updateID int6
 		chatID: chat.ID, messageID: query.MessageID, failure: "answer_widget_query", widget: true,
 		answer: func(ctx context.Context, text string) error { return s.client.AnswerWidgetQuery(ctx, query.ID, text) },
 	}
-	result := processingResult{event: "telegram.update.ignored", reason: "unknown_action", principalID: principalID}
-	action, approvalID, isApproval := approval.ParseCallback(query.Data)
-	if isApproval && s.approvals != nil {
-		place, owned, err := s.approvals.ProposalPlace(ctx, principalID, approvalID)
-		if err != nil {
-			return processingResult{}, "approval_place", err
-		}
-		if owned && place.ChatID == chat.ID && place.MessageID == query.MessageID {
-			if bot.HasTopicsEnabled {
-				ctx = thread.With(ctx, place.ThreadID)
-			}
-			if action == approval.ActionPreview {
-				return s.processPreviewPress(ctx, pressTrigger(bot, updateID), tap, principalID, approvalID)
-			}
-			if err := tap.answer(ctx, WidgetWorkingAnswer); err != nil && !isPermanentAPIError(err) {
-				return processingResult{}, tap.failure, err
-			}
-			return s.processApprovalPress(ctx, bot, updateID, tap, principalID, action, approvalID)
-		}
-		result.reason = "foreign_approval"
-		if owned {
-			result.reason = "misplaced_widget_tap"
+	for _, handle := range widgetHandlers {
+		if own, result, failure, err := handle(s, ctx, bot, updateID, tap, principalID, query.Data); own {
+			return result, failure, err
 		}
 	}
+	return s.ignoreWidgetTap(ctx, tap, principalID, "unknown_action")
+}
+
+// widgetHandler takes the taps of one kind of widget. It reports false, doing nothing, for data
+// that is not its own. A tap it takes it answers exactly once, within Telegram's 15 seconds, and
+// acts on only when the tap comes from the message its own stored record names, since the tap names
+// no tab and its message is not proof of where anything is.
+type widgetHandler func(s *Service, ctx context.Context, bot Bot, updateID int64, tap press, principalID, data string) (own bool, result processingResult, failure string, err error)
+
+// widgetHandlers are offered a tap in turn.
+var widgetHandlers = []widgetHandler{
+	(*Service).processProposalWidgetTap,
+}
+
+// ignoreWidgetTap answers a tap as doing nothing and logs it as ignored for the reason.
+func (s *Service) ignoreWidgetTap(ctx context.Context, tap press, principalID, reason string) (processingResult, string, error) {
 	if err := tap.answer(ctx, WidgetIgnoredAnswer); err != nil && !isPermanentAPIError(err) {
 		return processingResult{}, tap.failure, err
 	}
-	return result, "", nil
+	return processingResult{event: "telegram.update.ignored", reason: reason, principalID: principalID}, "", nil
+}
+
+// processProposalWidgetTap handles a tap in a proposal widget as a press of the button it stands
+// for, in the tab of the proposal it names, and only from the message that shows the proposal. A
+// Confirm or Reject tap is answered before its actions run, so the answer never waits on them; a
+// Preview tap is answered as its button is.
+func (s *Service) processProposalWidgetTap(ctx context.Context, bot Bot, updateID int64, tap press, principalID, data string) (bool, processingResult, string, error) {
+	action, approvalID, isApproval := approval.ParseCallback(data)
+	if !isApproval || s.approvals == nil {
+		return false, processingResult{}, "", nil
+	}
+	place, owned, err := s.approvals.ProposalPlace(ctx, principalID, approvalID)
+	if err != nil {
+		return true, processingResult{}, "approval_place", err
+	}
+	if !owned || place.ChatID != tap.chatID || place.MessageID != tap.messageID {
+		reason := "foreign_approval"
+		if owned {
+			reason = "misplaced_widget_tap"
+		}
+		result, failure, err := s.ignoreWidgetTap(ctx, tap, principalID, reason)
+		return true, result, failure, err
+	}
+	if bot.HasTopicsEnabled {
+		ctx = thread.With(ctx, place.ThreadID)
+	}
+	if action == approval.ActionPreview {
+		result, failure, err := s.processPreviewPress(ctx, pressTrigger(bot, updateID), tap, principalID, approvalID)
+		return true, result, failure, err
+	}
+	if err := tap.answer(ctx, WidgetWorkingAnswer); err != nil && !isPermanentAPIError(err) {
+		return true, processingResult{}, tap.failure, err
+	}
+	result, failure, err := s.processApprovalPress(ctx, bot, updateID, tap, principalID, action, approvalID)
+	return true, result, failure, err
 }
 
 // widgetChatTypeSender is how Telegram may name the user's own chat with the bot.

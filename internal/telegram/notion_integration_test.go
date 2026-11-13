@@ -123,7 +123,7 @@ func TestNotionOperatorTokenIsAdoptedAndDisconnected(t *testing.T) {
 	h.start()
 
 	overview := h.requestSettings(1, 101)
-	if !strings.Contains(overview.text, "Accounts: Notion writes off") || !slices.Equal(buttonData(overview.keyboard), []string{"nav:model", "nav:accounts", "nav:tools", "nav:memory", "nav:confirmations"}) {
+	if !strings.Contains(overview.text, "Accounts: Notion writes off") || !slices.Equal(buttonData(overview.keyboard), []string{"nav:model", "nav:accounts", "nav:tools", "nav:memory", "nav:widgets"}) {
 		t.Fatalf("settings overview after adoption = %+v", overview)
 	}
 	settings := h.openSettingsPage(2, 101, settingsMessageID(1), "accounts")
@@ -192,7 +192,7 @@ func TestNotionChatConnectIntake(t *testing.T) {
 	h.start()
 
 	overview := h.requestSettings(1, 101)
-	if !strings.Contains(overview.text, "Accounts: Notion not connected") || !slices.Equal(buttonData(overview.keyboard), []string{"nav:model", "nav:accounts", "nav:tools", "nav:memory", "nav:confirmations"}) {
+	if !strings.Contains(overview.text, "Accounts: Notion not connected") || !slices.Equal(buttonData(overview.keyboard), []string{"nav:model", "nav:accounts", "nav:tools", "nav:memory", "nav:widgets"}) {
 		t.Fatalf("settings overview before connect = %+v", overview)
 	}
 	settings := h.openSettingsPage(2, 101, settingsMessageID(1), "accounts")

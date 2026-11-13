@@ -39,10 +39,10 @@ const (
 	// TypeSafePrivacyLine is added to /privacy while the principal's safety checks are on.
 	TypeSafePrivacyLine = "Safety checks: a scrubbed copy of messages, replies, outside content, and proposed actions goes to TypeSafe, never after Notion or NAS content."
 
-	WidgetOnLine  = "Proposals: shown as a widget. The proposal, Confirm, Reject, and Preview are inside it, and its caption names the proposal in one line. A proposal too long for a widget comes with buttons. A Telegram app that cannot show widgets shows only that line and cannot confirm the proposal there; switch back to buttons for such an app."
-	WidgetOffLine = "Proposals: shown with Confirm, Reject, and Preview buttons (the default). A widget shows the proposal and them in a small view Telegram draws in the chat instead; a Telegram app that cannot show widgets shows only a one-line caption and cannot confirm the proposal there."
-	// WidgetPrivacyLine is added to /privacy while the principal's proposals are widgets.
-	WidgetPrivacyLine = "Proposals as a widget: the proposal and its outcome are shown by a small program Telegram runs in the chat, which reaches nothing outside Telegram."
+	WidgetOnLine  = "Widgets: on. Proposals are shown as a widget, a small view Telegram draws in the chat, with the proposal, Confirm, Reject and Preview inside it and a one-line caption. A proposal too long for a widget keeps its buttons."
+	WidgetOffLine = "Widgets: off (the default). Proposals are shown with Confirm, Reject and Preview buttons. A widget is a small view Telegram draws in the chat; an app that cannot draw one shows only its caption."
+	// WidgetPrivacyLine is added to /privacy while the principal has widgets on.
+	WidgetPrivacyLine = "Widgets: what they show is drawn by a small program Telegram runs in the chat, which reaches nothing outside Telegram."
 )
 
 // The on/off pages of the integrations that run on an operator key or are opt-in.
@@ -81,15 +81,9 @@ var (
 		SummaryState: func(on bool) string { return "safety checks " + onOff(on) },
 	}
 	WidgetPage = SwitchPage{
-		Integration: "proposal-widget", Prefix: widgetSectionPrefix, Name: "Proposals", OnLine: WidgetOnLine, OffLine: WidgetOffLine,
-		OnButton: "Show proposals as a widget", OffButton: "Show proposals with buttons",
-		Event: "approval.widget.changed", HelpTopic: "confirmations", PrivacyLine: WidgetPrivacyLine,
-		SummaryState: func(on bool) string {
-			if on {
-				return "widget"
-			}
-			return "buttons"
-		},
+		Integration: "widgets", Prefix: widgetSectionPrefix, Name: "Widgets", OnLine: WidgetOnLine, OffLine: WidgetOffLine,
+		OnButton: "Turn on widgets", OffButton: "Turn off widgets",
+		Event: "widgets.changed", HelpTopic: "widgets", PrivacyLine: WidgetPrivacyLine,
 	}
 )
 

@@ -504,9 +504,9 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	}
 	approvals.SetTelemetry(telemetry)
 	approvals.SetSwitches(switches)
-	approvals.SetWidgets(switches.Toggle(approval.WidgetSwitch))
+	approvals.SetWidgets(switches.Toggle(integration.WidgetsSwitch))
 	a.Approvals = approvals
-	if err := a.register(ctx, Connector{Switch: &SwitchSettings{Switch: approval.WidgetSwitch}}); err != nil {
+	if err := a.register(ctx, Connector{Switch: &SwitchSettings{Switch: integration.WidgetsSwitch}}); err != nil {
 		return err
 	}
 	if err := broker.Register(withdrawal.Provider{Withdrawer: approvals}); err != nil {

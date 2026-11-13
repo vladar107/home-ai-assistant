@@ -653,7 +653,7 @@ func (c *Client) SendText(ctx context.Context, chatID int64, text string) (int64
 // whole or Telegram refuses it, and reports whether it did.
 func (c *Client) SendProposal(ctx context.Context, chatID int64, shown approval.Shown, buttons approval.Buttons) (int64, bool, error) {
 	if buttons.Widget {
-		message, sent, err := c.sendWidget(ctx, chatID, shown, proposalActions(buttons))
+		message, sent, err := c.sendProposalWidget(ctx, chatID, shown, proposalActions(buttons))
 		switch {
 		case err != nil && !isPermanentAPIError(err):
 			return 0, false, err
@@ -724,11 +724,11 @@ func undoKeyboard(buttons []approval.UndoButton) InlineKeyboard {
 // shows the text in its data with its actions, and the caption line under it.
 func (c *Client) EditProposal(ctx context.Context, chatID, messageID int64, shown approval.Shown, buttons approval.Buttons) error {
 	if shown.Widget {
-		return c.editWidget(ctx, chatID, messageID, shown, proposalActions(buttons))
+		return c.editProposalWidget(ctx, chatID, messageID, shown, proposalActions(buttons))
 	}
 	err := c.EditKeyboard(ctx, chatID, messageID, shown.Text, proposalKeyboard(buttons))
 	if hasNoText(err) {
-		return c.editWidget(ctx, chatID, messageID, unflaggedWidget(shown), proposalActions(buttons))
+		return c.editProposalWidget(ctx, chatID, messageID, unflaggedWidget(shown), proposalActions(buttons))
 	}
 	return err
 }
@@ -744,11 +744,11 @@ func unflaggedWidget(shown approval.Shown) approval.Shown {
 // its data with no actions, and the caption line under it.
 func (c *Client) EditText(ctx context.Context, chatID, messageID int64, shown approval.Shown) error {
 	if shown.Widget {
-		return c.editWidget(ctx, chatID, messageID, shown, nil)
+		return c.editProposalWidget(ctx, chatID, messageID, shown, nil)
 	}
 	err := c.EditKeyboard(ctx, chatID, messageID, shown.Text, nil)
 	if hasNoText(err) {
-		return c.editWidget(ctx, chatID, messageID, unflaggedWidget(shown), nil)
+		return c.editProposalWidget(ctx, chatID, messageID, unflaggedWidget(shown), nil)
 	}
 	return err
 }

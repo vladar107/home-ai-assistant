@@ -123,9 +123,13 @@ const switchesTable = "integration_switches"
 // keys, are never in it. A switch already chosen here is left as it is. A restored mcp-<server>
 // switch grants nothing while the catalog has no server of that name, but it applies to a server
 // the operator later adds under the same name; a server outside the user's principal list refuses
-// its tools where they are offered and run, whatever the switch says. It lives here because the
-// integration package sits below the approvals that the export package builds on.
+// its tools where they are offered and run, whatever the switch says. A proposal-widget switch, from
+// an export made before it became the Widgets switch, is restored as that. It lives here because
+// the integration package sits below the approvals that the export package builds on.
 type switchesExporter struct{}
+
+// renamedSwitches maps a switch's former name in an older export to its name now.
+var renamedSwitches = map[string]string{"proposal-widget": integration.WidgetsSwitch.Integration}
 
 func (switchesExporter) Section() export.Section {
 	return export.Section{Name: "switches", Label: "Integration switches", Version: 1, Tables: []export.Table{{Name: switchesTable}}}
@@ -144,6 +148,10 @@ func (switchesExporter) Plan(ctx context.Context, plan *export.Planning, _ int, 
 	}
 	for _, row := range tables[switchesTable] {
 		name := row.Text("integration")
+		if renamed, found := renamedSwitches[name]; found {
+			row = row.Clone()
+			row["integration"], name = renamed, renamed
+		}
 		if chosen[name] {
 			plan.Present()
 			continue

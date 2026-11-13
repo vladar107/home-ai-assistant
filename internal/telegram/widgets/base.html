@@ -1,0 +1,95 @@
+<style>
+body{margin:0;padding:12px;font:15px/1.4 -apple-system,system-ui,sans-serif;background:var(--tg-theme-bg-color,#fff);color:var(--tg-theme-text-color,#000)}
+#status{margin-top:8px;color:var(--tg-theme-hint-color,#888)}
+#status:empty{display:none}
+button{flex:1;padding:10px 4px;border:0;border-radius:8px;font:inherit;background:var(--tg-theme-button-color,#2481cc);color:var(--tg-theme-button-text-color,#fff)}
+button.quiet{background:var(--tg-theme-secondary-bg-color,#eee);color:var(--tg-theme-text-color,#000)}
+button:disabled{opacity:.5}
+{{styles}}
+</style>
+<div id="view">{{markup}}</div>
+<div id="status"></div>
+<script>
+(function () {
+  var widget = window.TelegramWidget;
+  if (!widget) {
+    return;
+  }
+  var view = document.getElementById('view');
+  var status = document.getElementById('status');
+  var controlsReturn = 'controls';
+  var dataChanges = 'data';
+  var drawn = 0;
+  var busy = false;
+
+  function current() {
+    try {
+      var raw = widget.chatData;
+      var data = raw && typeof raw === 'object' ? raw : JSON.parse(raw || '{}');
+      return data && typeof data === 'object' ? data : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function setBusy(on) {
+    var buttons = view.getElementsByTagName('button');
+    for (var i = 0; i < buttons.length; i++) {
+      buttons[i].disabled = on;
+    }
+    busy = on;
+  }
+
+  function failure(error) {
+    if (error && error.code === 'RATE_LIMITED') {
+      return 'Too many taps; wait a moment and try again.';
+    }
+    return 'No answer came; try again.';
+  }
+
+  function request(data, after) {
+    if (busy) {
+      return;
+    }
+    var tapped = drawn;
+    setBusy(true);
+    status.textContent = 'Working on it…';
+    widget.request(data).then(function (response) {
+      if (tapped !== drawn) {
+        return;
+      }
+      if (response && response.result) {
+        status.textContent = String(response.result);
+      }
+      if (after === controlsReturn) {
+        setBusy(false);
+      } else {
+        setTimeout(function () {
+          if (tapped === drawn) {
+            redraw();
+          }
+        }, 20000);
+      }
+    }, function (error) {
+      if (tapped !== drawn) {
+        return;
+      }
+      status.textContent = failure(error);
+      setBusy(false);
+    });
+  }
+
+  function redraw() {
+    drawn++;
+    busy = false;
+    status.textContent = '';
+    draw(current());
+  }
+
+{{script}}
+
+  redraw();
+  widget.onEvent('chatDataChanged', redraw);
+  widget.ready();
+})();
+</script>

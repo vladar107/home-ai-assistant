@@ -27,6 +27,10 @@ func (s Switch) UserOffText() string {
 	return s.Name + " is off for you; turn it on in /settings and ask again."
 }
 
+// WidgetsSwitch is each principal's choice to have messages that can be a Telegram widget, such as
+// a proposal, sent as one. It is off until the principal turns it on.
+var WidgetsSwitch = Switch{Integration: "widgets", Name: "Widgets"}
+
 // Switched is implemented by a tool provider or an approval executor whose tools all belong to one
 // switchable integration; the core offers and runs them only while the principal has it on.
 type Switched interface {

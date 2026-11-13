@@ -368,10 +368,6 @@ type Buttons struct {
 	Widget  bool
 }
 
-// WidgetSwitch is each principal's choice to have proposals sent as a widget. It is off until the
-// principal turns it on.
-var WidgetSwitch = integration.Switch{Integration: "proposal-widget", Name: "Proposals as a widget"}
-
 // WidgetPreference reports whether a principal chose to have proposals sent as a widget.
 type WidgetPreference interface {
 	Enabled(ctx context.Context, principalID string) (bool, error)

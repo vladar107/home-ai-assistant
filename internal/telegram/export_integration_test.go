@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/export"
+	"github.com/vladar107/home-ai-assistant/internal/integration"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 	"github.com/vladar107/home-ai-assistant/internal/trip"
@@ -454,6 +455,40 @@ func TestExportRestoresEverySectionIntoAnEmptyDatabase(t *testing.T) {
 	}
 	if source.documentCount() != 0 || len(source.messages) != 0 || len(target.messages) != 0 {
 		t.Fatal("a restore that adds nothing asked for confirmation")
+	}
+}
+
+// An export made before the Widgets switch carries the proposal widget choice under its old name:
+// it is restored as the Widgets switch, and leaves a widgets choice the user already made as it is.
+func TestRestoreReadsTheProposalWidgetSwitchAsWidgets(t *testing.T) {
+	t.Parallel()
+	source := newExportHarness(t)
+	source.exec(`INSERT INTO integration_switches (principal_id, integration, enabled, changed_at) VALUES ('alice', 'proposal-widget', 1, ?)`, stamp(time.Now().Add(-time.Hour)))
+	data := source.takeExport(1, 101)
+
+	target := newExportHarness(t)
+	copyKey(t, source, target)
+	preview, outcome := target.restore(1, 101, data)
+	if !strings.Contains(preview, "widgets on") || strings.Contains(preview, "proposal-widget") || !strings.Contains(outcome, "Restored") {
+		t.Fatalf("preview:\n%s\noutcome: %s", preview, outcome)
+	}
+	if enabled, err := target.switches.Enabled(target.ctx, "alice", integration.WidgetsSwitch); err != nil || !enabled {
+		t.Fatalf("widgets after the restore = %v %v", enabled, err)
+	}
+	if count := target.count(`SELECT count(*) FROM integration_switches WHERE integration = 'proposal-widget'`); count != 0 {
+		t.Fatalf("%d proposal-widget rows restored", count)
+	}
+
+	chosen := newExportHarness(t)
+	copyKey(t, source, chosen)
+	if err := chosen.switches.SetEnabled(chosen.ctx, "alice", integration.WidgetsSwitch, false); err != nil {
+		t.Fatal(err)
+	}
+	if again := chosen.restorePreview(1, 101, data); !strings.Contains(again, "Everything in this file is already here") {
+		t.Fatalf("preview with widgets already chosen:\n%s", again)
+	}
+	if enabled, err := chosen.switches.Enabled(chosen.ctx, "alice", integration.WidgetsSwitch); err != nil || enabled {
+		t.Fatalf("widgets after the restore = %v %v, want the choice kept", enabled, err)
 	}
 }
 

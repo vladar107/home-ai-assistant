@@ -3,17 +3,15 @@ package telegram
 import (
 	"bytes"
 	"context"
-	_ "embed"
+	"embed"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
 	"unicode"
-	"unicode/utf8"
 
-	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/clip"
-	"github.com/vladar107/home-ai-assistant/internal/conversation"
 )
 
 const (
@@ -26,72 +24,54 @@ const (
 	WidgetIgnoredAnswer = "This no longer does anything."
 )
 
-// widgetTemplate is the only program a widget runs. It draws the message's chat data, a widgetData,
-// and sends the data of the action tapped, which is what the button it stands for would send.
-//
-//go:embed widget.html
-var widgetTemplate string
+// widgetKind names a kind of widget, which is the program it runs and the data that program reads.
+// A widget message keeps the program it was sent with, so a kind's data must stay readable by the
+// views already sent.
+type widgetKind string
 
-// widgetData is what a proposal widget shows: the proposal's text, whose first line is its title,
-// where it stands, and either the actions still open or none once it is resolved.
-type widgetData struct {
-	Text    string         `json:"text"`
-	Status  string         `json:"status,omitempty"`
-	Actions []widgetAction `json:"actions,omitempty"`
+const proposalWidget widgetKind = "proposal"
+
+//go:embed widgets
+var widgetFiles embed.FS
+
+// widgetTemplates is the program each kind of widget runs: the shared base with the kind's view in
+// it, built once when the program starts. No part of it comes from a conversation.
+var widgetTemplates = map[widgetKind]string{
+	proposalWidget: composeWidget(proposalWidget),
 }
 
-type widgetAction struct {
-	Label string `json:"label"`
-	Data  string `json:"data"`
-}
-
-func proposalActions(buttons approval.Buttons) []widgetAction {
-	actions := []widgetAction{
-		{Label: "Confirm", Data: buttons.Confirm},
-		{Label: "Reject", Data: buttons.Reject},
+// composeWidget puts a kind's view into the base: its styles from widgets/<kind>.css, its markup
+// from <kind>.html, and its script from <kind>.js. The base holds the theme styles and the status
+// line under the view, and its script reads the message's data and redraws when it changes. The
+// view's script runs inside the base's and defines draw(data), which draws the data; its controls
+// call request(data, after), which disables every button, shows that the tap is being worked on,
+// sends the data, shows the answer or words the failure, and ignores an answer that arrives after a
+// redraw. After an answer the controls come back when after is controlsReturn, as after a Preview;
+// with dataChanges the widget waits for its data to change, as an answer that acts changes it, and
+// redraws after 20 seconds if it does not.
+func composeWidget(kind widgetKind) string {
+	read := func(name string) string {
+		content, err := widgetFiles.ReadFile("widgets/" + name)
+		if err != nil {
+			panic(fmt.Sprintf("widget %s: %v", kind, err))
+		}
+		return string(content)
 	}
-	if buttons.Preview != "" {
-		actions = append(actions, widgetAction{Label: "Preview", Data: buttons.Preview})
+	base := read("base.html")
+	slots := []struct{ marker, extension string }{{"{{styles}}", ".css"}, {"{{markup}}", ".html"}, {"{{script}}", ".js"}}
+	replacements := make([]string, 0, 2*len(slots))
+	for _, slot := range slots {
+		if strings.Count(base, slot.marker) != 1 {
+			panic(fmt.Sprintf("widget base must hold %s once", slot.marker))
+		}
+		part := read(string(kind) + slot.extension)
+		// A closing tag inside a view's styles or script would end the base's block early.
+		if lower := strings.ToLower(part); slot.extension != ".html" && (strings.Contains(lower, "</script") || strings.Contains(lower, "</style")) {
+			panic(fmt.Sprintf("widget %s%s must not hold a closing script or style tag", kind, slot.extension))
+		}
+		replacements = append(replacements, slot.marker, strings.TrimSuffix(part, "\n"))
 	}
-	return actions
-}
-
-// encodeWidgetData renders a proposal's text and status as the user reads them, with its actions,
-// and reports whether the data fits Telegram's limit whole.
-func encodeWidgetData(text, status string, actions []widgetAction) (string, bool) {
-	data := marshalWidgetData(widgetData{Text: plainWidgetText(text), Status: plainWidgetText(status), Actions: actions})
-	return data, len(data) <= widgetDataLimit
-}
-
-// shortenWidgetData is encodeWidgetData shortening the text in the middle until the data fits, with
-// the status whole, or with no text and the status shortened when the status alone does not fit.
-// It reports whether anything was shortened, and false for fits only when the actions alone do not
-// fit.
-func shortenWidgetData(text, status string, actions []widgetAction) (data string, shortened, fits bool) {
-	if data, fits := encodeWidgetData(text, status, actions); fits {
-		return data, false, true
-	}
-	shownText, shownStatus := plainWidgetText(text), plainWidgetText(status)
-	encode := func(text, status string) (string, bool) {
-		data := marshalWidgetData(widgetData{Text: text, Status: status, Actions: actions})
-		return data, len(data) <= widgetDataLimit
-	}
-	if longest := longestFit(utf8.RuneCountInString(shownText), func(limit int) bool {
-		_, fits := encode(clipMiddle(shownText, limit), shownStatus)
-		return fits
-	}); longest >= 0 {
-		data, _ := encode(clipMiddle(shownText, longest), shownStatus)
-		return data, true, true
-	}
-	longest := longestFit(utf8.RuneCountInString(shownStatus), func(limit int) bool {
-		_, fits := encode("", clipMiddle(shownStatus, limit))
-		return fits
-	})
-	if longest < 0 {
-		return "", false, false
-	}
-	data, _ = encode("", clipMiddle(shownStatus, longest))
-	return data, true, true
+	return strings.NewReplacer(replacements...).Replace(base)
 }
 
 // plainWidgetText is text as a message would show it, without the formatting, which a widget does
@@ -100,11 +80,11 @@ func plainWidgetText(text string) string {
 	return captionText(renderMarkup(text))
 }
 
-func marshalWidgetData(data widgetData) string {
+func marshalWidgetData(data any) string {
 	var encoded bytes.Buffer
 	encoder := json.NewEncoder(&encoded)
 	encoder.SetEscapeHTML(false)
-	// Encoding strings and a slice of them cannot fail.
+	// A widget's data is made of strings, slices, and structs of them, whose encoding cannot fail.
 	_ = encoder.Encode(data)
 	return strings.TrimSuffix(encoded.String(), "\n")
 }
@@ -179,17 +159,17 @@ func executeCaptioned[T any](c *Client, ctx context.Context, method string, para
 	return result, err
 }
 
-// sendWidget posts a proposal widget with the given actions, its text and status in the data and its
-// caption line under it. It reports false, sending nothing, when the text and status do not fit the
-// data whole.
-func (c *Client) sendWidget(ctx context.Context, chatID int64, shown approval.Shown, actions []widgetAction) (Message, bool, error) {
-	data, fits := encodeWidgetData(shown.Body, shown.Status, actions)
-	if !fits {
-		return Message{}, false, nil
+// sendWidget posts a widget of the kind with its data, which must fit widgetDataLimit, and its
+// caption line under it. It never carries an inline keyboard, which makes some Telegram apps show a
+// widget message as unsupported.
+func (c *Client) sendWidget(ctx context.Context, chatID int64, kind widgetKind, data, caption string) (Message, error) {
+	template, found := widgetTemplates[kind]
+	if !found {
+		return Message{}, fmt.Errorf("unknown widget kind %q", kind)
 	}
 	params := url.Values{
 		"chat_id":       {strconv.FormatInt(chatID, 10)},
-		"html":          {widgetTemplate},
+		"html":          {template},
 		"chat_data":     {data},
 		"allow_queries": {"true"},
 	}
@@ -198,46 +178,33 @@ func (c *Client) sendWidget(ctx context.Context, chatID int64, shown approval.Sh
 		params.Del("message_thread_id")
 		setThread(ctx, params)
 		var err error
-		message, err = executeCaptioned[Message](c, ctx, "sendWidget", params, shown.Caption)
+		message, err = executeCaptioned[Message](c, ctx, "sendWidget", params, caption)
 		return err
 	})
-	return message, true, err
+	return message, err
 }
 
-// editWidget shows a proposal on its widget: the caption line, and the text and status in the data
-// with the actions given, or with none once the proposal is resolved. The data is sent whatever
-// became of the caption. A text too long for the data is shortened there, with the status whole, and
-// sent in full as a reply to the widget once: data already showing it is not modified and sends no
-// second reply. The first error is returned.
-func (c *Client) editWidget(ctx context.Context, chatID, messageID int64, shown approval.Shown, actions []widgetAction) error {
+// editWidget shows a widget's caption line and, unless data is empty, its data, which is sent
+// whatever became of the caption. The widget keeps the program it was sent with. It reports whether
+// the data changed, and returns the first error.
+func (c *Client) editWidget(ctx context.Context, chatID, messageID int64, caption, data string) (bool, error) {
 	params := url.Values{
 		"chat_id":    {strconv.FormatInt(chatID, 10)},
 		"message_id": {strconv.FormatInt(messageID, 10)},
 	}
-	_, captionErr := executeCaptioned[json.RawMessage](c, ctx, "editMessageCaption", params, shown.Caption)
+	_, captionErr := executeCaptioned[json.RawMessage](c, ctx, "editMessageCaption", params, caption)
 	if isNotModified(captionErr) {
 		captionErr = nil
 	}
 	var changed bool
 	var dataErr error
-	data, shortened, fits := shortenWidgetData(shown.Body, shown.Status, actions)
-	if fits {
+	if data != "" {
 		changed, dataErr = c.editWidgetData(ctx, chatID, messageID, data)
 	}
-	var replyErr error
-	if shortened && changed {
-		for _, chunk := range conversation.SplitReply(shown.Text) {
-			if replyErr = c.SendReply(ctx, chatID, messageID, chunk); replyErr != nil {
-				break
-			}
-		}
+	if captionErr != nil {
+		return changed, captionErr
 	}
-	for _, err := range []error{captionErr, dataErr, replyErr} {
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	return changed, dataErr
 }
 
 // editWidgetData replaces a widget's data and reports whether that changed it.

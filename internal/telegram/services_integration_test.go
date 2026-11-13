@@ -153,7 +153,7 @@ func TestServicesPageShowsEachServerInItsState(t *testing.T) {
 	overview := h.requestSettings(2, 101)
 	attention := attentionMark + " Connect your key again for Prices moved, Prices quotes in Services."
 	if !strings.Contains(overview.text, "Services: 1 of 5 on") || !strings.Contains(overview.text, attention) ||
-		!slices.Equal(buttonData(overview.keyboard), []string{"nav:model", "nav:tools", "nav:services", "nav:memory", "nav:confirmations"}) ||
+		!slices.Equal(buttonData(overview.keyboard), []string{"nav:model", "nav:tools", "nav:services", "nav:memory", "nav:widgets"}) ||
 		!slices.ContainsFunc(keyboardTexts(overview.keyboard), func(text string) bool { return text == "Services "+attentionMark }) {
 		t.Fatalf("overview = %+v", overview)
 	}
@@ -181,7 +181,7 @@ func TestServicesPageShowsEachServerInItsState(t *testing.T) {
 	}
 
 	bob := h.requestSettings(4, 202)
-	if strings.Contains(bob.text, "Services") || !slices.Equal(buttonData(bob.keyboard), []string{"nav:model", "nav:tools", "nav:memory", "nav:confirmations"}) {
+	if strings.Contains(bob.text, "Services") || !slices.Equal(buttonData(bob.keyboard), []string{"nav:model", "nav:tools", "nav:memory", "nav:widgets"}) {
 		t.Fatalf("bob's overview = %+v", bob)
 	}
 	if edit := h.press(5, 202, settingsMessageID(4), "mcp:on:shop"); strings.Contains(edit.text, "Services") {

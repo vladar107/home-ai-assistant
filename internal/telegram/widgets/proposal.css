@@ -1,0 +1,7 @@
+#title{font-weight:600;white-space:pre-wrap;word-wrap:break-word}
+#text{margin-top:6px;white-space:pre-wrap;word-wrap:break-word}
+#text:empty{display:none}
+#state{margin-top:10px;font-weight:600;white-space:pre-wrap;word-wrap:break-word}
+#state:empty{display:none}
+#actions{display:flex;gap:8px;margin-top:12px}
+button.reject{background:var(--tg-theme-secondary-bg-color,#eee);color:var(--tg-theme-destructive-text-color,#d33)}

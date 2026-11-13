@@ -120,3 +120,48 @@ func TestMigrationIntegrationSwitchesKeepsEachUsersState(t *testing.T) {
 		t.Fatalf("turning a switch on wrote %d connection rows", count)
 	}
 }
+
+// Migration 056 carries each principal's proposal widget choice over to the Widgets switch with
+// when it was made; a principal who has both keeps the widgets choice, and the old name is gone.
+func TestMigrationWidgetsSwitchCarriesEachChoiceOver(t *testing.T) {
+	ctx := t.Context()
+	db := migrateUpTo(t, ctx, "056")
+	exec(t, ctx, db,
+		`INSERT INTO principals (id, display_name) VALUES ('alice', 'Alice'), ('bob', 'Bob'), ('carol', 'Carol'), ('dave', 'Dave')`,
+		`INSERT INTO integration_switches (principal_id, integration, enabled, changed_at) VALUES
+		 ('alice', 'proposal-widget', 1, '2026-10-01T10:00:00.000Z'),
+		 ('bob', 'proposal-widget', 0, '2026-10-02T10:00:00.000Z'),
+		 ('carol', 'web', 0, '2026-10-03T10:00:00.000Z'),
+		 ('dave', 'proposal-widget', 1, '2026-10-04T10:00:00.000Z'),
+		 ('dave', 'widgets', 0, '2026-10-05T10:00:00.000Z')`,
+	)
+
+	if err := migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	store := &Store{db: db}
+	switches, err := integration.NewSwitches(store, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for principal, want := range map[string]bool{"alice": true, "bob": false, "carol": false, "dave": false} {
+		if enabled, err := switches.Enabled(ctx, principal, integration.WidgetsSwitch); err != nil || enabled != want {
+			t.Fatalf("widgets for %s after migration = %v %v, want %v", principal, enabled, err, want)
+		}
+	}
+	for principal, want := range map[string]string{"alice": "2026-10-01T10:00:00.000Z", "bob": "2026-10-02T10:00:00.000Z", "dave": "2026-10-05T10:00:00.000Z"} {
+		var changedAt string
+		if err := db.QueryRowContext(ctx, `SELECT changed_at FROM integration_switches WHERE principal_id = ? AND integration = 'widgets'`, principal).Scan(&changedAt); err != nil || changedAt != want {
+			t.Fatalf("widgets of %s changed at %q %v, want %q", principal, changedAt, err, want)
+		}
+	}
+	if count := countRows(t, store, `SELECT count(*) FROM integration_switches WHERE principal_id = 'carol' AND integration = 'widgets'`); count != 0 {
+		t.Fatalf("a principal who never chose has %d widgets rows", count)
+	}
+	if count := countRows(t, store, `SELECT count(*) FROM integration_switches WHERE integration = 'proposal-widget'`); count != 0 {
+		t.Fatalf("%d proposal-widget rows remain", count)
+	}
+	if count := countRows(t, store, `SELECT count(*) FROM integration_switches WHERE principal_id = 'carol' AND integration = 'web' AND enabled = 0`); count != 1 {
+		t.Fatal("the migration changed another switch")
+	}
+}

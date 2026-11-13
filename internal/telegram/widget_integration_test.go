@@ -5,9 +5,12 @@ import (
 	"compress/zlib"
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -15,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/integration"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
@@ -265,7 +269,7 @@ func (h *conversationHarness) waitUntil(what string, done func() bool) {
 
 func (h *conversationHarness) setWidgets(principalID string, enabled bool) {
 	h.t.Helper()
-	if err := h.switches.SetEnabled(h.ctx, principalID, approval.WidgetSwitch, enabled); err != nil {
+	if err := h.switches.SetEnabled(h.ctx, principalID, integration.WidgetsSwitch, enabled); err != nil {
 		h.t.Fatal(err)
 	}
 }
@@ -333,21 +337,47 @@ func newWidgetHarness(t *testing.T, runtime *controlledRuntime, options harnessO
 	return h
 }
 
-func TestWidgetTemplateFitsTelegramsLimits(t *testing.T) {
+var updateWidgets = flag.Bool("update", false, "rewrite the golden widget templates in testdata/widgets")
+
+// Every kind's composed template is pinned in testdata/widgets, so a change to what a widget runs is
+// a diff a reviewer reads, and fits Telegram's limits. Run go test ./internal/telegram -run
+// TestWidgetTemplates -update after an intended change.
+func TestWidgetTemplatesMatchTheirGoldenFilesAndFitTelegramsLimits(t *testing.T) {
 	t.Parallel()
-	var compressed bytes.Buffer
-	writer, err := zlib.NewWriterLevel(&compressed, 9)
+	for kind, template := range widgetTemplates {
+		path := filepath.Join("testdata", "widgets", string(kind)+".html")
+		if *updateWidgets {
+			if err := os.WriteFile(path, []byte(template), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		} else if golden, err := os.ReadFile(path); err != nil {
+			t.Fatalf("read %s: %v; run with -update to create it", path, err)
+		} else if template != string(golden) {
+			t.Errorf("the %s widget's template changed; review the change and run with -update if it is intended", kind)
+		}
+		var compressed bytes.Buffer
+		writer, err := zlib.NewWriterLevel(&compressed, 9)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := writer.Write([]byte(template)); err != nil {
+			t.Fatal(err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if len(template) > 32768 || compressed.Len() > 4096 {
+			t.Fatalf("the %s widget's template is %d bytes, %d compressed; Telegram takes 32768 and 4096", kind, len(template), compressed.Len())
+		}
+	}
+	goldens, err := os.ReadDir(filepath.Join("testdata", "widgets"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := writer.Write([]byte(widgetTemplate)); err != nil {
-		t.Fatal(err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if len(widgetTemplate) > 32768 || compressed.Len() > 4096 {
-		t.Fatalf("widget template is %d bytes, %d compressed; Telegram takes 32768 and 4096", len(widgetTemplate), compressed.Len())
+	for _, golden := range goldens {
+		if _, found := widgetTemplates[widgetKind(strings.TrimSuffix(golden.Name(), ".html"))]; !found {
+			t.Errorf("testdata/widgets/%s belongs to no widget kind; remove it", golden.Name())
+		}
 	}
 }
 
@@ -359,20 +389,20 @@ func TestWidgetSwitchDecidesHowProposalsAreSent(t *testing.T) {
 	h := newWidgetHarness(t, runtime, harnessOptions{})
 
 	settings := h.requestSettings(1, 101)
-	if !strings.Contains(settings.text, "Confirmations: buttons") {
+	if !strings.Contains(settings.text, "Widgets: off") {
 		t.Fatalf("settings overview = %s", settings.text)
 	}
-	page := h.openSettingsPage(2, 101, settings.messageID, "confirmations")
+	page := h.openSettingsPage(2, 101, settings.messageID, "widgets")
 	if !strings.Contains(page.text, WidgetOffLine) || strings.Join(buttonData(page.keyboard), " ") != "widget:on nav:root" {
-		t.Fatalf("confirmations page = %+v", page)
+		t.Fatalf("widgets page = %+v", page)
 	}
 	if on := h.press(3, 101, settings.messageID, "widget:on"); !strings.Contains(on.text, WidgetOnLine) || buttonData(on.keyboard)[0] != "widget:off" {
-		t.Fatalf("confirmations page after turning the widget on = %+v", on)
+		t.Fatalf("widgets page after turning widgets on = %+v", on)
 	}
 
 	h.proposeJob(runtime, 4, 0, "Weekly tasks", "List my overdue tasks.")
 	widget := h.nextWidget()
-	if widget.chatID != 101 || widget.html != widgetTemplate || strings.Contains(widget.caption, "\n") || !strings.Contains(widget.caption, `"Weekly tasks"`) ||
+	if widget.chatID != 101 || widget.html != widgetTemplates[proposalWidget] || strings.Contains(widget.caption, "\n") || !strings.Contains(widget.caption, `"Weekly tasks"`) ||
 		strings.Contains(widget.caption, "List my overdue tasks.") || strings.Contains(widget.caption, "Expires") {
 		t.Fatalf("widget = %+v, want a caption of one line naming the job", widget)
 	}
@@ -386,7 +416,7 @@ func TestWidgetSwitchDecidesHowProposalsAreSent(t *testing.T) {
 	confirm, _, _ := widgetActions(t, widget.data)
 
 	if off := h.press(5, 101, settings.messageID, "widget:off"); !strings.Contains(off.text, WidgetOffLine) {
-		t.Fatalf("confirmations page after turning the widget off = %+v", off)
+		t.Fatalf("widgets page after turning widgets off = %+v", off)
 	}
 
 	gate := make(chan struct{})
@@ -420,6 +450,42 @@ func TestWidgetSwitchDecidesHowProposalsAreSent(t *testing.T) {
 	if count := len(h.widgets.sent); count != 0 {
 		t.Fatalf("%d widgets sent with the switch off", count)
 	}
+}
+
+// The Widgets page replaced the Confirmations page: a press of the old page's button on a settings
+// message already in the chat shows the overview, app_help answers on widgets and no longer on
+// confirmations, and /privacy names widgets while they are on.
+func TestWidgetsSettingsPageReplacesConfirmations(t *testing.T) {
+	t.Parallel()
+	runtime := newControlledRuntime()
+	h := newWidgetHarness(t, runtime, harnessOptions{})
+
+	settings := h.requestSettings(1, 101)
+	if old := h.press(2, 101, settings.messageID, "nav:confirmations"); old.text != settings.text || strings.Join(buttonData(old.keyboard), " ") != strings.Join(buttonData(settings.keyboard), " ") {
+		t.Fatalf("old confirmations button = %+v, want the overview %+v", old, settings)
+	}
+	h.push(textUpdate(3, 101, "/privacy"))
+	if reply := h.nextMessage(); strings.Contains(reply.text, WidgetPrivacyLine) {
+		t.Fatalf("privacy with widgets off = %s", reply.text)
+	}
+	if on := h.press(4, 101, settings.messageID, "widget:on"); !strings.HasPrefix(on.text, crumbs("Widgets")) || !strings.Contains(on.text, WidgetOnLine) {
+		t.Fatalf("widgets page after turning widgets on = %+v", on)
+	}
+	h.push(textUpdate(5, 101, "/privacy"))
+	if reply := h.nextMessage(); !strings.Contains(reply.text, privacyItem+WidgetPrivacyLine) {
+		t.Fatalf("privacy with widgets on = %s", reply.text)
+	}
+
+	h.push(textUpdate(6, 101, "how do widgets work?"))
+	call := receive(t, h.ctx, runtime.calls)
+	if help := h.callTool(call, "app_help", `{"topic":"widgets"}`); help.IsError || !strings.Contains(help.Text, `press "Widgets"`) || !strings.Contains(help.Text, WidgetOnLine) {
+		t.Fatalf("widgets help = %+v", help)
+	}
+	if help := h.callTool(call, "app_help", `{"topic":"confirmations"}`); !help.IsError || !strings.Contains(help.Text, "topic must be one of") {
+		t.Fatalf("confirmations help = %+v", help)
+	}
+	call.answer <- agentruntime.RunResult{Response: "They show proposals."}
+	h.wantReply(101, 6, "They show proposals.")
 }
 
 // Preview and Reject work from the widget as their buttons do, and a tap on someone else's proposal
@@ -790,6 +856,45 @@ func TestWidgetTapMustComeFromTheProposalsMessage(t *testing.T) {
 	}
 	h.wantOutcome(widget.messageID, "Scheduled. First run:")
 	h.continueTurn(runtime, 3)
+}
+
+// A tap is offered to each kind's handler in turn: one whose data no handler takes is answered as
+// doing nothing and logged as ignored, and a proposal tap that is not for the message it came from
+// keeps its own reason.
+func TestWidgetTapNoHandlerTakesIsAnsweredAsDoingNothing(t *testing.T) {
+	t.Parallel()
+	runtime := newControlledRuntime()
+	h := newWidgetHarness(t, runtime, harnessOptions{})
+	h.setWidgets("alice", true)
+
+	h.proposeJob(runtime, 1, 0, "Weekly tasks", "List my overdue tasks.")
+	widget := h.nextWidget()
+	confirm, _, _ := widgetActions(t, widget.data)
+
+	for _, tap := range []struct {
+		update            Update
+		principal, reason string
+	}{
+		{widgetTap(2, 101, widget.messageID, "picker:choose:1"), "alice", "unknown_action"},
+		{widgetTap(3, 101, widget.messageID+50, confirm), "alice", "misplaced_widget_tap"},
+		{widgetTap(4, 202, widget.messageID, confirm), "bob", "foreign_approval"},
+	} {
+		h.push(tap.update)
+		if answer := h.wantWidgetAnswer(tap.update.UpdateID); answer != WidgetIgnoredAnswer {
+			t.Fatalf("answer to a tap ignored as %s = %q", tap.reason, answer)
+		}
+		logged := regexp.MustCompile(`msg=telegram\.update\.ignored reason=` + tap.reason + ` principal_id=` + tap.principal + `\b`)
+		h.waitUntil("the tap logged as ignored with "+tap.reason, func() bool { return logged.MatchString(h.logs.String()) })
+	}
+	h.waitOffset(5)
+	select {
+	case edit := <-h.widgets.edits:
+		t.Fatalf("an ignored tap edited the widget: %+v", edit)
+	default:
+	}
+	if status, _ := h.approvalStatus(approvalID(confirm)); status != approval.StatusPending {
+		t.Fatalf("approval after ignored taps = %s", status)
+	}
 }
 
 const outcomeTool = "outcome_write"
