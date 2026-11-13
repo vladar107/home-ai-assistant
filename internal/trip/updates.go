@@ -2,6 +2,7 @@ package trip
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -45,7 +46,7 @@ const (
 	maximumUpdateItems        = 5
 	maximumUpdateMessageUnits = 3500
 	// maximumUpdateCandidates bounds the updates read from one reply, and maximumTripEvents the
-	// calendar events; a longer list is not taken as complete.
+	// calendar events read for one trip; a longer list is not taken as complete.
 	maximumUpdateCandidates = 20
 	maximumTripEvents       = 100
 	// promptedUpdates is how many sent items the prompt lists, and knownUpdates how many are
@@ -59,12 +60,41 @@ const (
 	maximumUpdateTitleRunes     = 200
 	maximumUpdateTextRunes      = 600
 	maximumEventIDRunes         = 300
+	// maximumUpdateSentenceRunes bounds the one sentence a mail or web item is shown as.
+	maximumUpdateSentenceRunes = 200
 
 	updateNoticesKept = 2
 
-	updateTimeLayout = "Mon 2 Jan 15:04"
-	updateDayLayout  = "Mon 2 Jan"
+	updateDayLayout   = "Mon 2 Jan"
+	updateClockLayout = "15:04"
+	updateBullet      = "\u2022 "
+	updateDash        = "\u2013"
+
+	// snapshotVersion marks a snapshot whose events code read from the calendar. One without it was
+	// transcribed by a model turn, with other IDs and with offsets that depended on when it ran, so
+	// it is not compared with.
+	snapshotVersion = 2
 )
+
+// CalendarEvent is one event of the owner's calendar. An all-day event's StartsAt and EndsAt are
+// its first and last day, both inclusive, at midnight UTC.
+type CalendarEvent struct {
+	// Key is the event's calendar and its event ID together, which stays the same between reads.
+	Key      string
+	Title    string
+	Place    string
+	StartsAt time.Time
+	EndsAt   time.Time
+	AllDay   bool
+}
+
+// CalendarReader lists the principal's calendar events between two instants, as the calendar tool
+// lists them: recurring events as their instances, without cancelled ones. The second result is
+// false when the list is not whole, because a calendar could not be read or more than limit events
+// exist; such a list is compared with nothing. The application adapts the calendar connector to it.
+type CalendarReader interface {
+	CalendarEvents(ctx context.Context, principalID string, from, to time.Time, limit int) ([]CalendarEvent, bool, error)
+}
 
 // UpdateAccess says what the check for news about a principal's trips may read, and whether it
 // runs at all; the application implements it over the Google accounts, the web switch, and the
@@ -90,21 +120,29 @@ type UpdatesConfig struct {
 	Zone *time.Location
 	// Now is the clock; nil means time.Now.
 	Now func() time.Time
+	// Calendar reads the owner's calendar; nil compares no calendar.
+	Calendar CalendarReader
+	// Language gives the sample of the user's language the mail and web items are written in; nil
+	// leaves them in whatever language the turn chooses.
+	Language LanguageSamples
 }
 
 // Updates checks a planned trip, from three days before it starts until it ends, for news in the
-// owner's mail, on the web, and in their calendar, and sends what is new to the trip's tab. The
-// trip loop starts each check; at most one runs at a time.
+// owner's mail, on the web, and in their calendar, and sends what is new to the trip's tab. A model
+// turn reads mail and the web; code reads the calendar and compares it. The trip loop starts each
+// check; at most one runs at a time.
 type Updates struct {
-	trips   Repository
-	log     UpdateLog
-	checker Checker
-	access  UpdateAccess
-	sender  Sender
-	notices *UpdateNotices
-	logger  *slog.Logger
-	zone    *time.Location
-	now     func() time.Time
+	trips    Repository
+	log      UpdateLog
+	checker  Checker
+	access   UpdateAccess
+	sender   Sender
+	notices  *UpdateNotices
+	calendar CalendarReader
+	language LanguageSamples
+	logger   *slog.Logger
+	zone     *time.Location
+	now      func() time.Time
 
 	mu sync.Mutex
 	// requested holds when each principal last asked for a check; the next cycle turns it into
@@ -134,7 +172,7 @@ func NewUpdates(cfg UpdatesConfig, trips Repository, log UpdateLog, checker Chec
 	}
 	return &Updates{
 		trips: trips, log: log, checker: checker, access: access, sender: sender, notices: notices, logger: logger,
-		zone: cfg.Zone, now: now, requested: make(map[string]time.Time), asked: make(map[string]bool),
+		calendar: cfg.Calendar, language: cfg.Language, zone: cfg.Zone, now: now, requested: make(map[string]time.Time), asked: make(map[string]bool),
 	}, nil
 }
 
@@ -239,11 +277,11 @@ func (u *Updates) begin(ctx context.Context, item Trip, now time.Time) error {
 }
 
 type updateReply struct {
-	Updates        []updateCandidate `json:"updates"`
-	Events         []eventCandidate  `json:"events"`
-	EventsComplete bool              `json:"events_complete"`
+	Updates []updateCandidate `json:"updates"`
 }
 
+// updateCandidate is one item of the reply. Title is no longer asked for and is not used; it is
+// read so that a reply which still carries one is not refused whole.
 type updateCandidate struct {
 	Source    string `json:"source"`
 	Origin    string `json:"origin"`
@@ -252,19 +290,11 @@ type updateCandidate struct {
 	Text      string `json:"text"`
 }
 
-type eventCandidate struct {
-	ID       string `json:"id"`
-	Title    string `json:"title"`
-	StartsAt string `json:"starts_at"`
-	EndsAt   string `json:"ends_at"`
-	Place    string `json:"place"`
-	AllDay   bool   `json:"all_day"`
-}
-
 // calendarSnapshot is the stored form of the events from the last complete list, with when it was
 // taken and the trip's dates it was taken for. The column starts as an empty JSON array, which is
 // no snapshot at all, so this is always an object.
 type calendarSnapshot struct {
+	Version      int         `json:"version"`
 	TakenAt      time.Time   `json:"taken_at"`
 	TripStartsAt time.Time   `json:"trip_starts_at"`
 	TripEndsAt   time.Time   `json:"trip_ends_at"`
@@ -272,7 +302,8 @@ type calendarSnapshot struct {
 }
 
 // tripEvent is one calendar event. An all-day event's StartsAt and EndsAt are its first and last
-// day, both inclusive, at midnight UTC, and are compared and shown as dates.
+// day, both inclusive, at midnight UTC, and are compared and shown as dates. Place is the place as
+// it is shown, its text before the first comma.
 type tripEvent struct {
 	ID       string    `json:"id"`
 	Title    string    `json:"title"`
@@ -329,31 +360,41 @@ func (u *Updates) check(ctx context.Context, item Trip, started time.Time) {
 		fail("sent", err)
 		return
 	}
-	days := 0
-	if readable.mail {
-		days = updateMailDays(state.MailReadAt, started)
+	// A turn that failed leaves mail and the web unread, as one that ran out of calls does; the
+	// calendar, which code reads, is compared all the same.
+	var reply updateReply
+	exhausted := false
+	if readable.mail || readable.web {
+		days := 0
+		if readable.mail {
+			days = updateMailDays(state.MailReadAt, started)
+		}
+		sample := ""
+		if u.language != nil {
+			sample = u.language.Sample(ctx, principalID, item.ID)
+		}
+		calls := &tools.CallLog{}
+		message := prompt.TripUpdates(item.Title, started, u.where(item, started),
+			UpdatePrompt(item, days, readable.web, sample, known[:min(len(known), promptedUpdates)]))
+		text, errorKind, err := u.checker.RunCheck(tools.WithCallLog(tools.WithCallBudget(ctx, updateBudget), calls), principalID, message)
+		if ctx.Err() != nil {
+			return
+		}
+		decoded, ok := decodeUpdates(text)
+		switch {
+		case err != nil:
+			fail("turn", err)
+			exhausted = true
+		case errorKind != "":
+			u.logger.WarnContext(ctx, "trip.updates.failed", "principal_id", principalID, "trip_id", item.ID, "stage", "turn", "error_kind", errorKind)
+			exhausted = true
+		case !ok:
+			u.logger.WarnContext(ctx, "trip.updates.unreadable", "principal_id", principalID, "trip_id", item.ID)
+			exhausted = true
+		default:
+			reply, exhausted = decoded, calls.Exhausted()
+		}
 	}
-	calls := &tools.CallLog{}
-	message := prompt.TripUpdates(item.Title, started, u.where(item, started),
-		UpdatePrompt(item, days, readable.web, readable.calendar, known[:min(len(known), promptedUpdates)]))
-	text, errorKind, err := u.checker.RunCheck(tools.WithCallLog(tools.WithCallBudget(ctx, updateBudget), calls), principalID, message)
-	if ctx.Err() != nil {
-		return
-	}
-	if err != nil {
-		fail("turn", err)
-		return
-	}
-	if errorKind != "" {
-		u.logger.WarnContext(ctx, "trip.updates.failed", "principal_id", principalID, "trip_id", item.ID, "stage", "turn", "error_kind", errorKind)
-		return
-	}
-	reply, ok := decodeUpdates(text)
-	if !ok {
-		u.logger.WarnContext(ctx, "trip.updates.unreadable", "principal_id", principalID, "trip_id", item.ID)
-		return
-	}
-	exhausted := calls.Exhausted()
 
 	sent := make(map[string]bool, len(known))
 	for _, earlier := range known {
@@ -383,7 +424,11 @@ func (u *Updates) check(ctx context.Context, item Trip, started time.Time) {
 	next := state
 	calendarState := "skipped"
 	var changes []SentUpdate
-	if events, complete := tripEvents(item, reply, readable.calendar && !exhausted); complete {
+	events, skipped := u.tripEvents(ctx, item, readable.calendar)
+	if ctx.Err() != nil {
+		return
+	}
+	if skipped == "" {
 		calendarState = "baseline"
 		var missing []string
 		if previous, held := loadSnapshot(state.CalendarSnapshot); held &&
@@ -391,7 +436,7 @@ func (u *Updates) check(ctx context.Context, item Trip, started time.Time) {
 			calendarState = "compared"
 			changes, events, missing = compareEvents(item, state.CalendarSnapshot, previous.Events, state.Missing, events)
 		}
-		encoded, err := json.Marshal(calendarSnapshot{TakenAt: started, TripStartsAt: item.StartsAt, TripEndsAt: item.EndsAt, Events: events})
+		encoded, err := json.Marshal(calendarSnapshot{Version: snapshotVersion, TakenAt: started, TripStartsAt: item.StartsAt, TripEndsAt: item.EndsAt, Events: events})
 		if err != nil {
 			fail("snapshot", err)
 			return
@@ -447,7 +492,7 @@ func (u *Updates) check(ctx context.Context, item Trip, started time.Time) {
 		return
 	}
 	u.logger.InfoContext(storeCtx, "trip.updates.done", "principal_id", principalID, "trip_id", item.ID, "mail", readable.mail, "web", readable.web,
-		"calendar", calendarState, "exhausted", exhausted, "found", len(reply.Updates), "changes", len(changes), "sent", len(delivered),
+		"calendar", calendarState, "calendar_skipped", skipped, "exhausted", exhausted, "found", len(reply.Updates), "changes", len(changes), "sent", len(delivered),
 		"left", len(left), "repeated", repeated, "dropped", invalid)
 }
 
@@ -462,27 +507,18 @@ func updateMailDays(readAt, now time.Time) int {
 }
 
 // UpdatePrompt asks for strict JSON so code, not the model, validates, deduplicates, and decides
-// what is sent. days is how far back mail is searched, zero when mail cannot be read; web and
-// calendar are whether those can be read; sent is what was already sent for the trip, newest
-// first. A source that cannot be read is not mentioned.
-func UpdatePrompt(item Trip, days int, web, calendar bool, sent []SentUpdate) string {
+// what is sent. days is how far back mail is searched, zero when mail cannot be read; web is
+// whether the web can be read; sample, when there is one, is a message of the user's whose language
+// the items are written in; sent is what was already sent for the trip, newest first. A source that
+// cannot be read is not mentioned, and the calendar never is: code reads it.
+func UpdatePrompt(item Trip, days int, web bool, sample string, sent []SentUpdate) string {
 	location := localtime.SavedZone(item.Zone)
-	var outside, kinds []string
+	var outside, read, what, kinds []string
 	if days > 0 {
-		outside, kinds = append(outside, "mail"), append(kinds, UpdateSourceMail)
+		outside, read, what, kinds = append(outside, "mail"), append(read, "Mail"), append(what, "mail for a message"), append(kinds, UpdateSourceMail)
 	}
 	if web {
-		outside, kinds = append(outside, "web"), append(kinds, UpdateSourceWeb)
-	}
-	var read []string
-	if days > 0 {
-		read = append(read, "Mail")
-	}
-	if web {
-		read = append(read, "web")
-	}
-	if calendar {
-		read = append(read, "calendar")
+		outside, read, what, kinds = append(outside, "web"), append(read, "web"), append(what, "web for a page"), append(kinds, UpdateSourceWeb)
 	}
 	var builder strings.Builder
 	builder.WriteString("Look for important news about the user's trip described at the end, which is near or under way. ")
@@ -494,11 +530,6 @@ func UpdatePrompt(item Trip, days int, web, calendar bool, sent []SentUpdate) st
 	if web {
 		builder.WriteString("Search the web for news that affects the trip at its destination and dates, such as strikes, closures, severe weather warnings, " +
 			"or changes announced by its providers or organisers. ")
-	}
-	if calendar {
-		fmt.Fprintf(&builder, "List the user's calendar events from %s to %s, both ends inclusive, with calendar_events; "+
-			"if a result says it stopped early, call again from the start it names. ",
-			item.StartsAt.In(location).Format(time.DateOnly), item.EndLabel(time.DateOnly, time.DateOnly))
 	}
 	builder.WriteString("Important news changes the user's plans, timing, access, safety, or costs: a cancellation, a new time, venue, gate, or platform, " +
 		"a strike, a closure, an entry rule, or a new fee. Leave out marketing, newsletters, confirmations and reminders that change nothing, " +
@@ -513,43 +544,23 @@ func UpdatePrompt(item Trip, days int, web, calendar bool, sent []SentUpdate) st
 		"Never report news that an item already sent tells, even when it comes from another source. " +
 		"If a tool answers that the call budget is exhausted, stop and reply at once in the same JSON with what you have. " +
 		"Reply with ONLY strict JSON, no prose and no code fence, in this shape: ")
-	var shape []string
-	if len(kinds) > 0 {
-		shape = append(shape, `"updates":[{"source":"`+strings.Join(kinds, "|")+`","origin":"","reference":"","title":"","text":""}]`)
-	}
-	if calendar {
-		shape = append(shape, `"events":[{"id":"","title":"","starts_at":"","ends_at":"","place":"","all_day":false}],"events_complete":false`)
-	}
-	builder.WriteString("{" + strings.Join(shape, ",") + "}. ")
-	if len(kinds) > 0 {
-		var what []string
-		if days > 0 {
-			what = append(what, "mail for a message")
+	builder.WriteString(`{"updates":[{"source":"` + strings.Join(kinds, "|") + `","origin":"","reference":"","text":""}]}. `)
+	origin, reference := "the sender's name", "the message ID of the mail"
+	if web {
+		origin, reference = "the sender's or site's name", "the message ID of the mail or the address of the page"
+		if days == 0 {
+			origin, reference = "the site's name", "the address of the page"
 		}
-		if web {
-			what = append(what, "web for a page")
-		}
-		origin, reference := "the sender's name", "the message ID of the mail"
-		if web {
-			origin, reference = "the sender's or site's name", "the message ID of the mail or the address of the page"
-			if days == 0 {
-				origin, reference = "the site's name", "the address of the page"
-			}
-		}
-		fmt.Fprintf(&builder, "Each update is one piece of important %s news: source is %s; origin is %s, never an address; reference is %s; "+
-			"title is under 80 characters; and text is one or two plain sentences under 300 characters on what changed and why it matters for this trip. "+
-			"Origin, title, and text hold no links, URLs, domain names, @ handles, or / commands. ",
-			listed(outside), listed(what), origin, reference)
 	}
-	if calendar {
-		builder.WriteString("events lists every calendar event in those dates with its ID, title, start, end, place, and all_day. " +
-			"For a timed event all_day is false and starts_at and ends_at are RFC 3339 instants with their offset; " +
-			"for an all-day event all_day is true and starts_at and ends_at are its first and last day as YYYY-MM-DD, both inclusive, as calendar_events shows them. " +
-			"events_complete is true only when the list holds them all; a calendar that could not be read, a list cut short, or an exhausted budget makes it false. ")
+	fmt.Fprintf(&builder, "Each update is one piece of important %s news: source is %s; origin is %s, never an address; reference is %s; "+
+		"and text is one plain sentence under %d characters on what changed and why it matters for this trip. "+
+		"Origin and text hold no links, URLs, domain names, @ handles, or / commands. ",
+		listed(outside), listed(what), origin, reference, maximumUpdateSentenceRunes)
+	quoted := prompt.LanguageSample(sample)
+	if quoted != "" {
+		builder.WriteString("Write each text in the language of the language sample quoted at the very end. ")
 	}
-	if len(kinds) > 0 {
-		builder.WriteString("If there is no news, leave updates empty.")
-	}
+	builder.WriteString("If there is no news, leave updates empty.")
 	builder.WriteString("\n\nThe trip:\n")
 	const layout = "Mon 2 Jan 2006 15:04"
 	fmt.Fprintf(&builder, "> Title: %s\n> Destination: %s\n> From %s to %s, local time in %s\n",
@@ -567,6 +578,9 @@ func UpdatePrompt(item Trip, days int, web, calendar bool, sent []SentUpdate) st
 	}
 	for _, earlier := range sent {
 		fmt.Fprintf(&builder, "> [%s] %s (reference %s)\n", earlier.Source, newsLine(earlier), earlier.Reference)
+	}
+	if quoted != "" {
+		builder.WriteString("\n" + quoted + "\n")
 	}
 	return strings.TrimSuffix(builder.String(), "\n")
 }
@@ -631,39 +645,45 @@ func cleanUpdate(candidate updateCandidate, readable sources) (SentUpdate, bool)
 		fallback = "Unnamed site"
 	}
 	update.Origin = orFallback(updateText(candidate.Origin, maximumUpdateOriginRunes), fallback)
-	update.Title = updateText(candidate.Title, maximumUpdateTitleRunes)
-	update.Text = updateText(candidate.Text, maximumUpdateTextRunes)
+	update.Text = updateText(candidate.Text, maximumUpdateSentenceRunes)
 	if update.Text == "" {
 		return SentUpdate{}, false
 	}
 	return update, true
 }
 
-// tripEvents returns the reply's calendar events within the trip's dates and whether they make a
-// complete list. Any event that cannot be read makes the list incomplete, since leaving it out
-// would read as its removal.
-func tripEvents(item Trip, reply updateReply, usable bool) ([]tripEvent, bool) {
-	if !usable || !reply.EventsComplete || len(reply.Events) > maximumTripEvents {
-		return nil, false
+// tripEvents reads the calendar events within the trip's dates. Its second result is "" when they
+// make a complete list, and otherwise one word for why the calendar is not compared this time. Any
+// event that cannot be read makes the list incomplete, since leaving it out would read as its
+// removal.
+func (u *Updates) tripEvents(ctx context.Context, item Trip, readable bool) ([]tripEvent, string) {
+	if !readable || u.calendar == nil {
+		return nil, "off"
+	}
+	read, complete, err := u.calendar.CalendarEvents(ctx, item.PrincipalID, item.StartsAt, item.EndsAt, maximumTripEvents)
+	switch {
+	case err != nil:
+		if ctx.Err() == nil {
+			u.logger.WarnContext(ctx, "trip.updates.failed", "principal_id", item.PrincipalID, "trip_id", item.ID, "stage", "calendar", "error", err)
+		}
+		return nil, "failed"
+	case !complete:
+		return nil, "incomplete"
+	case len(read) > maximumTripEvents:
+		return nil, "limit"
 	}
 	location := localtime.SavedZone(item.Zone)
 	firstDay, _ := time.Parse(time.DateOnly, item.StartsAt.In(location).Format(time.DateOnly))
 	lastDay, _ := time.Parse(time.DateOnly, item.EndLabel(time.DateOnly, time.DateOnly))
-	events := make([]tripEvent, 0, len(reply.Events))
-	seen := make(map[string]bool, len(reply.Events))
-	for _, candidate := range reply.Events {
-		event := tripEvent{ID: plain(candidate.ID), AllDay: candidate.AllDay, Place: updateText(candidate.Place, maximumUpdateTitleRunes),
-			Title: orFallback(updateText(candidate.Title, maximumUpdateTitleRunes), "Untitled event")}
-		var startsOK, endsOK bool
-		if event.AllDay {
-			event.StartsAt, startsOK = parseDay(candidate.StartsAt)
-			event.EndsAt, endsOK = parseDay(candidate.EndsAt)
-		} else {
-			event.StartsAt, startsOK = parseInstant(candidate.StartsAt)
-			event.EndsAt, endsOK = parseInstant(candidate.EndsAt)
-		}
-		if event.ID == "" || utf8.RuneCountInString(event.ID) > maximumEventIDRunes || !startsOK || !endsOK || event.EndsAt.Before(event.StartsAt) {
-			return nil, false
+	events := make([]tripEvent, 0, len(read))
+	seen := make(map[string]bool, len(read))
+	for _, found := range read {
+		place, _, _ := strings.Cut(found.Place, ",")
+		event := tripEvent{ID: eventID(found.Key), AllDay: found.AllDay, StartsAt: found.StartsAt.UTC(), EndsAt: found.EndsAt.UTC(),
+			Place: updateText(place, maximumUpdateTitleRunes),
+			Title: orFallback(updateText(found.Title, maximumUpdateTitleRunes), "Untitled event")}
+		if event.ID == "" || event.StartsAt.IsZero() || event.EndsAt.Before(event.StartsAt) {
+			return nil, "event"
 		}
 		inside := event.EndsAt.After(item.StartsAt) && event.StartsAt.Before(item.EndsAt)
 		if event.AllDay {
@@ -673,23 +693,32 @@ func tripEvents(item Trip, reply updateReply, usable bool) ([]tripEvent, bool) {
 			continue
 		}
 		seen[event.ID] = true
-		event.StartsAt, event.EndsAt = event.StartsAt.UTC(), event.EndsAt.UTC()
 		events = append(events, event)
 	}
-	return events, true
+	slices.SortStableFunc(events, func(a, b tripEvent) int {
+		return cmp.Or(a.StartsAt.Compare(b.StartsAt), strings.Compare(a.ID, b.ID))
+	})
+	return events, ""
 }
 
-func parseDay(value string) (time.Time, bool) {
-	day, err := time.Parse(time.DateOnly, strings.TrimSpace(value))
-	return day, err == nil
+// eventID keeps an event's key within what the snapshot and a sent item's reference hold: a long
+// one is kept as its digest, which still tells events apart.
+func eventID(key string) string {
+	key = plain(key)
+	if utf8.RuneCountInString(key) <= maximumEventIDRunes {
+		return key
+	}
+	sum := sha256.Sum256([]byte(key))
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
+// loadSnapshot reads a stored snapshot that code took; one a model turn took is not held.
 func loadSnapshot(raw json.RawMessage) (calendarSnapshot, bool) {
 	if !bytes.HasPrefix(bytes.TrimSpace(raw), []byte("{")) {
 		return calendarSnapshot{}, false
 	}
 	var snapshot calendarSnapshot
-	if err := json.Unmarshal(raw, &snapshot); err != nil {
+	if err := json.Unmarshal(raw, &snapshot); err != nil || snapshot.Version != snapshotVersion {
 		return calendarSnapshot{}, false
 	}
 	return snapshot, true
@@ -719,20 +748,19 @@ func compareEvents(item Trip, basis json.RawMessage, previous []tripEvent, missi
 		now, found := byID[before.ID]
 		switch {
 		case !found && slices.Contains(missing, before.ID):
-			changes = append(changes, calendarChange(reference("removed", before), before.Title,
-				fmt.Sprintf("%q (%s) is no longer in your calendar during the trip.", before.Title, eventStart(before, location))))
+			changes = append(changes, calendarChange(reference("removed", before), before.Title, "Removed: "+before.Title+", "+eventWhen(before, location)))
 		case !found:
 			stillMissing = append(stillMissing, before.ID)
 			kept = append(kept, before)
-		case now.AllDay != before.AllDay || !now.StartsAt.Equal(before.StartsAt) || !now.EndsAt.Equal(before.EndsAt) || now.Place != before.Place:
-			changes = append(changes, calendarChange(reference("moved", now), now.Title,
-				fmt.Sprintf("%q moved to %s; it was %s.", now.Title, eventWhen(now, location), eventWhen(before, location))))
+		default:
+			if what := eventChange(now, before, location); what != "" {
+				changes = append(changes, calendarChange(reference("moved", now), now.Title, now.Title+": "+what))
+			}
 		}
 	}
 	for _, event := range current {
 		if !slices.ContainsFunc(previous, func(before tripEvent) bool { return before.ID == event.ID }) {
-			changes = append(changes, calendarChange(reference("added", event), event.Title,
-				fmt.Sprintf("%q was added: %s.", event.Title, eventWhen(event, location))))
+			changes = append(changes, calendarChange(reference("added", event), event.Title, "Added: "+event.Title+", "+eventWhen(event, location)))
 		}
 	}
 	return changes, kept, stillMissing
@@ -743,67 +771,101 @@ func calendarChange(reference, title, text string) SentUpdate {
 		Title: title, Text: clip.Runes(text, maximumUpdateTextRunes)}
 }
 
-func eventStart(event tripEvent, location *time.Location) string {
+// eventSpan is an event's day and its times in the trip's zone. An all-day event has no times, and
+// one over several days names its last day too.
+func eventSpan(event tripEvent, location *time.Location) (day, times string) {
 	if event.AllDay {
-		return event.StartsAt.Format(updateDayLayout) + ", all day"
+		day = event.StartsAt.Format(updateDayLayout)
+		if !event.EndsAt.Equal(event.StartsAt) {
+			day += updateDash + event.EndsAt.Format(updateDayLayout)
+		}
+		return day, ""
 	}
-	return event.StartsAt.In(location).Format(updateTimeLayout)
+	from, to := event.StartsAt.In(location), event.EndsAt.In(location)
+	day, times = from.Format(updateDayLayout), from.Format(updateClockLayout)
+	switch {
+	case to.Equal(from):
+	case to.Format(time.DateOnly) == from.Format(time.DateOnly):
+		times += updateDash + to.Format(updateClockLayout)
+	default:
+		times += updateDash + to.Format(updateDayLayout+" "+updateClockLayout)
+	}
+	return day, times
 }
 
 func eventWhen(event tripEvent, location *time.Location) string {
-	var when string
+	day, times := eventSpan(event, location)
+	if event.AllDay {
+		return day + " (all day)"
+	}
+	return day + " " + times
+}
+
+// eventChange says what differs between an event and the same event in the last list, and only
+// that: its new time with the old one, which leaves the day out when it stayed, and its new place
+// with the old one. It is "" when neither changed.
+func eventChange(now, before tripEvent, location *time.Location) string {
+	var parts []string
+	if now.AllDay != before.AllDay || !now.StartsAt.Equal(before.StartsAt) || !now.EndsAt.Equal(before.EndsAt) {
+		day, times := eventSpan(now, location)
+		oldDay, oldTimes := eventSpan(before, location)
+		was := oldDay
+		switch {
+		case before.AllDay && !now.AllDay:
+			was += ", all day"
+		case !before.AllDay && !now.AllDay && day == oldDay:
+			was = oldTimes
+		case !before.AllDay:
+			was += " " + oldTimes
+		}
+		if now.AllDay {
+			parts = append(parts, day+" (all day, was "+was+")")
+		} else {
+			parts = append(parts, day+" "+times+" (was "+was+")")
+		}
+	}
 	switch {
-	case event.AllDay && event.EndsAt.Equal(event.StartsAt):
-		when = event.StartsAt.Format(updateDayLayout) + " (all day)"
-	case event.AllDay:
-		when = event.StartsAt.Format(updateDayLayout) + " to " + event.EndsAt.Format(updateDayLayout) + " (all day)"
+	case now.Place == before.Place:
+	case now.Place == "":
+		parts = append(parts, "no place now (was "+before.Place+")")
+	case before.Place == "":
+		parts = append(parts, "now at "+now.Place)
 	default:
-		when = event.StartsAt.In(location).Format(updateTimeLayout) + " to " + event.EndsAt.In(location).Format(updateTimeLayout)
+		parts = append(parts, "now at "+now.Place+" (was "+before.Place+")")
 	}
-	if event.Place != "" {
-		when += " at " + event.Place
-	}
-	return when
+	return strings.Join(parts, ", ")
 }
 
 // updateMessage writes the message for as many items as fit, and returns those items. Its first
-// line names where the delivered items come from, and says that mail and web items are not
-// verified.
+// line says that the items are not verified when any of them comes from mail or the web.
 func updateMessage(item Trip, items []SentUpdate) ([]SentUpdate, string) {
-	units := utf16Units(updateHeader(item, []string{UpdateSourceMail, UpdateSourceWeb, UpdateSourceCalendar}))
+	units := utf16Units(updateHeader(item, false))
 	var delivered []SentUpdate
 	var lines strings.Builder
+	verified := true
 	for _, update := range items {
-		line := "\n- " + newsLine(update)
+		line := "\n" + updateBullet + newsLine(update)
 		if len(delivered) == maximumUpdateItems || units+utf16Units(line) > maximumUpdateMessageUnits {
 			break
 		}
 		units += utf16Units(line)
 		lines.WriteString(line)
 		delivered = append(delivered, update)
+		verified = verified && update.Source == UpdateSourceCalendar
 	}
 	if len(delivered) == 0 {
 		return nil, ""
 	}
-	var present []string
-	for _, source := range []string{UpdateSourceMail, UpdateSourceWeb, UpdateSourceCalendar} {
-		if slices.ContainsFunc(delivered, func(update SentUpdate) bool { return update.Source == source }) {
-			present = append(present, source)
-		}
-	}
-	return delivered, updateHeader(item, present) + lines.String()
+	return delivered, updateHeader(item, verified) + lines.String()
 }
 
-func updateHeader(item Trip, present []string) string {
-	if slices.Equal(present, []string{UpdateSourceCalendar}) {
-		return fmt.Sprintf("Trip %s: changes in your calendar.", item.Title)
+// updateHeader opens a message; verified is true when every item in it is a calendar change, which
+// code found.
+func updateHeader(item Trip, verified bool) string {
+	if verified {
+		return item.Title + ": calendar changes"
 	}
-	names := map[string]string{UpdateSourceMail: "your mail", UpdateSourceWeb: "the web", UpdateSourceCalendar: "your calendar"}
-	var from []string
-	for _, source := range present {
-		from = append(from, names[source])
-	}
-	return fmt.Sprintf("Trip %s: news from %s. Not verified; check with the source before you act on it.", item.Title, listed(from))
+	return item.Title + ": news, not verified"
 }
 
 func utf16Units(text string) int {
@@ -814,14 +876,16 @@ func utf16Units(text string) int {
 	return units
 }
 
+// newsLine is one item as its message shows it and as the next check's prompt replays it. An item
+// stored before mail and web items became one sentence still has a title, which opens it.
 func newsLine(update SentUpdate) string {
 	if update.Source == UpdateSourceCalendar {
-		return "Your calendar: " + update.Text
+		return update.Text
 	}
 	line := fmt.Sprintf("%s (%s): ", update.Origin, update.Source)
 	if title := update.Title; title != "" {
 		line += title
-		if last, _ := utf8.DecodeLastRuneInString(title); !strings.ContainsRune(".!?…", last) {
+		if last, _ := utf8.DecodeLastRuneInString(title); !strings.ContainsRune(".!?\u2026", last) {
 			line += "."
 		}
 		line += " "

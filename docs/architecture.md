@@ -580,6 +580,37 @@ naming the paused jobs and watches, marks them sent only after delivery, and
 prunes old trips. Every turn, chat, scheduled, and task, gets a one-line summary of
 the active or next trip beside the location line.
 
+While the Trips scan is on, the same loop checks each planned trip for news from
+three days before it starts until it ends (`trip.Updates`). Mail and the web are
+read by a model turn that answers in strict JSON, one sentence per item. The
+calendar is read by code: `trip` declares a `CalendarReader`, which the wiring
+adapts to the calendar connector's `EventsBetween`, and compares the events in
+the trip's dates with a stored snapshot by instant, each keyed by its calendar
+and event ID, so no time zone enters the comparison. A list that is not whole
+(an account or calendar that failed, or more events than its limit) is compared
+with nothing, and a removal is reported only after two whole lists. The
+snapshot carries a version; one taken before code read the calendar only gives a
+new baseline. A change is one line that says what changed, in the trip's zone.
+A turn that fails leaves mail and the web for the next check and does not keep
+the calendar from being compared.
+
+The updates, the start and end notices, and the scan's update lines are
+rewritten where they are sent (`trip.Language`): the sample is the user's latest
+message in the tab the message goes to, else in any tab, read from the session
+files by `history`, since the store keeps no message text after its turn. A
+forwarded message and a private conversation give no sample.
+`turn.RewriteAlertLike` quotes the sample, without the application's marker, as
+a sample of a language and nothing else. The rewrite is used only when it has
+the original's lines, each with the original's numbers in their order, keeps
+every text the original quotes and every booking reference of the trip that the
+original holds, adds no address, handle, or command the original lacks, fits
+one message, and is at most about twice as long; otherwise, and when the user
+never wrote, the original is sent. The text code writes (headers, calendar
+lines, notices, the scan's line) is English, and that is what
+`trip_updates_sent` stores for a calendar change, because the next check's
+prompt replays it. A mail or web item is written by the check's turn in the
+sample's language and stored as written.
+
 ### Scheduled jobs in conversation
 
 The system prompt of chat turns and background tasks ends, after memory, with the

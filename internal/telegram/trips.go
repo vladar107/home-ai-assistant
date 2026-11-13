@@ -99,7 +99,10 @@ type TripNotifier struct {
 	Feeds TripFeeds
 }
 
-var _ trip.Tabs = TripNotifier{}
+var (
+	_ trip.Tabs         = TripNotifier{}
+	_ trip.Destinations = TripNotifier{}
+)
 
 func (n TripNotifier) SendTripCard(ctx context.Context, found trip.Trip) error {
 	chatID, err := n.chat(ctx, found.PrincipalID)
@@ -120,6 +123,15 @@ func (n TripNotifier) Send(ctx context.Context, principalID, tripID, text string
 		return err
 	}
 	return n.Client.sendPlain(n.inFeed(ctx, principalID, chatID, tripID), chatID, text, nil)
+}
+
+// TripTab is the tab Send puts the trip's messages in, zero for the main view.
+func (n TripNotifier) TripTab(ctx context.Context, principalID, tripID string) (int64, error) {
+	chatID, err := n.chat(ctx, principalID)
+	if err != nil {
+		return 0, err
+	}
+	return sendThread(n.inFeed(ctx, principalID, chatID, tripID)), nil
 }
 
 // TripChanged keeps the trip's tab and its summary in step with a write to the trip. A failure is

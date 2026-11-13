@@ -125,6 +125,36 @@ func (s *Service) Exchanges(_ context.Context, principalID, runtimeSessionID str
 	return exchanges, nil
 }
 
+// LatestMessage returns the last thing the principal wrote themselves in the tab, zero for the main
+// view, or with anywhere in whichever tab they wrote last; false when they wrote nothing that the
+// session files still hold. A tab's conversations are those last active in it, newest first. A
+// message the user forwarded is someone else's text, so it does not count, and neither does any
+// message of a private conversation, since the caller hands the text to turns that are not private.
+func (s *Service) LatestMessage(ctx context.Context, principalID string, threadID int64, anywhere bool) (string, bool, error) {
+	sessions, err := s.sessions.ConversationSessions(ctx, principalID, maximumSessions)
+	if err != nil {
+		return "", false, err
+	}
+	for _, session := range sessions {
+		if session.Private || !anywhere && session.ThreadID != threadID {
+			continue
+		}
+		var latest string
+		if err := s.messages(principalID, session.RuntimeSessionID, func(current message) bool {
+			if current.role == roleUser && !current.forwarded {
+				latest = current.text
+			}
+			return true
+		}); err != nil {
+			return "", false, err
+		}
+		if latest != "" {
+			return latest, true, nil
+		}
+	}
+	return "", false, nil
+}
+
 const (
 	roleUser      = "user"
 	roleAssistant = "assistant"
@@ -136,6 +166,8 @@ type message struct {
 	role string
 	at   time.Time
 	text string
+	// forwarded marks a user message the application told the turn was forwarded.
+	forwarded bool
 }
 
 type sessionEntry struct {
@@ -268,9 +300,11 @@ func (s *Service) readMessage(entry sessionEntry) (message, bool) {
 		return message{}, false
 	}
 	var text string
+	var forwarded bool
 	switch entry.Message.Role {
 	case roleUser:
-		text = userText(contentText(entry.Message.Content))
+		written := contentText(entry.Message.Content)
+		text, forwarded = userText(written), strings.Contains(written, prompt.Forwarded)
 	case roleAssistant:
 		if entry.Message.StopReason == "error" || entry.Message.StopReason == "aborted" {
 			return message{}, false
@@ -283,7 +317,7 @@ func (s *Service) readMessage(entry sessionEntry) (message, bool) {
 		return message{}, false
 	}
 	at, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
-	return message{role: entry.Message.Role, at: at.In(s.location), text: text}, true
+	return message{role: entry.Message.Role, at: at.In(s.location), text: text, forwarded: forwarded}, true
 }
 
 // contentText joins the text blocks of a message; a user message may also be a plain string.

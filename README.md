@@ -187,12 +187,15 @@ borrowed between users.
   also checked for important news, from three days before it starts until it
   ends: about twice a day, between 08:00 and 21:00 at home before the trip and
   in the trip's zone during it, the assistant reads recent mail, searches the
-  web, and compares the calendar events in the trip's dates with the last
-  check. What is new (a changed venue or time, a strike, a moved or cancelled
-  event) arrives in the trip's tab as one plain message that names each item's
-  source and says it is not verified; nothing new means no message. *Scan now*
-  also checks every trip in that window at once. No separate job is created,
-  and each check uses the user's model subscription.
+  web, and the calendar events in the trip's dates are compared in code with
+  the last check. What is new (a changed venue or time, a strike, a moved or
+  cancelled event) arrives in the trip's tab as one short message with a line
+  per item: a calendar change says only what changed, and mail and web items
+  name their source under a header that says they are not verified. Nothing
+  new means no message. The message, like the trip's start and end notices, is
+  in the language of the user's latest message in that tab. *Scan now* also
+  checks every trip in that window at once. No separate job is created, and
+  each check uses the user's model subscription.
 - **Memory.** Each user has a small memory of instructions and facts that the
   assistant keeps across `/new`, scheduled runs, and restarts. Facts are saved
   at once, and so are instructions the user states, with Undo, unless the

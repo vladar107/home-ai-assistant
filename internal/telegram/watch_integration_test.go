@@ -369,10 +369,10 @@ func TestTripUpdateReachesTheTripsTabAndTheNextTurnAsOutsideContent(t *testing.T
 	if check.request.PrincipalID != "alice" || !strings.Contains(check.request.Message, `news about the user's trip "Example trip"`) || !check.request.WebSearch {
 		t.Fatalf("check turn = %s %v %q", check.request.PrincipalID, check.request.WebSearch, check.request.Message)
 	}
-	reply := `{"updates":[{"source":"web","origin":"Example Times","reference":"https://example.com/strike","title":"Rail strike","text":"Trains to Example City stop on Friday."}]}`
+	reply := `{"updates":[{"source":"web","origin":"Example Times","reference":"https://example.com/strike","text":"Trains to Example City stop on Friday."}]}`
 	check.answer <- agentruntime.RunResult{Response: reply, Final: reply}
 	news := h.nextMessage()
-	if news.threadID != tab || !strings.Contains(news.text, "- Example Times (web): Rail strike. Trains to Example City stop on Friday.") {
+	if news.threadID != tab || !strings.Contains(news.text, "\u2022 Example Times (web): Trains to Example City stop on Friday.") {
 		t.Fatalf("update = %+v, want it in the trip's tab %d", news, tab)
 	}
 	h.assembly.TripLoop.Wait()

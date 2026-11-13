@@ -104,6 +104,7 @@ type TripNotices interface {
 	trip.Tabs
 	trip.CardSender
 	trip.Sender
+	trip.Destinations
 }
 
 // TabServices are the tabs the services deliver into: where scheduled runs and watch alerts go,
@@ -691,6 +692,8 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	var conversationHistory conversation.History
 	// The weekly review reads the replies the user marked 👎 from the same files.
 	var exchanges usermemory.Exchanges
+	// The user's own messages are kept nowhere else, so without the files trip messages stay English.
+	var written trip.Messages
 	if in.SessionFiles != nil {
 		reader, err := history.NewService(in.Store, in.SessionFiles, a.location, telemetry)
 		if err != nil {
@@ -699,7 +702,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		if err := broker.Register(reader); err != nil {
 			return err
 		}
-		conversationHistory, exchanges = reader, reader
+		conversationHistory, exchanges, written = reader, reader, reader
 	}
 	notices := conversation.Notices{approvals}
 	// Trip updates are written by a model from mail and web pages, so a turn told of one has read
@@ -863,18 +866,24 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	}
 	a.tripState = &tripScanState{schedules: scheduler, web: webSearch}
 	tripTools.SetScanState(a.tripState)
-	tripUpdates, err := trip.NewUpdates(trip.UpdatesConfig{Zone: a.location, Now: in.Core.Now}, in.Store, in.Store, tripScanChecker{engine}, a.tripState, tabs.Trips, tripUpdateNotices, in.Logger)
+	tripLanguage, err := trip.NewLanguage(tabs.Trips, written, engine, in.Store, in.Logger)
+	if err != nil {
+		return fmt.Errorf("initialize trip language: %w", err)
+	}
+	tripSender := tripLanguage.Sender(tabs.Trips)
+	tripUpdates, err := trip.NewUpdates(trip.UpdatesConfig{Zone: a.location, Now: in.Core.Now, Calendar: a.tripState, Language: tripLanguage},
+		in.Store, in.Store, tripScanChecker{engine}, a.tripState, tripSender, tripUpdateNotices, in.Logger)
 	if err != nil {
 		return fmt.Errorf("initialize trip updates: %w", err)
 	}
-	if err := scheduler.Register(trip.ScanJobType(tripScanChecker{engine}, in.Store, a.tripState, tripService, tabs.Trips, tabs.Trips, tripUpdates, scheduler.Now, in.Logger)); err != nil {
+	if err := scheduler.Register(trip.ScanJobType(tripScanChecker{engine}, in.Store, a.tripState, tripService, tabs.Trips, tripSender, tripUpdates, scheduler.Now, in.Logger)); err != nil {
 		return err
 	}
 	paused := []trip.Paused{scheduler}
 	if a.Watches != nil {
 		paused = append(paused, a.Watches)
 	}
-	tripLoop, err := trip.NewLoop(trip.LoopConfig{Now: in.Core.Now, Updates: tripUpdates}, tripService, paused, tabs.Trips, in.Logger)
+	tripLoop, err := trip.NewLoop(trip.LoopConfig{Now: in.Core.Now, Updates: tripUpdates}, tripService, paused, tripSender, in.Logger)
 	if err != nil {
 		return fmt.Errorf("initialize trip loop: %w", err)
 	}
@@ -1020,7 +1029,7 @@ func (a *Assembly) buildConnectors(ctx context.Context) error {
 				return err
 			}
 		}
-		a.tripState.google = googleService
+		a.tripState.google, a.tripState.calendar = googleService, calendarService
 		a.Google = googleService
 	}
 	if a.NS != nil {
