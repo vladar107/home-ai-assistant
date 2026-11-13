@@ -1,6 +1,7 @@
 package telegram
 
 import (
+	"errors"
 	"log/slog"
 	"slices"
 	"strconv"
@@ -400,6 +401,27 @@ func TestADeletedTripTabIsMadeAgainWithAFreshSummary(t *testing.T) {
 	}
 	if message := h.nextMessage(); message.threadID != again || message.text != "second" {
 		t.Fatalf("notice after the tab was gone = %+v, want it in the new tab %d", message, again)
+	}
+}
+
+func TestATripTabRecordedByItsCreationNoticeFirstTakesItsSummary(t *testing.T) {
+	t.Parallel()
+	h := newTripTabHarness(t, true)
+	var planned trip.Trip
+	made := h.makeTabAfterItsNotice(1, func() error {
+		result, err := h.trips.Add(h.ctx, "alice", h.exampleDraft(""))
+		if err == nil && result.Rejection != "" {
+			err = errors.New(result.Rejection)
+		}
+		planned = result.Trip
+		return err
+	})
+	if tab := h.wantTripTab("Example trip", planned.ID); tab != made {
+		t.Fatalf("trip tab = %d, want %d", tab, made)
+	}
+	h.wantSummary(made, planned.ID, h.summaryOf(planned.ID))
+	if strings.Contains(h.logs.String(), "stage=record") {
+		t.Fatalf("recording the trip's tab failed:\n%s", h.logs.String())
 	}
 }
 

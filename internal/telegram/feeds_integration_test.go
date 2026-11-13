@@ -297,6 +297,21 @@ func TestANewFeedTabThatRefusesSendsIsNotReplacedForADay(t *testing.T) {
 	}
 }
 
+func TestAFeedTabRecordedByItsCreationNoticeFirstTakesItsMessage(t *testing.T) {
+	t.Parallel()
+	h, _ := newFeedHarness(t, newControlledRuntime(), nil, true)
+	made := h.makeTabAfterItsNotice(1, func() error { return h.notifier().Send(h.ctx, "alice", "", "first") })
+	if message := h.nextMessage(); message.threadID != made || message.text != "first" {
+		t.Fatalf("message = %+v, want it in the new tab %d", message, made)
+	}
+	if tab := h.wantFeedTab("Reminders", thread.FeedReminders); tab != made {
+		t.Fatalf("reminders tab = %d, want %d", tab, made)
+	}
+	if strings.Contains(h.logs.String(), "msg=telegram.feed.failed") {
+		t.Fatalf("making the feed tab failed:\n%s", h.logs.String())
+	}
+}
+
 func TestAFeedTabThatCannotBeMadeLeavesTheMessageInTheMainView(t *testing.T) {
 	t.Parallel()
 	h, _ := newFeedHarness(t, newControlledRuntime(), nil, true)

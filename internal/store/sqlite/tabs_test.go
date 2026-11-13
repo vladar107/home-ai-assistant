@@ -314,6 +314,53 @@ func TestTabRegistryKeepsFixedNamesAndConfirmsOnce(t *testing.T) {
 	}
 }
 
+func TestASubjectTabIsRecordedWhicheverOfItsTwoWritesLandsFirst(t *testing.T) {
+	store, ctx := openTestStore(t)
+	reports, reminders := thread.FeedSubject(thread.FeedReports), thread.FeedSubject(thread.FeedReminders)
+	wantTab := func(threadID int64, name, namedBy, subject string) {
+		t.Helper()
+		tab, found, err := store.Tab(ctx, "alice", threadID)
+		if err != nil || !found || tab.Name != name || tab.NamedBy != namedBy || tab.Subject != subject {
+			t.Fatalf("tab %d = %+v %v %v, want %q named by %s for %q", threadID, tab, found, err, name, namedBy, subject)
+		}
+	}
+
+	if err := store.AddSubjectTab(ctx, "alice", 7, "Reports", reports); err != nil {
+		t.Fatal(err)
+	}
+	if added, err := store.AddTab(ctx, "alice", 7, "Reports", thread.NamedByBot); err != nil || added {
+		t.Fatalf("creation notice after the record = %v %v", added, err)
+	}
+	wantTab(7, "Reports", thread.NamedByFixed, reports)
+
+	if added, err := store.AddTab(ctx, "alice", 8, "As Telegram sent it", thread.NamedByBot); err != nil || !added {
+		t.Fatalf("creation notice before the record = %v %v", added, err)
+	}
+	if err := store.AddSubjectTab(ctx, "alice", 8, "Reminders", reminders); err != nil {
+		t.Fatalf("record after the creation notice: %v", err)
+	}
+	wantTab(8, "Reminders", thread.NamedByFixed, reminders)
+	if threadID, found, err := store.SubjectTab(ctx, "alice", reminders); err != nil || !found || threadID != 8 {
+		t.Fatalf("reminders tab = %d %v %v, want 8", threadID, found, err)
+	}
+
+	watches := thread.FeedSubject(thread.FeedWatches)
+	if err := store.AddSubjectTab(ctx, "alice", 7, "Watches", watches); err == nil {
+		t.Fatal("a tab that serves a subject was taken over")
+	}
+	wantTab(7, "Reports", thread.NamedByFixed, reports)
+	if _, err := store.RenameTab(ctx, "alice", 9, "Groceries"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddSubjectTab(ctx, "alice", 9, "Watches", watches); err == nil {
+		t.Fatal("a tab the user named was taken over")
+	}
+	wantTab(9, "Groceries", thread.NamedByUser, "")
+	if threadID, found, err := store.SubjectTab(ctx, "alice", watches); err != nil || found {
+		t.Fatalf("watches tab after the refusals = %d %v %v, want none", threadID, found, err)
+	}
+}
+
 // tripTakeState is what a take of a tab changes, read back from the registry and the conversations.
 type tripTakeState struct {
 	tab      int64

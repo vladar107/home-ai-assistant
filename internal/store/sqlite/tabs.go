@@ -350,20 +350,34 @@ func (s *Store) SubjectTab(ctx context.Context, principalID, subject string) (in
 	return threadID, true, nil
 }
 
-// AddSubjectTab records a tab the bot made to serve the subject, under a fixed name.
+// AddSubjectTab records a tab the bot made to serve the subject, under a fixed name. The notice of
+// the tab's creation may have recorded it first, as a tab the bot named, and that row is taken
+// over. A row that serves a subject, or that the user named, is not, and the tab is not recorded.
 func (s *Store) AddSubjectTab(ctx context.Context, principalID string, threadID int64, name, subject string) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("add subject tab: SQLite store is not open")
 	}
-	if _, err := s.db.ExecContext(
+	result, err := s.db.ExecContext(
 		ctx,
-		`INSERT INTO telegram_tabs (principal_id, thread_id, name, named_by, subject) VALUES (?, ?, ?, 'fixed', ?)`,
+		`INSERT INTO telegram_tabs (principal_id, thread_id, name, named_by, subject) VALUES (?, ?, ?, 'fixed', ?)
+		 ON CONFLICT (principal_id, thread_id) DO UPDATE
+		 SET name = excluded.name, named_by = 'fixed', subject = excluded.subject,
+		     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+		 WHERE telegram_tabs.subject IS NULL AND telegram_tabs.named_by <> 'user'`,
 		principalID,
 		threadID,
 		name,
 		subject,
-	); err != nil {
+	)
+	if err != nil {
 		return fmt.Errorf("add subject tab: %w", err)
+	}
+	recorded, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("add subject tab: %w", err)
+	}
+	if recorded == 0 {
+		return fmt.Errorf("add subject tab: the tab is already recorded")
 	}
 	return nil
 }

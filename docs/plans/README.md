@@ -152,6 +152,7 @@ plan that links back to the earlier record.
 | 0140 | [Proposals as a Telegram widget](0140-approval-widget.md) | done |
 | 0141 | [A trip takes a tab the user already has](0141-trip-takes-a-tab-the-user-has.md) | done |
 | 0142 | [One text on a widget proposal](0142-widget-one-text.md) | done |
+| 0143 | [A fixed tab survives its own creation notice](0143-fixed-tab-survives-its-creation-notice.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

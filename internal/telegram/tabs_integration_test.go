@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -50,6 +51,8 @@ type tabSimulator struct {
 	// pins are the messages the bot pinned, and pinStatus fails pinning when set.
 	pins      chan pinnedMessage
 	pinStatus int
+	// createHold, when set, keeps a tab's creation unanswered until it is closed.
+	createHold chan struct{}
 }
 
 type pinnedMessage struct {
@@ -131,8 +134,16 @@ func (h *conversationHarness) serveTabMethod(w http.ResponseWriter, r *http.Requ
 		}
 		h.tabs.next++
 		threadID := h.tabs.next
+		hold := h.tabs.createHold
 		h.mu.Unlock()
 		h.tabs.created <- createdTopic{chatID: chatID, threadID: threadID, name: r.Form.Get("name")}
+		if hold != nil {
+			select {
+			case <-hold:
+			case <-r.Context().Done():
+				return nil, true
+			}
+		}
 		return map[string]any{"message_thread_id": threadID, "name": r.Form.Get("name")}, true
 	case "deleteForumTopic":
 		threadID := h.threadOf(r.Form.Get("message_thread_id"))
@@ -646,6 +657,44 @@ func TestATabIsConfirmedOnceTheRegistryKnowsIt(t *testing.T) {
 	if tab, found := h.registryTab(61); !found || tab.NamedBy != thread.NamedByUser || !tab.Confirmed {
 		t.Fatalf("tab after the user's message = %+v %v, want confirmed", tab, found)
 	}
+}
+
+// makeTabAfterItsNotice runs what has the bot make one tab, with the notice of the tab's creation
+// recorded before Telegram answers the creation. The tab is left for the next check of a made tab,
+// and no tab may have been deleted.
+func (h *conversationHarness) makeTabAfterItsNotice(updateID int64, makeTab func() error) int64 {
+	h.t.Helper()
+	hold := make(chan struct{})
+	h.mu.Lock()
+	h.tabs.createHold = hold
+	h.mu.Unlock()
+	release := sync.OnceFunc(func() { close(hold) })
+	h.t.Cleanup(release)
+	made := make(chan error, 1)
+	go func() { made <- makeTab() }()
+	created := receive(h.t, h.ctx, h.tabs.created)
+	h.push(Update{UpdateID: updateID, Message: &Message{
+		MessageID: requestMessageID(updateID), MessageThreadID: created.threadID, From: &User{ID: 999, FirstName: "Test"},
+		Chat: Chat{ID: created.chatID, Type: ChatTypePrivate}, ForumTopicCreated: &ForumTopicCreated{Name: created.name},
+	}})
+	h.waitOffset(updateID + 1)
+	if tab, found := h.registryTab(created.threadID); !found || tab.NamedBy != thread.NamedByBot || tab.Subject != "" {
+		h.t.Fatalf("tab after its creation notice = %+v %v, want one the bot named", tab, found)
+	}
+	h.mu.Lock()
+	h.tabs.createHold = nil
+	h.mu.Unlock()
+	release()
+	if err := receive(h.t, h.ctx, made); err != nil {
+		h.t.Fatal(err)
+	}
+	select {
+	case deleted := <-h.tabs.deleted:
+		h.t.Fatalf("tab %d was deleted, want the new tab %d kept", deleted, created.threadID)
+	default:
+	}
+	h.tabs.created <- created
+	return created.threadID
 }
 
 func TestTopicServiceMessagesNameTabsWithoutUndoingThem(t *testing.T) {
