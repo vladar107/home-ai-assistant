@@ -164,6 +164,7 @@ plan that links back to the earlier record.
 | 0152 | [Home Assistant's MCP server: the device-control path and the full tool set](0152-home-assistant-mcp-one-path.md) | proposed |
 | 0153 | [Flight status: delays, gates, and cancellations for a trip's flights](0153-flight-status.md) | proposed |
 | 0154 | [An interface language each user chooses: English or Russian](0154-interface-language.md) | proposed |
+| 0155 | [Regular agent evaluations and prompt experiments](0155-agent-evals-and-prompt-experiments.md) | proposed |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.
