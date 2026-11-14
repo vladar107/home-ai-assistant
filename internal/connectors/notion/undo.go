@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 )
 
 // truncatedRichText is the number of rich text items from which Notion may cut a property value in a
@@ -50,13 +51,25 @@ func (s *Service) captureUndo(ctx context.Context, token string, arguments updat
 	return payload
 }
 
+var (
+	undoUnreadable = locale.T("the change could not be read back.", "не удалось прочитать, что нужно отменить.")
+	undoPageGone   = locale.T("the page is gone from Notion or no longer shared.", "страницы больше нет в Notion или она больше не доступна.")
+	undoChanged    = locale.T("changed in Notion since.", "в Notion это уже изменили.")
+	undoRestored   = locale.T("Restored the previous values.", "Прежние значения возвращены.")
+)
+
+// undoRefusal keeps the English reason for the record and the user's language for the user.
+func undoRefusal(ctx context.Context, message locale.Text) *approval.UndoRefusal {
+	return &approval.UndoRefusal{Reason: message.FormatIn(locale.English), UserReason: message.Format(ctx)}
+}
+
 // Undo writes back the values a direct update replaced, while the page still holds the values the
 // update wrote.
 func (s *Service) Undo(ctx context.Context, record approval.Record, payload json.RawMessage) (approval.Outcome, error) {
 	var undo updateUndo
 	var arguments updateArguments
 	if record.Tool != toolUpdatePage || json.Unmarshal(payload, &undo) != nil || json.Unmarshal(record.Arguments, &arguments) != nil || undo.PageID == "" {
-		return approval.Outcome{}, &approval.UndoRefusal{Reason: "the change could not be read back."}
+		return approval.Outcome{}, undoRefusal(ctx, undoUnreadable)
 	}
 	token, connected, err := s.token(ctx, record.PrincipalID)
 	if err != nil {
@@ -69,7 +82,7 @@ func (s *Service) Undo(ctx context.Context, record approval.Record, payload json
 	if err != nil {
 		var notionErr *Error
 		if errors.As(err, &notionErr) && notionErr.Class == ErrorNotShared {
-			return approval.Outcome{}, &approval.UndoRefusal{Reason: "the page is gone from Notion or no longer shared."}
+			return approval.Outcome{}, undoRefusal(ctx, undoPageGone)
 		}
 		return approval.Outcome{}, err
 	}
@@ -77,7 +90,7 @@ func (s *Service) Undo(ctx context.Context, record approval.Record, payload json
 		want, ok := comparableInput(written)
 		current, found := comparableCurrent(page.Properties[name])
 		if !ok || !found || want != current {
-			return approval.Outcome{}, &approval.UndoRefusal{Reason: "changed in Notion since."}
+			return approval.Outcome{}, undoRefusal(ctx, undoChanged)
 		}
 	}
 	_, err = s.client.UpdatePage(ctx, token, undo.PageID, undo.Previous)
@@ -92,7 +105,7 @@ func (s *Service) Undo(ctx context.Context, record approval.Record, payload json
 		return approval.Outcome{}, err
 	}
 	s.logger.InfoContext(ctx, "notion.undo.executed", "principal_id", record.PrincipalID, "tool", record.Tool)
-	return approval.Outcome{Text: "Restored the previous values."}, nil
+	return approval.Outcome{Text: undoRestored.FormatIn(locale.English), UserText: undoRestored.Format(ctx)}, nil
 }
 
 // propertyValue is a property value in either shape: a page read names its type, and a write may

@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -251,11 +252,19 @@ func (s *Service) TakeNotes(principalID, turn string) []string {
 	return notes
 }
 
-func (s *Service) addNote(ctx context.Context, principalID, note string) {
+// The notes a memory change leaves under the reply; only the user reads them, the model never does.
+var (
+	rememberedNote = locale.T("Remembered: %s", "Запомнено: %s")
+	updatedNote    = locale.T("Updated: %s", "Обновлено: %s")
+	forgotNote     = locale.T("Forgot: %s", "Забыто: %s")
+)
+
+func (s *Service) addNote(ctx context.Context, principalID string, line locale.Text, text string) {
 	turn := tools.TurnFrom(ctx)
 	if turn == "" {
 		return
 	}
+	note := line.Format(ctx, text)
 	s.notesMu.Lock()
 	defer s.notesMu.Unlock()
 	key := noteKey(principalID, turn)

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/localtime"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
@@ -48,24 +49,94 @@ const (
 	maximumLookBack     = 7 * 24 * time.Hour
 	// readOverlap reaches back past where the last check read, for mail Gmail indexed late; a
 	// message read twice is skipped by its record.
-	readOverlap          = 5 * time.Minute
-	maximumScanBytes     = 128 << 10
-	maximumReminderText  = 500
-	maximumInstruction   = 600
-	maximumCheckClause   = 300
-	screenTimeout        = 3 * time.Second
-	untilLayout          = "2006-01-02"
-	summaryDayTimeLayout = "Mon 2 Jan 15:04"
-
-	// inboxWarning heads every card item and summary the check writes: all of it was read from mail.
-	inboxWarning = "⚠️ I read this from mail, which is outside content. Check it against the message before confirming."
-	// inboxFlaggedWarning replaces it when the screener finds text that tries to instruct the
-	// assistant.
-	inboxFlaggedWarning = "⚠️ This reads like instructions from outside content, such as the mail it came from. Confirm only if it is what you want."
-
-	// InboxUnreadableText answers a check the user ran while no mailbox can be read.
-	InboxUnreadableText = "Your mail cannot be read now, so nothing was checked. Turn on Mail for a connected Google account in /settings."
+	readOverlap         = 5 * time.Minute
+	maximumScanBytes    = 128 << 10
+	maximumReminderText = 500
+	maximumInstruction  = 600
+	maximumCheckClause  = 300
+	screenTimeout       = 3 * time.Second
+	untilLayout         = "2006-01-02"
 )
+
+var (
+	inboxHeading    = locale.T("From your inbox", "Из твоей почты")
+	inboxUnreadable = locale.T("Your mail cannot be read now, so nothing was checked. Turn on Mail for a connected Google account in /settings.", "Сейчас почту нельзя прочитать, поэтому ничего не проверено. Включи почту для подключённого аккаунта Google в /settings.")
+
+	// warningText heads every card item and summary the check writes: all of it was read from mail.
+	warningText = locale.T("⚠️ I read this from mail, which is outside content. Check it against the message before confirming.", "⚠️ Это взято из почты, то есть из внешнего контента. Сверь с письмом, прежде чем подтверждать.")
+	// flaggedWarningText replaces it when the screener finds text that tries to instruct the assistant.
+	flaggedWarningText = locale.T("⚠️ This reads like instructions from outside content, such as the mail it came from. Confirm only if it is what you want.", "⚠️ Это похоже на указания из внешнего контента, например из письма, откуда это взято. Подтверждай, только если это то, чего ты хочешь.")
+
+	aboutLine       = locale.T("About: %s", "О письме: %s")
+	aboutSenderLine = locale.T("About: %s, from %s", "О письме: %s, от %s")
+
+	newMailHeading  = locale.T("New mail that needs something from you:", "Новые письма, которым что-то нужно от тебя:")
+	offeredWithNew  = locale.T("The follow-ups I propose are on the card above; nothing happens until you confirm.", "Предлагаемые действия — на карточке выше; ничего не произойдёт, пока ты не подтвердишь.")
+	offeredEarlier  = locale.T("Follow-ups for mail I told you about earlier are on the card above; nothing happens until you confirm.", "Действия для писем, о которых уже сообщалось, — на карточке выше; ничего не произойдёт, пока ты не подтвердишь.")
+	outOfToolCalls  = locale.T("The check ran out of tool calls, so more mail may be left for the next check.", "У проверки закончились обращения к инструментам, поэтому часть почты может достаться следующей проверке.")
+	cappedNote      = locale.T("A check reads at most a week back, so mail from before %s was not read.", "Проверка читает почту максимум за неделю, поэтому письма до %s не прочитаны.")
+	skippedRestNote = locale.T("Two inbox checks in a row could not read your mail from %s to %s to the end, so I skipped the rest of it; look through it yourself.", "Две проверки входящих подряд не смогли дочитать твою почту с %s по %s, поэтому остаток пропущен; просмотри его самостоятельно.")
+	skippedNote     = locale.T("Two inbox checks in a row could not read your mail from %s to %s, so I skipped it and will not try it again; look through it yourself.", "Две проверки входящих подряд не смогли прочитать твою почту с %s по %s, поэтому она пропущена, и я не буду пробовать снова; просмотри её самостоятельно.")
+
+	waitingNote = locale.N(
+		"An earlier inbox card is still waiting, so %d follow-up waits until you answer it or it expires.",
+		"An earlier inbox card is still waiting, so %d follow-ups wait until you answer it or it expires.",
+		"Прошлая карточка входящих ещё ждёт ответа, поэтому %d действие ждёт, пока ты ответишь или она истечёт.",
+		"Прошлая карточка входящих ещё ждёт ответа, поэтому %d действия ждут, пока ты ответишь или она истечёт.",
+		"Прошлая карточка входящих ещё ждёт ответа, поэтому %d действий ждут, пока ты ответишь или она истечёт.")
+	failedNote = locale.N(
+		"The card could not be sent, so %d follow-up waits for the next check.",
+		"The card could not be sent, so %d follow-ups wait for the next check.",
+		"Карточку не удалось отправить, поэтому %d действие ждёт следующей проверки.",
+		"Карточку не удалось отправить, поэтому %d действия ждут следующей проверки.",
+		"Карточку не удалось отправить, поэтому %d действий ждут следующей проверки.")
+	fullCardNote = locale.N(
+		"A card holds at most %[2]d, so %[1]d follow-up waits for the next card.",
+		"A card holds at most %[2]d, so %[1]d follow-ups wait for the next card.",
+		"На карточке помещается не больше %[2]d, поэтому %[1]d действие ждёт следующей карточки.",
+		"На карточке помещается не больше %[2]d, поэтому %[1]d действия ждут следующей карточки.",
+		"На карточке помещается не больше %[2]d, поэтому %[1]d действий ждут следующей карточки.")
+	expiredNote = locale.N(
+		"%[1]d follow-up expired unanswered on %[2]d cards, so I dropped it.",
+		"%[1]d follow-ups expired unanswered on %[2]d cards, so I dropped them.",
+		"%[1]d действие осталось без ответа на %[2]d карточках, поэтому больше его не предлагаю.",
+		"%[1]d действия остались без ответа на %[2]d карточках, поэтому больше их не предлагаю.",
+		"%[1]d действий осталось без ответа на %[2]d карточках, поэтому больше их не предлагаю.")
+	lostNote = locale.N(
+		"An earlier check failed while offering %d follow-up, so I will not offer it again in case it is already on a card.",
+		"An earlier check failed while offering %d follow-ups, so I will not offer them again in case they are already on a card.",
+		"Прошлая проверка дала сбой при показе %d действия, поэтому не буду предлагать его снова: оно уже могло попасть на карточку.",
+		"Прошлая проверка дала сбой при показе %d действий, поэтому не буду предлагать их снова: они уже могли попасть на карточку.",
+		"Прошлая проверка дала сбой при показе %d действий, поэтому не буду предлагать их снова: они уже могли попасть на карточку.")
+	droppedMessagesNote = locale.N(
+		"I could not read %d message and left it out.",
+		"I could not read %d messages and left them out.",
+		"Не удалось прочитать %d письмо, оно пропущено.",
+		"Не удалось прочитать %d письма, они пропущены.",
+		"Не удалось прочитать %d писем, они пропущены.")
+	droppedDetailsNote = locale.N(
+		"I left out or shortened %d detail I could not read.",
+		"I left out or shortened %d details I could not read.",
+		"Не удалось прочитать %d деталь, она пропущена или сокращена.",
+		"Не удалось прочитать %d детали, они пропущены или сокращены.",
+		"Не удалось прочитать %d деталей, они пропущены или сокращены.")
+	leftNote = locale.N(
+		"%d more message is left for the next check.",
+		"%d more messages are left for the next check.",
+		"Ещё %d письмо ждёт следующей проверки.",
+		"Ещё %d письма ждут следующей проверки.",
+		"Ещё %d писем ждут следующей проверки.")
+)
+
+// InboxHeadingFor is InboxHeading in the context's language.
+func InboxHeadingFor(ctx context.Context) string { return inboxHeading.Format(ctx) }
+
+func warningFor(ctx context.Context, flagged bool) string {
+	if flagged {
+		return flaggedWarningText.Format(ctx)
+	}
+	return warningText.Format(ctx)
+}
 
 // ScanPrompt asks for strict JSON, so code, not the model, validates, deduplicates, and decides what
 // is offered. from is the instant mail is read from, shown in the job's zone.
@@ -245,7 +316,7 @@ func (r scan) Run(ctx context.Context, occurrence schedule.Occurrence) (schedule
 	}
 	if !readable {
 		if occurrence.Manual {
-			return schedule.Result{Text: InboxUnreadableText}, nil
+			return schedule.Result{Text: inboxUnreadable.Format(ctx)}, nil
 		}
 		return schedule.Result{Quiet: true}, nil
 	}
@@ -287,7 +358,7 @@ func (r scan) Run(ctx context.Context, occurrence schedule.Occurrence) (schedule
 		if err := s.repository.RecordInboxReadUntil(ctx, principalID, started, 0); err != nil {
 			return schedule.Result{}, err
 		}
-		return schedule.Result{Text: skippedText(since, started, location), ErrorKind: "unreadable"}, nil
+		return schedule.Result{Text: skippedText(ctx, since, started, location), ErrorKind: "unreadable"}, nil
 	}
 
 	if err := r.record(ctx, principalID, reply, started, location, &done); err != nil {
@@ -338,9 +409,12 @@ func readTo(reply scanReply, calls *tools.CallLog, since, started time.Time, don
 	return since, true
 }
 
-func skippedText(from, until time.Time, location *time.Location) string {
-	return fmt.Sprintf("Two inbox checks in a row could not read your mail from %s to %s, so I skipped it and will not try it again; look through it yourself.",
-		from.In(location).Format(summaryDayTimeLayout), until.In(location).Format(summaryDayTimeLayout))
+func skippedText(ctx context.Context, from, until time.Time, location *time.Location) string {
+	return skippedNote.Format(ctx, dayTime(ctx, from, location), dayTime(ctx, until, location))
+}
+
+func dayTime(ctx context.Context, at time.Time, location *time.Location) string {
+	return locale.Date(locale.From(ctx), at.In(location), locale.DayTime)
 }
 
 // decodeScan reads the model's reply, tolerating a code fence around it and nothing else.
@@ -607,14 +681,15 @@ func (r scan) proposal(ctx context.Context, principalID string, record Record, a
 	if err != nil {
 		return approval.Proposal{}, err
 	}
-	about := "About: " + record.Title
+	about := aboutLine.Format(ctx, record.Title)
 	if record.Sender != "" {
-		about += ", from " + record.Sender
+		about = aboutSenderLine.Format(ctx, record.Title, record.Sender)
 	}
-	warning := inboxWarning
-	if r.service.flagged(ctx, principalID, proposal.Tool, about+"\n"+screened) {
-		warning = inboxFlaggedWarning
+	englishAbout := aboutLine.FormatIn(locale.English, record.Title)
+	if record.Sender != "" {
+		englishAbout = aboutSenderLine.FormatIn(locale.English, record.Title, record.Sender)
 	}
+	warning := warningFor(ctx, r.service.flagged(ctx, principalID, proposal.Tool, englishAbout+"\n"+screened))
 	proposal.Summary = warning + "\n" + about + "\n" + proposal.Summary
 	if !approval.SummaryFits(proposal.Summary) {
 		return approval.Proposal{}, approval.ErrSummaryTooLong
@@ -632,7 +707,7 @@ func (r scan) stage(ctx context.Context, principalID string, proposals []approva
 		return nil, fmt.Errorf("the principal has no active chat")
 	}
 	threadID, _ := thread.Delivery(ctx)
-	return r.config.Offers.OfferIfIdle(ctx, principalID, chatID, threadID, InboxHeading, InboxLifetime, proposals)
+	return r.config.Offers.OfferIfIdle(ctx, principalID, chatID, threadID, InboxHeadingFor(ctx), InboxLifetime, proposals)
 }
 
 // summary is the check's report: the new records, then what became of their follow-ups and of the
@@ -640,66 +715,57 @@ func (r scan) stage(ctx context.Context, principalID string, proposals []approva
 func (r scan) summary(ctx context.Context, principalID string, done outcome, location *time.Location) string {
 	var sections []string
 	if len(done.created) > 0 {
-		lines := []string{"New mail that needs something from you:"}
+		lines := []string{newMailHeading.Format(ctx)}
 		var screened []string
 		for _, record := range done.created {
-			described := Describe(record)
 			lines = append(lines, "")
-			lines = append(lines, described...)
-			screened = append(screened, described...)
+			lines = append(lines, DescribeFor(ctx, record)...)
+			// The screen reads what the mail made of the record, worded as before in English.
+			screened = append(screened, Describe(record)...)
 		}
-		warning := inboxWarning
-		if r.service.flagged(ctx, principalID, toolRecord, strings.Join(screened, "\n")) {
-			warning = inboxFlaggedWarning
-		}
+		warning := warningFor(ctx, r.service.flagged(ctx, principalID, toolRecord, strings.Join(screened, "\n")))
 		sections = append(sections, warning+"\n\n"+strings.Join(lines, "\n"))
 	}
 	var notes []string
 	switch {
 	case done.offered > 0 && len(done.created) > 0:
-		notes = append(notes, "The follow-ups I propose are on the card above; nothing happens until you confirm.")
+		notes = append(notes, offeredWithNew.Format(ctx))
 	case done.offered > 0:
-		notes = append(notes, "Follow-ups for mail I told you about earlier are on the card above; nothing happens until you confirm.")
+		notes = append(notes, offeredEarlier.Format(ctx))
 	}
 	if done.pending > 0 {
 		switch {
 		case done.waiting:
-			notes = append(notes, fmt.Sprintf("An earlier inbox card is still waiting, so %s until you answer it or it expires.", followUps(done.pending)))
+			notes = append(notes, waitingNote.Format(ctx, done.pending))
 		case done.failed:
-			notes = append(notes, fmt.Sprintf("The card could not be sent, so %s for the next check.", followUps(done.pending)))
+			notes = append(notes, failedNote.Format(ctx, done.pending))
 		default:
-			notes = append(notes, fmt.Sprintf("A card holds at most %d, so %s for the next card.", maximumOffered, followUps(done.pending)))
+			notes = append(notes, fullCardNote.Format(ctx, done.pending, maximumOffered))
 		}
 	}
 	if done.expired > 0 {
-		notes = append(notes, fmt.Sprintf("%s expired unanswered on %d cards, so I dropped %s.", count(done.expired, "follow-up", "follow-ups"), MaximumExpiries, pronoun(done.expired)))
+		notes = append(notes, expiredNote.Format(ctx, done.expired, MaximumExpiries))
 	}
 	if done.lost > 0 {
-		already := "they are"
-		if done.lost == 1 {
-			already = "it is"
-		}
-		notes = append(notes, fmt.Sprintf("An earlier check failed while offering %s, so I will not offer %s again in case %s already on a card.",
-			count(done.lost, "follow-up", "follow-ups"), pronoun(done.lost), already))
+		notes = append(notes, lostNote.Format(ctx, done.lost))
 	}
 	if done.droppedMessages > 0 {
-		notes = append(notes, fmt.Sprintf("I could not read %s and left %s out.", count(done.droppedMessages, "message", "messages"), pronoun(done.droppedMessages)))
+		notes = append(notes, droppedMessagesNote.Format(ctx, done.droppedMessages))
 	}
 	if done.droppedDetails > 0 {
-		notes = append(notes, fmt.Sprintf("I left out or shortened %s I could not read.", count(done.droppedDetails, "detail", "details")))
+		notes = append(notes, droppedDetailsNote.Format(ctx, done.droppedDetails))
 	}
 	switch {
 	case done.left > 0:
-		notes = append(notes, fmt.Sprintf("%s left for the next check.", count(done.left, "more message is", "more messages are")))
+		notes = append(notes, leftNote.Format(ctx, done.left))
 	case done.unknown:
-		notes = append(notes, "The check ran out of tool calls, so more mail may be left for the next check.")
+		notes = append(notes, outOfToolCalls.Format(ctx))
 	}
 	if !done.capped.IsZero() {
-		notes = append(notes, fmt.Sprintf("A check reads at most a week back, so mail from before %s was not read.", done.capped.In(location).Format(summaryDayTimeLayout)))
+		notes = append(notes, cappedNote.Format(ctx, dayTime(ctx, done.capped, location)))
 	}
 	if !done.skippedFrom.IsZero() {
-		notes = append(notes, fmt.Sprintf("Two inbox checks in a row could not read your mail from %s to %s to the end, so I skipped the rest of it; look through it yourself.",
-			done.skippedFrom.In(location).Format(summaryDayTimeLayout), done.skippedUntil.In(location).Format(summaryDayTimeLayout)))
+		notes = append(notes, skippedRestNote.Format(ctx, dayTime(ctx, done.skippedFrom, location), dayTime(ctx, done.skippedUntil, location)))
 	}
 	// Follow-ups that keep waiting behind a card the user has already been told of are no news.
 	news := len(done.created) > 0 || done.offered > 0 || done.failed || done.expired > 0 || done.lost > 0 || done.droppedMessages > 0 ||
@@ -711,24 +777,6 @@ func (r scan) summary(ctx context.Context, principalID string, done outcome, loc
 		sections = append(sections, strings.Join(notes, " "))
 	}
 	return strings.Join(sections, "\n\n")
-}
-
-func count(n int, one, many string) string {
-	if n == 1 {
-		return "1 " + one
-	}
-	return fmt.Sprintf("%d %s", n, many)
-}
-
-func pronoun(n int) string {
-	if n == 1 {
-		return "it"
-	}
-	return "them"
-}
-
-func followUps(n int) string {
-	return count(n, "follow-up waits", "follow-ups wait")
 }
 
 // flagged reports whether the screener finds text that tries to instruct the assistant.

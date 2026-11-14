@@ -13,6 +13,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/clip"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -434,9 +435,10 @@ func (s *Service) prepareProposal(ctx context.Context, token, tool string, argum
 	case toolCreatePage:
 		var create createArguments
 		_ = json.Unmarshal(arguments, &create)
-		parent := "page " + create.ParentID
+		summary := createInPage
+		parent := create.ParentID
 		if create.ParentType == "data_source" {
-			parent = "data source " + create.ParentID
+			summary = createInDataSource
 			if dataSource, found := s.dataSourceSchema(ctx, token, create.ParentID); found {
 				if err := refuseTitleProperty(dataSource.Properties, create.Properties); err != nil {
 					return "", approval.Intent{}, err
@@ -445,14 +447,14 @@ func (s *Service) prepareProposal(ctx context.Context, token, tool string, argum
 					return "", approval.Intent{}, err
 				}
 				if name := strings.TrimSpace(plainText(dataSource.Title)); name != "" {
-					parent = boldName(name)
+					summary, parent = createInNamed, boldName(name)
 				}
 			}
 		}
 		intent = approval.Intent{Verb: "create", TargetKind: "Notion page", TargetName: create.Title}
-		fmt.Fprintf(&builder, "Notion · create page\n%s in %s", boldName(create.Title), parent)
-		writeLines(&builder, renderInputProperties(create.Properties))
-		writeParagraphs(&builder, create.Paragraphs)
+		builder.WriteString(summary.Format(ctx, boldName(create.Title), parent))
+		writeLines(&builder, renderInputProperties(ctx, create.Properties))
+		writeParagraphs(ctx, &builder, create.Paragraphs)
 	case toolUpdatePage:
 		var update updateArguments
 		_ = json.Unmarshal(arguments, &update)
@@ -464,8 +466,8 @@ func (s *Service) prepareProposal(ctx context.Context, token, tool string, argum
 			return "", approval.Intent{}, err
 		}
 		intent = approval.Intent{Verb: "update", TargetKind: "Notion page", TargetName: objectTitle(page)}
-		fmt.Fprintf(&builder, "Notion · update page\n%s", pageLink(page))
-		writeLines(&builder, renderPropertyChanges(page.Properties, update.Properties))
+		builder.WriteString(updateSummary.Format(ctx, pageLink(page)))
+		writeLines(&builder, renderPropertyChanges(ctx, page.Properties, update.Properties))
 	case toolAppendBlocks:
 		var appendTo appendArguments
 		_ = json.Unmarshal(arguments, &appendTo)
@@ -474,8 +476,8 @@ func (s *Service) prepareProposal(ctx context.Context, token, tool string, argum
 			return "", approval.Intent{}, err
 		}
 		intent = approval.Intent{Verb: "append to", TargetKind: "Notion page", TargetName: objectTitle(page)}
-		fmt.Fprintf(&builder, "Notion · append %d paragraph(s)\n%s", len(appendTo.Paragraphs), pageLink(page))
-		writeParagraphs(&builder, appendTo.Paragraphs)
+		builder.WriteString(appendSummary.Format(ctx, len(appendTo.Paragraphs), pageLink(page)))
+		writeParagraphs(ctx, &builder, appendTo.Paragraphs)
 	}
 	return builder.String(), intent, nil
 }
@@ -500,11 +502,11 @@ func writeLines(builder *strings.Builder, lines []string) {
 	}
 }
 
-func writeParagraphs(builder *strings.Builder, paragraphs []string) {
+func writeParagraphs(ctx context.Context, builder *strings.Builder, paragraphs []string) {
 	if len(paragraphs) == 0 {
 		return
 	}
-	fmt.Fprintf(builder, "\nBody (%d paragraph(s)):", len(paragraphs))
+	builder.WriteString("\n" + bodyHeading.Format(ctx, len(paragraphs)))
 	for index, paragraph := range paragraphs {
 		fmt.Fprintf(builder, "\n%d. %s", index+1, clip.Runes(paragraph, summaryTextRunes))
 	}
@@ -512,35 +514,77 @@ func writeParagraphs(builder *strings.Builder, paragraphs []string) {
 
 // renderInputProperties renders the proposed property values of a page that does not exist yet,
 // which therefore has nothing they replace.
-func renderInputProperties(properties map[string]json.RawMessage) []string {
+func renderInputProperties(ctx context.Context, properties map[string]json.RawMessage) []string {
 	names := sortedKeys(properties)
 	lines := make([]string, 0, len(names))
 	for _, name := range names {
-		lines = append(lines, name+": "+renderInputProperty(properties[name]))
+		lines = append(lines, name+": "+shownValue(ctx, renderInputProperty(properties[name])))
 	}
 	return lines
 }
 
 // renderPropertyChanges renders each proposed value beside the value it replaces, so the user
 // confirms a change rather than a value.
-func renderPropertyChanges(current, proposed map[string]json.RawMessage) []string {
+func renderPropertyChanges(ctx context.Context, current, proposed map[string]json.RawMessage) []string {
 	names := sortedKeys(proposed)
 	lines := make([]string, 0, len(names))
 	for _, name := range names {
 		value := renderInputProperty(proposed[name])
 		switch before := currentPropertyValue(current[name]); {
 		case before == value, before == "" && value == emptyValue:
-			lines = append(lines, name+": "+value+" (no change)")
+			lines = append(lines, name+": "+shownValue(ctx, value)+" "+noChange.Format(ctx))
 		case before == "":
-			lines = append(lines, name+": "+emptyValue+" → "+value)
+			lines = append(lines, name+": "+shownValue(ctx, emptyValue)+" → "+shownValue(ctx, value))
 		default:
-			lines = append(lines, name+": "+before+" → "+value)
+			lines = append(lines, name+": "+before+" → "+shownValue(ctx, value))
 		}
 	}
 	return lines
 }
 
 const emptyValue = "(empty)"
+
+var (
+	createInPage       = locale.T("Notion · create page\n%s in page %s", "Notion · создать страницу\n%s в странице %s")
+	createInDataSource = locale.T("Notion · create page\n%s in data source %s", "Notion · создать страницу\n%s в источнике данных %s")
+	createInNamed      = locale.T("Notion · create page\n%s in %s", "Notion · создать страницу\n%s в %s")
+	updateSummary      = locale.T("Notion · update page\n%s", "Notion · обновить страницу\n%s")
+	appendSummary      = locale.N("Notion · append %[1]d paragraph(s)\n%[2]s", "Notion · append %[1]d paragraph(s)\n%[2]s", "Notion · добавить %[1]d абзац\n%[2]s", "Notion · добавить %[1]d абзаца\n%[2]s", "Notion · добавить %[1]d абзацев\n%[2]s")
+	bodyHeading        = locale.N("Body (%d paragraph(s)):", "Body (%d paragraph(s)):", "Текст (%d абзац):", "Текст (%d абзаца):", "Текст (%d абзацев):")
+	noChange           = locale.T("(no change)", "(без изменений)")
+	emptyShown         = locale.T("(empty)", "(пусто)")
+
+	execNotConnected = locale.T("Notion is no longer connected; nothing was written.", "Notion больше не подключён; ничего не записано.")
+	execWritesOff    = locale.T("Notion writes are off; nothing was written.", "Запись в Notion выключена; ничего не записано.")
+	execRejected     = locale.T("Notion rejected the write: %s. Nothing was written.", "Notion отклонил запись: %s. Ничего не записано.")
+	execCreated      = locale.T("Created page: %s", "Страница создана: %s")
+	execUpdated      = locale.T("Updated.", "Обновлено.")
+	execAppended     = locale.N("Appended %[1]d paragraph(s) to page %[2]s.", "Appended %[1]d paragraph(s) to page %[2]s.", "Добавлен %[1]d абзац на страницу %[2]s.", "Добавлено %[1]d абзаца на страницу %[2]s.", "Добавлено %[1]d абзацев на страницу %[2]s.")
+
+	execUnauthorized = locale.T("Notion rejected the connection token; nothing was written. Reconnect Notion in /settings.", "Notion отклонил токен подключения; ничего не записано. Подключи Notion заново в /settings.")
+	execRestricted   = locale.T("The Notion connection lacks the capability for this write; nothing was written.", "У подключения к Notion нет права на эту запись; ничего не записано.")
+	execNotShared    = locale.T("Notion has no shared page or data source with that ID; nothing was written.", "В Notion нет доступной страницы или источника данных с таким ID; ничего не записано.")
+	execInvalid      = locale.T("Notion rejected the request; nothing was written.", "Notion отклонил запрос; ничего не записано.")
+	execRateLimited  = locale.T("Notion is rate limiting requests; nothing was written. Try again later.", "Notion ограничивает частоту запросов; ничего не записано. Попробуй позже.")
+	execUpdateUnsure = locale.T("Notion did not confirm the update; check the page before trying again.", "Notion не подтвердил обновление; проверь страницу, прежде чем пробовать снова.")
+	execWriteUnsure  = locale.T("Notion did not confirm the write; check Notion for a partial result before trying again.", "Notion не подтвердил запись; проверь в Notion, не записалась ли часть, прежде чем пробовать снова.")
+)
+
+func actionFailed(ctx context.Context, reason string, message locale.Text, arguments ...any) *approval.ActionError {
+	return &approval.ActionError{Reason: reason, Text: message.FormatIn(locale.English, arguments...), UserText: message.Format(ctx, arguments...)}
+}
+
+func doneOutcome(ctx context.Context, message locale.Text, arguments ...any) approval.Outcome {
+	return approval.Outcome{Text: message.FormatIn(locale.English, arguments...), UserText: message.Format(ctx, arguments...)}
+}
+
+// shownValue writes the one fixed word a rendered value can be in the user's language.
+func shownValue(ctx context.Context, value string) string {
+	if value == emptyValue {
+		return emptyShown.Format(ctx)
+	}
+	return value
+}
 
 // renderInputProperty renders a property value input, which may omit the "type" field, by the
 // single value key it carries.
@@ -612,14 +656,14 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		return approval.Outcome{}, err
 	}
 	if !connected {
-		return approval.Outcome{}, &approval.ActionError{Reason: "not_connected", Text: "Notion is no longer connected; nothing was written."}
+		return approval.Outcome{}, actionFailed(ctx, "not_connected", execNotConnected)
 	}
 	row, _, err := s.repository.LoadIntegrationConnection(ctx, record.PrincipalID, Integration)
 	if err != nil {
 		return approval.Outcome{}, err
 	}
 	if !row.WritesEnabled {
-		return approval.Outcome{}, &approval.ActionError{Reason: "writes_disabled", Text: "Notion writes are off; nothing was written."}
+		return approval.Outcome{}, actionFailed(ctx, "writes_disabled", execWritesOff)
 	}
 	outcome, err := s.write(ctx, token, record)
 	if err != nil {
@@ -628,10 +672,10 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 			s.logger.InfoContext(ctx, "notion.action.failed", "principal_id", record.PrincipalID, "tool", record.Tool, "error_class", notionErr.Class)
 			if notionErr.Class == ErrorInvalid {
 				if cause := s.invalidCause(ctx, token, record); cause != "" {
-					return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "Notion rejected the write: " + cause + ". Nothing was written."}
+					return approval.Outcome{}, actionFailed(ctx, "invalid", execRejected, cause)
 				}
 			}
-			return approval.Outcome{}, actionError(record.Tool, notionErr.Class)
+			return approval.Outcome{}, actionError(ctx, record.Tool, notionErr.Class)
 		}
 		return approval.Outcome{}, err
 	}
@@ -665,7 +709,7 @@ func (s *Service) write(ctx context.Context, token string, record approval.Recor
 		if err != nil {
 			return approval.Outcome{}, err
 		}
-		return approval.Outcome{Text: "Created page: " + pageReference(page)}, nil
+		return doneOutcome(ctx, execCreated, pageReference(page)), nil
 	case toolUpdatePage:
 		var arguments updateArguments
 		if err := json.Unmarshal(record.Arguments, &arguments); err != nil {
@@ -683,7 +727,7 @@ func (s *Service) write(ctx context.Context, token string, record approval.Recor
 		if err != nil {
 			return approval.Outcome{}, err
 		}
-		return approval.Outcome{Text: "Updated.", Undo: undo}, nil
+		return withUndo(doneOutcome(ctx, execUpdated), undo), nil
 	case toolAppendBlocks:
 		var arguments appendArguments
 		if err := json.Unmarshal(record.Arguments, &arguments); err != nil {
@@ -692,7 +736,7 @@ func (s *Service) write(ctx context.Context, token string, record approval.Recor
 		if _, err := s.client.AppendBlockChildren(ctx, token, arguments.PageID, paragraphBlocks(arguments.Paragraphs)); err != nil {
 			return approval.Outcome{}, err
 		}
-		return approval.Outcome{Text: fmt.Sprintf("Appended %d paragraph(s) to page %s.", len(arguments.Paragraphs), arguments.PageID)}, nil
+		return approval.Outcome{Text: execAppended.FormatIn(locale.English, len(arguments.Paragraphs), arguments.PageID), UserText: execAppended.Format(ctx, len(arguments.Paragraphs), arguments.PageID)}, nil
 	default:
 		return approval.Outcome{}, fmt.Errorf("unknown Notion action")
 	}
@@ -755,22 +799,27 @@ func (s *Service) invalidCause(ctx context.Context, token string, record approva
 
 // actionError maps a Notion failure of a confirmed action to what the user is told. A failure of
 // unknown outcome on a create or append tells the user to check Notion before trying again.
-func actionError(tool string, class ErrorClass) *approval.ActionError {
+func withUndo(outcome approval.Outcome, undo json.RawMessage) approval.Outcome {
+	outcome.Undo = undo
+	return outcome
+}
+
+func actionError(ctx context.Context, tool string, class ErrorClass) *approval.ActionError {
 	switch class {
 	case ErrorUnauthorized:
-		return &approval.ActionError{Reason: "unauthorized", Text: "Notion rejected the connection token; nothing was written. Reconnect Notion in /settings."}
+		return actionFailed(ctx, "unauthorized", execUnauthorized)
 	case ErrorRestricted:
-		return &approval.ActionError{Reason: "restricted", Text: "The Notion connection lacks the capability for this write; nothing was written."}
+		return actionFailed(ctx, "restricted", execRestricted)
 	case ErrorNotShared:
-		return &approval.ActionError{Reason: "not_shared", Text: "Notion has no shared page or data source with that ID; nothing was written."}
+		return actionFailed(ctx, "not_shared", execNotShared)
 	case ErrorInvalid:
-		return &approval.ActionError{Reason: "invalid", Text: "Notion rejected the request; nothing was written."}
+		return actionFailed(ctx, "invalid", execInvalid)
 	case ErrorRateLimited:
-		return &approval.ActionError{Reason: "rate_limited", Text: "Notion is rate limiting requests; nothing was written. Try again later."}
+		return actionFailed(ctx, "rate_limited", execRateLimited)
 	default:
 		if tool == toolUpdatePage {
-			return &approval.ActionError{Reason: "unavailable", Text: "Notion did not confirm the update; check the page before trying again."}
+			return actionFailed(ctx, "unavailable", execUpdateUnsure)
 		}
-		return &approval.ActionError{Reason: "ambiguous", Text: "Notion did not confirm the write; check Notion for a partial result before trying again."}
+		return actionFailed(ctx, "ambiguous", execWriteUnsure)
 	}
 }

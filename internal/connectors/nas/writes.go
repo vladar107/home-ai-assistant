@@ -11,6 +11,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -177,7 +178,7 @@ func (s *Service) executeSave(ctx context.Context, principalID string, call tool
 	if err != nil {
 		return tools.Result{}, err
 	}
-	proposal := approval.Proposal{Tool: toolSaveAttachment, Arguments: canonical, Summary: saveSummary(record, location, missing, root.Shared), Intent: approval.Intent{Verb: "save", TargetKind: "file", TargetName: path.Base(location.Path)}}
+	proposal := approval.Proposal{Tool: toolSaveAttachment, Arguments: canonical, Summary: saveSummary(ctx, record, location, missing, root.Shared), Intent: approval.Intent{Verb: "save", TargetKind: "file", TargetName: path.Base(location.Path)}}
 	if _, err := s.proposer.Propose(ctx, principalID, proposal); err != nil {
 		if approval.Refused(err) {
 			return tools.Result{Text: err.Error(), IsError: true}, nil
@@ -256,22 +257,66 @@ func missingFolderText(missing Location, root, defaultFolder string) string {
 	return text + "."
 }
 
-func saveSummary(record attachment.Record, location Location, missing []Location, shared bool) string {
-	owner := "your"
-	if shared {
-		owner = "the shared"
+var (
+	saveOwnSummary    = locale.T("Save %q (%s) to your NAS folder as %s", "Сохранить %q (%s) в твою папку на NAS как %s")
+	saveSharedSummary = locale.T("Save %q (%s) to the shared NAS folder as %s", "Сохранить %q (%s) в общую папку на NAS как %s")
+	createsFolder     = locale.T("Creates the folder %s", "Будет создана папка %s")
+	createsFolders    = locale.T("Creates the folder %s", "Будут созданы папки %s")
+	nothingChanged    = locale.T("Nothing already on the NAS is changed or removed.", "Ничего из того, что уже есть на NAS, не изменится и не удалится.")
+
+	sizeGigabytes = locale.T("%.1f GB", "%.1f ГБ")
+	sizeMegabytes = locale.T("%.1f MB", "%.1f МБ")
+	sizeKilobytes = locale.T("%.1f KB", "%.1f КБ")
+	sizeBytes     = locale.N("%d bytes", "%d bytes", "%d байт", "%d байта", "%d байт")
+
+	execUnavailable = locale.T("That action is no longer available; nothing was saved.", "Это действие больше недоступно; ничего не сохранено.")
+	execUnreadable  = locale.T("The confirmed action could not be read; nothing was saved.", "Не удалось прочитать подтверждённое действие; ничего не сохранено.")
+	execWritesOff   = locale.T("Saving to the NAS is off; nothing was saved.", "Сохранение на NAS выключено; ничего не сохранено.")
+	execFileGone    = locale.T("That file is no longer in this conversation; nothing was saved.", "Этого файла больше нет в разговоре; ничего не сохранено.")
+	execNoAccess    = locale.T("This user no longer has NAS access; nothing was saved.", "У тебя больше нет доступа к NAS; ничего не сохранено.")
+	execSaved       = locale.T("Saved to %s.", "Сохранено: %s.")
+	execExists      = locale.T("A file with that name now exists; nothing was replaced.", "Файл с таким именем уже существует; ничего не заменено.")
+	execDenied      = locale.T("That folder is read-only; nothing was saved.", "Эта папка только для чтения; ничего не сохранено.")
+	execNoFolder    = locale.T("The NAS has no such folder; nothing was saved.", "На NAS нет такой папки; ничего не сохранено.")
+	execNasDown     = locale.T("The NAS is unavailable right now; nothing was saved.", "NAS сейчас недоступен; ничего не сохранено.")
+)
+
+func actionFailed(ctx context.Context, reason string, message locale.Text) *approval.ActionError {
+	return &approval.ActionError{Reason: reason, Text: message.FormatIn(locale.English), UserText: message.Format(ctx)}
+}
+
+// userSize is formatSize in the user's language.
+func userSize(ctx context.Context, bytes int64) string {
+	switch {
+	case bytes >= 1<<30:
+		return sizeGigabytes.Format(ctx, float64(bytes)/float64(1<<30))
+	case bytes >= 1<<20:
+		return sizeMegabytes.Format(ctx, float64(bytes)/float64(1<<20))
+	case bytes >= 1<<10:
+		return sizeKilobytes.Format(ctx, float64(bytes)/float64(1<<10))
+	default:
+		return sizeBytes.Format(ctx, int(bytes))
 	}
-	var builder strings.Builder
-	fmt.Fprintf(&builder, "Save %q (%s) to %s NAS folder as %s", record.FileName, formatSize(record.SizeBytes), owner, location)
+}
+
+func saveSummary(ctx context.Context, record attachment.Record, location Location, missing []Location, shared bool) string {
+	message := saveOwnSummary
+	if shared {
+		message = saveSharedSummary
+	}
+	summary := message.Format(ctx, record.FileName, userSize(ctx, record.SizeBytes), location)
 	if len(missing) > 0 {
 		names := make([]string, 0, len(missing))
 		for _, directory := range missing {
 			names = append(names, directory.String())
 		}
-		fmt.Fprintf(&builder, "\nCreates the folder %s", strings.Join(names, ", "))
+		create := createsFolders
+		if len(missing) == 1 {
+			create = createsFolder
+		}
+		summary += "\n" + create.Format(ctx, strings.Join(names, ", "))
 	}
-	builder.WriteString("\nNothing already on the NAS is changed or removed.")
-	return builder.String()
+	return summary + "\n" + nothingChanged.Format(ctx)
 }
 
 // ExecuteApproved writes the confirmed save exactly once. Every guard is checked again here,
@@ -279,37 +324,37 @@ func saveSummary(record attachment.Record, location Location, missing []Location
 // the press.
 func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (approval.Outcome, error) {
 	if record.Tool != toolSaveAttachment || s.proposer == nil || s.attachments == nil {
-		return approval.Outcome{}, &approval.ActionError{Reason: "unavailable", Text: "That action is no longer available; nothing was saved."}
+		return approval.Outcome{}, actionFailed(ctx, "unavailable", execUnavailable)
 	}
 	var confirmed confirmedSave
 	if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
-		return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed action could not be read; nothing was saved."}
+		return approval.Outcome{}, actionFailed(ctx, "malformed", execUnreadable)
 	}
 	location, err := parseLocation(confirmed.Path)
 	if err != nil {
-		return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed action could not be read; nothing was saved."}
+		return approval.Outcome{}, actionFailed(ctx, "malformed", execUnreadable)
 	}
 	enabled, err := s.writesEnabled(ctx, record.PrincipalID)
 	if err != nil {
 		return approval.Outcome{}, err
 	}
 	if !enabled {
-		return approval.Outcome{}, &approval.ActionError{Reason: "writes_disabled", Text: "Saving to the NAS is off; nothing was saved."}
+		return approval.Outcome{}, actionFailed(ctx, "writes_disabled", execWritesOff)
 	}
 	_, data, found, err := s.attachments.Content(ctx, record.PrincipalID, confirmed.AttachmentID)
 	if err != nil {
 		return approval.Outcome{}, err
 	}
 	if !found {
-		return approval.Outcome{}, &approval.ActionError{Reason: "attachment_gone", Text: "That file is no longer in this conversation; nothing was saved."}
+		return approval.Outcome{}, actionFailed(ctx, "attachment_gone", execFileGone)
 	}
 
 	connection, allowed, err := s.session(ctx, record.PrincipalID)
 	if err != nil {
-		return approval.Outcome{}, actionErrorFor(err)
+		return approval.Outcome{}, actionErrorFor(ctx, err)
 	}
 	if !allowed {
-		return approval.Outcome{}, &approval.ActionError{Reason: "no_access", Text: "This user no longer has NAS access; nothing was saved."}
+		return approval.Outcome{}, actionFailed(ctx, "no_access", execNoAccess)
 	}
 	defer connection.Close()
 
@@ -321,31 +366,31 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 				if classify(err).Class == ErrorExists {
 					continue
 				}
-				return approval.Outcome{}, actionErrorFor(err)
+				return approval.Outcome{}, actionErrorFor(ctx, err)
 			}
 		}
 	}
 	if err := connection.Create(ctx, location, data); err != nil {
-		return approval.Outcome{}, actionErrorFor(err)
+		return approval.Outcome{}, actionErrorFor(ctx, err)
 	}
 	s.logger.InfoContext(ctx, "nas.action.executed", "principal_id", record.PrincipalID, "tool", record.Tool)
-	return approval.Outcome{Text: fmt.Sprintf("Saved to %s.", location)}, nil
+	return approval.Outcome{Text: execSaved.FormatIn(locale.English, location), UserText: execSaved.Format(ctx, location)}, nil
 }
 
-func actionErrorFor(err error) error {
+func actionErrorFor(ctx context.Context, err error) error {
 	var nasErr *Error
 	if !errors.As(err, &nasErr) {
 		return err
 	}
 	switch nasErr.Class {
 	case ErrorExists:
-		return &approval.ActionError{Reason: "exists", Text: "A file with that name now exists; nothing was replaced."}
+		return actionFailed(ctx, "exists", execExists)
 	case ErrorDenied:
-		return &approval.ActionError{Reason: "denied", Text: "That folder is read-only; nothing was saved."}
+		return actionFailed(ctx, "denied", execDenied)
 	case ErrorNotFound:
-		return &approval.ActionError{Reason: "not_found", Text: "The NAS has no such folder; nothing was saved."}
+		return actionFailed(ctx, "not_found", execNoFolder)
 	default:
-		return &approval.ActionError{Reason: "unavailable", Text: "The NAS is unavailable right now; nothing was saved."}
+		return actionFailed(ctx, "unavailable", execNasDown)
 	}
 }
 

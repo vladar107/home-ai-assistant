@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -219,7 +220,7 @@ func (s *Service) record(ctx context.Context, principalID string, call tools.Cal
 	if err != nil {
 		return tools.Result{}, err
 	}
-	summary := "Change the intake record " + existing.Title + " (" + existing.Kind + ") to:\n" + strings.Join(Describe(record), "\n")
+	summary := changeSummary.Format(ctx, existing.Title, existing.Kind, strings.Join(DescribeFor(ctx, record), "\n"))
 	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolRecord, Arguments: canonical, Summary: summary,
 		Intent: approval.Intent{Verb: "change", TargetKind: "intake record", TargetName: existing.Title, NewName: record.Title}})
 }
@@ -243,7 +244,7 @@ func (s *Service) delete(ctx context.Context, principalID string, call tools.Cal
 		return tools.Result{}, err
 	}
 	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolDelete, Arguments: canonical,
-		Summary: "Delete the intake record " + record.Title + " (" + record.Kind + ").",
+		Summary: deleteSummary.Format(ctx, record.Title, record.Kind),
 		Intent:  approval.Intent{Verb: "delete", TargetKind: "intake record", TargetName: record.Title}})
 }
 
@@ -268,11 +269,11 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 	case toolRecord:
 		var confirmed confirmedUpdate
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
-			return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed change could not be read; nothing was changed."}
+			return approval.Outcome{}, actionFailed(ctx, "malformed", execUnreadableChange)
 		}
 		updated, _, reason := validate(confirmed.Draft, true)
 		if reason != "" {
-			return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "That change is no longer valid; nothing was changed."}
+			return approval.Outcome{}, actionFailed(ctx, "invalid", execInvalid)
 		}
 		updated.ID, updated.PrincipalID, updated.UpdatedAt = confirmed.ID, record.PrincipalID, s.stamp()
 		changed, err := s.repository.UpdateIntakeRecord(ctx, updated, confirmed.UpdatedAt)
@@ -280,26 +281,26 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 			return approval.Outcome{}, err
 		}
 		if !changed {
-			return approval.Outcome{}, &approval.ActionError{Reason: "changed", Text: "The record changed or was deleted since; nothing was changed."}
+			return approval.Outcome{}, actionFailed(ctx, "changed", execChanged)
 		}
 		s.logger.InfoContext(ctx, "intake.updated", "principal_id", record.PrincipalID, "record_id", confirmed.ID)
-		return approval.Outcome{Text: "Updated the intake record " + confirmed.ID + "."}, nil
+		return doneOutcome(ctx, execUpdated, confirmed.ID), nil
 	case toolDelete:
 		var confirmed confirmedDelete
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
-			return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed deletion could not be read; nothing was deleted."}
+			return approval.Outcome{}, actionFailed(ctx, "malformed", execUnreadableDelete)
 		}
 		deleted, err := s.repository.DeleteIntakeRecord(ctx, record.PrincipalID, confirmed.ID)
 		if err != nil {
 			return approval.Outcome{}, err
 		}
 		if !deleted {
-			return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That record no longer exists."}
+			return approval.Outcome{}, actionFailed(ctx, "not_found", execRecordGone)
 		}
 		s.logger.InfoContext(ctx, "intake.deleted", "principal_id", record.PrincipalID, "record_id", confirmed.ID)
-		return approval.Outcome{Text: "Deleted the intake record."}, nil
+		return doneOutcome(ctx, execDeleted), nil
 	default:
-		return approval.Outcome{}, &approval.ActionError{Reason: "unavailable", Text: "That action is no longer available."}
+		return approval.Outcome{}, actionFailed(ctx, "unavailable", execUnavailable)
 	}
 }
 
@@ -394,9 +395,42 @@ func (s *Service) full(record Record) string {
 // Describe is a record's facts as lines for the user or the model: what it is and who it is from,
 // then its dates, amounts, references, and what the user must do.
 func Describe(record Record) []string {
-	heading := record.Title + " (" + record.Kind + ")"
+	return DescribeFor(locale.With(context.Background(), locale.English), record)
+}
+
+var (
+	recordHeading       = locale.T("%s (%s)", "%s (%s)")
+	recordHeadingSender = locale.T("%s (%s), from %s", "%s (%s), от %s")
+	recordToDo          = locale.T("To do: %s", "Что сделать: %s")
+	recordNothingToDo   = locale.T("Nothing to do.", "Ничего делать не нужно.")
+
+	changeSummary        = locale.T("Change the intake record %s (%s) to:\n%s", "Изменить запись входящих %s (%s) так:\n%s")
+	deleteSummary        = locale.T("Delete the intake record %s (%s).", "Удалить запись входящих %s (%s).")
+	execUnreadableChange = locale.T("The confirmed change could not be read; nothing was changed.", "Не удалось прочитать подтверждённое изменение; ничего не изменено.")
+	execInvalid          = locale.T("That change is no longer valid; nothing was changed.", "Это изменение больше не подходит; ничего не изменено.")
+	execChanged          = locale.T("The record changed or was deleted since; nothing was changed.", "Запись с тех пор изменилась или удалена; ничего не изменено.")
+	execUpdated          = locale.T("Updated the intake record %s.", "Запись входящих %s обновлена.")
+	execUnreadableDelete = locale.T("The confirmed deletion could not be read; nothing was deleted.", "Не удалось прочитать подтверждённое удаление; ничего не удалено.")
+	execRecordGone       = locale.T("That record no longer exists.", "Такой записи больше нет.")
+	execDeleted          = locale.T("Deleted the intake record.", "Запись входящих удалена.")
+	execUnavailable      = locale.T("That action is no longer available.", "Это действие больше недоступно.")
+)
+
+// actionFailed keeps the English sentence for the record and the model, and the user's language
+// for the user.
+func actionFailed(ctx context.Context, reason string, message locale.Text, arguments ...any) *approval.ActionError {
+	return &approval.ActionError{Reason: reason, Text: message.FormatIn(locale.English, arguments...), UserText: message.Format(ctx, arguments...)}
+}
+
+func doneOutcome(ctx context.Context, message locale.Text, arguments ...any) approval.Outcome {
+	return approval.Outcome{Text: message.FormatIn(locale.English, arguments...), UserText: message.Format(ctx, arguments...)}
+}
+
+// DescribeFor is Describe in the context's language, for what the user reads.
+func DescribeFor(ctx context.Context, record Record) []string {
+	heading := recordHeading.Format(ctx, record.Title, record.Kind)
 	if record.Sender != "" {
-		heading += ", from " + record.Sender
+		heading = recordHeadingSender.Format(ctx, record.Title, record.Kind, record.Sender)
 	}
 	lines := []string{heading}
 	for _, date := range record.Facts.Dates {
@@ -409,9 +443,9 @@ func Describe(record Record) []string {
 		lines = append(lines, "- "+reference.Label+": "+reference.Value)
 	}
 	if record.ActionRequired != "" {
-		lines = append(lines, "To do: "+record.ActionRequired)
+		lines = append(lines, recordToDo.Format(ctx, record.ActionRequired))
 	} else {
-		lines = append(lines, "Nothing to do.")
+		lines = append(lines, recordNothingToDo.Format(ctx))
 	}
 	return lines
 }

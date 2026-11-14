@@ -279,7 +279,7 @@ func (s *Service) writeFact(ctx context.Context, principalID, text string) (tool
 		return tools.Result{}, err
 	}
 	s.record(ctx, principalID, KindFact, outcomeWritten)
-	s.addNote(ctx, principalID, "Remembered: "+text)
+	s.addNote(ctx, principalID, rememberedNote, text)
 	return tools.Result{Text: fmt.Sprintf("Saved the fact (id %s). The user's reply will show it as a Remembered line.", id)}, nil
 }
 
@@ -350,7 +350,7 @@ func (s *Service) writeReplacement(ctx context.Context, principalID, id, text st
 		return tools.Result{}, err
 	}
 	s.record(ctx, principalID, entry.Kind, outcomeWritten)
-	s.addNote(ctx, principalID, "Updated: "+text)
+	s.addNote(ctx, principalID, updatedNote, text)
 	return tools.Result{Text: "Updated the entry. The user's reply will show it as an Updated line."}, nil
 }
 
@@ -403,7 +403,7 @@ func (s *Service) forget(ctx context.Context, principalID, id string) (tools.Res
 		return tools.Result{}, err
 	}
 	s.record(ctx, principalID, entry.Kind, outcomeRemoved)
-	s.addNote(ctx, principalID, "Forgot: "+entry.Text)
+	s.addNote(ctx, principalID, forgotNote, entry.Text)
 	return tools.Result{Text: "Forgot the entry. The user's reply will show it as a Forgot line."}, nil
 }
 

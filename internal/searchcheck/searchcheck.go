@@ -15,6 +15,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/judgment"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 )
 
@@ -139,7 +140,7 @@ func (s *Service) decide(ctx context.Context, principalID, query string, interac
 		_, err = s.proposer.Propose(ctx, principalID, approval.Proposal{
 			Tool:      Tool,
 			Arguments: arguments,
-			Summary:   "Search the web for: " + codeSpan(query) + "\nNeeds your confirmation because " + phrase + ".",
+			Summary:   searchSummary.Format(ctx, codeSpan(query), reasonSummaryPhrases[reason].Format(ctx)),
 			Intent:    approval.Intent{Verb: "search", TargetKind: "web query", TargetName: query},
 		})
 	}
@@ -183,6 +184,20 @@ var reasonPhrases = map[string]string{
 	ReasonOffRequest: "it does not look like part of your request",
 }
 
+var searchSummary = locale.T("Search the web for: %s\nNeeds your confirmation because %s.", "Искать в интернете: %s\nНужно твоё подтверждение, потому что %s.")
+
+// reasonSummaryPhrases is the user's wording of reasonPhrases, which the model reads.
+var reasonSummaryPhrases = map[string]locale.Text{
+	ReasonSuspicious: locale.T("this conversation read content that tried to instruct the assistant", "в этом разговоре прочитан контент, который пытался давать указания ассистенту"),
+	ReasonPattern:    locale.T("it contains a web address or other identifier", "в нём есть веб-адрес или другой идентификатор"),
+	ReasonOffRequest: locale.T("it does not look like part of your request", "он не похож на часть твоего запроса"),
+}
+
+var (
+	approvedUserOutcome = locale.T("Approved; the search runs now.", "Подтверждено; поиск выполняется.")
+	unreadableSearch    = locale.T("The confirmed search could not be read; nothing was searched.", "Не удалось прочитать подтверждённый поиск; ничего не искали.")
+)
+
 func allowed(reason string) agentruntime.SearchDecision {
 	return agentruntime.SearchDecision{Verdict: agentruntime.SearchAllow, Reason: reason}
 }
@@ -225,10 +240,10 @@ func (s *Service) ActionTools() []string { return []string{Tool} }
 
 // ExecuteApproved records the confirmation; the search itself runs when the model asks for it
 // again with the same query.
-func (s *Service) ExecuteApproved(_ context.Context, record approval.Record) (approval.Outcome, error) {
+func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (approval.Outcome, error) {
 	var confirmed searchArguments
 	if err := json.Unmarshal(record.Arguments, &confirmed); err != nil || strings.TrimSpace(confirmed.Query) == "" {
-		return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed search could not be read; nothing was searched."}
+		return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: unreadableSearch.FormatIn(locale.English), UserText: unreadableSearch.Format(ctx)}
 	}
 	now := s.now()
 	s.mu.Lock()
@@ -238,7 +253,7 @@ func (s *Service) ExecuteApproved(_ context.Context, record approval.Record) (ap
 		entries = entries[1:]
 	}
 	s.approved[record.PrincipalID] = append(entries, approvedSearch{query: approvalKey(confirmed.Query), at: now})
-	return approval.Outcome{Text: approvedOutcome}, nil
+	return approval.Outcome{Text: approvedOutcome, UserText: approvedUserOutcome.Format(ctx)}, nil
 }
 
 // useApproval spends the principal's confirmation of this query, if there is a live one.

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -159,7 +160,7 @@ func (s *Service) propose(ctx context.Context, principalID string, snap *snapsho
 		return "", errMalformed
 	}
 	verb := strings.ReplaceAll(arguments.Service, "_", " ")
-	summary := fmt.Sprintf("Home Assistant: %s %s (%s)", verb, entity.name, entity.entityID)
+	summary := serviceCallSummary.Format(ctx, verb, entity.name, entity.entityID)
 	if len(arguments.Data) > 0 {
 		keys := make([]string, 0, len(arguments.Data))
 		for key := range arguments.Data {
@@ -198,33 +199,54 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 	case toolAction:
 		return s.executeApprovedAction(ctx, record)
 	default:
-		return approval.Outcome{}, &approval.ActionError{Reason: "unknown_tool", Text: "This action is not supported."}
+		return approval.Outcome{}, actionFailed(ctx, "unknown_tool", actionUnsupported)
 	}
 	s.forget()
 	snap, err := s.current(ctx)
 	if err != nil {
-		return approval.Outcome{}, actionError(err)
+		return approval.Outcome{}, actionError(ctx, err)
 	}
 	arguments, entity, err := s.validateServiceCall(ctx, snap, record.Arguments)
 	if err != nil {
-		return approval.Outcome{}, actionError(err)
+		return approval.Outcome{}, actionError(ctx, err)
 	}
 	body := map[string]any{"entity_id": arguments.EntityID}
 	for key, value := range arguments.Data {
 		body[key] = value
 	}
 	if err := s.client.postJSON(ctx, "/api/services/"+entity.domain+"/"+arguments.Service, body, nil); err != nil {
-		return approval.Outcome{}, actionError(err)
+		return approval.Outcome{}, actionError(ctx, err)
 	}
 	s.logger.InfoContext(ctx, "homeassistant.confirmed_action", "principal_id", record.PrincipalID, "domain", entity.domain)
 	s.forget()
-	return approval.Outcome{Text: fmt.Sprintf("Done: %s %s.", strings.ReplaceAll(arguments.Service, "_", " "), entity.name)}, nil
+	service := strings.ReplaceAll(arguments.Service, "_", " ")
+	return approval.Outcome{Text: serviceDone.FormatIn(locale.English, service, entity.name), UserText: serviceDone.Format(ctx, service, entity.name)}, nil
 }
 
-func actionError(err error) error {
+var (
+	actionUnsupported = locale.T("This action is not supported.", "Это действие не поддерживается.")
+	serviceDone       = locale.T("Done: %s %s.", "Выполнено: %[1]s для %[2]s.")
+	// The service is Home Assistant's own name for it, such as "turn on", in every language.
+	serviceCallSummary = locale.T("Home Assistant: %s %s (%s)", "Home Assistant: %[1]s для %[2]s (%[3]s)")
+
+	apiErrorTexts = map[string]locale.Text{
+		errUnauthorized.class: locale.T("Home Assistant refused the household token; the operator needs to check it.", "Home Assistant отклонил токен дома; оператору нужно его проверить."),
+		errNotFound.class:     locale.T("Home Assistant does not know that entity, service, or tool.", "Home Assistant не знает такого устройства, службы или инструмента."),
+		errBadRequest.class:   locale.T("Home Assistant could not carry out that request.", "Home Assistant не смог выполнить этот запрос."),
+		errUnavailable.class:  locale.T("Home Assistant is unavailable right now.", "Home Assistant сейчас недоступен."),
+		errTimeout.class:      locale.T("Home Assistant did not respond in time.", "Home Assistant не ответил вовремя."),
+		errMalformed.class:    locale.T("Home Assistant returned an unexpected response.", "Home Assistant вернул неожиданный ответ."),
+	}
+)
+
+func actionError(ctx context.Context, err error) error {
 	var apiErr *apiError
 	if errors.As(err, &apiErr) {
-		return &approval.ActionError{Reason: apiErr.class, Text: apiErr.text}
+		failed := &approval.ActionError{Reason: apiErr.class, Text: apiErr.text}
+		if message, known := apiErrorTexts[apiErr.class]; known && message.FormatIn(locale.English) == apiErr.text {
+			failed.UserText = message.Format(ctx)
+		}
+		return failed
 	}
 	return &approval.ActionError{Reason: "rejected", Text: err.Error()}
 }
