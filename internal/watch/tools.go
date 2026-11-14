@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/localtime"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
@@ -23,6 +24,45 @@ const (
 
 	// actTimeout lets a change made at once run as long as one made after Confirm.
 	actTimeout = 45 * time.Second
+)
+
+var (
+	proposeWatchDefault = locale.T("Watch %s\n%s\nYou get a message only when something changes, and once more when it is back to normal.", "Наблюдение: %[1]s\n%[2]s\nТебе придёт сообщение только при изменении и ещё одно, когда всё вернётся в норму.")
+	proposeWatchHome    = locale.T("Watch %s\n%s\nYou get a message only when this changes.", "Наблюдение: %[1]s\n%[2]s\nТебе придёт сообщение только при изменении.")
+	proposeWatchAgent   = locale.T("Watch %s\n%s\nYou get a message only when the answer changes.", "Наблюдение: %[1]s\n%[2]s\nТебе придёт сообщение только при изменении ответа.")
+	proposeWatchRain    = locale.T("Watch %s\n%s\nYou get a message when rain becomes expected, by the forecast.", "Наблюдение: %[1]s\n%[2]s\nТебе придёт сообщение, когда по прогнозу ожидается дождь.")
+	proposeWatchRainEnd = locale.T("Watch %s\n%s\nYou get a message when rain becomes expected and when it no longer is, by the forecast.", "Наблюдение: %[1]s\n%[2]s\nТебе придёт сообщение, когда по прогнозу ожидается дождь и когда его больше не ожидается.")
+	proposeWatchPlace   = locale.T("Watch %s\n%s\nYou get a message each time, by your live location.", "Наблюдение: %[1]s\n%[2]s\nТебе придёт сообщение каждый раз, по твоей геопозиции.")
+	notSharingMessage   = locale.T("It works only while you share your live location in this chat, and you are not sharing it now.", "Оно работает, только пока ты делишься геопозицией в этом чате, а сейчас ты ею не делишься.")
+	silentWhileTravel   = locale.T("It stays silent while you are traveling.", "В поездках оно молчит.")
+	changeWatch         = locale.T("Change the watch %s to:\n%s\n%s", "Изменить наблюдение %[1]s на:\n%[2]s\n%[3]s")
+	silentWhileTravelTo = locale.T("It will stay silent while you are traveling.", "В поездках оно будет молчать.")
+	noLongerPauses      = locale.T("It will no longer pause while you are traveling.", "В поездках оно больше не будет приостанавливаться.")
+	staysPaused         = locale.T("It stays paused until you resume it in /jobs.", "Оно остаётся приостановленным, пока ты не возобновишь его в /jobs.")
+	stopWatching        = locale.T("Stop watching %s (%s, %s).", "Остановить наблюдение %[1]s (%[2]s, %[3]s).")
+
+	watchingNow         = locale.T("Watching. %s", "Наблюдение включено. %s")
+	changedPaused       = locale.T("Changed. It stays paused until you resume it in /jobs.", "Изменено. Оно остаётся приостановленным, пока ты не возобновишь его в /jobs.")
+	changedNext         = locale.T("Changed. %s", "Изменено. %s")
+	deletedWatch        = locale.T("Deleted.", "Удалено.")
+	checkingAllDay      = locale.T("Checking all day, %s, %s.", "Проверка весь день: %[1]s, %[2]s.")
+	checkingUntilMid    = locale.T("Checking now until midnight.", "Проверка идёт до полуночи.")
+	checkingUntil       = locale.T("Checking now until %s.", "Проверка идёт до %s.")
+	firstCheck          = locale.T("First check: %s.", "Первая проверка: %s.")
+	placeGoneMessage    = locale.T("The saved place %s no longer exists.", "Сохранённого места %s больше нет.")
+	tooManyAgentMessage = locale.N("You already have %d agent watches, which is the most allowed; delete one in /jobs first.", "You already have %d agent watches, which is the most allowed; delete one in /jobs first.", "Наблюдений с проверкой моделью уже максимум: %d. Сначала удали одно в /jobs.", "Наблюдений с проверкой моделью уже максимум: %d. Сначала удали одно в /jobs.", "Наблюдений с проверкой моделью уже максимум: %d. Сначала удали одно в /jobs.")
+	tooManyMessage      = locale.N("You already have %d watches, which is the most allowed; delete one in /jobs first.", "You already have %d watches, which is the most allowed; delete one in /jobs first.", "Наблюдений уже максимум: %d. Сначала удали одно в /jobs.", "Наблюдений уже максимум: %d. Сначала удали одно в /jobs.", "Наблюдений уже максимум: %d. Сначала удали одно в /jobs.")
+	nothingSetUp        = locale.T("%s Nothing was set up.", "%s Ничего не создано.")
+	nothingChanged      = locale.T("%s Nothing was changed.", "%s Ничего не изменено.")
+	unreadWatch         = locale.T("The confirmed watch could not be read; nothing was set up.", "Подтверждённое наблюдение не удалось прочитать, ничего не создано.")
+	unreadRemoval       = locale.T("The confirmed action could not be read; nothing was deleted.", "Подтверждённое действие не удалось прочитать, ничего не удалено.")
+	unreadChange        = locale.T("The confirmed change could not be read; nothing was changed.", "Подтверждённое изменение не удалось прочитать, ничего не изменено.")
+	invalidWatch        = locale.T("That watch is no longer valid; nothing was set up.", "Это наблюдение больше недействительно, ничего не создано.")
+	invalidChange       = locale.T("That watch is no longer valid; nothing was changed.", "Это наблюдение больше недействительно, ничего не изменено.")
+	watchGone           = locale.T("That watch no longer exists.", "Этого наблюдения больше нет.")
+	watchGoneUnchanged  = locale.T("That watch no longer exists; nothing was changed.", "Этого наблюдения больше нет, ничего не изменено.")
+	watchChangedSince   = locale.T("That watch changed after this was proposed; nothing was changed. Ask again to change it.", "Наблюдение изменилось после предложения, ничего не изменено. Попроси изменить его снова.")
+	actionUnavailable   = locale.T("That action is no longer available.", "Это действие больше недоступно.")
 )
 
 const listGuidance = "Watches: watch_list shows the user's watches with their ids. A watch checks a train or bus departure, a saved route, NS disruptions at some stations, the state of a device or sensor at home, or the rain forecast at a place during a daily window, in code and without a model, and messages the user only when something changes. The user manages watches with /jobs as well, and each alert has Mute today and Pause buttons."
@@ -491,25 +531,27 @@ func (s *Service) newWatchProposal(ctx context.Context, principalID, kind string
 	if err != nil {
 		return approval.Proposal{}, "", err
 	}
-	summary := "Watch " + spec.Label() + "\n" + spec.Describe() + "\nYou get a message only when something changes, and once more when it is back to normal."
+	language := locale.From(ctx)
+	label, described := spec.LabelIn(language), spec.DescribeIn(language)
+	summary := proposeWatchDefault.FormatIn(language, label, described)
 	switch spec.Kind {
 	case KindHome:
-		summary = "Watch " + spec.Label() + "\n" + spec.Describe() + "\nYou get a message only when this changes."
+		summary = proposeWatchHome.FormatIn(language, label, described)
 	case KindAgent:
-		summary = "Watch " + spec.Label() + "\n" + spec.Describe() + "\nYou get a message only when the answer changes."
+		summary = proposeWatchAgent.FormatIn(language, label, described)
 	case KindWeather:
-		summary = "Watch " + spec.Label() + "\n" + spec.Describe() + "\nYou get a message when rain becomes expected, by the forecast."
+		summary = proposeWatchRain.FormatIn(language, label, described)
 		if slices.Contains(spec.Triggers, TriggerClear) {
-			summary = "Watch " + spec.Label() + "\n" + spec.Describe() + "\nYou get a message when rain becomes expected and when it no longer is, by the forecast."
+			summary = proposeWatchRainEnd.FormatIn(language, label, described)
 		}
 	case KindPlace:
-		summary = "Watch " + spec.Label() + "\n" + spec.Describe() + "\nYou get a message each time, by your live location."
+		summary = proposeWatchPlace.FormatIn(language, label, described)
 		if note := s.placeNote(ctx, principalID); note != "" {
-			summary += "\n" + note
+			summary += "\n" + notSharingMessage.FormatIn(language)
 		}
 	}
 	if arguments.PauseWhileTraveling != nil && *arguments.PauseWhileTraveling {
-		summary += "\nIt stays silent while you are traveling."
+		summary += "\n" + silentWhileTravel.FormatIn(language)
 	}
 	return approval.Proposal{Tool: toolPropose, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "watch", TargetKind: spec.Kind + " watch", TargetName: intentName(spec)}}, "", nil
 }
@@ -541,16 +583,17 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 	if err != nil {
 		return tools.Result{}, err
 	}
-	summary := "Change the watch " + watch.Label() + " to:\n" + spec.Label() + "\n" + spec.Describe()
+	language := locale.From(ctx)
+	summary := changeWatch.FormatIn(language, watch.LabelIn(language), spec.LabelIn(language), spec.DescribeIn(language))
 	if flagChanged {
 		if *arguments.PauseWhileTraveling {
-			summary += "\nIt will stay silent while you are traveling."
+			summary += "\n" + silentWhileTravelTo.FormatIn(language)
 		} else {
-			summary += "\nIt will no longer pause while you are traveling."
+			summary += "\n" + noLongerPauses.FormatIn(language)
 		}
 	}
 	if !watch.Enabled {
-		summary += "\nIt stays paused until you resume it in /jobs."
+		summary += "\n" + staysPaused.FormatIn(language)
 	}
 	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolUpdate, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "change", TargetKind: watch.Kind + " watch", TargetName: intentName(watch.Spec), NewName: intentName(spec)}})
 }
@@ -574,7 +617,8 @@ func (s *Service) proposeRemoval(ctx context.Context, principalID string, call t
 	if err != nil {
 		return tools.Result{}, err
 	}
-	summary := "Stop watching " + watch.Label() + " (" + watch.DescribeDays() + ", " + watch.DescribeWindow() + ")."
+	language := locale.From(ctx)
+	summary := stopWatching.FormatIn(language, watch.LabelIn(language), watch.DescribeDaysIn(language), watch.DescribeWindowIn(language))
 	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolRemove, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "remove", TargetKind: watch.Kind + " watch", TargetName: watch.Label()}})
 }
 
@@ -599,15 +643,16 @@ func (s *Service) ActionTools() []string {
 // because a one-off window can pass and the principal's count can change before the press, and
 // the approval's own ID becomes the watch ID so a second execution cannot create a second watch.
 func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (approval.Outcome, error) {
+	language := locale.From(ctx)
 	switch record.Tool {
 	case toolPropose:
 		var confirmed confirmedWatch
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
-			return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed watch could not be read; nothing was set up."}
+			return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed watch could not be read; nothing was set up.", UserText: unreadWatch.FormatIn(language)}
 		}
 		spec, err := normalize(confirmed.Spec, s.now())
 		if err != nil {
-			return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "That watch is no longer valid (" + err.Error() + "); nothing was set up."}
+			return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "That watch is no longer valid (" + err.Error() + "); nothing was set up.", UserText: invalidWatch.FormatIn(language)}
 		}
 		if spec.Kind == KindAgent {
 			existing, err := s.repository.ListWatches(ctx, record.PrincipalID)
@@ -615,7 +660,7 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 				return approval.Outcome{}, err
 			}
 			if agentWatches(existing) >= MaximumAgentWatchesPerPrincipal && !slices.ContainsFunc(existing, func(w Watch) bool { return w.ID == record.ID }) {
-				return approval.Outcome{}, &approval.ActionError{Reason: "too_many", Text: tooManyAgentText() + " Nothing was set up."}
+				return approval.Outcome{}, &approval.ActionError{Reason: "too_many", Text: tooManyAgentText() + " Nothing was set up.", UserText: nothingSetUp.FormatIn(language, tooManyAgentMessage.FormatIn(language, MaximumAgentWatchesPerPrincipal))}
 			}
 		}
 		now := s.now()
@@ -627,10 +672,10 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		})
 		if err != nil {
 			if errors.Is(err, ErrTooManyWatches) {
-				return approval.Outcome{}, &approval.ActionError{Reason: "too_many", Text: tooManyText() + " Nothing was set up."}
+				return approval.Outcome{}, &approval.ActionError{Reason: "too_many", Text: tooManyText() + " Nothing was set up.", UserText: nothingSetUp.FormatIn(language, tooManyMessage.FormatIn(language, MaximumWatchesPerPrincipal))}
 			}
 			if errors.Is(err, ErrPlaceGone) {
-				return approval.Outcome{}, &approval.ActionError{Reason: "place_gone", Text: placeGoneText(spec) + " Nothing was set up."}
+				return approval.Outcome{}, &approval.ActionError{Reason: "place_gone", Text: placeGoneText(spec) + " Nothing was set up.", UserText: nothingSetUp.FormatIn(language, placeGoneMessage.FormatIn(language, spec.Target.Name))}
 			}
 			return approval.Outcome{}, err
 		}
@@ -642,19 +687,20 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		if err != nil {
 			return approval.Outcome{}, err
 		}
-		text := "Watching. " + s.nextWindow(spec)
+		text, userText := "Watching. "+s.nextWindow(spec, locale.English), watchingNow.FormatIn(language, s.nextWindow(spec, language))
 		if spec.Kind == KindPlace {
 			if note := s.placeNote(ctx, record.PrincipalID); note != "" {
 				text += " " + note
+				userText += " " + notSharingMessage.FormatIn(language)
 			}
 		}
-		return approval.Outcome{Text: text, Undo: undo}, nil
+		return approval.Outcome{Text: text, UserText: userText, Undo: undo}, nil
 	case toolUpdate:
 		return s.executeUpdate(ctx, record)
 	case toolRemove:
 		var confirmed removeArguments
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
-			return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed action could not be read; nothing was deleted."}
+			return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed action could not be read; nothing was deleted.", UserText: unreadRemoval.FormatIn(language)}
 		}
 		// The whole watch is read before it goes, so an Undo can put it back.
 		watch, found, err := s.repository.LoadWatch(ctx, record.PrincipalID, confirmed.WatchID)
@@ -668,37 +714,38 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 			}
 		}
 		if !deleted {
-			return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That watch no longer exists."}
+			return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That watch no longer exists.", UserText: watchGone.FormatIn(language)}
 		}
 		undo, err := json.Marshal(watchUndo{WatchID: watch.ID, Removed: &watch})
 		if err != nil {
 			return approval.Outcome{}, err
 		}
-		return approval.Outcome{Text: "Deleted.", Undo: undo}, nil
+		return approval.Outcome{Text: "Deleted.", UserText: deletedWatch.FormatIn(language), Undo: undo}, nil
 	default:
-		return approval.Outcome{}, &approval.ActionError{Reason: "unavailable", Text: "That action is no longer available."}
+		return approval.Outcome{}, &approval.ActionError{Reason: "unavailable", Text: "That action is no longer available.", UserText: actionUnavailable.FormatIn(language)}
 	}
 }
 
 func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (approval.Outcome, error) {
+	language := locale.From(ctx)
 	var confirmed confirmedUpdate
 	if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
-		return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed change could not be read; nothing was changed."}
+		return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed change could not be read; nothing was changed.", UserText: unreadChange.FormatIn(language)}
 	}
 	current, found, err := s.repository.LoadWatch(ctx, record.PrincipalID, confirmed.WatchID)
 	if err != nil {
 		return approval.Outcome{}, err
 	}
 	if !found || current.Kind != confirmed.Spec.Kind {
-		return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That watch no longer exists; nothing was changed."}
+		return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That watch no longer exists; nothing was changed.", UserText: watchGoneUnchanged.FormatIn(language)}
 	}
-	stale := &approval.ActionError{Reason: "stale", Text: "That watch changed after this was proposed; nothing was changed. Ask again to change it."}
+	stale := &approval.ActionError{Reason: "stale", Text: "That watch changed after this was proposed; nothing was changed. Ask again to change it.", UserText: watchChangedSince.FormatIn(language)}
 	if !current.UpdatedAt.Equal(confirmed.UpdatedAt) {
 		return approval.Outcome{}, stale
 	}
 	spec, err := normalize(confirmed.Spec, s.now())
 	if err != nil {
-		return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "That watch is no longer valid (" + err.Error() + "); nothing was changed."}
+		return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "That watch is no longer valid (" + err.Error() + "); nothing was changed.", UserText: invalidChange.FormatIn(language)}
 	}
 	travelChanged := confirmed.TravelPause != nil && *confirmed.TravelPause != current.TravelPause
 	if sameSpec(spec, current.Spec) {
@@ -720,7 +767,7 @@ func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (ap
 			return err
 		})
 		if errors.Is(err, ErrPlaceGone) {
-			return approval.Outcome{}, &approval.ActionError{Reason: "place_gone", Text: placeGoneText(spec) + " Nothing was changed."}
+			return approval.Outcome{}, &approval.ActionError{Reason: "place_gone", Text: placeGoneText(spec) + " Nothing was changed.", UserText: nothingChanged.FormatIn(language, placeGoneMessage.FormatIn(language, spec.Target.Name))}
 		}
 		if err != nil {
 			return approval.Outcome{}, err
@@ -736,16 +783,16 @@ func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (ap
 		return approval.Outcome{}, err
 	}
 	if !current.Enabled {
-		return approval.Outcome{Text: "Changed. It stays paused until you resume it in /jobs.", Undo: undo}, nil
+		return approval.Outcome{Text: "Changed. It stays paused until you resume it in /jobs.", UserText: changedPaused.FormatIn(language), Undo: undo}, nil
 	}
-	return approval.Outcome{Text: "Changed. " + s.nextWindow(spec), Undo: undo}, nil
+	return approval.Outcome{Text: "Changed. " + s.nextWindow(spec, locale.English), UserText: changedNext.FormatIn(language, s.nextWindow(spec, language)), Undo: undo}, nil
 }
 
 // nextWindow says when the watch next checks, within the coming week. A watch that checks all day
 // says how often instead, since the end of today's window is no end to it.
-func (s *Service) nextWindow(spec Spec) string {
+func (s *Service) nextWindow(spec Spec, language locale.Language) string {
 	if allDay(spec.Kind) && spec.Start == startOfDay && spec.End == endOfDay {
-		return "Checking all day, " + spec.DescribeDays() + ", " + spec.checkEvery() + "."
+		return checkingAllDay.FormatIn(language, spec.DescribeDaysIn(language), spec.checkEveryIn(language))
 	}
 	location, err := localtime.LoadZone(spec.Zone)
 	if err != nil {
@@ -760,11 +807,11 @@ func (s *Service) nextWindow(spec Spec) string {
 			start := occurrence.Start
 			if start.Before(now) {
 				if spec.End == endOfDay {
-					return "Checking now until midnight."
+					return checkingUntilMid.In(language)
 				}
-				return "Checking now until " + occurrence.End.Format("15:04") + "."
+				return checkingUntil.FormatIn(language, occurrence.End.Format("15:04"))
 			}
-			return "First check: " + start.Format("Mon 2 Jan 15:04 MST") + "."
+			return firstCheck.FormatIn(language, locale.Date(language, start, locale.DayTimeZone))
 		}
 	}
 	return ""

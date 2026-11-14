@@ -9,7 +9,28 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 )
+
+var (
+	undoUnreadable    = locale.T("what to undo could not be read.", "не удалось прочитать, что отменять.")
+	undoImpossible    = locale.T("this action cannot be undone.", "это действие нельзя отменить.")
+	undoWatchGone     = locale.T("the watch no longer exists.", "наблюдения больше нет.")
+	undoWatchChanged  = locale.T("the watch was changed since; change it in /jobs instead.", "наблюдение с тех пор изменилось; измени его в /jobs.")
+	undoWatchInvalid  = locale.T("the watch as it was is no longer valid.", "наблюдение в прежнем виде больше недействительно.")
+	undoNotYours      = locale.T("the watch belongs to someone else.", "наблюдение принадлежит другому пользователю.")
+	undoCannotSetUp   = locale.T("the watch can no longer be set up.", "наблюдение больше нельзя создать.")
+	undoAlreadyBack   = locale.T("the watch is already back.", "наблюдение уже вернулось.")
+	undoPlaceGone     = locale.T("the saved place %s no longer exists.", "сохранённого места %s больше нет.")
+	undoStopped       = locale.T("Stopped watching %s.", "Наблюдение остановлено: %s.")
+	undoRestored      = locale.T("Restored the watch %s as it was.", "Наблюдение %s восстановлено как было.")
+	undoWatchingAgain = locale.T("Watching %s again; its earlier alerts are not kept.", "Наблюдение %s снова включено; прежние уведомления не сохраняются.")
+)
+
+// undoRefused is a refusal with the reason in English for the model and in the user's language.
+func undoRefused(ctx context.Context, reason string, user locale.Text) *approval.UndoRefusal {
+	return &approval.UndoRefusal{Reason: reason, UserReason: user.Format(ctx)}
+}
 
 // watchUndo reverses a direct watch action: UpdatedAt is when a create or an update left the
 // watch, Before the watch an update replaced, and Removed the whole watch a removal deleted.
@@ -39,7 +60,7 @@ func (s *Service) undoPayload(ctx context.Context, principalID, watchID string, 
 func (s *Service) Undo(ctx context.Context, record approval.Record, raw json.RawMessage) (approval.Outcome, error) {
 	var undo watchUndo
 	if err := json.Unmarshal(raw, &undo); err != nil || undo.WatchID == "" {
-		return approval.Outcome{}, &approval.UndoRefusal{Reason: "what to undo could not be read."}
+		return approval.Outcome{}, undoRefused(ctx, "what to undo could not be read.", undoUnreadable)
 	}
 	switch {
 	case record.Tool == toolPropose && !undo.UpdatedAt.IsZero():
@@ -49,7 +70,7 @@ func (s *Service) Undo(ctx context.Context, record approval.Record, raw json.Raw
 	case record.Tool == toolRemove && undo.Removed != nil:
 		return s.undoRemoved(ctx, record.PrincipalID, *undo.Removed)
 	default:
-		return approval.Outcome{}, &approval.UndoRefusal{Reason: "this action cannot be undone."}
+		return approval.Outcome{}, undoRefused(ctx, "this action cannot be undone.", undoImpossible)
 	}
 }
 
@@ -60,10 +81,10 @@ func (s *Service) unchanged(ctx context.Context, principalID string, undo watchU
 		return Watch{}, err
 	}
 	if !found {
-		return Watch{}, &approval.UndoRefusal{Reason: "the watch no longer exists."}
+		return Watch{}, undoRefused(ctx, "the watch no longer exists.", undoWatchGone)
 	}
 	if !watch.UpdatedAt.Equal(undo.UpdatedAt) {
-		return Watch{}, &approval.UndoRefusal{Reason: "the watch was changed since; change it in /jobs instead."}
+		return Watch{}, undoRefused(ctx, "the watch was changed since; change it in /jobs instead.", undoWatchChanged)
 	}
 	return watch, nil
 }
@@ -78,10 +99,10 @@ func (s *Service) undoCreated(ctx context.Context, principalID string, undo watc
 		return approval.Outcome{}, err
 	}
 	if !deleted {
-		return approval.Outcome{}, &approval.UndoRefusal{Reason: "the watch was changed since; change it in /jobs instead."}
+		return approval.Outcome{}, undoRefused(ctx, "the watch was changed since; change it in /jobs instead.", undoWatchChanged)
 	}
 	s.logger.InfoContext(ctx, "watch.deleted", "principal_id", principalID, "watch_id", watch.ID)
-	return approval.Outcome{Text: "Stopped watching " + watch.Label() + "."}, nil
+	return approval.Outcome{Text: "Stopped watching " + watch.Label() + ".", UserText: undoStopped.Format(ctx, watch.LabelIn(locale.From(ctx)))}, nil
 }
 
 func (s *Service) undoUpdated(ctx context.Context, principalID string, undo watchUndo) (approval.Outcome, error) {
@@ -90,11 +111,11 @@ func (s *Service) undoUpdated(ctx context.Context, principalID string, undo watc
 		return approval.Outcome{}, err
 	}
 	if watch.Kind != undo.Before.Kind {
-		return approval.Outcome{}, &approval.UndoRefusal{Reason: "the watch was changed since; change it in /jobs instead."}
+		return approval.Outcome{}, undoRefused(ctx, "the watch was changed since; change it in /jobs instead.", undoWatchChanged)
 	}
 	spec, err := normalize(undo.Before.Spec, s.now())
 	if err != nil {
-		return approval.Outcome{}, &approval.UndoRefusal{Reason: "the watch as it was is no longer valid (" + err.Error() + ")."}
+		return approval.Outcome{}, &approval.UndoRefusal{Reason: "the watch as it was is no longer valid (" + err.Error() + ").", UserReason: undoWatchInvalid.Format(ctx)}
 	}
 	if sameSpec(spec, watch.Spec) {
 		if undo.TravelChanged {
@@ -103,7 +124,7 @@ func (s *Service) undoUpdated(ctx context.Context, principalID string, undo watc
 			}
 			s.changed(ctx, principalID, watch.ID)
 		}
-		return approval.Outcome{Text: "Restored the watch " + spec.Label() + " as it was."}, nil
+		return restoredOutcome(ctx, spec), nil
 	}
 	next := watch
 	next.Spec, next.UpdatedAt = spec, s.now()
@@ -116,22 +137,26 @@ func (s *Service) undoUpdated(ctx context.Context, principalID string, undo watc
 		return err
 	})
 	if errors.Is(err, ErrPlaceGone) {
-		return approval.Outcome{}, &approval.UndoRefusal{Reason: placeGoneText(spec)}
+		return approval.Outcome{}, &approval.UndoRefusal{Reason: placeGoneText(spec), UserReason: undoPlaceGone.Format(ctx, spec.Target.Name)}
 	}
 	if err != nil {
 		return approval.Outcome{}, err
 	}
 	if !updated {
-		return approval.Outcome{}, &approval.UndoRefusal{Reason: "the watch was changed since; change it in /jobs instead."}
+		return approval.Outcome{}, undoRefused(ctx, "the watch was changed since; change it in /jobs instead.", undoWatchChanged)
 	}
 	s.logger.InfoContext(ctx, "watch.updated", "principal_id", principalID, "watch_id", watch.ID, "kind", spec.Kind)
 	s.changed(ctx, principalID, watch.ID)
-	return approval.Outcome{Text: "Restored the watch " + spec.Label() + " as it was."}, nil
+	return restoredOutcome(ctx, spec), nil
+}
+
+func restoredOutcome(ctx context.Context, spec Spec) approval.Outcome {
+	return approval.Outcome{Text: "Restored the watch " + spec.Label() + " as it was.", UserText: undoRestored.Format(ctx, spec.LabelIn(locale.From(ctx)))}
 }
 
 func (s *Service) undoRemoved(ctx context.Context, principalID string, removed Watch) (approval.Outcome, error) {
 	if removed.PrincipalID != principalID {
-		return approval.Outcome{}, &approval.UndoRefusal{Reason: "the watch belongs to someone else."}
+		return approval.Outcome{}, undoRefused(ctx, "the watch belongs to someone else.", undoNotYours)
 	}
 	now := s.now()
 	spec, err := normalize(removed.Spec, now)
@@ -139,7 +164,7 @@ func (s *Service) undoRemoved(ctx context.Context, principalID string, removed W
 		err = fmt.Errorf("its last day has passed")
 	}
 	if err != nil {
-		return approval.Outcome{}, &approval.UndoRefusal{Reason: "the watch can no longer be set up (" + err.Error() + ")."}
+		return approval.Outcome{}, &approval.UndoRefusal{Reason: "the watch can no longer be set up (" + err.Error() + ").", UserReason: undoCannotSetUp.Format(ctx)}
 	}
 	if spec.Kind == KindAgent {
 		existing, err := s.repository.ListWatches(ctx, principalID)
@@ -147,7 +172,7 @@ func (s *Service) undoRemoved(ctx context.Context, principalID string, removed W
 			return approval.Outcome{}, err
 		}
 		if agentWatches(existing) >= MaximumAgentWatchesPerPrincipal && !slices.ContainsFunc(existing, func(w Watch) bool { return w.ID == removed.ID }) {
-			return approval.Outcome{}, &approval.UndoRefusal{Reason: tooManyAgentText()}
+			return approval.Outcome{}, &approval.UndoRefusal{Reason: tooManyAgentText(), UserReason: tooManyAgentMessage.Format(ctx, MaximumAgentWatchesPerPrincipal)}
 		}
 	}
 	watch := Watch{ID: removed.ID, PrincipalID: principalID, Spec: spec, Enabled: removed.Enabled, MutedOn: removed.MutedOn, TravelPause: removed.TravelPause, CreatedAt: removed.CreatedAt, UpdatedAt: now}
@@ -157,18 +182,18 @@ func (s *Service) undoRemoved(ctx context.Context, principalID string, removed W
 		return err
 	})
 	if errors.Is(err, ErrPlaceGone) {
-		return approval.Outcome{}, &approval.UndoRefusal{Reason: placeGoneText(spec)}
+		return approval.Outcome{}, &approval.UndoRefusal{Reason: placeGoneText(spec), UserReason: undoPlaceGone.Format(ctx, spec.Target.Name)}
 	}
 	if errors.Is(err, ErrTooManyWatches) {
-		return approval.Outcome{}, &approval.UndoRefusal{Reason: tooManyText()}
+		return approval.Outcome{}, &approval.UndoRefusal{Reason: tooManyText(), UserReason: tooManyMessage.Format(ctx, MaximumWatchesPerPrincipal)}
 	}
 	if err != nil {
 		return approval.Outcome{}, err
 	}
 	if !created {
-		return approval.Outcome{}, &approval.UndoRefusal{Reason: "the watch is already back."}
+		return approval.Outcome{}, undoRefused(ctx, "the watch is already back.", undoAlreadyBack)
 	}
 	s.logger.InfoContext(ctx, "watch.created", "principal_id", principalID, "watch_id", watch.ID, "kind", spec.Kind)
 	s.changed(ctx, principalID, watch.ID)
-	return approval.Outcome{Text: "Watching " + spec.Label() + " again; its earlier alerts are not kept."}, nil
+	return approval.Outcome{Text: "Watching " + spec.Label() + " again; its earlier alerts are not kept.", UserText: undoWatchingAgain.Format(ctx, spec.LabelIn(locale.From(ctx)))}, nil
 }

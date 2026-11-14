@@ -19,6 +19,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/localtime"
 	"github.com/vladar107/home-ai-assistant/internal/weekday"
 )
@@ -142,21 +143,21 @@ var kindTriggers = map[string][]string{
 	KindPlace:       {TriggerArrive, TriggerLeave},
 }
 
-var triggerDescriptions = map[string]string{
-	TriggerCancelled:       "a cancellation",
-	TriggerPartlyCancelled: "a partial cancellation",
-	TriggerDelay:           "a delay of %d minutes or more",
-	TriggerPlatform:        "a platform change",
-	TriggerLeg:             "a leg cancelled, %d or more minutes late, or moved to another platform",
-	TriggerArrival:         "the arrival target no longer being met",
-	TriggerNew:             "a new disruption or engineering work",
-	TriggerChanged:         "a change to one already known",
-	TriggerEnter:           "the condition starting to hold",
-	TriggerClear:           "the condition ending",
-	TriggerChange:          "the value changing while it holds",
-	TriggerArrive:          "arriving",
-	TriggerLeave:           "leaving",
-}
+var (
+	triggerCancelled       = locale.T("a cancellation", "отмена")
+	triggerPartlyCancelled = locale.T("a partial cancellation", "частичная отмена")
+	triggerDelay           = locale.T("a delay of %d minutes or more", "задержка от %d мин")
+	triggerPlatform        = locale.T("a platform change", "смена платформы")
+	triggerLeg             = locale.T("a leg cancelled, %d or more minutes late, or moved to another platform", "отмена участка, опоздание от %d мин или смена платформы")
+	triggerArrival         = locale.T("the arrival target no longer being met", "срыв времени прибытия")
+	triggerNew             = locale.T("a new disruption or engineering work", "новый сбой или ремонтные работы")
+	triggerChanged         = locale.T("a change to one already known", "изменение уже известного")
+	triggerEnter           = locale.T("the condition starting to hold", "условие начало выполняться")
+	triggerClear           = locale.T("the condition ending", "условие перестало выполняться")
+	triggerChange          = locale.T("the value changing while it holds", "изменение значения, пока условие выполняется")
+	triggerArrive          = locale.T("arriving", "прибытие")
+	triggerLeave           = locale.T("leaving", "уход")
+)
 
 // Target is what a watch looks at. A departure watch is a train (From, To, optional Via) or a bus
 // (Stop, Line); a disruption watch has Stations; a route watch names a saved route; a home watch
@@ -201,19 +202,29 @@ type Condition struct {
 
 func (c Condition) numeric() bool { return c.Above != nil || c.Below != nil }
 
+var (
+	conditionOr    = locale.T(" or ", " или ")
+	conditionAbove = locale.T("above %s", "выше %s")
+	conditionBelow = locale.T("below %s", "ниже %s")
+	conditionFor   = locale.T(" for %d min", " в течение %d мин")
+)
+
 // Describe is the condition as the user reads it, such as "open for 10 min" or "above -15".
-func (c Condition) Describe() string {
+func (c Condition) Describe() string { return c.DescribeIn(locale.English) }
+
+// DescribeIn is Describe in a language; the states are the device's own values.
+func (c Condition) DescribeIn(language locale.Language) string {
 	var text string
 	switch {
 	case len(c.State) > 0:
-		text = strings.Join(c.State, " or ")
+		text = strings.Join(c.State, conditionOr.In(language))
 	case c.Above != nil:
-		text = "above " + strconv.FormatFloat(*c.Above, 'f', -1, 64)
+		text = conditionAbove.FormatIn(language, strconv.FormatFloat(*c.Above, 'f', -1, 64))
 	case c.Below != nil:
-		text = "below " + strconv.FormatFloat(*c.Below, 'f', -1, 64)
+		text = conditionBelow.FormatIn(language, strconv.FormatFloat(*c.Below, 'f', -1, 64))
 	}
 	if c.ForMinutes > 0 {
-		text += fmt.Sprintf(" for %d min", c.ForMinutes)
+		text += conditionFor.FormatIn(language, c.ForMinutes)
 	}
 	return text
 }
@@ -442,23 +453,39 @@ type Repository interface {
 	WatchAlertByMessage(ctx context.Context, principalID string, messageID int64) (AlertMessage, bool, error)
 }
 
+var (
+	labelBus         = locale.T("%s bus %s from %s", "Автобус %[2]s от остановки %[3]s, отправление %[1]s")
+	labelTrain       = locale.T("%s train %s → %s", "Поезд %[2]s → %[3]s, отправление %[1]s")
+	labelVia         = locale.T("%s via %s", "%s через %s")
+	labelDisruptions = locale.T("Disruptions at %s", "Сбои на станциях: %s")
+	labelRoute       = locale.T("Route %q, leaving %s", "Маршрут %q, выезд в %s")
+	labelRain        = locale.T("Rain at %s", "Дождь: %s")
+	labelArriving    = locale.T("Arriving at %s", "Приход в %s")
+	labelLeaving     = locale.T("Leaving %s", "Уход из %s")
+	labelBoth        = locale.T("Arriving at or leaving %s", "Приход и уход: %s")
+	yourLocation     = locale.T("your location", "твоя геопозиция")
+)
+
 // Label names a watch the way the user reads it in alerts and lists.
-func (s Spec) Label() string {
+func (s Spec) Label() string { return s.LabelIn(locale.English) }
+
+// LabelIn is Label in a language; names, stations and lines are the user's or the operator's own.
+func (s Spec) LabelIn(language locale.Language) string {
 	target := s.Target
 	switch s.Kind {
 	case KindDeparture:
 		if target.Mode == ModeBus {
-			return fmt.Sprintf("%s bus %s from %s", s.End, target.Line, target.Stop)
+			return labelBus.FormatIn(language, s.End, target.Line, target.Stop)
 		}
-		label := fmt.Sprintf("%s train %s → %s", s.End, target.From, target.To)
+		label := labelTrain.FormatIn(language, s.End, target.From, target.To)
 		if target.Via != "" {
-			label += " via " + target.Via
+			label = labelVia.FormatIn(language, label, target.Via)
 		}
 		return label
 	case KindDisruptions:
-		return "Disruptions at " + strings.Join(target.Stations, ", ")
+		return labelDisruptions.FormatIn(language, strings.Join(target.Stations, ", "))
 	case KindRoute:
-		return fmt.Sprintf("Route %q, leaving %s", target.Route, s.End)
+		return labelRoute.FormatIn(language, target.Route, s.End)
 	case KindHome:
 		name := target.Name
 		if name == "" {
@@ -467,63 +494,102 @@ func (s Spec) Label() string {
 		if s.Condition == nil {
 			return name
 		}
-		return name + ": " + s.Condition.Describe()
+		return name + ": " + s.Condition.DescribeIn(language)
 	case KindAgent:
 		return target.Name
 	case KindWeather:
-		return "Rain at " + s.placeName()
+		return labelRain.FormatIn(language, s.placeNameIn(language))
 	case KindPlace:
 		switch {
 		case len(s.Triggers) == 1 && s.Triggers[0] == TriggerArrive:
-			return "Arriving at " + target.Name
+			return labelArriving.FormatIn(language, target.Name)
 		case len(s.Triggers) == 1 && s.Triggers[0] == TriggerLeave:
-			return "Leaving " + target.Name
+			return labelLeaving.FormatIn(language, target.Name)
 		}
-		return "Arriving at or leaving " + target.Name
+		return labelBoth.FormatIn(language, target.Name)
 	default:
 		return s.Kind
 	}
 }
 
 // placeName is where a weather watch looks.
-func (s Spec) placeName() string {
+func (s Spec) placeName() string { return s.placeNameIn(locale.English) }
+
+func (s Spec) placeNameIn(language locale.Language) string {
 	if s.Target.Current {
-		return "your location"
+		return yourLocation.In(language)
 	}
 	return s.Target.Name
 }
 
+var (
+	describeUntil = locale.T(", until %s", ", до %s")
+	describeOnce  = locale.T("once, %s", "один раз, %s")
+	allDayWindow  = locale.T("all day", "весь день")
+)
+
 // DescribeDays is when a watch runs, such as "Mon–Fri" or "once, Mon 5 Oct".
-func (s Spec) DescribeDays() string {
-	days := s.describeDays()
+func (s Spec) DescribeDays() string { return s.DescribeDaysIn(locale.English) }
+
+// DescribeDaysIn is DescribeDays in a language.
+func (s Spec) DescribeDaysIn(language locale.Language) string {
+	days := s.describeDays(language)
 	if s.Check != nil && s.Check.Until != "" {
 		until, err := time.Parse(dateLayout, s.Check.Until)
 		if err != nil {
-			return days + ", until " + s.Check.Until
+			return days + describeUntil.FormatIn(language, s.Check.Until)
 		}
-		return days + ", until " + until.Format("Mon 2 Jan")
+		return days + describeUntil.FormatIn(language, locale.Date(language, until, locale.Day))
 	}
 	return days
 }
 
-func (s Spec) describeDays() string {
+func (s Spec) describeDays(language locale.Language) string {
 	if s.Date != "" {
 		day, err := time.Parse(dateLayout, s.Date)
 		if err != nil {
-			return "once, " + s.Date
+			return describeOnce.FormatIn(language, s.Date)
 		}
-		return "once, " + day.Format("Mon 2 Jan")
+		return describeOnce.FormatIn(language, locale.Date(language, day, locale.Day))
 	}
-	return weekday.Describe(s.Days)
+	return weekday.DescribeFor(locale.With(context.Background(), language), s.Days)
 }
 
 // DescribeTriggers lists what the watch alerts on.
-func (s Spec) DescribeTriggers() string {
+func (s Spec) DescribeTriggers() string { return s.DescribeTriggersIn(locale.English) }
+
+// DescribeTriggersIn is DescribeTriggers in a language.
+func (s Spec) DescribeTriggersIn(language locale.Language) string {
 	described := make([]string, 0, len(s.Triggers))
 	for _, trigger := range s.Triggers {
-		text := triggerDescriptions[trigger]
-		if strings.Contains(text, "%d") {
-			text = fmt.Sprintf(text, s.DelayMinutes)
+		var text string
+		switch trigger {
+		case TriggerCancelled:
+			text = triggerCancelled.In(language)
+		case TriggerPartlyCancelled:
+			text = triggerPartlyCancelled.In(language)
+		case TriggerDelay:
+			text = triggerDelay.FormatIn(language, s.DelayMinutes)
+		case TriggerPlatform:
+			text = triggerPlatform.In(language)
+		case TriggerLeg:
+			text = triggerLeg.FormatIn(language, s.DelayMinutes)
+		case TriggerArrival:
+			text = triggerArrival.In(language)
+		case TriggerNew:
+			text = triggerNew.In(language)
+		case TriggerChanged:
+			text = triggerChanged.In(language)
+		case TriggerEnter:
+			text = triggerEnter.In(language)
+		case TriggerClear:
+			text = triggerClear.In(language)
+		case TriggerChange:
+			text = triggerChange.In(language)
+		case TriggerArrive:
+			text = triggerArrive.In(language)
+		case TriggerLeave:
+			text = triggerLeave.In(language)
 		}
 		described = append(described, text)
 	}
@@ -531,46 +597,70 @@ func (s Spec) DescribeTriggers() string {
 }
 
 // DescribeWindow is the daily window, such as "07:00–09:30", or "all day" for a whole-day one.
-func (s Spec) DescribeWindow() string {
+func (s Spec) DescribeWindow() string { return s.DescribeWindowIn(locale.English) }
+
+// DescribeWindowIn is DescribeWindow in a language.
+func (s Spec) DescribeWindowIn(language locale.Language) string {
 	if s.Start == startOfDay && s.End == endOfDay {
-		return "all day"
+		return allDayWindow.In(language)
 	}
 	return s.Start + "–" + s.End
 }
 
+var (
+	checkedHome     = locale.T("checked every minute", "проверяется каждую минуту")
+	checkedWeather  = locale.T("checked every %d minutes against the forecast", "проверяется раз в %d мин по прогнозу")
+	checkedPlace    = locale.T("noticed on your live location's updates, only while you share it", "замечается по обновлениям твоей геопозиции, только пока ты ею делишься")
+	checkedAgent    = locale.T("checked every %d minutes, each check a model turn on your own subscription", "проверяется раз в %d мин, каждая проверка — запрос к модели по твоей подписке")
+	checkedTransit  = locale.T("checked every %d minutes and every %d in the last %d", "проверяется раз в %[1]d мин, а в последние %[3]d мин — раз в %[2]d мин")
+	describeChecks  = locale.T("Checks: %s", "Что проверяется: %s")
+	describeIf      = locale.T("Condition: %s", "Условие: %s")
+	describeRain    = locale.T("Rain: %s", "Дождь: %s")
+	describeDaysRow = locale.T("Days: %s", "Дни: %s")
+	describeWindow  = locale.T("Window: %s (%s), %s", "Время: %[1]s (%[2]s), %[3]s")
+	describeAbout   = locale.T("Tells you about: %s", "Сообщает о: %s")
+	describeMessage = locale.T("Messages in: %s", "Сообщения на языке: %s")
+)
+
 // checkEvery is how often the watch's kind is checked, as the user reads it.
-func (s Spec) checkEvery() string {
+func (s Spec) checkEvery() string { return s.checkEveryIn(locale.English) }
+
+func (s Spec) checkEveryIn(language locale.Language) string {
 	switch s.Kind {
 	case KindHome:
-		return "checked every minute"
+		return checkedHome.In(language)
 	case KindWeather:
-		return fmt.Sprintf("checked every %d minutes against the forecast", int(WeatherCheckInterval.Minutes()))
+		return checkedWeather.FormatIn(language, int(WeatherCheckInterval.Minutes()))
 	case KindPlace:
-		return "noticed on your live location's updates, only while you share it"
+		return checkedPlace.In(language)
 	case KindAgent:
 		if s.Check != nil {
-			return fmt.Sprintf("checked every %d minutes, each check a model turn on your own subscription", s.Check.IntervalMinutes)
+			return checkedAgent.FormatIn(language, s.Check.IntervalMinutes)
 		}
 	}
-	return fmt.Sprintf("checked every %d minutes and every %d in the last %d", int(CheckInterval.Minutes()), int(FinalCheckInterval.Minutes()), int(FinalStretch.Minutes()))
+	return checkedTransit.FormatIn(language, int(CheckInterval.Minutes()), int(FinalCheckInterval.Minutes()), int(FinalStretch.Minutes()))
 }
 
 // Describe is the watch's definition as the user confirms it.
-func (s Spec) Describe() string {
+func (s Spec) Describe() string { return s.DescribeIn(locale.English) }
+
+// DescribeIn is Describe in a language. The instruction, condition text and message language are
+// the user's own words.
+func (s Spec) DescribeIn(language locale.Language) string {
 	var lines []string
 	if s.Kind == KindAgent && s.Check != nil {
-		lines = append(lines, "Checks: "+s.Check.Instruction, "Condition: "+s.Check.Condition)
+		lines = append(lines, describeChecks.FormatIn(language, s.Check.Instruction), describeIf.FormatIn(language, s.Check.Condition))
 	}
 	if s.Kind == KindWeather && s.Weather != nil {
-		lines = append(lines, "Rain: "+s.Weather.Describe())
+		lines = append(lines, describeRain.FormatIn(language, s.Weather.DescribeIn(language)))
 	}
 	lines = append(lines,
-		"Days: "+s.DescribeDays(),
-		fmt.Sprintf("Window: %s (%s), %s", s.DescribeWindow(), s.Zone, s.checkEvery()),
-		"Tells you about: "+s.DescribeTriggers(),
+		describeDaysRow.FormatIn(language, s.DescribeDaysIn(language)),
+		describeWindow.FormatIn(language, s.DescribeWindowIn(language), s.Zone, s.checkEveryIn(language)),
+		describeAbout.FormatIn(language, s.DescribeTriggersIn(language)),
 	)
 	if s.Language != "" {
-		lines = append(lines, "Messages in: "+s.Language)
+		lines = append(lines, describeMessage.FormatIn(language, s.Language))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -623,10 +713,15 @@ func (s Spec) Expired(now time.Time) bool {
 	return err == nil && now.After(end)
 }
 
+var weatherThreshold = locale.T("%s mm or more in 15 minutes within the next %d minutes", "от %s мм за 15 минут в ближайшие %d мин")
+
 // Describe is how much rain within how long counts, such as "0.2 mm or more in 15 minutes within
 // the next 60 minutes".
-func (w Weather) Describe() string {
-	return fmt.Sprintf("%s mm or more in 15 minutes within the next %d minutes", strconv.FormatFloat(w.ThresholdMM, 'f', -1, 64), w.WithinMinutes)
+func (w Weather) Describe() string { return w.DescribeIn(locale.English) }
+
+// DescribeIn is Describe in a language.
+func (w Weather) DescribeIn(language locale.Language) string {
+	return weatherThreshold.FormatIn(language, strconv.FormatFloat(w.ThresholdMM, 'f', -1, 64), w.WithinMinutes)
 }
 
 // allDay reports whether a kind is watched through whole days by default rather than around a
