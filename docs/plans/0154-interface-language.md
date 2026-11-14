@@ -77,10 +77,12 @@ watch and trip rewrites use it when they have no language of their own.
   CLDR breadth is not needed for two languages. The package holds:
   - `Language` (`en`, `ru`), with English the zero value.
   - `T(en, ru string) Text`: one message in both languages, written side by side where it is
-    used. `Text.In(ctx)` returns it in the context's language; `Text.Format(ctx, args...)`
-    formats it with `fmt.Sprintf`.
+    used. `Text.In(Language)` returns a message that has no verbs in a language;
+    `Text.Format(ctx, args...)` formats it in the context's language with `fmt.Sprintf`, and
+    `Text.FormatIn(Language, args...)` does the same where there is no context.
   - `N(enOne, enOther, ruOne, ruFew, ruMany string) Count`: a message that depends on a number.
-    `Count.Format(ctx, n, args...)` picks the form and passes `n` as the first argument.
+    `Count.Format(ctx, n, args...)` and `Count.FormatIn(Language, n, args...)` pick the form and
+    pass `n` as the first argument.
     Russian uses the CLDR integer rule: one when `n%10 == 1 && n%100 != 11`, few when `n%10` is
     2 to 4 and `n%100` is not 12 to 14, many otherwise. Counts are whole numbers only.
   - `With(ctx, Language)` and `From(ctx)`, as the `thread` package carries a tab. A context
