@@ -236,7 +236,7 @@ func tripKind(trips TripReader) objectKind {
 			return tabObject{
 				ID: found.ID, Title: found.Title, SummaryMessageID: found.SummaryMessageID,
 				Open:    found.Status == trip.StatusPlanned && !found.Ended(now),
-				Summary: trip.Summary(found, now),
+				Summary: trip.SummaryIn(locale.From(ctx), found, now),
 			}, true, nil
 		},
 		setSummary: trips.SetSummaryMessage,

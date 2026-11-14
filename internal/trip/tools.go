@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/localtime"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
@@ -25,10 +26,6 @@ const (
 	actionEndNow = "end_now"
 	// actionMove moves the trip to the tab of the turn and leaves its content alone.
 	actionMove = "move"
-
-	// addTabLine and moveTabLine end a proposal whose trip is to use the tab it was made in.
-	addTabLine  = "The trip takes this tab."
-	moveTabLine = "The trip moves to this tab."
 
 	// listedTrips keeps a listing well inside the broker's result limit; one trip is read in
 	// full by its id.
@@ -289,7 +286,8 @@ func (t *Tools) executeAdd(ctx context.Context, principalID string, call tools.C
 		return tools.Result{Text: text, IsError: true}, nil
 	}
 	record := addRecord{addArguments: addFromDraft(normalized)}
-	summary := "Add a trip:\n" + describeDraft(normalized)
+	language := locale.From(ctx)
+	summary := addProposal.Format(ctx, describeDraft(language, normalized))
 	threadID := thread.From(ctx)
 	// A trip that has already ended is given no tab, so it cannot use this one.
 	ended := !normalized.EndsAt.After(t.service.Now())
@@ -304,14 +302,14 @@ func (t *Tools) executeAdd(ctx context.Context, principalID string, call tools.C
 		if check.Refusal != "" {
 			return tools.Result{Text: check.Refusal, IsError: true}, nil
 		}
-		record.UseThisTab, summary = true, summary+"\n"+addTabLine
+		record.UseThisTab, summary = true, summary+"\n"+addTabLine.Format(ctx)
 	case threadID > 0 && !ended:
 		check, err := t.service.CheckTab(ctx, principalID, "", threadID, true)
 		if err != nil {
 			t.logger.WarnContext(ctx, "trip.tab.check_failed", "principal_id", principalID, "error", err)
 		}
 		if err == nil && check.Refusal == "" {
-			record.NamedTab, summary = true, summary+"\n"+addTabLine
+			record.NamedTab, summary = true, summary+"\n"+addTabLine.Format(ctx)
 		}
 	}
 	canonical, err := json.Marshal(record)
@@ -352,13 +350,13 @@ func (t *Tools) executeUpdate(ctx context.Context, principalID string, call tool
 	case (arguments.Cancel || arguments.EndNow) && edits:
 		return tools.Result{Text: "cancel and end_now take no other change; make the edits in a separate call.", IsError: true}, nil
 	case arguments.Cancel && existing.Status == StatusSuggested:
-		record.Action, summary = actionCancel, fmt.Sprintf("Dismiss the suggested trip %q; it will not be offered again.", existing.Title)
+		record.Action, summary = actionCancel, dismissProposal.Format(ctx, existing.Title)
 	case arguments.Cancel:
-		record.Action, summary = actionCancel, fmt.Sprintf("Cancel the trip %q and remove its check-in reminders.", existing.Title)
+		record.Action, summary = actionCancel, cancelProposal.Format(ctx, existing.Title)
 	case arguments.EndNow && !existing.Active(t.service.Now()):
 		return tools.Result{Text: "That trip is not under way, so it cannot be ended now. Cancel it instead if it is not going ahead.", IsError: true}, nil
 	case arguments.EndNow:
-		record.Action, summary = actionEndNow, fmt.Sprintf("End the trip %q now.", existing.Title)
+		record.Action, summary = actionEndNow, endProposal.Format(ctx, existing.Title)
 	case !edits && !arguments.UseThisTab:
 		return tools.Result{Text: "Give a change: new fields, bookings to add, change, or remove, cancel, end_now, or use_this_tab.", IsError: true}, nil
 	case !edits:
@@ -366,7 +364,7 @@ func (t *Tools) executeUpdate(ctx context.Context, principalID string, call tool
 		if !move {
 			return result, nil
 		}
-		record.Action, summary = actionMove, fmt.Sprintf("Move the trip %q to this tab.", existing.Title)
+		record.Action, summary = actionMove, moveProposal.Format(ctx, existing.Title)
 	default:
 		if arguments.UseThisTab {
 			move, result := t.checkMove(ctx, principalID, existing)
@@ -386,9 +384,9 @@ func (t *Tools) executeUpdate(ctx context.Context, principalID string, call tool
 		}
 		add := addFromDraft(normalized)
 		record.Title, record.Destination, record.StartsAt, record.EndsAt, record.Timezone, record.Bookings = add.Title, add.Destination, add.StartsAt, add.EndsAt, add.Timezone, add.Bookings
-		summary = fmt.Sprintf("Change the trip %q to:\n%s", existing.Title, describeDraft(normalized))
+		summary = changeProposal.Format(ctx, existing.Title, describeDraft(locale.From(ctx), normalized))
 		if record.UseThisTab {
-			summary += "\n" + moveTabLine
+			summary += "\n" + moveTabLine.Format(ctx)
 		}
 	}
 	canonical, err := json.Marshal(record)
@@ -542,86 +540,194 @@ func reminderGap(trip Trip, booking Booking, now time.Time) string {
 	return ""
 }
 
-func sourceText(source string) string {
+func sourceText(source string) string { return userSource(locale.English, source) }
+
+func unsetText(reason string) string { return userUnset(locale.English, reason) }
+
+// The texts of a trip proposal and of its executed change that the user reads; the model reads the
+// English ones written beside them.
+var (
+	// addTabLine and moveTabLine end a proposal whose trip is to use the tab it was made in.
+	addTabLine  = locale.T("The trip takes this tab.", "Поездка занимает эту вкладку.")
+	moveTabLine = locale.T("The trip moves to this tab.", "Поездка переносится в эту вкладку.")
+
+	addProposal     = locale.T("Add a trip:\n%s", "Добавить поездку:\n%s")
+	dismissProposal = locale.T("Dismiss the suggested trip %q; it will not be offered again.", "Убрать предложенную поездку %q: она больше не будет предлагаться.")
+	cancelProposal  = locale.T("Cancel the trip %q and remove its check-in reminders.", "Отменить поездку %q и убрать напоминания о регистрации.")
+	endProposal     = locale.T("End the trip %q now.", "Завершить поездку %q сейчас.")
+	moveProposal    = locale.T("Move the trip %q to this tab.", "Перенести поездку %q в эту вкладку.")
+	changeProposal  = locale.T("Change the trip %q to:\n%s", "Изменить поездку %q:\n%s")
+
+	draftLine        = locale.T("%s, %s: %s to %s (%s)", "%[1]s, %[2]s: с %[3]s по %[4]s (%[5]s)")
+	bookingLine      = locale.T("- %s: %s", "- %[1]s: %[2]s")
+	bookingFlight    = locale.T(", flight %s", ", рейс %s")
+	bookingStarts    = locale.T(", starts %s", ", начало %s")
+	bookingCheckIn   = locale.T(", check-in %s (%s)", ", регистрация %s (%s)")
+	bookingKindNames = map[string]locale.Text{
+		KindFlight: locale.T("flight", "перелёт"),
+		KindHotel:  locale.T("hotel", "отель"),
+		KindTrain:  locale.T("train", "поезд"),
+		KindCar:    locale.T("car", "автомобиль"),
+		KindOther:  locale.T("other", "другое"),
+	}
+
+	checkInStatedText  = locale.T("stated in the booking", "указано в бронировании")
+	checkInLookedUp    = locale.T("looked up on the provider's site", "найдено на сайте провайдера")
+	checkInAssumedText = locale.T("assumed: 24 hours before the booking starts", "предположительно: за 24 часа до начала бронирования")
+
+	unsetPastText     = locale.T("check-in is already open", "регистрация уже открыта")
+	unsetCapText      = locale.T("the user has reached the limit of scheduled jobs", "достигнут лимит запланированных задач")
+	unsetFarText      = locale.T("check-in is more than a year away", "регистрация откроется больше чем через год")
+	unsetAfterEndText = locale.T("check-in opens after the trip ends", "регистрация откроется после конца поездки")
+	unsetInvalidText  = locale.T("the scheduler refused the time", "планировщик не принял это время")
+
+	tripSaved   = locale.T("Saved the trip %s, %s: %s to %s (%s).", "Поездка %[1]s, %[2]s сохранена: с %[3]s по %[4]s (%[5]s).")
+	tripUpdated = locale.T("Updated the trip %s, %s: %s to %s (%s).", "Поездка %[1]s, %[2]s обновлена: с %[3]s по %[4]s (%[5]s).")
+
+	remindersSet    = locale.T("Reminders set: %s.", "Напоминания: %s.")
+	remindersMissed = locale.T("No reminder for: %s.", "Без напоминания: %s.")
+	remindersNone   = locale.T("No check-in time, so no reminder: %s.", "Время регистрации неизвестно, напоминания нет: %s.")
+	reminderSetItem = locale.T("%s at %s (%s)", "%[1]s, %[2]s (%[3]s)")
+	reminderGapItem = locale.T("%s (%s)", "%[1]s (%[2]s)")
+
+	tripCancelled = locale.T("Cancelled the trip %q and removed its check-in reminders.", "Поездка %q отменена, напоминания о регистрации убраны.")
+	tripDismissed = locale.T("Dismissed the suggested trip %q.", "Предложенная поездка %q убрана.")
+	tripEnded     = locale.T("Ended the trip %q now; paused jobs resume.", "Поездка %q завершена; приостановленные задачи возобновятся.")
+	tripAlready   = locale.T("The trip %q already uses this tab.", "Поездка %q уже использует эту вкладку.")
+	tripMoved     = locale.T("Moved the trip %q to this tab: its summary is pinned here, and its reminders, notices, and news arrive here.",
+		"Поездка %q перенесена в эту вкладку: её сводка закреплена здесь, а напоминания, уведомления и новости приходят сюда.")
+	tripMovedLeft = locale.T(" The tab it had stays as an ordinary tab with its messages, which the user can delete.",
+		" Прежняя вкладка остаётся обычной вкладкой с сообщениями, её можно удалить.")
+	tripUsesTab = locale.T("It uses this tab: its summary is pinned here, and its reminders, notices, and news arrive here.",
+		"Она использует эту вкладку: сводка закреплена здесь, а напоминания, уведомления и новости приходят сюда.")
+	tripNotTab = locale.T(" It does not use this tab: %s", " Она не использует эту вкладку: %s")
+
+	nothingChanged     = locale.T("%s Nothing was changed.", "%s Ничего не изменилось.")
+	otherNotSaved      = locale.T("%s The other changes could not be saved.", "%s Остальные изменения сохранить не удалось.")
+	otherNotMade       = locale.T("%s The other changes were not made: %s", "%[1]s Остальные изменения не внесены: %[2]s")
+	changeUnreadable   = locale.T("The confirmed trip change could not be read; nothing was changed.", "Подтверждённое изменение поездки не удалось прочитать, ничего не изменилось.")
+	changeNotAvailable = locale.T("That action is no longer available.", "Это действие больше недоступно.")
+)
+
+// userTime writes a time the user reads: the compact layout in English, the Russian style otherwise.
+func userTime(language locale.Language, at time.Time) string {
+	if language == locale.Russian {
+		return locale.Date(language, at, locale.DayYearTime)
+	}
+	return at.Format(localLayout)
+}
+
+// userEnd writes a trip's end as endLabel does: an end at midnight is the last day before it.
+func userEnd(language locale.Language, start, end time.Time, location *time.Location) string {
+	local := end.In(location)
+	if local.Hour() == 0 && local.Minute() == 0 && local.Second() == 0 && end.After(start) {
+		local = local.AddDate(0, 0, -1)
+		if language == locale.Russian {
+			return locale.Date(language, local, locale.DayYear)
+		}
+		return local.Format(dateLayout)
+	}
+	return userTime(language, local)
+}
+
+func userKind(language locale.Language, kind string) string {
+	if name, ok := bookingKindNames[kind]; ok {
+		return name.In(language)
+	}
+	return kind
+}
+
+func userSource(language locale.Language, source string) string {
 	switch source {
 	case CheckInStated:
-		return "stated in the booking"
+		return checkInStatedText.In(language)
 	case CheckInLookedUp:
-		return "looked up on the provider's site"
+		return checkInLookedUp.In(language)
 	case CheckInDefault:
-		return "assumed: 24 hours before the booking starts"
+		return checkInAssumedText.In(language)
 	}
 	return source
 }
 
-func unsetText(reason string) string {
+func userUnset(language locale.Language, reason string) string {
 	switch reason {
 	case UnsetPast:
-		return "check-in is already open"
+		return unsetPastText.In(language)
 	case UnsetCap:
-		return "the user has reached the limit of scheduled jobs"
+		return unsetCapText.In(language)
 	case UnsetFar:
-		return "check-in is more than a year away"
+		return unsetFarText.In(language)
 	case UnsetAfterEnd:
-		return "check-in opens after the trip ends"
+		return unsetAfterEndText.In(language)
 	case UnsetInvalid:
-		return "the scheduler refused the time"
+		return unsetInvalidText.In(language)
 	}
 	return reason
 }
 
-// describeDraft renders a draft for a proposal and for the model: the trip and each booking in the
-// trip's zone.
-func describeDraft(draft Draft) string {
+// describeDraft renders a draft for a proposal: the trip and each booking in the trip's zone.
+func describeDraft(language locale.Language, draft Draft) string {
 	location := localtime.SavedZone(draft.Zone)
-	lines := []string{fmt.Sprintf("%s, %s: %s to %s (%s)", draft.Title, draft.Destination,
-		draft.StartsAt.In(location).Format(localLayout), endLabel(draft.StartsAt, draft.EndsAt, location, localLayout, dateLayout), location)}
+	lines := []string{draftLine.FormatIn(language, draft.Title, draft.Destination,
+		userTime(language, draft.StartsAt.In(location)), userEnd(language, draft.StartsAt, draft.EndsAt, location), location)}
 	for _, booking := range draft.Bookings {
-		line := fmt.Sprintf("- %s: %s", booking.Kind, booking.Title)
+		line := bookingLine.FormatIn(language, userKind(language, booking.Kind), booking.Title)
 		if booking.Reference != "" {
 			line += " (" + booking.Reference + ")"
 		}
 		if booking.FlightNumber != "" {
-			line += ", flight " + booking.FlightNumber
+			line += bookingFlight.FormatIn(language, booking.FlightNumber)
 		}
-		line += ", starts " + booking.StartsAt.In(location).Format(localLayout)
+		line += bookingStarts.FormatIn(language, userTime(language, booking.StartsAt.In(location)))
 		if !booking.CheckInAt.IsZero() {
-			line += fmt.Sprintf(", check-in %s (%s)", booking.CheckInAt.In(location).Format(localLayout), sourceText(booking.CheckInSource))
+			line += bookingCheckIn.FormatIn(language, userTime(language, booking.CheckInAt.In(location)), userSource(language, booking.CheckInSource))
 		}
 		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")
 }
 
-// describeSaved tells what a write stored, which reminders were set, and which bookings got none.
-func describeSaved(verb string, result Result) string {
+// describeSaved tells what a write stored, which reminders were set, and which bookings got none. In
+// English it is the line the model reads; in Russian it is the user's.
+func describeSaved(language locale.Language, updated bool, result Result) string {
 	trip := result.Trip
 	location := localtime.SavedZone(trip.Zone)
 	unset := make(map[string]string, len(result.Unset))
 	for _, item := range result.Unset {
-		unset[item.BookingID] = unsetText(item.Reason)
+		unset[item.BookingID] = userUnset(language, item.Reason)
 	}
-	parts := []string{fmt.Sprintf("%s the trip [%s] %s, %s: %s to %s (%s).", verb, trip.ID, trip.Title, trip.Destination,
-		trip.StartsAt.In(location).Format(localLayout), trip.EndLabel(localLayout, dateLayout), location)}
+	start, end := userTime(language, trip.StartsAt.In(location)), userEnd(language, trip.StartsAt, trip.EndsAt, location)
+	var head string
+	switch {
+	case language == locale.Russian && updated:
+		head = tripUpdated.FormatIn(language, trip.Title, trip.Destination, start, end, location)
+	case language == locale.Russian:
+		head = tripSaved.FormatIn(language, trip.Title, trip.Destination, start, end, location)
+	case updated:
+		head = fmt.Sprintf("Updated the trip [%s] %s, %s: %s to %s (%s).", trip.ID, trip.Title, trip.Destination, start, end, location)
+	default:
+		head = fmt.Sprintf("Saved the trip [%s] %s, %s: %s to %s (%s).", trip.ID, trip.Title, trip.Destination, start, end, location)
+	}
+	parts := []string{head}
 	var set, missed, none []string
 	for _, booking := range trip.Bookings {
 		switch {
 		case booking.CheckInAt.IsZero():
 			none = append(none, booking.Title)
 		case unset[booking.ID] != "":
-			missed = append(missed, fmt.Sprintf("%s (%s)", booking.Title, unset[booking.ID]))
+			missed = append(missed, reminderGapItem.FormatIn(language, booking.Title, unset[booking.ID]))
 		case trip.Status == StatusPlanned:
-			set = append(set, fmt.Sprintf("%s at %s (%s)", booking.Title, booking.CheckInAt.In(location).Format(localLayout), sourceText(booking.CheckInSource)))
+			set = append(set, reminderSetItem.FormatIn(language, booking.Title, userTime(language, booking.CheckInAt.In(location)), userSource(language, booking.CheckInSource)))
 		}
 	}
 	if len(set) > 0 {
-		parts = append(parts, "Reminders set: "+strings.Join(set, "; ")+".")
+		parts = append(parts, remindersSet.FormatIn(language, strings.Join(set, "; ")))
 	}
 	if len(missed) > 0 {
-		parts = append(parts, "No reminder for: "+strings.Join(missed, "; ")+".")
+		parts = append(parts, remindersMissed.FormatIn(language, strings.Join(missed, "; ")))
 	}
 	if len(none) > 0 {
-		parts = append(parts, "No check-in time, so no reminder: "+strings.Join(none, "; ")+".")
+		parts = append(parts, remindersNone.FormatIn(language, strings.Join(none, "; ")))
 	}
 	return strings.Join(parts, " ")
 }
@@ -633,10 +739,12 @@ func (t *Tools) ActionTools() []string {
 // ExecuteApproved makes the confirmed change. The content is validated again by the service, and
 // the trip can have changed since the proposal.
 func (t *Tools) ExecuteApproved(ctx context.Context, record approval.Record) (approval.Outcome, error) {
-	malformed := &approval.ActionError{Reason: "malformed", Text: "The confirmed trip change could not be read; nothing was changed."}
+	language := locale.From(ctx)
+	english := locale.With(ctx, locale.English)
+	malformed := &approval.ActionError{Reason: "malformed", Text: changeUnreadable.In(locale.English), UserText: changeUnreadable.Format(ctx)}
 	var result Result
 	var err error
-	var text string
+	var text, userText string
 	switch record.Tool {
 	case toolAdd:
 		var confirmed addRecord
@@ -655,19 +763,21 @@ func (t *Tools) ExecuteApproved(ctx context.Context, record approval.Record) (ap
 				return approval.Outcome{}, err
 			}
 			if check.Refusal != "" {
-				return approval.Outcome{}, &approval.ActionError{Reason: "rejected", Text: check.Refusal + " Nothing was changed."}
+				return approval.Outcome{}, &approval.ActionError{Reason: "rejected", Text: nothingChanged.Format(english, check.Refusal), UserText: nothingChanged.Format(ctx, check.Refusal)}
 			}
 			claim = TabClaim{ThreadID: record.ThreadID}
 		case confirmed.NamedTab:
 			claim = TabClaim{ThreadID: record.ThreadID, Named: true}
 		}
 		if result, err = t.service.AddInTab(ctx, record.PrincipalID, draft, claim); err == nil && result.Rejection == "" {
-			text = describeSaved("Saved", result)
+			text, userText = describeSaved(locale.English, false, result), describeSaved(language, false, result)
 			switch move := result.Move; {
 			case move != nil && move.Refusal == "":
-				text += " " + tabUsedText
+				text += " " + tripUsesTab.In(locale.English)
+				userText += " " + tripUsesTab.In(language)
 			case move != nil:
-				text += " It does not use this tab: " + move.Refusal
+				text += tripNotTab.FormatIn(locale.English, move.Refusal)
+				userText += tripNotTab.FormatIn(language, move.Refusal)
 			}
 		}
 	case toolUpdate:
@@ -685,18 +795,19 @@ func (t *Tools) ExecuteApproved(ctx context.Context, record approval.Record) (ap
 		switch confirmed.Action {
 		case actionCancel:
 			if result, err = t.service.Cancel(ctx, record.PrincipalID, confirmed.ID, expected); err == nil && result.Rejection == "" {
-				text = fmt.Sprintf("Cancelled the trip %q and removed its check-in reminders.", result.Trip.Title)
+				cancelled := tripCancelled
 				if result.Trip.Status == StatusDismissed {
-					text = fmt.Sprintf("Dismissed the suggested trip %q.", result.Trip.Title)
+					cancelled = tripDismissed
 				}
+				text, userText = cancelled.Format(english, result.Trip.Title), cancelled.Format(ctx, result.Trip.Title)
 			}
 		case actionEndNow:
 			if result, err = t.service.EndNow(ctx, record.PrincipalID, confirmed.ID, expected); err == nil && result.Rejection == "" {
-				text = fmt.Sprintf("Ended the trip %q now; paused jobs resume.", result.Trip.Title)
+				text, userText = tripEnded.Format(english, result.Trip.Title), tripEnded.Format(ctx, result.Trip.Title)
 			}
 		case actionMove:
 			if result, err = t.service.UseTab(ctx, record.PrincipalID, confirmed.ID, record.ThreadID); err == nil && result.Rejection == "" {
-				text = movedText(result)
+				text, userText = movedText(locale.English, result), movedText(language, result)
 			}
 		case "":
 			draft, reason := draftFromAdd(addArguments{Title: confirmed.Title, Destination: confirmed.Destination, StartsAt: confirmed.StartsAt,
@@ -706,55 +817,56 @@ func (t *Tools) ExecuteApproved(ctx context.Context, record approval.Record) (ap
 			}
 			// The trip moves first, so the update's summary goes to the taken tab and no tab is made
 			// for a trip whose tab is gone only to be left behind.
-			moved := ""
+			moved, userMoved := "", ""
 			if confirmed.UseThisTab {
 				if result, err = t.service.UseTab(ctx, record.PrincipalID, confirmed.ID, record.ThreadID); err != nil {
 					return approval.Outcome{}, err
 				}
 				if result.Rejection != "" {
-					return approval.Outcome{}, &approval.ActionError{Reason: "rejected", Text: result.Rejection + " Nothing was changed."}
+					return approval.Outcome{}, &approval.ActionError{Reason: "rejected", Text: nothingChanged.Format(english, result.Rejection), UserText: nothingChanged.Format(ctx, result.Rejection)}
 				}
-				moved = movedText(result)
+				moved, userMoved = movedText(locale.English, result), movedText(language, result)
 			}
 			result, err = t.service.Update(ctx, record.PrincipalID, confirmed.ID, expected, draft)
 			switch {
 			case moved != "" && err != nil:
 				t.logger.WarnContext(ctx, "trip.update.failed", "principal_id", record.PrincipalID, "trip_id", confirmed.ID, "error", err)
-				return approval.Outcome{}, &approval.ActionError{Reason: "rejected", Text: moved + " The other changes could not be saved."}
+				return approval.Outcome{}, &approval.ActionError{Reason: "rejected", Text: otherNotSaved.Format(english, moved), UserText: otherNotSaved.Format(ctx, userMoved)}
 			case moved != "" && result.Rejection != "":
-				return approval.Outcome{}, &approval.ActionError{Reason: "rejected", Text: moved + " The other changes were not made: " + result.Rejection}
+				return approval.Outcome{}, &approval.ActionError{Reason: "rejected", Text: otherNotMade.Format(english, moved, result.Rejection), UserText: otherNotMade.Format(ctx, userMoved, result.Rejection)}
 			case err == nil && result.Rejection == "":
-				text = describeSaved("Updated", result)
+				text, userText = describeSaved(locale.English, true, result), describeSaved(language, true, result)
 				if moved != "" {
 					text += " " + moved
+					userText += " " + userMoved
 				}
 			}
 		default:
 			return approval.Outcome{}, malformed
 		}
 	default:
-		return approval.Outcome{}, &approval.ActionError{Reason: "unavailable", Text: "That action is no longer available."}
+		return approval.Outcome{}, &approval.ActionError{Reason: "unavailable", Text: changeNotAvailable.In(locale.English), UserText: changeNotAvailable.Format(ctx)}
 	}
 	switch {
 	case err != nil:
 		return approval.Outcome{}, err
 	case result.Rejection != "":
-		return approval.Outcome{}, &approval.ActionError{Reason: "rejected", Text: result.Rejection + " Nothing was changed."}
+		return approval.Outcome{}, &approval.ActionError{Reason: "rejected", Text: nothingChanged.Format(english, result.Rejection), UserText: nothingChanged.Format(ctx, result.Rejection)}
 	}
-	return approval.Outcome{Text: text}, nil
+	if language != locale.Russian {
+		userText = ""
+	}
+	return approval.Outcome{Text: text, UserText: userText}, nil
 }
 
-// tabUsedText tells the model that a trip uses the tab of the turn.
-const tabUsedText = "It uses this tab: its summary is pinned here, and its reminders, notices, and news arrive here."
-
 // movedText tells what moving a trip to the turn's tab did.
-func movedText(result Result) string {
+func movedText(language locale.Language, result Result) string {
 	if result.Move != nil && result.Move.Already {
-		return fmt.Sprintf("The trip %q already uses this tab.", result.Trip.Title)
+		return tripAlready.FormatIn(language, result.Trip.Title)
 	}
-	text := fmt.Sprintf("Moved the trip %q to this tab: its summary is pinned here, and its reminders, notices, and news arrive here.", result.Trip.Title)
+	text := tripMoved.FormatIn(language, result.Trip.Title)
 	if result.Move != nil && result.Move.Left {
-		text += " The tab it had stays as an ordinary tab with its messages, which the user can delete."
+		text += tripMovedLeft.In(language)
 	}
 	return text
 }
