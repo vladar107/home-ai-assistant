@@ -14,6 +14,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/conversation/history"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
@@ -41,16 +42,7 @@ const (
 	// placeholderPrefix opens the ids a review gives what its changes add, which no change may name.
 	placeholderPrefix = "review-"
 
-	reviewLabel = "From your weekly review"
-	// reviewWarning heads a review card whose reason or backlog item the screener flagged: the
-	// replies the review read can quote outside content.
-	reviewWarning = "⚠️ This reads like instructions from outside content, such as a web page or mail one of your replies quoted. Confirm only if it is what you want."
-	// reviewExposedWarning heads every change to memory a review proposes after reading a reply from
-	// a conversation that read third-party content. The changes are instructions by design, so they
-	// are not screened, which would flag nearly all of them.
-	reviewExposedWarning = "⚠️ I wrote this after reading replies from a conversation that read outside content, such as a web page or mail. Check that it is what you want before confirming."
-
-	// ReviewNothingText answers a review the user ran that found nothing worth proposing.
+	// ReviewNothingText answers a review the user ran that found nothing worth proposing, in English.
 	ReviewNothingText = "Nothing from the past week is worth proposing."
 
 	reviewSent    = "sent"
@@ -64,6 +56,26 @@ const (
 	actionRemoveInstruction  = "remove_instruction"
 	actionSaveProcedure      = "save_procedure"
 	actionRemoveProcedure    = "remove_procedure"
+)
+
+var (
+	reviewHeading = locale.T("Weekly review", "Еженедельный обзор")
+	reviewLabel   = locale.T("From your weekly review", "Из твоего еженедельного обзора")
+	// reviewWarning heads a review card whose reason or backlog item the screener flagged: the
+	// replies the review read can quote outside content.
+	reviewWarning = locale.T("⚠️ This reads like instructions from outside content, such as a web page or mail one of your replies quoted. Confirm only if it is what you want.", "⚠️ Это похоже на указания из внешнего контента, например из веб-страницы или письма, которые процитировал один из ответов. Подтверждай, только если это то, чего ты хочешь.")
+	// reviewExposedWarning heads every change to memory a review proposes after reading a reply from
+	// a conversation that read third-party content. The changes are instructions by design, so they
+	// are not screened, which would flag nearly all of them.
+	reviewExposedWarning = locale.T("⚠️ I wrote this after reading replies from a conversation that read outside content, such as a web page or mail. Check that it is what you want before confirming.", "⚠️ Это составлено по ответам из разговора, где был прочитан внешний контент, например веб-страница или письмо. Проверь, что это то, чего ты хочешь, прежде чем подтверждать.")
+
+	reviewNothingLine = locale.T("Nothing from the past week is worth proposing.", "Ничего из прошедшей недели не стоит предлагать.")
+	reviewSentLine    = locale.N("Your weekly review is above: %d proposal to confirm or reject.", "Your weekly review is above: %d proposals to confirm or reject.", "Твой еженедельный обзор выше: %d предложение, которое можно подтвердить или отклонить.", "Твой еженедельный обзор выше: %d предложения, которые можно подтвердить или отклонить.", "Твой еженедельный обзор выше: %d предложений, которые можно подтвердить или отклонить.")
+
+	addInstructionSummary     = locale.T("Remember this instruction: %q\nIt will apply to every later conversation, scheduled run, and background task until you delete it in /memory.", "Запомнить эту инструкцию: %[1]q\nОна будет действовать во всех следующих разговорах, запусках по расписанию и фоновых задачах, пока ты не удалишь её в /memory.")
+	replaceInstructionSummary = locale.T("Change the remembered instruction\nfrom: %q\nto: %q", "Изменить запомненную инструкцию\nбыло: %[1]q\nстанет: %[2]q")
+	mergeInstructionsSummary  = locale.T("Merge these instructions into one:\n%s\ninto: %q", "Объединить эти инструкции в одну:\n%[1]s\nбудет: %[2]q")
+	removeInstructionSummary  = locale.T("Forget the remembered instruction: %q", "Забыть запомненную инструкцию: %[1]q")
 )
 
 // lessonMechanisms are the mechanisms lessons come from, in the order the review lists them.
@@ -198,6 +210,7 @@ type lessonCounts struct{ confirmed, rejected, expired int }
 
 func (r review) Run(ctx context.Context, occurrence schedule.Occurrence) (schedule.Result, error) {
 	s, principalID := r.service, occurrence.PrincipalID
+	userCtx := s.inUserLanguage(ctx, principalID)
 	enabled, err := s.repository.MemoryEnabled(ctx, principalID)
 	if err != nil {
 		return schedule.Result{}, err
@@ -212,7 +225,7 @@ func (r review) Run(ctx context.Context, occurrence schedule.Occurrence) (schedu
 	}
 	if !inputs.worthReviewing() {
 		s.recordReview(ctx, principalID, reviewSkipped, 0)
-		return r.nothing(occurrence), nil
+		return r.nothing(userCtx, occurrence), nil
 	}
 	message := prompt.WeeklyReview(occurrence.ScheduledFor, occurrence.Location, inputs.render())
 	text, errorKind, err := r.config.Checker.RunReview(ctx, principalID, message)
@@ -228,13 +241,13 @@ func (r review) Run(ctx context.Context, occurrence schedule.Occurrence) (schedu
 		// A reply that is not the JSON asked for proposes nothing; it is counted and logged, not sent.
 		s.logger.WarnContext(ctx, "memory.review.unreadable", "principal_id", principalID, "job_id", occurrence.JobID)
 		s.recordReview(ctx, principalID, reviewFailed, 0)
-		return r.nothing(occurrence), nil
+		return r.nothing(userCtx, occurrence), nil
 	}
-	proposals, kinds, dropped := r.proposals(ctx, principalID, reply, inputs)
+	proposals, kinds, dropped := r.proposals(userCtx, principalID, reply, inputs)
 	if len(proposals) == 0 {
 		s.logger.InfoContext(ctx, "memory.review.done", "principal_id", principalID, "job_id", occurrence.JobID, "sent", 0, "dropped", dropped)
 		s.recordReview(ctx, principalID, reviewNothing, 0)
-		return r.nothing(occurrence), nil
+		return r.nothing(userCtx, occurrence), nil
 	}
 	chatID, found, err := r.config.Chats.ResolveActiveChat(ctx, principalID)
 	if err != nil {
@@ -246,7 +259,7 @@ func (r review) Run(ctx context.Context, occurrence schedule.Occurrence) (schedu
 	}
 	// The scheduler resolved the tab the run's report goes to, which is where the cards belong.
 	threadID, _ := thread.Delivery(ctx)
-	records, err := r.config.Offers.Offer(ctx, principalID, chatID, threadID, ReviewHeading, ReviewLifetime, proposals)
+	records, err := r.config.Offers.Offer(userCtx, principalID, chatID, threadID, reviewHeading.Format(userCtx), ReviewLifetime, proposals)
 	if records == nil {
 		s.logger.WarnContext(ctx, "memory.review.offer_failed", "principal_id", principalID, "job_id", occurrence.JobID, "error", err)
 		s.recordReview(ctx, principalID, reviewFailed, 0)
@@ -268,23 +281,30 @@ func (r review) Run(ctx context.Context, occurrence schedule.Occurrence) (schedu
 	// A review the user ran says what it sent, where the scheduler would otherwise add that there is
 	// nothing to report.
 	if occurrence.Manual {
-		return schedule.Result{Text: sentText(len(proposals))}, nil
+		return schedule.Result{Text: reviewSentLine.Format(userCtx, len(proposals))}, nil
 	}
 	return schedule.Result{Quiet: true}, nil
 }
 
-func (review) nothing(occurrence schedule.Occurrence) schedule.Result {
+func (review) nothing(ctx context.Context, occurrence schedule.Occurrence) schedule.Result {
 	if occurrence.Manual {
-		return schedule.Result{Text: ReviewNothingText}
+		return schedule.Result{Text: reviewNothingLine.Format(ctx)}
 	}
 	return schedule.Result{Quiet: true}
 }
 
-func sentText(count int) string {
-	if count == 1 {
-		return "Your weekly review is above: 1 proposal to confirm or reject."
+// inUserLanguage carries the principal's chosen language, which an unattended run does not start
+// with, so the cards read in it.
+func (s *Service) inUserLanguage(ctx context.Context, principalID string) context.Context {
+	preferences, ok := s.repository.(locale.Preferences)
+	if !ok {
+		return ctx
 	}
-	return fmt.Sprintf("Your weekly review is above: %d proposals to confirm or reject.", count)
+	withLanguage, err := locale.ForPrincipal(ctx, preferences, principalID)
+	if err != nil {
+		s.logger.WarnContext(ctx, "memory.review.language_unread", "principal_id", principalID, "error", err)
+	}
+	return withLanguage
 }
 
 // gather reads the week's signals. A reply its session file does not show is left out rather than
@@ -562,7 +582,7 @@ func (r review) proposals(ctx context.Context, principalID string, reply reviewR
 			dropped++
 			continue
 		}
-		proposal, kind, reason := memory.accept(change)
+		proposal, kind, reason := memory.accept(ctx, change)
 		if reason != "" {
 			action := change.Action
 			if !slices.Contains(reviewActions, action) {
@@ -574,7 +594,7 @@ func (r review) proposals(ctx context.Context, principalID string, reply reviewR
 		}
 		proposal = r.label(ctx, principalID, proposal, change.Reason, "")
 		if inputs.exposed() {
-			proposal.Summary = reviewExposedWarning + "\n" + proposal.Summary
+			proposal.Summary = reviewExposedWarning.Format(ctx) + "\n" + proposal.Summary
 		}
 		if !approval.SummaryFits(proposal.Summary) {
 			r.service.logger.InfoContext(ctx, "memory.review.dropped", "principal_id", principalID, "action", change.Action, "reason", "too_long")
@@ -614,7 +634,7 @@ func (r review) proposals(ctx context.Context, principalID string, reply reviewR
 func (r review) label(ctx context.Context, principalID string, proposal approval.Proposal, reason, screened string) approval.Proposal {
 	reason = clip.Runes(normalize(reason), reviewReasonRunes)
 	proposal.Title = approval.TitleOf(proposal.Summary)
-	label := reviewLabel + ":"
+	label := reviewLabel.Format(ctx) + ":"
 	if reason != "" {
 		label += " " + reason
 		screened = strings.TrimSpace(screened + "\n" + reason)
@@ -625,7 +645,7 @@ func (r review) label(ctx context.Context, principalID string, proposal approval
 		flagged, err := r.service.screener.Screen(screenCtx, principalID, proposal.Tool, screened)
 		cancel()
 		if err == nil && flagged {
-			proposal.Summary = reviewWarning + "\n" + proposal.Summary
+			proposal.Summary = reviewWarning.Format(ctx) + "\n" + proposal.Summary
 		}
 	}
 	return proposal
@@ -633,7 +653,7 @@ func (r review) label(ctx context.Context, principalID string, proposal approval
 
 // accept judges one change and, when it is valid, applies it to the memory and returns its proposal
 // and its memory kind; otherwise it says why the change is dropped.
-func (m *reviewMemory) accept(change reviewChange) (approval.Proposal, string, string) {
+func (m *reviewMemory) accept(ctx context.Context, change reviewChange) (approval.Proposal, string, string) {
 	switch change.Action {
 	case actionAddInstruction:
 		text := normalize(change.Text)
@@ -645,7 +665,7 @@ func (m *reviewMemory) accept(change reviewChange) (approval.Proposal, string, s
 		arguments, err := json.Marshal(proposedAdd{addArguments: addArguments{Kind: KindInstruction, Text: text}, Review: true})
 		return approval.Proposal{
 			Tool: toolAdd, Arguments: arguments,
-			Summary: fmt.Sprintf("Remember this instruction: %q\nIt will apply to every later conversation, scheduled run, and background task until you delete it in /memory.", text),
+			Summary: addInstructionSummary.Format(ctx, text),
 		}, KindInstruction, errorText(err)
 	case actionReplaceInstruction:
 		text := normalize(change.Text)
@@ -660,7 +680,7 @@ func (m *reviewMemory) accept(change reviewChange) (approval.Proposal, string, s
 		arguments, err := json.Marshal(proposedReplace{replaceArguments: replaceArguments{ID: entry.ID, Text: text}, Review: true, Previous: entry.Text})
 		return approval.Proposal{
 			Tool: toolReplace, Arguments: arguments,
-			Summary: fmt.Sprintf("Change the remembered instruction\nfrom: %q\nto: %q", entry.Text, text),
+			Summary: replaceInstructionSummary.Format(ctx, entry.Text, text),
 		}, KindInstruction, errorText(err)
 	case actionMergeInstructions:
 		text := normalize(change.Text)
@@ -694,7 +714,7 @@ func (m *reviewMemory) accept(change reviewChange) (approval.Proposal, string, s
 		arguments, err := json.Marshal(proposedMerge{IDs: ids, Texts: texts, Text: text})
 		return approval.Proposal{
 			Tool: toolMerge, Arguments: arguments,
-			Summary: fmt.Sprintf("Merge these instructions into one:\n%s\ninto: %q", strings.Join(lines, "\n"), text),
+			Summary: mergeInstructionsSummary.Format(ctx, strings.Join(lines, "\n"), text),
 		}, KindInstruction, errorText(err)
 	case actionRemoveInstruction:
 		entry, reason := m.instruction(change.ID)
@@ -705,7 +725,7 @@ func (m *reviewMemory) accept(change reviewChange) (approval.Proposal, string, s
 		arguments, err := json.Marshal(proposedRemove{ID: entry.ID, Text: entry.Text, Review: true})
 		return approval.Proposal{
 			Tool: toolRemove, Arguments: arguments,
-			Summary: fmt.Sprintf("Forget the remembered instruction: %q", entry.Text),
+			Summary: removeInstructionSummary.Format(ctx, entry.Text),
 		}, KindInstruction, errorText(err)
 	case actionSaveProcedure:
 		saved := proposedProcedure{ID: strings.TrimSpace(change.ID), Title: normalize(change.Title), Steps: normalizeSteps(change.Steps), Review: true}
@@ -723,9 +743,9 @@ func (m *reviewMemory) accept(change reviewChange) (approval.Proposal, string, s
 			return approval.Proposal{}, "", rejected.text
 		}
 		saved.Updated = replaced.UpdatedAt
-		summary := "Keep this procedure: " + saved.Title
+		summary := keepProcedure.Format(ctx, saved.Title)
 		if saved.ID != "" {
-			summary = fmt.Sprintf("Replace the procedure %q with this one: %s", replaced.Title, saved.Title)
+			summary = replaceProcedure.Format(ctx, replaced.Title, saved.Title)
 			m.touched[saved.ID] = true
 			for index := range m.procedures {
 				if m.procedures[index].ID == saved.ID {
@@ -739,7 +759,7 @@ func (m *reviewMemory) accept(change reviewChange) (approval.Proposal, string, s
 		arguments, err := json.Marshal(saved)
 		return approval.Proposal{
 			Tool: toolProcedureSave, Arguments: arguments,
-			Summary: summary + "\n" + saved.Steps + "\nI will read it before similar requests until you delete it in /memory.",
+			Summary: summary + "\n" + saved.Steps + "\n" + procedureWillRead.Format(ctx),
 		}, KindProcedure, errorText(err)
 	case actionRemoveProcedure:
 		id := strings.TrimSpace(change.ID)
@@ -756,7 +776,7 @@ func (m *reviewMemory) accept(change reviewChange) (approval.Proposal, string, s
 		arguments, err := json.Marshal(proposedProcedureRemoval{ID: procedure.ID, Title: procedure.Title, Updated: procedure.UpdatedAt})
 		return approval.Proposal{
 			Tool: toolProcedureRemove, Arguments: arguments,
-			Summary: fmt.Sprintf("Forget the procedure %q.", procedure.Title),
+			Summary: forgetProcedure.Format(ctx, procedure.Title),
 		}, KindProcedure, errorText(err)
 	default:
 		return approval.Proposal{}, "", "unknown action"

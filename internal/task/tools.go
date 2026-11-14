@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
@@ -32,6 +33,15 @@ const (
 		"proposes the task: the user sees it with Confirm and Reject buttons, so never say it started."
 	tooManyText    = "The user already has a background task running and three waiting. Tell them to wait for one to finish or cancel one in /tasks."
 	resultGuidance = "When a background task's report comes up, task_result returns its full text."
+)
+
+var (
+	startProposal      = locale.T("Start the background task %q with this brief:\n%s\nI read outside content in this conversation, so I need your confirmation.", "Запустить фоновую задачу %[1]q с таким заданием:\n%[2]s\nВ этом разговоре был прочитан внешний контент, поэтому нужно твоё подтверждение.")
+	startedOutcome     = locale.T("Started the background task %q. The report will arrive as a reply to your message within %s.", "Фоновая задача %[1]q запущена. Отчёт придёт ответом на твоё сообщение в течение %[2]s.")
+	startUnavailable   = locale.T("That action is no longer available.", "Это действие больше недоступно.")
+	startMalformed     = locale.T("The confirmed task could not be read; nothing was started.", "Не удалось прочитать подтверждённую задачу, ничего не запущено.")
+	startTooMany       = locale.T("You already have a background task running and three waiting, so the task was not started. Wait for one to finish or cancel one in /tasks.", "У тебя уже выполняется одна фоновая задача и ещё три ждут, поэтому эта не запущена. Дождись завершения одной или отмени одну в /tasks.")
+	startInvalidOutput = locale.T("The title or the brief is not valid. Nothing was started.", "Название или задание не подходят, ничего не запущено.")
 )
 
 // Proposer is the core approval service as the task service sees it.
@@ -140,7 +150,7 @@ func (s *Service) proposeStart(ctx context.Context, principalID, requestID, titl
 	if err != nil {
 		return tools.Result{}, err
 	}
-	summary := fmt.Sprintf("Start the background task %q with this brief:\n%s\nI read outside content in this conversation, so I need your confirmation.", title, brief)
+	summary := startProposal.Format(ctx, title, brief)
 	if _, err := s.proposer.Propose(ctx, principalID, approval.Proposal{Tool: toolStart, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "start", TargetKind: "background task", TargetName: title}}); err != nil {
 		if approval.Refused(err) {
 			return tools.Result{Text: err.Error(), IsError: true}, nil
@@ -159,22 +169,25 @@ func (s *Service) ActionTools() []string {
 // origin is resolved under the record's principal, so a record cannot reach another user's chat.
 func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (approval.Outcome, error) {
 	if record.Tool != toolStart {
-		return approval.Outcome{}, &approval.ActionError{Reason: "unavailable", Text: "That action is no longer available."}
+		return approval.Outcome{}, &approval.ActionError{Reason: "unavailable", Text: startUnavailable.In(locale.English), UserText: startUnavailable.Format(ctx)}
 	}
 	var confirmed confirmedTask
 	if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
-		return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed task could not be read; nothing was started."}
+		return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: startMalformed.In(locale.English), UserText: startMalformed.Format(ctx)}
 	}
 	task, err := s.Create(ctx, record.PrincipalID, confirmed.RequestID, confirmed.Title, confirmed.Brief)
 	switch {
 	case errors.Is(err, ErrTooManyTasks):
-		return approval.Outcome{}, &approval.ActionError{Reason: "too_many", Text: "You already have a background task running and three waiting, so the task was not started. Wait for one to finish or cancel one in /tasks."}
+		return approval.Outcome{}, &approval.ActionError{Reason: "too_many", Text: startTooMany.In(locale.English), UserText: startTooMany.Format(ctx)}
 	case isInput(err):
-		return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: err.Error() + " Nothing was started."}
+		return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: err.Error() + " Nothing was started.", UserText: startInvalidOutput.Format(ctx)}
 	case err != nil:
 		return approval.Outcome{}, err
 	}
-	return approval.Outcome{Text: fmt.Sprintf("Started the background task %q. The report will arrive as a reply to your message within %s.", task.Title, Duration(s.config.Timeout))}, nil
+	return approval.Outcome{
+		Text:     startedOutcome.FormatIn(locale.English, task.Title, Duration(s.config.Timeout)),
+		UserText: startedOutcome.Format(ctx, task.Title, DurationFor(ctx, s.config.Timeout)),
+	}, nil
 }
 
 func (s *Service) executeResult(ctx context.Context, principalID string, arguments json.RawMessage) (tools.Result, error) {

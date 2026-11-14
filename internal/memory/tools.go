@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
@@ -31,13 +32,62 @@ const (
 		"When the conversation contradicts an entry, change it with memory_replace, and when the user asks you to forget something use memory_remove, by id; removing follows the same rules as writing, and the tool result says whether it was done or proposed. " +
 		"Each entry holds at most 300 characters, instructions 1500 and facts 2000 in total; when a write is refused for size, merge or remove entries first."
 
-	screenedWarning = "⚠️ This reads like instructions aimed at an AI assistant rather than a fact about you. Confirm only if you asked me to remember it."
-	screenTimeout   = 3 * time.Second
+	screenTimeout = 3 * time.Second
+)
 
+var (
+	screenedWarning = locale.T("⚠️ This reads like instructions aimed at an AI assistant rather than a fact about you. Confirm only if you asked me to remember it.", "⚠️ Это похоже на указания для ИИ-ассистента, а не на факт о тебе. Подтверждай, только если просьба запомнить это исходила от тебя.")
 	// exposedProcedureWarning heads every procedure proposed after outside content; procedures are
 	// instructions by design, so screening them would flag nearly all.
-	exposedProcedureWarning = "⚠️ I wrote these steps after this conversation read outside content. Check that they describe how you want this done before confirming."
+	exposedProcedureWarning = locale.T("⚠️ I wrote these steps after this conversation read outside content. Check that they describe how you want this done before confirming.", "⚠️ Эти шаги составлены после того, как в разговоре был прочитан внешний контент. Проверь, что они описывают, как ты хочешь это делать, прежде чем подтверждать.")
+
+	rememberInstruction = locale.T("Remember this instruction: %q", "Запомнить эту инструкцию: %[1]q")
+	rememberFact        = locale.T("Remember this fact: %q", "Запомнить этот факт: %[1]q")
+	instructionApplies  = locale.T("It will apply to every later conversation, scheduled run, and background task until you delete it in /memory.", "Она будет действовать во всех следующих разговорах, запусках по расписанию и фоновых задачах, пока ты не удалишь её в /memory.")
+	confirmBeforeKeep   = locale.T("I read outside content in this conversation, so I need your confirmation before keeping it.", "В этом разговоре был прочитан внешний контент, поэтому перед сохранением нужно твоё подтверждение.")
+	changeInstruction   = locale.T("Change the remembered instruction\nfrom: %q\nto: %q", "Изменить запомненную инструкцию\nбыло: %[1]q\nстанет: %[2]q")
+	changeFact          = locale.T("Change the remembered fact\nfrom: %q\nto: %q", "Изменить запомненный факт\nбыло: %[1]q\nстанет: %[2]q")
+	forgetInstruction   = locale.T("Forget the remembered instruction: %q", "Забыть запомненную инструкцию: %[1]q")
+	forgetFact          = locale.T("Forget the remembered fact: %q", "Забыть запомненный факт: %[1]q")
+	lessonLabelPlain    = locale.T("Learned from your 👎:", "Вывод из твоего 👎:")
+	lessonLabelDated    = locale.T("Learned from your 👎 on %s:", "Вывод из твоего 👎 от %[1]s:")
+
+	rememberedOutcome  = locale.T("Remembered.", "Сохранено.")
+	updatedOutcome     = locale.T("Updated.", "Обновлено.")
+	forgotOutcome      = locale.T("Forgot.", "Забыто.")
+	forgotEntryOutcome = locale.T("Forgot: %s", "Забыто: %[1]s")
+	restoredOutcome    = locale.T("Restored: %s", "Восстановлено: %[1]s")
+
+	memoryOff           = locale.T("Memory is turned off in /settings, so nothing was remembered.", "Память выключена в /settings, ничего не сохранено.")
+	entryUnreadRemember = locale.T("The confirmed entry could not be read; nothing was remembered.", "Не удалось прочитать подтверждённую запись, ничего не сохранено.")
+	entryUnreadChange   = locale.T("The confirmed entry could not be read; nothing was changed.", "Не удалось прочитать подтверждённую запись, ничего не изменено.")
+	entryUnreadForget   = locale.T("The confirmed entry could not be read; nothing was forgotten.", "Не удалось прочитать подтверждённую запись, ничего не удалено.")
+	entryGone           = locale.T("That entry no longer exists.", "Этой записи больше нет.")
+	entryChangedChange  = locale.T("That entry changed since; nothing was changed.", "Запись с тех пор изменилась, ничего не изменено.")
+	entryChangedForget  = locale.T("That entry changed since; nothing was forgotten.", "Запись с тех пор изменилась, ничего не удалено.")
+	memoryActionGone    = locale.T("That action is no longer available.", "Это действие больше недоступно.")
+	memoryHoldsThat     = locale.T("Memory already holds that; nothing was changed.", "Это уже есть в памяти, ничего не изменено.")
+	memoryNoRoom        = locale.T("Memory has no room for that now; delete an entry in /memory and ask again. Nothing was changed.", "В памяти сейчас нет места для этого: удали запись в /memory и попроси снова. Ничего не изменено.")
+	undoUnreadable      = locale.T("the change could not be read back.", "не удалось прочитать, что нужно отменить.")
+	undoEntryBack       = locale.T("that entry is in memory again.", "эта запись снова есть в памяти.")
+	undoNoRoomRestore   = locale.T("memory has no room for it now.", "в памяти сейчас нет места для неё.")
+	undoHeldRestore     = locale.T("memory already holds that text in another entry.", "этот текст уже есть в другой записи.")
+	undoEntryAbsent     = locale.T("that entry is no longer in memory.", "этой записи больше нет в памяти.")
+	undoEntryChanged    = locale.T("that entry changed since.", "эта запись с тех пор изменилась.")
+	undoNoRoomOld       = locale.T("memory has no room for the old text now.", "в памяти сейчас нет места для прежнего текста.")
+	undoHeldOld         = locale.T("memory already holds the old text in another entry.", "прежний текст уже есть в другой записи.")
+	undoNotPossible     = locale.T("that action cannot be undone.", "это действие нельзя отменить.")
 )
+
+// memoryFailure is a failed execution whose sentence the model reads in English and the user in
+// their language.
+func memoryFailure(ctx context.Context, reason string, text locale.Text) *approval.ActionError {
+	return &approval.ActionError{Reason: reason, Text: text.In(locale.English), UserText: text.Format(ctx)}
+}
+
+func memoryRefusal(ctx context.Context, reason locale.Text) *approval.UndoRefusal {
+	return &approval.UndoRefusal{Reason: reason.In(locale.English), UserReason: reason.Format(ctx)}
+}
 
 var definitions = []tools.Definition{
 	{
@@ -189,10 +239,13 @@ func (s *Service) add(ctx context.Context, principalID string, call tools.Call) 
 		return tools.Result{Text: rejected.text, IsError: true}, nil
 	}
 	stored := addArguments{Kind: arguments.Kind, Text: text}
-	summary := fmt.Sprintf("Remember this %s: %q", arguments.Kind, text)
+	summary := rememberFact.Format(ctx, text)
+	if arguments.Kind == KindInstruction {
+		summary = rememberInstruction.Format(ctx, text)
+	}
 	proposal := approval.Proposal{Tool: toolAdd, Intent: approval.Intent{Verb: "remember", TargetKind: arguments.Kind + " in memory"}}
 	if arguments.Kind == KindInstruction {
-		proposal.Summary = summary + "\nIt will apply to every later conversation, scheduled run, and background task until you delete it in /memory."
+		proposal.Summary = summary + "\n" + instructionApplies.Format(ctx)
 		return s.proposeInstruction(ctx, principalID, exposed, text, proposal, func(learned bool) ([]byte, error) {
 			return json.Marshal(proposedAdd{addArguments: stored, Learned: learned})
 		})
@@ -202,7 +255,7 @@ func (s *Service) add(ctx context.Context, principalID string, call tools.Call) 
 		return tools.Result{}, err
 	}
 	proposal.Arguments = canonical
-	proposal.Summary = summary + "\nI read outside content in this conversation, so I need your confirmation before keeping it."
+	proposal.Summary = summary + "\n" + confirmBeforeKeep.Format(ctx)
 	return s.propose(ctx, principalID, exposed, text, arguments.Kind, proposal)
 }
 
@@ -257,8 +310,12 @@ func (s *Service) replace(ctx context.Context, principalID string, call tools.Ca
 		return tools.Result{Text: rejected.text, IsError: true}, nil
 	}
 	stored := replaceArguments{ID: entry.ID, Text: text}
+	change := changeFact
+	if entry.Kind == KindInstruction {
+		change = changeInstruction
+	}
 	proposal := approval.Proposal{
-		Tool: toolReplace, Summary: fmt.Sprintf("Change the remembered %s\nfrom: %q\nto: %q", entry.Kind, entry.Text, text),
+		Tool: toolReplace, Summary: change.Format(ctx, entry.Text, text),
 		Intent: approval.Intent{Verb: "change", TargetKind: entry.Kind + " in memory"},
 	}
 	if entry.Kind == KindInstruction {
@@ -317,8 +374,12 @@ func (s *Service) remove(ctx context.Context, principalID string, call tools.Cal
 	if err != nil {
 		return tools.Result{}, err
 	}
+	forget := forgetFact
+	if entry.Kind == KindInstruction {
+		forget = forgetInstruction
+	}
 	proposal := approval.Proposal{
-		Tool: toolRemove, Arguments: canonical, Summary: fmt.Sprintf("Forget the remembered %s: %q", entry.Kind, entry.Text),
+		Tool: toolRemove, Arguments: canonical, Summary: forget.Format(ctx, entry.Text),
 		Intent: approval.Intent{Verb: "forget", TargetKind: entry.Kind + " in memory"},
 	}
 	if entry.Kind == KindInstruction {
@@ -371,7 +432,7 @@ func (s *Service) proposeInstruction(ctx context.Context, principalID string, ex
 	// Outside content in the conversation may have shaped the text, so it is not presented as what
 	// the user's own 👎 taught.
 	if !exposed {
-		proposal.Summary = lessonLabel(sentAt) + "\n" + proposal.Summary
+		proposal.Summary = lessonLabel(ctx, sentAt) + "\n" + proposal.Summary
 	}
 	result, err := s.propose(ctx, principalID, exposed, text, KindInstruction, proposal)
 	if err != nil || result.IsError {
@@ -406,11 +467,11 @@ func (s *Service) claimLesson(ctx context.Context, principalID string) (*tools.R
 	return run, sentAt, "", nil
 }
 
-func lessonLabel(sentAt time.Time) string {
+func lessonLabel(ctx context.Context, sentAt time.Time) string {
 	if sentAt.IsZero() {
-		return "Learned from your 👎:"
+		return lessonLabelPlain.Format(ctx)
 	}
-	return "Learned from your 👎 on " + sentAt.Format("Mon 2 Jan") + ":"
+	return lessonLabelDated.Format(ctx, locale.Date(locale.From(ctx), sentAt, locale.Day))
 }
 
 const unknownEntryText = "No memory entry has that id. The ids are in the Memory section of your prompt."
@@ -428,7 +489,7 @@ func (s *Service) propose(ctx context.Context, principalID string, exposed bool,
 		flagged, err := s.screener.Screen(screenCtx, principalID, proposal.Tool, text)
 		cancel()
 		if err == nil && flagged {
-			proposal.Summary = screenedWarning + "\n" + proposal.Summary
+			proposal.Summary = screenedWarning.Format(ctx) + "\n" + proposal.Summary
 		}
 	}
 	if _, err := s.proposer.Propose(ctx, principalID, proposal); err != nil {
@@ -478,7 +539,7 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		return approval.Outcome{}, err
 	}
 	if !enabled {
-		return approval.Outcome{}, &approval.ActionError{Reason: "disabled", Text: "Memory is turned off in /settings, so nothing was remembered."}
+		return approval.Outcome{}, memoryFailure(ctx, "disabled", memoryOff)
 	}
 	switch record.Tool {
 	case toolProcedureSave:
@@ -494,11 +555,11 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 	case toolAdd:
 		var confirmed proposedAdd
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil || !validKind(confirmed.Kind) || validText(confirmed.Text) != "" {
-			return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed entry could not be read; nothing was remembered."}
+			return approval.Outcome{}, memoryFailure(ctx, "malformed", entryUnreadRemember)
 		}
 		if rejected := check(entries, confirmed.Kind, confirmed.Text, ""); rejected.outcome != "" {
 			s.record(ctx, record.PrincipalID, confirmed.Kind, rejected.outcome)
-			return approval.Outcome{}, &approval.ActionError{Reason: rejected.outcome, Text: userFacing(rejected)}
+			return approval.Outcome{}, &approval.ActionError{Reason: rejected.outcome, Text: userFacing(rejected), UserText: userFacingText(ctx, rejected)}
 		}
 		id, err := s.uniqueID(ctx, record.PrincipalID)
 		if err != nil {
@@ -513,22 +574,22 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		if mechanism != "" {
 			s.recordLesson(ctx, record.PrincipalID, mechanism, outcomeWritten)
 		}
-		return approval.Outcome{Text: "Remembered.", Undo: s.undoPayload(ctx, record, undoEntry{ID: id})}, nil
+		return approval.Outcome{Text: rememberedOutcome.In(locale.English), UserText: rememberedOutcome.Format(ctx), Undo: s.undoPayload(ctx, record, undoEntry{ID: id})}, nil
 	case toolReplace:
 		var confirmed proposedReplace
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil || validText(confirmed.Text) != "" {
-			return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed entry could not be read; nothing was changed."}
+			return approval.Outcome{}, memoryFailure(ctx, "malformed", entryUnreadChange)
 		}
 		entry, found := find(entries, confirmed.ID)
 		if !found {
-			return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That entry no longer exists."}
+			return approval.Outcome{}, memoryFailure(ctx, "not_found", entryGone)
 		}
 		if confirmed.Previous != "" && entry.Text != confirmed.Previous {
-			return approval.Outcome{}, &approval.ActionError{Reason: "changed", Text: "That entry changed since; nothing was changed."}
+			return approval.Outcome{}, memoryFailure(ctx, "changed", entryChangedChange)
 		}
 		if rejected := check(entries, entry.Kind, confirmed.Text, entry.ID); rejected.outcome != "" {
 			s.record(ctx, record.PrincipalID, entry.Kind, rejected.outcome)
-			return approval.Outcome{}, &approval.ActionError{Reason: rejected.outcome, Text: userFacing(rejected)}
+			return approval.Outcome{}, &approval.ActionError{Reason: rejected.outcome, Text: userFacing(rejected), UserText: userFacingText(ctx, rejected)}
 		}
 		mechanism := lesson(confirmed.Learned, confirmed.Review)
 		if _, err := s.repository.ReplaceMemory(ctx, record.PrincipalID, entry.ID, confirmed.Text, writtenSource(record, mechanism != ""), s.now()); err != nil {
@@ -539,18 +600,18 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 			s.recordLesson(ctx, record.PrincipalID, mechanism, outcomeWritten)
 		}
 		previous := undoEntry{ID: entry.ID, Text: entry.Text, Source: entry.Source, UpdatedAt: entry.UpdatedAt}
-		return approval.Outcome{Text: "Updated.", Undo: s.undoPayload(ctx, record, previous)}, nil
+		return approval.Outcome{Text: updatedOutcome.In(locale.English), UserText: updatedOutcome.Format(ctx), Undo: s.undoPayload(ctx, record, previous)}, nil
 	case toolRemove:
 		var confirmed proposedRemove
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil || confirmed.ID == "" {
-			return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed entry could not be read; nothing was forgotten."}
+			return approval.Outcome{}, memoryFailure(ctx, "malformed", entryUnreadForget)
 		}
 		entry, found := find(entries, confirmed.ID)
 		if !found {
-			return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That entry no longer exists."}
+			return approval.Outcome{}, memoryFailure(ctx, "not_found", entryGone)
 		}
 		if entry.Text != confirmed.Text {
-			return approval.Outcome{}, &approval.ActionError{Reason: "changed", Text: "That entry changed since; nothing was forgotten."}
+			return approval.Outcome{}, memoryFailure(ctx, "changed", entryChangedForget)
 		}
 		if _, err := s.repository.RemoveMemory(ctx, record.PrincipalID, entry.ID); err != nil {
 			return approval.Outcome{}, err
@@ -559,11 +620,11 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		if confirmed.Review {
 			s.recordLesson(ctx, record.PrincipalID, MechanismReview, outcomeWritten)
 		}
-		return approval.Outcome{Text: "Forgot.", Undo: removalUndo(record, entry)}, nil
+		return approval.Outcome{Text: forgotOutcome.In(locale.English), UserText: forgotOutcome.Format(ctx), Undo: removalUndo(record, entry)}, nil
 	case toolMerge:
 		return s.executeMerge(ctx, record, entries)
 	default:
-		return approval.Outcome{}, &approval.ActionError{Reason: "unavailable", Text: "That action is no longer available."}
+		return approval.Outcome{}, memoryFailure(ctx, "unavailable", memoryActionGone)
 	}
 }
 
@@ -635,7 +696,7 @@ func removalUndo(record approval.Record, entry Entry) json.RawMessage {
 func (s *Service) restore(ctx context.Context, record approval.Record, payload json.RawMessage) (approval.Outcome, error) {
 	var removed removedEntry
 	if json.Unmarshal(payload, &removed) != nil || removed.ID == "" || !validKind(removed.Kind) || validText(removed.Text) != "" {
-		return approval.Outcome{}, &approval.UndoRefusal{Reason: "the change could not be read back."}
+		return approval.Outcome{}, memoryRefusal(ctx, undoUnreadable)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -644,21 +705,21 @@ func (s *Service) restore(ctx context.Context, record approval.Record, payload j
 		return approval.Outcome{}, err
 	}
 	if _, found := find(entries, removed.ID); found {
-		return approval.Outcome{}, &approval.UndoRefusal{Reason: "that entry is in memory again."}
+		return approval.Outcome{}, memoryRefusal(ctx, undoEntryBack)
 	}
 	if rejected := check(entries, removed.Kind, removed.Text, ""); rejected.outcome != "" {
-		reason := "memory has no room for it now."
+		reason := undoNoRoomRestore
 		if rejected.outcome == outcomeDuplicate {
-			reason = "memory already holds that text in another entry."
+			reason = undoHeldRestore
 		}
-		return approval.Outcome{}, &approval.UndoRefusal{Reason: reason}
+		return approval.Outcome{}, memoryRefusal(ctx, reason)
 	}
 	entry := Entry{ID: removed.ID, PrincipalID: record.PrincipalID, Kind: removed.Kind, Text: removed.Text, Source: removed.Source, CreatedAt: removed.CreatedAt, UpdatedAt: removed.UpdatedAt}
 	if err := s.repository.AddMemory(ctx, entry); err != nil {
 		return approval.Outcome{}, err
 	}
 	s.record(ctx, record.PrincipalID, entry.Kind, outcomeWritten)
-	return approval.Outcome{Text: "Restored: " + entry.Text}, nil
+	return approval.Outcome{Text: restoredOutcome.FormatIn(locale.English, entry.Text), UserText: restoredOutcome.Format(ctx, entry.Text)}, nil
 }
 
 // Undo reverses a direct instruction write while the entry still holds what it wrote: it removes an
@@ -672,7 +733,7 @@ func (s *Service) Undo(ctx context.Context, record approval.Record, payload json
 		Text string `json:"text"`
 	}
 	if json.Unmarshal(payload, &undo) != nil || undo.ID == "" || json.Unmarshal(record.Arguments, &written) != nil {
-		return approval.Outcome{}, &approval.UndoRefusal{Reason: "the change could not be read back."}
+		return approval.Outcome{}, memoryRefusal(ctx, undoUnreadable)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -681,10 +742,10 @@ func (s *Service) Undo(ctx context.Context, record approval.Record, payload json
 		return approval.Outcome{}, err
 	}
 	if !found {
-		return approval.Outcome{}, &approval.UndoRefusal{Reason: "that entry is no longer in memory."}
+		return approval.Outcome{}, memoryRefusal(ctx, undoEntryAbsent)
 	}
 	if entry.Text != written.Text || !entry.UpdatedAt.Equal(undo.Written) {
-		return approval.Outcome{}, &approval.UndoRefusal{Reason: "that entry changed since."}
+		return approval.Outcome{}, memoryRefusal(ctx, undoEntryChanged)
 	}
 	switch record.Tool {
 	case toolAdd:
@@ -692,26 +753,26 @@ func (s *Service) Undo(ctx context.Context, record approval.Record, payload json
 			return approval.Outcome{}, err
 		}
 		s.record(ctx, record.PrincipalID, entry.Kind, outcomeRemoved)
-		return approval.Outcome{Text: "Forgot: " + entry.Text}, nil
+		return approval.Outcome{Text: forgotEntryOutcome.FormatIn(locale.English, entry.Text), UserText: forgotEntryOutcome.Format(ctx, entry.Text)}, nil
 	case toolReplace:
 		entries, err := s.repository.ListMemory(ctx, record.PrincipalID)
 		if err != nil {
 			return approval.Outcome{}, err
 		}
 		if rejected := check(entries, entry.Kind, undo.Text, entry.ID); rejected.outcome != "" {
-			reason := "memory has no room for the old text now."
+			reason := undoNoRoomOld
 			if rejected.outcome == outcomeDuplicate {
-				reason = "memory already holds the old text in another entry."
+				reason = undoHeldOld
 			}
-			return approval.Outcome{}, &approval.UndoRefusal{Reason: reason}
+			return approval.Outcome{}, memoryRefusal(ctx, reason)
 		}
 		if _, err := s.repository.ReplaceMemory(ctx, record.PrincipalID, entry.ID, undo.Text, undo.Source, undo.UpdatedAt); err != nil {
 			return approval.Outcome{}, err
 		}
 		s.record(ctx, record.PrincipalID, entry.Kind, outcomeWritten)
-		return approval.Outcome{Text: "Restored: " + undo.Text}, nil
+		return approval.Outcome{Text: restoredOutcome.FormatIn(locale.English, undo.Text), UserText: restoredOutcome.Format(ctx, undo.Text)}, nil
 	default:
-		return approval.Outcome{}, &approval.UndoRefusal{Reason: "that action cannot be undone."}
+		return approval.Outcome{}, memoryRefusal(ctx, undoNotPossible)
 	}
 }
 
@@ -721,6 +782,13 @@ func userFacing(rejected rejection) string {
 		return "Memory already holds that; nothing was changed."
 	}
 	return "Memory has no room for that now; delete an entry in /memory and ask again. Nothing was changed."
+}
+
+func userFacingText(ctx context.Context, rejected rejection) string {
+	if rejected.outcome == outcomeDuplicate {
+		return memoryHoldsThat.Format(ctx)
+	}
+	return memoryNoRoom.Format(ctx)
 }
 
 func find(entries []Entry, id string) (Entry, bool) {

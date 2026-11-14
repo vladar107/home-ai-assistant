@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -175,6 +176,23 @@ func (s *Service) readProcedure(ctx context.Context, principalID string, call to
 	return tools.Result{Text: "Procedure: " + procedure.Title + "\n" + procedure.Steps}, nil
 }
 
+var (
+	keepProcedure        = locale.T("Keep this procedure: %s", "Сохранить эту процедуру: %[1]s")
+	replaceProcedure     = locale.T("Replace the procedure %q with this one: %s", "Заменить процедуру %[1]q на эту: %[2]s")
+	procedureWillRead    = locale.T("I will read it before similar requests until you delete it in /memory.", "Я буду читать её перед похожими просьбами, пока ты не удалишь её в /memory.")
+	forgetProcedure      = locale.T("Forget the procedure %q.", "Забыть процедуру %[1]q.")
+	procedureUnreadKeep  = locale.T("The confirmed procedure could not be read; nothing was kept.", "Не удалось прочитать подтверждённую процедуру, ничего не сохранено.")
+	procedureUnreadDrop  = locale.T("The confirmed procedure could not be read; nothing was forgotten.", "Не удалось прочитать подтверждённую процедуру, ничего не удалено.")
+	procedureGone        = locale.T("That procedure no longer exists.", "Этой процедуры больше нет.")
+	procedureKeptAlready = locale.T("A procedure with that title is kept already; nothing was changed.", "Процедура с таким названием уже сохранена, ничего не изменено.")
+	procedureCapReached  = locale.T("You keep the most procedures there may be; delete one in /memory and ask again. Nothing was kept.", "У тебя сохранено максимально допустимое число процедур: удали одну в /memory и попроси снова. Ничего не сохранено.")
+	procedureChangedKeep = locale.T("That procedure changed since; nothing was changed.", "Процедура с тех пор изменилась, ничего не изменено.")
+	procedureChangedDrop = locale.T("That procedure changed since; nothing was forgotten.", "Процедура с тех пор изменилась, ничего не удалено.")
+	procedureUpdated     = locale.T("Updated the procedure.", "Процедура обновлена.")
+	procedureKept        = locale.T("Kept the procedure.", "Процедура сохранена.")
+	procedureForgot      = locale.T("Forgot the procedure.", "Процедура забыта.")
+)
+
 const unknownProcedureText = "No procedure has that id. The ids are in the Memory section of your prompt."
 
 func (s *Service) saveProcedure(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
@@ -202,17 +220,17 @@ func (s *Service) saveProcedure(ctx context.Context, principalID string, call to
 	if err != nil {
 		return tools.Result{}, err
 	}
-	summary := "Keep this procedure: " + stored.Title
+	summary := keepProcedure.Format(ctx, stored.Title)
 	if stored.ID != "" {
-		summary = fmt.Sprintf("Replace the procedure %q with this one: %s", replaced.Title, stored.Title)
+		summary = replaceProcedure.Format(ctx, replaced.Title, stored.Title)
 	}
 	proposal := approval.Proposal{
 		Tool: toolProcedureSave, Arguments: canonical,
-		Summary: summary + "\n" + stored.Steps + "\nI will read it before similar requests until you delete it in /memory.",
+		Summary: summary + "\n" + stored.Steps + "\n" + procedureWillRead.Format(ctx),
 	}
 	exposed := s.exposed(ctx, principalID)
 	if exposed {
-		proposal.Summary = exposedProcedureWarning + "\n" + proposal.Summary
+		proposal.Summary = exposedProcedureWarning.Format(ctx) + "\n" + proposal.Summary
 	}
 	result, err := s.propose(ctx, principalID, exposed, stored.Title+"\n"+stored.Steps, KindProcedure, proposal)
 	if err == nil && !result.IsError {
@@ -277,7 +295,7 @@ func checkProcedure(procedures []Procedure, saved proposedProcedure) (Procedure,
 func (s *Service) executeProcedure(ctx context.Context, record approval.Record) (approval.Outcome, error) {
 	var confirmed proposedProcedure
 	if err := json.Unmarshal(record.Arguments, &confirmed); err != nil || validProcedure(confirmed.Title, confirmed.Steps) != "" {
-		return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed procedure could not be read; nothing was kept."}
+		return approval.Outcome{}, memoryFailure(ctx, "malformed", procedureUnreadKeep)
 	}
 	procedures, err := s.repository.ListProcedures(ctx, record.PrincipalID)
 	if err != nil {
@@ -287,13 +305,13 @@ func (s *Service) executeProcedure(ctx context.Context, record approval.Record) 
 	if rejected.outcome != "" {
 		switch rejected.outcome {
 		case outcomeUnknown:
-			return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That procedure no longer exists."}
+			return approval.Outcome{}, memoryFailure(ctx, "not_found", procedureGone)
 		case outcomeDuplicate:
 			s.record(ctx, record.PrincipalID, KindProcedure, rejected.outcome)
-			return approval.Outcome{}, &approval.ActionError{Reason: rejected.outcome, Text: "A procedure with that title is kept already; nothing was changed."}
+			return approval.Outcome{}, memoryFailure(ctx, rejected.outcome, procedureKeptAlready)
 		default:
 			s.record(ctx, record.PrincipalID, KindProcedure, rejected.outcome)
-			return approval.Outcome{}, &approval.ActionError{Reason: rejected.outcome, Text: "You keep the most procedures there may be; delete one in /memory and ask again. Nothing was kept."}
+			return approval.Outcome{}, memoryFailure(ctx, rejected.outcome, procedureCapReached)
 		}
 	}
 	now := s.now()
@@ -303,18 +321,18 @@ func (s *Service) executeProcedure(ctx context.Context, record approval.Record) 
 	}
 	if confirmed.ID != "" {
 		if !replaced.UpdatedAt.Equal(confirmed.Updated) {
-			return approval.Outcome{}, &approval.ActionError{Reason: "changed", Text: "That procedure changed since; nothing was changed."}
+			return approval.Outcome{}, memoryFailure(ctx, "changed", procedureChangedKeep)
 		}
 		found, err := s.repository.ReplaceProcedure(ctx, record.PrincipalID, confirmed.ID, confirmed.Title, confirmed.Steps, source, now)
 		if err != nil {
 			return approval.Outcome{}, err
 		}
 		if !found {
-			return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That procedure no longer exists."}
+			return approval.Outcome{}, memoryFailure(ctx, "not_found", procedureGone)
 		}
 		s.record(ctx, record.PrincipalID, KindProcedure, outcomeWritten)
 		s.recordLesson(ctx, record.PrincipalID, mechanism, outcomeWritten)
-		return approval.Outcome{Text: "Updated the procedure."}, nil
+		return approval.Outcome{Text: procedureUpdated.In(locale.English), UserText: procedureUpdated.Format(ctx)}, nil
 	}
 	id, err := s.uniqueID(ctx, record.PrincipalID)
 	if err != nil {
@@ -325,14 +343,14 @@ func (s *Service) executeProcedure(ctx context.Context, record approval.Record) 
 	}
 	s.record(ctx, record.PrincipalID, KindProcedure, outcomeWritten)
 	s.recordLesson(ctx, record.PrincipalID, mechanism, outcomeWritten)
-	return approval.Outcome{Text: "Kept the procedure."}, nil
+	return approval.Outcome{Text: procedureKept.In(locale.English), UserText: procedureKept.Format(ctx)}, nil
 }
 
 // executeProcedureRemoval forgets a confirmed procedure while it still has the title the user saw.
 func (s *Service) executeProcedureRemoval(ctx context.Context, record approval.Record) (approval.Outcome, error) {
 	var confirmed proposedProcedureRemoval
 	if err := json.Unmarshal(record.Arguments, &confirmed); err != nil || confirmed.ID == "" {
-		return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed procedure could not be read; nothing was forgotten."}
+		return approval.Outcome{}, memoryFailure(ctx, "malformed", procedureUnreadDrop)
 	}
 	procedures, err := s.repository.ListProcedures(ctx, record.PrincipalID)
 	if err != nil {
@@ -340,15 +358,15 @@ func (s *Service) executeProcedureRemoval(ctx context.Context, record approval.R
 	}
 	index := slices.IndexFunc(procedures, func(procedure Procedure) bool { return procedure.ID == confirmed.ID })
 	if index < 0 {
-		return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That procedure no longer exists."}
+		return approval.Outcome{}, memoryFailure(ctx, "not_found", procedureGone)
 	}
 	if procedures[index].Title != confirmed.Title || !procedures[index].UpdatedAt.Equal(confirmed.Updated) {
-		return approval.Outcome{}, &approval.ActionError{Reason: "changed", Text: "That procedure changed since; nothing was forgotten."}
+		return approval.Outcome{}, memoryFailure(ctx, "changed", procedureChangedDrop)
 	}
 	if _, err := s.repository.RemoveProcedure(ctx, record.PrincipalID, confirmed.ID); err != nil {
 		return approval.Outcome{}, err
 	}
 	s.record(ctx, record.PrincipalID, KindProcedure, outcomeRemoved)
 	s.recordLesson(ctx, record.PrincipalID, MechanismReview, outcomeWritten)
-	return approval.Outcome{Text: "Forgot the procedure."}, nil
+	return approval.Outcome{Text: procedureForgot.In(locale.English), UserText: procedureForgot.Format(ctx)}, nil
 }

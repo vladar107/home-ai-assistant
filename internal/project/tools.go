@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
@@ -30,6 +31,72 @@ const (
 	maximumAddItems = 20
 	// actTimeout lets a change made at once run as long as one made after Confirm.
 	actTimeout = 45 * time.Second
+)
+
+var (
+	startProjectSummary  = locale.T("Start the project %s", "Начать проект %[1]s")
+	goalSummaryLine      = locale.T("Goal: %s", "Цель: %[1]s")
+	itemsSummaryLine     = locale.T("Items:\n%s", "Пункты:\n%[1]s")
+	changeProjectSummary = locale.T("Change the project %s:", "Изменить проект %[1]s:")
+	titleChangeLine      = locale.T("title → %s", "название → %[1]s")
+	goalChangeLine       = locale.T("goal → %s", "цель → %[1]s")
+	statusChangeLine     = locale.T("status → %s", "статус → %[1]s")
+	noGoal               = locale.T("none", "нет")
+	addItemsSummary      = locale.T("Add to the project %s:\n%s", "Добавить в проект %[1]s:\n%[2]s")
+	changeItemSummary    = locale.T("Change an item of the project %s:\n%s\n→ %s", "Изменить пункт проекта %[1]s:\n%[2]s\n→ %[3]s")
+	checkItemSummary     = locale.T("Check off in the project %s: %s", "Отметить выполненным в проекте %[1]s: %[2]s")
+	openItemSummary      = locale.T("Open again in the project %s: %s", "Вернуть в работу в проекте %[1]s: %[2]s")
+	removeItemSummary    = locale.T("Remove from the project %s: %s", "Убрать из проекта %[1]s: %[2]s")
+	linkSummary          = locale.T("Link the project %s to %s", "Привязать проект %[1]s: %[2]s")
+	unlinkSummary        = locale.T("Remove the link of the project %s to %s", "Убрать связь проекта %[1]s: %[2]s")
+	itemRow              = locale.T("- %s", "- %[1]s")
+	itemRowDue           = locale.T("- %s (due %s)", "- %[1]s (срок: %[2]s)")
+	itemRowNote          = locale.T("- %s: %s", "- %[1]s: %[2]s")
+	itemRowDueNote       = locale.T("- %s (due %s): %s", "- %[1]s (срок: %[2]s): %[3]s")
+	linkWithLabel        = locale.T("%s %s (%s)", "%[1]s %[2]s (%[3]s)")
+	linkPlain            = locale.T("%s %s", "%[1]s %[2]s")
+	statusActiveWord     = locale.T("active", "активен")
+	statusPausedWord     = locale.T("paused", "на паузе")
+	statusDoneWord       = locale.T("done", "завершён")
+	statusAbandonedWord  = locale.T("abandoned", "заброшен")
+	linkNotionWord       = locale.T("notion", "Notion")
+	linkNASWord          = locale.T("nas", "NAS")
+	linkCollectionWord   = locale.T("collection", "коллекция")
+	linkIntakeWord       = locale.T("intake", "входящее")
+	linkURLWord          = locale.T("url", "веб-адрес")
+
+	changedOutcome   = locale.T("Changed.", "Изменено.")
+	addedOutcome     = locale.T("Added.", "Добавлено.")
+	checkedOutcome   = locale.T("Checked off.", "Отмечено выполненным.")
+	reopenedOutcome  = locale.T("Opened again.", "Возвращено в работу.")
+	removedOutcome   = locale.T("Removed.", "Убрано.")
+	linkedOutcome    = locale.T("Linked.", "Привязано.")
+	unlinkedOutcome  = locale.T("Unlinked.", "Связь убрана.")
+	startedOutcome   = locale.T("Started the project (id %s).", "Проект начат (id %[1]s).")
+	abandonedOutcome = locale.T("Abandoned the project %s; close its tab with /close.", "Проект %[1]s заброшен; закрой его вкладку командой /close.")
+	restoredOutcome  = locale.T("Restored the project %s as it was.", "Проект %[1]s возвращён, как был.")
+
+	malformedChanged  = locale.T("The confirmed change could not be read; nothing was changed.", "Не удалось прочитать подтверждённое изменение, ничего не изменено.")
+	malformedAdded    = locale.T("The confirmed change could not be read; nothing was added.", "Не удалось прочитать подтверждённое изменение, ничего не добавлено.")
+	malformedRemoved  = locale.T("The confirmed change could not be read; nothing was removed.", "Не удалось прочитать подтверждённое изменение, ничего не убрано.")
+	malformedLinked   = locale.T("The confirmed change could not be read; nothing was linked.", "Не удалось прочитать подтверждённое изменение, ничего не привязано.")
+	malformedCreated  = locale.T("The confirmed change could not be read; nothing was created.", "Не удалось прочитать подтверждённое изменение, ничего не создано.")
+	itemGoneChanged   = locale.T("That item no longer exists; nothing was changed.", "Этого пункта больше нет, ничего не изменено.")
+	itemGoneRemoved   = locale.T("That item no longer exists; nothing was removed.", "Этого пункта больше нет, ничего не убрано.")
+	itemsAlreadyAdded = locale.T("Those items were already added.", "Эти пункты уже добавлены.")
+	linkGone          = locale.T("That link no longer exists.", "Этой связи больше нет.")
+	linkAlready       = locale.T("The project already has that link.", "У проекта уже есть эта связь.")
+	linksFull         = locale.T("A project holds at most %d links; nothing was linked.", "В проекте может быть не больше %[1]d связей, ничего не привязано.")
+	actionUnavailable = locale.T("That action is no longer available.", "Это действие больше недоступно.")
+	projectGoneChange = locale.T("That project no longer exists; nothing was changed.", "Этого проекта больше нет, ничего не изменено.")
+	changeInvalid     = locale.T("That change is not valid (%s); nothing was changed.", "Это изменение недопустимо (%[1]s), ничего не изменено.")
+	projectInvalid    = locale.T("That project is not valid (%s); nothing was created.", "Этот проект недопустим (%[1]s), ничего не создано.")
+	tooManyChanged    = locale.T("The user already keeps %d open projects, the most there can be; finish or abandon one with project_update first. Nothing was changed.", "У тебя уже %[1]d открытых проектов, больше нельзя: сначала заверши или заброси один. Ничего не изменено.")
+	tooManyCreated    = locale.T("The user already keeps %d open projects, the most there can be; finish or abandon one with project_update first. Nothing was created.", "У тебя уже %[1]d открытых проектов, больше нельзя: сначала заверши или заброси один. Ничего не создано.")
+	tooManyUndo       = locale.T("The user already keeps %d open projects, the most there can be; finish or abandon one with project_update first.", "у тебя уже %[1]d открытых проектов, больше нельзя: сначала заверши или заброси один.")
+	undoUnreadable    = locale.T("what to undo could not be read.", "не удалось прочитать, что нужно отменить.")
+	undoChangedSince  = locale.T("the project was changed since; change it with a new request instead.", "проект с тех пор изменился; измени его новой просьбой.")
+	undoProjectGone   = locale.T("the project no longer exists.", "проекта больше нет.")
 )
 
 const guidance = "Projects: a project is a goal the user works toward over days or weeks, such as finding a dentist, renovating a room, or preparing a tax return, " +
@@ -466,12 +533,12 @@ func (s *Service) proposeCreate(ctx context.Context, principalID string, call to
 	if err != nil {
 		return tools.Result{}, err
 	}
-	summary := "Start the project " + confirmed.Title
+	summary := startProjectSummary.Format(ctx, confirmed.Title)
 	if confirmed.Goal != "" {
-		summary += "\nGoal: " + confirmed.Goal
+		summary += "\n" + goalSummaryLine.Format(ctx, confirmed.Goal)
 	}
 	if len(confirmed.Items) > 0 {
-		summary += "\nItems:\n" + describeItems(confirmed.Items)
+		summary += "\n" + itemsSummaryLine.Format(ctx, describeItems(ctx, confirmed.Items))
 	}
 	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolCreate, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "start", TargetKind: "project", TargetName: confirmed.Title}})
 }
@@ -516,17 +583,19 @@ func normalizeNewItems(items []Item, existing int) ([]Item, error) {
 	return normalized, nil
 }
 
-func describeItems(items []Item) string {
+func describeItems(ctx context.Context, items []Item) string {
 	lines := make([]string, 0, len(items))
 	for _, item := range items {
-		line := "- " + item.Text
-		if item.DueOn != "" {
-			line += " (due " + item.DueOn + ")"
+		switch {
+		case item.DueOn != "" && item.Note != "":
+			lines = append(lines, itemRowDueNote.Format(ctx, item.Text, item.DueOn, item.Note))
+		case item.DueOn != "":
+			lines = append(lines, itemRowDue.Format(ctx, item.Text, item.DueOn))
+		case item.Note != "":
+			lines = append(lines, itemRowNote.Format(ctx, item.Text, item.Note))
+		default:
+			lines = append(lines, itemRow.Format(ctx, item.Text))
 		}
-		if item.Note != "" {
-			line += ": " + item.Note
-		}
-		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -564,15 +633,19 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 	}
 	var changes []string
 	if next.Title != found.Title {
-		changes = append(changes, "title → "+next.Title)
+		changes = append(changes, titleChangeLine.Format(ctx, next.Title))
 	}
 	if next.Goal != found.Goal {
-		changes = append(changes, "goal → "+cmpText(next.Goal, "none"))
+		goal := next.Goal
+		if goal == "" {
+			goal = noGoal.Format(ctx)
+		}
+		changes = append(changes, goalChangeLine.Format(ctx, goal))
 	}
 	if next.Status != found.Status {
-		changes = append(changes, "status → "+next.Status)
+		changes = append(changes, statusChangeLine.Format(ctx, statusWord(ctx, next.Status)))
 	}
-	summary := "Change the project " + found.Title + ":\n- " + strings.Join(changes, "\n- ")
+	summary := changeProjectSummary.Format(ctx, found.Title) + "\n- " + strings.Join(changes, "\n- ")
 	result, err := s.act(ctx, principalID, call, approval.Proposal{Tool: toolUpdate, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "change", TargetKind: "project", TargetName: found.Title, NewName: next.Title}})
 	if err != nil || result.IsError || next.Open() {
 		return result, err
@@ -585,6 +658,20 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 		result.Text += " Jobs still routed to this project: " + describeJobs(jobs) + ". Ask the user whether to delete them; delete each they agree to with schedule_remove, or reminder_cancel for a reminder."
 	}
 	return result, nil
+}
+
+func statusWord(ctx context.Context, status string) string {
+	switch status {
+	case StatusActive:
+		return statusActiveWord.Format(ctx)
+	case StatusPaused:
+		return statusPausedWord.Format(ctx)
+	case StatusDone:
+		return statusDoneWord.Format(ctx)
+	case StatusAbandoned:
+		return statusAbandonedWord.Format(ctx)
+	}
+	return status
 }
 
 func cmpText(value, empty string) string {
@@ -646,7 +733,7 @@ func (s *Service) proposeItemAdd(ctx context.Context, principalID string, call t
 	if err != nil {
 		return tools.Result{}, err
 	}
-	summary := "Add to the project " + found.Title + ":\n" + describeItems(items)
+	summary := addItemsSummary.Format(ctx, found.Title, describeItems(ctx, items))
 	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolItemAdd, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "add items to", TargetKind: "project", TargetName: found.Title}})
 }
 
@@ -690,7 +777,7 @@ func (s *Service) proposeItemUpdate(ctx context.Context, principalID string, cal
 	if err != nil {
 		return tools.Result{}, err
 	}
-	summary := "Change an item of the project " + found.Title + ":\n" + describeItems([]Item{item}) + "\n→ " + strings.TrimPrefix(describeItems([]Item{changed}), "- ")
+	summary := changeItemSummary.Format(ctx, found.Title, describeItems(ctx, []Item{item}), strings.TrimPrefix(describeItems(ctx, []Item{changed}), "- "))
 	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolItemUpdate, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "change an item of", TargetKind: "project", TargetName: found.Title}})
 }
 
@@ -733,9 +820,9 @@ func (s *Service) proposeItemCheck(ctx context.Context, principalID string, call
 	if err != nil {
 		return tools.Result{}, err
 	}
-	verb, summary := "check off an item of", "Check off in the project "+found.Title+": "+item.Text
+	verb, summary := "check off an item of", checkItemSummary.Format(ctx, found.Title, item.Text)
 	if !done {
-		verb, summary = "open an item of", "Open again in the project "+found.Title+": "+item.Text
+		verb, summary = "open an item of", openItemSummary.Format(ctx, found.Title, item.Text)
 	}
 	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolItemCheck, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: verb, TargetKind: "project", TargetName: found.Title}})
 }
@@ -759,7 +846,7 @@ func (s *Service) proposeItemRemove(ctx context.Context, principalID string, cal
 	if err != nil {
 		return tools.Result{}, err
 	}
-	summary := "Remove from the project " + found.Title + ": " + item.Text
+	summary := removeItemSummary.Format(ctx, found.Title, item.Text)
 	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolItemRemove, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "remove an item from", TargetKind: "project", TargetName: found.Title}})
 }
 
@@ -813,9 +900,9 @@ func (s *Service) proposeLink(ctx context.Context, principalID string, call tool
 	if err != nil {
 		return tools.Result{}, err
 	}
-	summary, verb := "Link the project "+found.Title+" to "+describeLink(link), "link"
+	summary, verb := linkSummary.Format(ctx, found.Title, describeLink(ctx, link)), "link"
 	if arguments.Remove {
-		summary, verb = "Remove the link of the project "+found.Title+" to "+describeLink(link), "unlink"
+		summary, verb = unlinkSummary.Format(ctx, found.Title, describeLink(ctx, link)), "unlink"
 	}
 	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolLink, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: verb, TargetKind: "project", TargetName: found.Title}})
 }
@@ -838,12 +925,24 @@ func (s *Service) collectionLink(ctx context.Context, principalID string, link L
 	return Link{}, fmt.Sprintf("The user has no collection called %q.", link.Reference), nil
 }
 
-func describeLink(link Link) string {
-	text := link.Kind + " " + link.Reference
-	if link.Label != "" {
-		text = link.Kind + " " + link.Label + " (" + link.Reference + ")"
+func describeLink(ctx context.Context, link Link) string {
+	kind := link.Kind
+	switch link.Kind {
+	case LinkNotion:
+		kind = linkNotionWord.Format(ctx)
+	case LinkNAS:
+		kind = linkNASWord.Format(ctx)
+	case LinkCollection:
+		kind = linkCollectionWord.Format(ctx)
+	case LinkIntake:
+		kind = linkIntakeWord.Format(ctx)
+	case LinkURL:
+		kind = linkURLWord.Format(ctx)
 	}
-	return text
+	if link.Label != "" {
+		return linkWithLabel.Format(ctx, kind, link.Label, link.Reference)
+	}
+	return linkPlain.Format(ctx, kind, link.Reference)
 }
 
 // act makes the change at once in a clean turn and proposes it otherwise.
@@ -863,8 +962,16 @@ func (s *Service) ActionTools() []string {
 	return []string{toolCreate, toolUpdate, toolItemAdd, toolItemUpdate, toolItemCheck, toolItemRemove, toolLink}
 }
 
-func malformed(what string) error {
-	return &approval.ActionError{Reason: "malformed", Text: "The confirmed change could not be read; nothing was " + what + "."}
+func projectFailure(ctx context.Context, reason string, text locale.Text) *approval.ActionError {
+	return &approval.ActionError{Reason: reason, Text: text.In(locale.English), UserText: text.Format(ctx)}
+}
+
+func projectRefusal(ctx context.Context, reason locale.Text) *approval.UndoRefusal {
+	return &approval.UndoRefusal{Reason: reason.In(locale.English), UserReason: reason.Format(ctx)}
+}
+
+func malformed(ctx context.Context, text locale.Text) error {
+	return projectFailure(ctx, "malformed", text)
 }
 
 // ExecuteApproved makes the confirmed change to the project as it is now. Everything is checked
@@ -876,30 +983,30 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 	}
 	var projectID string
 	var apply func(*Project) error
-	text := "Changed."
+	text := changedOutcome
 	switch record.Tool {
 	case toolUpdate:
 		var confirmed confirmedUpdate
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
-			return approval.Outcome{}, malformed("changed")
+			return approval.Outcome{}, malformed(ctx, malformedChanged)
 		}
 		projectID = confirmed.ProjectID
-		apply = func(next *Project) error { return invalid(applyUpdate(next, confirmed)) }
+		apply = func(next *Project) error { return invalid(ctx, applyUpdate(next, confirmed)) }
 	case toolItemAdd:
 		var confirmed confirmedItemAdd
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
-			return approval.Outcome{}, malformed("added")
+			return approval.Outcome{}, malformed(ctx, malformedAdded)
 		}
-		projectID, text = confirmed.ProjectID, "Added."
+		projectID, text = confirmed.ProjectID, addedOutcome
 		apply = func(next *Project) error {
 			items, err := normalizeNewItems(confirmed.Items, len(next.Items))
 			if err != nil {
-				return invalid(err)
+				return invalid(ctx, err)
 			}
 			for index, item := range items {
 				item.ID = itemID(record.ID, index)
 				if _, taken := next.item(item.ID); taken {
-					return &approval.ActionError{Reason: "duplicate", Text: "Those items were already added."}
+					return projectFailure(ctx, "duplicate", itemsAlreadyAdded)
 				}
 				next.Items = append(next.Items, item)
 			}
@@ -908,17 +1015,17 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 	case toolItemUpdate:
 		var confirmed confirmedItemUpdate
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
-			return approval.Outcome{}, malformed("changed")
+			return approval.Outcome{}, malformed(ctx, malformedChanged)
 		}
 		projectID = confirmed.ProjectID
 		apply = func(next *Project) error {
 			index, known := next.item(confirmed.ItemID)
 			if !known {
-				return itemGone("changed")
+				return itemGone(ctx, itemGoneChanged)
 			}
 			changed, err := applyItemUpdate(next.Items[index], confirmed)
 			if err != nil {
-				return invalid(err)
+				return invalid(ctx, err)
 			}
 			next.Items[index] = changed
 			return nil
@@ -926,16 +1033,16 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 	case toolItemCheck:
 		var confirmed confirmedItemCheck
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
-			return approval.Outcome{}, malformed("changed")
+			return approval.Outcome{}, malformed(ctx, malformedChanged)
 		}
-		projectID, text = confirmed.ProjectID, "Checked off."
+		projectID, text = confirmed.ProjectID, checkedOutcome
 		if !confirmed.Done {
-			text = "Opened again."
+			text = reopenedOutcome
 		}
 		apply = func(next *Project) error {
 			index, known := next.item(confirmed.ItemID)
 			if !known {
-				return itemGone("changed")
+				return itemGone(ctx, itemGoneChanged)
 			}
 			switch {
 			case confirmed.Done && !next.Items[index].Done():
@@ -948,13 +1055,13 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 	case toolItemRemove:
 		var confirmed confirmedItemRemove
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
-			return approval.Outcome{}, malformed("removed")
+			return approval.Outcome{}, malformed(ctx, malformedRemoved)
 		}
-		projectID, text = confirmed.ProjectID, "Removed."
+		projectID, text = confirmed.ProjectID, removedOutcome
 		apply = func(next *Project) error {
 			index, known := next.item(confirmed.ItemID)
 			if !known {
-				return itemGone("removed")
+				return itemGone(ctx, itemGoneRemoved)
 			}
 			next.Items = slices.Delete(next.Items, index, index+1)
 			return nil
@@ -962,43 +1069,43 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 	case toolLink:
 		var confirmed confirmedLink
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
-			return approval.Outcome{}, malformed("linked")
+			return approval.Outcome{}, malformed(ctx, malformedLinked)
 		}
 		link, err := normalizeLink(confirmed.Link)
 		if err != nil {
-			return approval.Outcome{}, invalid(err)
+			return approval.Outcome{}, invalid(ctx, err)
 		}
-		projectID, text = confirmed.ProjectID, "Linked."
+		projectID, text = confirmed.ProjectID, linkedOutcome
 		if confirmed.Remove {
-			text = "Unlinked."
+			text = unlinkedOutcome
 		}
 		apply = func(next *Project) error {
 			index := slices.IndexFunc(next.Links, func(existing Link) bool { return existing.Kind == link.Kind && existing.Reference == link.Reference })
 			switch {
 			case confirmed.Remove && index < 0:
-				return &approval.ActionError{Reason: "not_found", Text: "That link no longer exists."}
+				return projectFailure(ctx, "not_found", linkGone)
 			case confirmed.Remove:
 				next.Links = slices.Delete(next.Links, index, index+1)
 			case index >= 0:
-				return &approval.ActionError{Reason: "duplicate", Text: "The project already has that link."}
+				return projectFailure(ctx, "duplicate", linkAlready)
 			case len(next.Links) >= MaximumLinks:
-				return &approval.ActionError{Reason: "too_many", Text: fmt.Sprintf("A project holds at most %d links; nothing was linked.", MaximumLinks)}
+				return &approval.ActionError{Reason: "too_many", Text: linksFull.FormatIn(locale.English, MaximumLinks), UserText: linksFull.Format(ctx, MaximumLinks)}
 			default:
 				next.Links = append(next.Links, link)
 			}
 			return nil
 		}
 	default:
-		return approval.Outcome{}, &approval.ActionError{Reason: "unavailable", Text: "That action is no longer available."}
+		return approval.Outcome{}, projectFailure(ctx, "unavailable", actionUnavailable)
 	}
 	before, after, found, err := s.change(ctx, record.PrincipalID, projectID, apply)
 	switch {
 	case errors.Is(err, ErrTooManyProjects):
-		return approval.Outcome{}, &approval.ActionError{Reason: "too_many", Text: tooManyText() + " Nothing was changed."}
+		return approval.Outcome{}, &approval.ActionError{Reason: "too_many", Text: tooManyText() + " Nothing was changed.", UserText: tooManyChanged.Format(ctx, MaximumOpenProjects)}
 	case err != nil:
 		return approval.Outcome{}, err
 	case !found:
-		return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That project no longer exists; nothing was changed."}
+		return approval.Outcome{}, projectFailure(ctx, "not_found", projectGoneChange)
 	}
 	s.logger.InfoContext(ctx, "project.changed", "principal_id", record.PrincipalID, "project_id", projectID, "tool", record.Tool, "items", len(after.Items), "links", len(after.Links))
 	s.changed(ctx, after)
@@ -1008,28 +1115,28 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 	if err != nil {
 		return approval.Outcome{}, err
 	}
-	return approval.Outcome{Text: text, Undo: undo}, nil
+	return approval.Outcome{Text: text.In(locale.English), UserText: text.Format(ctx), Undo: undo}, nil
 }
 
-func invalid(err error) error {
+func invalid(ctx context.Context, err error) error {
 	if err == nil {
 		return nil
 	}
-	return &approval.ActionError{Reason: "invalid", Text: "That change is not valid (" + err.Error() + "); nothing was changed."}
+	return &approval.ActionError{Reason: "invalid", Text: "That change is not valid (" + err.Error() + "); nothing was changed.", UserText: changeInvalid.Format(ctx, err.Error())}
 }
 
-func itemGone(what string) error {
-	return &approval.ActionError{Reason: "not_found", Text: "That item no longer exists; nothing was " + what + "."}
+func itemGone(ctx context.Context, text locale.Text) error {
+	return projectFailure(ctx, "not_found", text)
 }
 
 func (s *Service) executeCreate(ctx context.Context, record approval.Record) (approval.Outcome, error) {
 	var confirmed confirmedCreate
 	if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
-		return approval.Outcome{}, malformed("created")
+		return approval.Outcome{}, malformed(ctx, malformedCreated)
 	}
 	confirmed, err := normalizeCreate(confirmed)
 	if err != nil {
-		return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "That project is not valid (" + err.Error() + "); nothing was created."}
+		return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "That project is not valid (" + err.Error() + "); nothing was created.", UserText: projectInvalid.Format(ctx, err.Error())}
 	}
 	now := s.stamp()
 	created := Project{
@@ -1043,7 +1150,7 @@ func (s *Service) executeCreate(ctx context.Context, record approval.Record) (ap
 	stored, err := s.repository.CreateProject(ctx, created, MaximumOpenProjects)
 	switch {
 	case errors.Is(err, ErrTooManyProjects):
-		return approval.Outcome{}, &approval.ActionError{Reason: "too_many", Text: tooManyText() + " Nothing was created."}
+		return approval.Outcome{}, &approval.ActionError{Reason: "too_many", Text: tooManyText() + " Nothing was created.", UserText: tooManyCreated.Format(ctx, MaximumOpenProjects)}
 	case err != nil:
 		return approval.Outcome{}, err
 	}
@@ -1055,7 +1162,7 @@ func (s *Service) executeCreate(ctx context.Context, record approval.Record) (ap
 	if err != nil {
 		return approval.Outcome{}, err
 	}
-	return approval.Outcome{Text: "Started the project (id " + record.ID + ").", Undo: undo}, nil
+	return approval.Outcome{Text: startedOutcome.FormatIn(locale.English, record.ID), UserText: startedOutcome.Format(ctx, record.ID), Undo: undo}, nil
 }
 
 // Undo puts the project back as a direct change found it; undoing a start abandons the project,
@@ -1063,9 +1170,9 @@ func (s *Service) executeCreate(ctx context.Context, record approval.Record) (ap
 func (s *Service) Undo(ctx context.Context, record approval.Record, raw json.RawMessage) (approval.Outcome, error) {
 	var undo projectUndo
 	if err := json.Unmarshal(raw, &undo); err != nil || undo.ProjectID == "" || !slices.Contains(s.ActionTools(), record.Tool) {
-		return approval.Outcome{}, &approval.UndoRefusal{Reason: "what to undo could not be read."}
+		return approval.Outcome{}, projectRefusal(ctx, undoUnreadable)
 	}
-	refusal := &approval.UndoRefusal{Reason: "the project was changed since; change it with a new request instead."}
+	refusal := projectRefusal(ctx, undoChangedSince)
 	_, after, found, err := s.change(ctx, record.PrincipalID, undo.ProjectID, func(next *Project) error {
 		if !next.UpdatedAt.Equal(undo.UpdatedAt) {
 			return refusal
@@ -1080,18 +1187,18 @@ func (s *Service) Undo(ctx context.Context, record approval.Record, raw json.Raw
 	})
 	switch {
 	case errors.Is(err, ErrTooManyProjects):
-		return approval.Outcome{}, &approval.UndoRefusal{Reason: tooManyText()}
+		return approval.Outcome{}, &approval.UndoRefusal{Reason: tooManyText(), UserReason: tooManyUndo.Format(ctx, MaximumOpenProjects)}
 	case err != nil:
 		return approval.Outcome{}, err
 	case !found:
-		return approval.Outcome{}, &approval.UndoRefusal{Reason: "the project no longer exists."}
+		return approval.Outcome{}, projectRefusal(ctx, undoProjectGone)
 	}
 	s.logger.InfoContext(ctx, "project.changed", "principal_id", record.PrincipalID, "project_id", undo.ProjectID, "tool", record.Tool, "undo", true)
 	s.changed(ctx, after)
 	if record.Tool == toolCreate {
-		return approval.Outcome{Text: "Abandoned the project " + after.Title + "; close its tab with /close."}, nil
+		return approval.Outcome{Text: abandonedOutcome.FormatIn(locale.English, after.Title), UserText: abandonedOutcome.Format(ctx, after.Title)}, nil
 	}
-	return approval.Outcome{Text: "Restored the project " + after.Title + " as it was."}, nil
+	return approval.Outcome{Text: restoredOutcome.FormatIn(locale.English, after.Title), UserText: restoredOutcome.Format(ctx, after.Title)}, nil
 }
 
 func errorResult(text string) tools.Result {
