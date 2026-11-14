@@ -1,0 +1,8 @@
+{
+  "id": "bad-zone",
+  "title": "Bad zone",
+  "kind": "happy",
+  "clock": {"local": "2026-03-10T08:30", "zone": "Mars/Olympus"},
+  "user": {},
+  "steps": [{"say": "Hello"}]
+}

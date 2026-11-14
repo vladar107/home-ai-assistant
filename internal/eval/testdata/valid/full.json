@@ -1,0 +1,32 @@
+{
+  "id": "sample-reminder",
+  "title": "Sample one-off reminder",
+  "tags": ["sample", "time"],
+  "kind": "wrong-local-time",
+  "clock": {"local": "2026-03-10T08:30", "zone": "Europe/Berlin"},
+  "user": {"name": "Sam", "switches": {"schedule": true}, "memory": ["Prefers short replies."]},
+  "world": {"sample": {"items": ["a", "b"]}},
+  "steps": [
+    {
+      "say": "Remind me tomorrow at 9 to call the dentist.",
+      "expect": {
+        "calls": [
+          {
+            "tool": "schedule_create",
+            "args": [
+              {"path": "when", "within": {"from": "2026-03-11T08:55", "to": "2026-03-11T09:05"}},
+              {"path": "text", "matches": "(?i)dentist"}
+            ]
+          }
+        ],
+        "not_called": ["schedule_delete"],
+        "max_calls": 3,
+        "proposals": {"min": 1, "tools": ["schedule_create"]},
+        "reply": {"not_contains": ["recurring"], "language": "en"},
+        "store": [{"check": "sample-check", "value": 1}]
+      }
+    },
+    {"confirm": true}
+  ],
+  "rubric": ["Does the reply state the local time the reminder was set for?"]
+}

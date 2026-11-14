@@ -1,0 +1,9 @@
+{
+  "id": "unknown-field",
+  "title": "Unknown field",
+  "kind": "happy",
+  "clock": {"local": "2026-03-10T08:30", "zone": "UTC"},
+  "user": {},
+  "turns": [{"say": "Hello"}],
+  "steps": [{"say": "Hello"}]
+}

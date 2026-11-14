@@ -1,0 +1,50 @@
+# Eval cases
+
+One JSON file per case, loaded by `internal/eval` (`LoadCases`). Decoding is strict: an unknown
+field fails the load, and every error names the file. Cases are synthetic and public: use
+neutral names, places and data, never a real message, trace, memory or device.
+
+```json
+{
+  "id": "sample-reminder",
+  "title": "A one-off reminder lands at the right local time",
+  "tags": ["regression", "time"],
+  "kind": "wrong-local-time",
+  "clock": {"local": "2026-03-10T08:30", "zone": "Europe/Berlin"},
+  "user": {"name": "Sam", "switches": {"schedule": true}, "memory": ["Prefers short replies."]},
+  "world": {},
+  "steps": [
+    {
+      "say": "Remind me tomorrow at 9 to call the dentist.",
+      "expect": {
+        "calls": [{"tool": "schedule_create", "args": [{"path": "when", "within": {"from": "2026-03-11T08:55", "to": "2026-03-11T09:05"}}]}],
+        "not_called": ["schedule_delete"],
+        "reply": {"language": "en"}
+      }
+    }
+  ],
+  "rubric": ["Does the reply state the local time the reminder was set for?"],
+  "trials": 3
+}
+```
+
+- `id`: unique across files, lowercase kebab case. `title` is required.
+- `kind`: the failure kind the case covers, lowercase kebab case, or `happy` for a flow that works.
+- `clock`: `local` is `YYYY-MM-DDTHH:MM` wall time in the IANA `zone`.
+- `user`: all optional: `name`, `switches` (name to bool), `memory` lines, `model`, `effort`.
+- `world`: state the tools see, keyed by provider. Each key must be a section registered by a
+  world seeder; an unknown key fails the load.
+- `steps`: at least one, played in one session. A step has exactly one action: `say` (text),
+  `confirm: true`, `reject: true`, `thumbs_down: true` (the last three act on the previous turn
+  and cannot start a case), or `run_job` (id of a scheduled job in the world).
+- `expect` (optional per step):
+  - `calls`: `{tool, min (default 1), max, args}`; each arg has a dot `path` into the tool's JSON
+    arguments and exactly one of `equals`, `contains`, `matches` (regexp) or `within`
+    (`{from, to}`, both `YYYY-MM-DDTHH:MM` or both `HH:MM`, local time);
+  - `not_called`, `max_calls`, `ordered` (calls occur in the listed order);
+  - `proposals`: `{min, max, tools}`; `no_writes`: nothing was written;
+  - `reply`: `contains`, `not_contains`, `matches` (regexps), `language` (BCP-47, such as `en`),
+    `quiet` (a scheduled run that sends nothing);
+  - `store`: checks on the final store, each an object with a `check` name.
+- `rubric`: yes/no questions for the judge, each about one dimension.
+- `trials`: runs per case, 1 to 10, default 3.

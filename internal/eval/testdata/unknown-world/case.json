@@ -1,0 +1,9 @@
+{
+  "id": "unknown-world",
+  "title": "Unknown world section",
+  "kind": "happy",
+  "clock": {"local": "2026-03-10T08:30", "zone": "UTC"},
+  "user": {},
+  "world": {"nonexistent": {}},
+  "steps": [{"say": "Hello"}]
+}
