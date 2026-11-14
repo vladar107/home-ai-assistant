@@ -12,6 +12,7 @@ import (
 )
 
 func TestAFailedStageLeavesNoFilesBehind(t *testing.T) {
+	t.Parallel()
 	store := testutil.OpenStore(t, filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
 	t.Cleanup(func() { _ = store.Close() })
 	directory := filepath.Join(t.TempDir(), "attachments")
