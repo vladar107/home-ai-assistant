@@ -14,7 +14,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/integration"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
-	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
+	"github.com/vladar107/home-ai-assistant/internal/testutil"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -59,10 +59,7 @@ type switchFixture struct {
 func newSwitchFixture(t *testing.T) *switchFixture {
 	t.Helper()
 	ctx := t.Context()
-	state, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	state := testutil.OpenStore(t, filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
 	t.Cleanup(func() { _ = state.Close() })
 	if err := state.BootstrapConfiguredPrincipals(ctx, []identity.ConfiguredPrincipal{
 		{ID: "alice", DisplayName: "Alice", TelegramUserID: 101},
@@ -76,6 +73,7 @@ func newSwitchFixture(t *testing.T) *switchFixture {
 		trains: &switchedProvider{sw: trainsSwitch, tool: "train_times", guidance: "Trains guidance."},
 		extras: &switchedProvider{sw: extrasSwitch, tool: "extra_tool", guidance: "Extras guidance."},
 	}
+	var err error
 	if f.switches, err = integration.NewSwitches(state, logger); err != nil {
 		t.Fatal(err)
 	}

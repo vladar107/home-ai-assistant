@@ -160,7 +160,7 @@ plan that links back to the earlier record.
 | 0148 | [The MCP servers' Compose project lives in this repository](0148-mcp-servers-in-this-repository.md) | done |
 | 0149 | [One Widgets switch and a shared base for widgets](0149-widgets-shared-base.md) | done |
 | 0150 | [Choosing the changes of a proposal in a widget](0150-proposal-changes-widget.md) | done |
-| 0151 | [Faster tests: one migration per process everywhere, no fixed waits](0151-faster-test-suite.md) | proposed |
+| 0151 | [Faster tests: one migration per process everywhere, no fixed waits](0151-faster-test-suite.md) | in-progress |
 | 0152 | [Home Assistant's MCP server: the device-control path and the full tool set](0152-home-assistant-mcp-one-path.md) | abandoned |
 | 0153 | [Flight status: delays, gates, and cancellations for a trip's flights](0153-flight-status.md) | proposed |
 | 0154 | [An interface language each user chooses: English or Russian](0154-interface-language.md) | proposed |

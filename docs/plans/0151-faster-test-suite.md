@@ -1,6 +1,6 @@
 # 0151 — Faster tests: one migration per process everywhere, no fixed waits
 
-Status: `proposed`
+Status: `in-progress`
 
 ## Context
 

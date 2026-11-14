@@ -8,14 +8,11 @@ import (
 	"testing"
 
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
-	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
+	"github.com/vladar107/home-ai-assistant/internal/testutil"
 )
 
 func TestAFailedStageLeavesNoFilesBehind(t *testing.T) {
-	store, err := sqlite.Open(t.Context(), filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	store := testutil.OpenStore(t, filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
 	t.Cleanup(func() { _ = store.Close() })
 	directory := filepath.Join(t.TempDir(), "attachments")
 	service, err := attachment.NewService(attachment.Config{Directory: directory}, store, slog.New(slog.NewTextHandler(io.Discard, nil)))
