@@ -86,6 +86,7 @@ func stagedChart(t *testing.T, box *outbox.Box, principalID string) {
 }
 
 func TestChartFetchesHourlyStatisticsDownsamplesThemAndStagesOnePNG(t *testing.T) {
+	t.Parallel()
 	f, box := newChartFixture(t)
 	first := start.AddDate(0, 0, -90)
 	var hours []map[string]any
@@ -135,6 +136,7 @@ func TestChartFetchesHourlyStatisticsDownsamplesThemAndStagesOnePNG(t *testing.T
 // TestChartComparesTheElapsedPartOfAMonth compares this month, two days in, with the same two
 // days of the month before, and compares a shifted series only with its own sensor.
 func TestChartComparesTheElapsedPartOfAMonth(t *testing.T) {
+	t.Parallel()
 	f, box := newChartFixture(t)
 	var days []map[string]any
 	for day := range 30 {
@@ -198,6 +200,7 @@ func TestChartComparesTheElapsedPartOfAMonth(t *testing.T) {
 }
 
 func TestChartUsesOnlyTheCallingPrincipalsHomeSwitch(t *testing.T) {
+	t.Parallel()
 	f, box := newChartFixture(t)
 	f.sim.set(func(s *simulator) {
 		s.series = map[string]map[string][]map[string]any{hallTemperatureID: {"day": weightSeries(5, func(i int) time.Time { return start.AddDate(0, 0, i-5) })}}
@@ -233,6 +236,7 @@ func TestChartUsesOnlyTheCallingPrincipalsHomeSwitch(t *testing.T) {
 }
 
 func TestChartRefusesHourlyStatisticsOverAYear(t *testing.T) {
+	t.Parallel()
 	f, _ := newChartFixture(t)
 	result := f.call(f.chartSet("alice"), "chart", map[string]any{
 		"title":  "Hall",

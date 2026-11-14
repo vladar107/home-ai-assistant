@@ -496,6 +496,7 @@ var (
 )
 
 func TestToolsCarryHaNamesAndReadOnlyTurnsGetReadsOnly(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, newSimulator(livingTV, solarToday))
 	ctx := t.Context()
 
@@ -526,6 +527,7 @@ func TestToolsCarryHaNamesAndReadOnlyTurnsGetReadsOnly(t *testing.T) {
 }
 
 func TestActionToolForwardsArgumentsToTheMCPTool(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, newSimulator(livingTV))
 	set := f.toolSet()
 
@@ -550,6 +552,7 @@ func TestActionToolForwardsArgumentsToTheMCPTool(t *testing.T) {
 }
 
 func TestLiveContextOffersOnlyTheAreaFilter(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, newSimulator(livingTV))
 	set := f.toolSet()
 
@@ -583,6 +586,7 @@ func TestLiveContextOffersOnlyTheAreaFilter(t *testing.T) {
 }
 
 func TestExposedEntityNeedingConfirmationWithholdsActions(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct {
 		exposed []string
 		label   bool
@@ -593,6 +597,7 @@ func TestExposedEntityNeedingConfirmationWithholdsActions(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			sim := newSimulator(tc.exposed...)
 			if tc.label {
 				sim.labelFrontDoor()
@@ -611,11 +616,13 @@ func TestExposedEntityNeedingConfirmationWithholdsActions(t *testing.T) {
 }
 
 func TestExposedCoverWithoutSensitiveClassKeepsActions(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, newSimulator(livingTV, "- names: Blinds\n  domain: cover\n  state: open\n  attributes:\n    device_class: blind\n"))
 	wantTools(t, f.toolSet(), actionTools)
 }
 
 func TestLabelledDeviceIsProposedAndRunsOnlyAfterConfirmation(t *testing.T) {
+	t.Parallel()
 	sim := newSimulator(livingTV, solarToday)
 	sim.labelFrontDoor()
 	f := newFixture(t, sim)
@@ -697,6 +704,7 @@ func TestLabelledDeviceIsProposedAndRunsOnlyAfterConfirmation(t *testing.T) {
 }
 
 func TestRejectedProposalPostsNothing(t *testing.T) {
+	t.Parallel()
 	sim := newSimulator(livingTV)
 	sim.labelFrontDoor()
 	f := newFixture(t, sim)
@@ -714,6 +722,7 @@ func TestRejectedProposalPostsNothing(t *testing.T) {
 }
 
 func TestConfirmationFailsWhenTheLabelWasRemovedMeanwhile(t *testing.T) {
+	t.Parallel()
 	sim := newSimulator(livingTV)
 	sim.labelFrontDoor()
 	f := newFixture(t, sim)
@@ -732,6 +741,7 @@ func TestConfirmationFailsWhenTheLabelWasRemovedMeanwhile(t *testing.T) {
 }
 
 func TestHistoryResolvesAnExposedSensorAndReportsTheUnit(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, newSimulator(livingTV, solarToday))
 	set := f.toolSet()
 
@@ -771,6 +781,7 @@ func weightSeries(count int, step func(int) time.Time) []map[string]any {
 }
 
 func TestHistoryPointsReturnsATrendWithFirstLastAndChange(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, newSimulator(livingTV, solarToday))
 	f.sim.set(func(s *simulator) {
 		s.timeZone = "Europe/Berlin"
@@ -792,6 +803,7 @@ func TestHistoryPointsReturnsATrendWithFirstLastAndChange(t *testing.T) {
 }
 
 func TestHistoryPointsOfAMeterReportTheTotal(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, newSimulator(livingTV, solarToday))
 	f.sim.set(func(s *simulator) {
 		s.timeZone = "Europe/Berlin"
@@ -809,6 +821,7 @@ func TestHistoryPointsOfAMeterReportTheTotal(t *testing.T) {
 }
 
 func TestHistoryPointsUseACoarserBucketAboveSixtyPoints(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, newSimulator(solarToday))
 	f.sim.set(func(s *simulator) {
 		s.series = map[string]map[string][]map[string]any{"sensor.solar_production_today": {
@@ -828,6 +841,7 @@ func TestHistoryPointsUseACoarserBucketAboveSixtyPoints(t *testing.T) {
 }
 
 func TestHistoryRefreshesOnceForANameMissAndNotAgainWithinThirtySeconds(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, newSimulator(livingTV, solarToday))
 	set := f.toolSet()
 	before := f.sim.listRequests()
@@ -860,6 +874,7 @@ func TestHistoryRefreshesOnceForANameMissAndNotAgainWithinThirtySeconds(t *testi
 }
 
 func TestHistoryRefusesUnknownSensorsAndPeriods(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, newSimulator(livingTV, solarToday, frontDoor))
 	f.sim.set(func(s *simulator) { s.liveContext = overviewTop + livingTV + solarToday })
 	set := f.toolSet()
@@ -879,6 +894,7 @@ func TestHistoryRefusesUnknownSensorsAndPeriods(t *testing.T) {
 }
 
 func TestHistoryAsksForAClearerNameWhenSeveralSensorsMatch(t *testing.T) {
+	t.Parallel()
 	other := "- names: Solar production total\n  domain: sensor\n  state: '120'\n"
 	f := newFixture(t, newSimulator(solarToday, other))
 	result := f.call(f.toolSet(), "ha_history", map[string]any{"name": "solar production", "period": "today"})
@@ -889,6 +905,7 @@ func TestHistoryAsksForAClearerNameWhenSeveralSensorsMatch(t *testing.T) {
 }
 
 func TestSwitchIsOnByDefaultAndPerUser(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, newSimulator(livingTV))
 	ctx := t.Context()
 
@@ -918,6 +935,7 @@ func TestSwitchIsOnByDefaultAndPerUser(t *testing.T) {
 // A proposal made while the home was on and confirmed after the user turned it off is not run,
 // whichever home tool proposed it.
 func TestConfirmedActionIsRefusedWhileTheHomeIsOff(t *testing.T) {
+	t.Parallel()
 	proposals := map[string]func(*fixture){
 		"service call": func(f *fixture) {
 			f.call(f.toolSet(), "ha_service_call", map[string]any{"entity_id": "lock.front_door", "service": "unlock"})
@@ -929,6 +947,7 @@ func TestConfirmedActionIsRefusedWhileTheHomeIsOff(t *testing.T) {
 	}
 	for name, propose := range proposals {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			sim := newSimulator(livingTV)
 			sim.labelFrontDoor()
 			f := newFixture(t, sim)
@@ -959,6 +978,7 @@ func TestConfirmedActionIsRefusedWhileTheHomeIsOff(t *testing.T) {
 }
 
 func TestHomeAssistantBeingDownOffersNothingWithoutFailingTheTurn(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, newSimulator(livingTV))
 	f.server.Close()
 
@@ -975,6 +995,7 @@ func TestHomeAssistantBeingDownOffersNothingWithoutFailingTheTurn(t *testing.T) 
 }
 
 func TestARefusedTokenOffersNothing(t *testing.T) {
+	t.Parallel()
 	f := newFixtureWithToken(t, newSimulator(livingTV), "not-the-household-token")
 	set, err := f.broker.ToolsFor(t.Context(), "alice")
 	if err != nil || !set.Empty() {
@@ -983,6 +1004,7 @@ func TestARefusedTokenOffersNothing(t *testing.T) {
 }
 
 func TestSnapshotIsReusedForFiveMinutesThenRefreshed(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, newSimulator(livingTV))
 
 	f.toolSet()
@@ -1003,6 +1025,7 @@ func TestSnapshotIsReusedForFiveMinutesThenRefreshed(t *testing.T) {
 }
 
 func TestStaleSnapshotKeepsServingWhileHomeAssistantRestarts(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, newSimulator(livingTV))
 	wantTools(t, f.toolSet(), readTools)
 
@@ -1017,6 +1040,7 @@ func TestStaleSnapshotKeepsServingWhileHomeAssistantRestarts(t *testing.T) {
 }
 
 func TestAnActionRefreshesTheExposureBeforeTheNextCall(t *testing.T) {
+	t.Parallel()
 	sim := newSimulator(livingTV)
 	f := newFixture(t, sim)
 	set := f.toolSet()
@@ -1028,6 +1052,7 @@ func TestAnActionRefreshesTheExposureBeforeTheNextCall(t *testing.T) {
 }
 
 func TestServiceRejectsBadConfiguration(t *testing.T) {
+	t.Parallel()
 	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
 	state := testutil.OpenStore(t, filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
 	t.Cleanup(func() { _ = state.Close() })
@@ -1069,6 +1094,7 @@ func turnOnCalls(sim *simulator) []mcpCall {
 }
 
 func TestActionRunsAtOnceWhenNothingOutsideWasRead(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, newSimulator(livingTV))
 	f.service.SetExposure(&externalFlag{})
 
@@ -1085,6 +1111,7 @@ func TestActionRunsAtOnceWhenNothingOutsideWasRead(t *testing.T) {
 }
 
 func TestActionAfterOutsideContentIsProposedAndRunsOnlyAfterConfirmation(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, newSimulator(livingTV))
 	f.service.SetExposure(&externalFlag{external: true})
 
@@ -1124,6 +1151,7 @@ func TestActionAfterOutsideContentIsProposedAndRunsOnlyAfterConfirmation(t *test
 }
 
 func TestOutsideContentWithoutAProposerRefusesTheAction(t *testing.T) {
+	t.Parallel()
 	sim := newSimulator(livingTV)
 	f := newFixture(t, sim)
 	service, err := homeassistant.NewService(homeassistant.Config{Token: token, BaseURL: f.server.URL, Now: f.clock.Now}, f.switches, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -1150,6 +1178,7 @@ func TestOutsideContentWithoutAProposerRefusesTheAction(t *testing.T) {
 }
 
 func TestConfirmedActionFailsWhenItIsNoLongerSafeToRun(t *testing.T) {
+	t.Parallel()
 	cases := map[string]func(*fixture){
 		"actions withheld": func(f *fixture) {
 			f.sim.set(func(s *simulator) { s.liveContext += frontDoor })
@@ -1157,6 +1186,7 @@ func TestConfirmedActionFailsWhenItIsNoLongerSafeToRun(t *testing.T) {
 	}
 	for name, change := range cases {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			f := newFixture(t, newSimulator(livingTV))
 			f.service.SetExposure(&externalFlag{external: true})
 			f.call(f.toolSet(), "ha_turn_on", map[string]any{"name": "Living TV"})
@@ -1215,6 +1245,7 @@ func definitionOf(t *testing.T, set agentruntime.ToolSet, name string) agentrunt
 }
 
 func TestScriptLabelledAssistantReadIsAReadAndRunsAtOnceInAnExposedConversation(t *testing.T) {
+	t.Parallel()
 	sim := newSimulator(livingTV)
 	sim.labelScripts()
 	f := newFixture(t, sim)
@@ -1244,6 +1275,7 @@ func TestScriptLabelledAssistantReadIsAReadAndRunsAtOnceInAnExposedConversation(
 }
 
 func TestUnlabelledScriptIsStillProposedInAnExposedConversation(t *testing.T) {
+	t.Parallel()
 	sim := newSimulator(livingTV)
 	sim.labelScripts()
 	f := newFixture(t, sim)
@@ -1269,6 +1301,7 @@ func TestUnlabelledScriptIsStillProposedInAnExposedConversation(t *testing.T) {
 // A script's name is chosen by whoever wrote it, so one named like a read still acts until it
 // carries the read label.
 func TestUnlabelledScriptNamedLikeAReadStaysAWrite(t *testing.T) {
+	t.Parallel()
 	sim := newSimulator(livingTV)
 	sim.labelScripts()
 	f := newFixture(t, sim)
@@ -1293,6 +1326,7 @@ func TestUnlabelledScriptNamedLikeAReadStaysAWrite(t *testing.T) {
 }
 
 func TestScriptLabelledBothReadAndConfirmStaysAWrite(t *testing.T) {
+	t.Parallel()
 	sim := newSimulator(livingTV)
 	sim.labelScripts()
 	f := newFixture(t, sim)
@@ -1312,6 +1346,7 @@ func TestScriptLabelledBothReadAndConfirmStaysAWrite(t *testing.T) {
 }
 
 func TestScriptWithBothLabelsStaysAWriteBeforeItHasAState(t *testing.T) {
+	t.Parallel()
 	sim := newSimulator(livingTV)
 	sim.labelScripts()
 	sim.set(func(s *simulator) {
@@ -1325,6 +1360,7 @@ func TestScriptWithBothLabelsStaysAWriteBeforeItHasAState(t *testing.T) {
 }
 
 func TestRenamedReadLabelNoLongerMakesAScriptARead(t *testing.T) {
+	t.Parallel()
 	sim := newSimulator(livingTV)
 	sim.labelScripts()
 	sim.set(func(s *simulator) {
@@ -1342,6 +1378,7 @@ func TestRenamedReadLabelNoLongerMakesAScriptARead(t *testing.T) {
 }
 
 func TestScriptWithoutAResponseKeepsItsResultText(t *testing.T) {
+	t.Parallel()
 	sim := newSimulator(livingTV)
 	sim.labelScripts()
 	sim.set(func(s *simulator) { s.scriptResult = "null" })
@@ -1354,6 +1391,7 @@ func TestScriptWithoutAResponseKeepsItsResultText(t *testing.T) {
 }
 
 func TestScriptStaysAWriteWhenTheLabelsCannotBeRead(t *testing.T) {
+	t.Parallel()
 	sim := newSimulator(livingTV)
 	sim.labelScripts()
 	sim.set(func(s *simulator) { s.labelsFail = true })
@@ -1370,6 +1408,7 @@ func TestScriptStaysAWriteWhenTheLabelsCannotBeRead(t *testing.T) {
 }
 
 func TestOneStringResultObjectComesBackAsPlainText(t *testing.T) {
+	t.Parallel()
 	sim := newSimulator(livingTV)
 	sim.labelScripts()
 	f := newFixture(t, sim)
@@ -1393,6 +1432,7 @@ func TestOneStringResultObjectComesBackAsPlainText(t *testing.T) {
 }
 
 func TestProposalSummaryShowsArgumentsAsFieldLines(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, newSimulator(livingTV))
 	f.service.SetExposure(&externalFlag{external: true})
 

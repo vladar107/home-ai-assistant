@@ -89,6 +89,7 @@ func freezerWatch(condition watch.Condition) watch.Watch {
 func number(value float64) *float64 { return &value }
 
 func TestHomeWatchStateConditionAlertsWithSeededDuration(t *testing.T) {
+	t.Parallel()
 	f := homeFixture(t, balconyDoor)
 	ctx := t.Context()
 	occ := watch.Occurrence{Cache: watch.NewCache()}
@@ -121,6 +122,7 @@ func TestHomeWatchStateConditionAlertsWithSeededDuration(t *testing.T) {
 }
 
 func TestHomeWatchStateKeepsItsStartWhenLastChangedJumpsWhileHolding(t *testing.T) {
+	t.Parallel()
 	f := homeFixture(t, balconyDoor)
 	began := start.Add(-30 * time.Minute)
 	setEntity(f, "binary_sensor.balcony_door", "on", start.Add(-time.Minute))
@@ -134,6 +136,7 @@ func TestHomeWatchStateKeepsItsStartWhenLastChangedJumpsWhileHolding(t *testing.
 }
 
 func TestHomeWatchNumericConditionsCountFromFirstCheck(t *testing.T) {
+	t.Parallel()
 	f := homeFixture(t, freezer)
 	ctx := t.Context()
 	above := freezerWatch(watch.Condition{Above: number(-15), ForMinutes: 5})
@@ -171,6 +174,7 @@ func TestHomeWatchNumericConditionsCountFromFirstCheck(t *testing.T) {
 }
 
 func TestHomeWatchUnavailableStateFailsTheCheck(t *testing.T) {
+	t.Parallel()
 	f := homeFixture(t, balconyDoor, freezer)
 	setEntity(f, "binary_sensor.balcony_door", "unavailable", start)
 	setEntity(f, "sensor.freezer", "unavailable", start)
@@ -188,6 +192,7 @@ func TestHomeWatchUnavailableStateFailsTheCheck(t *testing.T) {
 }
 
 func TestHomeWatchResolve(t *testing.T) {
+	t.Parallel()
 	f := homeFixture(t, balconyDoor, freezer, hallLamp)
 	f.sim.set(func(s *simulator) {
 		s.registry = append(s.registry, map[string]any{"ei": "sensor.washing_machine", "lb": []string{"assistant_confirm"}})
@@ -211,6 +216,7 @@ func TestHomeWatchResolve(t *testing.T) {
 }
 
 func TestHomeWatchResolveRefusesUnknownAndInvisible(t *testing.T) {
+	t.Parallel()
 	f := homeFixture(t, balconyDoor, freezer)
 	ctx := t.Context()
 	state := &watch.Condition{State: []string{"open"}}
@@ -230,6 +236,7 @@ func TestHomeWatchResolveRefusesUnknownAndInvisible(t *testing.T) {
 }
 
 func TestHomeWatchResolveRefusesAmbiguousName(t *testing.T) {
+	t.Parallel()
 	f := homeFixture(t, hallLamp)
 	f.sim.set(func(s *simulator) {
 		s.registry = append(s.registry,
@@ -243,6 +250,7 @@ func TestHomeWatchResolveRefusesAmbiguousName(t *testing.T) {
 }
 
 func TestHomeWatchResolveRequiresNumericStateForThresholds(t *testing.T) {
+	t.Parallel()
 	f := homeFixture(t, washingMachine, freezer)
 	_, err := f.service.Resolve(t.Context(), "alice", watch.Spec{Target: watch.Target{Name: "Washing machine"}, Condition: &watch.Condition{Above: number(1)}})
 	if err == nil || !strings.Contains(err.Error(), "not a number") {
@@ -255,6 +263,7 @@ func TestHomeWatchResolveRequiresNumericStateForThresholds(t *testing.T) {
 }
 
 func TestHomeWatchFailsWhenEntityStopsBeingExposed(t *testing.T) {
+	t.Parallel()
 	f := homeFixture(t, balconyDoor, freezer)
 	if _, err := f.service.Evaluate(t.Context(), "alice", doorWatch(0), watch.Occurrence{Cache: watch.NewCache()}); err != nil {
 		t.Fatal(err)
@@ -268,6 +277,7 @@ func TestHomeWatchFailsWhenEntityStopsBeingExposed(t *testing.T) {
 }
 
 func TestHomeWatchSkipsWhileTheHomeIsOff(t *testing.T) {
+	t.Parallel()
 	f := homeFixture(t, balconyDoor)
 	if err := f.switches.SetEnabled(t.Context(), "alice", homeassistant.Switch, false); err != nil {
 		t.Fatal(err)
@@ -288,6 +298,7 @@ func TestHomeWatchSkipsWhileTheHomeIsOff(t *testing.T) {
 }
 
 func TestHomeWatchesShareOneStatesRequestPerCycle(t *testing.T) {
+	t.Parallel()
 	f := homeFixture(t, balconyDoor, freezer)
 	cache := watch.NewCache()
 	for _, w := range []watch.Watch{doorWatch(0), freezerWatch(watch.Condition{Above: number(-15)}), doorWatch(5)} {
@@ -308,6 +319,7 @@ func TestHomeWatchesShareOneStatesRequestPerCycle(t *testing.T) {
 }
 
 func TestHomeWatchResolveMapsBinarySensorWords(t *testing.T) {
+	t.Parallel()
 	f := homeFixture(t, balconyDoor)
 	ctx := t.Context()
 	resolve := func(states ...string) (watch.Spec, error) {
@@ -337,6 +349,7 @@ func TestHomeWatchResolveMapsBinarySensorWords(t *testing.T) {
 }
 
 func TestHomeWatchResolveChecksStatesAgainstTheSensorsOptions(t *testing.T) {
+	t.Parallel()
 	f := homeFixture(t, robotStatus, washingMachine)
 	ctx := t.Context()
 
