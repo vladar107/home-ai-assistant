@@ -19,6 +19,7 @@ flowchart TB
     notion["Notion"]
     google["Google<br/>Gmail, Calendar"]
     ns["NS API<br/>Dutch trains"]
+    aerodatabox["AeroDataBox on RapidAPI<br/>flight status"]
     ha["Home Assistant<br/>MCP server, Assist API"]
     meteo["Open-Meteo<br/>weather"]
     ovapi["OVapi<br/>live buses, notices"]
@@ -35,6 +36,7 @@ flowchart TB
     agent -->|read, confirmed writes| notion
     agent -->|read-only, several accounts per user| google
     agent -->|trips, departures, disruptions, OV-fiets| ns
+    agent -->|flight numbers and dates, one operator key| aerodatabox
     agent -->|reads, device actions, confirmed service calls| ha
     agent -->|forecasts| meteo
     agent -->|departures, stop list, notices| ovapi
@@ -158,6 +160,7 @@ flowchart TB
         calendar["calendar"]
         nasc["nas"]
         nsc["ns"]
+        flightsc["flights<br/>flight status, unit budget"]
         hac["homeassistant<br/>MCP tools, history, confirmed calls"]
         grafanac["grafana<br/>dashboards, metrics, logs"]
         busc["bus"]
@@ -248,6 +251,7 @@ flowchart TB
     broker --> routes
     approval --> routes
     routes --> nsc & busc & store
+    trip --> flightsc
     tg --> coll
     broker --> coll
     approval --> coll
@@ -650,6 +654,43 @@ lines, notices, the scan's line) is English, and that is what
 `trip_updates_sent` stores for a calendar change, because the next check's
 prompt replays it. A mail or web item is written by the check's turn in the
 sample's language and stored as written.
+
+The same loop follows the flights of planned trips (`trip.Flights`), without a
+model turn, while the owner has the Trips scan and the Flight status switch on.
+`trip` declares a `FlightLookup`, which the wiring adapts to the `flights`
+connector, as it does the calendar reader. A flight booking with a number is
+first looked up 38 hours before its stored departure: the stored time is not
+trusted as an instant, since `trip_add` reads times in the trip's zone, so the
+lookup asks for its date in that zone at either end, and once more for the
+neighbouring day when no leg matches. The leg whose scheduled departure is the
+stored instant, or reads at its origin as the stored wall-clock time, within 30
+minutes, is the booking's; else the only leg returned. From then on the leg is
+looked up on fixed slots counted from its scheduled departure D and expected
+arrival A (D-24h, which the match serves; D-6h, unless it falls at night at
+the origin; D-3h, D-90 min, D-45 min, D-15 min, D+30 min, and A+20 min), so
+every trip following one leg is due at the same slot and the connector's
+five-minute cache serves the second. A leg without live data is looked up only
+at D-24h and D-3h. When the budget left in the period cannot cover the slots
+still ahead, D-6h, then D+30, then D-90 are dropped. At most one lookup runs at
+a time, in its own goroutine; its messages are sent from another, so a
+rewrite into the tab's language never holds up the next lookup.
+
+Each lookup is compared in code with the last one stored in `trip_flights`: a
+delay of 15 minutes or more, a move of a reported delay by 15 minutes or back
+under it, a gate or terminal change (a first gate only within four hours of
+departure), a cancellation, which ends the tracking, a possible cancellation,
+and a diversion. The first lookup is a silent baseline but for a cancellation, a
+diversion, or a delay. One message per lookup goes to the trip's tab, rewritten
+as above, with `Flight data: AeroDataBox (aerodatabox.com)` added after the
+rewrite so it is never translated or dropped; each change is recorded in
+`trip_updates_sent` with source `flight` and a reference of the designator, the
+leg's day, the field, and the lookup's time, and the next turn hears of it as
+outside content. Two failed slots in a row from D-3h, a flight not found, and a
+leg without live data are each said once per leg. A spent allowance pauses every
+lookup until the period ends and is said once per user and period in a trip's
+tab (`trip_flight_pauses`). The hourly prune empties a leg's stored lookup and
+the text of its changes a week after the leg ends, keeping the designator, the
+day, and the airport codes.
 
 ### Scheduled jobs in conversation
 
@@ -1198,6 +1239,40 @@ principal's home or Grafana switch, and the Grafana allowlist. `chart` and the
 day card share the Inter fonts in `internal/fonts` and stage through the outbox's
 stage-once rule: a run of a turn stages one image, and a second fails rather than
 replacing the first.
+
+### Flight status
+
+`flights` looks a flight up by its number and local day on AeroDataBox through
+RapidAPI, with one operator key for the household (`HOME_AGENT_FLIGHTS_API_KEY`
+or its file) and a per-user "Flight status" switch, on by default. The key is
+sent only in RapidAPI's headers; image, position, and flight plan are never asked
+for, redirects are refused, and there is no proxy. A number is normalised before
+it is sent (`EX 0123` is `EX123`), and anything else sends nothing. Every
+attempt, retries included, reserves its two units before it goes out: a
+transport under `httpretry` takes them, in one SQLite transaction, from the
+period's counters in `flight_lookup_units` (every lookup, the tool's lookups,
+and each user's), and refuses without a request once one would pass its limit.
+The budget (`HOME_AGENT_FLIGHTS_MONTHLY_UNITS`, 340 by default) gives the tool
+a share of 10/34 and each user 5/34, 100 and 50 at the default; tracking may
+use all of it. The period starts at 00:00 UTC on
+`HOME_AGENT_FLIGHTS_QUOTA_RESET_DAY`, which must be the subscription's day. A 402, a quota
+refusal, or a remaining count below one lookup marks the period spent in
+`flight_lookup_periods`; a 401 or a 403 (a key not subscribed to the API) stops every lookup
+until restart and shows Flight status as unavailable in `/settings`. The
+same transport spaces requests two seconds apart. A refused key stops every
+lookup until restart. Results, and a flight not found, are cached for five
+minutes by number, day, and role, whoever asked.
+
+`flight_status(flight_number, date?)` is a read tool, so scheduled turns have it
+too. The date is the departure's, local to the origin, today in the household
+zone by default, and at most seven days away; one further is refused without a
+lookup. Each leg starts with a status phrase the guidance tells the model to
+copy, and the result ends with the source line. A tool call that returned
+flight data marks its run (`tools.Run.Attribute`), and the chat reply or
+scheduled report of that run gets the source line appended when it does not
+already name aerodatabox.com, since the free plan's terms ask for visible
+attribution. `home_agent.flights.lookups` counts lookups by purpose and outcome
+and `home_agent.flights.units` shows the period's used units against the budget.
 
 ### Departure checks
 

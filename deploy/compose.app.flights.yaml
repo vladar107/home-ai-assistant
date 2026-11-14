@@ -1,0 +1,16 @@
+# Flight status from AeroDataBox on RapidAPI. Applied on top of compose.app.yaml only when
+# HOME_AGENT_FLIGHTS_ENABLED is true, so a deployment without the feature needs no RapidAPI key on
+# the NAS.
+services:
+  home-agent:
+    environment:
+      HOME_AGENT_FLIGHTS_API_KEY_FILE: /run/secrets/flights-api-key
+      HOME_AGENT_FLIGHTS_MONTHLY_UNITS: ${HOME_AGENT_FLIGHTS_MONTHLY_UNITS:-340}
+      HOME_AGENT_FLIGHTS_QUOTA_RESET_DAY: ${HOME_AGENT_FLIGHTS_QUOTA_RESET_DAY:-1}
+    secrets:
+      - source: flights-api-key
+        target: flights-api-key
+
+secrets:
+  flights-api-key:
+    file: ${HOME_AGENT_SECRETS_PATH:?set HOME_AGENT_SECRETS_PATH}/flights-api-key

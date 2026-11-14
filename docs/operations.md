@@ -176,6 +176,7 @@ that user turns it on or off for themselves. Optional Compose overlays
 | Google (Gmail, Calendar) | `HOME_AGENT_GOOGLE_ENABLED=true`, `HOME_AGENT_GOOGLE_CLIENT_ID` | `scripts/keychain-set-secret home-agent.google-client-secret` | Desktop-app OAuth client in a published Google project (no logo, so no verification) with the Gmail and Calendar APIs enabled and `gmail.readonly` and `calendar.readonly` on the consent screen. Each user connects any number of accounts by pasting the failed `localhost` redirect URL into the chat, then switches Mail and Calendar per account in `/settings`. |
 | Web | `HOME_AGENT_WEB_ENABLED=true`, optional `HOME_AGENT_WEATHER_HOME` | none | Search runs on the user's own subscription through the vendored `pi-web-search` extension; weather uses Open-Meteo. Locally set `HOME_AGENT_PI_WEB_SEARCH_EXTENSION=<repo>/third_party/pi-web-search/src/index.ts`. Re-check live search on every Pi upgrade. Each query is checked by the application first (see the architecture's security model); `home_agent_search_checks` counts decisions by `verdict` (`allow`, `confirm`, `deny`) and `reason`. |
 | NS trains | `HOME_AGENT_NS_ENABLED=true` | Keychain `ns.api-key` (Ns-App product at apiportal.ns.nl) | The same subscription must also include OV-fiets (the places API) for `ns_ovfiets`; without it, that tool answers that the subscription lacks OV-fiets while the other NS tools keep working. |
+| Flight status | `HOME_AGENT_FLIGHTS_ENABLED=true`, optional `HOME_AGENT_FLIGHTS_MONTHLY_UNITS` (340) and `HOME_AGENT_FLIGHTS_QUOTA_RESET_DAY` (1); locally `HOME_AGENT_FLIGHTS_API_KEY` or `HOME_AGENT_FLIGHTS_API_KEY_FILE` | `scripts/keychain-set-secret aerodatabox.api-key`, synced as Docker secret `flights-api-key` | AeroDataBox on RapidAPI's free Basic plan; see the setup below. `flight_status` answers questions, and the trips loop follows the flights of tracked trips on their day of travel. Per-user "Flight status" switch, on by default. |
 | Home Assistant | `HOME_AGENT_HA_ENABLED=true`; locally `HOME_AGENT_HA_TOKEN`, optional `HOME_AGENT_HA_URL` (default `https://ha.home`) | Keychain `home-assistant.token`, synced as Docker secret `ha-token` | One household long-lived token; see the setup below. The overlay `deploy/compose.app.homeassistant.yaml` reaches Home Assistant at `http://homeassistant:8123` through host-gateway, because it uses host networking and the NAS cannot reach the Caddy macvlan edge. Per-user "Home" switch in `/settings`, on by default. |
 | Grafana | `HOME_AGENT_GRAFANA_ENABLED=true`, `HOME_AGENT_GRAFANA_PRINCIPALS`; locally `HOME_AGENT_GRAFANA_TOKEN`, `HOME_AGENT_GRAFANA_URL` (default `http://grafana:3000`), `HOME_AGENT_GRAFANA_PRINCIPALS` | Keychain `grafana.home-agent-token`, synced as Docker secret `grafana-token` | Read-only dashboards, PromQL, and LogQL for the named principals only; nobody else sees it in `/settings`. See the setup below. The overlay `deploy/compose.app.grafana.yaml` reaches Grafana by service name over `home-observability`. Per-user "Monitoring" switch, on by default. |
 | Buses | `HOME_AGENT_BUS_ENABLED=true`, `HOME_AGENT_BUS_HOME_STOP`, optional `HOME_AGENT_BUS_CONTACT` | none | Live data from OVapi (plain HTTP, no key); the stop list is read daily from OVapi's GTFS archive by range requests. The home stop is any timing point code of the stop (`stop_code` in GTFS `stops.txt`). Planned trips and boards for stops OVapi has no live data for go to Transitous; set the contact, which its terms ask for, to label those requests. Its use is private and non-commercial. |
@@ -189,6 +190,43 @@ that user turns it on or off for themselves. Optional Compose overlays
 | MCP servers | On the NAS `HOME_AGENT_MCP_SERVERS_FILE_PATH`, `HOME_AGENT_MCP_NETWORK`, optional `HOME_AGENT_MCP_SERVERS_SOURCE` (default `deploy/mcp-servers.json`); locally `HOME_AGENT_MCP_SERVERS_FILE` | none for the deployment; a `key` server takes each user's own key, connected in `/settings` | The servers the operator lists in a catalog, each with a per-user switch that is off by default; only allowlisted read tools are offered, and their results count as outside content. The overlay `deploy/compose.app.mcp.yaml` mounts the catalog and joins the sidecar project's client network, which may hold only the application and the operator's relays. See MCP servers below. |
 
 After changing a secret, run `scripts/nas-sync-secrets` and redeploy.
+
+### Flight status setup
+
+1. Create a RapidAPI account and subscribe to AeroDataBox's free Basic plan.
+   It needs no card and cannot bill: past its 400 units a month RapidAPI
+   refuses. Its terms allow no commercial use and ask for attribution, which the
+   assistant adds wherever a user reads flight data.
+2. Note the day of the month you subscribed: RapidAPI renews the units on that
+   anniversary, not on the 1st. Set `HOME_AGENT_FLIGHTS_QUOTA_RESET_DAY` to it. The
+   assistant's period starts at 00:00 UTC that day; RapidAPI's own remaining count
+   stops lookups in the hours before the renewal's time.
+3. Store the application key: `scripts/keychain-set-secret aerodatabox.api-key`.
+4. Set `HOME_AGENT_FLIGHTS_ENABLED=true` in `deploy/.env.nas`, run
+   `scripts/nas-sync-secrets`, and deploy as for NS. Locally, set
+   `HOME_AGENT_FLIGHTS_API_KEY` in `.env`.
+5. Check it: ask for a flight departing today, then compare the period's units
+   in Grafana (`home_agent_flights_units`, used against budget) with RapidAPI's
+   usage page.
+
+One lookup costs two units. The default budget of 340 units leaves 60 of the
+free plan's 400 for the operator's own checks and a count lost with the database;
+questions may use 100 of them a month and one user 50, and tracking the rest. A
+tracked leg costs eight or nine lookups. When the household budget or RapidAPI's
+quota is spent, lookups stop until the next period and each user with a flight
+in the tracking window is told once.
+
+To rotate the key, regenerate it in RapidAPI, store it again with
+`scripts/keychain-set-secret aerodatabox.api-key`, run `scripts/nas-sync-secrets`,
+and restart the application. A refused key, or one not subscribed to AeroDataBox,
+stops every lookup until a restart, logs `flights.request.failed` with
+`error_class=unauthorized` or `not_subscribed`, and shows Flight status as
+unavailable in `/settings`.
+
+The upgrade path is AeroDataBox's Pro plan, about $8 for 5,000 units a month,
+which also allows commercial use: raise `HOME_AGENT_FLIGHTS_MONTHLY_UNITS`, and the
+tool's and each user's shares grow with it. Past that, FlightAware AeroAPI's
+Personal tier would be a second implementation of the connector's provider.
 
 ### Home Assistant setup
 

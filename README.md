@@ -108,6 +108,9 @@ borrowed between users.
 - **Trains.** NS trips, departures, and disruptions, checks of the exact
   planned departures a user names, one normalized status each, and the
   OV-fiets rental bikes available now at a station.
+- **Flights.** A flight's status by its number and day: departure and arrival
+  as scheduled and as now expected, delay, gate, terminal, and whether it is
+  cancelled or diverted, from AeroDataBox, which every answer names.
 - **Home.** Reads and controls the devices exposed to Home Assistant's Assist,
   and answers from their history, as totals or as daily, weekly, or monthly
   trends. Everyday actions run immediately; sensitive devices are confirmed.
@@ -195,7 +198,16 @@ borrowed between users.
   new means no message. The message, like the trip's start and end notices, is
   in the language of the user's latest message in that tab. *Scan now* also
   checks every trip in that window at once. No separate job is created, and
-  each check uses the user's model subscription.
+  each check uses the user's model subscription. With Flight status on too, a
+  tracked trip's flights with a flight number are followed on their day of
+  travel, about eight times from a day before departure to just after landing,
+  without a model turn: a delay of 15 minutes or more, a return to on time, a
+  gate or terminal change, a cancellation, or a diversion arrives in the trip's
+  tab as one short message ending with `Flight data: AeroDataBox
+  (aerodatabox.com)`, and an unchanged flight sends nothing. Flight numbers and
+  dates go to AeroDataBox through RapidAPI, never a booking reference, name, or
+  seat; the household shares a small monthly allowance, and when it is spent
+  the user is told once and flights are not followed until it renews.
 - **Memory.** Each user has a small memory of instructions and facts that the
   assistant keeps across `/new`, scheduled runs, and restarts. Facts are saved
   at once, and so are instructions the user states, with Undo, unless the

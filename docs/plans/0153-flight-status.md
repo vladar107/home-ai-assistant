@@ -1,6 +1,6 @@
 # 0153 — Flight status: delays, gates, and cancellations for a trip's flights
 
-Status: `proposed`
+Status: `in-progress`
 
 ## Context
 
@@ -149,6 +149,9 @@ under the budget.
     cannot starve the tracking of a flight; tracking may use all of the budget.
   - One user's questions may use at most 50 units, 25 lookups, so one user cannot spend the
     household's.
+  - Decided while building: the two shares are 10/34 and 5/34 of the budget, 100 and 50 at the
+    default, so a larger budget on the Pro plan grows them instead of leaving questions at 100
+    units.
   - An attempt that cannot be reserved is not sent and returns the allowance-spent error.
   - Results are cached for five minutes by designator, day, and role, shared by the tool, every
     user's tracking, and every trip, so two household members on the same flight cost one
@@ -173,6 +176,8 @@ under the budget.
     phrase word for word; every time and gate must come from a result in this turn; a failed call
     is reported as a failed check, never as "on time"; and end the answer with the result's last
     line. The result is outside content, as NS results are.
+  - Decided while building: `delayed +N min` starts at five minutes late, as the tool reports
+    what the provider says; the tracking's threshold for a message stays at 15.
 - **Attribution is added by code where the user reads flight data.** The terms ask for visible
   attribution with a link where feasible, and a model can drop a line. So:
   - a chat or scheduled reply from a turn in which `flight_status` returned data gets
@@ -202,6 +207,10 @@ under the budget.
   - Once matched, the leg's own scheduled departure is D for the cadence, and its origin-local
     date, with `dateLocalRole=Departure`, is the day of every later lookup and of the cache key,
     the same key the tool uses. The booking itself is not changed.
+  - Decided while building: the match runs when the window opens, 38 hours before the stored
+    departure, and serves the D−24h slot, so a leg still costs eight lookups. A booking whose
+    number or stored departure changes starts over. A match whose lookup failed is tried again
+    an hour later, and one never found is given up 12 hours after the stored departure.
   - At most one lookup runs at a time, in its own goroutine, under the loop's context and joined
     at shutdown, so start and end notices are never held up.
   - Messages are sent after the lookup is done and outside the lookup goroutine. The 0146 rewrite
@@ -254,7 +263,9 @@ under the budget.
   Times are local to the airport they belong to. The message ends with the attribution line
   above. Whether something changed is decided by comparing with the stored last lookup, not by
   the sent log. Each change is then recorded as a `SentUpdate` with source `flight` and a
-  reference of designator, date, field, new value, and the lookup's time, so a gate that goes
+  reference of designator, date, field, and the lookup's time (decided while building: the new
+  value is only in the text, which the prune empties, since a gate or a time is flight data and
+  the reference is the row's key), so a gate that goes
   B7, B12, B7, B12 or a delay that comes back is reported each time, and the 0139 check's prompt
   lists what was sent. `trip_updates_sent` allows only `mail`, `web`, and `calendar` as a source,
   so its table is rebuilt to allow `flight`.
@@ -288,7 +299,8 @@ under the budget.
   `scripts/nas-sync-secrets` materialises as a Docker secret, and `HOME_AGENT_FLIGHTS_ENABLED`
   adds a `deploy/compose.app.flights.yaml` overlay. `HOME_AGENT_FLIGHTS_MONTHLY_UNITS` and
   `HOME_AGENT_FLIGHTS_QUOTA_RESET_DAY` are optional. Metrics: lookups by outcome and purpose, and
-  the period's units against the budget.
+  the period's units against the budget. The Keychain item is `aerodatabox.api-key`, synced as
+  the Docker secret `flights-api-key`.
 - **Not in this plan:** a flight row on the day card or a status widget, the provider's paid
   flight alerts, departed and landed messages, seat or booking changes, and flights not on a trip
   being followed on their own.
@@ -322,6 +334,33 @@ under the budget.
    household member is on, cover on time, delayed, cancelled, diverted, schedule-only, two legs
    under one number, and a marketing number; and this plan records the confirmed headers, quota
    behaviour, renewal day, date range, and the codeshare rule.
+
+   Confirmed by the spike, one call to the flight status endpoint on RapidAPI's Basic plan for a
+   departed flight no household member is on, and one to AeroDataBox's own gateway:
+   - the endpoint is `x-tier: Tier 2`, two units a call;
+   - RapidAPI sends `x-ratelimit-api-units-limit` (400), `x-ratelimit-api-units-remaining`, and
+     `x-ratelimit-api-units-reset`, the seconds until the subscription's period renews, about 30
+     days: the period is the subscription's anniversary, not the calendar month, so
+     `HOME_AGENT_FLIGHTS_QUOTA_RESET_DAY` must be set to the subscription's day, and the
+     marketplace's remaining count and refusal catch the hours between 00:00 UTC and the
+     anniversary's time; its request counters and the free plans' hard limit do not bind;
+   - AeroDataBox's own gateway names the remaining count `x-api-credits-remaining` and answers
+     402 once the plan's units are spent, which stops lookups as a spent budget does; RapidAPI
+     answers 403 for a key not subscribed to the API, which stops every lookup until restart,
+     is logged, and shows Flight status as unavailable in `/settings`;
+   - the answer is a JSON array; the number has a space (`EX 123`); times are
+     `{"utc":"YYYY-MM-DD HH:MMZ","local":"YYYY-MM-DD HH:MM+00:00"}`; a departed flight has
+     `status`, `codeshareStatus`, `lastUpdatedUtc`, `airline`, and at each end the airport,
+     `quality`, `scheduledTime`, `revisedTime` or `predictedTime`, `runwayTime`, and the terminal;
+     an unknown gate is left out, not null.
+
+   The fixtures in `internal/connectors/flights/testdata/` follow these shapes for made-up flights
+   (EX123, ZZ456) and fictional airports. Open, and the reason this plan stays in progress: what a
+   marketing number returns (a codeshare's operating airline is taken from the leg's
+   `airline.name`), and how a diversion names its new airport (taken from the arrival airport when
+   it differs from the one matched); both are provisional until a live codeshare and a live
+   diversion are seen. A 429 whose message names a quota is taken as the plan's quota spent and
+   any other 429 as the rate limit.
 2. **Connector client and budget.** Complex. Depends on 1's first fixtures. Files: new
    `internal/connectors/flights/` (client, provider, AeroDataBox, legs, budget, cache, service),
    `internal/config/flights.go`, migration `059_flight_lookups.sql` and its repository in
@@ -365,7 +404,11 @@ under the budget.
    period turns, and resumes at the next slot; a short budget drops slots in the order above;
    every message ends with the attribution line in English after the rewrite; a leg's stored
    lookup is gone seven days after it ends; shutdown during a lookup returns promptly; and the
-   message reaches the trip's tab in its language through the 0146 rewrite.
+   message reaches the trip's tab in its language through the 0146 rewrite. Decided while
+   building: the integration test is `internal/wiring/flights_integration_test.go`, beside the
+   adapter it drives, with the real connector over the fake AeroDataBox; the trip's tab is a
+   recording sender and the 0146 rewrite a fake rewriter through `trip.Language`, instead of the
+   Telegram simulator.
 6. **Documentation and operations.** Simple. Depends on 3 and 5. Files: `README.md` (trips,
    settings, privacy, attribution), `docs/architecture.md`, `docs/operations.md` (RapidAPI
    sign-up on the free plan, key rotation, budget and reset day, the upgrade path),
@@ -376,17 +419,22 @@ under the budget.
 ## Files affected
 
 - new `internal/connectors/flights/` with tests and fixtures
+- new `internal/flightnumber/`, the one normaliser of a flight number, which the trip package and
+  the connector both import without the connector depending on `trip`
 - `internal/config/` (new `flights.go`)
 - `internal/store/sqlite/migrations/` (`058_trip_booking_flight_number.sql`, `059_flight_lookups.sql`,
   `060_trip_flights.sql`) and the trip and budget repositories
 - `internal/trip/` (`trip.go`, `scan.go`, `service.go`, `tools.go`, `export.go`, `loop.go`, new
   `flights.go`)
-- `internal/turn` (the attribution line on a reply)
-- `internal/wiring/wiring.go`, `internal/wiring/trips.go`, `internal/wiring/export.go`
+- `internal/turn` and `internal/conversation` (the attribution line on a reply), and
+  `internal/tools/run.go` (the run that records it)
+- `internal/observability` (the lookup and unit metrics)
+- `internal/app/app.go`, `internal/wiring/wiring.go`, `internal/wiring/trips.go`,
+  `internal/wiring/export.go`
 - `internal/telegram/switch_pages.go` and the privacy line in `internal/telegram`
 - `README.md`, `docs/architecture.md`, `docs/operations.md`, `.env.example`,
   `deploy/nas.env.example`, `deploy/compose.app.flights.yaml`, `scripts/nas-sync-secrets`,
-  `scripts/deploy-app-nas`
+  `scripts/deploy-app-nas`, `scripts/keychain-set-secret`
 
 ## Validation
 
