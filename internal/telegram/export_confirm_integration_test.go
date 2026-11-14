@@ -10,6 +10,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/export"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	"github.com/vladar107/home-ai-assistant/internal/trip"
 )
@@ -92,7 +93,8 @@ func TestRestoreRefusesWhenItWouldAddOtherThanThePreviewShowed(t *testing.T) {
 	confirm, _ := approvalButtons(t, card.keyboard)
 	h.push(callbackUpdate(3, 101, card.messageID, confirm))
 	h.wantAnswer(3)
-	if edit := h.nextEdit(); !strings.Contains(edit.text, export.ErrChanged.Text) {
+	// Alice chose Russian in the seed, so the background edit of the card shows the outcome in it.
+	if edit := h.nextEdit(); !strings.Contains(edit.text, export.ErrChanged.Message.In(locale.Russian)) {
 		t.Fatalf("outcome = %q", edit.text)
 	}
 	if h.count(`SELECT count(*) FROM memory_entries WHERE principal_id = 'alice'`) != 0 {

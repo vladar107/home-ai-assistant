@@ -22,6 +22,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
@@ -687,11 +688,11 @@ func (c *Client) SendProposal(ctx context.Context, chatID int64, shown approval.
 
 func proposalKeyboard(buttons approval.Buttons) InlineKeyboard {
 	row := []InlineButton{
-		{Text: "Confirm", CallbackData: buttons.Confirm},
-		{Text: "Reject", CallbackData: buttons.Reject},
+		{Text: locale.Confirm.In(buttons.Language), CallbackData: buttons.Confirm},
+		{Text: locale.Reject.In(buttons.Language), CallbackData: buttons.Reject},
 	}
 	if buttons.Preview != "" {
-		row = append(row, InlineButton{Text: "Preview", CallbackData: buttons.Preview})
+		row = append(row, InlineButton{Text: locale.Preview.In(buttons.Language), CallbackData: buttons.Preview})
 	}
 	return InlineKeyboard{row}
 }

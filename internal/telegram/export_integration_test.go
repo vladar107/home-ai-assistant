@@ -802,7 +802,8 @@ func TestRestoreSectionThatFailsLeavesNothingBehind(t *testing.T) {
 
 	target.exec(`DROP TRIGGER refuse_bookings`)
 	_, outcome = target.restore(3, 101, data)
-	if !strings.Contains(outcome, "Restored 3 records: Trips 1, Scheduled jobs and reminders 2.") {
+	// The first restore brought back Alice's Russian, so the second outcome is shown in it.
+	if !strings.Contains(outcome, "Восстановлено: 3 записи (Поездки 1, Задания по расписанию и напоминания 2).") {
 		t.Fatalf("second outcome = %q", outcome)
 	}
 }

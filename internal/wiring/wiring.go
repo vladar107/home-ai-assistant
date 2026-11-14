@@ -515,6 +515,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	approvals.SetTelemetry(telemetry)
 	approvals.SetSwitches(switches)
 	approvals.SetWidgets(switches.Toggle(integration.WidgetsSwitch))
+	approvals.SetLanguages(in.Store)
 	a.Approvals = approvals
 	if err := a.register(ctx, Connector{Switch: &SwitchSettings{Switch: integration.WidgetsSwitch}}); err != nil {
 		return err

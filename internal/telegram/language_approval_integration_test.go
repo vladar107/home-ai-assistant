@@ -1,10 +1,12 @@
 package telegram
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 )
@@ -14,7 +16,6 @@ import (
 func TestRussianUserGetsRussianProposalWidgets(t *testing.T) {
 	t.Parallel()
 	h := newOfferHarness(t, harnessOptions{languages: true, approvalSweep: 100 * time.Millisecond})
-	h.approvals.SetLanguages(h.store)
 	if err := h.store.SaveLanguage(h.ctx, "alice", locale.Russian); err != nil {
 		t.Fatal(err)
 	}
@@ -57,12 +58,32 @@ func TestRussianUserGetsRussianProposalWidgets(t *testing.T) {
 	}
 }
 
+// With widgets off, a Russian user's proposal comes with Russian buttons whose callbacks are the
+// same as in English.
+func TestRussianUserGetsRussianProposalButtons(t *testing.T) {
+	t.Parallel()
+	h := newOfferHarness(t, harnessOptions{languages: true})
+	h.setWidgets("alice", false)
+	if err := h.store.SaveLanguage(h.ctx, "alice", locale.Russian); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.approvals.Offer(h.ctx, "alice", 101, 0, "Weekly review", 10*time.Minute, []approval.Proposal{outcomeProposal(t, "Save the note A", "Saved.", false)}); err != nil {
+		t.Fatal(err)
+	}
+	message := h.nextMessage()
+	if labels := buttonLabels(message.keyboard); !slices.Equal(labels, []string{"Подтвердить", "Отклонить"}) {
+		t.Fatalf("buttons = %q", labels)
+	}
+	if row := message.keyboard[0]; !strings.HasPrefix(row[0].CallbackData, "approval:confirm:") || !strings.HasPrefix(row[1].CallbackData, "approval:reject:") {
+		t.Fatalf("callbacks = %+v", row)
+	}
+}
+
 // A user with no language keeps the data of today: it names no language, so the widget draws from
 // the template's English labels.
 func TestEnglishWidgetDataNamesNoLanguage(t *testing.T) {
 	t.Parallel()
 	h := newOfferHarness(t, harnessOptions{languages: true})
-	h.approvals.SetLanguages(h.store)
 	_, single := h.offerWidget(10*time.Minute, outcomeProposal(t, "Save the note A", "Saved.", false))
 	if strings.Contains(single.data, "lang") || decodeWidget(t, single.data).Actions[0].Label != "Confirm" {
 		t.Fatalf("english widget data = %s", single.data)
