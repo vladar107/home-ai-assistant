@@ -285,6 +285,7 @@ func actionErrorOf(t *testing.T, err error) *approval.ActionError {
 // Each principal sees the roots configured for them and nothing else, which is the whole of the
 // per-user boundary now that one process serves both people.
 func TestRootsAreScopedToThePrincipal(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.write(f.home, "Documents/notes.md", "milk and bread")
 	f.write(f.second, "Photos/private.md", "not for alice")
@@ -309,6 +310,7 @@ func TestRootsAreScopedToThePrincipal(t *testing.T) {
 }
 
 func TestBobSeesOnlyHisOwnRoot(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.write(f.second, "Photos/holiday.md", "sunny")
 	contribution, err := f.service.Contribute(f.ctx, "bob")
@@ -329,6 +331,7 @@ func TestBobSeesOnlyHisOwnRoot(t *testing.T) {
 }
 
 func TestPrincipalWithoutRootsGetsNothing(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	contribution, err := f.service.Contribute(f.ctx, "carol")
 	if err != nil {
@@ -347,6 +350,7 @@ func TestPrincipalWithoutRootsGetsNothing(t *testing.T) {
 }
 
 func TestReadingIsTextOnlyAndResumable(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.write(f.home, "Documents/notes.md", "milk and bread")
 	f.write(f.home, "Documents/long.md", strings.Repeat("a", 20<<10))
@@ -380,6 +384,7 @@ func TestReadingIsTextOnlyAndResumable(t *testing.T) {
 }
 
 func TestPDFsAreReadAsTheirTextInWindows(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	handbook, err := os.ReadFile(filepath.Join("..", "..", "pdftext", "testdata", "handbook.pdf"))
 	if err != nil {
@@ -408,6 +413,7 @@ func TestPDFsAreReadAsTheirTextInWindows(t *testing.T) {
 
 // A symlink planted inside a root must not become a way out of it.
 func TestSymlinksCannotLeaveARoot(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	outside := t.TempDir()
 	if err := os.WriteFile(filepath.Join(outside, "secret.md"), []byte("outside the root"), 0o644); err != nil {
@@ -436,6 +442,7 @@ func TestSymlinksCannotLeaveARoot(t *testing.T) {
 }
 
 func TestSearchMatchesNamesUnderAFolder(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.write(f.home, "Documents/2026/invoice-january.pdf", "x")
 	f.write(f.home, "Documents/2026/invoice-february.pdf", "x")
@@ -456,6 +463,7 @@ func TestSearchMatchesNamesUnderAFolder(t *testing.T) {
 }
 
 func TestSavingIsOffUntilTheUserSwitchesItOn(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.files.add("alice", "att1", "scan.pdf", []byte("scanned bytes"))
 
@@ -480,6 +488,7 @@ func TestSavingIsOffUntilTheUserSwitchesItOn(t *testing.T) {
 
 // With no folder named the file lands in the user's default; the name it was sent with is kept.
 func TestSaveDefaultsToTheUsersOwnFolder(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.files.add("alice", "att1", "scan.pdf", []byte("scanned bytes"))
 	f.enableSaving()
@@ -506,6 +515,7 @@ func TestSaveDefaultsToTheUsersOwnFolder(t *testing.T) {
 
 // The user can send a document somewhere specific, and folders on the way are created with it.
 func TestSaveIntoAFolderTheUserNames(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.files.add("alice", "att1", "statement.pdf", []byte("bank statement"))
 	f.enableSaving()
@@ -528,6 +538,7 @@ func TestSaveIntoAFolderTheUserNames(t *testing.T) {
 }
 
 func TestSaveRefusesReadOnlyFoldersAndExistingNames(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.files.add("alice", "att1", "scan.pdf", []byte("scanned bytes"))
 	f.write(f.inbox, "taken.pdf", "an existing file")
@@ -558,6 +569,7 @@ func TestSaveRefusesReadOnlyFoldersAndExistingNames(t *testing.T) {
 // The read-only mount is the outer guarantee: a confirmed save still fails if the directory
 // itself refuses the write, whatever this package believed.
 func TestAReadOnlyDirectoryRefusesAConfirmedSave(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("running as root ignores directory permissions")
 	}
@@ -583,6 +595,7 @@ func TestAReadOnlyDirectoryRefusesAConfirmedSave(t *testing.T) {
 }
 
 func TestSwitchingSavingOffStopsAConfirmedSave(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.files.add("alice", "att1", "scan.pdf", []byte("scanned bytes"))
 	f.enableSaving()
@@ -603,6 +616,7 @@ func TestSwitchingSavingOffStopsAConfirmedSave(t *testing.T) {
 }
 
 func TestSaveRefusesAnAttachmentFromAnotherConversation(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.files.add("bob", "att-bob", "bob.pdf", []byte("bob's file"))
 	f.enableSaving()
@@ -615,6 +629,7 @@ func TestSaveRefusesAnAttachmentFromAnotherConversation(t *testing.T) {
 // Sending is what the user asked for when they want the file itself, and it must not depend on
 // reading: the bytes go from the mounted directory to the chat without passing through the model.
 func TestSendingAFileDeliversItsBytesUnread(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.write(f.home, "Documents/Payslip.pdf", "%PDF-1.7 payslip")
 	f.contribute()
@@ -639,6 +654,7 @@ func TestSendingAFileDeliversItsBytesUnread(t *testing.T) {
 // A file is addressed exactly as it is for reading, so every refusal that protects reading
 // protects sending too.
 func TestSendingStaysInsideTheGrant(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	outside := t.TempDir()
 	if err := os.WriteFile(filepath.Join(outside, "secret.pdf"), []byte("outside the root"), 0o644); err != nil {
@@ -664,6 +680,7 @@ func TestSendingStaysInsideTheGrant(t *testing.T) {
 // Nothing empty and nothing over the limit leaves the NAS, and each refusal says why so the model
 // can tell the user rather than retrying.
 func TestSendingRefusesEmptyAndOversizeFiles(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.write(f.home, "Documents/empty.pdf", "")
 	if err := os.WriteFile(filepath.Join(f.home, "huge.bin"), make([]byte, (20<<20)+1), 0o644); err != nil {
@@ -686,6 +703,7 @@ func TestSendingRefusesEmptyAndOversizeFiles(t *testing.T) {
 
 // A file that cannot be delivered must not leave the model believing the user has it.
 func TestAnUndeliverableFileIsReportedAsNotArrived(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.write(f.home, "Documents/report.pdf", "report")
 	f.outbox.err = errors.New("Telegram sendDocument returned HTTP status 500")
@@ -700,6 +718,7 @@ func TestAnUndeliverableFileIsReportedAsNotArrived(t *testing.T) {
 // The tool is only as available as the deployment that can deliver it, and the guidance carries
 // the household's rule: a file is opened only when its content was asked for.
 func TestSendingIsAbsentWithoutADelivererAndReadingStaysGated(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	contribution := f.contribute()
 	if !slices.Contains(names(contribution), "nas_send_file") {
@@ -735,6 +754,7 @@ func TestSendingIsAbsentWithoutADelivererAndReadingStaysGated(t *testing.T) {
 }
 
 func TestRootsListingLabelsOwnership(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, withSharedRoots)
 	roots := f.execute("nas_list_files", `{}`)
 	for _, want := range []string{
@@ -750,6 +770,7 @@ func TestRootsListingLabelsOwnership(t *testing.T) {
 }
 
 func TestSaveToASharedFolderSaysSo(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, withSharedRoots)
 	f.files.add("alice", "att1", "x.pdf", []byte("bytes"))
 	f.enableSaving()
@@ -769,6 +790,7 @@ func TestSaveToASharedFolderSaysSo(t *testing.T) {
 }
 
 func TestSaveIntoAnExistingHomeFolder(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, withWritableHome)
 	f.write(f.home, "Documents/readme.txt", "x")
 	f.files.add("alice", "att1", "scan.pdf", []byte("scanned bytes"))
@@ -790,6 +812,7 @@ func TestSaveIntoAnExistingHomeFolder(t *testing.T) {
 }
 
 func TestSaveIntoAMissingHomeFolderIsRefusedBeforeAnyProposal(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, withWritableHome)
 	f.files.add("alice", "att1", "scan.pdf", []byte("scanned bytes"))
 	f.enableSaving()
@@ -808,6 +831,7 @@ func TestSaveIntoAMissingHomeFolderIsRefusedBeforeAnyProposal(t *testing.T) {
 }
 
 func TestSaveUsesTheCaseFoundOnDisk(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, withWritableHome)
 	f.write(f.home, "Docs/readme.txt", "x")
 	f.files.add("alice", "att1", "scan.pdf", []byte("scanned bytes"))
@@ -833,6 +857,7 @@ func TestSaveUsesTheCaseFoundOnDisk(t *testing.T) {
 }
 
 func TestConfirmationCreatesNoFolderInARootWithoutCreateFolders(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, withWritableHome)
 	f.write(f.home, "Docs/readme.txt", "x")
 	f.files.add("alice", "att1", "scan.pdf", []byte("scanned bytes"))
@@ -856,6 +881,7 @@ func TestConfirmationCreatesNoFolderInARootWithoutCreateFolders(t *testing.T) {
 }
 
 func TestSaveRefusesSystemFolderNames(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, withWritableHome)
 	f.write(f.home, "@Recycle/readme.txt", "x")
 	f.files.add("alice", "att1", "scan.pdf", []byte("scanned bytes"))

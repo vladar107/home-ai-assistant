@@ -6,6 +6,7 @@ import (
 )
 
 func TestParseLocationRefusesAnythingButAPlainRelativePath(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ path, want string }{
 		{"", "a path is required"},
 		{"/home/Documents", "not with /"},
@@ -27,6 +28,7 @@ func TestParseLocationRefusesAnythingButAPlainRelativePath(t *testing.T) {
 }
 
 func TestParseLocationResolvesRootAndPath(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ raw, root, path string }{
 		{"home", "home", ""},
 		{"home/", "home", ""},
@@ -45,6 +47,7 @@ func TestParseLocationResolvesRootAndPath(t *testing.T) {
 }
 
 func TestAncestorsParentAndName(t *testing.T) {
+	t.Parallel()
 	location := Location{Root: "inbox", Path: "receipts/2026/scan.pdf"}
 	ancestors := location.Ancestors()
 	if len(ancestors) != 2 || ancestors[0].String() != "inbox/receipts" || ancestors[1].String() != "inbox/receipts/2026" {
@@ -65,6 +68,7 @@ func TestAncestorsParentAndName(t *testing.T) {
 // safeName has to accept whatever name the sender's device chose, without letting it become a
 // path or an unusable segment.
 func TestSafeNameProducesOneUsableSegment(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ raw, want string }{
 		{"scan.pdf", "scan.pdf"},
 		{"../../etc/passwd", "..-..-etc-passwd"},

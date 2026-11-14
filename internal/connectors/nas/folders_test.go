@@ -19,6 +19,7 @@ func foldersMake(f *fixture, directory string, paths ...string) {
 }
 
 func TestFolderTreeListsFoldersOnly(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	foldersMake(f, f.home, "Documents/Finance", "Photos")
 	f.write(f.home, "Documents/notes.md", "x")
@@ -33,6 +34,7 @@ func TestFolderTreeListsFoldersOnly(t *testing.T) {
 }
 
 func TestFolderTreeStopsAtTheRequestedDepthAndSaysSo(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	foldersMake(f, f.home, "A/B/C/D", "Flat")
 	f.contribute()
@@ -56,6 +58,7 @@ func TestFolderTreeStopsAtTheRequestedDepthAndSaysSo(t *testing.T) {
 }
 
 func TestFolderTreeSkipsSystemFoldersAndSymlinks(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	foldersMake(f, f.home, "Real", ".hidden/Inner", "@recycle", "#snapshot")
 	outside := t.TempDir()
@@ -71,6 +74,7 @@ func TestFolderTreeSkipsSystemFoldersAndSymlinks(t *testing.T) {
 }
 
 func TestFolderTreeFailsForAMissingPath(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.contribute()
 	for _, path := range []string{"home/Nowhere", "nowhere"} {
@@ -81,6 +85,7 @@ func TestFolderTreeFailsForAMissingPath(t *testing.T) {
 }
 
 func TestFolderTreeIsBoundedAndSaysSo(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	for index := range 1500 {
 		foldersMake(f, f.home, fmt.Sprintf("folder-with-a-fairly-long-name-%04d", index))
@@ -94,6 +99,7 @@ func TestFolderTreeIsBoundedAndSaysSo(t *testing.T) {
 }
 
 func TestFolderTreeIsOfferedWithoutWrites(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	if !slices.Contains(names(f.contribute()), "nas_list_folders") {
 		t.Fatal("the folder tree tool was not offered")
