@@ -879,7 +879,7 @@ func utf16Units(text string) int {
 // newsLine is one item as its message shows it and as the next check's prompt replays it. An item
 // stored before mail and web items became one sentence still has a title, which opens it.
 func newsLine(update SentUpdate) string {
-	if update.Source == UpdateSourceCalendar {
+	if update.Source == UpdateSourceCalendar || update.Source == UpdateSourceFlight {
 		return update.Text
 	}
 	line := fmt.Sprintf("%s (%s): ", update.Origin, update.Source)
@@ -906,7 +906,15 @@ func NewUpdateNotices() *UpdateNotices {
 }
 
 func (n *UpdateNotices) remember(principalID, title, message string) {
-	text := fmt.Sprintf("You sent the user this news about their trip %q in its tab, written from mail, web pages, and their calendar:\n%s", title, message)
+	n.keep(principalID, fmt.Sprintf("You sent the user this news about their trip %q in its tab, written from mail, web pages, and their calendar:\n%s", title, message))
+}
+
+// rememberFlight keeps a flight status message, whose data comes from the flight status provider.
+func (n *UpdateNotices) rememberFlight(principalID, title, message string) {
+	n.keep(principalID, fmt.Sprintf("You sent the user this flight status about their trip %q in its tab, from AeroDataBox flight data:\n%s", title, message))
+}
+
+func (n *UpdateNotices) keep(principalID, text string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	notices := append(n.pending[principalID], text)

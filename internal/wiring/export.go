@@ -55,6 +55,8 @@ var ExcludedFromExport = map[string]string{
 	"trip_scans":                  "how far the trips check has read",
 	"trip_updates_sent":           "what the trip update check has sent",
 	"trip_update_states":          "what the trip update check has seen",
+	"trip_flights":                "what the flight tracking has seen",
+	"trip_flight_pauses":          "what the flight tracking has said",
 	"backlog_items":               "development ideas, which /backlog export gives out",
 }
 

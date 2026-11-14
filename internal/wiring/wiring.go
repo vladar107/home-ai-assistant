@@ -903,7 +903,17 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	if a.Watches != nil {
 		paused = append(paused, a.Watches)
 	}
-	tripLoop, err := trip.NewLoop(trip.LoopConfig{Now: in.Core.Now, Updates: tripUpdates}, tripService, paused, tripSender, in.Logger)
+	loopConfig := trip.LoopConfig{Now: in.Core.Now, Updates: tripUpdates}
+	if a.Flights != nil {
+		// Flight messages are rewritten without their source line, which follows untranslated, so
+		// they go to the tabs as they are.
+		loopConfig.Flights, err = trip.NewFlights(trip.FlightsConfig{Now: in.Core.Now, Language: tripLanguage, Attribution: flights.Attribution},
+			in.Store, in.Store, in.Store, tripFlights{service: a.Flights}, a.tripState, tabs.Trips, tripUpdateNotices, in.Logger)
+		if err != nil {
+			return fmt.Errorf("initialize flight tracking: %w", err)
+		}
+	}
+	tripLoop, err := trip.NewLoop(loopConfig, tripService, paused, tripSender, in.Logger)
 	if err != nil {
 		return fmt.Errorf("initialize trip loop: %w", err)
 	}

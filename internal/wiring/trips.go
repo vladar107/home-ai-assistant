@@ -2,9 +2,11 @@ package wiring
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/connectors/calendar"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/flights"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/google"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/trip"
@@ -110,4 +112,73 @@ func (s *tripScanState) readable(ctx context.Context, principalID string, test f
 		}
 	}
 	return false, nil
+}
+
+// tripFlights adapts the flight status connector to what the trips loop needs to follow flights.
+// Its lookups count as tracking, against the household budget alone.
+type tripFlights struct {
+	service *flights.Service
+}
+
+func (t tripFlights) LookUpFlight(ctx context.Context, designator, day string, anyEnd bool) ([]trip.FlightLeg, error) {
+	role := flights.RoleDeparture
+	if anyEnd {
+		role = flights.RoleBoth
+	}
+	legs, err := t.service.Lookup(ctx, flights.Request{Designator: designator, Day: day, Role: role, Purpose: flights.PurposeTracking})
+	var spent *flights.SpentError
+	switch {
+	case errors.Is(err, flights.ErrNotFound):
+		return nil, trip.ErrFlightNotFound
+	case errors.As(err, &spent):
+		return nil, &trip.FlightPausedError{Until: spent.Until, Text: flights.PausedText(spent.Until)}
+	case err != nil:
+		return nil, err
+	}
+	found := make([]trip.FlightLeg, 0, len(legs))
+	for _, leg := range legs {
+		found = append(found, tripLeg(leg))
+	}
+	return found, nil
+}
+
+func (t tripFlights) FlightStatusEnabled(ctx context.Context, principalID string) (bool, error) {
+	return t.service.Enabled(ctx, principalID)
+}
+
+func (t tripFlights) FlightUnitsLeft(ctx context.Context) (int, time.Time, error) {
+	return t.service.UnitsLeft(ctx)
+}
+
+func tripLeg(leg flights.Leg) trip.FlightLeg {
+	found := trip.FlightLeg{
+		Designator: leg.Designator, Live: leg.Live, Status: trip.FlightScheduled,
+		Origin:      trip.FlightAirport{Code: leg.Departure.Airport.Code, Name: leg.Departure.Airport.Name, Zone: leg.Departure.Airport.Zone},
+		Destination: trip.FlightAirport{Code: leg.Arrival.Airport.Code, Name: leg.Arrival.Airport.Name, Zone: leg.Arrival.Airport.Zone},
+		Departure:   tripTimes(leg.Departure),
+		Arrival:     tripTimes(leg.Arrival),
+	}
+	if leg.Codeshare == flights.CodeshareMarketed {
+		found.Operator = leg.Airline
+	}
+	switch leg.Status {
+	case flights.StatusCanceled:
+		found.Status = trip.FlightCancelled
+	case flights.StatusCanceledUncertain:
+		found.Status = trip.FlightMaybeCancelled
+	case flights.StatusDiverted:
+		found.Status = trip.FlightDiverted
+	case flights.StatusArrived:
+		found.Status = trip.FlightLanded
+	case flights.StatusDeparted, flights.StatusEnRoute, flights.StatusApproaching:
+		found.Status = trip.FlightDeparted
+	}
+	return found
+}
+
+func tripTimes(movement flights.Movement) trip.FlightTimes {
+	return trip.FlightTimes{
+		Scheduled: movement.Scheduled, Expected: movement.Expected(), Actual: movement.Runway,
+		Gate: movement.Gate, Terminal: movement.Terminal,
+	}
 }

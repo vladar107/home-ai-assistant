@@ -40,6 +40,8 @@ type LoopConfig struct {
 	Now func() time.Time
 	// Updates checks trips near or under way for news; nil checks none.
 	Updates *Updates
+	// Flights follows the flights of trips on their day of travel; nil follows none.
+	Flights *Flights
 }
 
 // Loop sends the start and end notices trips owe, starts the checks for news about trips, and
@@ -51,6 +53,7 @@ type Loop struct {
 	paused   []Paused
 	sender   Sender
 	updates  *Updates
+	flights  *Flights
 	logger   *slog.Logger
 	interval time.Duration
 	now      func() time.Time
@@ -61,6 +64,12 @@ type Loop struct {
 	// checkDone is closed when the running check for news ends; nil before the first.
 	checkMu   sync.Mutex
 	checkDone chan struct{}
+	// flightDone is closed when the running flight lookup ends; flightSends counts the messages
+	// being sent after one, which never hold up the next lookup.
+	flightDone  chan struct{}
+	flightSends sync.WaitGroup
+	// lastSend is closed when the latest flight send ends; the next one waits for it.
+	lastSend chan struct{}
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -87,7 +96,7 @@ func NewLoop(cfg LoopConfig, notices Notices, paused []Paused, sender Sender, lo
 	if now == nil {
 		now = time.Now
 	}
-	return &Loop{notices: notices, paused: paused, sender: sender, updates: cfg.Updates, logger: logger, interval: interval, now: now}, nil
+	return &Loop{notices: notices, paused: paused, sender: sender, updates: cfg.Updates, flights: cfg.Flights, logger: logger, interval: interval, now: now}, nil
 }
 
 func (l *Loop) Descriptor() module.Descriptor {
@@ -168,12 +177,76 @@ func (l *Loop) Cycle(ctx context.Context) {
 		l.deliver(ctx, notice, now)
 	}
 	l.startCheck(ctx, now)
+	l.startFlight(ctx, now)
 	if now.Sub(l.lastPruned) >= loopPruneInterval && ctx.Err() == nil {
 		l.lastPruned = now
 		if err := l.notices.Prune(ctx, now); err != nil && ctx.Err() == nil {
 			l.logger.WarnContext(ctx, "trip.loop.failed", "stage", "prune", "error", err)
 		}
+		if l.flights != nil {
+			if err := l.flights.prune(ctx, now); err != nil && ctx.Err() == nil {
+				l.logger.WarnContext(ctx, "trip.loop.failed", "stage", "flights_prune", "error", err)
+			}
+		}
 	}
+}
+
+// startFlight starts the flight lookup that is due, in its own goroutine, unless one is running.
+// What it found is sent from another goroutine once it is stored, since a message's rewrite into
+// the trip's language is a model turn that must not hold up the next lookup.
+func (l *Loop) startFlight(ctx context.Context, now time.Time) {
+	if l.flights == nil || ctx.Err() != nil {
+		return
+	}
+	l.checkMu.Lock()
+	running := l.flightDone
+	l.checkMu.Unlock()
+	if running != nil {
+		select {
+		case <-running:
+		default:
+			return
+		}
+	}
+	legs, job, found, err := l.flights.due(ctx, now)
+	if err != nil {
+		if ctx.Err() == nil {
+			l.logger.WarnContext(ctx, "trip.loop.failed", "stage", "flights_due", "error", err)
+		}
+		return
+	}
+	if !found {
+		return
+	}
+	done := make(chan struct{})
+	l.checkMu.Lock()
+	l.flightDone = done
+	l.checkMu.Unlock()
+	go func() {
+		defer close(done)
+		messages := l.flights.run(ctx, job, legs, now)
+		if len(messages) == 0 {
+			return
+		}
+		// Each send waits for the one before it, so a leg's messages arrive in order.
+		l.checkMu.Lock()
+		previous, sent := l.lastSend, make(chan struct{})
+		l.lastSend = sent
+		l.checkMu.Unlock()
+		l.flightSends.Add(1)
+		go func() {
+			defer l.flightSends.Done()
+			defer close(sent)
+			if previous != nil {
+				<-previous
+			}
+			// The lookup's state is stored, so what it found is not found again: its messages are
+			// sent even after the loop was told to stop, within a bound.
+			sendCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), flightSendTimeout)
+			defer cancel()
+			l.flights.send(sendCtx, messages)
+		}()
+	}()
 }
 
 // startCheck starts the check for news about the trip that is due, in its own goroutine so the
@@ -218,14 +291,19 @@ func (l *Loop) startCheck(ctx context.Context, now time.Time) {
 	}()
 }
 
-// Wait returns once the running check for news, if any, has ended.
+// Wait returns once the running check for news and flight lookup, if any, have ended, and the
+// flight messages being sent with them.
 func (l *Loop) Wait() {
 	l.checkMu.Lock()
-	running := l.checkDone
+	running, flight := l.checkDone, l.flightDone
 	l.checkMu.Unlock()
 	if running != nil {
 		<-running
 	}
+	if flight != nil {
+		<-flight
+	}
+	l.flightSends.Wait()
 }
 
 func (l *Loop) deliver(ctx context.Context, notice Notice, now time.Time) {
