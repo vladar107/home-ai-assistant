@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/daycard"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 	"github.com/vladar107/home-ai-assistant/internal/transit"
@@ -141,7 +142,7 @@ func (s *Service) weatherCard(ctx context.Context, principalID string, request c
 	}
 	language := request.Language
 	if language == "" {
-		language = "en"
+		language = locale.From(ctx).String()
 	}
 	words, known := cardLanguages[language]
 	if !known {

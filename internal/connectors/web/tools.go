@@ -78,7 +78,7 @@ func cardDefinition(trains bool) tools.Definition {
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"title":{"type":"string","maxLength":100,"description":"The card's top line, such as the day and route: Mon 28.09 · Den Haag → Zwolle."},` +
 			`"summary":{"type":"string","maxLength":160,"description":"One sentence about the day's weather in the reply's language, such as Rain in the morning, drizzle in the evening."},` +
-			`"language":{"type":"string","enum":["en","ru"],"description":"Language of the card's fixed words (feels like, mm, gusts, dry, train statuses); default en."},` +
+			`"language":{"type":"string","enum":["en","ru"],"description":"Language of the card's fixed words (feels like, mm, gusts, dry, train statuses); default: the user's interface language."},` +
 			windUnitSchema + `,` +
 			properties + `},` +
 			`"required":["title","summary","legs"],"additionalProperties":false}`),
