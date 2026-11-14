@@ -31,6 +31,9 @@ type SwitchSettings struct {
 	Allowed func(principalID string) bool
 	// Exposure is the home's check of which devices are exposed; nil for the others.
 	Exposure func(context.Context) (checked bool, conflicts []string)
+	// Unavailable says why the integration cannot work until the operator acts, or "" while it
+	// can; nil for an integration that never says.
+	Unavailable func() string
 }
 
 // register adds a connector to every part of the application it takes part in.

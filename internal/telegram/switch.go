@@ -140,6 +140,24 @@ func HomeDetails(exposure func(context.Context) (checked bool, conflicts []strin
 	return homeDetails(exposure)
 }
 
+// UnavailableDetails shows on a switch page why its integration cannot work until the operator
+// acts, such as a provider that refused the operator's key, and points the overview at it.
+func UnavailableDetails(reason func() string, name string) SwitchDetails {
+	return unavailableDetails{reason: reason, name: name}
+}
+
+type unavailableDetails struct {
+	reason func() string
+	name   string
+}
+
+func (u unavailableDetails) Details(context.Context) ([]string, string) {
+	if reason := u.reason(); reason != "" {
+		return []string{reason}, u.name + ": unavailable until the operator fixes it."
+	}
+	return nil, ""
+}
+
 type homeDetails func(context.Context) (bool, []string)
 
 func (h homeDetails) Details(ctx context.Context) ([]string, string) {

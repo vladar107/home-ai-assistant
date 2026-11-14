@@ -32,6 +32,14 @@ type Run struct {
 	reacted      bool
 	seen         map[string]struct{}
 	image        outbox.Once
+	attributions []Attribution
+}
+
+// Attribution is a line a source's terms ask to show wherever the user reads its data, and the
+// text, such as its domain, whose presence in a reply already names it.
+type Attribution struct {
+	Mark string
+	Line string
 }
 
 // NewRun starts the record of a run whose trusted instruction is the given text: the user's own
@@ -156,6 +164,39 @@ func (r *Run) Reacted() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.reacted
+}
+
+// Attribute records that the run read data whose source must be named in its reply; a line already
+// recorded is kept once.
+func (r *Run) Attribute(mark, line string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, known := range r.attributions {
+		if known.Line == line {
+			return
+		}
+	}
+	r.attributions = append(r.attributions, Attribution{Mark: mark, Line: line})
+}
+
+// Attributed ends the reply with each recorded source line whose mark the reply does not already
+// hold, whatever its case, so the source is named even when the model left it out.
+func (r *Run) Attributed(reply string) string {
+	if r == nil {
+		return reply
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var missing []string
+	for _, attribution := range r.attributions {
+		if !strings.Contains(strings.ToLower(reply), strings.ToLower(attribution.Mark)) {
+			missing = append(missing, attribution.Line)
+		}
+	}
+	if len(missing) == 0 {
+		return reply
+	}
+	return strings.TrimRight(reply, "\n") + "\n\n" + strings.Join(missing, "\n")
 }
 
 // Image is the record of the image the run staged for its reply.

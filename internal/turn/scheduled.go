@@ -157,7 +157,13 @@ func (e *Engine) runUnwatched(ctx context.Context, principalID, turn, message st
 		principalID: principalID, key: traceKey, kind: kind, model: model.Model, effort: model.Effort, started: started,
 		result: result, executor: tools.Executor, run: run, recorder: sink.trace,
 	})
-	return unwatchedReply(ctx, turnCtx, result, runErr, run)
+	reply, err := unwatchedReply(ctx, turnCtx, result, runErr, run)
+	// A check's reply is read by code, not shown, so only a scheduled reply names the sources the
+	// user reads; one with nothing to add sends nothing, so it is left as it is.
+	if err == nil && kind == TraceScheduled && reply.ErrorKind == "" && !strings.Contains(reply.Text, prompt.NothingToAdd) {
+		reply.Text = run.Attributed(reply.Text)
+	}
+	return reply, err
 }
 
 // unwatchedGate checks the principal's own connection before an unwatched turn. When the turn

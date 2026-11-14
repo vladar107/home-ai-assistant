@@ -16,6 +16,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/config"
 	"github.com/vladar107/home-ai-assistant/internal/connection"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/bus"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/flights"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/google"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/grafana"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/homeassistant"
@@ -380,6 +381,9 @@ func (a *App) buildAssembly(ctx context.Context, client *telegram.Client, config
 	if cfg.NS.Enabled() {
 		in.NS = &ns.Config{APIKey: cfg.NS.APIKey}
 	}
+	if cfg.Flights.Enabled() {
+		in.Flights = &flights.Config{APIKey: cfg.Flights.APIKey, MonthlyUnits: cfg.Flights.MonthlyUnits, QuotaResetDay: cfg.Flights.QuotaResetDay}
+	}
 	if cfg.HA.Enabled() {
 		in.HA = &homeassistant.Config{Token: cfg.HA.Token, BaseURL: cfg.HA.URL}
 	}
@@ -495,6 +499,9 @@ func (a *App) settingsSections(asm *wiring.Assembly, location *time.Location) ([
 			return nil, fmt.Errorf("integration %q has no settings page", page.Switch.Integration)
 		}
 		settings.Page = found
+		if page.Unavailable != nil {
+			settings.Details = telegram.UnavailableDetails(page.Unavailable, found.Name)
+		}
 		sections = append(sections, telegram.NewSwitchSection(settings, a.logger, a.telemetry))
 	}
 	sections = append(sections, telegram.NewHeadsUpSection(asm.Scheduler, a.logger, a.telemetry))

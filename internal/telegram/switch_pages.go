@@ -3,6 +3,7 @@ package telegram
 const (
 	webSectionPrefix           = "web"
 	nsSectionPrefix            = "ns"
+	flightsSectionPrefix       = "flights"
 	busSectionPrefix           = "bus"
 	homeAssistantSectionPrefix = "ha"
 	grafanaSectionPrefix       = "grafana"
@@ -14,6 +15,9 @@ const (
 
 	NSOnLine  = "Trains (NS): on (the default). I can plan trips, list departures, and report disruptions from live NS data."
 	NSOffLine = "Trains (NS): off. Turn it back on to let me plan trips, list departures, and report disruptions from live NS data."
+
+	FlightsOnLine  = "Flight status: on (the default). I can look up a flight's times, delay, gate, and status by its number, and follow the flights of your tracked trips on their day of travel, with data from AeroDataBox (aerodatabox.com)."
+	FlightsOffLine = "Flight status: off. Turn it back on to let me look up flights by their number and follow the flights of your tracked trips, with data from AeroDataBox (aerodatabox.com)."
 
 	BusOnLine  = "Buses: on (the default). I can show live departures, direct buses, and disruption notices from OVapi."
 	BusOffLine = "Buses: off. Turn it back on to let me show live departures, direct buses, and disruption notices from OVapi."
@@ -57,6 +61,11 @@ var (
 		OnButton: "Turn on trains", OffButton: "Turn off trains",
 		Event: "ns.trains.changed", HelpTopic: "trains", PrivacyLine: NSPrivacyLine,
 	}
+	FlightsPage = SwitchPage{
+		Integration: "flights", Prefix: flightsSectionPrefix, Name: "Flights", OnLine: FlightsOnLine, OffLine: FlightsOffLine,
+		OnButton: "Turn on flight status", OffButton: "Turn off flight status",
+		Event: "flights.changed", HelpTopic: "flights", PrivacyLine: FlightsPrivacyLine,
+	}
 	BusPage = SwitchPage{
 		Integration: "bus", Prefix: busSectionPrefix, Name: "Buses", OnLine: BusOnLine, ExtraOnLines: []string{BusPlanningLine}, OffLine: BusOffLine,
 		OnButton: "Turn on buses", OffButton: "Turn off buses",
@@ -89,7 +98,7 @@ var (
 
 // SwitchPageFor is the on/off page of the named integration.
 func SwitchPageFor(integration string) (SwitchPage, bool) {
-	for _, page := range []SwitchPage{WebPage, NSPage, BusPage, HomePage, GrafanaPage, TypeSafePage, WidgetPage} {
+	for _, page := range []SwitchPage{WebPage, NSPage, FlightsPage, BusPage, HomePage, GrafanaPage, TypeSafePage, WidgetPage} {
 		if page.Integration == integration {
 			return page, true
 		}

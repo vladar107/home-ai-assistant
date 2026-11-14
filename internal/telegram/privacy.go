@@ -22,6 +22,7 @@ var privacyOrder = []string{
 	privacyTasks,
 	webSectionPrefix,
 	nsSectionPrefix,
+	flightsSectionPrefix,
 	homeAssistantSectionPrefix,
 	busSectionPrefix,
 	mcpSectionPrefix,

@@ -789,6 +789,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 				reply = prompt.NothingToAdd
 			}
 			if !strings.Contains(reply, prompt.NothingToAdd) {
+				reply = run.Attributed(reply)
 				plainReply = reply
 			}
 		}

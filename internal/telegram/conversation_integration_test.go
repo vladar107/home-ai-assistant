@@ -29,6 +29,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connection"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/bus"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/calendar"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/flights"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/gmail"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/google"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/grafana"
@@ -195,6 +196,9 @@ type harnessOptions struct {
 	web bool
 	// ns adds the NS connector against the given gateway, as an operator key does.
 	ns string
+	// flights adds the flight status connector against the given AeroDataBox address, as an
+	// operator key does; its limiter does not wait.
+	flights string
 	// homeAssistant adds the Home Assistant connector against the given URL, as an operator token does.
 	homeAssistant string
 	// grafana adds the Grafana connector against the given URL for alice alone, as an operator token does.
@@ -568,6 +572,10 @@ func (h *conversationHarness) wiringInputs(t *testing.T, runtime agentruntime.Ag
 	if options.ns != "" {
 		in.NS = &ns.Config{APIKey: "test-key", BaseURL: options.ns}
 	}
+	if options.flights != "" {
+		in.Flights = &flights.Config{APIKey: "test-key", BaseURL: options.flights, MonthlyUnits: 340, QuotaResetDay: 1,
+			Sleep: func(ctx context.Context, _ time.Duration) error { return ctx.Err() }}
+	}
 	if options.homeAssistant != "" {
 		in.HA = &homeassistant.Config{Token: "test-token", BaseURL: options.homeAssistant}
 	}
@@ -636,6 +644,9 @@ func (h *conversationHarness) telegramService(identities *identity.Service, logg
 			h.t.Fatalf("integration %q has no settings page", page.Switch.Integration)
 		}
 		settings.Page = found
+		if page.Unavailable != nil {
+			settings.Details = UnavailableDetails(page.Unavailable, found.Name)
+		}
 		deps.Sections = append(deps.Sections, NewSwitchSection(settings, logger, nil))
 	}
 	deps.Sections = append(deps.Sections, NewHeadsUpSection(asm.Scheduler, logger, nil))

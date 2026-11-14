@@ -32,6 +32,7 @@ const (
 	// web request goes is named.
 	WebPrivacyLine         = "Web: searches go to your model provider, pages are fetched from home, and places go to Open-Meteo for weather."
 	NSPrivacyLine          = "Trains: stations and times go to NS."
+	FlightsPrivacyLine     = "Flights: the flight numbers and dates you ask about, and those of your tracked trips' flights, go to AeroDataBox through RapidAPI; booking references, names, and seats never do."
 	BusPrivacyLine         = "Buses: stops go to OVapi over plain HTTP."
 	BusPlanningPrivacyLine = "Planned trips go to Transitous."
 

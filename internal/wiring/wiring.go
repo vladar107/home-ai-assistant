@@ -23,6 +23,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connection"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/bus"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/calendar"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/flights"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/gmail"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/google"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/grafana"
@@ -80,6 +81,7 @@ type Telemetry interface {
 	watch.Telemetry
 	events.Telemetry
 	web.Telemetry
+	flights.Telemetry
 	chart.Telemetry
 	history.Telemetry
 	judgment.Recorder
@@ -162,6 +164,7 @@ type Inputs struct {
 	Google  *GoogleConfig
 	Web     *web.Config
 	NS      *ns.Config
+	Flights *flights.Config
 	HA      *homeassistant.Config
 	Grafana *grafana.Config
 	Bus     *bus.Config
@@ -258,6 +261,7 @@ type Assembly struct {
 	Google        *google.Service
 	Web           *web.Service
 	NS            *ns.Service
+	Flights       *flights.Service
 	HomeAssistant *homeassistant.Service
 	Grafana       *grafana.Service
 	Bus           *bus.Service
@@ -589,6 +593,18 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 			return fmt.Errorf("initialize NS connector: %w", err)
 		}
 		trains = a.NS
+	}
+	if in.Flights != nil {
+		flightsConfig := *in.Flights
+		flightsConfig.Zone = cmp.Or(flightsConfig.Zone, a.location)
+		if flightsConfig.Now == nil {
+			flightsConfig.Now = in.Core.Now
+		}
+		a.Flights, err = flights.NewService(flightsConfig, in.Store, switches, in.Logger)
+		if err != nil {
+			return fmt.Errorf("initialize flight status connector: %w", err)
+		}
+		a.Flights.SetTelemetry(telemetry)
 	}
 	var webSearch turn.WebSearch
 	if in.Web != nil {
@@ -1038,6 +1054,11 @@ func (a *Assembly) buildConnectors(ctx context.Context) error {
 	}
 	if a.NS != nil {
 		if err := a.register(ctx, Connector{Module: a.NS, Tools: []tools.Provider{a.NS}, Switch: &SwitchSettings{Switch: ns.Switch}}); err != nil {
+			return err
+		}
+	}
+	if a.Flights != nil {
+		if err := a.register(ctx, Connector{Module: a.Flights, Tools: []tools.Provider{a.Flights}, Switch: &SwitchSettings{Switch: flights.Switch, Unavailable: a.Flights.Unavailable}}); err != nil {
 			return err
 		}
 	}
