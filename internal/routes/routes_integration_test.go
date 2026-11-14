@@ -333,6 +333,7 @@ func work() routes.Spec {
 }
 
 func TestRouteCheckTimesEachLegAndTheArrival(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.save("alice", work())
 	monday := h.day("2026-10-05")
@@ -397,6 +398,7 @@ func TestRouteCheckTimesEachLegAndTheArrival(t *testing.T) {
 }
 
 func TestRouteCheckTimesABusLegByItsLiveDeparture(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.save("alice", routes.Spec{
 		Name: "evening",
@@ -418,6 +420,7 @@ func TestRouteCheckTimesABusLegByItsLiveDeparture(t *testing.T) {
 }
 
 func TestRouteCheckChoosesTheRouteByWeekday(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.save("alice", work())
 	weekend := work()
@@ -452,6 +455,7 @@ func TestRouteCheckChoosesTheRouteByWeekday(t *testing.T) {
 }
 
 func TestRoutesBelongToTheirOwner(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.save("alice", work())
 
@@ -486,6 +490,7 @@ func TestRoutesBelongToTheirOwner(t *testing.T) {
 }
 
 func TestRouteProposalsNeverInventLegValues(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	for _, test := range []struct {
 		legs []any
@@ -528,6 +533,7 @@ func TestRouteProposalsNeverInventLegValues(t *testing.T) {
 }
 
 func TestRouteUpdatesShowOnlyWhatChanges(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.save("alice", work())
 
@@ -607,6 +613,7 @@ func changeTimes(queries []url.Values) []string {
 }
 
 func TestRouteCheckContinuesOnAnAlternativeWhenNoSavedTrainRuns(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.save("alice", work())
 	h.gateway.serveTrips(bothSavedPartlyCancelled(t))
@@ -655,6 +662,7 @@ func TestRouteCheckContinuesOnAnAlternativeWhenNoSavedTrainRuns(t *testing.T) {
 // the alternatives start then and the trips before it are left out. Its saved 08:10 does not run,
 // and no departure near it is looked up.
 func TestRouteCheckPlansAlternativesFromWhenTheRouteGetsThere(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.save("alice", routes.Spec{
 		Name:     "twice",
@@ -697,6 +705,7 @@ func TestRouteCheckPlansAlternativesFromWhenTheRouteGetsThere(t *testing.T) {
 }
 
 func TestRouteCheckNamesASavedTrainThatIsNotInTheTimetable(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	route := work()
 	route.Legs[1].Departures = []string{"07:56", "08:10"}
@@ -736,6 +745,7 @@ func TestRouteCheckNamesASavedTrainThatIsNotInTheTimetable(t *testing.T) {
 // Without the alternatives a trains service may offer, and for a bus, a leg whose departures cannot
 // be taken stays unusable.
 func TestRouteCheckWithoutAlternativesKeepsTheLegUnusable(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.save("alice", work())
 	h.save("alice", routes.Spec{
