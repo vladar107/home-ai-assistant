@@ -121,6 +121,7 @@ func (f *presenceFixture) wantEdges(want ...string) {
 }
 
 func TestArrivingNeedsTwoGoodFixesAndLeavingGivesOneLeave(t *testing.T) {
+	t.Parallel()
 	f := newPresenceFixture(t)
 	f.startLive(1000, 10)
 	if f.state() != location.PresenceOutside {
@@ -149,6 +150,7 @@ func TestArrivingNeedsTwoGoodFixesAndLeavingGivesOneLeave(t *testing.T) {
 }
 
 func TestJitterAtTheBoundaryAndPoorOrMissingAccuracyChangeNothing(t *testing.T) {
+	t.Parallel()
 	f := newPresenceFixture(t)
 	f.startLive(20, 10)
 	f.wantEdges()
@@ -176,6 +178,7 @@ func TestJitterAtTheBoundaryAndPoorOrMissingAccuracyChangeNothing(t *testing.T) 
 }
 
 func TestOneFixThatLastsTwoMinutesCountsWithoutAnother(t *testing.T) {
+	t.Parallel()
 	f := newPresenceFixture(t)
 	f.startLive(1000, 10)
 	f.move(10, 30)
@@ -196,6 +199,7 @@ func TestOneFixThatLastsTwoMinutesCountsWithoutAnother(t *testing.T) {
 }
 
 func TestEndingOrExpiringAShareForgetsPresenceWithoutAnEvent(t *testing.T) {
+	t.Parallel()
 	f := newPresenceFixture(t)
 	f.startLive(20, 10)
 	stopped := f.fix("alice", 2000, 10)
@@ -234,6 +238,7 @@ func TestEndingOrExpiringAShareForgetsPresenceWithoutAnEvent(t *testing.T) {
 }
 
 func TestPinsNeverMovePresenceAndOneReplacingAShareResetsIt(t *testing.T) {
+	t.Parallel()
 	f := newPresenceFixture(t)
 	pin := f.fix("alice", 20, 10)
 	pin.Source, pin.LiveMessageID = location.SourcePin, 0
@@ -267,6 +272,7 @@ func TestPinsNeverMovePresenceAndOneReplacingAShareResetsIt(t *testing.T) {
 }
 
 func TestForgettingTheLocationForgetsPresence(t *testing.T) {
+	t.Parallel()
 	f := newPresenceFixture(t)
 	f.startLive(20, 10)
 	if f.state() != location.PresenceInside {
@@ -282,6 +288,7 @@ func TestForgettingTheLocationForgetsPresence(t *testing.T) {
 }
 
 func TestAnotherPrincipalsPlacesAndPresenceStayApart(t *testing.T) {
+	t.Parallel()
 	f := newPresenceFixture(t)
 	f.startLive(1000, 10)
 	f.move(10, 20, 20)
@@ -324,6 +331,7 @@ func TestAnotherPrincipalsPlacesAndPresenceStayApart(t *testing.T) {
 }
 
 func TestResizingAPlaceForgetsItsPresenceAndRenamingDoesNot(t *testing.T) {
+	t.Parallel()
 	f := newPresenceFixture(t)
 	f.startLive(20, 10)
 	place, found, err := f.store.LoadPlace(t.Context(), "alice", "gym-1")
@@ -354,6 +362,7 @@ func TestResizingAPlaceForgetsItsPresenceAndRenamingDoesNot(t *testing.T) {
 // A live share that falls silent past LiveSilence is pruned, but its message may still move: the
 // presence it left stays, so moving away afterwards is a leaving.
 func TestASilentShareThatResumesStillLeaves(t *testing.T) {
+	t.Parallel()
 	f := newPresenceFixture(t)
 	f.startLive(20, 10)
 	f.clock.now = f.clock.now.Add(standard.LiveSilence + time.Minute)
@@ -372,6 +381,7 @@ func TestASilentShareThatResumesStillLeaves(t *testing.T) {
 
 // A prune that resets an ended share's presence leaves a newer share's presence alone.
 func TestResettingPresenceKeepsOtherSharesRows(t *testing.T) {
+	t.Parallel()
 	f := newPresenceFixture(t)
 	f.savePlace("alice", "pool-1", "Pool")
 	for index, placeID := range []string{"gym-1", "pool-1"} {
@@ -391,6 +401,7 @@ func TestResettingPresenceKeepsOtherSharesRows(t *testing.T) {
 // Edits Telegram queued while the bot was down still move presence, but an arrival they show from
 // minutes ago is not told.
 func TestALateArrivalMovesPresenceWithoutAnEvent(t *testing.T) {
+	t.Parallel()
 	f := newPresenceFixture(t)
 	f.startLive(1000, 10)
 	shared := f.clock.now
@@ -410,6 +421,7 @@ func TestALateArrivalMovesPresenceWithoutAnEvent(t *testing.T) {
 
 // Of two saved places that overlap, the turn line names the smaller.
 func TestTheTurnLineNamesTheSmallestPlaceTheUserIsIn(t *testing.T) {
+	t.Parallel()
 	f := newPresenceFixture(t)
 	small := location.Place{ID: "desk-1", PrincipalID: "alice", Name: "Desk", Latitude: placeLatitude, Longitude: placeLongitude,
 		RadiusM: location.MinimumRadius, CreatedAt: base, UpdatedAt: base}

@@ -56,6 +56,7 @@ func newService(t *testing.T, store *sqlite.Store, policy location.Policy, c *cl
 }
 
 func TestPolicyExpiry(t *testing.T) {
+	t.Parallel()
 	until := base.Add(15 * time.Minute)
 	for name, test := range map[string]struct {
 		fix  location.Fix
@@ -76,6 +77,7 @@ func TestPolicyExpiry(t *testing.T) {
 }
 
 func TestCurrentHidesExpiredPositionsUnderTheCurrentPolicy(t *testing.T) {
+	t.Parallel()
 	store := newStore(t)
 	c := &clock{now: base}
 	service := newService(t, store, standard, c, nil)
@@ -103,6 +105,7 @@ func TestCurrentHidesExpiredPositionsUnderTheCurrentPolicy(t *testing.T) {
 }
 
 func TestPruneDeletesOnlyExpiredRows(t *testing.T) {
+	t.Parallel()
 	store := newStore(t)
 	c := &clock{now: base}
 	service := newService(t, store, standard, c, nil)
@@ -132,6 +135,7 @@ func TestPruneDeletesOnlyExpiredRows(t *testing.T) {
 }
 
 func TestTurnLine(t *testing.T) {
+	t.Parallel()
 	store := newStore(t)
 	c := &clock{now: base}
 	service := newService(t, store, standard, c, describer{name: "Stationsplein 1, Leiden"})
@@ -175,6 +179,7 @@ func TestTurnLine(t *testing.T) {
 }
 
 func TestSummaryAndShareAcknowledgements(t *testing.T) {
+	t.Parallel()
 	store := newStore(t)
 	c := &clock{now: base}
 	service := newService(t, store, standard, c, describer{name: "Leiden"})
