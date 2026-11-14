@@ -17,11 +17,7 @@ func TestEveryObjectKindHasItsTable(t *testing.T) {
 	if tables := slices.Sorted(maps.Keys(objectTables)); !slices.Equal(tables, kinds) {
 		t.Fatalf("object tables cover %v, want %v", tables, kinds)
 	}
-	store, err := Open(t.Context(), filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
+	store := openMigratedStore(t, filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
 	for kind, table := range objectTables {
 		if _, err := store.db.ExecContext(t.Context(), `SELECT id, principal_id, summary_message_id FROM `+table+` LIMIT 0`); err != nil {
 			t.Errorf("%s table %s: %v", kind, table, err)
