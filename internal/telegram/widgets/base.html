@@ -17,10 +17,17 @@ button:disabled{opacity:.5}
   }
   var view = document.getElementById('view');
   var status = document.getElementById('status');
+  var labels = {{labels}};
+  var language = 'en';
   var controlsReturn = 'controls';
   var dataChanges = 'data';
   var drawn = 0;
   var busy = false;
+
+  function label(key) {
+    var set = labels[language];
+    return set && set[key] !== undefined ? set[key] : labels.en[key];
+  }
 
   function current() {
     try {
@@ -42,9 +49,9 @@ button:disabled{opacity:.5}
 
   function failure(error) {
     if (error && error.code === 'RATE_LIMITED') {
-      return 'Too many taps; wait a moment and try again.';
+      return label('tooMany');
     }
-    return 'No answer came; try again.';
+    return label('noAnswer');
   }
 
   function request(data, after) {
@@ -53,7 +60,7 @@ button:disabled{opacity:.5}
     }
     var tapped = drawn;
     setBusy(true);
-    status.textContent = 'Working on it…';
+    status.textContent = label('working');
     widget.request(data).then(function (response) {
       if (tapped !== drawn) {
         return;
@@ -89,7 +96,9 @@ button:disabled{opacity:.5}
     drawn++;
     busy = false;
     status.textContent = '';
-    draw(current());
+    var data = current();
+    language = String(data.g || data.lang || 'en');
+    draw(data);
   }
 
 {{script}}

@@ -2,13 +2,40 @@ package telegram
 
 import (
 	"context"
-	"strings"
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 )
+
+var (
+	changesWarning   = locale.T("⚠️ A marked change carries a warning; open it before confirming.", "⚠️ У отмеченного изменения есть предупреждение; откройте его, прежде чем подтверждать.")
+	changesConfirm   = locale.T("Confirm %[1]s of %[2]s", "Подтвердить %[1]s из %[2]s")
+	changesRejectAll = locale.T("Reject all", "Отклонить все")
+)
+
+// changesLabels are the words the changes view draws, in a language. The view puts the numbers of
+// its Confirm button where {1} and {2} stand, and picks the count line of the number of changes.
+func changesLabels(language locale.Language) map[string]any {
+	words := make(map[string]string)
+	for state, word := range approval.StateWords(language) {
+		words[string(state)] = word
+	}
+	counts := make([]string, approval.MaximumBundleItems+1)
+	for number := range counts {
+		counts[number] = approval.ChangeCount.FormatIn(language, number)
+	}
+	return map[string]any{
+		"words":     words,
+		"counts":    counts,
+		"warning":   changesWarning.In(language),
+		"confirm":   changesConfirm.FormatIn(language, "{1}", "{2}"),
+		"rejectAll": changesRejectAll.In(language),
+		"preview":   locale.Preview.In(language),
+	}
+}
 
 // changesTitleFloor is how many characters of a title the data keeps, or the whole title when it
 // is shorter: a title cut below it is too short to tell its change apart.
@@ -25,12 +52,14 @@ const changesTitleFloor = 24
 //	c  the changes, in the order the user sees them
 //	s  where the proposal stands
 //	p  true when Preview is offered
+//	g  the language the widget draws its labels in, none for English
 type changesData struct {
 	ID      string        `json:"i"`
 	Heading string        `json:"h,omitempty"`
 	Changes []changesItem `json:"c"`
 	Status  string        `json:"s,omitempty"`
 	Preview bool          `json:"p,omitempty"`
+	Lang    string        `json:"g,omitempty"`
 }
 
 // changesItem is one change of a changes widget.
@@ -51,7 +80,7 @@ type changesItem struct {
 // changesDataFor builds the data of the proposal shown, as the user reads it.
 func changesDataFor(shown approval.Shown, preview bool) changesData {
 	data := changesData{
-		ID: shown.ID, Heading: plainWidgetText(shown.Heading), Status: plainWidgetText(shown.Status), Preview: preview,
+		ID: shown.ID, Heading: plainWidgetText(shown.Heading), Status: plainWidgetText(shown.Status), Preview: preview, Lang: widgetLanguage(shown.Language),
 		Changes: make([]changesItem, len(shown.Changes)),
 	}
 	for index, change := range shown.Changes {
@@ -68,11 +97,7 @@ func changesDataFor(shown approval.Shown, preview bool) changesData {
 func outcomeOf(change approval.Change) string {
 	switch change.State {
 	case approval.ChangeDone:
-		rest, _ := strings.CutPrefix(change.Outcome, "Done. ")
-		if rest == change.Outcome {
-			return ""
-		}
-		return rest
+		return change.Detail
 	case approval.ChangeFailed:
 		return change.Outcome
 	default:

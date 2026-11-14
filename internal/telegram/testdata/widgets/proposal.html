@@ -26,10 +26,17 @@ button.reject{background:var(--tg-theme-secondary-bg-color,#eee);color:var(--tg-
   }
   var view = document.getElementById('view');
   var status = document.getElementById('status');
+  var labels = {"en":{"ignored":"This no longer does anything.","noAnswer":"No answer came; try again.","tooMany":"Too many taps; wait a moment and try again.","working":"Working on it…"},"ru":{"ignored":"Эта кнопка больше не действует.","noAnswer":"Ответ не пришёл; попробуйте ещё раз.","tooMany":"Слишком много нажатий; подождите немного и попробуйте снова.","working":"Выполняется…"}};
+  var language = 'en';
   var controlsReturn = 'controls';
   var dataChanges = 'data';
   var drawn = 0;
   var busy = false;
+
+  function label(key) {
+    var set = labels[language];
+    return set && set[key] !== undefined ? set[key] : labels.en[key];
+  }
 
   function current() {
     try {
@@ -51,9 +58,9 @@ button.reject{background:var(--tg-theme-secondary-bg-color,#eee);color:var(--tg-
 
   function failure(error) {
     if (error && error.code === 'RATE_LIMITED') {
-      return 'Too many taps; wait a moment and try again.';
+      return label('tooMany');
     }
-    return 'No answer came; try again.';
+    return label('noAnswer');
   }
 
   function request(data, after) {
@@ -62,7 +69,7 @@ button.reject{background:var(--tg-theme-secondary-bg-color,#eee);color:var(--tg-
     }
     var tapped = drawn;
     setBusy(true);
-    status.textContent = 'Working on it…';
+    status.textContent = label('working');
     widget.request(data).then(function (response) {
       if (tapped !== drawn) {
         return;
@@ -98,7 +105,9 @@ button.reject{background:var(--tg-theme-secondary-bg-color,#eee);color:var(--tg-
     drawn++;
     busy = false;
     status.textContent = '';
-    draw(current());
+    var data = current();
+    language = String(data.g || data.lang || 'en');
+    draw(data);
   }
 
   var title = document.getElementById('title');

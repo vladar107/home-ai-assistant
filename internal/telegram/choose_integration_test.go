@@ -196,6 +196,7 @@ func TestChangesAreTitledAndShownAsAListForTheChangesKind(t *testing.T) {
 		outcomeProposal(t, approval.IntentWarning+"\n\nRename the note\nto Groceries", "Renamed.", false),
 	)
 	h.exec(`UPDATE approvals SET widget_kind = 'changes' WHERE bundle_id = ?`, bundle)
+	h.exec(`UPDATE approvals SET warned = 1 WHERE id = ?`, ids[1])
 
 	pressed, err := h.approvals.PressKept(h.ctx, "alice", bundle, nil)
 	if err != nil || !pressed.Changed {

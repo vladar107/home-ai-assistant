@@ -6,6 +6,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 )
 
 // widgetData is what a proposal widget shows: the proposal's text, whose first line is its title,
@@ -15,6 +16,8 @@ type widgetData struct {
 	Text    string         `json:"text"`
 	Status  string         `json:"status,omitempty"`
 	Actions []widgetAction `json:"actions,omitempty"`
+	// Lang is the language the widget draws its labels in, none for English.
+	Lang string `json:"lang,omitempty"`
 }
 
 type widgetAction struct {
@@ -24,19 +27,19 @@ type widgetAction struct {
 
 func proposalActions(buttons approval.Buttons) []widgetAction {
 	actions := []widgetAction{
-		{Label: "Confirm", Data: buttons.Confirm},
-		{Label: "Reject", Data: buttons.Reject},
+		{Label: locale.Confirm.In(buttons.Language), Data: buttons.Confirm},
+		{Label: locale.Reject.In(buttons.Language), Data: buttons.Reject},
 	}
 	if buttons.Preview != "" {
-		actions = append(actions, widgetAction{Label: "Preview", Data: buttons.Preview})
+		actions = append(actions, widgetAction{Label: locale.Preview.In(buttons.Language), Data: buttons.Preview})
 	}
 	return actions
 }
 
 // encodeWidgetData renders a proposal's text and status as the user reads them, with its actions,
 // and reports whether the data fits Telegram's limit whole.
-func encodeWidgetData(text, status string, actions []widgetAction) (string, bool) {
-	data := marshalWidgetData(widgetData{Text: plainWidgetText(text), Status: plainWidgetText(status), Actions: actions})
+func encodeWidgetData(language locale.Language, text, status string, actions []widgetAction) (string, bool) {
+	data := marshalWidgetData(widgetData{Text: plainWidgetText(text), Status: plainWidgetText(status), Actions: actions, Lang: widgetLanguage(language)})
 	return data, len(data) <= widgetDataLimit
 }
 
@@ -44,13 +47,13 @@ func encodeWidgetData(text, status string, actions []widgetAction) (string, bool
 // the status whole, or with no text and the status shortened when the status alone does not fit.
 // It reports whether anything was shortened, and false for fits only when the actions alone do not
 // fit.
-func shortenWidgetData(text, status string, actions []widgetAction) (data string, shortened, fits bool) {
-	if data, fits := encodeWidgetData(text, status, actions); fits {
+func shortenWidgetData(language locale.Language, text, status string, actions []widgetAction) (data string, shortened, fits bool) {
+	if data, fits := encodeWidgetData(language, text, status, actions); fits {
 		return data, false, true
 	}
 	shownText, shownStatus := plainWidgetText(text), plainWidgetText(status)
 	encode := func(text, status string) (string, bool) {
-		data := marshalWidgetData(widgetData{Text: text, Status: status, Actions: actions})
+		data := marshalWidgetData(widgetData{Text: text, Status: status, Actions: actions, Lang: widgetLanguage(language)})
 		return data, len(data) <= widgetDataLimit
 	}
 	if longest := longestFit(utf8.RuneCountInString(shownText), func(limit int) bool {
@@ -75,7 +78,7 @@ func shortenWidgetData(text, status string, actions []widgetAction) (data string
 // and its caption line under it. It reports false, sending nothing, when the text and status do not
 // fit the data whole.
 func (c *Client) sendProposalWidget(ctx context.Context, chatID int64, shown approval.Shown, actions []widgetAction) (Message, bool, error) {
-	data, fits := encodeWidgetData(shown.Body, shown.Status, actions)
+	data, fits := encodeWidgetData(shown.Language, shown.Body, shown.Status, actions)
 	if !fits {
 		return Message{}, false, nil
 	}
@@ -89,7 +92,7 @@ func (c *Client) sendProposalWidget(ctx context.Context, chatID int64, shown app
 // once: data already showing it is not modified and sends no second reply. The first error is
 // returned.
 func (c *Client) editProposalWidget(ctx context.Context, chatID, messageID int64, shown approval.Shown, actions []widgetAction) error {
-	data, shortened, fits := shortenWidgetData(shown.Body, shown.Status, actions)
+	data, shortened, fits := shortenWidgetData(shown.Language, shown.Body, shown.Status, actions)
 	if !fits {
 		data = ""
 	}

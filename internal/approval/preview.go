@@ -2,19 +2,29 @@ package approval
 
 import (
 	"context"
-	"fmt"
 	"slices"
 	"strings"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
-const (
-	previewBusyText        = "A preview of this batch is already running; its report will follow here."
-	previewNothingText     = "Nothing in this batch can be previewed."
-	previewResolvedText    = "This batch is no longer waiting for confirmation, so there is nothing to preview."
-	previewUnavailableText = "Previews are not available right now."
-	previewFooter          = "Preview only: nothing is scheduled or changed until you confirm."
+var (
+	previewBusyText        = locale.T("A preview of this batch is already running; its report will follow here.", "Предпросмотр этого предложения уже выполняется; отчёт появится здесь.")
+	previewNothingText     = locale.T("Nothing in this batch can be previewed.", "Для этого предложения предпросмотр недоступен.")
+	previewResolvedText    = locale.T("This batch is no longer waiting for confirmation, so there is nothing to preview.", "Это предложение больше не ждёт подтверждения, поэтому просматривать нечего.")
+	previewUnavailableText = locale.T("Previews are not available right now.", "Предпросмотр сейчас недоступен.")
+	previewFooter          = locale.T("Preview only: nothing is scheduled or changed until you confirm.", "Только предпросмотр: ничего не запланировано и не изменено, пока вы не подтвердите.")
+	previewRunning         = locale.T("Running a preview; its report will follow here. Nothing is saved.", "Запускаю предпросмотр; отчёт появится здесь. Ничего не сохраняется.")
+	previewsRunning        = locale.N(
+		"Running previews of %[1]d item one after another; each report will follow here. Nothing is saved.",
+		"Running previews of %[1]d items one after another; each report will follow here. Nothing is saved.",
+		"Запускаю предпросмотр для %[1]d изменения по очереди; каждый отчёт появится здесь. Ничего не сохраняется.",
+		"Запускаю предпросмотр для %[1]d изменений по очереди; каждый отчёт появится здесь. Ничего не сохраняется.",
+		"Запускаю предпросмотр для %[1]d изменений по очереди; каждый отчёт появится здесь. Ничего не сохраняется.",
+	)
+	previewHeading  = locale.T("Preview: %[1]s", "Предпросмотр: %[1]s")
+	previewNumbered = locale.T("Preview %[1]d of %[2]d: %[3]s", "Предпросмотр %[1]d из %[2]d: %[3]s")
 )
 
 // PreviewPressed is what a Preview press did.
@@ -29,7 +39,7 @@ type PreviewPressed struct {
 // be previewed.
 func (s *Service) buttons(ctx context.Context, bundle []Record) Buttons {
 	id := bundle[0].BundleID
-	buttons := Buttons{Confirm: callbackData(ActionConfirm, id), Reject: callbackData(ActionReject, id)}
+	buttons := Buttons{Confirm: callbackData(ActionConfirm, id), Reject: callbackData(ActionReject, id), Language: s.language(ctx, bundle[0].PrincipalID)}
 	if len(s.previewable(ctx, bundle)) > 0 {
 		buttons.Preview = callbackData(ActionPreview, id)
 	}
@@ -75,17 +85,18 @@ func (s *Service) Preview(ctx context.Context, principalID, approvalID, trigger 
 	if !found || record.PrincipalID != principalID {
 		return PreviewPressed{}, nil
 	}
+	language := s.language(ctx, principalID)
 	bundle, err := s.repository.LoadBundle(ctx, record.BundleID)
 	if err != nil {
 		return PreviewPressed{}, err
 	}
 	pending := slices.IndexFunc(bundle, func(item Record) bool { return item.Status == StatusPending })
 	if pending < 0 || !s.now().Before(bundle[pending].ExpiresAt) {
-		return s.answerPreview(trigger, previewResolvedText), nil
+		return s.answerPreview(trigger, previewResolvedText.In(language)), nil
 	}
 	items := s.previewable(ctx, bundle)
 	if len(items) == 0 {
-		return s.answerPreview(trigger, previewNothingText), nil
+		return s.answerPreview(trigger, previewNothingText.In(language)), nil
 	}
 
 	s.mu.Lock()
@@ -96,13 +107,13 @@ func (s *Service) Preview(ctx context.Context, principalID, approvalID, trigger 
 	text := ""
 	switch {
 	case s.runCtx == nil:
-		text = previewUnavailableText
+		text = previewUnavailableText.In(language)
 	case s.previewing[record.BundleID]:
-		text = previewBusyText
+		text = previewBusyText.In(language)
 	case len(items) == 1:
-		text = "Running a preview; its report will follow here. Nothing is saved."
+		text = previewRunning.In(language)
 	default:
-		text = fmt.Sprintf("Running previews of %d items one after another; each report will follow here. Nothing is saved.", len(items))
+		text = previewsRunning.FormatIn(language, len(items))
 	}
 	s.rememberPress(trigger, text)
 	if s.runCtx == nil || s.previewing[record.BundleID] {
@@ -110,7 +121,7 @@ func (s *Service) Preview(ctx context.Context, principalID, approvalID, trigger 
 	}
 	s.previewing[record.BundleID] = true
 	s.previews.Add(1)
-	go s.runPreviews(thread.With(s.runCtx, record.ThreadID), record.BundleID, items, chatID, messageID)
+	go s.runPreviews(locale.With(thread.With(s.runCtx, record.ThreadID), language), record.BundleID, items, chatID, messageID)
 	s.logger.InfoContext(ctx, "approval.preview.started", "principal_id", principalID, "bundle_id", record.BundleID, "items", len(items))
 	return PreviewPressed{Text: text, Owned: true}, nil
 }
@@ -158,7 +169,7 @@ func (s *Service) runPreviews(ctx context.Context, bundleID string, items []Reco
 			}
 			return
 		}
-		if err := s.deliverer.SendPreview(ctx, chatID, messageID, previewText(preview, index, len(items))); err != nil {
+		if err := s.deliverer.SendPreview(ctx, chatID, messageID, previewText(preview, index, len(items), locale.From(ctx))); err != nil {
 			s.logger.WarnContext(ctx, "approval.preview.undeliverable", "principal_id", current.PrincipalID, "approval_id", current.ID, "error", err)
 			return
 		}
@@ -166,10 +177,10 @@ func (s *Service) runPreviews(ctx context.Context, bundleID string, items []Reco
 	}
 }
 
-func previewText(preview Preview, index, count int) string {
-	heading := "Preview: " + preview.Name
+func previewText(preview Preview, index, count int, language locale.Language) string {
+	heading := previewHeading.FormatIn(language, preview.Name)
 	if count > 1 {
-		heading = fmt.Sprintf("Preview %d of %d: %s", index+1, count, preview.Name)
+		heading = previewNumbered.FormatIn(language, index+1, count, preview.Name)
 	}
-	return "**" + heading + "**\n\n" + strings.TrimSpace(preview.Text) + "\n\n" + previewFooter
+	return "**" + heading + "**\n\n" + strings.TrimSpace(preview.Text) + "\n\n" + previewFooter.In(language)
 }

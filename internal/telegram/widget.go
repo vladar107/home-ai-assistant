@@ -6,6 +6,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/url"
 	"strconv"
 	"strings"
@@ -26,7 +27,53 @@ var (
 	WidgetWorkingAnswer = locale.T("Working on it…", "Выполняется…")
 	// WidgetIgnoredAnswer answers a tap that names nothing the user can act on.
 	WidgetIgnoredAnswer = locale.T("This no longer does anything.", "Эта кнопка больше не действует.")
+
+	widgetTooManyTaps = locale.T("Too many taps; wait a moment and try again.", "Слишком много нажатий; подождите немного и попробуйте снова.")
+	widgetNoAnswer    = locale.T("No answer came; try again.", "Ответ не пришёл; попробуйте ещё раз.")
 )
+
+// widgetLanguages are the languages a widget's template can draw its labels in.
+var widgetLanguages = []locale.Language{locale.English, locale.Russian}
+
+// widgetLabelSets are the labels a kind of widget draws beyond the base's, by language. A kind
+// without any has none here.
+var widgetLabelSets = map[widgetKind]func(language locale.Language) map[string]any{
+	changesWidget: changesLabels,
+}
+
+// widgetLabels is the labels a kind's template carries, in every language, as the JSON object the
+// template's script reads. The data of a message names its language, and one with no language is
+// drawn in English, so a widget sent before a language existed keeps working. The texts come from
+// the catalog and travel in the template, not in the data, which Telegram limits to a kilobyte.
+func widgetLabels(kind widgetKind) string {
+	labels := make(map[string]map[string]any, len(widgetLanguages))
+	for _, language := range widgetLanguages {
+		set := map[string]any{
+			"working":  WidgetWorkingAnswer.In(language),
+			"ignored":  WidgetIgnoredAnswer.In(language),
+			"tooMany":  widgetTooManyTaps.In(language),
+			"noAnswer": widgetNoAnswer.In(language),
+		}
+		if own := widgetLabelSets[kind]; own != nil {
+			maps.Copy(set, own(language))
+		}
+		labels[language.String()] = set
+	}
+	// The default escaping keeps a closing tag out of the script the labels are written into.
+	encoded, err := json.Marshal(labels)
+	if err != nil {
+		panic(fmt.Sprintf("widget %s labels: %v", kind, err))
+	}
+	return string(encoded)
+}
+
+// widgetLanguage is the language a widget's data names, none for English.
+func widgetLanguage(language locale.Language) string {
+	if language == locale.English {
+		return ""
+	}
+	return language.String()
+}
 
 // widgetKind names a kind of widget, which is the program it runs and the data that program reads.
 // A widget message keeps the program it was sent with, so a kind's data must stay readable by the
@@ -67,7 +114,11 @@ func composeWidget(kind widgetKind) string {
 	}
 	base := read("base.html")
 	slots := []struct{ marker, extension string }{{"{{styles}}", ".css"}, {"{{markup}}", ".html"}, {"{{script}}", ".js"}}
-	replacements := make([]string, 0, 2*len(slots))
+	replacements := make([]string, 0, 2*len(slots)+2)
+	if strings.Count(base, "{{labels}}") != 1 {
+		panic("widget base must hold {{labels}} once")
+	}
+	replacements = append(replacements, "{{labels}}", widgetLabels(kind))
 	for _, slot := range slots {
 		if strings.Count(base, slot.marker) != 1 {
 			panic(fmt.Sprintf("widget base must hold %s once", slot.marker))

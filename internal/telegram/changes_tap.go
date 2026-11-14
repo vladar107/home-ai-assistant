@@ -106,7 +106,7 @@ func (s *Service) processKeepTap(ctx context.Context, bot Bot, updateID int64, t
 	}
 	answer := WidgetWorkingAnswer.Format(ctx)
 	if !current {
-		answer = approval.ProposalChangedText
+		answer = approval.ProposalChanged.Format(ctx)
 	}
 	if err := tap.answer(ctx, answer); err != nil && !isPermanentAPIError(err) {
 		return processingResult{}, tap.failure, err

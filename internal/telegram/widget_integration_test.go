@@ -19,6 +19,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/integration"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
@@ -807,7 +808,7 @@ func TestProposalKindRecordOfSeveralChangesKeepsItsShape(t *testing.T) {
 	if err != nil || !pressed.Changed {
 		t.Fatalf("press = %+v %v", pressed, err)
 	}
-	if data, fits := encodeWidgetData(pressed.Shown.Body, pressed.Shown.Status, proposalActions(pressed.Buttons)); !fits || len(data) < widgetDataLimit-20 {
+	if data, fits := encodeWidgetData(locale.English, pressed.Shown.Body, pressed.Shown.Status, proposalActions(pressed.Buttons)); !fits || len(data) < widgetDataLimit-20 {
 		t.Fatalf("batch data in the proposal shape = %d bytes, want just under the limit", len(data))
 	}
 
@@ -877,10 +878,10 @@ func TestWidgetDataKeepsTextInAnyScript(t *testing.T) {
 	t.Parallel()
 	actions := []widgetAction{{Label: "Confirm", Data: "approval:confirm:0000000000000000"}}
 	for name, character := range map[string]string{"two bytes": "ж", "three bytes": "界", "four bytes": "🙂", "escaped": `"`} {
-		if _, fits := encodeWidgetData(strings.Repeat(character, 900), "Done.", actions); fits {
+		if _, fits := encodeWidgetData(locale.English, strings.Repeat(character, 900), "Done.", actions); fits {
 			t.Fatalf("%s: 900 characters fit the data whole", name)
 		}
-		raw, shortened, fits := shortenWidgetData(strings.Repeat(character, 900), "Done.", actions)
+		raw, shortened, fits := shortenWidgetData(locale.English, strings.Repeat(character, 900), "Done.", actions)
 		data := decodeWidget(t, raw)
 		if !fits || !shortened || len(raw) > widgetDataLimit || data.Status != "Done." || !strings.Contains(data.Text, "…") {
 			t.Fatalf("%s: fits = %t, shortened = %t, %d bytes, %+v", name, fits, shortened, len(raw), data)
@@ -895,7 +896,7 @@ func TestWidgetDataKeepsTextInAnyScript(t *testing.T) {
 			t.Fatalf("%s: caption of %d units, plain = %t", name, units, plain)
 		}
 	}
-	raw, shortened, fits := shortenWidgetData("Save the note", "Done. "+strings.Repeat("Saved. ", 200), actions)
+	raw, shortened, fits := shortenWidgetData(locale.English, "Save the note", "Done. "+strings.Repeat("Saved. ", 200), actions)
 	if data := decodeWidget(t, raw); !fits || !shortened || len(raw) > widgetDataLimit || data.Text != "" || !strings.HasPrefix(data.Status, "Done. Saved.") || !strings.Contains(data.Status, "…") {
 		t.Fatalf("status too long for the data = %t %t %+v", fits, shortened, data)
 	}

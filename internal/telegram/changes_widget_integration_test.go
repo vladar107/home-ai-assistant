@@ -472,7 +472,7 @@ func TestChangesDataKeepsWhatAFailedChangeSays(t *testing.T) {
 	data, shortened, fits := encodeChangesData(approval.Shown{
 		ID: "aaaaaaaaaaaaaaaa", Status: "1 done, 1 failed.",
 		Changes: []approval.Change{
-			{Title: "Save the note A", State: approval.ChangeDone, Outcome: "Done. Saved A."},
+			{Title: "Save the note A", State: approval.ChangeDone, Outcome: "Done. Saved A.", Detail: "Saved A."},
 			{Title: "Save the note B", State: approval.ChangeFailed, Outcome: interrupted},
 			{Title: "Save the note C", State: approval.ChangeDone, Outcome: "Done."},
 		},

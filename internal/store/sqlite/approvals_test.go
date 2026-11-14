@@ -94,10 +94,10 @@ func TestMigrationDirectApprovalsKeepsExistingRows(t *testing.T) {
 	if found, ok, err := store.FindDirectApproval(ctx, "alice", "note_write", hash, direct.RequestID); err != nil || !ok || found.ID != direct.ID || found.Status != approval.StatusConfirmed || found.StartedAt.IsZero() {
 		t.Fatalf("duplicate lookup = %+v %v %v", found, ok, err)
 	}
-	if finished, err := store.FinishDirectApproval(ctx, direct.ID, approval.StatusDone, "", "Saved.", json.RawMessage(`{"name":"d"}`), now.Add(approval.UndoWindow)); err != nil || !finished {
+	if finished, err := store.FinishDirectApproval(ctx, direct.ID, approval.StatusDone, "", "Saved.", "", json.RawMessage(`{"name":"d"}`), now.Add(approval.UndoWindow)); err != nil || !finished {
 		t.Fatalf("finish direct = %v %v", finished, err)
 	}
-	if err := store.SetApprovalSummary(ctx, direct.ID, "Warned"); err != nil {
+	if err := store.SetApprovalWarning(ctx, direct.ID, "Warned"); err != nil {
 		t.Fatal(err)
 	}
 	listed, err := store.DirectApprovals(ctx, "alice", direct.RequestID)
@@ -144,7 +144,7 @@ func TestMigrationDirectApprovalsKeepsExistingRows(t *testing.T) {
 	if claimed, err := store.ClaimUndo(ctx, direct.ID, "alice", now); err != nil || !claimed {
 		t.Fatalf("undo claim after the restart = %v %v", claimed, err)
 	}
-	if err := store.CompleteUndo(ctx, direct.ID, "Removed."); err != nil {
+	if err := store.CompleteUndo(ctx, direct.ID, "Removed.", ""); err != nil {
 		t.Fatal(err)
 	}
 	if undone, _, err := store.LoadApproval(ctx, direct.ID); err != nil || undone.Status != approval.StatusUndone || undone.Reason != "" || undone.Outcome != "Removed." || !undone.FinishedAt.Equal(finished.FinishedAt) {
@@ -279,7 +279,7 @@ func TestConfirmChosenEndsTheOthersOnlyWhileAKeptRecordWaits(t *testing.T) {
 		}
 		return strings.Join(line, " ")
 	}
-	finished, err := store.FinishApproval(ctx, "bbbbbbbbbbbbbbbb", approval.StatusPending, approval.StatusRejected, approval.ReasonWithdrawn, "")
+	finished, err := store.FinishApproval(ctx, "bbbbbbbbbbbbbbbb", approval.StatusPending, approval.StatusRejected, approval.ReasonWithdrawn, "", "")
 	if err != nil || !finished {
 		t.Fatalf("withdraw = %v %v", finished, err)
 	}

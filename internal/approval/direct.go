@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/clip"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
@@ -24,6 +25,26 @@ const (
 	directItemsUnits = 4000
 	// directMessageItems is Telegram's limit on the buttons of one message.
 	directMessageItems = 100
+)
+
+var (
+	doneHeading        = locale.T("Done:", "Готово:")
+	doneManyHeading    = locale.N("Done, %[1]d change:", "Done, %[1]d changes:", "Готово, %[1]d изменение:", "Готово, %[1]d изменения:", "Готово, %[1]d изменений:")
+	undoNumbered       = locale.T("Undo %[1]d", "Отменить %[1]d")
+	undoWindowLine     = locale.T("Undo works for 24 hours.", "Отменить можно в течение 24 часов.")
+	notUndoneLine      = locale.T("Not undone: %[1]s", "Отменить не удалось: %[1]s")
+	undoInterruptedEnd = locale.T("A restart interrupted its Undo, and it can no longer be undone; check whether the change still stands.", "Перезапуск прервал отмену, и теперь это нельзя отменить; проверьте, действует ли изменение.")
+	undoInterrupted    = locale.T("A restart interrupted its Undo; check whether the change still stands, or press Undo again.", "Перезапуск прервал отмену; проверьте, действует ли изменение, или нажмите «Отменить» ещё раз.")
+	undoExpiredLine    = locale.T("It can no longer be undone.", "Отменить это больше нельзя.")
+	undoneLine         = locale.T("Undone.", "Отменено.")
+	notAskedLine       = locale.T("This was not made without asking, so it has no Undo.", "Это сделано после вашего подтверждения, поэтому отмены у него нет.")
+	alreadyUndoneLine  = locale.T("This was already undone.", "Это уже отменено.")
+	notCompleteLine    = locale.T("This did not complete, so there is nothing to undo.", "Это не было выполнено, поэтому отменять нечего.")
+	beingUndoneLine    = locale.T("This is being undone.", "Это уже отменяется.")
+	undoPassedLine     = locale.T("The 24 hours to undo this have passed.", "24 часа на отмену истекли.")
+	cannotUndoLine     = locale.T("This cannot be undone.", "Это нельзя отменить.")
+	noLongerUndoable   = locale.T("This can no longer be undone.", "Это больше нельзя отменить.")
+	undoFailedLine     = locale.T("Undo failed; try again in a moment.", "Не удалось отменить; попробуйте ещё раз через минуту.")
 )
 
 // Act makes the proposed action at once, without asking, when the call belongs to a chat turn that
@@ -49,7 +70,7 @@ func (s *Service) Act(ctx context.Context, principalID string, proposal Proposal
 		return "", fmt.Errorf("approval proposal names a tool without an executor")
 	}
 	summary := strings.TrimSpace(proposal.Summary)
-	if utf16Units(summary)+utf16Units(DirectIntentWarning)+2 > bundleSummaryUnits {
+	if utf16Units(summary)+directWarningUnits+2 > bundleSummaryUnits {
 		return "", ErrSummaryTooLong
 	}
 	canonical, err := canonicalJSON(proposal.Arguments)
@@ -108,7 +129,7 @@ func (s *Service) Act(ctx context.Context, principalID string, proposal Proposal
 		s.mu.Unlock()
 	}
 
-	succeeded, reason, outcome, undo := s.runExecutor(ctx, executor, record)
+	succeeded, reason, outcome, userText, undo := s.runExecutor(ctx, executor, record)
 	status := StatusFailed
 	if succeeded {
 		status, reason = StatusDone, ""
@@ -119,11 +140,11 @@ func (s *Service) Act(ctx context.Context, principalID string, proposal Proposal
 			record.Undo, record.UndoUntil = undo, now.Add(UndoWindow)
 		}
 	}
-	outcome = clip.Runes(outcome, outcomeRunes)
-	if _, err := s.repository.FinishDirectApproval(context.WithoutCancel(ctx), id, status, reason, outcome, record.Undo, record.UndoUntil); err != nil {
+	outcome, userText = clip.Runes(outcome, outcomeRunes), clip.Runes(userText, outcomeRunes)
+	if _, err := s.repository.FinishDirectApproval(context.WithoutCancel(ctx), id, status, reason, outcome, userText, record.Undo, record.UndoUntil); err != nil {
 		s.logger.ErrorContext(ctx, "approval.finish_failed", "principal_id", principalID, "approval_id", id, "status", status)
 	}
-	record.Status, record.Reason, record.Outcome = status, reason, outcome
+	record.Status, record.Reason, record.Outcome, record.UserOutcome = status, reason, outcome, userText
 	if !succeeded {
 		s.dropIntents([]Record{record})
 	}
@@ -166,7 +187,7 @@ func (s *Service) repeatedOrDone(record Record, repeated bool) (string, error) {
 		}
 		return strings.Join(strings.Fields(prefix+prompt.ActDone+" "+record.Outcome+" "+text), " "), nil
 	default:
-		return "", &FailedError{Text: prefix + "The action failed: " + statusLine(record, outcomeRunes)}
+		return "", &FailedError{Text: prefix + "The action failed: " + modelStatusLine(record, outcomeRunes)}
 	}
 }
 
@@ -192,8 +213,9 @@ func (s *Service) sendDirect(ctx context.Context, principalID string, chatID int
 	if unsent, err = s.repository.UnsentDirectApprovals(ctx, principalID, thread.From(ctx), s.now()); err != nil {
 		return
 	}
-	for _, group := range s.directMessages(unsent) {
-		messageID, err := s.deliverer.SendDirectActions(ctx, chatID, s.directActions(group))
+	language := s.language(ctx, principalID)
+	for _, group := range s.directMessages(unsent, language) {
+		messageID, err := s.deliverer.SendDirectActions(ctx, chatID, s.directActions(group, language))
 		if err != nil {
 			s.logger.WarnContext(ctx, "approval.direct.undeliverable", "principal_id", principalID, "error", err)
 			return
@@ -208,13 +230,13 @@ func (s *Service) sendDirect(ctx context.Context, principalID string, chatID int
 
 // directMessages splits records into the "Done" messages that carry them: runs that fit one
 // message's text and buttons, each record whole in one message.
-func (s *Service) directMessages(records []Record) [][]Record {
+func (s *Service) directMessages(records []Record, language locale.Language) [][]Record {
 	var groups [][]Record
 	from, units := 0, 0
 	for index, record := range records {
 		// The cost covers the item's separators and its number, up to "100. ".
 		cost := utf16Units(record.Summary) + 8
-		if line := s.directStatus(record); line != "" {
+		if line := s.directStatus(record, language); line != "" {
 			cost += utf16Units(line) + 1
 		}
 		if index > from && (units+cost > directItemsUnits || index-from == directMessageItems) {
@@ -228,23 +250,23 @@ func (s *Service) directMessages(records []Record) [][]Record {
 
 // directActions renders a "Done" message: each action's summary with where it stands, and an Undo
 // button for each action that can still be undone.
-func (s *Service) directActions(records []Record) DirectActions {
+func (s *Service) directActions(records []Record, language locale.Language) DirectActions {
 	var builder strings.Builder
 	if len(records) == 1 {
-		builder.WriteString("Done:")
+		builder.WriteString(doneHeading.In(language))
 	} else {
-		fmt.Fprintf(&builder, "Done, %d changes:", len(records))
+		builder.WriteString(doneManyHeading.FormatIn(language, len(records)))
 	}
 	var actions DirectActions
 	for index, record := range records {
 		builder.WriteString("\n\n")
-		label := "Undo"
+		label := locale.Undo.In(language)
 		if len(records) > 1 {
 			fmt.Fprintf(&builder, "%d. ", index+1)
-			label = fmt.Sprintf("Undo %d", index+1)
+			label = undoNumbered.FormatIn(language, index+1)
 		}
 		builder.WriteString(record.Summary)
-		if line := s.directStatus(record); line != "" {
+		if line := s.directStatus(record, language); line != "" {
 			builder.WriteString("\n" + line)
 		}
 		if s.undoable(record) {
@@ -252,7 +274,7 @@ func (s *Service) directActions(records []Record) DirectActions {
 		}
 	}
 	if len(actions.Undo) > 0 {
-		builder.WriteString("\n\nUndo works for 24 hours.")
+		builder.WriteString("\n\n" + undoWindowLine.In(language))
 	}
 	actions.Text = builder.String()
 	return actions
@@ -268,23 +290,23 @@ func (s *Service) undoable(record Record) bool {
 	return ok
 }
 
-func (s *Service) directStatus(record Record) string {
+func (s *Service) directStatus(record Record, language locale.Language) string {
 	switch record.Status {
 	case StatusDone:
 		expired := len(record.Undo) > 0 && !s.now().Before(record.UndoUntil)
 		switch {
 		case record.Reason == ReasonUndoRefused:
-			return "Not undone: " + clip.Runes(record.Outcome, directOutcomeRunes)
+			return notUndoneLine.FormatIn(language, clip.Runes(userOutcome(record), directOutcomeRunes))
 		case record.Reason == ReasonUndoInterrupted && expired:
-			return "A restart interrupted its Undo, and it can no longer be undone; check whether the change still stands."
+			return undoInterruptedEnd.In(language)
 		case record.Reason == ReasonUndoInterrupted:
-			return "A restart interrupted its Undo; check whether the change still stands, or press Undo again."
+			return undoInterrupted.In(language)
 		case expired:
-			return "It can no longer be undone."
+			return undoExpiredLine.In(language)
 		}
 		return ""
 	case StatusUndone:
-		return "Undone."
+		return undoneLine.In(language)
 	default:
 		return ""
 	}
@@ -309,7 +331,8 @@ func (s *Service) Undo(ctx context.Context, principalID, recordID string) (Undid
 	if !found || record.PrincipalID != principalID {
 		return Undid{}, nil
 	}
-	if answer := s.undoRefusal(record); answer != "" {
+	language := s.language(ctx, principalID)
+	if answer := s.undoRefusal(record, language); answer != "" {
 		return Undid{Owned: true, Answer: answer}, nil
 	}
 	claimed, err := s.repository.ClaimUndo(ctx, record.ID, principalID, s.now())
@@ -321,16 +344,16 @@ func (s *Service) Undo(ctx context.Context, principalID, recordID string) (Undid
 		if err != nil {
 			return Undid{}, err
 		}
-		answer := s.undoRefusal(current)
+		answer := s.undoRefusal(current, language)
 		if answer == "" {
-			answer = "This can no longer be undone."
+			answer = noLongerUndoable.In(language)
 		}
 		return Undid{Owned: true, Answer: answer}, nil
 	}
 	s.mu.Lock()
 	undoer, _ := s.executors[record.Tool].(Undoer)
 	s.mu.Unlock()
-	undoCtx, cancel := context.WithTimeout(ctx, executionTimeout)
+	undoCtx, cancel := context.WithTimeout(locale.With(ctx, language), executionTimeout)
 	result, err := undoer.Undo(undoCtx, record, record.Undo)
 	cancel()
 	storeCtx := context.WithoutCancel(ctx)
@@ -338,25 +361,25 @@ func (s *Service) Undo(ctx context.Context, principalID, recordID string) (Undid
 	var answer string
 	switch {
 	case err == nil:
-		record.Status, record.Reason, record.Outcome = StatusUndone, "", clip.Runes(result.Text, outcomeRunes)
-		if err := s.repository.CompleteUndo(storeCtx, record.ID, record.Outcome); err != nil {
+		record.Status, record.Reason, record.Outcome, record.UserOutcome = StatusUndone, "", clip.Runes(result.Text, outcomeRunes), clip.Runes(result.UserText, outcomeRunes)
+		if err := s.repository.CompleteUndo(storeCtx, record.ID, record.Outcome, record.UserOutcome); err != nil {
 			return Undid{}, err
 		}
-		answer = "Undone."
+		answer = undoneLine.In(language)
 		s.recordStatus(ctx, record, StatusUndone)
 	case errors.As(err, &refusal):
-		reason := clip.Runes(refusal.Reason, outcomeRunes)
-		if err := s.repository.ReleaseUndo(storeCtx, record.ID, ReasonUndoRefused, reason, true); err != nil {
+		reason, userReason := clip.Runes(refusal.Reason, outcomeRunes), clip.Runes(refusal.UserReason, outcomeRunes)
+		if err := s.repository.ReleaseUndo(storeCtx, record.ID, ReasonUndoRefused, reason, userReason, true); err != nil {
 			return Undid{}, err
 		}
-		record.Reason, record.Outcome, record.Undo, record.UndoUntil = ReasonUndoRefused, reason, nil, time.Time{}
-		answer = "Not undone: " + reason
+		record.Reason, record.Outcome, record.UserOutcome, record.Undo, record.UndoUntil = ReasonUndoRefused, reason, userReason, nil, time.Time{}
+		answer = notUndoneLine.FormatIn(language, userOutcome(record))
 	default:
-		if err := s.repository.ReleaseUndo(storeCtx, record.ID, "", "", false); err != nil {
+		if err := s.repository.ReleaseUndo(storeCtx, record.ID, "", "", "", false); err != nil {
 			return Undid{}, err
 		}
 		s.logger.WarnContext(ctx, "approval.undo.failed", "principal_id", principalID, "approval_id", record.ID, "tool", record.Tool)
-		return Undid{Owned: true, Answer: "Undo failed; try again in a moment."}, nil
+		return Undid{Owned: true, Answer: undoFailedLine.In(language)}, nil
 	}
 	s.logger.InfoContext(ctx, "approval.undo", "principal_id", principalID, "approval_id", record.ID, "tool", record.Tool, "status", record.Status, "reason", record.Reason)
 	s.addNotice(record)
@@ -365,22 +388,22 @@ func (s *Service) Undo(ctx context.Context, principalID, recordID string) (Undid
 }
 
 // undoRefusal says why a record cannot be undone now, or nothing when it can.
-func (s *Service) undoRefusal(record Record) string {
+func (s *Service) undoRefusal(record Record, language locale.Language) string {
 	switch {
 	case record.Mode != ModeDirect:
-		return "This was not made without asking, so it has no Undo."
+		return notAskedLine.In(language)
 	case record.Status == StatusUndone:
-		return "This was already undone."
+		return alreadyUndoneLine.In(language)
 	case record.Status != StatusDone:
-		return "This did not complete, so there is nothing to undo."
+		return notCompleteLine.In(language)
 	case record.Reason == ReasonUndoRefused:
-		return "Not undone: " + record.Outcome
+		return notUndoneLine.FormatIn(language, userOutcome(record))
 	case record.Reason == ReasonUndoing:
-		return "This is being undone."
+		return beingUndoneLine.In(language)
 	case len(record.Undo) > 0 && !s.now().Before(record.UndoUntil):
-		return "The 24 hours to undo this have passed."
+		return undoPassedLine.In(language)
 	case !s.undoable(record):
-		return "This cannot be undone."
+		return cannotUndoLine.In(language)
 	default:
 		return ""
 	}
@@ -395,7 +418,7 @@ func (s *Service) showDirect(ctx context.Context, record Record) {
 	if err != nil || len(shown) == 0 {
 		return
 	}
-	if err := s.deliverer.EditDirectActions(ctx, record.ChatID, record.MessageID, s.directActions(shown)); err != nil {
+	if err := s.deliverer.EditDirectActions(ctx, record.ChatID, record.MessageID, s.directActions(shown, s.language(ctx, record.PrincipalID))); err != nil {
 		s.logger.WarnContext(ctx, "approval.direct.unshown", "principal_id", record.PrincipalID, "approval_id", record.ID, "error", err)
 	}
 }

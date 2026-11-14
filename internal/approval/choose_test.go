@@ -100,7 +100,7 @@ func TestChosenConfirmShowsAChangeWithdrawnBeforeTheStoreCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	withdraw = func() {
-		if finished, err := store.FinishApproval(ctx, records[1].ID, approval.StatusPending, approval.StatusRejected, approval.ReasonWithdrawn, ""); err != nil || !finished {
+		if finished, err := store.FinishApproval(ctx, records[1].ID, approval.StatusPending, approval.StatusRejected, approval.ReasonWithdrawn, "", ""); err != nil || !finished {
 			t.Errorf("withdraw = %v %v", finished, err)
 		}
 	}

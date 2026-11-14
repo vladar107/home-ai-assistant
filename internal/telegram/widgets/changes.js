@@ -4,12 +4,9 @@
   var state = document.getElementById('state');
   var warning = document.getElementById('warning');
   var actions = document.getElementById('actions');
-  var words = {w: 'waiting', x: 'executing', d: 'done', r: 'rejected', l: 'left out', h: 'withdrawn', e: 'expired', p: 'replaced', f: 'failed'};
-  var warningSentence = '⚠️ A marked change carries a warning; open it before confirming.';
   var unticked = {};
   var opened = {};
   var answers = {};
-  var ignored = 'This no longer does anything.';
 
   function clear(element) {
     while (element.firstChild) {
@@ -28,7 +25,17 @@
     return made;
   }
 
+  function isIgnored(answer) {
+    for (var code in labels) {
+      if (labels[code].ignored === answer) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   function stateText(change) {
+    var words = label('words');
     var code = String(change.s || '');
     if (words[code]) {
       if (code === 'f') {
@@ -59,7 +66,7 @@
       return;
     }
     request('approval:read:' + data.i + ':' + (index + 1), function (answer) {
-      if (answer === ignored) {
+      if (isIgnored(answer)) {
         status.textContent = answer;
       } else if (answer) {
         answers[index] = answer;
@@ -145,15 +152,15 @@
       list.appendChild(row(data, i));
     }
     heading.textContent = String(data.h || '');
-    count.textContent = changes.length + (changes.length === 1 ? ' change' : ' changes');
+    count.textContent = label('counts')[changes.length] || changes.length + ' changes';
     state.textContent = String(data.s || '');
-    warning.textContent = marked ? warningSentence : '';
+    warning.textContent = marked ? label('warning') : '';
     clear(actions);
     if (waiting) {
-      actions.appendChild(control('Confirm ' + kept + ' of ' + open, '', 'approval:keep:' + data.i + ':' + flags, dataChanges, kept === 0));
-      actions.appendChild(control('Reject all', 'reject', 'approval:reject:' + data.i, dataChanges, false));
+      actions.appendChild(control(label('confirm').replace('{1}', kept).replace('{2}', open), '', 'approval:keep:' + data.i + ':' + flags, dataChanges, kept === 0));
+      actions.appendChild(control(label('rejectAll'), 'reject', 'approval:reject:' + data.i, dataChanges, false));
       if (data.p) {
-        actions.appendChild(control('Preview', 'quiet', 'approval:preview:' + data.i, controlsReturn, false));
+        actions.appendChild(control(label('preview'), 'quiet', 'approval:preview:' + data.i, controlsReturn, false));
       }
     }
     actions.style.display = actions.firstChild ? 'flex' : 'none';

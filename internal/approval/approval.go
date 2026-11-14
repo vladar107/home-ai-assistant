@@ -19,10 +19,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf16"
 
 	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/integration"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
@@ -68,8 +70,10 @@ const (
 	DefaultSweepInterval = 30 * time.Second
 	maximumSummaryRunes  = 3000
 	intentCheckTimeout   = 3 * time.Second
-	IntentWarning        = "⚠️ This does not look like something you asked for. Check it carefully before confirming."
-	DirectIntentWarning  = "⚠️ This does not look like something you asked for. Check it, and press Undo if it is wrong."
+	// IntentWarning and DirectIntentWarning are the English warnings; a proposal's summary starts
+	// with the one in the language of its user at the time it was made.
+	IntentWarning       = "⚠️ This does not look like something you asked for. Check it carefully before confirming."
+	DirectIntentWarning = "⚠️ This does not look like something you asked for. Check it, and press Undo if it is wrong."
 	// UndoWindow is how long the owner of a direct action can undo it.
 	UndoWindow       = 24 * time.Hour
 	executionTimeout = 45 * time.Second
@@ -159,10 +163,17 @@ type Record struct {
 	Hash        string
 	Summary     string
 	// Title is the proposal's own title, empty when the summary names the change.
-	Title     string
-	Status    string
-	Reason    string
-	Outcome   string
+	Title  string
+	Status string
+	Reason string
+	// Outcome is the outcome line in English, which the model reads; UserOutcome is the same line in
+	// the language of the user it was made for, empty when the executor wrote none, and then the
+	// user reads Outcome.
+	Outcome     string
+	UserOutcome string
+	// Warned reports that the intent check put a warning at the start of the summary, in the
+	// language the user had then.
+	Warned    bool
 	ChatID    int64
 	MessageID int64
 	// ThreadID is the Telegram tab of the turn that made the record, or zero for the main view.
@@ -199,7 +210,11 @@ const (
 
 // Outcome is the content-free result line of an executed action, such as a created page URL.
 type Outcome struct {
+	// Text is the English line the model reads, in act results and Undo notices.
 	Text string
+	// UserText is the same line in the user's language, which the status line shows when it is set.
+	// It never reaches the model.
+	UserText string
 	// Undo is what reverses a direct action, such as a created object's ID or the values it
 	// replaced. It is kept apart from the arguments, whose hash stays canonical, and an action
 	// without it cannot be undone.
@@ -217,6 +232,8 @@ type Undoer interface {
 // UndoRefusal refuses an Undo for good, with the reason shown to the user.
 type UndoRefusal struct {
 	Reason string
+	// UserReason is Reason in the user's language, shown to the user when it is set.
+	UserReason string
 }
 
 func (e *UndoRefusal) Error() string { return "undo refused: " + e.Reason }
@@ -240,6 +257,8 @@ type Exposure interface {
 type ActionError struct {
 	Reason string
 	Text   string
+	// UserText is Text in the user's language, shown to the user when it is set.
+	UserText string
 }
 
 func (e *ActionError) Error() string { return "action failed: " + e.Reason }
@@ -292,8 +311,9 @@ type Repository interface {
 	// StartApproval marks a confirmed record as executing, so a restart can tell it from one that
 	// never ran.
 	StartApproval(ctx context.Context, id string, now time.Time) error
-	// FinishApproval moves a record to a terminal status with a reason and outcome.
-	FinishApproval(ctx context.Context, id, from, status, reason, outcome string) (bool, error)
+	// FinishApproval moves a record to a terminal status with a reason, the English outcome and the
+	// outcome in the user's language.
+	FinishApproval(ctx context.Context, id, from, status, reason, outcome, userOutcome string) (bool, error)
 	// ConfirmChosen confirms the kept records of the principal's bundle and rejects the other
 	// pending ones with ReasonLeftOut, in one transaction, only while a kept record is still
 	// pending and unexpired. It returns the IDs of both sets, and changes nothing and returns none
@@ -302,8 +322,9 @@ type Repository interface {
 	// SetApprovalMessage records the chat and the message that shows the records, and the kind of
 	// widget that message is, none for text; a zero message ID marks them as not delivered yet.
 	SetApprovalMessage(ctx context.Context, ids []string, chatID, messageID int64, widget WidgetKind) error
-	// SetApprovalSummary replaces the summary of a pending record.
-	SetApprovalSummary(ctx context.Context, id, summary string) error
+	// SetApprovalWarning replaces the summary of a pending record with one that starts with an
+	// intent warning, and marks the record as warned.
+	SetApprovalWarning(ctx context.Context, id, summary string) error
 	// ExpireApprovals moves every pending record past its expiry, or every pending and confirmed
 	// record when all is set, to expired, or to failed for a confirmed record that had started,
 	// returning the changed records. With all set it also marks a done record whose Undo was running
@@ -317,7 +338,7 @@ type Repository interface {
 	CreateDirectApproval(context.Context, Record) error
 	// FinishDirectApproval moves a confirmed direct record to done or failed, keeping the undo
 	// payload of a done one until undoUntil.
-	FinishDirectApproval(ctx context.Context, id, status, reason, outcome string, undo json.RawMessage, undoUntil time.Time) (bool, error)
+	FinishDirectApproval(ctx context.Context, id, status, reason, outcome, userOutcome string, undo json.RawMessage, undoUntil time.Time) (bool, error)
 	// DirectApprovals returns the direct records of a chat request in the order they were made.
 	DirectApprovals(ctx context.Context, principalID, requestID string) ([]Record, error)
 	// UnsentDirectApprovals returns the principal's done and undone direct records of one tab that
@@ -332,10 +353,10 @@ type Repository interface {
 	// deadline is after now, reporting whether it did, so only one press undoes it.
 	ClaimUndo(ctx context.Context, id, principalID string, now time.Time) (bool, error)
 	// CompleteUndo moves a claimed record to undone with the outcome of its Undo.
-	CompleteUndo(ctx context.Context, id, outcome string) error
+	CompleteUndo(ctx context.Context, id, outcome, userOutcome string) error
 	// ReleaseUndo returns a claimed record to plain done with a reason and outcome. A spent one loses
 	// its undo payload, so it cannot be pressed again.
-	ReleaseUndo(ctx context.Context, id, reason, outcome string, spent bool) error
+	ReleaseUndo(ctx context.Context, id, reason, outcome, userOutcome string, spent bool) error
 }
 
 // Deliverer sends and updates the proposal messages in the user's chat.
@@ -376,6 +397,8 @@ type Shown struct {
 	Changes []Change
 	// Heading is what an offered proposal is shown under; a chat turn's proposal has none.
 	Heading string
+	// Language is the language of the user the proposal is for, which a widget draws its labels in.
+	Language locale.Language
 }
 
 // ChangeState is the short code of where one change of a proposal stands, which a widget maps to
@@ -404,12 +427,17 @@ type Change struct {
 	Warned bool
 	// Outcome is what became of a change that is no longer waiting.
 	Outcome string
+	// Detail is the outcome line of a done change without the word that says it is done.
+	Detail string
 	// Text is the change's whole summary.
 	Text string
 }
 
-// ProposalChangedText answers a Confirm that names changes the proposal no longer has.
+// ProposalChangedText answers a Confirm that names changes the proposal no longer has, in English;
+// ProposalChanged is the same answer in the user's language.
 const ProposalChangedText = "This proposal changed; look at it again."
+
+var ProposalChanged = locale.T("This proposal changed; look at it again.", "Это предложение изменилось; посмотрите его ещё раз.")
 
 // DirectActions is a turn's "Done" message: its text and the Undo buttons of the actions that can
 // still be undone, in order.
@@ -432,6 +460,8 @@ type Buttons struct {
 	Reject  string
 	Preview string
 	Widget  bool
+	// Language is the language of the user the buttons are for.
+	Language locale.Language
 	// Kind asks for the whole proposal as one widget of that kind, with its changes in what is
 	// shown. A deliverer that cannot send it sends nothing and returns message ID 0.
 	Kind WidgetKind
@@ -465,6 +495,7 @@ type Service struct {
 	telemetry Telemetry
 	switches  integration.SwitchReader
 	widgets   WidgetPreference
+	languages locale.Preferences
 	intents   map[string]Intent
 	// notices holds what became of resolved proposals per tab, so the outcome reaches the
 	// conversation that made them.
@@ -544,7 +575,7 @@ func (s *Service) recordStatus(ctx context.Context, record Record, status string
 	if telemetry == nil {
 		return
 	}
-	telemetry.RecordApproval(ctx, record.PrincipalID, record.Tool, status, warned(record))
+	telemetry.RecordApproval(ctx, record.PrincipalID, record.Tool, status, record.Warned)
 }
 
 // SetIntentChecker enables the intent check on proposals delivered from now on.
@@ -576,6 +607,35 @@ func (s *Service) SetWidgets(widgets WidgetPreference) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.widgets = widgets
+}
+
+// SetLanguages sets where the principals' interface languages are read, at wiring time. Without it
+// every proposal is shown in the language of the context it is rendered in, English when it has none.
+func (s *Service) SetLanguages(languages locale.Preferences) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.languages = languages
+}
+
+// language is the language the principal's proposals are shown in: their own choice, read from the
+// store whatever work asks, so a background edit writes the language of the record's owner. A
+// choice that cannot be read leaves the context's language.
+func (s *Service) language(ctx context.Context, principalID string) locale.Language {
+	s.mu.Lock()
+	languages := s.languages
+	s.mu.Unlock()
+	if languages == nil || principalID == "" {
+		return locale.From(ctx)
+	}
+	language, chosen, err := languages.LoadLanguage(ctx, principalID)
+	if err != nil {
+		s.logger.WarnContext(ctx, "approval.language.unread", "principal_id", principalID, "error", err)
+		return locale.From(ctx)
+	}
+	if !chosen {
+		return locale.English
+	}
+	return language
 }
 
 // wantsWidget reports whether the principal's proposals go out as a widget; a choice that cannot
@@ -979,12 +1039,12 @@ func (s *Service) checkIntent(ctx context.Context, record Record) {
 	if !mismatch {
 		return
 	}
-	warning := IntentWarning
+	warning := intentWarning
 	if record.Mode == ModeDirect {
-		warning = DirectIntentWarning
+		warning = directIntentWarning
 	}
-	summary := clip.Runes(warning+"\n\n"+record.Summary, maximumSummaryRunes)
-	if err := s.repository.SetApprovalSummary(ctx, record.ID, summary); err != nil {
+	summary := clip.Runes(warning.In(s.language(ctx, record.PrincipalID))+"\n\n"+record.Summary, maximumSummaryRunes)
+	if err := s.repository.SetApprovalWarning(ctx, record.ID, summary); err != nil {
 		s.logger.WarnContext(ctx, "approval.intent_warning.unsaved", "principal_id", record.PrincipalID, "approval_id", record.ID)
 	}
 }
@@ -1012,8 +1072,9 @@ func (s *Service) send(ctx context.Context, bundle []Record, chatID int64) error
 		}
 	}
 	ranges := messageRanges(bundle, start)
+	language := s.language(ctx, first.PrincipalID)
 	for index, span := range ranges {
-		shown := messageShown(bundle, span[0], span[1])
+		shown := messageShown(bundle, span[0], span[1], language)
 		var messageID int64
 		var widget WidgetKind
 		var err error
@@ -1052,7 +1113,7 @@ func (s *Service) sendChanges(ctx context.Context, bundle []Record, chatID int64
 	}
 	buttons := s.buttons(ctx, bundle)
 	buttons.Widget, buttons.Kind = true, ChangesWidget
-	messageID, kind, err := s.deliverer.SendProposal(ctx, chatID, changesShown(bundle), buttons)
+	messageID, kind, err := s.deliverer.SendProposal(ctx, chatID, changesShown(bundle, s.language(ctx, bundle[0].PrincipalID)), buttons)
 	if err != nil {
 		s.undeliverable(ctx, bundle, chatID, err)
 		return false, err
@@ -1126,15 +1187,16 @@ func (s *Service) Press(ctx context.Context, principalID, action, approvalID str
 	if len(bundle) == 0 {
 		return Pressed{Owned: true}, nil
 	}
+	language := s.language(ctx, principalID)
 	pending := slices.IndexFunc(bundle, func(item Record) bool { return item.Status == StatusPending })
 	if pending < 0 {
-		return Pressed{Shown: bundleShown(bundle), Owned: true}, nil
+		return Pressed{Shown: bundleShown(bundle, language), Owned: true}, nil
 	}
 	if !s.now().Before(bundle[pending].ExpiresAt) {
 		if err := s.finishPending(ctx, bundle, StatusExpired, ReasonTimeout); err != nil {
 			return Pressed{}, err
 		}
-		return Pressed{Shown: bundleShown(bundle), Owned: true}, nil
+		return Pressed{Shown: bundleShown(bundle, language), Owned: true}, nil
 	}
 	switch action {
 	case ActionReject:
@@ -1142,7 +1204,7 @@ func (s *Service) Press(ctx context.Context, principalID, action, approvalID str
 			return Pressed{}, err
 		}
 		s.rememberNotice(bundle)
-		return Pressed{Shown: bundleShown(bundle), Owned: true}, nil
+		return Pressed{Shown: bundleShown(bundle, language), Owned: true}, nil
 	case ActionConfirm:
 		confirmed, err := s.repository.ConfirmBundle(ctx, record.BundleID, principalID, s.now())
 		if err != nil {
@@ -1153,7 +1215,7 @@ func (s *Service) Press(ctx context.Context, principalID, action, approvalID str
 			if err != nil {
 				return Pressed{}, err
 			}
-			return Pressed{Shown: bundleShown(shown(current)), Owned: true}, nil
+			return Pressed{Shown: bundleShown(shown(current), language), Owned: true}, nil
 		}
 		for index := range bundle {
 			if bundle[index].Status == StatusPending {
@@ -1162,7 +1224,7 @@ func (s *Service) Press(ctx context.Context, principalID, action, approvalID str
 			}
 		}
 		s.rememberNotice(bundle)
-		return Pressed{Shown: bundleShown(bundle), Owned: true, Ran: !offered(bundle)}, nil
+		return Pressed{Shown: bundleShown(bundle, language), Owned: true, Ran: !offered(bundle)}, nil
 	default:
 		return Pressed{}, nil
 	}
@@ -1252,7 +1314,7 @@ func (s *Service) PressKept(ctx context.Context, principalID, approvalID string,
 // stored is the answer to a press that names changes: the bundle as stored, with the buttons its
 // message keeps while anything still waits.
 func (s *Service) stored(ctx context.Context, bundle []Record, changed, ran bool) Pressed {
-	pressed := Pressed{Shown: bundleShown(bundle), Owned: true, Changed: changed, Ran: ran}
+	pressed := Pressed{Shown: bundleShown(bundle, s.language(ctx, bundle[0].PrincipalID)), Owned: true, Changed: changed, Ran: ran}
 	if slices.ContainsFunc(bundle, func(record Record) bool { return record.Status == StatusPending }) {
 		pressed.Buttons = s.buttons(ctx, bundle)
 	}
@@ -1346,7 +1408,7 @@ func (s *Service) finishPending(ctx context.Context, bundle []Record, status, re
 		if record.Status != StatusPending {
 			continue
 		}
-		finished, err := s.repository.FinishApproval(ctx, record.ID, StatusPending, status, reason, "")
+		finished, err := s.repository.FinishApproval(ctx, record.ID, StatusPending, status, reason, "", "")
 		if err != nil {
 			return err
 		}
@@ -1363,7 +1425,7 @@ func (s *Service) execute(ctx context.Context, record Record) Record {
 	s.mu.Lock()
 	executor, bound := s.executors[record.Tool]
 	s.mu.Unlock()
-	status, reason, outcome := StatusFailed, ReasonNoExecutor, ""
+	status, reason, outcome, userText := StatusFailed, ReasonNoExecutor, "", ""
 	if bound {
 		if err := s.repository.StartApproval(ctx, record.ID, s.now()); err != nil {
 			// Without the mark a restart would report the action as never run, so it is not run.
@@ -1373,24 +1435,27 @@ func (s *Service) execute(ctx context.Context, record Record) Record {
 	}
 	if bound {
 		var succeeded bool
-		succeeded, reason, outcome, _ = s.runExecutor(ctx, executor, record)
+		succeeded, reason, outcome, userText, _ = s.runExecutor(ctx, executor, record)
 		if succeeded {
 			status = StatusExecuted
 		}
 	}
-	if _, err := s.repository.FinishApproval(context.WithoutCancel(ctx), record.ID, StatusConfirmed, status, reason, outcome); err != nil {
+	if _, err := s.repository.FinishApproval(context.WithoutCancel(ctx), record.ID, StatusConfirmed, status, reason, outcome, userText); err != nil {
 		s.logger.ErrorContext(ctx, "approval.finish_failed", "principal_id", record.PrincipalID, "approval_id", record.ID, "status", status)
 	}
-	record.Status, record.Reason, record.Outcome = status, reason, outcome
+	record.Status, record.Reason, record.Outcome, record.UserOutcome = status, reason, outcome, userText
 	s.recordStatus(ctx, record, status)
 	s.logger.InfoContext(ctx, "approval.resolved", "principal_id", record.PrincipalID, "approval_id", record.ID, "bundle_id", record.BundleID, "status", status, "reason", reason)
 	return record
 }
 
 // runExecutor runs a started record's action, returning whether it succeeded, the failure reason,
-// the outcome line, and the undo payload of a success. An action whose integration the principal
-// has switched off since it was proposed is not run.
-func (s *Service) runExecutor(ctx context.Context, executor Executor, record Record) (bool, string, string, json.RawMessage) {
+// the outcome line, the same line in the user's language when the executor wrote one, and the undo
+// payload of a success. An action whose integration the principal has switched off since it was
+// proposed is not run. The executor runs in the principal's language, so the line it writes for the
+// user is in it.
+func (s *Service) runExecutor(ctx context.Context, executor Executor, record Record) (bool, string, string, string, json.RawMessage) {
+	ctx = locale.With(ctx, s.language(ctx, record.PrincipalID))
 	if switched, ok := executor.(integration.Switched); ok {
 		s.mu.Lock()
 		switches := s.switches
@@ -1398,10 +1463,10 @@ func (s *Service) runExecutor(ctx context.Context, executor Executor, record Rec
 		sw := switched.Switch()
 		enabled, err := switches.Enabled(ctx, record.PrincipalID, sw)
 		if err != nil {
-			return false, ReasonExecutorFailed, "", nil
+			return false, ReasonExecutorFailed, "", "", nil
 		}
 		if !enabled {
-			return false, ReasonDisabled, sw.UserOffText(), nil
+			return false, ReasonDisabled, sw.UserOffText(), "", nil
 		}
 	}
 	executionCtx, cancel := context.WithTimeout(ctx, executionTimeout)
@@ -1410,15 +1475,15 @@ func (s *Service) runExecutor(ctx context.Context, executor Executor, record Rec
 	var actionErr *ActionError
 	switch {
 	case err == nil:
-		return true, "", result.Text, result.Undo
+		return true, "", result.Text, result.UserText, result.Undo
 	case errors.As(err, &actionErr):
-		return false, actionErr.Reason, actionErr.Text, nil
+		return false, actionErr.Reason, actionErr.Text, actionErr.UserText, nil
 	case errors.Is(err, context.DeadlineExceeded):
-		return false, ReasonTimeout, "", nil
+		return false, ReasonTimeout, "", "", nil
 	case errors.Is(err, context.Canceled):
-		return false, ReasonInterrupted, "", nil
+		return false, ReasonInterrupted, "", "", nil
 	default:
-		return false, ReasonExecutorFailed, "", nil
+		return false, ReasonExecutorFailed, "", "", nil
 	}
 }
 
@@ -1455,7 +1520,7 @@ func (s *Service) report(ctx context.Context, records []Record) {
 		if last.ChatID == 0 || last.MessageID == 0 || last.Mode == ModeDirect {
 			continue
 		}
-		if err := s.deliverer.EditText(ctx, last.ChatID, last.MessageID, bundleShown(bundle)); err != nil {
+		if err := s.deliverer.EditText(ctx, last.ChatID, last.MessageID, bundleShown(bundle, s.language(ctx, last.PrincipalID))); err != nil {
 			s.logger.WarnContext(ctx, "approval.report.failed", "principal_id", last.PrincipalID, "bundle_id", last.BundleID, "error", err)
 		}
 	}
@@ -1614,37 +1679,95 @@ func shown(bundle []Record) []Record {
 }
 
 // bundleShown renders the message that carries the bundle's buttons, which is the last one.
-func bundleShown(bundle []Record) Shown {
+func bundleShown(bundle []Record, language locale.Language) Shown {
 	last := bundle[len(bundle)-1]
 	from := len(bundle) - 1
 	for last.MessageID != 0 && from > 0 && bundle[from-1].MessageID == last.MessageID {
 		from--
 	}
-	return messageShown(bundle, from, len(bundle))
+	return messageShown(bundle, from, len(bundle), language)
+}
+
+var (
+	changesTogether = locale.N(
+		"%[1]d change, confirmed or rejected together:",
+		"%[1]d changes, confirmed or rejected together:",
+		"%[1]d изменение подтверждается или отклоняется вместе:",
+		"%[1]d изменения подтверждаются или отклоняются вместе:",
+		"%[1]d изменений подтверждаются или отклоняются вместе:",
+	)
+	changeOfTogether    = locale.T("Change %[1]d of %[2]d, confirmed or rejected together:", "Изменение %[1]d из %[2]d подтверждается или отклоняется вместе:")
+	changesSpanTogether = locale.T("Changes %[1]d-%[2]d of %[3]d, confirmed or rejected together:", "Изменения %[1]d–%[2]d из %[3]d подтверждаются или отклоняются вместе:")
+	ChangeCount         = locale.N("%[1]d change", "%[1]d changes", "%[1]d изменение", "%[1]d изменения", "%[1]d изменений")
+	tallyPart           = locale.T("%[1]d %[2]s", "%[2]s: %[1]d")
+	expiresInLine       = locale.T("Expires in %[1]s.", "Истекает через %[1]s.")
+	confirmedLine       = locale.T("Confirmed; executing.", "Подтверждено, выполняется.")
+	doneLine            = locale.T("Done. %[1]s", "Готово. %[1]s")
+	withdrawnLine       = locale.T("Withdrawn by the assistant; nothing was written.", "Отозвано ассистентом, ничего не записано.")
+	leftOutLine         = locale.T("Left out; nothing was written.", "Пропущено, ничего не записано.")
+	rejectedLine        = locale.T("Rejected; nothing was written.", "Отклонено, ничего не записано.")
+	replacedLine        = locale.T("Replaced by a newer proposal; nothing was written.", "Заменено более новым предложением, ничего не записано.")
+	restartExpiredLine  = locale.T("Expired because the assistant restarted; nothing was written.", "Срок истёк: ассистент перезапустился, ничего не записано.")
+	expiredLine         = locale.T("Expired; nothing was written.", "Истекло, ничего не записано.")
+	interruptedLine     = locale.T("The assistant restarted while executing this; check whether it took effect before trying again.", "Ассистент перезапустился во время выполнения; проверьте, сработало ли изменение, прежде чем пробовать снова.")
+	timedOutLine        = locale.T("Execution timed out; check the target before trying again.", "Выполнение заняло слишком много времени; проверьте, что получилось, прежде чем пробовать снова.")
+	failedEarlyLine     = locale.T("Execution failed before anything was written.", "Не удалось выполнить: ничего не было записано.")
+	failedWithLine      = locale.T("Failed. %[1]s", "Не удалось. %[1]s")
+	failedLine          = locale.T("Failed.", "Не удалось.")
+	lessThanAMinute     = locale.T("less than a minute", "меньше минуты")
+	minutesLeft         = locale.N("%[1]d minute", "%[1]d minutes", "%[1]d минуту", "%[1]d минуты", "%[1]d минут")
+	hoursLeft           = locale.N("%[1]d hour", "%[1]d hours", "%[1]d час", "%[1]d часа", "%[1]d часов")
+	intentWarning       = locale.T("⚠️ This does not look like something you asked for. Check it carefully before confirming.", "⚠️ Похоже, вы об этом не просили. Внимательно проверьте, прежде чем подтверждать.")
+	directIntentWarning = locale.T("⚠️ This does not look like something you asked for. Check it, and press Undo if it is wrong.", "⚠️ Похоже, вы об этом не просили. Проверьте и нажмите «Отменить», если это ошибка.")
+	changeWords         = []struct {
+		state ChangeState
+		key   string
+		text  locale.Text
+	}{
+		{ChangeWaiting, "waiting", locale.T("waiting", "ожидает")},
+		{ChangeExecuting, "executing", locale.T("executing", "выполняется")},
+		{ChangeDone, "done", locale.T("done", "готово")},
+		{ChangeRejected, "rejected", locale.T("rejected", "отклонено")},
+		{ChangeLeftOut, "left out", locale.T("left out", "пропущено")},
+		{ChangeWithdrawn, "withdrawn", locale.T("withdrawn", "отозвано")},
+		{ChangeExpired, "expired", locale.T("expired", "истекло")},
+		{ChangeReplaced, "replaced", locale.T("replaced", "заменено")},
+		{ChangeFailed, "failed", locale.T("failed", "не удалось")},
+	}
+)
+
+// StateWords returns the word that says where a change in each state stands, in a language, which a
+// widget draws.
+func StateWords(language locale.Language) map[ChangeState]string {
+	words := make(map[ChangeState]string, len(changeWords))
+	for _, word := range changeWords {
+		words[word.state] = word.text.In(language)
+	}
+	return words
 }
 
 // messageShown renders the records from to to of a bundle: a single proposal as itself, and more as
 // a numbered list with each item's result under it, or one shared result at the end of the last
 // message when they all ended the same way.
-func messageShown(bundle []Record, from, to int) Shown {
+func messageShown(bundle []Record, from, to int, language locale.Language) Shown {
 	heading := ""
 	if from == 0 && bundle[0].Heading != "" {
 		heading = bundle[0].Heading + "\n\n"
 	}
 	if bundle[to-1].Widget == ChangesWidget && len(bundle) > 1 {
-		return changesShown(bundle)
+		return changesShown(bundle, language)
 	}
-	view := Shown{Caption: captionLine(bundle), Widget: bundle[to-1].Widget, ID: bundle[0].BundleID}
+	view := Shown{Caption: captionLine(bundle, language), Widget: bundle[to-1].Widget, ID: bundle[0].BundleID, Language: language}
 	if len(bundle) > 1 {
-		view.Changes = changesOf(bundle)
+		view.Changes = changesOf(bundle, language)
 	}
 	if len(bundle) == 1 {
-		view.Body, view.Status = heading+bundle[0].Summary, statusLine(bundle[0], maximumSummaryRunes)
+		view.Body, view.Status = heading+bundle[0].Summary, statusLine(bundle[0], maximumSummaryRunes, language)
 		return withStatus(view)
 	}
-	shared := statusLine(bundle[0], bundleOutcomeRunes)
+	shared := statusLine(bundle[0], bundleOutcomeRunes, language)
 	for _, record := range bundle[1:] {
-		if statusLine(record, bundleOutcomeRunes) != shared {
+		if statusLine(record, bundleOutcomeRunes, language) != shared {
 			shared = ""
 			break
 		}
@@ -1653,16 +1776,16 @@ func messageShown(bundle []Record, from, to int) Shown {
 	builder.WriteString(heading)
 	switch {
 	case from == 0:
-		fmt.Fprintf(&builder, "%d changes, confirmed or rejected together:", len(bundle))
+		builder.WriteString(changesTogether.FormatIn(language, len(bundle)))
 	case to-from == 1:
-		fmt.Fprintf(&builder, "Change %d of %d, confirmed or rejected together:", to, len(bundle))
+		builder.WriteString(changeOfTogether.FormatIn(language, to, len(bundle)))
 	default:
-		fmt.Fprintf(&builder, "Changes %d-%d of %d, confirmed or rejected together:", from+1, to, len(bundle))
+		builder.WriteString(changesSpanTogether.FormatIn(language, from+1, to, len(bundle)))
 	}
 	for index := from; index < to; index++ {
 		fmt.Fprintf(&builder, "\n\n%d. %s", index+1, bundle[index].Summary)
 		if shared == "" {
-			builder.WriteString("\n" + statusLine(bundle[index], bundleOutcomeRunes))
+			builder.WriteString("\n" + statusLine(bundle[index], bundleOutcomeRunes, language))
 		}
 	}
 	view.Body = builder.String()
@@ -1673,19 +1796,19 @@ func messageShown(bundle []Record, from, to int) Shown {
 		view.Status = shared
 		view = withStatus(view)
 	default:
-		view.Text, view.Status = view.Body, capitalize(tally(bundle))+"."
+		view.Text, view.Status = view.Body, capitalize(tally(bundle, language))+"."
 	}
 	return view
 }
 
 // changesShown renders a proposal of several changes as the list a changes widget draws: the
 // numbered titles, each with what became of it, and under them where the proposal stands.
-func changesShown(bundle []Record) Shown {
+func changesShown(bundle []Record, language locale.Language) Shown {
 	var builder strings.Builder
 	if bundle[0].Heading != "" {
 		builder.WriteString(bundle[0].Heading + "\n\n")
 	}
-	changes := changesOf(bundle)
+	changes := changesOf(bundle, language)
 	for index, change := range changes {
 		if index > 0 {
 			builder.WriteString("\n")
@@ -1695,23 +1818,26 @@ func changesShown(bundle []Record) Shown {
 			builder.WriteString("\n" + change.Outcome)
 		}
 	}
-	status := statusLine(bundle[0], bundleOutcomeRunes)
+	status := statusLine(bundle[0], bundleOutcomeRunes, language)
 	if slices.ContainsFunc(bundle, func(record Record) bool { return record.Status != StatusPending }) {
-		status = capitalize(tally(bundle)) + "."
+		status = capitalize(tally(bundle, language)) + "."
 	}
 	body := builder.String()
 	return Shown{
-		Text: body, Body: body, Status: status, Caption: captionLine(bundle), Widget: ChangesWidget,
-		ID: bundle[0].BundleID, Changes: changes, Heading: bundle[0].Heading,
+		Text: body, Body: body, Status: status, Caption: captionLine(bundle, language), Widget: ChangesWidget,
+		ID: bundle[0].BundleID, Changes: changes, Heading: bundle[0].Heading, Language: language,
 	}
 }
 
-func changesOf(bundle []Record) []Change {
+func changesOf(bundle []Record, language locale.Language) []Change {
 	changes := make([]Change, len(bundle))
 	for index, record := range bundle {
-		changes[index] = Change{Title: changeTitle(record), State: changeState(record), Text: record.Summary, Warned: warned(record) || strings.HasPrefix(record.Summary, "⚠️ ")}
+		changes[index] = Change{Title: changeTitle(record), State: changeState(record), Text: record.Summary, Warned: record.Warned || strings.HasPrefix(record.Summary, "⚠️ ")}
 		if record.Status != StatusPending {
-			changes[index].Outcome = statusLine(record, bundleOutcomeRunes)
+			changes[index].Outcome = statusLine(record, bundleOutcomeRunes, language)
+		}
+		if record.Status == StatusExecuted {
+			changes[index].Detail = clip.Runes(userOutcome(record), bundleOutcomeRunes)
 		}
 	}
 	return changes
@@ -1727,10 +1853,36 @@ func changeTitle(record Record) string {
 	return TitleOf(record.Summary)
 }
 
+// warningPrefixes are the intent warnings in every language, each followed by the blank line that
+// separates it from the summary. A proposal is read after the user may have switched language, so
+// the warning it starts with can be either.
+var warningPrefixes = []string{
+	IntentWarning + "\n\n",
+	DirectIntentWarning + "\n\n",
+	intentWarning.In(locale.Russian) + "\n\n",
+	directIntentWarning.In(locale.Russian) + "\n\n",
+}
+
+// warningUnits and directWarningUnits are the longest intent warning, and the longest direct one,
+// in UTF-16 units over the languages, which the room a summary needs is checked against whatever
+// language the warning is written in.
+var (
+	warningUnits       = max(utf16Units(intentWarning.In(locale.English)), utf16Units(intentWarning.In(locale.Russian)))
+	directWarningUnits = max(utf16Units(directIntentWarning.In(locale.English)), utf16Units(directIntentWarning.In(locale.Russian)))
+)
+
+// withoutWarning drops the intent warning a summary starts with, in either language.
+func withoutWarning(summary string) string {
+	for _, prefix := range warningPrefixes {
+		summary = strings.TrimPrefix(summary, prefix)
+	}
+	return summary
+}
+
 // TitleOf reads the title of a change from its summary: the first line after any leading lines that
 // start with a warning's mark, joined with the next line when it ends with a colon.
 func TitleOf(summary string) string {
-	summary = strings.TrimPrefix(strings.TrimPrefix(summary, IntentWarning+"\n\n"), DirectIntentWarning+"\n\n")
+	summary = withoutWarning(summary)
 	lines := strings.Split(summary, "\n")
 	for len(lines) > 0 && (strings.HasPrefix(lines[0], "⚠️ ") || strings.TrimSpace(lines[0]) == "") {
 		lines = lines[1:]
@@ -1746,26 +1898,13 @@ func TitleOf(summary string) string {
 }
 
 func changeState(record Record) ChangeState {
-	switch statusWord(record) {
-	case "waiting":
-		return ChangeWaiting
-	case "executing":
-		return ChangeExecuting
-	case "done":
-		return ChangeDone
-	case "left out":
-		return ChangeLeftOut
-	case "withdrawn":
-		return ChangeWithdrawn
-	case "expired":
-		return ChangeExpired
-	case "replaced":
-		return ChangeReplaced
-	case "failed":
-		return ChangeFailed
-	default:
-		return ChangeRejected
+	key := statusKey(record)
+	for _, word := range changeWords {
+		if word.key == key {
+			return word.state
+		}
 	}
+	return ChangeRejected
 }
 
 // withStatus ends the text with the status, which a widget shows apart from the body.
@@ -1780,46 +1919,48 @@ func withStatus(shown Shown) Shown {
 // captionLine names what a bundle proposes in one line: a single proposal by the first line of its
 // summary and more by their number, under the heading of an offered bundle and marked when the intent
 // check warned about any of them. Once anything is resolved it adds what became of them.
-func captionLine(bundle []Record) string {
-	line := fmt.Sprintf("%d changes", len(bundle))
+func captionLine(bundle []Record, language locale.Language) string {
+	line := ChangeCount.FormatIn(language, len(bundle))
 	if len(bundle) == 1 {
 		line = strings.TrimSuffix(summaryLine(bundle[0]), ":")
 	}
-	if slices.ContainsFunc(bundle, warned) {
+	if slices.ContainsFunc(bundle, func(record Record) bool { return record.Warned }) {
 		line = "⚠️ " + line
 	}
 	if bundle[0].Heading != "" {
 		line = bundle[0].Heading + ": " + line
 	}
 	if slices.ContainsFunc(bundle, func(record Record) bool { return record.Status != StatusPending }) {
-		line += " — " + tally(bundle)
+		line += " — " + tally(bundle, language)
 	}
 	return line
 }
 
 // tally says what became of a bundle's records in a few words: the one word they share, or how
 // many ended each way, in the order the bundle first shows each.
-func tally(bundle []Record) string {
-	var words []string
+func tally(bundle []Record, language locale.Language) string {
+	var keys []string
 	counts := make(map[string]int)
 	for _, record := range bundle {
-		word := statusWord(record)
-		if counts[word] == 0 {
-			words = append(words, word)
+		key := statusKey(record)
+		if counts[key] == 0 {
+			keys = append(keys, key)
 		}
-		counts[word]++
+		counts[key]++
 	}
-	if len(words) == 1 {
-		return words[0]
+	if len(keys) == 1 {
+		return statusWord(keys[0], language)
 	}
-	parts := make([]string, len(words))
-	for index, word := range words {
-		parts[index] = fmt.Sprintf("%d %s", counts[word], word)
+	parts := make([]string, len(keys))
+	for index, key := range keys {
+		parts[index] = tallyPart.FormatIn(language, counts[key], statusWord(key, language))
 	}
 	return strings.Join(parts, ", ")
 }
 
-func statusWord(record Record) string {
+// statusKey is the English word for where a record stands, which says the state and is the key of
+// its word in every language.
+func statusKey(record Record) string {
 	switch record.Status {
 	case StatusPending:
 		return "waiting"
@@ -1847,89 +1988,113 @@ func statusWord(record Record) string {
 	}
 }
 
-func capitalize(text string) string {
-	if text == "" {
-		return text
+// statusWord writes a status key in a language; a status that has no word is written as stored.
+func statusWord(key string, language locale.Language) string {
+	for _, word := range changeWords {
+		if word.key == key {
+			return word.text.In(language)
+		}
 	}
-	return strings.ToUpper(text[:1]) + text[1:]
+	return key
 }
 
-func warned(record Record) bool {
-	return strings.HasPrefix(record.Summary, IntentWarning) || strings.HasPrefix(record.Summary, DirectIntentWarning)
+func capitalize(text string) string {
+	runes := []rune(text)
+	if len(runes) == 0 {
+		return text
+	}
+	runes[0] = unicode.ToUpper(runes[0])
+	return string(runes)
 }
 
 // summaryLine is the first line of a record's summary after any intent warning, cut to
 // summaryLineRunes.
 func summaryLine(record Record) string {
-	summary := strings.TrimPrefix(strings.TrimPrefix(record.Summary, IntentWarning+"\n\n"), DirectIntentWarning+"\n\n")
+	summary := record.Summary
+	if record.Warned {
+		summary = withoutWarning(summary)
+	}
 	line, _, _ := strings.Cut(summary, "\n")
 	return clip.Runes(line, summaryLineRunes)
 }
 
-// statusLine says where a record stands, with its outcome cut to limit runes.
-func statusLine(record Record, limit int) string {
-	outcome := clip.Runes(record.Outcome, limit)
+// userOutcome is the outcome line the user reads: the one in their language when the executor wrote
+// it, otherwise the English one.
+func userOutcome(record Record) string {
+	if record.UserOutcome != "" {
+		return record.UserOutcome
+	}
+	return record.Outcome
+}
+
+// modelStatusLine is statusLine as the model reads it: in English, from the English outcome.
+func modelStatusLine(record Record, limit int) string {
+	record.UserOutcome = ""
+	return statusLine(record, limit, locale.English)
+}
+
+// statusLine says where a record stands, in the user's language, with its outcome cut to limit
+// runes.
+func statusLine(record Record, limit int, language locale.Language) string {
+	outcome := clip.Runes(userOutcome(record), limit)
 	switch record.Status {
 	case StatusPending:
-		return "Expires in " + fmtMinutes(record.ExpiresAt.Sub(record.CreatedAt)) + "."
+		return expiresInLine.FormatIn(language, fmtMinutes(record.ExpiresAt.Sub(record.CreatedAt), language))
 	case StatusConfirmed:
-		return "Confirmed; executing."
+		return confirmedLine.In(language)
 	case StatusExecuted:
-		return "Done. " + outcome
+		return doneLine.FormatIn(language, outcome)
 	case StatusRejected:
 		if record.Reason == ReasonWithdrawn {
-			return "Withdrawn by the assistant; nothing was written."
+			return withdrawnLine.In(language)
 		}
 		if record.Reason == ReasonLeftOut {
-			return "Left out; nothing was written."
+			return leftOutLine.In(language)
 		}
-		return "Rejected; nothing was written."
+		return rejectedLine.In(language)
 	case StatusExpired:
 		switch record.Reason {
 		case ReasonReplaced:
-			return "Replaced by a newer proposal; nothing was written."
+			return replacedLine.In(language)
 		case ReasonRestart:
-			return "Expired because the assistant restarted; nothing was written."
+			return restartExpiredLine.In(language)
 		default:
-			return "Expired; nothing was written."
+			return expiredLine.In(language)
 		}
 	case StatusFailed:
 		switch record.Reason {
 		case ReasonInterrupted:
-			return "The assistant restarted while executing this; check whether it took effect before trying again."
+			return interruptedLine.In(language)
 		case ReasonTimeout:
-			return "Execution timed out; check the target before trying again."
+			return timedOutLine.In(language)
 		case ReasonNoExecutor, ReasonExecutorFailed:
-			return "Execution failed before anything was written."
+			return failedEarlyLine.In(language)
 		default:
 			if outcome != "" {
-				return "Failed. " + outcome
+				return failedWithLine.FormatIn(language, outcome)
 			}
-			return "Failed."
+			return failedLine.In(language)
 		}
 	default:
 		return ""
 	}
 }
 
-func fmtMinutes(duration time.Duration) string {
+func fmtMinutes(duration time.Duration, language locale.Language) string {
 	minutes := int((duration + time.Minute - 1) / time.Minute)
 	if minutes < 1 {
-		return "less than a minute"
-	}
-	if minutes == 1 {
-		return "1 minute"
+		return lessThanAMinute.In(language)
 	}
 	if minutes >= 120 && minutes%60 == 0 {
-		return fmt.Sprintf("%d hours", minutes/60)
+		return hoursLeft.FormatIn(language, minutes/60)
 	}
-	return fmt.Sprintf("%d minutes", minutes)
+	return minutesLeft.FormatIn(language, minutes)
 }
 
 // SummaryFits reports whether a proposal's summary fits one bundle message with the intent warning,
 // so it can be shown whole.
 func SummaryFits(summary string) bool {
-	return utf16Units(strings.TrimSpace(summary))+utf16Units(IntentWarning)+2 <= bundleSummaryUnits
+	return utf16Units(strings.TrimSpace(summary))+warningUnits+2 <= bundleSummaryUnits
 }
 
 // canonicalJSON re-encodes arguments with sorted object keys and no insignificant whitespace so

@@ -50,7 +50,7 @@ func (s *Service) Withdraw(ctx context.Context, principalID string, items []int,
 			return fmt.Sprintf("There is no item %d; the batch has %d. Nothing was withdrawn.", number, len(bundle)), true, nil
 		}
 		if record := bundle[number-1]; record.Status != StatusPending {
-			return fmt.Sprintf("Item %d is no longer waiting (%s), so it cannot be withdrawn. Nothing was withdrawn.", number, statusLine(record, bundleOutcomeRunes)), true, nil
+			return fmt.Sprintf("Item %d is no longer waiting (%s), so it cannot be withdrawn. Nothing was withdrawn.", number, modelStatusLine(record, bundleOutcomeRunes)), true, nil
 		}
 		if !slices.Contains(chosen, number-1) {
 			chosen = append(chosen, number-1)
@@ -62,7 +62,7 @@ func (s *Service) Withdraw(ctx context.Context, principalID string, items []int,
 	var records []Record
 	for _, index := range chosen {
 		record := &bundle[index]
-		finished, err := s.repository.FinishApproval(ctx, record.ID, StatusPending, StatusRejected, ReasonWithdrawn, "")
+		finished, err := s.repository.FinishApproval(ctx, record.ID, StatusPending, StatusRejected, ReasonWithdrawn, "", "")
 		if err != nil {
 			return "", false, err
 		}
@@ -143,6 +143,7 @@ func (s *Service) directNote(ctx context.Context, principalID string) string {
 // keeps them while anything is still waiting, and loses them once nothing is.
 func (s *Service) showWithdrawal(ctx context.Context, bundle []Record, withdrawn []Record) {
 	last := bundle[len(bundle)-1]
+	language := s.language(ctx, last.PrincipalID)
 	edited := map[int64]bool{last.MessageID: true}
 	for _, record := range withdrawn {
 		if edited[record.MessageID] || record.MessageID == 0 {
@@ -154,15 +155,15 @@ func (s *Service) showWithdrawal(ctx context.Context, bundle []Record, withdrawn
 		for to < len(bundle) && bundle[to].MessageID == record.MessageID {
 			to++
 		}
-		if err := s.deliverer.EditText(ctx, record.ChatID, record.MessageID, messageShown(bundle, from, to)); err != nil {
+		if err := s.deliverer.EditText(ctx, record.ChatID, record.MessageID, messageShown(bundle, from, to, language)); err != nil {
 			s.logger.WarnContext(ctx, "approval.withdrawal.unshown", "principal_id", record.PrincipalID, "bundle_id", record.BundleID, "error", err)
 		}
 	}
 	var err error
 	if slices.ContainsFunc(bundle, func(record Record) bool { return record.Status == StatusPending }) {
-		err = s.deliverer.EditProposal(ctx, last.ChatID, last.MessageID, bundleShown(bundle), s.buttons(ctx, bundle))
+		err = s.deliverer.EditProposal(ctx, last.ChatID, last.MessageID, bundleShown(bundle, language), s.buttons(ctx, bundle))
 	} else {
-		err = s.deliverer.EditText(ctx, last.ChatID, last.MessageID, bundleShown(bundle))
+		err = s.deliverer.EditText(ctx, last.ChatID, last.MessageID, bundleShown(bundle, language))
 	}
 	if err != nil {
 		s.logger.WarnContext(ctx, "approval.withdrawal.unshown", "principal_id", last.PrincipalID, "bundle_id", last.BundleID, "error", err)

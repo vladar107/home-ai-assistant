@@ -159,9 +159,10 @@ watch and trip rewrites use it when they have no language of their own.
   scans, watch checks, trip updates and background tasks. A chat turn (`turn/engine.go`) is not
   told: the model keeps answering in the language the user writes in. A user who never chose gets
   no line, so their turns are byte-identical to today.
-- **Widget labels travel in the widget's data**, as a `labels` object, so each kind keeps one
-  template within Telegram's size limits. A view uses its English labels when the data has none,
-  so messages sent before the change keep working.
+- **Widget labels travel in the widget's template**, in English and Russian together, and the
+  data carries only `g`, the language to draw in, because Telegram limits a widget's data to a
+  kilobyte. Each kind still has one template. A view draws English when the data names no
+  language, so messages sent before the change keep working.
 - **Tests stay out of each other's way.** Chunk 2 converts every exported reply constant that a
   test reads and every such test use at once, through a test helper that reads a message in
   English, so later chunks change only their own non-test files and add their Russian tests in
