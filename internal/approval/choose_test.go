@@ -88,6 +88,7 @@ func chooseProposal(summary string) approval.Proposal {
 // A change the assistant withdraws between the press loading the proposal and the store's choice
 // shows as withdrawn in the answer, with the tally and the caption of the stored state.
 func TestChosenConfirmShowsAChangeWithdrawnBeforeTheStoreCall(t *testing.T) {
+	t.Parallel()
 	var withdraw func()
 	service, store := newChooseService(t, func(*sqlite.Store) { withdraw() })
 	ctx := t.Context()
@@ -118,6 +119,7 @@ func TestChosenConfirmShowsAChangeWithdrawnBeforeTheStoreCall(t *testing.T) {
 // A bundle offered outside a chat turn has no conversation to continue: a press that keeps some of
 // its changes reports no run and leaves no notice.
 func TestChosenConfirmOfAnOfferedProposalLeavesNoNotice(t *testing.T) {
+	t.Parallel()
 	service, _ := newChooseService(t, nil)
 	ctx := t.Context()
 	records, err := service.Offer(ctx, "alice", 101, 0, "Weekly review", 10*time.Minute, []approval.Proposal{chooseProposal("Change A"), chooseProposal("Change B")})
@@ -137,6 +139,7 @@ func TestChosenConfirmOfAnOfferedProposalLeavesNoNotice(t *testing.T) {
 // A proposal's own title names it; without one the title is read from the summary, past any leading
 // warning line, and a card with a warning line is marked.
 func TestChangesAreTitledByTheirOwnTitleOrTheirSummary(t *testing.T) {
+	t.Parallel()
 	service, _ := newChooseService(t, nil)
 	ctx := t.Context()
 	card := func(reason, change, title string) approval.Proposal {
