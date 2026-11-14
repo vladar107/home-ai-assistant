@@ -474,6 +474,7 @@ func toolNames(set agentruntime.ToolSet) []string {
 }
 
 func TestBusesAreOnByDefaultAndSwitchPerUser(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, options{})
 	if names := toolNames(f.toolSet("alice")); !slices.Contains(names, "bus_trip") || !slices.Contains(names, "bus_stop_status") {
 		t.Fatalf("tools by default = %v", names)
@@ -507,6 +508,7 @@ func TestBusesAreOnByDefaultAndSwitchPerUser(t *testing.T) {
 }
 
 func TestLiveTripFromHomeUsesOneOVapiCall(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, options{contact: contact})
 	text := f.text("bus_trip", map[string]any{"to": "Amersfoort Centraal Station"})
 
@@ -534,6 +536,7 @@ func TestLiveTripFromHomeUsesOneOVapiCall(t *testing.T) {
 }
 
 func TestLiveTripOrderAndTimes(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, options{})
 	text := f.text("bus_trip", map[string]any{"from": "Amersfoort Centraal Station", "to": homeStop, "limit": 3})
 	wantContains(t, text, "Live direct buses from Amersfoort, Centraal Station to Amersfoort, Stadhuis", "1. ", "2. ", "3. ",
@@ -554,6 +557,7 @@ func TestLiveTripOrderAndTimes(t *testing.T) {
 }
 
 func TestStopStatusCountsDelaysAndCancellations(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, options{})
 	var cancelledKey, delayedKey string
 	var points map[string]struct {
@@ -592,6 +596,7 @@ func TestStopStatusCountsDelaysAndCancellations(t *testing.T) {
 }
 
 func TestStopNamesResolveOrOfferCandidates(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, options{})
 	for _, name := range []string{"amersfoort stadhuis", "Amersfoort, Stadhuis", "AMERSFOORT  STADHUIS", homeStop, "50420270"} {
 		wantContains(t, f.text("bus_stop_status", map[string]any{"stop": name}), "Live departures from Amersfoort, Stadhuis")
@@ -614,6 +619,7 @@ func TestStopNamesResolveOrOfferCandidates(t *testing.T) {
 }
 
 func TestStopStatusFromCoordinatesPicksTheNearestStop(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, options{})
 	text := f.text("bus_stop_status", map[string]any{"stop": "52.1560, 5.3850"})
 	wantContains(t, text,
@@ -632,6 +638,7 @@ func TestStopStatusFromCoordinatesPicksTheNearestStop(t *testing.T) {
 }
 
 func TestTripFromCoordinatesIsPlannedThroughTransitous(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, options{contact: contact})
 	text := f.text("bus_trip", map[string]any{"from": "52.1560,5.3850", "to": "Amersfoort Centraal Station"})
 	wantContains(t, text, "Planned trips from your location to Amersfoort, Centraal Station")
@@ -654,6 +661,7 @@ func TestTripFromCoordinatesIsPlannedThroughTransitous(t *testing.T) {
 }
 
 func TestInvalidCoordinatesAreRefused(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, options{})
 	for _, point := range []string{"91.0,4.5", "52.0,181.0", "-90.5,10"} {
 		if result := f.call("bus_stop_status", map[string]any{"stop": point}); !result.IsError {
@@ -669,6 +677,7 @@ func TestInvalidCoordinatesAreRefused(t *testing.T) {
 }
 
 func TestHomeStopMustBeKnown(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, options{homeStop: "12345678"})
 	result := f.call("bus_stop_status", map[string]any{})
 	if !result.IsError || !strings.Contains(result.Text, "home stop is not in the national stop list") {
@@ -677,6 +686,7 @@ func TestHomeStopMustBeKnown(t *testing.T) {
 }
 
 func TestLaterTripIsPlannedThroughTransitous(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, options{contact: contact})
 	text := f.text("bus_trip", map[string]any{"to": "Amersfoort Centraal Station", "date_time": "2026-10-05T08:00"})
 	wantContains(t, text,
@@ -701,6 +711,7 @@ func TestLaterTripIsPlannedThroughTransitous(t *testing.T) {
 }
 
 func TestArriveByAndTransfersAreRendered(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, options{contact: contact})
 	text := f.text("bus_trip", map[string]any{"to": "Utrecht Centraal", "date_time": "2026-10-05T09:00", "arrive_by": true})
 	wantContains(t, text, "arriving by Mon 5 Oct 09:00", "1 change", "Train ", "→ Utrecht")
@@ -710,6 +721,7 @@ func TestArriveByAndTransfersAreRendered(t *testing.T) {
 }
 
 func TestPlansKeepToTheLimitAndTheirOwnTime(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, options{contact: contact})
 	// Two days ahead the future works at the home stop apply.
 	// "Leiden Centraal" names both the railway platforms and the bus stop beside them; being one
@@ -720,6 +732,7 @@ func TestPlansKeepToTheLimitAndTheirOwnTime(t *testing.T) {
 }
 
 func TestUnknownPlaceIsGeocoded(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, options{contact: contact})
 	text := f.text("bus_trip", map[string]any{"to": "Hoog Catharijne", "date_time": "2026-10-05T08:00"})
 	wantContains(t, text, "to Utrecht, Hoog Catharijne,")
@@ -733,6 +746,7 @@ func TestUnknownPlaceIsGeocoded(t *testing.T) {
 }
 
 func TestWithoutContactTransitousStillPlans(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, options{})
 	wantContains(t, f.text("bus_trip", map[string]any{"to": "Amersfoort Centraal Station", "date_time": "2026-10-05T08:00"}), "Planned trips from Amersfoort, Stadhuis")
 	wantContains(t, f.text("bus_stop_status", map[string]any{"stop": "Hoevelaken, Centrum"}), "Next departures from Hoevelaken, Centrum")
@@ -747,6 +761,7 @@ func TestWithoutContactTransitousStillPlans(t *testing.T) {
 }
 
 func TestStopsWithoutLiveOVapiDataUseTransitous(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, options{contact: contact})
 	// Hoevelaken has no timing point codes in the feed, so OVapi is never asked.
 	text := f.text("bus_trip", map[string]any{"from": "Hoevelaken, Centrum", "to": "Amersfoort Stadhuis"})
@@ -771,6 +786,7 @@ func TestStopsWithoutLiveOVapiDataUseTransitous(t *testing.T) {
 }
 
 func TestOVapiFailureFallsBackToTransitous(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, options{contact: contact})
 	f.server.tpcCode = http.StatusBadGateway
 	wantContains(t, f.text("bus_trip", map[string]any{"to": "Amersfoort Centraal Station"}), "Planned trips from Amersfoort, Stadhuis")
@@ -784,6 +800,7 @@ func TestOVapiFailureFallsBackToTransitous(t *testing.T) {
 }
 
 func TestDisruptionNoticesMatchStopsAndLines(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, options{})
 	board := f.text("bus_stop_status", map[string]any{})
 	wantContains(t, board,
@@ -805,6 +822,7 @@ func TestDisruptionNoticesMatchStopsAndLines(t *testing.T) {
 }
 
 func TestDisruptionFeedFailureKeepsDepartures(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, options{})
 	f.server.alertCode = http.StatusInternalServerError
 	text := f.text("bus_stop_status", map[string]any{})
@@ -812,6 +830,7 @@ func TestDisruptionFeedFailureKeepsDepartures(t *testing.T) {
 }
 
 func TestLiveAnswersAreCachedBriefly(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, options{})
 	f.text("bus_stop_status", map[string]any{})
 	f.text("bus_stop_status", map[string]any{"limit": 5})
@@ -829,6 +848,7 @@ func TestLiveAnswersAreCachedBriefly(t *testing.T) {
 }
 
 func TestBadArgumentsAreRefused(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, options{})
 	for _, arguments := range []map[string]any{
 		{"to": "Amersfoort Centraal Station", "limit": 11},
@@ -843,6 +863,7 @@ func TestBadArgumentsAreRefused(t *testing.T) {
 }
 
 func TestStopStatusChecksOnePlannedDeparture(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, options{})
 
 	delayed := f.text("bus_stop_status", map[string]any{"departure": "18:18", "line": "Bus 3"})
@@ -871,6 +892,7 @@ func TestStopStatusChecksOnePlannedDeparture(t *testing.T) {
 }
 
 func TestDepartureChecksUseTheTimetableBeyondLiveData(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, options{contact: contact})
 	clock := func(value string) transit.Clock {
 		parsed, err := transit.ParseClock(value)
