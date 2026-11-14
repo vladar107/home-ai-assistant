@@ -14,6 +14,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/clip"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -375,11 +376,11 @@ func (s *Service) proposeCreate(ctx context.Context, principalID string, call to
 	if err != nil {
 		return tools.Result{}, err
 	}
-	summary := "Create the collection " + name
+	language := locale.From(ctx)
+	summary := createSummary.Format(ctx, name, describeFieldsIn(language, fields))
 	if description != "" {
-		summary += ": " + description
+		summary = createSummaryDescribed.Format(ctx, name, description, describeFieldsIn(language, fields))
 	}
-	summary += "\nFields:\n" + describeFields(fields)
 	proposal := approval.Proposal{Tool: toolCreate, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "create", TargetKind: "collection", TargetName: name}}
 	if _, err := s.proposer.Propose(ctx, principalID, proposal); err != nil {
 		if approval.Refused(err) {
@@ -430,7 +431,7 @@ func (s *Service) proposeAlter(ctx context.Context, principalID string, call too
 			added.Key = fieldKey(nextNumber)
 			nextNumber++
 			fields = append(fields, added)
-			lines = append(lines, "add "+added.Describe())
+			lines = append(lines, alterAddLine.Format(ctx, describeFieldIn(locale.From(ctx), added)))
 		case alterRename:
 			field, found := working.field(change.Field)
 			if !found {
@@ -448,7 +449,7 @@ func (s *Service) proposeAlter(ctx context.Context, principalID string, call too
 			}
 			index := slices.IndexFunc(fields, func(candidate Field) bool { return candidate.Key == field.Key })
 			fields[index].Name = name
-			lines = append(lines, "rename "+field.Name+" → "+name)
+			lines = append(lines, alterRenameLine.Format(ctx, field.Name, name))
 		case alterRemove:
 			field, found := working.field(change.Field)
 			if !found {
@@ -458,7 +459,7 @@ func (s *Service) proposeAlter(ctx context.Context, principalID string, call too
 				return errorResult("removing a field takes only its name"), nil
 			}
 			fields = slices.DeleteFunc(fields, func(candidate Field) bool { return candidate.Key == field.Key })
-			lines = append(lines, "remove "+field.Name+" and its values")
+			lines = append(lines, alterRemoveLine.Format(ctx, field.Name))
 			removes = true
 		default:
 			return errorResult("action must be add, rename, or remove"), nil
@@ -472,7 +473,7 @@ func (s *Service) proposeAlter(ctx context.Context, principalID string, call too
 	if err != nil {
 		return tools.Result{}, err
 	}
-	summary := "Change the fields of the collection " + collection.Name + ":\n- " + strings.Join(lines, "\n- ")
+	summary := alterSummary.Format(ctx, collection.Name, strings.Join(lines, "\n- "))
 	proposal := approval.Proposal{Tool: toolAlter, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "change the fields of", TargetKind: "collection", TargetName: collection.Name}}
 	if removes {
 		if _, err := s.proposer.Propose(ctx, principalID, proposal); err != nil {
@@ -522,13 +523,13 @@ func (s *Service) proposeAdd(ctx context.Context, principalID string, call tools
 			return errorResult("a record needs at least one value"), nil
 		}
 		records = append(records, values)
-		lines = append(lines, "- "+describeValues(collection, values, s.location))
+		lines = append(lines, "- "+describeValuesIn(locale.From(ctx), collection, values, s.location))
 	}
 	canonical, err := json.Marshal(confirmedAdd{CollectionID: collection.ID, Records: records})
 	if err != nil {
 		return tools.Result{}, err
 	}
-	summary := "Add to " + collection.Name + ":\n" + strings.Join(lines, "\n")
+	summary := addSummary.Format(ctx, collection.Name, strings.Join(lines, "\n"))
 	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolAdd, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "add records to", TargetKind: "collection", TargetName: collection.Name}})
 }
 
@@ -568,7 +569,8 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 	if err != nil {
 		return tools.Result{}, err
 	}
-	summary := "Change a record of " + collection.Name + ":\n" + describeValues(collection, record.Values, s.location) + "\n→ " + describeValues(collection, values, s.location)
+	language := locale.From(ctx)
+	summary := updateSummary.Format(ctx, collection.Name, describeValuesIn(language, collection, record.Values, s.location), describeValuesIn(language, collection, values, s.location))
 	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolUpdate, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "change a record of", TargetKind: "collection", TargetName: collection.Name}})
 }
 
@@ -598,7 +600,7 @@ func (s *Service) proposeRemove(ctx context.Context, principalID string, call to
 	if err != nil {
 		return tools.Result{}, err
 	}
-	summary := "Remove from " + collection.Name + ": " + describeValues(collection, record.Values, s.location)
+	summary := removeSummary.Format(ctx, collection.Name, describeValuesIn(locale.From(ctx), collection, record.Values, s.location))
 	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolRemove, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "remove a record from", TargetKind: "collection", TargetName: collection.Name}})
 }
 
@@ -635,18 +637,18 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 	case toolRemove:
 		return s.executeRemove(ctx, record)
 	default:
-		return approval.Outcome{}, &approval.ActionError{Reason: "unavailable", Text: "That action is no longer available."}
+		return approval.Outcome{}, actionFailed(ctx, "unavailable", execUnavailable)
 	}
 }
 
-func malformed(what string) error {
-	return &approval.ActionError{Reason: "malformed", Text: "The confirmed change could not be read; nothing was " + what + "."}
+func malformed(ctx context.Context, message locale.Text) error {
+	return actionFailed(ctx, "malformed", message)
 }
 
 func (s *Service) executeCreate(ctx context.Context, record approval.Record) (approval.Outcome, error) {
 	var confirmed confirmedCreate
 	if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
-		return approval.Outcome{}, malformed("created")
+		return approval.Outcome{}, malformed(ctx, execUnreadableCreate)
 	}
 	name, err := normalizeName(confirmed.Name)
 	if err == nil {
@@ -658,7 +660,7 @@ func (s *Service) executeCreate(ctx context.Context, record approval.Record) (ap
 		fields, nextNumber, err = normalizeFields(confirmed.Fields, 1)
 	}
 	if err != nil {
-		return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "That collection is not valid (" + err.Error() + "); nothing was created."}
+		return approval.Outcome{}, actionFailed(ctx, "invalid", execInvalidCollection, err.Error())
 	}
 	now := s.stamp()
 	created, err := s.repository.CreateCollection(ctx, Collection{
@@ -666,31 +668,31 @@ func (s *Service) executeCreate(ctx context.Context, record approval.Record) (ap
 	}, MaximumCollectionsPerPrincipal)
 	switch {
 	case errors.Is(err, ErrTooManyCollections):
-		return approval.Outcome{}, &approval.ActionError{Reason: "too_many", Text: tooManyCollectionsText() + " Nothing was created."}
+		return approval.Outcome{}, actionFailed(ctx, "too_many", execTooManyCollections, MaximumCollectionsPerPrincipal)
 	case errors.Is(err, ErrNameTaken):
-		return approval.Outcome{}, &approval.ActionError{Reason: "name_taken", Text: "Another collection is already called " + name + "; nothing was created."}
+		return approval.Outcome{}, actionFailed(ctx, "name_taken", execNameTaken, name)
 	case err != nil:
 		return approval.Outcome{}, err
 	}
 	if created {
 		s.logger.InfoContext(ctx, "collection.created", "principal_id", record.PrincipalID, "collection_id", record.ID, "fields", len(fields))
 	}
-	return approval.Outcome{Text: "Created."}, nil
+	return doneOutcome(ctx, execCreated), nil
 }
 
 func (s *Service) executeAlter(ctx context.Context, record approval.Record) (approval.Outcome, error) {
 	var confirmed confirmedAlter
 	if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
-		return approval.Outcome{}, malformed("changed")
+		return approval.Outcome{}, malformed(ctx, execUnreadableChange)
 	}
 	current, found, err := s.repository.LoadCollection(ctx, record.PrincipalID, confirmed.CollectionID)
 	if err != nil {
 		return approval.Outcome{}, err
 	}
 	if !found {
-		return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That collection no longer exists; nothing was changed."}
+		return approval.Outcome{}, actionFailed(ctx, "not_found", execCollectionGoneChange)
 	}
-	stale := &approval.ActionError{Reason: "stale", Text: "That collection changed after this was proposed; nothing was changed. Ask again to change it."}
+	stale := actionFailed(ctx, "stale", execStaleCollection)
 	if !current.UpdatedAt.Equal(confirmed.UpdatedAt) {
 		return approval.Outcome{}, stale
 	}
@@ -699,7 +701,7 @@ func (s *Service) executeAlter(ctx context.Context, record approval.Record) (app
 		err = checkFieldChanges(current, fields)
 	}
 	if err != nil {
-		return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "Those fields are not valid (" + err.Error() + "); nothing was changed."}
+		return approval.Outcome{}, actionFailed(ctx, "invalid", execInvalidFields, err.Error())
 	}
 	next := current
 	next.Fields, next.NextKey, next.UpdatedAt = fields, nextNumber, s.stamp()
@@ -715,7 +717,7 @@ func (s *Service) executeAlter(ctx context.Context, record approval.Record) (app
 	if err != nil {
 		return approval.Outcome{}, err
 	}
-	return approval.Outcome{Text: "Changed.", Undo: undo}, nil
+	return withUndo(doneOutcome(ctx, execChanged), undo), nil
 }
 
 // checkFieldChanges refuses fields that could not come from adding, renaming, and removing fields
@@ -756,20 +758,20 @@ func recordID(approvalID string, index int) string {
 func (s *Service) executeAdd(ctx context.Context, record approval.Record) (approval.Outcome, error) {
 	var confirmed confirmedAdd
 	if err := json.Unmarshal(record.Arguments, &confirmed); err != nil || len(confirmed.Records) == 0 {
-		return approval.Outcome{}, malformed("added")
+		return approval.Outcome{}, malformed(ctx, execUnreadableAdd)
 	}
 	collection, found, err := s.repository.LoadCollection(ctx, record.PrincipalID, confirmed.CollectionID)
 	if err != nil {
 		return approval.Outcome{}, err
 	}
 	if !found {
-		return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That collection no longer exists; nothing was added."}
+		return approval.Outcome{}, actionFailed(ctx, "not_found", execCollectionGoneAdd)
 	}
 	now := s.stamp()
 	records := make([]Record, 0, len(confirmed.Records))
 	for index, values := range confirmed.Records {
 		if err := checkValues(collection, values, s.location); err != nil {
-			return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "The collection changed since this was proposed (" + err.Error() + "); nothing was added."}
+			return approval.Outcome{}, actionFailed(ctx, "invalid", execCollectionChangedAdd, err.Error())
 		}
 		// Records are listed by when they were made, so each of a batch is a millisecond after the
 		// one before and the batch keeps the order it was given in.
@@ -779,9 +781,9 @@ func (s *Service) executeAdd(ctx context.Context, record approval.Record) (appro
 	created, err := s.repository.CreateRecords(ctx, records, MaximumRecords)
 	switch {
 	case errors.Is(err, ErrTooManyRecords):
-		return approval.Outcome{}, &approval.ActionError{Reason: "too_many", Text: tooManyRecordsText(collection) + " Nothing was added."}
+		return approval.Outcome{}, actionFailed(ctx, "too_many", execTooManyRecords, collection.Name, MaximumRecords)
 	case errors.Is(err, ErrCollectionGone):
-		return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That collection no longer exists; nothing was added."}
+		return approval.Outcome{}, actionFailed(ctx, "not_found", execCollectionGoneAdd)
 	case err != nil:
 		return approval.Outcome{}, err
 	}
@@ -802,22 +804,22 @@ func (s *Service) executeAdd(ctx context.Context, record approval.Record) (appro
 	if err != nil {
 		return approval.Outcome{}, err
 	}
-	return approval.Outcome{Text: "Added " + countText(len(records)) + ".", Undo: payload}, nil
+	return withUndo(doneCount(ctx, execAdded, len(records)), payload), nil
 }
 
 func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (approval.Outcome, error) {
 	var confirmed confirmedUpdate
 	if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
-		return approval.Outcome{}, malformed("changed")
+		return approval.Outcome{}, malformed(ctx, execUnreadableChange)
 	}
 	current, found, err := s.repository.LoadRecord(ctx, record.PrincipalID, confirmed.RecordID)
 	if err != nil {
 		return approval.Outcome{}, err
 	}
 	if !found || current.CollectionID != confirmed.CollectionID {
-		return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That record no longer exists; nothing was changed."}
+		return approval.Outcome{}, actionFailed(ctx, "not_found", execRecordGoneChange)
 	}
-	stale := &approval.ActionError{Reason: "stale", Text: "That record changed after this was proposed; nothing was changed. Ask again to change it."}
+	stale := actionFailed(ctx, "stale", execStaleRecord)
 	if !current.UpdatedAt.Equal(confirmed.UpdatedAt) {
 		return approval.Outcome{}, stale
 	}
@@ -826,10 +828,10 @@ func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (ap
 		return approval.Outcome{}, err
 	}
 	if !found {
-		return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That collection no longer exists; nothing was changed."}
+		return approval.Outcome{}, actionFailed(ctx, "not_found", execCollectionGoneChange)
 	}
 	if err := checkValues(collection, confirmed.Values, s.location); err != nil {
-		return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "The collection changed since this was proposed (" + err.Error() + "); nothing was changed."}
+		return approval.Outcome{}, actionFailed(ctx, "invalid", execCollectionChangedChange, err.Error())
 	}
 	next := current
 	next.Values, next.UpdatedAt = confirmed.Values, s.stamp()
@@ -845,13 +847,13 @@ func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (ap
 	if err != nil {
 		return approval.Outcome{}, err
 	}
-	return approval.Outcome{Text: "Changed.", Undo: undo}, nil
+	return withUndo(doneOutcome(ctx, execChanged), undo), nil
 }
 
 func (s *Service) executeRemove(ctx context.Context, record approval.Record) (approval.Outcome, error) {
 	var confirmed confirmedRemove
 	if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
-		return approval.Outcome{}, malformed("deleted")
+		return approval.Outcome{}, malformed(ctx, execUnreadableDelete)
 	}
 	// The whole record is read before it goes, so an Undo can put it back.
 	current, found, err := s.repository.LoadRecord(ctx, record.PrincipalID, confirmed.RecordID)
@@ -865,14 +867,14 @@ func (s *Service) executeRemove(ctx context.Context, record approval.Record) (ap
 		}
 	}
 	if !deleted {
-		return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That record no longer exists."}
+		return approval.Outcome{}, actionFailed(ctx, "not_found", execRecordGone)
 	}
 	s.logger.InfoContext(ctx, "collection.record.deleted", "principal_id", record.PrincipalID, "collection_id", current.CollectionID, "record_id", current.ID)
 	undo, err := json.Marshal(removeUndo{Removed: &current})
 	if err != nil {
 		return approval.Outcome{}, err
 	}
-	return approval.Outcome{Text: "Deleted.", Undo: undo}, nil
+	return withUndo(doneOutcome(ctx, execDeleted), undo), nil
 }
 
 func tooManyCollectionsText() string {
@@ -881,6 +883,126 @@ func tooManyCollectionsText() string {
 
 func tooManyRecordsText(collection Collection) string {
 	return fmt.Sprintf("The collection %s would hold more than %d records, which is the most allowed; remove some first.", collection.Name, MaximumRecords)
+}
+
+var (
+	execUnavailable             = locale.T("That action is no longer available.", "Это действие больше недоступно.")
+	execUnreadableCreate        = locale.T("The confirmed change could not be read; nothing was created.", "Не удалось прочитать подтверждённое изменение; ничего не создано.")
+	execUnreadableChange        = locale.T("The confirmed change could not be read; nothing was changed.", "Не удалось прочитать подтверждённое изменение; ничего не изменено.")
+	execUnreadableAdd           = locale.T("The confirmed change could not be read; nothing was added.", "Не удалось прочитать подтверждённое изменение; ничего не добавлено.")
+	execUnreadableDelete        = locale.T("The confirmed change could not be read; nothing was deleted.", "Не удалось прочитать подтверждённое изменение; ничего не удалено.")
+	execInvalidCollection       = locale.T("That collection is not valid (%s); nothing was created.", "Эта коллекция не подходит (%s); ничего не создано.")
+	execTooManyCollections      = locale.T("You already have %d collections, which is the most allowed; delete one in /collections first. Nothing was created.", "У тебя уже %d коллекций, а это предел; сначала удали одну в /collections. Ничего не создано.")
+	execNameTaken               = locale.T("Another collection is already called %s; nothing was created.", "Коллекция с названием %s уже есть; ничего не создано.")
+	execCollectionGoneChange    = locale.T("That collection no longer exists; nothing was changed.", "Такой коллекции больше нет; ничего не изменено.")
+	execStaleCollection         = locale.T("That collection changed after this was proposed; nothing was changed. Ask again to change it.", "Коллекция изменилась после предложения; ничего не изменено. Попроси изменить её ещё раз.")
+	execInvalidFields           = locale.T("Those fields are not valid (%s); nothing was changed.", "Эти поля не подходят (%s); ничего не изменено.")
+	execCollectionGoneAdd       = locale.T("That collection no longer exists; nothing was added.", "Такой коллекции больше нет; ничего не добавлено.")
+	execCollectionChangedAdd    = locale.T("The collection changed since this was proposed (%s); nothing was added.", "Коллекция изменилась после предложения (%s); ничего не добавлено.")
+	execTooManyRecords          = locale.T("The collection %s would hold more than %d records, which is the most allowed; remove some first. Nothing was added.", "В коллекции %s было бы больше %d записей, а это предел; сначала удали несколько. Ничего не добавлено.")
+	execRecordGoneChange        = locale.T("That record no longer exists; nothing was changed.", "Такой записи больше нет; ничего не изменено.")
+	execStaleRecord             = locale.T("That record changed after this was proposed; nothing was changed. Ask again to change it.", "Запись изменилась после предложения; ничего не изменено. Попроси изменить её ещё раз.")
+	execCollectionChangedChange = locale.T("The collection changed since this was proposed (%s); nothing was changed.", "Коллекция изменилась после предложения (%s); ничего не изменено.")
+	execRecordGone              = locale.T("That record no longer exists.", "Такой записи больше нет.")
+	execCreated                 = locale.T("Created.", "Создано.")
+	execChanged                 = locale.T("Changed.", "Изменено.")
+	execDeleted                 = locale.T("Deleted.", "Удалено.")
+	execAdded                   = locale.N("Added %d record.", "Added %d records.", "Добавлена %d запись.", "Добавлены %d записи.", "Добавлено %d записей.")
+	createSummary               = locale.T("Create the collection %s\nFields:\n%s", "Создать коллекцию %s\nПоля:\n%s")
+	createSummaryDescribed      = locale.T("Create the collection %s: %s\nFields:\n%s", "Создать коллекцию %s: %s\nПоля:\n%s")
+	alterSummary                = locale.T("Change the fields of the collection %s:\n- %s", "Изменить поля коллекции %s:\n- %s")
+	alterAddLine                = locale.T("add %s", "добавить поле %s")
+	alterRenameLine             = locale.T("rename %s → %s", "переименовать %s → %s")
+	alterRemoveLine             = locale.T("remove %s and its values", "удалить %s вместе со значениями")
+	addSummary                  = locale.T("Add to %s:\n%s", "Добавить в %s:\n%s")
+	updateSummary               = locale.T("Change a record of %s:\n%s\n→ %s", "Изменить запись в %s:\n%s\n→ %s")
+	removeSummary               = locale.T("Remove from %s: %s", "Удалить из %s: %s")
+	requiredWord                = locale.T("required", "обязательное")
+	noValuesWord                = locale.T("(no values)", "(нет значений)")
+	yesWord                     = locale.T("yes", "да")
+	noWord                      = locale.T("no", "нет")
+	typeWords                   = map[string]locale.Text{
+		TypeText:     locale.T("text", "текст"),
+		TypeNumber:   locale.T("number", "число"),
+		TypeMoney:    locale.T("money", "сумма"),
+		TypeDate:     locale.T("date", "дата"),
+		TypeDateTime: locale.T("datetime", "дата и время"),
+		TypeBool:     locale.T("bool", "да/нет"),
+		TypeChoice:   locale.T("choice", "выбор"),
+		TypePerson:   locale.T("person", "человек"),
+	}
+)
+
+// actionFailed keeps the English sentence for the record and the model, and the user's language
+// for the user.
+func actionFailed(ctx context.Context, reason string, message locale.Text, arguments ...any) *approval.ActionError {
+	return &approval.ActionError{Reason: reason, Text: message.FormatIn(locale.English, arguments...), UserText: message.Format(ctx, arguments...)}
+}
+
+func doneOutcome(ctx context.Context, message locale.Text, arguments ...any) approval.Outcome {
+	return approval.Outcome{Text: message.FormatIn(locale.English, arguments...), UserText: message.Format(ctx, arguments...)}
+}
+
+func doneCount(ctx context.Context, message locale.Count, n int) approval.Outcome {
+	return approval.Outcome{Text: message.FormatIn(locale.English, n), UserText: message.Format(ctx, n)}
+}
+
+func withUndo(outcome approval.Outcome, undo json.RawMessage) approval.Outcome {
+	outcome.Undo = undo
+	return outcome
+}
+
+// describeFieldIn is Field.Describe in the user's language; the model keeps reading Describe.
+func describeFieldIn(language locale.Language, f Field) string {
+	if language != locale.Russian {
+		return f.Describe()
+	}
+	word, known := typeWords[f.Type]
+	if !known {
+		return f.Describe()
+	}
+	text := f.Name + ": " + word.In(language)
+	if f.Type == TypeChoice {
+		text += " (" + strings.Join(f.Options, ", ") + ")"
+	}
+	if f.Required {
+		text += ", " + requiredWord.In(language)
+	}
+	return text
+}
+
+func describeFieldsIn(language locale.Language, fields []Field) string {
+	lines := make([]string, 0, len(fields))
+	for _, field := range fields {
+		lines = append(lines, "- "+describeFieldIn(language, field))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// describeValuesIn is describeValues in the user's language.
+func describeValuesIn(language locale.Language, c Collection, values map[string]json.RawMessage, location *time.Location) string {
+	if language != locale.Russian {
+		return describeValues(c, values, location)
+	}
+	parts := make([]string, 0, len(c.Fields))
+	for _, field := range c.Fields {
+		value, ok := decodeValue(field, values[field.Key])
+		if !ok {
+			continue
+		}
+		shown := display(field, value, location)
+		if field.Type == TypeBool {
+			shown = noWord.In(language)
+			if value.Bool {
+				shown = yesWord.In(language)
+			}
+		}
+		parts = append(parts, field.Name+": "+shown)
+	}
+	if len(parts) == 0 {
+		return noValuesWord.In(language)
+	}
+	return strings.Join(parts, "; ")
 }
 
 func describeFields(fields []Field) string {

@@ -12,8 +12,10 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 	"github.com/vladar107/home-ai-assistant/internal/transit"
+	"github.com/vladar107/home-ai-assistant/internal/weekday"
 )
 
 const (
@@ -342,7 +344,7 @@ func (s *Service) proposeSave(ctx context.Context, principalID string, call tool
 	if err != nil {
 		return tools.Result{}, err
 	}
-	summary := "Save the route " + spec.Describe()
+	summary := saveSummary.Format(ctx, spec.DescribeFor(ctx))
 	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolSave, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "save", TargetKind: "route", TargetName: spec.Name}})
 }
 
@@ -435,7 +437,7 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 		}
 		next.Legs[changedLeg] = resolved
 	}
-	changes := describeChanges(route.Spec, next, arguments.LegIndex-1, action)
+	changes := describeChanges(ctx, route.Spec, next, arguments.LegIndex-1, action)
 	if len(changes) == 0 {
 		return errorResult("That changes nothing; the route already reads exactly like this."), nil
 	}
@@ -443,7 +445,7 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 	if err != nil {
 		return tools.Result{}, err
 	}
-	summary := "Change the route " + route.Name + ":\n" + strings.Join(changes, "\n")
+	summary := changeSummary.Format(ctx, route.Name, strings.Join(changes, "\n"))
 	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolUpdate, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "change", TargetKind: "route", TargetName: route.Name, NewName: next.Name}})
 }
 
@@ -466,7 +468,7 @@ func (s *Service) proposeRemoval(ctx context.Context, principalID string, call t
 	if err != nil {
 		return tools.Result{}, err
 	}
-	summary := "Delete the route " + route.Heading() + "\n" + route.Outline()
+	summary := deleteSummary.Format(ctx, route.HeadingFor(ctx), route.OutlineFor(ctx))
 	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolRemove, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "delete", TargetKind: "route", TargetName: route.Name}})
 }
 
@@ -531,32 +533,60 @@ func (s *Service) resolveLeg(ctx context.Context, principalID string, leg Leg) (
 
 // describeChanges lists what an update changes, each as the old and the new value; legIndex and
 // action name the one leg the update touches.
-func describeChanges(before, after Spec, legIndex int, action string) []string {
+func describeChanges(ctx context.Context, before, after Spec, legIndex int, action string) []string {
 	var changes []string
 	if before.Name != after.Name {
-		changes = append(changes, fmt.Sprintf("name: %s → %s", before.Name, after.Name))
+		changes = append(changes, nameChange.Format(ctx, before.Name, after.Name))
 	}
 	if !slices.Equal(before.Days, after.Days) {
-		changes = append(changes, fmt.Sprintf("days: %s → %s", before.DescribeDays(), after.DescribeDays()))
+		changes = append(changes, daysChange.Format(ctx, weekday.DescribeFor(ctx, before.Days), weekday.DescribeFor(ctx, after.Days)))
 	}
 	if before.ArriveBy != after.ArriveBy {
-		changes = append(changes, fmt.Sprintf("arrival target: %s → %s", orNone(before.ArriveBy), orNone(after.ArriveBy)))
+		changes = append(changes, arrivalChange.Format(ctx, orNone(ctx, before.ArriveBy), orNone(ctx, after.ArriveBy)))
 	}
 	switch {
 	case legIndex < 0:
 	case action == legInsert:
-		changes = append(changes, fmt.Sprintf("new leg %d: %s", legIndex+1, after.Legs[legIndex].Describe()))
+		changes = append(changes, newLegChange.Format(ctx, legIndex+1, after.Legs[legIndex].DescribeFor(ctx)))
 	case action == legRemove:
-		changes = append(changes, fmt.Sprintf("leg %d removed: %s", legIndex+1, before.Legs[legIndex].Describe()))
+		changes = append(changes, removedLegChange.Format(ctx, legIndex+1, before.Legs[legIndex].DescribeFor(ctx)))
 	case !sameLeg(before.Legs[legIndex], after.Legs[legIndex]):
-		changes = append(changes, fmt.Sprintf("leg %d: %s → %s", legIndex+1, before.Legs[legIndex].Describe(), after.Legs[legIndex].Describe()))
+		changes = append(changes, legChange.Format(ctx, legIndex+1, before.Legs[legIndex].DescribeFor(ctx), after.Legs[legIndex].DescribeFor(ctx)))
 	}
 	return changes
 }
 
-func orNone(value string) string {
+var (
+	execUnreadableRoute  = locale.T("The confirmed route could not be read; nothing was saved.", "Не удалось прочитать подтверждённый маршрут; ничего не сохранено.")
+	execInvalidSave      = locale.T("That route is not valid (%s); nothing was saved.", "Этот маршрут не подходит (%s); ничего не сохранено.")
+	execTooMany          = locale.T("You already have %d routes, which is the most allowed; delete one in /jobs first. Nothing was saved.", "У тебя уже %d маршрутов, а это предел; сначала удали один в /jobs. Ничего не сохранено.")
+	execNameTakenSave    = locale.T("Another route is already called %s; nothing was saved.", "Маршрут с названием %s уже есть; ничего не сохранено.")
+	execUnreadableDelete = locale.T("The confirmed action could not be read; nothing was deleted.", "Не удалось прочитать подтверждённое действие; ничего не удалено.")
+	execRouteGone        = locale.T("That route no longer exists.", "Такого маршрута больше нет.")
+	execUnavailable      = locale.T("That action is no longer available.", "Это действие больше недоступно.")
+	execUnreadableChange = locale.T("The confirmed change could not be read; nothing was changed.", "Не удалось прочитать подтверждённое изменение; ничего не изменено.")
+	execRouteGoneChange  = locale.T("That route no longer exists; nothing was changed.", "Такого маршрута больше нет; ничего не изменено.")
+	execStale            = locale.T("That route changed after this was proposed; nothing was changed. Ask again to change it.", "Маршрут изменился после предложения; ничего не изменено. Попроси изменить его ещё раз.")
+	execInvalidChange    = locale.T("That route is not valid (%s); nothing was changed.", "Этот маршрут не подходит (%s); ничего не изменено.")
+	execNameTakenChange  = locale.T("Another route is already called %s; nothing was changed.", "Маршрут с названием %s уже есть; ничего не изменено.")
+	execSaved            = locale.T("Saved.", "Сохранено.")
+	execDeleted          = locale.T("Deleted.", "Удалено.")
+	execChanged          = locale.T("Changed.", "Изменено.")
+	saveSummary          = locale.T("Save the route %s", "Сохранить маршрут %s")
+	changeSummary        = locale.T("Change the route %s:\n%s", "Изменить маршрут %s:\n%s")
+	deleteSummary        = locale.T("Delete the route %s\n%s", "Удалить маршрут %s\n%s")
+	nameChange           = locale.T("name: %s → %s", "название: %s → %s")
+	daysChange           = locale.T("days: %s → %s", "дни: %s → %s")
+	arrivalChange        = locale.T("arrival target: %s → %s", "прибыть к: %s → %s")
+	newLegChange         = locale.T("new leg %d: %s", "новый участок %d: %s")
+	removedLegChange     = locale.T("leg %d removed: %s", "участок %d удалён: %s")
+	legChange            = locale.T("leg %d: %s → %s", "участок %d: %s → %s")
+	noArrivalTarget      = locale.T("none", "нет")
+)
+
+func orNone(ctx context.Context, value string) string {
 	if value == "" {
-		return "none"
+		return noArrivalTarget.Format(ctx)
 	}
 	return value
 }
@@ -578,19 +608,19 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 	case toolSave:
 		var confirmed Spec
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
-			return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed route could not be read; nothing was saved."}
+			return approval.Outcome{}, actionFailed(ctx, "malformed", execUnreadableRoute)
 		}
 		spec, err := normalize(confirmed)
 		if err != nil {
-			return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "That route is not valid (" + err.Error() + "); nothing was saved."}
+			return approval.Outcome{}, actionFailed(ctx, "invalid", execInvalidSave, err.Error())
 		}
 		now := s.now()
 		created, err := s.repository.CreateRoute(ctx, Route{ID: record.ID, PrincipalID: record.PrincipalID, Spec: spec, CreatedAt: now, UpdatedAt: now}, MaximumRoutesPerPrincipal)
 		switch {
 		case errors.Is(err, ErrTooManyRoutes):
-			return approval.Outcome{}, &approval.ActionError{Reason: "too_many", Text: tooManyText() + " Nothing was saved."}
+			return approval.Outcome{}, actionFailed(ctx, "too_many", execTooMany, MaximumRoutesPerPrincipal)
 		case errors.Is(err, ErrNameTaken):
-			return approval.Outcome{}, &approval.ActionError{Reason: "name_taken", Text: "Another route is already called " + spec.Name + "; nothing was saved."}
+			return approval.Outcome{}, actionFailed(ctx, "name_taken", execNameTakenSave, spec.Name)
 		case err != nil:
 			return approval.Outcome{}, err
 		}
@@ -601,13 +631,13 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		if err != nil {
 			return approval.Outcome{}, err
 		}
-		return approval.Outcome{Text: "Saved.", Undo: undo}, nil
+		return withUndo(doneOutcome(ctx, execSaved), undo), nil
 	case toolUpdate:
 		return s.executeUpdate(ctx, record)
 	case toolRemove:
 		var confirmed confirmedRemoval
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
-			return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed action could not be read; nothing was deleted."}
+			return approval.Outcome{}, actionFailed(ctx, "malformed", execUnreadableDelete)
 		}
 		// The whole route is read before it goes, so an Undo can put it back.
 		route, found, err := s.repository.LoadRoute(ctx, record.PrincipalID, confirmed.RouteID)
@@ -621,43 +651,43 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 			}
 		}
 		if !deleted {
-			return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That route no longer exists."}
+			return approval.Outcome{}, actionFailed(ctx, "not_found", execRouteGone)
 		}
 		undo, err := json.Marshal(routeUndo{RouteID: route.ID, Removed: &route})
 		if err != nil {
 			return approval.Outcome{}, err
 		}
-		return approval.Outcome{Text: "Deleted.", Undo: undo}, nil
+		return withUndo(doneOutcome(ctx, execDeleted), undo), nil
 	default:
-		return approval.Outcome{}, &approval.ActionError{Reason: "unavailable", Text: "That action is no longer available."}
+		return approval.Outcome{}, actionFailed(ctx, "unavailable", execUnavailable)
 	}
 }
 
 func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (approval.Outcome, error) {
 	var confirmed confirmedUpdate
 	if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
-		return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed change could not be read; nothing was changed."}
+		return approval.Outcome{}, actionFailed(ctx, "malformed", execUnreadableChange)
 	}
 	current, found, err := s.repository.LoadRoute(ctx, record.PrincipalID, confirmed.RouteID)
 	if err != nil {
 		return approval.Outcome{}, err
 	}
 	if !found {
-		return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That route no longer exists; nothing was changed."}
+		return approval.Outcome{}, actionFailed(ctx, "not_found", execRouteGoneChange)
 	}
-	stale := &approval.ActionError{Reason: "stale", Text: "That route changed after this was proposed; nothing was changed. Ask again to change it."}
+	stale := actionFailed(ctx, "stale", execStale)
 	if !current.UpdatedAt.Equal(confirmed.UpdatedAt) {
 		return approval.Outcome{}, stale
 	}
 	spec, err := normalize(confirmed.Spec)
 	if err != nil {
-		return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "That route is not valid (" + err.Error() + "); nothing was changed."}
+		return approval.Outcome{}, actionFailed(ctx, "invalid", execInvalidChange, err.Error())
 	}
 	next := current
 	next.Spec, next.UpdatedAt = spec, s.now()
 	updated, err := s.repository.UpdateRoute(ctx, next, confirmed.UpdatedAt)
 	if errors.Is(err, ErrNameTaken) {
-		return approval.Outcome{}, &approval.ActionError{Reason: "name_taken", Text: "Another route is already called " + spec.Name + "; nothing was changed."}
+		return approval.Outcome{}, actionFailed(ctx, "name_taken", execNameTakenChange, spec.Name)
 	}
 	if err != nil {
 		return approval.Outcome{}, err
@@ -670,7 +700,7 @@ func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (ap
 	if err != nil {
 		return approval.Outcome{}, err
 	}
-	return approval.Outcome{Text: "Changed.", Undo: undo}, nil
+	return withUndo(doneOutcome(ctx, execChanged), undo), nil
 }
 
 func tooManyText() string {
@@ -791,4 +821,19 @@ func (s *Service) Render(result Result) string {
 
 func errorResult(text string) tools.Result {
 	return tools.Result{Text: text, IsError: true}
+}
+
+// actionFailed keeps the English sentence for the record and the model, and the user's language
+// for the user.
+func actionFailed(ctx context.Context, reason string, message locale.Text, arguments ...any) *approval.ActionError {
+	return &approval.ActionError{Reason: reason, Text: message.FormatIn(locale.English, arguments...), UserText: message.Format(ctx, arguments...)}
+}
+
+func doneOutcome(ctx context.Context, message locale.Text, arguments ...any) approval.Outcome {
+	return approval.Outcome{Text: message.FormatIn(locale.English, arguments...), UserText: message.Format(ctx, arguments...)}
+}
+
+func withUndo(outcome approval.Outcome, undo json.RawMessage) approval.Outcome {
+	outcome.Undo = undo
+	return outcome
 }

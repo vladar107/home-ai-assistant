@@ -125,7 +125,7 @@ type Chats interface {
 
 // BacklogProposer turns a suggested backlog item into a proposal; it is the backlog service.
 type BacklogProposer interface {
-	AddProposal(title, details string) (approval.Proposal, string)
+	AddProposal(ctx context.Context, title, details string) (approval.Proposal, string)
 }
 
 // ReviewConfig is what the weekly review needs besides the memory service. Exchanges nil leaves the
@@ -590,7 +590,7 @@ func (r review) proposals(ctx context.Context, principalID string, reply reviewR
 			dropped++
 			continue
 		}
-		proposal, reason := r.config.Backlog.AddProposal(item.Title, item.Details)
+		proposal, reason := r.config.Backlog.AddProposal(ctx, item.Title, item.Details)
 		if reason != "" {
 			r.service.logger.InfoContext(ctx, "memory.review.dropped", "principal_id", principalID, "action", "backlog", "reason", reason)
 			dropped++

@@ -4,6 +4,7 @@
 package routes
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -12,6 +13,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/transit"
 	"github.com/vladar107/home-ai-assistant/internal/weekday"
 )
@@ -221,25 +223,45 @@ func normalizeLeg(leg Leg) (Leg, error) {
 	return result, nil
 }
 
+// The clauses of a leg's line; each is a whole phrase in both languages, joined by punctuation.
+var (
+	walkLeg       = locale.T("walk %d min", "пешком %d мин")
+	bikeLeg       = locale.T("bike %d min", "на велосипеде %d мин")
+	trainLeg      = locale.T("train %s → %s", "поезд %s → %s")
+	trainViaLeg   = locale.T(" via %s", " через %s")
+	busLeg        = locale.T("bus %s from %s", "автобус %s от остановки %s")
+	busTowardsLeg = locale.T(" towards %s", " в сторону %s")
+	busRideLeg    = locale.T(", ride %d min", ", в пути %d мин")
+	noDepartures  = locale.T(", no fixed departures", ", без фиксированных отправлений")
+	departures    = locale.T(", departures %s", ", отправления: %s")
+	arriveByHead  = locale.T(", arrive by %s", ", прибыть к %s")
+)
+
 // Describe is the leg in one line, as summaries and lists show it.
-func (l Leg) Describe() string {
+func (l Leg) Describe() string { return l.DescribeFor(context.Background()) }
+
+// DescribeFor is Describe in the context's language, for text the user reads; Describe stays
+// English for the model.
+func (l Leg) DescribeFor(ctx context.Context) string {
 	switch l.Mode {
-	case ModeWalk, ModeBike:
-		return fmt.Sprintf("%s %d min", l.Mode, l.Minutes)
+	case ModeWalk:
+		return walkLeg.Format(ctx, l.Minutes)
+	case ModeBike:
+		return bikeLeg.Format(ctx, l.Minutes)
 	case ModeTrain:
-		text := fmt.Sprintf("train %s → %s", l.From, l.To)
+		text := trainLeg.Format(ctx, l.From, l.To)
 		if l.Via != "" {
-			text += " via " + l.Via
+			text += trainViaLeg.Format(ctx, l.Via)
 		}
-		return text + departuresText(l.Departures)
+		return text + departuresText(ctx, l.Departures)
 	case ModeBus:
-		text := fmt.Sprintf("bus %s from %s", l.Line, l.Stop)
+		text := busLeg.Format(ctx, l.Line, l.Stop)
 		if l.Towards != "" {
-			text += " towards " + l.Towards
+			text += busTowardsLeg.Format(ctx, l.Towards)
 		}
-		text += departuresText(l.Departures)
+		text += departuresText(ctx, l.Departures)
 		if l.Minutes > 0 {
-			text += fmt.Sprintf(", ride %d min", l.Minutes)
+			text += busRideLeg.Format(ctx, l.Minutes)
 		}
 		return text
 	default:
@@ -247,39 +269,48 @@ func (l Leg) Describe() string {
 	}
 }
 
-func departuresText(departures []string) string {
-	if len(departures) == 0 {
-		return ", no fixed departures"
+func departuresText(ctx context.Context, times []string) string {
+	if len(times) == 0 {
+		return noDepartures.Format(ctx)
 	}
-	return ", departures " + strings.Join(departures, ", ")
+	return departures.Format(ctx, strings.Join(times, ", "))
 }
 
 // DescribeDays is the route's weekdays, such as "Mon–Fri" or "Mon, Wed".
 func (s Spec) DescribeDays() string { return weekday.Describe(s.Days) }
 
 // Heading is the route's name, weekdays, and arrival target in one line.
-func (s Spec) Heading() string {
-	heading := s.Name + ": " + s.DescribeDays()
+func (s Spec) Heading() string { return s.HeadingFor(context.Background()) }
+
+// HeadingFor is Heading in the context's language.
+func (s Spec) HeadingFor(ctx context.Context) string {
+	heading := s.Name + ": " + weekday.DescribeFor(ctx, s.Days)
 	if s.ArriveBy != "" {
-		heading += ", arrive by " + s.ArriveBy
+		heading += arriveByHead.Format(ctx, s.ArriveBy)
 	}
 	return heading
 }
 
 // Describe is the route with one numbered line per leg.
-func (s Spec) Describe() string {
-	lines := []string{s.Heading()}
+func (s Spec) Describe() string { return s.DescribeFor(context.Background()) }
+
+// DescribeFor is Describe in the context's language.
+func (s Spec) DescribeFor(ctx context.Context) string {
+	lines := []string{s.HeadingFor(ctx)}
 	for index, leg := range s.Legs {
-		lines = append(lines, fmt.Sprintf("%d. %s", index+1, leg.Describe()))
+		lines = append(lines, fmt.Sprintf("%d. %s", index+1, leg.DescribeFor(ctx)))
 	}
 	return strings.Join(lines, "\n")
 }
 
 // Outline is the route's legs in one line, for lists.
-func (s Spec) Outline() string {
+func (s Spec) Outline() string { return s.OutlineFor(context.Background()) }
+
+// OutlineFor is Outline in the context's language.
+func (s Spec) OutlineFor(ctx context.Context) string {
 	parts := make([]string, 0, len(s.Legs))
 	for _, leg := range s.Legs {
-		parts = append(parts, leg.Describe())
+		parts = append(parts, leg.DescribeFor(ctx))
 	}
 	return strings.Join(parts, "; ")
 }

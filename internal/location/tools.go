@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -281,7 +282,7 @@ func (s *Service) proposeSave(ctx context.Context, principalID string, call tool
 	if err != nil {
 		return tools.Result{}, err
 	}
-	summary := fmt.Sprintf("Save your latest shared %s as the place %s, radius %d m.", sourceName(fix), name, radius)
+	summary := saveSummary(fix.Source).Format(ctx, name, radius)
 	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolPlaceSave, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "save", TargetKind: "place", TargetName: name}})
 }
 
@@ -315,7 +316,7 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 			}
 		}
 		if name != place.Name {
-			changes = append(changes, "name: "+place.Name+" → "+name)
+			changes = append(changes, renamedLine.Format(ctx, place.Name, name))
 		}
 		next.Name = name
 	}
@@ -324,7 +325,7 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 			return placeError(err.Error()), nil
 		}
 		if arguments.RadiusM != place.RadiusM {
-			changes = append(changes, fmt.Sprintf("radius: %d m → %d m", place.RadiusM, arguments.RadiusM))
+			changes = append(changes, resizedLine.Format(ctx, place.RadiusM, arguments.RadiusM))
 		}
 		next.RadiusM = arguments.RadiusM
 	}
@@ -335,7 +336,7 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 	if err != nil {
 		return tools.Result{}, err
 	}
-	summary := "Change the place " + place.Name + ":\n" + strings.Join(changes, "\n")
+	summary := changeSummary.Format(ctx, place.Name, strings.Join(changes, "\n"))
 	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolPlaceUpdate, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "change", TargetKind: "place", TargetName: place.Name, NewName: next.Name}})
 }
 
@@ -364,7 +365,7 @@ func (s *Service) proposeDelete(ctx context.Context, principalID string, call to
 	if err != nil {
 		return tools.Result{}, err
 	}
-	summary := fmt.Sprintf("Delete the place %s (radius %d m).", place.Name, place.RadiusM)
+	summary := deleteSummary.Format(ctx, place.Name, place.RadiusM)
 	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolPlaceDelete, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "delete", TargetKind: "place", TargetName: place.Name}})
 }
 
@@ -404,25 +405,25 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 	case toolPlaceSave:
 		var confirmed confirmedPlace
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
-			return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed place could not be read; nothing was saved."}
+			return approval.Outcome{}, actionFailed(ctx, "malformed", execUnreadablePlace)
 		}
 		fix, refusal, err := s.proposedFix(ctx, record.PrincipalID, confirmed)
 		if err != nil {
 			return approval.Outcome{}, err
 		}
 		if refusal != "" {
-			return approval.Outcome{}, &approval.ActionError{Reason: "location_gone", Text: refusal}
+			return approval.Outcome{}, actionFailed(ctx, "location_gone", execLocationGone)
 		}
 		place, err := s.newPlace(record.ID, record.PrincipalID, confirmed.Name, confirmed.RadiusM, fix)
 		if err != nil {
-			return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "That place is not valid (" + err.Error() + "); nothing was saved."}
+			return approval.Outcome{}, actionFailed(ctx, "invalid", execInvalidPlace, err.Error())
 		}
 		created, err := s.repository.CreatePlace(ctx, place, MaximumPlacesPerPrincipal)
 		switch {
 		case errors.Is(err, ErrTooManyPlaces):
-			return approval.Outcome{}, &approval.ActionError{Reason: "too_many", Text: tooManyPlacesText() + " Nothing was saved."}
+			return approval.Outcome{}, actionFailed(ctx, "too_many", execTooManyPlaces, MaximumPlacesPerPrincipal)
 		case errors.Is(err, ErrPlaceNameTaken):
-			return approval.Outcome{}, &approval.ActionError{Reason: "name_taken", Text: "Another place is already called " + place.Name + "; nothing was saved."}
+			return approval.Outcome{}, actionFailed(ctx, "name_taken", execNameTakenSave, place.Name)
 		case err != nil:
 			return approval.Outcome{}, err
 		}
@@ -433,13 +434,13 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		if err != nil {
 			return approval.Outcome{}, err
 		}
-		return approval.Outcome{Text: fmt.Sprintf("Saved the place %s, radius %d m.", place.Name, place.RadiusM), Undo: undo}, nil
+		return withUndo(doneOutcome(ctx, execSaved, place.Name, place.RadiusM), undo), nil
 	case toolPlaceUpdate:
 		return s.executeUpdate(ctx, record)
 	case toolPlaceDelete:
 		var confirmed confirmedPlaceDelete
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
-			return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed action could not be read; nothing was deleted."}
+			return approval.Outcome{}, actionFailed(ctx, "malformed", execUnreadableDelete)
 		}
 		place, deletedAt, err := s.deleteUnused(ctx, record.PrincipalID, confirmed.PlaceID, " Nothing was deleted.")
 		if err != nil {
@@ -451,25 +452,25 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		if err != nil {
 			return approval.Outcome{}, err
 		}
-		return approval.Outcome{Text: "Deleted the place " + place.Name + ".", Undo: undo}, nil
+		return withUndo(doneOutcome(ctx, placeDeletedOutcome, place.Name), undo), nil
 	default:
-		return approval.Outcome{}, &approval.ActionError{Reason: "unavailable", Text: "That action is no longer available."}
+		return approval.Outcome{}, actionFailed(ctx, "unavailable", execUnavailable)
 	}
 }
 
 func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (approval.Outcome, error) {
 	var confirmed confirmedPlaceUpdate
 	if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
-		return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed change could not be read; nothing was changed."}
+		return approval.Outcome{}, actionFailed(ctx, "malformed", execUnreadableChange)
 	}
 	current, found, err := s.repository.LoadPlace(ctx, record.PrincipalID, confirmed.PlaceID)
 	if err != nil {
 		return approval.Outcome{}, err
 	}
 	if !found {
-		return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That place no longer exists; nothing was changed."}
+		return approval.Outcome{}, actionFailed(ctx, "not_found", execPlaceGoneChange)
 	}
-	stale := &approval.ActionError{Reason: "stale", Text: "That place changed after this was proposed; nothing was changed. Ask again to change it."}
+	stale := actionFailed(ctx, "stale", execStalePlace)
 	if !current.UpdatedAt.Equal(confirmed.UpdatedAt) {
 		return approval.Outcome{}, stale
 	}
@@ -478,14 +479,14 @@ func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (ap
 		err = checkRadius(confirmed.RadiusM)
 	}
 	if err != nil {
-		return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "That change is not valid (" + err.Error() + "); nothing was changed."}
+		return approval.Outcome{}, actionFailed(ctx, "invalid", execInvalidChange, err.Error())
 	}
 	next := current
 	next.Name, next.RadiusM, next.UpdatedAt = name, confirmed.RadiusM, s.now()
 	updated, err := s.updatePlace(ctx, next, current.UpdatedAt)
 	switch {
 	case errors.Is(err, ErrPlaceNameTaken):
-		return approval.Outcome{}, &approval.ActionError{Reason: "name_taken", Text: "Another place is already called " + name + "; nothing was changed."}
+		return approval.Outcome{}, actionFailed(ctx, "name_taken", execNameTakenChange, name)
 	case err != nil:
 		return approval.Outcome{}, err
 	case !updated:
@@ -496,7 +497,7 @@ func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (ap
 	if err != nil {
 		return approval.Outcome{}, err
 	}
-	return approval.Outcome{Text: fmt.Sprintf("Changed. The place is now %s, radius %d m.", name, confirmed.RadiusM), Undo: undo}, nil
+	return withUndo(doneOutcome(ctx, execChanged, name, confirmed.RadiusM), undo), nil
 }
 
 // proposedFix is the shared position a confirmed place was proposed from, as it is now: the same
@@ -548,7 +549,7 @@ func (s *Service) deleteUnused(ctx context.Context, principalID, placeID, suffix
 		return Place{}, time.Time{}, err
 	}
 	if !found {
-		return Place{}, time.Time{}, &approval.ActionError{Reason: "not_found", Text: "That place no longer exists."}
+		return Place{}, time.Time{}, actionFailed(ctx, "not_found", execPlaceGone)
 	}
 	if refusal, err := s.inUse(ctx, place); err != nil || refusal != "" {
 		if err != nil {
@@ -562,20 +563,46 @@ func (s *Service) deleteUnused(ctx context.Context, principalID, placeID, suffix
 		return Place{}, time.Time{}, err
 	}
 	if !deleted {
-		return Place{}, time.Time{}, &approval.ActionError{Reason: "stale", Text: "That place changed meanwhile; nothing was deleted. Ask again to delete it."}
+		return Place{}, time.Time{}, actionFailed(ctx, "stale", execStaleDelete)
 	}
 	s.logger.InfoContext(ctx, "place.deleted", "principal_id", principalID, "place_id", place.ID)
 	return place, now, nil
 }
 
-func sourceName(fix Fix) string {
-	switch fix.Source {
+var (
+	execUnreadablePlace  = locale.T("The confirmed place could not be read; nothing was saved.", "Не удалось прочитать подтверждённое место; ничего не сохранено.")
+	execLocationGone     = locale.T("The location this place was to be saved from is no longer shared; share it again and ask once more. Nothing was saved.", "Геопозиция, из которой нужно было сохранить место, больше не доступна; поделись ею ещё раз и повтори просьбу. Ничего не сохранено.")
+	execInvalidPlace     = locale.T("That place is not valid (%s); nothing was saved.", "Это место не подходит (%s); ничего не сохранено.")
+	execTooManyPlaces    = locale.T("You already have %d places, which is the most allowed; delete one first. Nothing was saved.", "У тебя уже %d мест, а это предел; сначала удали одно. Ничего не сохранено.")
+	execNameTakenSave    = locale.T("Another place is already called %s; nothing was saved.", "Место с названием %s уже есть; ничего не сохранено.")
+	execUnreadableDelete = locale.T("The confirmed action could not be read; nothing was deleted.", "Не удалось прочитать подтверждённое действие; ничего не удалено.")
+	execUnavailable      = locale.T("That action is no longer available.", "Это действие больше недоступно.")
+	execUnreadableChange = locale.T("The confirmed change could not be read; nothing was changed.", "Не удалось прочитать подтверждённое изменение; ничего не изменено.")
+	execPlaceGoneChange  = locale.T("That place no longer exists; nothing was changed.", "Такого места больше нет; ничего не изменено.")
+	execStalePlace       = locale.T("That place changed after this was proposed; nothing was changed. Ask again to change it.", "Место изменилось после предложения; ничего не изменено. Попроси изменить его ещё раз.")
+	execInvalidChange    = locale.T("That change is not valid (%s); nothing was changed.", "Это изменение не подходит (%s); ничего не изменено.")
+	execNameTakenChange  = locale.T("Another place is already called %s; nothing was changed.", "Место с названием %s уже есть; ничего не изменено.")
+	execPlaceGone        = locale.T("That place no longer exists.", "Такого места больше нет.")
+	execStaleDelete      = locale.T("That place changed meanwhile; nothing was deleted. Ask again to delete it.", "Место тем временем изменилось; ничего не удалено. Попроси удалить его ещё раз.")
+	execSaved            = locale.T("Saved the place %s, radius %d m.", "Место %s сохранено, радиус %d м.")
+	execChanged          = locale.T("Changed. The place is now %s, radius %d m.", "Изменено. Теперь место называется %s, радиус %d м.")
+	saveLiveSummary      = locale.T("Save your latest shared live location as the place %s, radius %d m.", "Сохранить твою последнюю трансляцию геопозиции как место %s, радиус %d м.")
+	saveVenueSummary     = locale.T("Save your latest shared venue as the place %s, radius %d m.", "Сохранить твоё последнее присланное заведение как место %s, радиус %d м.")
+	savePinSummary       = locale.T("Save your latest shared location pin as the place %s, radius %d m.", "Сохранить твою последнюю присланную точку как место %s, радиус %d м.")
+	changeSummary        = locale.T("Change the place %s:\n%s", "Изменить место %s:\n%s")
+	renamedLine          = locale.T("name: %s → %s", "название: %s → %s")
+	resizedLine          = locale.T("radius: %d m → %d m", "радиус: %d м → %d м")
+	deleteSummary        = locale.T("Delete the place %s (radius %d m).", "Удалить место %s (радиус %d м).")
+)
+
+func saveSummary(source Source) locale.Text {
+	switch source {
 	case SourceLive:
-		return "live location"
+		return saveLiveSummary
 	case SourceVenue:
-		return "venue"
+		return saveVenueSummary
 	}
-	return "location pin"
+	return savePinSummary
 }
 
 func tooManyPlacesText() string {
@@ -584,4 +611,19 @@ func tooManyPlacesText() string {
 
 func placeError(text string) tools.Result {
 	return tools.Result{Text: text, IsError: true}
+}
+
+// actionFailed keeps the English sentence for the record and the model, and the user's language
+// for the user.
+func actionFailed(ctx context.Context, reason string, message locale.Text, arguments ...any) *approval.ActionError {
+	return &approval.ActionError{Reason: reason, Text: message.FormatIn(locale.English, arguments...), UserText: message.Format(ctx, arguments...)}
+}
+
+func doneOutcome(ctx context.Context, message locale.Text, arguments ...any) approval.Outcome {
+	return approval.Outcome{Text: message.FormatIn(locale.English, arguments...), UserText: message.Format(ctx, arguments...)}
+}
+
+func withUndo(outcome approval.Outcome, undo json.RawMessage) approval.Outcome {
+	outcome.Undo = undo
+	return outcome
 }

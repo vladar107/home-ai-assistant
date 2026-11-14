@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/clip"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
@@ -137,7 +139,7 @@ func (s *Service) executeAdd(ctx context.Context, principalID string, call tools
 		}
 		return s.propose(ctx, principalID, approval.Proposal{
 			Tool: toolAdd, Arguments: canonical,
-			Summary: fmt.Sprintf("Add to your backlog: %s\n%s\nI read outside content in this conversation, so I need your confirmation.", title, details),
+			Summary: addExternalSummary.Format(ctx, title, details),
 			Intent:  approval.Intent{Verb: "add", TargetKind: "backlog item", TargetName: title},
 		})
 	}
@@ -233,7 +235,7 @@ func (s *Service) executeUpdate(ctx context.Context, principalID string, call to
 		}
 		return s.propose(ctx, principalID, approval.Proposal{
 			Tool: toolUpdate, Arguments: canonical,
-			Summary: fmt.Sprintf("Change the backlog item %q to:\n%s (%s)\n%s\nI read outside content in this conversation, so I need your confirmation.", item.Title, next.Title, next.Status, next.Details),
+			Summary: changeExternalSummary.Format(ctx, strconv.Quote(item.Title), next.Title, statusWord(ctx, next.Status), next.Details),
 			Intent:  approval.Intent{Verb: "change", TargetKind: "backlog item", TargetName: item.Title, NewName: next.Title},
 		})
 	}
@@ -248,8 +250,8 @@ func (s *Service) executeUpdate(ctx context.Context, principalID string, call to
 }
 
 // AddProposal is a new item suggested outside a chat turn, such as by the weekly review, as a
-// proposal for the user to confirm, or why the item is refused.
-func (s *Service) AddProposal(title, details string) (approval.Proposal, string) {
+// proposal for the user to confirm in the context's language, or why the item is refused.
+func (s *Service) AddProposal(ctx context.Context, title, details string) (approval.Proposal, string) {
 	title, details = normalizeTitle(title), normalizeDetails(details)
 	if reason := cmp.Or(validTitle(title), validDetails(details)); reason != "" {
 		return approval.Proposal{}, reason
@@ -260,8 +262,34 @@ func (s *Service) AddProposal(title, details string) (approval.Proposal, string)
 	}
 	return approval.Proposal{
 		Tool: toolAdd, Arguments: canonical,
-		Summary: fmt.Sprintf("Add to your backlog: %s\n%s", title, details),
+		Summary: addSummary.Format(ctx, title, details),
 	}, ""
+}
+
+var (
+	execUnreadableItem    = locale.T("The confirmed item could not be read; nothing was added.", "Не удалось прочитать подтверждённый пункт; ничего не добавлено.")
+	execUnreadableChange  = locale.T("The confirmed change could not be read; nothing was changed.", "Не удалось прочитать подтверждённое изменение; ничего не изменено.")
+	execUnavailable       = locale.T("That action is no longer available.", "Это действие больше недоступно.")
+	execFull              = locale.T("The backlog already holds %d open items; mark some done or delete them in /backlog. Nothing was changed.", "В бэклоге уже %d открытых пунктов; отметь часть выполненными или удали в /backlog. Ничего не изменено.")
+	execItemGone          = locale.T("That backlog item no longer exists.", "Такого пункта бэклога больше нет.")
+	execAdded             = locale.T("Added to the backlog.", "Добавлено в бэклог.")
+	execUpdated           = locale.T("Updated.", "Обновлено.")
+	addSummary            = locale.T("Add to your backlog: %s\n%s", "Добавить в бэклог: %s\n%s")
+	addExternalSummary    = locale.T("Add to your backlog: %s\n%s\nI read outside content in this conversation, so I need your confirmation.", "Добавить в бэклог: %s\n%s\nВ этом разговоре был прочитан внешний контент, поэтому нужно твоё подтверждение.")
+	changeExternalSummary = locale.T("Change the backlog item %s to:\n%s (%s)\n%s\nI read outside content in this conversation, so I need your confirmation.", "Изменить пункт бэклога %s на:\n%s (%s)\n%s\nВ этом разговоре был прочитан внешний контент, поэтому нужно твоё подтверждение.")
+	openStatus            = locale.T("open", "открыт")
+	doneStatus            = locale.T("done", "выполнен")
+)
+
+// statusWord names a status for the user; any other value is shown as stored.
+func statusWord(ctx context.Context, status string) string {
+	switch status {
+	case StatusOpen:
+		return openStatus.Format(ctx)
+	case StatusDone:
+		return doneStatus.Format(ctx)
+	}
+	return status
 }
 
 func (s *Service) propose(ctx context.Context, principalID string, proposal approval.Proposal) (tools.Result, error) {
@@ -291,29 +319,39 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 	case toolAdd:
 		var confirmed addArguments
 		if json.Unmarshal(record.Arguments, &confirmed) != nil || validTitle(confirmed.Title) != "" || validDetails(confirmed.Details) != "" {
-			return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed item could not be read; nothing was added."}
+			return approval.Outcome{}, actionFailed(ctx, "malformed", execUnreadableItem)
 		}
 		_, rejected, err = s.add(ctx, record.PrincipalID, confirmed.Title, confirmed.Details)
 	case toolUpdate:
 		var confirmed change
 		if json.Unmarshal(record.Arguments, &confirmed) != nil || validTitle(confirmed.Title) != "" || validDetails(confirmed.Details) != "" ||
 			(confirmed.Status != StatusOpen && confirmed.Status != StatusDone) {
-			return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed change could not be read; nothing was changed."}
+			return approval.Outcome{}, actionFailed(ctx, "malformed", execUnreadableChange)
 		}
 		rejected, err = s.update(ctx, record.PrincipalID, confirmed)
 	default:
-		return approval.Outcome{}, &approval.ActionError{Reason: "unavailable", Text: "That action is no longer available."}
+		return approval.Outcome{}, actionFailed(ctx, "unavailable", execUnavailable)
 	}
 	switch {
 	case err != nil:
 		return approval.Outcome{}, err
 	case rejected == fullText:
-		return approval.Outcome{}, &approval.ActionError{Reason: "full", Text: fmt.Sprintf("The backlog already holds %d open items; mark some done or delete them in /backlog. Nothing was changed.", MaximumOpenItems)}
+		return approval.Outcome{}, actionFailed(ctx, "full", execFull, MaximumOpenItems)
 	case rejected != "":
-		return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That backlog item no longer exists."}
+		return approval.Outcome{}, actionFailed(ctx, "not_found", execItemGone)
 	case record.Tool == toolAdd:
-		return approval.Outcome{Text: "Added to the backlog."}, nil
+		return doneOutcome(ctx, execAdded), nil
 	default:
-		return approval.Outcome{Text: "Updated."}, nil
+		return doneOutcome(ctx, execUpdated), nil
 	}
+}
+
+// actionFailed keeps the English sentence for the record and the model, and the user's language
+// for the user.
+func actionFailed(ctx context.Context, reason string, message locale.Text, arguments ...any) *approval.ActionError {
+	return &approval.ActionError{Reason: reason, Text: message.FormatIn(locale.English, arguments...), UserText: message.Format(ctx, arguments...)}
+}
+
+func doneOutcome(ctx context.Context, message locale.Text) approval.Outcome {
+	return approval.Outcome{Text: message.FormatIn(locale.English), UserText: message.Format(ctx)}
 }
