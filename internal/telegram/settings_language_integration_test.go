@@ -28,11 +28,11 @@ var settingsLatinWords = []string{
 
 var settingsPageWords = map[string][]string{
 	"model":    {"lice"},
-	"tools":    {"NS", "AeroDataBox", "aerodatabox", "com", "OVapi", "Transitous", "transitous", "org", "sources", "OpenStreetMap", "off", "on"},
+	"tools":    {"NS", "AeroDataBox", "aerodatabox", "com", "OVapi", "Transitous", "transitous", "org", "sources", "OpenStreetMap"},
 	"events":   {"POST", "api"},
 	"home":     {"Assist"},
 	"services": {"Prices", "prices", "Look", "up", "Listings", "shop", "Search", "classified", "listings"},
-	"root":     {"strict", "local", "off", "on"},
+	"root":     {"strict", "local"},
 }
 
 func wantRussianPage(t *testing.T, what, text string, allowed ...string) {

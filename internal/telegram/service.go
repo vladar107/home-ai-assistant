@@ -858,7 +858,7 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 		return s.sendCommandReply(ctx, message, authorization.Principal.ID, "busy", conversation.BusyReply.Format(ctx), nil)
 	}
 	if elsewhere := (*conversation.OpenElsewhereError)(nil); errors.As(err, &elsewhere) {
-		return s.sendCommandReply(ctx, message, authorization.Principal.ID, "elsewhere", SessionOpenIn(elsewhere.ThreadID, elsewhere.TabName), nil)
+		return s.sendCommandReply(ctx, message, authorization.Principal.ID, "elsewhere", sessionOpenIn(ctx, elsewhere.ThreadID, elsewhere.TabName), nil)
 	}
 	// A retry would be refused the same way and hold every later update behind this one.
 	if errors.Is(err, conversation.ErrInvalidRequest) {

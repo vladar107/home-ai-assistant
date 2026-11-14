@@ -246,13 +246,6 @@ func flagged(text string, attention bool) string {
 	return text
 }
 
-func onOff(enabled bool) string {
-	if enabled {
-		return locale.On.In(locale.English)
-	}
-	return locale.Off.In(locale.English)
-}
-
 // stateOf words a switch for the user's language.
 func stateOf(ctx context.Context, enabled bool) string {
 	if enabled {
@@ -490,7 +483,7 @@ func (m modelSection) act(ctx context.Context, principalID string, chatID int64,
 		ceremony, err := m.connections.Connect(ctx, principalID, chatID)
 		if err != nil {
 			m.telemetry.ContextLogger(ctx, m.logger).WarnContext(ctx, "telegram.connection.start_failed", "principal_id", principalID, "error", err)
-			return settingsOutcome{message: connection.ConnectFailedReply}, nil
+			return settingsOutcome{message: connection.ConnectFailedText.Format(ctx)}, nil
 		}
 		return settingsOutcome{message: ConnectInstructions(ctx, ceremony)}, nil
 	case modelDisconnectAction:

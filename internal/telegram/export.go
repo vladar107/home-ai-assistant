@@ -61,7 +61,7 @@ func (s *Service) processRestore(ctx context.Context, message *Message, principa
 		return s.sendCommandReply(ctx, message, principalID, "restore", RestoreHelpReply.Format(ctx), nil)
 	}
 	if document.FileSize > export.MaximumFileBytes {
-		return s.sendCommandReply(ctx, message, principalID, "restore", export.ErrTooLarge.Text, nil)
+		return s.sendCommandReply(ctx, message, principalID, "restore", export.ErrTooLarge.Message.Format(ctx), nil)
 	}
 	reference, err := s.client.GetFile(ctx, document.FileID)
 	if err != nil {
@@ -74,7 +74,7 @@ func (s *Service) processRestore(ctx context.Context, message *Message, principa
 	if err != nil {
 		var oversized *oversizedFileError
 		if errors.As(err, &oversized) {
-			return s.sendCommandReply(ctx, message, principalID, "restore", export.ErrTooLarge.Text, nil)
+			return s.sendCommandReply(ctx, message, principalID, "restore", export.ErrTooLarge.Message.Format(ctx), nil)
 		}
 		if isPermanentFileError(err) {
 			return s.sendCommandReply(ctx, message, principalID, "restore", AttachmentUnavailableText.Format(ctx), nil)
@@ -85,7 +85,7 @@ func (s *Service) processRestore(ctx context.Context, message *Message, principa
 	if err != nil {
 		var refusal *export.Refusal
 		if errors.As(err, &refusal) {
-			return s.sendCommandReply(ctx, message, principalID, "restore", refusal.Text, nil)
+			return s.sendCommandReply(ctx, message, principalID, "restore", refusal.Message.Format(ctx), nil)
 		}
 		s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "telegram.restore.failed", "principal_id", principalID, "error", err)
 		return s.sendCommandReply(ctx, message, principalID, "restore", RestoreFailedReply.Format(ctx), nil)

@@ -25,8 +25,7 @@ var (
 			"1. Откройте ссылку ниже и войдите в аккаунт Google, который хотите подключить. Google сообщит, что приложение не проверено; это собственное приложение вашей семьи, так что продолжайте.\n"+
 			"2. Разрешите чтение почты, календаря или того и другого. Ничего нельзя ни отправить, ни изменить, ни удалить.\n"+
 			"3. Затем браузер не сможет открыть страницу localhost. Скопируйте полный адрес этой страницы и отправьте его сюда в течение 10 минут. Я сразу его удалю.\n\n")
-	// GoogleSignInInstructions is the English text, for the help page that names the button.
-	GoogleSignInInstructions = googleSignInSteps.In(locale.English)
+	googleLinkFollows = locale.T("(a personal sign-in link follows)", "(следом придёт персональная ссылка для входа)")
 
 	GoogleAccountsLine       = locale.T("Google accounts:", "Аккаунты Google:")
 	GooglePrivacyLine        = locale.T("Mail and calendar events I read go to your model.", "Почта и события календаря, которые я читаю, уходят вашей модели.")

@@ -323,35 +323,35 @@ func (s *Service) finish(ctx context.Context, principalID string, device deviceA
 	case errors.Is(err, errDenied):
 		return ConnectDeniedReply.Format(ctx), "denied"
 	case err != nil:
-		return ConnectFailedReply, "failed"
+		return ConnectFailedText.Format(ctx), "failed"
 	}
 	credential, err := s.client.exchange(ctx, code)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			return "", "cancelled"
 		}
-		return ConnectFailedReply, "failed"
+		return ConnectFailedText.Format(ctx), "failed"
 	}
 	profileDir, err := s.ProfileDir(principalID)
 	if err != nil {
-		return ConnectFailedReply, "failed"
+		return ConnectFailedText.Format(ctx), "failed"
 	}
 	if err := preparePrivateDirectory(profileDir); err != nil {
-		return ConnectFailedReply, "failed"
+		return ConnectFailedText.Format(ctx), "failed"
 	}
 	bound, err := s.repository.BindModelConnection(ctx, principalID, s.provider, credential.AccountID)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			return "", "cancelled"
 		}
-		return ConnectFailedReply, "failed"
+		return ConnectFailedText.Format(ctx), "failed"
 	}
 	if !bound {
 		return AccountAlreadyBoundReply.Format(ctx), "already_bound"
 	}
 	if err := writeCredential(profileDir, s.provider, credential); err != nil {
 		_, _ = s.repository.DeleteModelConnection(ctx, principalID)
-		return ConnectFailedReply, "failed"
+		return ConnectFailedText.Format(ctx), "failed"
 	}
 	// A disconnect or replacement that raced the final write must not leave credentials behind.
 	if ctx.Err() != nil {

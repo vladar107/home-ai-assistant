@@ -35,7 +35,7 @@ const webSearchHelp = "Web search is offered while web access is on for the user
 // the button's callback data.
 var pressMessages = map[string]func(context.Context) string{
 	notionSectionPrefix + ":" + notionConnectAction: func(ctx context.Context) string { return NotionConnectInstructions.Format(ctx) },
-	googleSectionPrefix + ":" + googleConnectAction: func(context.Context) string { return GoogleSignInInstructions + "(a personal sign-in link follows)" },
+	googleSectionPrefix + ":" + googleConnectAction: func(ctx context.Context) string { return googleSignInSteps.Format(ctx) + googleLinkFollows.Format(ctx) },
 }
 
 // Help is the app_help tool: this app's own instructions for a principal, rendered from the same
@@ -104,7 +104,7 @@ func (s *Service) helpText(ctx context.Context, principalID, topic string) (stri
 		if err != nil {
 			return "", err
 		}
-		fmt.Fprintf(&builder, "The user sends /settings and sees:\n%s\nButtons, each opening a group: %s", text, buttonTexts(keyboard))
+		fmt.Fprintf(&builder, "The user sends /settings and sees:\n%s\nButtons, each opening a group: %s", text, buttonTexts(ctx, keyboard))
 	case helpTopicCommands:
 		builder.WriteString("Chat commands:" + commandList(s.botCommands(locale.From(ctx))) + "\nNot in the menu but answered when typed:" + commandList(menuCommands(locale.From(ctx), typedCommands)))
 	case helpTopicJobs:
@@ -125,7 +125,7 @@ func (s *Service) helpText(ctx context.Context, principalID, topic string) (stri
 			if err != nil {
 				return "", err
 			}
-			fmt.Fprintf(&builder, "Where: send /settings, then %s.\nThat page shows the user now:\n%s\nButtons on it: %s", pathTo(ctx, page, summary.name), text, buttonTexts(keyboard))
+			fmt.Fprintf(&builder, "Where: send /settings, then %s.\nThat page shows the user now:\n%s\nButtons on it: %s", pathTo(ctx, page, summary.name), text, buttonTexts(ctx, keyboard))
 			for _, row := range keyboard {
 				for _, button := range row {
 					if message, found := pressMessages[button.CallbackData]; found {
@@ -174,11 +174,11 @@ func pathTo(ctx context.Context, page, sectionName string) string {
 	return "look at the overview"
 }
 
-func buttonTexts(keyboard InlineKeyboard) string {
+func buttonTexts(ctx context.Context, keyboard InlineKeyboard) string {
 	var texts []string
 	for _, row := range keyboard {
 		for _, button := range row {
-			if button.CallbackData == labelCallbackData || button.Text == settingsBackText {
+			if button.CallbackData == labelCallbackData || button.Text == settingsBackLabel(ctx) {
 				continue
 			}
 			texts = append(texts, button.Text)

@@ -46,7 +46,7 @@ func (s *Service) privacyReply(ctx context.Context, principalID string) (string,
 		core[privacySchedules] = SchedulePrivacyLine.Format(ctx)
 	}
 	if s.tasks != nil {
-		core[privacyTasks] = TaskPrivacyLine
+		core[privacyTasks] = TaskPrivacyLine.Format(ctx)
 	}
 	if s.transcriber != nil {
 		core[privacyVoice] = VoicePrivacyLine.Format(ctx)

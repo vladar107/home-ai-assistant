@@ -12,12 +12,13 @@ import (
 )
 
 const (
-	TaskPrivacyLine  = "Background task reports are kept for 30 days."
 	tasksPrefix      = "tasks"
 	taskCancelAction = "cancel"
 )
 
 var (
+	TaskPrivacyLine = locale.T("Background task reports are kept for 30 days.", "Отчёты фоновых задач хранятся 30 дней.")
+
 	TasksTitle       = locale.T("Background tasks", "Фоновые задачи")
 	NoTasksReply     = locale.T("You have no background tasks from the last week. Ask me for something long, such as going through a month of mail, and I will work on it in the background while we keep talking.", "За последнюю неделю у вас не было фоновых задач. Попросите меня о чём-нибудь долгом, например разобрать почту за месяц, и я займусь этим в фоне, пока мы продолжаем разговор.")
 	TaskGoneReply    = locale.T("That task has already finished or was cancelled.", "Эта задача уже завершилась или была отменена.")
@@ -96,7 +97,7 @@ func renderTasks(ctx context.Context, principalID string, tasks TaskController) 
 	var keyboard InlineKeyboard
 	for index, listedTask := range listed {
 		number := strconv.Itoa(index + 1)
-		lines = append(lines, fmt.Sprintf("%s. %s\n%s", number, listedTask.Title, task.Summary(listedTask, now)))
+		lines = append(lines, fmt.Sprintf("%s. %s\n%s", number, listedTask.Title, task.SummaryFor(ctx, listedTask, now)))
 		if listedTask.Open() {
 			keyboard = append(keyboard, taskKeyboard(listedTask.ID, taskCancelNumber.Format(ctx, number))...)
 		}
