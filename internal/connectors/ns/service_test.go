@@ -296,6 +296,7 @@ func wantError(t *testing.T, result agentruntime.ToolResult, fragment string) {
 var allTools = []string{"ns_trips", "ns_departures", "ns_disruptions", "ns_ovfiets"}
 
 func TestTrainsAreOnByDefaultAndAPerUserSwitch(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.server.serve("v3/trips", fixtureBytes(t, "trips.json"))
 	ctx := t.Context()
@@ -342,6 +343,7 @@ func TestTrainsAreOnByDefaultAndAPerUserSwitch(t *testing.T) {
 }
 
 func TestStationNamesResolveOnceFetched(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.server.serve("v3/trips", fixtureBytes(t, "trips.json"))
 
@@ -396,6 +398,7 @@ func TestStationNamesResolveOnceFetched(t *testing.T) {
 }
 
 func TestTripsRenderANormalMorning(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.server.serve("v3/trips", fixtureBytes(t, "trips.json"))
 
@@ -425,6 +428,7 @@ func TestTripsRenderANormalMorning(t *testing.T) {
 }
 
 func TestTripsReportDelaysTrackChangesAndCancellations(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.server.serve("v3/trips", fixtureBytes(t, "trips_disrupted.json"))
 
@@ -445,6 +449,7 @@ func TestTripsReportDelaysTrackChangesAndCancellations(t *testing.T) {
 }
 
 func TestTripsByArrivalSendTheLocalOffset(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.server.serve("v3/trips", fixtureBytes(t, "trips_arrival.json"))
 
@@ -466,6 +471,7 @@ func TestTripsByArrivalSendTheLocalOffset(t *testing.T) {
 // Extra transfer time is the NS app setting that makes NS plan only connections with that much more
 // time at each change, so a user who wants longer changes between trains gets them from NS itself.
 func TestTripsWithExtraTransferTimeAskNSForIt(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.server.serve("v3/trips", fixtureBytes(t, "trips.json"))
 
@@ -497,6 +503,7 @@ func TestTripsWithExtraTransferTimeAskNSForIt(t *testing.T) {
 }
 
 func TestDeparturesShowLiveChanges(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.server.serve("v2/departures", fixtureBytes(t, "departures.json"))
 
@@ -523,6 +530,7 @@ func TestDeparturesShowLiveChanges(t *testing.T) {
 }
 
 func TestDisruptionsAreFilteredOrderedAndCapped(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.clock.advance(-13*time.Hour - 45*time.Minute)
 	national := fixtureBytes(t, "disruptions.json")
@@ -599,6 +607,7 @@ func TestDisruptionsAreFilteredOrderedAndCapped(t *testing.T) {
 }
 
 func TestDisruptionsForAnotherTimeIncludePlannedWorks(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.clock.advance(-13*time.Hour - 45*time.Minute)
 	active := fixtureBytes(t, "disruptions.json")
@@ -657,6 +666,7 @@ func TestDisruptionsForAnotherTimeIncludePlannedWorks(t *testing.T) {
 }
 
 func TestStationListRefreshWaitsHonourTheCallersContext(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	stations := fixtureBytes(t, "stations.json")
 	requested := make(chan struct{}, 4)
@@ -703,6 +713,7 @@ func TestStationListRefreshWaitsHonourTheCallersContext(t *testing.T) {
 }
 
 func TestATransientFailureIsRetriedBeforeAnswering(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	trips := fixtureBytes(t, "trips.json")
 	var calls atomic.Int32
@@ -723,6 +734,7 @@ func TestATransientFailureIsRetriedBeforeAnswering(t *testing.T) {
 }
 
 func TestFailuresBecomeOneSentenceWithoutTheKey(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name   string
 		status int
@@ -737,6 +749,7 @@ func TestFailuresBecomeOneSentenceWithoutTheKey(t *testing.T) {
 		{"other bad request", http.StatusBadRequest, `{"errors":[{"type":"OTHER"}]}`, "NS could not answer that request."},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 			f := newFixture(t)
 			f.server.fail("v3/trips", test.status, test.body)
 			result := f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal", "date_time": "2026-12-20T08:00"})
@@ -774,6 +787,7 @@ func TestFailuresBecomeOneSentenceWithoutTheKey(t *testing.T) {
 }
 
 func TestResultsAreCachedForThirtySeconds(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.server.serve("v3/trips", fixtureBytes(t, "trips.json"))
 	trip := map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal"}
@@ -799,6 +813,7 @@ func TestResultsAreCachedForThirtySeconds(t *testing.T) {
 }
 
 func TestOVFietsReportsEachRentalPointAtAStation(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.server.serve(ovfietsPath, fixtureBytes(t, "ovfiets.json"))
 
@@ -842,6 +857,7 @@ func TestOVFietsReportsEachRentalPointAtAStation(t *testing.T) {
 }
 
 func TestOVFietsIsCachedAndFollowsTheTrainsSwitch(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.server.serve(ovfietsPath, fixtureBytes(t, "ovfiets.json"))
 	set := f.toolSet("alice")
@@ -869,6 +885,7 @@ func TestOVFietsIsCachedAndFollowsTheTrainsSwitch(t *testing.T) {
 }
 
 func TestOVFietsWithoutTheProductNamesTheSubscription(t *testing.T) {
+	t.Parallel()
 	want := "The operator's NS API subscription does not include OV-fiets (the NS places API); the operator needs to add that product."
 	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
 		f := newFixture(t)
@@ -926,6 +943,7 @@ func late(t *testing.T, stop any, minutes int) {
 }
 
 func TestTripStatusClassifiesTheTripTheUserWouldTake(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	at := func(clock string) time.Time {
 		parsed, err := time.Parse("15:04", clock)
@@ -1016,6 +1034,7 @@ func TestTripStatusClassifiesTheTripTheUserWouldTake(t *testing.T) {
 }
 
 func TestTripStatusSharesTheTripsCacheAndRefuses(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.server.serve("v3/trips", fixtureBytes(t, "trips.json"))
 	ctx := t.Context()
@@ -1058,6 +1077,7 @@ func TestTripStatusSharesTheTripsCacheAndRefuses(t *testing.T) {
 }
 
 func TestDepartureChecksReportExactlyTheTrainsAsked(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.server.serve("v3/trips", fixtureBytes(t, "trips.json"))
 	f.server.serve("v2/departures", fixtureBytes(t, "departures.json"))
@@ -1089,6 +1109,7 @@ func TestDepartureChecksReportExactlyTheTrainsAsked(t *testing.T) {
 }
 
 func TestDepartureChecksNormalizeTheStatus(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	day := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
 	clock := func(value string) transit.Clock {
@@ -1172,6 +1193,7 @@ func TestDepartureChecksNormalizeTheStatus(t *testing.T) {
 // The 07:56 and the 08:04 from Schothorst both make the IC 1722, so NS may leave the earlier one out
 // of its plan; asking again with extra change time brings it back.
 func TestDepartureChecksLookPastTrainsALaterOneBeats(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.server.serve("v2/departures", fixtureBytes(t, "departures.json"))
 	var response map[string]any
@@ -1261,6 +1283,7 @@ func TestDepartureChecksLookPastTrainsALaterOneBeats(t *testing.T) {
 }
 
 func TestDisruptionsAreStructuredWithTheirStations(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.server.serve("v3/disruptions", fixtureBytes(t, "disruptions.json"))
 
@@ -1310,6 +1333,7 @@ func tripsEdited(t *testing.T, change func(trips []map[string]any) []map[string]
 // The plan's trips run 07:56, 08:04, 08:12, 08:26, and 08:34; the 08:04 changes trains at Amersfoort
 // Centraal with 2 minutes to spare, the others with 10 or none.
 func TestAlternativesPlanTheNextTripsThatRun(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	ctx := t.Context()
 	at := func(clock string) time.Time {
