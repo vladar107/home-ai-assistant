@@ -45,6 +45,7 @@ func (r *fakeRewriter) RewriteAlertLike(_ context.Context, _, sample, text strin
 // A rewrite stands in for the message only when it keeps every number, every title the message
 // quotes, and every booking reference of the trip the message holds, and fits one message.
 func TestATripMessageIsRewrittenOnlyWhenTheRewriteKeepsWhatMatters(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	planned := f.add(draft(1, 3, booking(trip.KindFlight, "Flight to Example City", "ABC123", days(1), time.Time{})))
 	original := `Updated trip "Example trip": now 16 Oct 2026 to 18 Oct 2026. Booking ABC123 stays.`
@@ -89,6 +90,7 @@ func TestATripMessageIsRewrittenOnlyWhenTheRewriteKeepsWhatMatters(t *testing.T)
 // The sample is the latest message in the tab the trip's messages go to, then the latest anywhere,
 // and without either, or without the history to read them from, no rewrite is asked for.
 func TestATripMessagesLanguageSampleComesFromItsTabFirst(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	planned := f.add(draft(1, 3))
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -141,6 +143,7 @@ func TestATripMessagesLanguageSampleComesFromItsTabFirst(t *testing.T) {
 // its numbers in order, nothing Telegram would make tappable that the original lacks, and no more
 // than about twice its length. The log says why one was refused, never what it said.
 func TestATripMessagesRewriteMayAddNothing(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	planned := f.add(draft(1, 3))
 	original := "Example trip: calendar changes" + bullet + "Museum visit: Sat 17 Oct 13:00\u201314:00 (was 14:00\u201315:00)"

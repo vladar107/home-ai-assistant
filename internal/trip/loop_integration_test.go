@@ -60,6 +60,7 @@ func (f *fixture) loop(sender trip.Sender, paused ...trip.Paused) *trip.Loop {
 }
 
 func TestLoopSendsEachNoticeOnceAcrossRestarts(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	sender := &recordingSender{}
 	f.add(draft(1, 3))
@@ -94,6 +95,7 @@ func TestLoopSendsEachNoticeOnceAcrossRestarts(t *testing.T) {
 }
 
 func TestLoopSaysNothingIsPausedAndLimitsNames(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.add(draft(0, 2))
 	sender := &recordingSender{}
@@ -114,6 +116,7 @@ func TestLoopSaysNothingIsPausedAndLimitsNames(t *testing.T) {
 }
 
 func TestLoopCancelledActiveTripSendsEndNotice(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	planned := f.add(draft(0, 5))
 	sender := &recordingSender{}
@@ -132,6 +135,7 @@ func TestLoopCancelledActiveTripSendsEndNotice(t *testing.T) {
 }
 
 func TestLoopCancelledTripThatNeverStartedSendsNothing(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	planned := f.add(draft(2, 5))
 	sender := &recordingSender{}
@@ -148,6 +152,7 @@ func TestLoopCancelledTripThatNeverStartedSendsNothing(t *testing.T) {
 }
 
 func TestLoopRetriesAFailedSendOnTheNextCycle(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.add(draft(0, 5))
 	sender := &recordingSender{fail: true}
@@ -167,6 +172,7 @@ func TestLoopRetriesAFailedSendOnTheNextCycle(t *testing.T) {
 }
 
 func TestLoopRunsFromStart(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.add(draft(0, 5))
 	sender := &recordingSender{}
@@ -193,6 +199,7 @@ func TestLoopRunsFromStart(t *testing.T) {
 }
 
 func TestEndNoticeDoesNotSayResumedWhileAnotherTripIsUnderWay(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	first := f.add(draft(-2, 1))
 	second := f.add(draft(-1, 6))

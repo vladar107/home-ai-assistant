@@ -118,6 +118,7 @@ func (f *fixture) add(d trip.Draft) trip.Trip {
 }
 
 func TestPlannedTripSetsOneReminderPerBooking(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	flightCheckIn, hotelCheckIn := days(2), days(3)
 	planned := f.add(draft(3, 8,
@@ -145,6 +146,7 @@ func TestPlannedTripSetsOneReminderPerBooking(t *testing.T) {
 }
 
 func TestMovingBookingMovesReminderAndCancelRemovesThem(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	planned := f.add(draft(3, 8,
 		booking(trip.KindFlight, "Flight to Example City", "ABC123", days(3), days(2)),
@@ -181,6 +183,7 @@ func TestMovingBookingMovesReminderAndCancelRemovesThem(t *testing.T) {
 }
 
 func TestPastCheckInSetsNoReminderAndIsReported(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	result, err := f.trips.Add(t.Context(), "alice", draft(1, 5,
 		booking(trip.KindFlight, "Flight to Example City", "ABC123", days(1), start.Add(-time.Hour)),
@@ -197,6 +200,7 @@ func TestPastCheckInSetsNoReminderAndIsReported(t *testing.T) {
 }
 
 func TestReminderCapIsReportedAndTripStaysSaved(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	var unset int
 	for index := range 3 {
@@ -231,6 +235,7 @@ func mailTrip(startDay, endDay int, bookings ...trip.Booking) trip.Draft {
 }
 
 func TestSuggestDeduplicatesByBookingFingerprint(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	candidate := mailTrip(3, 8, booking(trip.KindFlight, "Flight to Example City", "ABC123", days(3), days(2)))
 
@@ -266,6 +271,7 @@ func TestSuggestDeduplicatesByBookingFingerprint(t *testing.T) {
 }
 
 func TestSuggestMergesBookingsAndKeepsWhatTheUserAdded(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	suggested, err := f.trips.Suggest(t.Context(), "alice", mailTrip(3, 8, booking(trip.KindFlight, "Flight to Example City", "ABC123", days(3), days(2))))
 	if err != nil {
@@ -315,6 +321,7 @@ func TestSuggestMergesBookingsAndKeepsWhatTheUserAdded(t *testing.T) {
 }
 
 func TestChatTripWithReferenceIsMatchedByALaterScan(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	planned := f.add(draft(3, 8, booking(trip.KindFlight, "Flight to Example City", "ABC123", days(3), days(2))))
 	found := mailTrip(3, 8, booking(trip.KindFlight, "Flight to Example City", "ABC123", days(3), days(2)))
@@ -328,6 +335,7 @@ func TestChatTripWithReferenceIsMatchedByALaterScan(t *testing.T) {
 }
 
 func TestSuggestUpdatesPlannedTripWhoseBookingMoved(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	suggested, _ := f.trips.Suggest(t.Context(), "alice", mailTrip(3, 8, booking(trip.KindFlight, "Flight to Example City", "ABC123", days(3), days(2))))
 	if tracked, err := f.trips.Track(t.Context(), "alice", suggested.Trip.ID); err != nil || tracked.Rejection != "" || tracked.Trip.Status != trip.StatusPlanned {
@@ -352,6 +360,7 @@ func TestSuggestUpdatesPlannedTripWhoseBookingMoved(t *testing.T) {
 }
 
 func TestCalendarSourceKeyIdentifiesABooking(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	event := booking(trip.KindOther, "Conference", "", days(3), time.Time{})
 	event.SourceKey = "event-1"
@@ -367,6 +376,7 @@ func TestCalendarSourceKeyIdentifiesABooking(t *testing.T) {
 }
 
 func TestSharedReferenceKeepsOneFingerprint(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	d := mailTrip(3, 8,
 		booking(trip.KindFlight, "Outbound", "ABC123", days(3), time.Time{}),
@@ -381,6 +391,7 @@ func TestSharedReferenceKeepsOneFingerprint(t *testing.T) {
 }
 
 func TestTravelingIsHalfOpenOnPlannedTrips(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	planned := f.add(draft(2, 5))
 	if _, err := f.trips.Suggest(t.Context(), "alice", mailTrip(10, 12, booking(trip.KindFlight, "Flight", "XYZ789", days(10), time.Time{}))); err != nil {
@@ -414,6 +425,7 @@ func TestTravelingIsHalfOpenOnPlannedTrips(t *testing.T) {
 }
 
 func TestEndNowEndsAnActiveTrip(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	planned := f.add(draft(-1, 5))
 	if result, err := f.trips.EndNow(t.Context(), "alice", planned.ID, time.Time{}); err != nil || result.Rejection != "" || !result.Trip.EndsAt.Equal(start) {
@@ -429,6 +441,7 @@ func TestEndNowEndsAnActiveTrip(t *testing.T) {
 }
 
 func TestNoticesAreOwedOncePerTrip(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	active := f.add(draft(-1, 5))
 	ahead := f.add(draft(3, 5))
@@ -466,6 +479,7 @@ func TestNoticesAreOwedOncePerTrip(t *testing.T) {
 }
 
 func TestEndNoticeIsDueWhenAStartedTripEnds(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	planned := f.add(draft(1, 3))
 	f.clock.Set(days(2))
@@ -482,6 +496,7 @@ func TestEndNoticeIsDueWhenAStartedTripEnds(t *testing.T) {
 }
 
 func TestTurnLine(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	if line, err := f.trips.TurnLine(t.Context(), "alice"); err != nil || line != "" {
 		t.Fatalf("line = %q, %v", line, err)
@@ -506,6 +521,7 @@ func TestTurnLine(t *testing.T) {
 }
 
 func TestPruneRemovesOldTripsOfEveryStatus(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	oldSuggested, _ := f.trips.Suggest(t.Context(), "alice", mailTrip(-60, -50, booking(trip.KindFlight, "Flight", "OLD111", days(-60), time.Time{})))
 	recentSuggested, _ := f.trips.Suggest(t.Context(), "alice", mailTrip(-20, -10, booking(trip.KindFlight, "Flight", "NEW222", days(-20), time.Time{})))
@@ -531,6 +547,7 @@ func TestPruneRemovesOldTripsOfEveryStatus(t *testing.T) {
 }
 
 func TestEndNowRemovesRemindersAfterTheNewEnd(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	planned := f.add(draft(-1, 6,
 		booking(trip.KindHotel, "Example Hotel", "", days(-1), time.Time{}),
@@ -551,6 +568,7 @@ func TestEndNowRemovesRemindersAfterTheNewEnd(t *testing.T) {
 }
 
 func TestPostponedTripNoticesAgain(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	planned := f.add(draft(-1, 5))
 	if _, err := f.trips.MarkStarted(t.Context(), "alice", planned.ID, start); err != nil {
@@ -567,6 +585,7 @@ func TestPostponedTripNoticesAgain(t *testing.T) {
 }
 
 func TestCheckInWithinTheCurrentMinuteIsPast(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.clock.Set(start.Add(30 * time.Second))
 	result, err := f.trips.Add(t.Context(), "alice", draft(1, 5,
@@ -582,6 +601,7 @@ func TestCheckInWithinTheCurrentMinuteIsPast(t *testing.T) {
 }
 
 func TestReminderFiresAtTheRightInstantWhenTheClocksFallBack(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	repeated := time.Date(2026, 10, 25, 1, 30, 0, 0, time.UTC)
 	planned := f.add(draft(8, 12, booking(trip.KindHotel, "Example Hotel", "", days(10), repeated)))
@@ -592,6 +612,7 @@ func TestReminderFiresAtTheRightInstantWhenTheClocksFallBack(t *testing.T) {
 }
 
 func TestRejectsUnsafeTextAndCaps(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	for name, mutate := range map[string]func(*trip.Draft){
 		"bare domain":         func(d *trip.Draft) { d.Title = "Visit example.com today" },
@@ -642,6 +663,7 @@ func TestRejectsUnsafeTextAndCaps(t *testing.T) {
 }
 
 func TestNoticeIsNotMarkedAfterThePostponedStart(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	planned := f.add(draft(-1, 5))
 	due, err := f.trips.DueNotices(t.Context(), start)
@@ -661,6 +683,7 @@ func TestNoticeIsNotMarkedAfterThePostponedStart(t *testing.T) {
 }
 
 func TestEndNoticeIsNotMarkedUnlessStartedAndEnded(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	planned := f.add(draft(-1, 5))
 	if marked, _ := f.trips.MarkEnded(t.Context(), "alice", planned.ID, start); marked {
@@ -673,6 +696,7 @@ func TestEndNoticeIsNotMarkedUnlessStartedAndEnded(t *testing.T) {
 }
 
 func TestStaleUpdateIsRejected(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	planned := f.add(draft(3, 8))
 	f.clock.Set(start.Add(time.Hour))
@@ -689,6 +713,7 @@ func TestStaleUpdateIsRejected(t *testing.T) {
 }
 
 func TestDateOnlyEndReadsAsThePreviousDay(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	d := draft(3, 8)
 	lisbon, _ := time.LoadLocation(zone)
@@ -701,6 +726,7 @@ func TestDateOnlyEndReadsAsThePreviousDay(t *testing.T) {
 }
 
 func TestWeakerCheckInSourceNeverReplacesAStrongerOne(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	stated := booking(trip.KindFlight, "Flight", "ABC123", days(10), days(9))
 	first, _ := f.trips.Suggest(t.Context(), "alice", mailTrip(10, 15, stated))
@@ -715,6 +741,7 @@ func TestWeakerCheckInSourceNeverReplacesAStrongerOne(t *testing.T) {
 }
 
 func TestSuggestedTripsHaveTheirOwnCap(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	for index := range trip.MaximumSuggested {
 		result, err := f.trips.Suggest(t.Context(), "alice", mailTrip(10, 12, booking(trip.KindFlight, "Flight", fmt.Sprintf("REF%03d", index), days(10), time.Time{})))
@@ -742,6 +769,7 @@ func TestSuggestedTripsHaveTheirOwnCap(t *testing.T) {
 }
 
 func TestReminderOfACheckInThatJustOpenedIsLeftToFire(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	checkIn := start.Add(time.Hour)
 	planned := f.add(draft(3, 8, booking(trip.KindFlight, "Flight", "ABC123", days(3), checkIn)))

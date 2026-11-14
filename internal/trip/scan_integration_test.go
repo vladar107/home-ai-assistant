@@ -166,6 +166,7 @@ func scanReplyJSON(t *testing.T, trips ...map[string]any) string {
 }
 
 func TestScanOffersEachBookingOnceAndPlansNothing(t *testing.T) {
+	t.Parallel()
 	s := newScanFixture(t)
 	s.checker.text = "```json\n" + scanReplyJSON(t, scanTripJSON("Example trip", "ABC123", 10, 15)) + "\n```"
 
@@ -192,6 +193,7 @@ func TestScanOffersEachBookingOnceAndPlansNothing(t *testing.T) {
 }
 
 func TestIgnoredTripIsNeverOfferedAgain(t *testing.T) {
+	t.Parallel()
 	s := newScanFixture(t)
 	s.checker.text = scanReplyJSON(t, scanTripJSON("Example trip", "ABC123", 10, 15))
 	s.run()
@@ -206,6 +208,7 @@ func TestIgnoredTripIsNeverOfferedAgain(t *testing.T) {
 }
 
 func TestScanDropsMalformedAndOutOfLimitOutput(t *testing.T) {
+	t.Parallel()
 	s := newScanFixture(t)
 	s.checker.text = "I found a trip to Example City."
 	if result := s.run(); result.Quiet || result.ErrorKind == "" {
@@ -234,6 +237,7 @@ func TestScanDropsMalformedAndOutOfLimitOutput(t *testing.T) {
 }
 
 func TestScanSendsAtMostTenTripsPerRun(t *testing.T) {
+	t.Parallel()
 	s := newScanFixture(t)
 	var found []map[string]any
 	for index := range 14 {
@@ -247,6 +251,7 @@ func TestScanSendsAtMostTenTripsPerRun(t *testing.T) {
 }
 
 func TestScanSaysOnceWhatChangedOnATrackedTrip(t *testing.T) {
+	t.Parallel()
 	s := newScanFixture(t)
 	s.checker.text = scanReplyJSON(t, scanTripJSON("Example trip", "ABC123", 10, 15))
 	s.run()
@@ -270,6 +275,7 @@ func TestScanSaysOnceWhatChangedOnATrackedTrip(t *testing.T) {
 }
 
 func TestScanReportsAFailedCheck(t *testing.T) {
+	t.Parallel()
 	s := newScanFixture(t)
 	s.checker.text, s.checker.errorKind = "Connect your model subscription first.", "not_connected"
 	result := s.run()
@@ -279,6 +285,7 @@ func TestScanReportsAFailedCheck(t *testing.T) {
 }
 
 func TestFailedCardIsRetriedAndReported(t *testing.T) {
+	t.Parallel()
 	s := newScanFixture(t)
 	s.checker.text = scanReplyJSON(t, scanTripJSON("Example trip", "ABC123", 10, 15))
 	s.recorded.failCards = true
@@ -297,6 +304,7 @@ func TestFailedCardIsRetriedAndReported(t *testing.T) {
 
 // The calendar is read in three contiguous windows of 60 days from the scan's date, both ends inclusive.
 func TestScanNamesThreeContiguousCalendarWindows(t *testing.T) {
+	t.Parallel()
 	s := newScanFixture(t)
 	s.clock.Set(time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC))
 	s.checker.text = `{"trips":[]}`
@@ -330,6 +338,7 @@ func TestScanNamesThreeContiguousCalendarWindows(t *testing.T) {
 // budget ran out; a scan within a week of it searches 8 days on the smaller one, and a scan more
 // than a week after the last success searches far again.
 func TestScanWindowFollowsTheLastSuccessfulScan(t *testing.T) {
+	t.Parallel()
 	s := newScanFixture(t)
 	s.checker.text, s.checker.exhaust = `{"trips":[]}`, true
 
@@ -357,6 +366,7 @@ func TestScanWindowFollowsTheLastSuccessfulScan(t *testing.T) {
 }
 
 func TestUnreadableOrFailedScanRecordsNothing(t *testing.T) {
+	t.Parallel()
 	s := newScanFixture(t)
 	s.checker.text = "I found a trip to Example City."
 	if result := s.run(); result.ErrorKind != "unreadable" {
@@ -378,6 +388,7 @@ func TestUnreadableOrFailedScanRecordsNothing(t *testing.T) {
 }
 
 func TestBookingFoundByFarAndNearScansIsOfferedOnce(t *testing.T) {
+	t.Parallel()
 	s := newScanFixture(t)
 	s.checker.text = scanReplyJSON(t, scanTripJSON("Example trip", "ABC123", 10, 15))
 	s.run()
@@ -395,6 +406,7 @@ func TestBookingFoundByFarAndNearScansIsOfferedOnce(t *testing.T) {
 }
 
 func TestOneCalendarOnlyBookingKeepsTheTripFromMail(t *testing.T) {
+	t.Parallel()
 	s := newScanFixture(t)
 	found := scanTripJSON("Example trip", "ABC123", 10, 15)
 	found["bookings"] = append(found["bookings"].([]map[string]any), map[string]any{
@@ -408,6 +420,7 @@ func TestOneCalendarOnlyBookingKeepsTheTripFromMail(t *testing.T) {
 }
 
 func TestProviderDomainsAreStrippedFromScannedText(t *testing.T) {
+	t.Parallel()
 	s := newScanFixture(t)
 	found := scanTripJSON("Example trip", "ABC123", 10, 15)
 	found["bookings"].([]map[string]any)[0]["title"] = "Example.com hotel"
@@ -428,6 +441,7 @@ func TestProviderDomainsAreStrippedFromScannedText(t *testing.T) {
 // A scan the user asked for says how many trips it sent, in counts only; with nothing new it stays
 // quiet, and the scheduler says there is nothing to report. A scheduled scan is always quiet.
 func TestManualScanSaysWhatItSent(t *testing.T) {
+	t.Parallel()
 	s := newScanFixture(t)
 	s.checker.text = scanReplyJSON(t, scanTripJSON("Example trip", "ABC123", 10, 15), scanTripJSON("Second trip", "XYZ789", 20, 25))
 	if result := s.runAs(true); result.Quiet || result.ErrorKind != "" || result.Text != "Found 2 new trips in your mail and calendar; their cards are above." {
@@ -454,6 +468,7 @@ func TestManualScanSaysWhatItSent(t *testing.T) {
 // A scan that could not read mail, such as one with only Calendar on, still offers what the calendar
 // holds, but the next scan searches mail as far back as a first one.
 func TestScanWithoutMailOffersCardsAndKeepsTheWindowFar(t *testing.T) {
+	t.Parallel()
 	s := newScanFixture(t)
 	s.mail.unreadable.Store(true)
 	found := scanTripJSON("Example trip", "", 10, 15)
@@ -480,6 +495,7 @@ func TestScanWithoutMailOffersCardsAndKeepsTheWindowFar(t *testing.T) {
 }
 
 func TestManualScanClaimsNoUpdateItCouldNotSend(t *testing.T) {
+	t.Parallel()
 	s := newScanFixture(t)
 	s.checker.text = scanReplyJSON(t, scanTripJSON("Example trip", "ABC123", 10, 15))
 	s.run()

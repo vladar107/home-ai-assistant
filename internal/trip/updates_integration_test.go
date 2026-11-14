@@ -239,6 +239,7 @@ func day(n int) time.Time { return time.Date(2026, 10, n, 0, 0, 0, 0, time.UTC) 
 const bullet = "\n\u2022 "
 
 func TestTripUpdatesCheckOnlyTripsInTheWindowWithTheScanOn(t *testing.T) {
+	t.Parallel()
 	u := newUpdateFixture(t)
 	later := u.add(draft(4, 6))
 	u.cycle()
@@ -272,6 +273,7 @@ func TestTripUpdatesCheckOnlyTripsInTheWindowWithTheScanOn(t *testing.T) {
 
 // Before the trip starts the household's hours count, and once it started the trip's own.
 func TestTripUpdatesRunInDaytimeWhereTheUserIs(t *testing.T) {
+	t.Parallel()
 	u := newUpdateFixture(t)
 	away := draft(2, 5)
 	away.Zone = "Asia/Tokyo"
@@ -306,6 +308,7 @@ func TestTripUpdatesRunInDaytimeWhereTheUserIs(t *testing.T) {
 }
 
 func TestTripUpdatesWaitEightHoursUnlessAScanIsAskedFor(t *testing.T) {
+	t.Parallel()
 	u := newUpdateFixture(t)
 	u.add(draft(1, 3))
 	u.clock.Set(time.Date(2026, 10, 15, 7, 0, 0, 0, time.UTC))
@@ -350,6 +353,7 @@ func TestTripUpdatesWaitEightHoursUnlessAScanIsAskedFor(t *testing.T) {
 }
 
 func TestOneTripUpdateCheckRunsAtATimeAndHoldsUpNoNotice(t *testing.T) {
+	t.Parallel()
 	u := newUpdateFixture(t)
 	first := u.add(draft(1, 3))
 	u.add(draft(2, 4))
@@ -377,6 +381,7 @@ func TestOneTripUpdateCheckRunsAtATimeAndHoldsUpNoNotice(t *testing.T) {
 }
 
 func TestShutdownDuringATripUpdateCheckRecordsNothing(t *testing.T) {
+	t.Parallel()
 	u := newUpdateFixture(t)
 	planned := u.add(draft(1, 3))
 	gate, started := make(chan struct{}), make(chan struct{}, 1)
@@ -405,6 +410,7 @@ func TestShutdownDuringATripUpdateCheckRecordsNothing(t *testing.T) {
 }
 
 func TestTripUpdateIsSentOnceAndListedInTheNextPrompt(t *testing.T) {
+	t.Parallel()
 	u := newUpdateFixture(t)
 	planned := u.add(draft(1, 3, booking(trip.KindFlight, "Flight to Example City", "ABC123", days(1), time.Time{})))
 	u.checker.set(updatesJSON(t, []map[string]any{news("mail", "Example Events", "<m1@example.test>", "The opening session moves to Hall B on Friday.")}))
@@ -453,6 +459,7 @@ func TestTripUpdateIsSentOnceAndListedInTheNextPrompt(t *testing.T) {
 }
 
 func TestTripUpdatesReportCalendarChanges(t *testing.T) {
+	t.Parallel()
 	u := newUpdateFixture(t)
 	planned := u.add(draft(1, 8))
 	dinner := event("dinner", "Team dinner", days(1).Add(6*time.Hour), days(1).Add(8*time.Hour), "Example Hall")
@@ -494,6 +501,7 @@ func TestTripUpdatesReportCalendarChanges(t *testing.T) {
 // A change's line says what changed and nothing else: the new time with the old one, without the
 // day when it stayed, and the place, cut at its first comma, only when that changed.
 func TestACalendarChangeLineSaysOnlyWhatChanged(t *testing.T) {
+	t.Parallel()
 	u := newUpdateFixture(t)
 	u.add(draft(1, 20))
 	visit := func(from time.Time, place string) trip.CalendarEvent {
@@ -527,6 +535,7 @@ func TestACalendarChangeLineSaysOnlyWhatChanged(t *testing.T) {
 }
 
 func TestIncompleteOrFailedListsLeaveTheCalendarAlone(t *testing.T) {
+	t.Parallel()
 	u := newUpdateFixture(t)
 	planned := u.add(draft(1, 8))
 	dinner := event("dinner", "Team dinner", days(1).Add(6*time.Hour), days(1).Add(8*time.Hour), "Example Hall")
@@ -573,6 +582,7 @@ func TestIncompleteOrFailedListsLeaveTheCalendarAlone(t *testing.T) {
 // A snapshot a model turn took, before code read the calendar, holds other IDs and other offsets.
 // The first check after it stores a baseline and reports nothing, and the next compares with that.
 func TestASnapshotTakenTheOldWayGivesOnlyABaseline(t *testing.T) {
+	t.Parallel()
 	u := newUpdateFixture(t)
 	planned := u.add(draft(1, 8))
 	old := fmt.Sprintf(`{"taken_at":%q,"trip_starts_at":%q,"trip_ends_at":%q,"events":[`+
@@ -604,6 +614,7 @@ func TestASnapshotTakenTheOldWayGivesOnlyABaseline(t *testing.T) {
 // The calendar is compared as instants, so a trip in another zone reports nothing when the check
 // moves from the household's hours to the trip's at its start.
 func TestAnUnchangedCalendarReportsNothingAcrossTheTripsStart(t *testing.T) {
+	t.Parallel()
 	u := newUpdateFixture(t)
 	away := draft(1, 5)
 	away.Zone = "Asia/Tokyo"
@@ -635,6 +646,7 @@ func TestAnUnchangedCalendarReportsNothingAcrossTheTripsStart(t *testing.T) {
 
 // With only the calendar to read there is nothing for a model to do, so the check runs no turn.
 func TestACalendarOnlyCheckRunsNoTurn(t *testing.T) {
+	t.Parallel()
 	u := newUpdateFixture(t)
 	planned := u.add(draft(1, 8))
 	u.access.mailOff.Store(true)
@@ -655,6 +667,7 @@ func TestACalendarOnlyCheckRunsNoTurn(t *testing.T) {
 }
 
 func TestUnreadableRepliesAndFailedSendsSendNothingAndAreOfferedAgain(t *testing.T) {
+	t.Parallel()
 	u := newUpdateFixture(t)
 	planned := u.add(draft(1, 8))
 	u.checker.set("I found news about the trip.")
@@ -695,6 +708,7 @@ func TestUnreadableRepliesAndFailedSendsSendNothingAndAreOfferedAgain(t *testing
 }
 
 func TestTripUpdatesCarryNoLinksAndNameTheirOrigin(t *testing.T) {
+	t.Parallel()
 	u := newUpdateFixture(t)
 	u.add(draft(1, 4))
 	u.checker.set(updatesJSON(t, []map[string]any{
@@ -715,6 +729,7 @@ func TestTripUpdatesCarryNoLinksAndNameTheirOrigin(t *testing.T) {
 // Without mail the check still reads the other sources, and the next check with mail reads as far
 // back as a first one.
 func TestTripUpdatesWithoutMailKeepTheMailHorizon(t *testing.T) {
+	t.Parallel()
 	u := newUpdateFixture(t)
 	planned := u.add(draft(1, 4))
 	u.access.mailOff.Store(true)
@@ -745,6 +760,7 @@ func TestTripUpdatesWithoutMailKeepTheMailHorizon(t *testing.T) {
 
 // The message reaches the owner's next turn once, and no one else's.
 func TestTheNextTurnIsToldOfTheTripUpdate(t *testing.T) {
+	t.Parallel()
 	u := newUpdateFixture(t)
 	u.add(draft(1, 4))
 	u.checker.set(updatesJSON(t, []map[string]any{news("web", "Example Times", "page-1", "Trains stop on Friday.")}))
@@ -773,6 +789,7 @@ func (u *updateFixture) calendarCheck(updates []map[string]any, events ...trip.C
 // A manual scan asks for a check of the trips in the window then; a trip that enters the window
 // later keeps to the daytime rule until the next scan.
 func TestAScanRequestCoversOnlyTheTripsInTheWindowThen(t *testing.T) {
+	t.Parallel()
 	u := newUpdateFixture(t)
 	u.add(draft(1, 3))
 	u.clock.Set(time.Date(2026, 10, 15, 23, 30, 0, 0, time.UTC)) // 00:30 at home
@@ -799,6 +816,7 @@ func TestAScanRequestCoversOnlyTheTripsInTheWindowThen(t *testing.T) {
 }
 
 func TestAllDayEventsAreComparedByDate(t *testing.T) {
+	t.Parallel()
 	u := newUpdateFixture(t)
 	u.add(draft(1, 8))
 	festival := allDay("festival", "Street festival", day(17), day(18))
@@ -819,6 +837,7 @@ func TestAllDayEventsAreComparedByDate(t *testing.T) {
 // Mail that did not fit in a message keeps the mail horizon where it was, so the next check still
 // reads it.
 func TestMailLeftOverByTheCapKeepsTheMailHorizon(t *testing.T) {
+	t.Parallel()
 	u := newUpdateFixture(t)
 	planned := u.add(draft(1, 8))
 	var many []map[string]any
@@ -844,6 +863,7 @@ func TestMailLeftOverByTheCapKeepsTheMailHorizon(t *testing.T) {
 }
 
 func TestARestoredEventRemovedAgainIsReportedAgain(t *testing.T) {
+	t.Parallel()
 	u := newUpdateFixture(t)
 	u.add(draft(1, 8))
 	dinner := event("dinner", "Team dinner", days(1).Add(6*time.Hour), days(1).Add(8*time.Hour), "Example Hall")
@@ -865,6 +885,7 @@ func TestARestoredEventRemovedAgainIsReportedAgain(t *testing.T) {
 
 // A calendar change that did not fit waits for the next message and arrives once.
 func TestACalendarChangeThatDidNotFitArrivesOnce(t *testing.T) {
+	t.Parallel()
 	u := newUpdateFixture(t)
 	u.add(draft(1, 8))
 	dinner := event("dinner", "Team dinner", days(1).Add(6*time.Hour), days(1).Add(8*time.Hour), "Example Hall")
@@ -890,6 +911,7 @@ func TestACalendarChangeThatDidNotFitArrivesOnce(t *testing.T) {
 }
 
 func TestChangingTheTripsDatesTakesANewCalendarBaseline(t *testing.T) {
+	t.Parallel()
 	u := newUpdateFixture(t)
 	planned := u.add(draft(1, 8))
 	dinner := event("dinner", "Team dinner", days(1).Add(6*time.Hour), days(1).Add(8*time.Hour), "Example Hall")
@@ -910,6 +932,7 @@ func TestChangingTheTripsDatesTakesANewCalendarBaseline(t *testing.T) {
 }
 
 func TestTripUpdatesDropTappableWords(t *testing.T) {
+	t.Parallel()
 	u := newUpdateFixture(t)
 	u.add(draft(1, 8))
 	u.calendarCheck(nil)
@@ -931,6 +954,7 @@ func TestTripUpdatesDropTappableWords(t *testing.T) {
 // Telegram limits a message to 4096 UTF-16 code units, which characters outside the basic plane
 // count twice in. An item is one sentence of at most 200 characters, so five of the widest fit.
 func TestTripUpdateMessagesFitTelegramsLimit(t *testing.T) {
+	t.Parallel()
 	u := newUpdateFixture(t)
 	u.add(draft(1, 8))
 	var wide []map[string]any
@@ -966,6 +990,7 @@ func (s cancellingSender) Send(ctx context.Context, principalID, tripID, text st
 
 // A message that was delivered is recorded even when shutdown begins right after the send.
 func TestADeliveredUpdateIsRecordedWhenShutdownFollowsTheSend(t *testing.T) {
+	t.Parallel()
 	u := newUpdateFixture(t)
 	planned := u.add(draft(1, 8))
 	ctx, cancel := context.WithCancel(t.Context())
@@ -1001,6 +1026,7 @@ func TestADeliveredUpdateIsRecordedWhenShutdownFollowsTheSend(t *testing.T) {
 // With web search off the check neither asks for a search nor mentions the web, and with nothing
 // to read it runs no turn.
 func TestTripUpdatesWithoutWebSearchLeaveTheWebOut(t *testing.T) {
+	t.Parallel()
 	u := newUpdateFixture(t)
 	u.add(draft(1, 8))
 	u.access.webOff.Store(true)
@@ -1028,6 +1054,7 @@ func TestTripUpdatesWithoutWebSearchLeaveTheWebOut(t *testing.T) {
 // Code reads the calendar, so a turn for mail and the web that fails or answers in prose does not
 // keep a calendar change back; mail and the web stay unread for the next check.
 func TestAFailedTurnStillComparesTheCalendar(t *testing.T) {
+	t.Parallel()
 	u := newUpdateFixture(t)
 	planned := u.add(draft(1, 8))
 	u.calendarCheck(nil, event("dinner", "Team dinner", days(1).Add(6*time.Hour), days(1).Add(8*time.Hour), ""))

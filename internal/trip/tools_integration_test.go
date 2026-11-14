@@ -87,6 +87,7 @@ const addCall = `{"title":"Example trip","destination":"Example City","starts_at
 	`{"kind":"train","title":"Example Train","starts_at":"2026-11-04 10:00"}]}`
 
 func TestChatTripAddActsAtOnceAndNamesUnsetReminders(t *testing.T) {
+	t.Parallel()
 	f := newToolsFixture(t)
 	result := f.call("trip_add", addCall)
 	if result.IsError {
@@ -112,6 +113,7 @@ func TestChatTripAddActsAtOnceAndNamesUnsetReminders(t *testing.T) {
 }
 
 func TestTripAddAfterOutsideContentIsProposedAndConfirmMakesIt(t *testing.T) {
+	t.Parallel()
 	f := newToolsFixture(t)
 	f.exposure.external.Store(true)
 	result := f.call("trip_add", addCall)
@@ -141,6 +143,7 @@ func TestTripAddAfterOutsideContentIsProposedAndConfirmMakesIt(t *testing.T) {
 }
 
 func TestTripUpdateChangesBookingsAndEndsTheTrip(t *testing.T) {
+	t.Parallel()
 	f := newToolsFixture(t)
 	f.call("trip_add", addCall)
 	trips, _ := f.trips.Trips(t.Context(), "alice")
@@ -174,6 +177,7 @@ func TestTripUpdateChangesBookingsAndEndsTheTrip(t *testing.T) {
 }
 
 func TestTripUpdateEndNowEndsAnActiveTrip(t *testing.T) {
+	t.Parallel()
 	f := newToolsFixture(t)
 	f.call("trip_add", addCall)
 	trips, _ := f.trips.Trips(t.Context(), "alice")
@@ -188,6 +192,7 @@ func TestTripUpdateEndNowEndsAnActiveTrip(t *testing.T) {
 }
 
 func TestTripListShowsBookingsAndWhichHaveNoReminder(t *testing.T) {
+	t.Parallel()
 	f := newToolsFixture(t)
 	if result := f.call("trip_list", `{}`); result.IsError || !strings.Contains(result.Text, "no upcoming or active trips") {
 		t.Fatalf("empty list = %+v", result)
@@ -212,6 +217,7 @@ func TestTripListShowsBookingsAndWhichHaveNoReminder(t *testing.T) {
 }
 
 func TestTripToolsRejectUnknownFieldsAndOfferWritesOnChatOnly(t *testing.T) {
+	t.Parallel()
 	f := newToolsFixture(t)
 	for _, call := range []struct{ name, arguments string }{
 		{"trip_add", `{"title":"Example trip","destination":"Example City","starts_at":"2026-11-02","ends_at":"2026-11-03","extra":1}`},
@@ -256,6 +262,7 @@ func lisbon(t *testing.T) *time.Location {
 }
 
 func TestConfirmedUpdateIsRejectedWhenTheTripChangedSincePropose(t *testing.T) {
+	t.Parallel()
 	f := newToolsFixture(t)
 	suggested, err := f.trips.Suggest(t.Context(), "alice", mailTrip(10, 15, booking(trip.KindFlight, "Flight to Example City", "ABC123", days(10), time.Time{})))
 	if err != nil {
@@ -288,6 +295,7 @@ func TestConfirmedUpdateIsRejectedWhenTheTripChangedSincePropose(t *testing.T) {
 }
 
 func TestTripListHidesSuggestedTripsAndQuotesTrackedOnes(t *testing.T) {
+	t.Parallel()
 	f := newToolsFixture(t)
 	suggested, err := f.trips.Suggest(t.Context(), "alice", mailTrip(10, 15, booking(trip.KindFlight, "Flight to Example City", "ABC123", days(10), time.Time{})))
 	if err != nil {
@@ -308,6 +316,7 @@ func TestTripListHidesSuggestedTripsAndQuotesTrackedOnes(t *testing.T) {
 }
 
 func TestEndNowIsNotProposedForATripThatIsNotUnderWay(t *testing.T) {
+	t.Parallel()
 	f := newToolsFixture(t)
 	planned := f.add(draft(3, 5))
 	if result := f.call("trip_update", `{"id":"`+planned.ID+`","end_now":true}`); !result.IsError {
@@ -316,6 +325,7 @@ func TestEndNowIsNotProposedForATripThatIsNotUnderWay(t *testing.T) {
 }
 
 func TestCancelOfASuggestedTripDismissesIt(t *testing.T) {
+	t.Parallel()
 	f := newToolsFixture(t)
 	suggested, _ := f.trips.Suggest(t.Context(), "alice", mailTrip(10, 15, booking(trip.KindFlight, "Flight", "ABC123", days(10), time.Time{})))
 	if result := f.call("trip_update", `{"id":"`+suggested.Trip.ID+`","cancel":true}`); result.IsError || !strings.Contains(result.Text, "Dismissed") {
