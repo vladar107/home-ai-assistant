@@ -53,7 +53,7 @@ func ScanPrompt(days int, today time.Time) string {
 		"If a tool answers that the call budget is exhausted, stop and reply at once in the same JSON with the trips you have. " +
 		"Reply with ONLY strict JSON, no prose and no code fence, in this shape: " +
 		`{"trips":[{"title":"","destination":"","timezone":"IANA zone of the destination","starts_at":"","ends_at":"",` +
-		`"bookings":[{"kind":"flight|hotel|train|car|other","title":"","reference":"booking reference or empty","starts_at":"",` +
+		`"bookings":[{"kind":"flight|hotel|train|car|other","title":"","reference":"booking reference or empty","flight_number":"only for a flight: the airline code and number as the booking states them, such as EX123, else empty","starts_at":"",` +
 		`"check_in_at":"","check_in_source":"stated|looked_up|default","calendar_event_id":"only for a calendar event without a reference"}]}]}. ` +
 		"Every time is an RFC 3339 instant with its offset. Titles, destinations, and references are plain text under 80 characters without links, " +
 		"and leave out any provider web address or domain name such as a site ending in .com. " +
@@ -102,6 +102,7 @@ type scanBooking struct {
 	Kind            string `json:"kind"`
 	Title           string `json:"title"`
 	Reference       string `json:"reference"`
+	FlightNumber    string `json:"flight_number"`
 	StartsAt        string `json:"starts_at"`
 	CheckInAt       string `json:"check_in_at"`
 	CheckInSource   string `json:"check_in_source"`
@@ -293,6 +294,10 @@ func (s scan) draft(candidate scanTrip) (Draft, bool) {
 	for _, found := range candidate.Bookings {
 		booking := Booking{Kind: found.Kind, Title: orFallback(WithoutAddresses(found.Title), found.Kind),
 			Reference: WithoutAddresses(found.Reference), CheckInSource: found.CheckInSource}
+		// A number the model got wrong must not cost the trip, so it is dropped, not refused.
+		if found.Kind == KindFlight {
+			booking.FlightNumber, _ = NormalizeFlightNumber(found.FlightNumber)
+		}
 		var ok bool
 		if booking.StartsAt, ok = parseInstant(found.StartsAt); !ok {
 			return Draft{}, false

@@ -362,6 +362,9 @@ func mergeTrip(known Trip, found Draft, foreign map[string]bool) (Trip, []Bookin
 		case index >= 0:
 			existing := &next.Bookings[index]
 			existing.StartsAt = booking.StartsAt
+			if booking.FlightNumber != "" {
+				existing.FlightNumber = booking.FlightNumber
+			}
 			if !booking.CheckInAt.IsZero() && (existing.CheckInAt.IsZero() || sourceRank(booking.CheckInSource) >= sourceRank(existing.CheckInSource)) {
 				existing.CheckInAt, existing.CheckInSource = booking.CheckInAt, booking.CheckInSource
 			}
@@ -911,6 +914,9 @@ func normalizeDraft(draft Draft, existing []Booking, keepIDs bool) (Draft, strin
 		if booking.Reference, text = cleanText("booking reference", booking.Reference, MaximumReferenceRunes, false); text != "" {
 			return Draft{}, text
 		}
+		if booking.FlightNumber, text = checkFlightNumber(booking); text != "" {
+			return Draft{}, text
+		}
 		if booking.StartsAt.IsZero() {
 			return Draft{}, "A booking needs the time it starts."
 		}
@@ -933,6 +939,41 @@ func normalizeDraft(draft Draft, existing []Booking, keepIDs bool) (Draft, strin
 	}
 	draft.Bookings = bookings
 	return draft, ""
+}
+
+var flightDesignator = regexp.MustCompile(`^([A-Z0-9]{2}|[A-Z]{3})([0-9]{1,4})([A-Z]?)$`)
+
+// NormalizeFlightNumber returns the flight's designator in its one form: uppercase, without
+// spaces, an airline code of two letters or digits (not both digits, as in EX, U2, or 3U) or of
+// three letters, then the number without its leading zeros and an optional letter. False means
+// the text is no flight number.
+func NormalizeFlightNumber(text string) (string, bool) {
+	text = strings.ToUpper(strings.Join(strings.Fields(text), ""))
+	parts := flightDesignator.FindStringSubmatch(text)
+	if parts == nil {
+		return "", false
+	}
+	airline, number := parts[1], strings.TrimLeft(parts[2], "0")
+	if number == "" || len(airline) == 2 && !strings.ContainsFunc(airline, unicode.IsLetter) {
+		return "", false
+	}
+	return airline + number + parts[3], true
+}
+
+// checkFlightNumber normalises the booking's flight number, or says in a sentence why it cannot
+// be kept. Only a flight has one, and an empty number stays empty.
+func checkFlightNumber(booking Booking) (string, string) {
+	if strings.TrimSpace(booking.FlightNumber) == "" {
+		return "", ""
+	}
+	if booking.Kind != KindFlight {
+		return "", "Only a flight booking has a flight number."
+	}
+	number, ok := NormalizeFlightNumber(booking.FlightNumber)
+	if !ok {
+		return "", "A flight number is an airline code and a number, such as EX123 or Z0 4567."
+	}
+	return number, ""
 }
 
 // plain drops invisible formatting characters, turns other control characters into spaces, and
@@ -1011,7 +1052,7 @@ func fingerprint(source string, booking Booking) string {
 func bookingSignature(bookings []Booking) string {
 	lines := make([]string, 0, len(bookings))
 	for _, booking := range bookings {
-		lines = append(lines, fmt.Sprintf("%s|%s|%s|%s|%d|%d|%s", booking.ID, booking.Kind, booking.Title, booking.Reference,
+		lines = append(lines, fmt.Sprintf("%s|%s|%s|%s|%s|%d|%d|%s", booking.ID, booking.Kind, booking.Title, booking.Reference, booking.FlightNumber,
 			booking.StartsAt.Unix(), booking.CheckInAt.Unix(), booking.CheckInSource))
 	}
 	sort.Strings(lines)

@@ -102,7 +102,8 @@ func (exporter) Plan(ctx context.Context, plan *export.Planning, _ int, tables e
 			skip(reason)
 			continue
 		}
-		if _, text := normalizeDraft(draft, nil, false); text != "" {
+		normalized, text := normalizeDraft(draft, nil, false)
+		if text != "" {
 			skip(text)
 			continue
 		}
@@ -121,7 +122,7 @@ func (exporter) Plan(ctx context.Context, plan *export.Planning, _ int, tables e
 		write["id"] = assignment.ID
 		plan.Add(tripsTable, write)
 		var reminders [][2]string
-		for _, booking := range bookings[id] {
+		for index, booking := range bookings[id] {
 			bookingID := booking.Text("id")
 			bookingAssignment := assignedBookings[bookingID]
 			if bookingAssignment.Present {
@@ -139,6 +140,7 @@ func (exporter) Plan(ctx context.Context, plan *export.Planning, _ int, tables e
 			}
 			bookingWrite := booking.Clone()
 			bookingWrite["id"], bookingWrite["trip_id"] = bookingAssignment.ID, assignment.ID
+			bookingWrite["flight_number"] = normalized.Bookings[index].FlightNumber
 			plan.Add(bookingsTable, bookingWrite)
 			reminders = append(reminders, [2]string{ReminderID(id, bookingID), ReminderID(assignment.ID, bookingAssignment.ID)})
 		}
@@ -169,7 +171,7 @@ func tripDraft(row export.Row, bookings []export.Row) (Draft, string) {
 		if !ok {
 			return Draft{}, "a booking's time could not be read"
 		}
-		item := Booking{Kind: booking.Text("kind"), Title: booking.Text("title"), Reference: booking.Text("reference"), StartsAt: starts, CheckInSource: booking.Text("check_in_source")}
+		item := Booking{Kind: booking.Text("kind"), Title: booking.Text("title"), Reference: booking.Text("reference"), FlightNumber: booking.Text("flight_number"), StartsAt: starts, CheckInSource: booking.Text("check_in_source")}
 		if !booking.Null("check_in_at") {
 			if item.CheckInAt, ok = booking.Time("check_in_at"); !ok {
 				return Draft{}, "a booking's check-in could not be read"

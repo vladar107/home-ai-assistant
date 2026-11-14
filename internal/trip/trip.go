@@ -106,12 +106,14 @@ func endLabel(start, end time.Time, location *time.Location, layout, dateLayout 
 }
 
 // Booking is one flight, stay, train, or car with the instant its check-in or pickup opens. A
-// zero CheckInAt means none is known and CheckInSource is then empty.
+// zero CheckInAt means none is known and CheckInSource is then empty. FlightNumber is the
+// normalised designator of a flight booking, such as EX123, or empty.
 type Booking struct {
 	ID            string
 	Kind          string
 	Title         string
 	Reference     string
+	FlightNumber  string
 	StartsAt      time.Time
 	CheckInAt     time.Time
 	CheckInSource string

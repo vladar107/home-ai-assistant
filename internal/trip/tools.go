@@ -68,6 +68,7 @@ type bookingArguments struct {
 	Kind          string `json:"kind"`
 	Title         string `json:"title"`
 	Reference     string `json:"reference,omitempty"`
+	FlightNumber  string `json:"flight_number,omitempty"`
 	StartsAt      string `json:"starts_at"`
 	CheckInAt     string `json:"check_in_at,omitempty"`
 	CheckInSource string `json:"check_in_source,omitempty"`
@@ -95,6 +96,7 @@ type bookingChange struct {
 	Kind          *string `json:"kind"`
 	Title         *string `json:"title"`
 	Reference     *string `json:"reference"`
+	FlightNumber  *string `json:"flight_number"`
 	StartsAt      *string `json:"starts_at"`
 	CheckInAt     *string `json:"check_in_at"`
 	CheckInSource *string `json:"check_in_source"`
@@ -137,6 +139,7 @@ const bookingSchema = `{"type":"object","properties":{` +
 	`"kind":{"type":"string","enum":["flight","hotel","train","car","other"]},` +
 	`"title":{"type":"string","description":"A short title such as Flight to Example City; at most 80 characters, no links."},` +
 	`"reference":{"type":"string","description":"The booking reference; at most 40 characters. Leave out when there is none."},` +
+	`"flight_number":{"type":"string","description":"For a flight only: the airline code and number, such as EX123. Leave out when unknown."},` +
 	`"starts_at":{"type":"string","description":"When the flight departs, the stay begins, or the pickup is, local to the trip: 2026-11-02 09:30."},` +
 	`"check_in_at":{"type":"string","description":"When check-in or pickup opens, local to the trip: 2026-11-01 09:30. Leave out when unknown."},` +
 	`"check_in_source":{"type":"string","enum":["stated","looked_up","default"],"description":"Where check_in_at came from; required with it."}},` +
@@ -182,7 +185,8 @@ var definitions = []tools.Definition{
 			`"change_bookings":{"type":"array","items":{"type":"object","properties":{` +
 			`"id":{"type":"string","description":"The booking's id from trip_list."},` +
 			`"kind":{"type":"string","enum":["flight","hotel","train","car","other"]},` +
-			`"title":{"type":"string"},"reference":{"type":"string"},"starts_at":{"type":"string"},` +
+			`"title":{"type":"string"},"reference":{"type":"string"},` +
+			`"flight_number":{"type":"string","description":"A new flight number, or an empty string to clear it."},"starts_at":{"type":"string"},` +
 			`"check_in_at":{"type":"string","description":"A new check-in time, or an empty string to clear it."},` +
 			`"check_in_source":{"type":"string","enum":["stated","looked_up","default"]}},` +
 			`"required":["id"],"additionalProperties":false}},` +
@@ -504,6 +508,9 @@ func renderTrip(trip Trip, now time.Time) string {
 		if booking.Reference != "" {
 			line += fmt.Sprintf(" (%q)", booking.Reference)
 		}
+		if booking.FlightNumber != "" {
+			line += ", flight " + booking.FlightNumber
+		}
 		line += ", starts " + booking.StartsAt.In(location).Format(localLayout)
 		if booking.CheckInAt.IsZero() {
 			line += "; no check-in time, no reminder"
@@ -573,6 +580,9 @@ func describeDraft(draft Draft) string {
 		line := fmt.Sprintf("- %s: %s", booking.Kind, booking.Title)
 		if booking.Reference != "" {
 			line += " (" + booking.Reference + ")"
+		}
+		if booking.FlightNumber != "" {
+			line += ", flight " + booking.FlightNumber
 		}
 		line += ", starts " + booking.StartsAt.In(location).Format(localLayout)
 		if !booking.CheckInAt.IsZero() {
@@ -778,7 +788,7 @@ func bookingsFrom(arguments []bookingArguments, location *time.Location) ([]Book
 		if err != nil || len(strings.TrimSpace(item.StartsAt)) <= len(dateLayout) {
 			return nil, "A booking's starts_at must be a local date and time such as 2026-11-02 09:30."
 		}
-		booking := Booking{ID: strings.TrimSpace(item.ID), Kind: item.Kind, Title: item.Title, Reference: item.Reference, StartsAt: startsAt, CheckInSource: item.CheckInSource}
+		booking := Booking{ID: strings.TrimSpace(item.ID), Kind: item.Kind, Title: item.Title, Reference: item.Reference, FlightNumber: item.FlightNumber, StartsAt: startsAt, CheckInSource: item.CheckInSource}
 		if strings.TrimSpace(item.CheckInAt) != "" {
 			booking.CheckInAt, err = parseLocal(item.CheckInAt, location, false)
 			if err != nil || len(strings.TrimSpace(item.CheckInAt)) <= len(dateLayout) {
@@ -799,7 +809,7 @@ func addFromDraft(draft Draft) addArguments {
 		StartsAt: draft.StartsAt.In(location).Format(localLayout), EndsAt: draft.EndsAt.In(location).Format(localLayout),
 	}
 	for _, booking := range draft.Bookings {
-		item := bookingArguments{ID: booking.ID, Kind: booking.Kind, Title: booking.Title, Reference: booking.Reference,
+		item := bookingArguments{ID: booking.ID, Kind: booking.Kind, Title: booking.Title, Reference: booking.Reference, FlightNumber: booking.FlightNumber,
 			StartsAt: booking.StartsAt.In(location).Format(localLayout), CheckInSource: booking.CheckInSource}
 		if !booking.CheckInAt.IsZero() {
 			item.CheckInAt = booking.CheckInAt.In(location).Format(localLayout)
@@ -893,6 +903,9 @@ func changeBooking(booking Booking, change bookingChange, location *time.Locatio
 	}
 	if change.Reference != nil {
 		booking.Reference = *change.Reference
+	}
+	if change.FlightNumber != nil {
+		booking.FlightNumber = *change.FlightNumber
 	}
 	if change.StartsAt != nil {
 		startsAt, err := parseLocal(*change.StartsAt, location, false)

@@ -878,3 +878,46 @@ func TestRestorePreviewIsPagedAndShowsEveryTextInFull(t *testing.T) {
 		t.Fatalf("restore card = %+v", card)
 	}
 }
+
+// A flight booking's number is exported with it and restored in its normalised form; a booking
+// without one, and one from an older export that has no such field, restore with none.
+func TestExportRoundTripsAFlightNumber(t *testing.T) {
+	t.Parallel()
+	source := newExportHarness(t)
+	source.seedExport("alice")
+	departs := stamp(time.Now().Add(240 * time.Hour))
+	source.exec(`INSERT INTO trip_bookings (id, principal_id, trip_id, kind, title, reference, starts_at, check_in_at, check_in_source, fingerprint, flight_number, position) VALUES ('f1a2b3c4', 'alice', ?, 'flight', 'Flight', 'XYZ789', ?, NULL, NULL, '', 'EX123', 1)`,
+		exportTrip, departs)
+	source.exec(`INSERT INTO trip_bookings (id, principal_id, trip_id, kind, title, reference, starts_at, check_in_at, check_in_source, fingerprint, flight_number, position) VALUES ('f2a2b3c4', 'alice', ?, 'flight', 'Spaced flight', 'XYZ790', ?, NULL, NULL, '', '', 2)`,
+		exportTrip, departs)
+	source.exec(`INSERT INTO trip_bookings (id, principal_id, trip_id, kind, title, reference, starts_at, check_in_at, check_in_source, fingerprint, flight_number, position) VALUES ('f3a2b3c4', 'alice', ?, 'flight', 'Older flight', 'XYZ791', ?, NULL, NULL, '', '', 3)`,
+		exportTrip, departs)
+	data := source.takeExport(1, 101)
+	key, err := os.ReadFile(source.exportKeyPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited := resign(t, key, data, func(_ map[string]any, sections map[string]map[string]any) {
+		for _, item := range sectionRows(sections["trips.json"], "trip_bookings") {
+			switch row := item.(map[string]any); row["title"] {
+			case "Spaced flight":
+				row["flight_number"] = " EX 0123 "
+			case "Older flight":
+				delete(row, "flight_number")
+			}
+		}
+	})
+	target := newExportHarness(t)
+	copyKey(t, source, target)
+	if _, outcome := target.restore(1, 101, edited); !strings.Contains(outcome, "Restored") {
+		t.Fatalf("outcome: %s", outcome)
+	}
+	numbers := map[string]string{}
+	for _, row := range target.principalRows("trip_bookings", "alice") {
+		numbers[row["title"].(string)] = row["flight_number"].(string)
+	}
+	want := map[string]string{"Flight": "EX123", "Spaced flight": "EX123", "Older flight": "", "Hotel": ""}
+	if !maps.Equal(numbers, want) {
+		t.Fatalf("restored flight numbers = %v, want %v", numbers, want)
+	}
+}

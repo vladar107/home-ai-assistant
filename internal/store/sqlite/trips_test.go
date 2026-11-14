@@ -195,3 +195,27 @@ func TestTripUpdatesBelongToTheTripsOwner(t *testing.T) {
 		t.Fatalf("another principal's state = %v %v", found, err)
 	}
 }
+
+func TestBookingFlightNumberRoundTripsAndOlderRowsHaveNone(t *testing.T) {
+	t.Parallel()
+	store, ctx := openTestStore(t)
+	addTestTrip(t, store, "alice", "aaaaaaaa", tripBase.Add(96*time.Hour))
+	loaded, found, err := store.LoadTrip(ctx, "alice", "aaaaaaaa")
+	if err != nil || !found {
+		t.Fatal(found, err)
+	}
+	loaded.Bookings = []trip.Booking{{ID: "bbbbbbbb", Kind: trip.KindFlight, Title: "Flight", FlightNumber: "EX123", StartsAt: tripBase}}
+	if ok, err := store.UpdateTrip(ctx, loaded); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	// A row written without the column, as every row was before it existed, takes the empty default.
+	if _, err := store.db.ExecContext(ctx,
+		`INSERT INTO trip_bookings (id, principal_id, trip_id, kind, title, reference, starts_at, fingerprint, position)
+		 VALUES ('cccccccc', 'alice', 'aaaaaaaa', 'flight', 'Old flight', '', ?, '', 1)`, formatTime(tripBase)); err != nil {
+		t.Fatal(err)
+	}
+	loaded, _, err = store.LoadTrip(ctx, "alice", "aaaaaaaa")
+	if err != nil || len(loaded.Bookings) != 2 || loaded.Bookings[0].FlightNumber != "EX123" || loaded.Bookings[1].FlightNumber != "" {
+		t.Fatalf("bookings = %+v %v", loaded.Bookings, err)
+	}
+}

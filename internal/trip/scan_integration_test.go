@@ -508,3 +508,68 @@ func TestManualScanClaimsNoUpdateItCouldNotSend(t *testing.T) {
 		t.Fatalf("manual run with an unsent update = %+v", result)
 	}
 }
+
+func TestScanKeepsTheFlightNumberOfAFlightAndDropsABadOne(t *testing.T) {
+	t.Parallel()
+	s := newScanFixture(t)
+	good := scanTripJSON("Example trip", "ABC123", 10, 15)
+	good["bookings"].([]map[string]any)[0]["flight_number"] = "ex 0123"
+	bad := scanTripJSON("Other trip", "DEF456", 20, 25)
+	bad["bookings"].([]map[string]any)[0]["flight_number"] = "see attached"
+	hotel := scanTripJSON("Third trip", "GHI789", 30, 35)
+	hotel["bookings"].([]map[string]any)[0]["kind"] = "hotel"
+	hotel["bookings"].([]map[string]any)[0]["flight_number"] = "EX123"
+	s.checker.text = scanReplyJSON(t, good, bad, hotel)
+
+	s.run()
+	if !strings.Contains(s.checker.messages[0], `"flight_number"`) {
+		t.Fatalf("the prompt does not ask for the flight number: %q", s.checker.messages[0])
+	}
+	if len(s.recorded.cards) != 3 {
+		t.Fatalf("cards = %d, want 3: a bad flight number must not cost the trip", len(s.recorded.cards))
+	}
+	want := map[string]string{"Example trip": "EX123", "Other trip": "", "Third trip": ""}
+	for _, card := range s.recorded.cards {
+		if got := card.Bookings[0].FlightNumber; got != want[card.Title] {
+			t.Errorf("%s: flight number = %q, want %q", card.Title, got, want[card.Title])
+		}
+	}
+}
+
+// A later scan gives a tracked flight the number it lacked, and a scan after it that finds no
+// number keeps the one stored.
+func TestRescanAddsAFlightNumberAndKeepsItWhenTheNextFindsNone(t *testing.T) {
+	t.Parallel()
+	s := newScanFixture(t)
+	s.checker.text = scanReplyJSON(t, scanTripJSON("Example trip", "ABC123", 10, 15))
+	s.run()
+	tracked, err := s.trips.Track(t.Context(), "alice", s.recorded.cards[0].ID)
+	if err != nil || tracked.Rejection != "" {
+		t.Fatalf("track: %v %q", err, tracked.Rejection)
+	}
+	number := func() string {
+		t.Helper()
+		planned, err := s.store.ListTrips(t.Context(), "alice", trip.StatusPlanned)
+		if err != nil || len(planned) != 1 || len(planned[0].Bookings) != 1 {
+			t.Fatalf("planned = %+v %v", planned, err)
+		}
+		return planned[0].Bookings[0].FlightNumber
+	}
+	if got := number(); got != "" {
+		t.Fatalf("number before = %q", got)
+	}
+
+	withNumber := scanTripJSON("Example trip", "ABC123", 10, 15)
+	withNumber["bookings"].([]map[string]any)[0]["flight_number"] = "ex 0123"
+	s.checker.text = scanReplyJSON(t, withNumber)
+	s.runAs(true)
+	if got := number(); got != "EX123" {
+		t.Fatalf("number after a scan that found it = %q, want EX123", got)
+	}
+
+	s.checker.text = scanReplyJSON(t, scanTripJSON("Example trip", "ABC123", 10, 15))
+	s.runAs(true)
+	if got := number(); got != "EX123" {
+		t.Fatalf("number after a scan that found none = %q, want EX123", got)
+	}
+}

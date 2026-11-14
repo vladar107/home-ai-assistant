@@ -335,3 +335,58 @@ func TestCancelOfASuggestedTripDismissesIt(t *testing.T) {
 		t.Fatalf("status = %s", got.Status)
 	}
 }
+
+func TestTripToolsStoreAndEditAFlightNumber(t *testing.T) {
+	t.Parallel()
+	f := newToolsFixture(t)
+	call := `{"title":"Example trip","destination":"Example City","starts_at":"2026-11-02 09:00","ends_at":"2026-11-06",` +
+		`"bookings":[{"kind":"flight","title":"Flight to Example City","flight_number":"ex 0123","starts_at":"2026-11-02 09:00"},` +
+		`{"kind":"hotel","title":"Example Hotel","starts_at":"2026-11-02 14:00"}]}`
+	if result := f.call("trip_add", call); result.IsError {
+		t.Fatalf("trip_add = %+v", result)
+	}
+	trips, _ := f.trips.Trips(t.Context(), "alice")
+	saved := trips[0]
+	flight, hotel := saved.Bookings[0], saved.Bookings[1]
+	if flight.FlightNumber != "EX123" || hotel.FlightNumber != "" {
+		t.Fatalf("stored numbers = %q, %q", flight.FlightNumber, hotel.FlightNumber)
+	}
+	if listed := f.call("trip_list", "{}"); !strings.Contains(listed.Text, ", flight EX123, starts") {
+		t.Fatalf("trip_list = %q", listed.Text)
+	}
+
+	if result := f.call("trip_update", `{"id":"`+saved.ID+`","change_bookings":[{"id":"`+flight.ID+`","title":"Renamed flight"}]}`); result.IsError {
+		t.Fatalf("rename = %+v", result)
+	}
+	if got, _, _ := f.trips.Trip(t.Context(), "alice", saved.ID); got.Bookings[0].FlightNumber != "EX123" {
+		t.Fatalf("number after an unrelated edit = %q", got.Bookings[0].FlightNumber)
+	}
+
+	if result := f.call("trip_update", `{"id":"`+saved.ID+`","change_bookings":[{"id":"`+flight.ID+`","flight_number":"z0 0456"}]}`); result.IsError {
+		t.Fatalf("change = %+v", result)
+	}
+	if got, _, _ := f.trips.Trip(t.Context(), "alice", saved.ID); got.Bookings[0].FlightNumber != "Z0456" {
+		t.Fatalf("number after change = %q", got.Bookings[0].FlightNumber)
+	}
+
+	for name, arguments := range map[string]string{
+		"malformed": `{"id":"` + saved.ID + `","change_bookings":[{"id":"` + flight.ID + `","flight_number":"nonsense"}]}`,
+		"on hotel":  `{"id":"` + saved.ID + `","change_bookings":[{"id":"` + hotel.ID + `","flight_number":"EX123"}]}`,
+		"kind away": `{"id":"` + saved.ID + `","change_bookings":[{"id":"` + flight.ID + `","kind":"train"}]}`,
+	} {
+		if result := f.call("trip_update", arguments); !result.IsError {
+			t.Errorf("%s: %+v, want an error", name, result)
+		}
+	}
+
+	if result := f.call("trip_update", `{"id":"`+saved.ID+`","change_bookings":[{"id":"`+flight.ID+`","flight_number":""}]}`); result.IsError {
+		t.Fatalf("clear = %+v", result)
+	}
+	if got, _, _ := f.trips.Trip(t.Context(), "alice", saved.ID); got.Bookings[0].FlightNumber != "" {
+		t.Fatalf("number after clearing = %q", got.Bookings[0].FlightNumber)
+	}
+
+	if result := f.call("trip_add", strings.Replace(call, `"ex 0123"`, `"nonsense"`, 1)); !result.IsError {
+		t.Fatalf("trip_add with a malformed number = %+v, want an error", result)
+	}
+}

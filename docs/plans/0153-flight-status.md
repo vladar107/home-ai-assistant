@@ -274,9 +274,9 @@ under the budget.
   - When only the tool's share is spent, the tool says so and tracking goes on.
   - A refused key is logged as `unauthorized` and every lookup is skipped until restart, since
     each retry would fail alike; the tool says the operator needs to check the key.
-- **State, and the seven days the terms allow.** Migrations are numbered 058 to 060, fixed across
-  the plans drafted beside this one, in chunk order: 058 the unit counters, 059 the booking's
-  flight number, 060 the flight state and the rebuilt `trip_updates_sent`. The flight state keeps,
+- **State, and the seven days the terms allow.** Migrations are numbered 058 to 060 in the order
+  the chunks landed: 058 the booking's flight number (chunk 4, built first), 059 the unit
+  counters, 060 the flight state and the rebuilt `trip_updates_sent`. The flight state keeps,
   per trip and leg (designator and origin-local date), the last stored lookup as JSON, the last
   attempt, the last success, and which once-only lines were sent. It is left out of the export,
   as the 0139 update state is. The loop's hourly prune deletes a leg's stored lookup, and the
@@ -324,7 +324,7 @@ under the budget.
    behaviour, renewal day, date range, and the codeshare rule.
 2. **Connector client and budget.** Complex. Depends on 1's first fixtures. Files: new
    `internal/connectors/flights/` (client, provider, AeroDataBox, legs, budget, cache, service),
-   `internal/config/flights.go`, migration `058_flight_lookups.sql` and its repository in
+   `internal/config/flights.go`, migration `059_flight_lookups.sql` and its repository in
    `internal/store/sqlite`. Accepted when a fake AeroDataBox over `httptest` shows: the key only
    in the headers; no image, location, or flight plan asked for; a malformed designator sends
    nothing, and `EX0123`, `U2123`, and `3U123` normalise as above; the cache serves a repeat;
@@ -344,7 +344,7 @@ under the budget.
    names a codeshare as asked or asks for the operating number, says "check failed" when the fake
    provider fails, and a reply that used it and left out the attribution gets it appended.
 4. **Flight number on bookings.** Simple. Independent of 2 and 3. Files:
-   migration `059_trip_booking_flight_number.sql`, the trip repository, `internal/trip/trip.go`, `scan.go`,
+   migration `058_trip_booking_flight_number.sql`, the trip repository, `internal/trip/trip.go`, `scan.go`,
    `service.go`, `tools.go`, `export.go`. Accepted when a scan reply and `trip_add` store a
    number, a malformed one is refused with a sentence, a non-flight booking cannot have one, a
    trip update keeps it, and an export and restore round-trip it.
@@ -377,7 +377,7 @@ under the budget.
 
 - new `internal/connectors/flights/` with tests and fixtures
 - `internal/config/` (new `flights.go`)
-- `internal/store/sqlite/migrations/` (`058_flight_lookups.sql`, `059_trip_booking_flight_number.sql`,
+- `internal/store/sqlite/migrations/` (`058_trip_booking_flight_number.sql`, `059_flight_lookups.sql`,
   `060_trip_flights.sql`) and the trip and budget repositories
 - `internal/trip/` (`trip.go`, `scan.go`, `service.go`, `tools.go`, `export.go`, `loop.go`, new
   `flights.go`)

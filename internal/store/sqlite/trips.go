@@ -21,7 +21,7 @@ var (
 const (
 	tripColumns = `id, principal_id, title, destination, starts_at, ends_at, zone, status, source,
 		started_notified_at, ended_notified_at, created_at, updated_at, summary_message_id`
-	bookingColumns = `id, kind, title, reference, starts_at, check_in_at, check_in_source, fingerprint`
+	bookingColumns = `id, kind, title, reference, starts_at, check_in_at, check_in_source, fingerprint, flight_number`
 )
 
 func (s *Store) ListTrips(ctx context.Context, principalID, status string) ([]trip.Trip, error) {
@@ -161,7 +161,7 @@ func (s *Store) queryBookings(ctx context.Context, tripID string) ([]trip.Bookin
 		var booking trip.Booking
 		var startsAt string
 		var checkInAt, source sql.NullString
-		if err := rows.Scan(&booking.ID, &booking.Kind, &booking.Title, &booking.Reference, &startsAt, &checkInAt, &source, &booking.Fingerprint); err != nil {
+		if err := rows.Scan(&booking.ID, &booking.Kind, &booking.Title, &booking.Reference, &startsAt, &checkInAt, &source, &booking.Fingerprint, &booking.FlightNumber); err != nil {
 			return nil, fmt.Errorf("scan trip booking: %w", err)
 		}
 		if booking.StartsAt, err = time.Parse(time.RFC3339Nano, startsAt); err != nil {
@@ -249,10 +249,10 @@ func insertBookings(ctx context.Context, tx *sql.Tx, item trip.Trip) error {
 			source = booking.CheckInSource
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO trip_bookings (id, principal_id, trip_id, kind, title, reference, starts_at, check_in_at, check_in_source, fingerprint, position)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO trip_bookings (id, principal_id, trip_id, kind, title, reference, starts_at, check_in_at, check_in_source, fingerprint, flight_number, position)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			booking.ID, item.PrincipalID, item.ID, booking.Kind, booking.Title, booking.Reference, formatTime(booking.StartsAt),
-			nullableTime(booking.CheckInAt), source, booking.Fingerprint, position,
+			nullableTime(booking.CheckInAt), source, booking.Fingerprint, booking.FlightNumber, position,
 		); err != nil {
 			return fmt.Errorf("add trip booking: %w", err)
 		}
