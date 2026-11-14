@@ -432,6 +432,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	logger := slog.New(slog.NewTextHandler(h.logs, nil))
 	h.profilesDir = cmp.Or(options.profilesDir, filepath.Join(t.TempDir(), "profiles"))
 	h.auth = codexauth.New(t)
+	h.auth.SetInterval(0)
 	dataDir := t.TempDir()
 	h.attachmentsDir = filepath.Join(dataDir, "attachments")
 	h.credentialsDir = filepath.Join(dataDir, "integrations")
@@ -503,6 +504,7 @@ func (h *conversationHarness) wiringInputs(t *testing.T, runtime agentruntime.Ag
 			Connection: connection.Config{
 				Provider: connection.DefaultProvider, ProfilesDir: h.profilesDir, AuthBaseURL: h.auth.URL(), HTTPClient: h.auth.Client(),
 				CodeTimeout: options.codeTimeout, Principals: []string{"alice", "bob"},
+				MinimumPollInterval: connectPoll, SlowDownStep: connectSlowDown,
 			},
 			Approval: approval.Config{SweepInterval: options.approvalSweep},
 			Recent:   options.recent,

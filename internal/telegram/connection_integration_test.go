@@ -18,6 +18,13 @@ import (
 
 var userCodePattern = regexp.MustCompile(`enter the code ([A-Z0-9-]+)\.`)
 
+// The harness polls for device approval this often, and slow_down lengthens that by this step,
+// instead of RFC 8628's one and five seconds.
+const (
+	connectPoll     = 50 * time.Millisecond
+	connectSlowDown = 300 * time.Millisecond
+)
+
 func buttonData(keyboard InlineKeyboard) []string {
 	var data []string
 	for _, row := range keyboard {
@@ -258,9 +265,13 @@ func TestConnectOutcomes(t *testing.T) {
 		h := newConversationHarness(t, newControlledRuntime())
 		h.start()
 		code := h.requestConnect(1, 101)
+		slowed := time.Now()
 		h.auth.SlowDownOnce(code)
 		h.auth.Approve(code, "acct-alice")
 		h.wantMessage(101, connection.ConnectedReply)
+		if waited := time.Since(slowed); waited < connectSlowDown {
+			t.Fatalf("approval polled %v after slow_down, want at least the %v step", waited, connectSlowDown)
+		}
 	})
 }
 

@@ -40,7 +40,7 @@ type device struct {
 type Simulator struct {
 	server   *httptest.Server
 	mu       sync.Mutex
-	interval int
+	interval float64
 	devices  []*device
 	requests []Request
 }
@@ -51,6 +51,14 @@ func New(t *testing.T) *Simulator {
 	s.server = httptest.NewServer(http.HandlerFunc(s.serve))
 	t.Cleanup(s.server.Close)
 	return s
+}
+
+// SetInterval sets the poll interval, in seconds, that later device authorizations ask for; it may
+// be zero or below a second, which the provider never asks for, so that tests poll quickly.
+func (s *Simulator) SetInterval(seconds float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.interval = seconds
 }
 
 func (s *Simulator) URL() string          { return s.server.URL }

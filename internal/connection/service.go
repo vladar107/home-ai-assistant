@@ -33,6 +33,12 @@ type Config struct {
 	HTTPClient  *http.Client
 	CodeTimeout time.Duration
 	Principals  []string
+	// MinimumPollInterval is the shortest wait between device token polls, whatever interval the
+	// provider asks for; zero means RFC 8628's one second, and NewService refuses a negative one.
+	MinimumPollInterval time.Duration
+	// SlowDownStep is how much each slow_down answer lengthens the poll interval; zero means RFC
+	// 8628's five seconds, and NewService refuses a negative one.
+	SlowDownStep time.Duration
 }
 
 type Service struct {
@@ -92,6 +98,17 @@ func NewService(cfg Config, repository Repository, deliverer Deliverer, logger *
 	if codeTimeout <= 0 {
 		codeTimeout = DefaultCodeTimeout
 	}
+	if cfg.MinimumPollInterval < 0 || cfg.SlowDownStep < 0 {
+		return nil, fmt.Errorf("connection poll interval and slow-down step must not be negative")
+	}
+	minimumInterval := cfg.MinimumPollInterval
+	if minimumInterval == 0 {
+		minimumInterval = minimumPollInterval
+	}
+	slowDownStep := cfg.SlowDownStep
+	if slowDownStep == 0 {
+		slowDownStep = slowDownIncrement
+	}
 	provider := cfg.Provider
 	if provider == "" {
 		provider = DefaultProvider
@@ -105,7 +122,7 @@ func NewService(cfg Config, repository Repository, deliverer Deliverer, logger *
 		profilesDir: profilesDir,
 		provider:    provider,
 		codeTimeout: codeTimeout,
-		client:      &deviceClient{baseURL: baseURL, clientID: clientID, httpClient: httpClient},
+		client:      &deviceClient{baseURL: baseURL, clientID: clientID, httpClient: httpClient, minimumInterval: minimumInterval, slowDownStep: slowDownStep},
 		repository:  repository,
 		deliverer:   deliverer,
 		logger:      logger,

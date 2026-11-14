@@ -13,7 +13,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/connection"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
-	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
+	"github.com/vladar107/home-ai-assistant/internal/testutil"
 )
 
 type silentDeliverer struct{}
@@ -37,10 +37,7 @@ func writeCredential(t *testing.T, profilesDir, accountID string) {
 // credential file for another account than the bound one counts as not connected everywhere.
 func TestACredentialForAnotherAccountIsNotReady(t *testing.T) {
 	ctx := t.Context()
-	store, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	store := testutil.OpenStore(t, filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
 	t.Cleanup(func() { _ = store.Close() })
 	if err := store.BootstrapConfiguredPrincipals(ctx, []identity.ConfiguredPrincipal{{ID: "alice", DisplayName: "Alice", TelegramUserID: 101}}); err != nil {
 		t.Fatal(err)
@@ -79,10 +76,7 @@ func TestACredentialForAnotherAccountIsNotReady(t *testing.T) {
 
 func TestCurrentCredentialNeverRefreshes(t *testing.T) {
 	ctx := t.Context()
-	store, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	store := testutil.OpenStore(t, filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
 	t.Cleanup(func() { _ = store.Close() })
 	if err := store.BootstrapConfiguredPrincipals(ctx, []identity.ConfiguredPrincipal{{ID: "alice", DisplayName: "Alice", TelegramUserID: 101}}); err != nil {
 		t.Fatal(err)
@@ -110,5 +104,24 @@ func TestCurrentCredentialNeverRefreshes(t *testing.T) {
 	}
 	if _, err := service.CurrentCredential(ctx, "alice"); !errors.Is(err, connection.ErrCredentialStale) {
 		t.Fatalf("credential due for refresh: %v", err)
+	}
+}
+
+// A negative poll floor or slow-down step is refused rather than polling in a tight loop.
+func TestNegativePollSettingsAreRefused(t *testing.T) {
+	store := testutil.OpenStore(t, filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
+	t.Cleanup(func() { _ = store.Close() })
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	for name, cfg := range map[string]connection.Config{
+		"poll interval": {MinimumPollInterval: -time.Second},
+		"slow-down":     {SlowDownStep: -time.Second},
+	} {
+		cfg.ProfilesDir = filepath.Join(t.TempDir(), "profiles")
+		if _, err := connection.NewService(cfg, store, silentDeliverer{}, logger); err == nil {
+			t.Fatalf("%s: a negative value was accepted", name)
+		}
+	}
+	if _, err := connection.NewService(connection.Config{ProfilesDir: filepath.Join(t.TempDir(), "profiles")}, store, silentDeliverer{}, logger); err != nil {
+		t.Fatalf("zero poll settings: %v", err)
 	}
 }

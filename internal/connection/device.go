@@ -29,6 +29,9 @@ type deviceClient struct {
 	baseURL    string
 	clientID   string
 	httpClient *http.Client
+
+	minimumInterval time.Duration
+	slowDownStep    time.Duration
 }
 
 type deviceAuthorization struct {
@@ -65,14 +68,14 @@ func (c *deviceClient) start(ctx context.Context) (deviceAuthorization, error) {
 	if err := json.Unmarshal(body, &response); err != nil || response.DeviceAuthID == "" || response.UserCode == "" {
 		return deviceAuthorization{}, fmt.Errorf("device authorization response is invalid")
 	}
-	interval, err := parseInterval(response.Interval)
+	interval, err := parseInterval(response.Interval, c.minimumInterval)
 	if err != nil {
 		return deviceAuthorization{}, err
 	}
 	return deviceAuthorization{deviceAuthID: response.DeviceAuthID, userCode: response.UserCode, interval: interval}, nil
 }
 
-func parseInterval(raw json.RawMessage) (time.Duration, error) {
+func parseInterval(raw json.RawMessage, minimum time.Duration) (time.Duration, error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return defaultPollInterval, nil
 	}
@@ -90,7 +93,7 @@ func parseInterval(raw json.RawMessage) (time.Duration, error) {
 	if seconds < 0 {
 		return 0, fmt.Errorf("device authorization interval is invalid")
 	}
-	return max(time.Duration(seconds*float64(time.Second)), minimumPollInterval), nil
+	return max(time.Duration(seconds*float64(time.Second)), minimum), nil
 }
 
 // poll waits for the user to approve the device; the context carries the ceremony deadline.
@@ -122,7 +125,7 @@ func (c *deviceClient) poll(ctx context.Context, device deviceAuthorization) (de
 			switch errorCode(body) {
 			case "deviceauth_authorization_pending":
 			case "slow_down":
-				interval += slowDownIncrement
+				interval += c.slowDownStep
 			default:
 				return deviceCode{}, errDenied
 			}
