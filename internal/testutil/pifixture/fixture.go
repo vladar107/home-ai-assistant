@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -71,6 +72,10 @@ func RunIfRequested() {
 	// race inside the fixture child no longer changes its exit status.
 	if len(os.Args) == 2 && os.Args[1] == "--version" {
 		fmt.Println(Version)
+		syscall.Exit(0)
+	}
+	if len(os.Args) == 2 && os.Args[1] == "--hold-output" {
+		_, _ = io.Copy(io.Discard, os.Stdin)
 		syscall.Exit(0)
 	}
 	if len(os.Args) < 3 || os.Args[1] != "--mode" || os.Args[2] != "rpc" {
@@ -392,6 +397,20 @@ func run() error {
 	case "fixture:crash":
 		fmt.Fprintln(os.Stderr, "Error: synthetic startup failure")
 		fmt.Fprintln(os.Stderr, "    at loadAuth (/opt/pi/dist/core/auth.js:12:3) token=synthetic-private-token")
+		syscall.Exit(3)
+	case "fixture:crash-holding-output":
+		// A helper keeps the inherited stdout open until the runtime closes stdin, so the runtime
+		// learns of the exit before the output ends.
+		self, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		holder := exec.Command(self, "--hold-output")
+		holder.Stdin, holder.Stdout = os.Stdin, os.Stdout
+		if err := holder.Start(); err != nil {
+			return err
+		}
+		fmt.Fprintln(os.Stderr, "Error: synthetic startup failure")
 		syscall.Exit(3)
 	case "fixture:malformed":
 		fmt.Fprintln(os.Stdout, "not-json synthetic-private-text")

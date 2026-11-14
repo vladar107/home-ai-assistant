@@ -390,11 +390,17 @@ func (r *Runtime) attempt(ctx context.Context, request agentruntime.RunRequest, 
 	if err != nil {
 		return agentruntime.RunResult{}, fmt.Errorf("open Pi input: %w", err)
 	}
-	stdout, err := cmd.StdoutPipe()
+	// Wait closes the reader of a StdoutPipe as soon as the process exits, which can cut off output
+	// that was not read yet and fails the read; owning the pipe lets the reader end at EOF.
+	stdout, stdoutWriter, err := os.Pipe()
 	if err != nil {
 		return agentruntime.RunResult{}, fmt.Errorf("open Pi output: %w", err)
 	}
-	if err := cmd.Start(); err != nil {
+	defer stdout.Close()
+	cmd.Stdout = stdoutWriter
+	err = cmd.Start()
+	_ = stdoutWriter.Close()
+	if err != nil {
 		return agentruntime.RunResult{}, fmt.Errorf("start Pi runtime: executable could not be started")
 	}
 

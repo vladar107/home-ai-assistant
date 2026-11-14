@@ -330,7 +330,7 @@ func TestVersionCompatibility(t *testing.T) {
 func TestProcessFailuresAreBoundedAndContentFree(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct{ scenario, message string }{
-		{"malformed", "read Pi output"},
+		{"malformed", "invalid event stream"},
 		{"oversized-event", "read Pi output"},
 		{"oversized-response", "response exceeded the size limit"},
 		{"reject", "rejected the prompt"},

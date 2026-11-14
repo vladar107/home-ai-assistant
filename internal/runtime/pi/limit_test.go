@@ -234,9 +234,22 @@ func TestWaitingTurnEndsOnCancellation(t *testing.T) {
 	awaitProcessCount(t, reader, "background", "running", 2)
 }
 
-// Serial: under load the exit can close Pi's output before it is read, which reads as an invalid
-// event stream instead of the exit code.
+// The process has exited but its output is still open, so the runtime learns of the exit first;
+// closing the output on that exit must not read as a broken event stream.
+func TestEarlyExitBeforeOutputEndsReportsTheExit(t *testing.T) {
+	t.Parallel()
+	r := newRuntime(t, config(t))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	_, err := r.Run(ctx, request("crash", "fixture:crash-holding-output"), &eventSink{})
+	if err == nil || !strings.Contains(err.Error(), "exit code 3") || strings.Contains(err.Error(), "invalid event stream") {
+		t.Fatalf("error = %v, want the exit code", err)
+	}
+}
+
 func TestEarlyExitLogsScrubbedStderr(t *testing.T) {
+	t.Parallel()
 	cfg := config(t)
 	var logs bytes.Buffer
 	cfg.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
