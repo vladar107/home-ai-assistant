@@ -34,6 +34,7 @@ type Config struct {
 	MCP           MCPConfig
 	Web           WebConfig
 	NS            NSConfig
+	Flights       FlightsConfig
 	HA            HAConfig
 	Grafana       GrafanaConfig
 	Bus           BusConfig
@@ -61,6 +62,7 @@ func Load() (Config, error) {
 		NAS:             defaultNASConfig(),
 		Web:             defaultWebConfig(),
 		NS:              defaultNSConfig(),
+		Flights:         defaultFlightsConfig(),
 		HA:              defaultHAConfig(),
 		Grafana:         defaultGrafanaConfig(),
 		Bus:             defaultBusConfig(),
@@ -134,6 +136,9 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if err := loadNSConfig(&cfg.NS); err != nil {
+		return Config{}, err
+	}
+	if err := loadFlightsConfig(&cfg.Flights); err != nil {
 		return Config{}, err
 	}
 	if err := loadHAConfig(&cfg.HA); err != nil {
@@ -226,6 +231,12 @@ func (c Config) Validate() error {
 	}
 	if c.NS.Enabled() && !c.Conversation.Enabled {
 		return fmt.Errorf("HOME_AGENT_NS_API_KEY or HOME_AGENT_NS_API_KEY_FILE: requires HOME_AGENT_CONVERSATION_ENABLED=true")
+	}
+	if err := c.Flights.validate(); err != nil {
+		return err
+	}
+	if c.Flights.Enabled() && !c.Conversation.Enabled {
+		return fmt.Errorf("HOME_AGENT_FLIGHTS_API_KEY or HOME_AGENT_FLIGHTS_API_KEY_FILE: requires HOME_AGENT_CONVERSATION_ENABLED=true")
 	}
 	if err := c.HA.validate(); err != nil {
 		return err

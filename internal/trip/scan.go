@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/flightnumber"
 	"github.com/vladar107/home-ai-assistant/internal/localtime"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
@@ -296,7 +297,7 @@ func (s scan) draft(candidate scanTrip) (Draft, bool) {
 			Reference: WithoutAddresses(found.Reference), CheckInSource: found.CheckInSource}
 		// A number the model got wrong must not cost the trip, so it is dropped, not refused.
 		if found.Kind == KindFlight {
-			booking.FlightNumber, _ = NormalizeFlightNumber(found.FlightNumber)
+			booking.FlightNumber, _ = flightnumber.Normalize(found.FlightNumber)
 		}
 		var ok bool
 		if booking.StartsAt, ok = parseInstant(found.StartsAt); !ok {

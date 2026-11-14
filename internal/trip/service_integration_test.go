@@ -784,32 +784,6 @@ func TestReminderOfACheckInThatJustOpenedIsLeftToFire(t *testing.T) {
 
 func TestFlightNumbersAreNormalisedAndCheckedWhenStored(t *testing.T) {
 	t.Parallel()
-	cases := []struct {
-		given, want string
-		ok          bool
-	}{
-		{"ex123", "EX123", true},
-		{" EX 0123 ", "EX123", true},
-		{"EX0123", "EX123", true},
-		{"EX0641", "EX641", true},
-		{"U2 4567", "U24567", true},
-		{"3U0012", "3U12", true},
-		{"EXA0042", "EXA42", true},
-		{"EX123A", "EX123A", true},
-		{"EX0", "", false},
-		{"12123", "", false},
-		{"EX", "", false},
-		{"EX12345", "", false},
-		{"EX-123", "", false},
-		{"EX123 and OP456", "", false},
-	}
-	for _, c := range cases {
-		got, ok := trip.NormalizeFlightNumber(c.given)
-		if got != c.want || ok != c.ok {
-			t.Errorf("NormalizeFlightNumber(%q) = %q, %v; want %q, %v", c.given, got, ok, c.want, c.ok)
-		}
-	}
-
 	f := newFixture(t)
 	flight := booking(trip.KindFlight, "Flight to Example City", "ABC123", days(10), time.Time{})
 	flight.FlightNumber = "ex 0123"

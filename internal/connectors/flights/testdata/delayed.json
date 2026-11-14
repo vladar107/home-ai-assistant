@@ -1,0 +1,72 @@
+[
+  {
+    "greatCircleDistance": {
+      "km": 2860.1
+    },
+    "departure": {
+      "airport": {
+        "icao": "XXAA",
+        "iata": "XAA",
+        "name": "Example City International",
+        "shortName": "International",
+        "municipalityName": "Example City",
+        "countryCode": "XX",
+        "timeZone": "Europe/Lisbon"
+      },
+      "scheduledTime": {
+        "utc": "2026-11-09 13:40Z",
+        "local": "2026-11-09 13:40+00:00"
+      },
+      "terminal": "2",
+      "checkInDesk": "10-20",
+      "quality": [
+        "Basic",
+        "Live"
+      ],
+      "revisedTime": {
+        "utc": "2026-11-09 14:25Z",
+        "local": "2026-11-09 14:25+00:00"
+      },
+      "gate": "B12"
+    },
+    "arrival": {
+      "airport": {
+        "icao": "XXBB",
+        "iata": "XBB",
+        "name": "Other City Airport",
+        "shortName": "Airport",
+        "municipalityName": "Other City",
+        "countryCode": "XY",
+        "timeZone": "Europe/Athens"
+      },
+      "scheduledTime": {
+        "utc": "2026-11-09 17:55Z",
+        "local": "2026-11-09 19:55+02:00"
+      },
+      "terminal": "A",
+      "baggageBelt": "4",
+      "quality": [
+        "Basic",
+        "Live"
+      ],
+      "predictedTime": {
+        "utc": "2026-11-09 18:35Z",
+        "local": "2026-11-09 20:35+02:00"
+      }
+    },
+    "lastUpdatedUtc": "2026-11-09 09:00Z",
+    "number": "EX 123",
+    "callSign": "XEX123",
+    "status": "Delayed",
+    "codeshareStatus": "IsOperator",
+    "isCargo": false,
+    "aircraft": {
+      "model": "Example 320"
+    },
+    "airline": {
+      "name": "Example Air",
+      "iata": "EX",
+      "icao": "XEX"
+    }
+  }
+]
