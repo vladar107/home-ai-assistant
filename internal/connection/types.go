@@ -7,11 +7,9 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/locale"
 )
 
-const (
-	ConnectFailedReply = "The connection could not be completed. Use /settings to try again."
-)
-
 var (
+	ConnectFailedText        = locale.T("The connection could not be completed. Use /settings to try again.", "Не удалось завершить подключение. Попробуйте ещё раз через /settings.")
+	ConnectFailedReply       = ConnectFailedText.In(locale.English)
 	ConnectedReply           = locale.T("Your model subscription is connected.", "Ваша подписка на модель подключена.")
 	ConnectDeniedReply       = locale.T("The connection was denied. Use /settings to try again.", "В подключении отказано. Попробуйте ещё раз через /settings.")
 	ConnectExpiredReply      = locale.T("The connection code expired. Use /settings to get a new one.", "Срок действия кода подключения истёк. Получите новый через /settings.")

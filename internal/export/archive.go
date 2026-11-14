@@ -13,6 +13,8 @@ import (
 	"runtime/debug"
 	"slices"
 	"time"
+
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 )
 
 const (
@@ -34,22 +36,29 @@ const (
 // it can name a path.
 var entryName = regexp.MustCompile(`^[a-z0-9_]{1,64}\.json$`)
 
-// Refusal is a file that is not restored at all, with the sentence that tells the user why.
+// Refusal is a file that is not restored at all, with the sentence that tells the user why. Text is
+// that sentence in English, for the model and the log; Message is it in both languages, for the
+// user.
 type Refusal struct {
-	Reason string
-	Text   string
+	Reason  string
+	Text    string
+	Message locale.Text
+}
+
+func newRefusal(reason string, message locale.Text) *Refusal {
+	return &Refusal{Reason: reason, Text: message.In(locale.English), Message: message}
 }
 
 func (r *Refusal) Error() string { return "export refused: " + r.Reason }
 
 var (
-	ErrUnreadable = &Refusal{"unreadable", "This is not an export file I can read; nothing was restored."}
-	ErrTooLarge   = &Refusal{"too_large", "This file is larger than an export can be; nothing was restored."}
-	ErrTooMany    = &Refusal{"too_many_entries", "This file holds more parts than an export can; nothing was restored."}
-	ErrPath       = &Refusal{"path", "This file holds a part with a path, which an export never has; nothing was restored."}
-	ErrSignature  = &Refusal{"signature", "This file was changed after it was exported, or was not exported here; nothing was restored."}
-	ErrPrincipal  = &Refusal{"principal", "This export belongs to another user, and you can restore only your own; nothing was restored."}
-	ErrNewer      = &Refusal{"newer", "This export was made by a newer version of the assistant; nothing was restored."}
+	ErrUnreadable = newRefusal("unreadable", locale.T("This is not an export file I can read; nothing was restored.", "Это не файл экспорта, который я могу прочитать; ничего не восстановлено."))
+	ErrTooLarge   = newRefusal("too_large", locale.T("This file is larger than an export can be; nothing was restored.", "Этот файл больше, чем может быть экспорт; ничего не восстановлено."))
+	ErrTooMany    = newRefusal("too_many_entries", locale.T("This file holds more parts than an export can; nothing was restored.", "В этом файле больше частей, чем может быть в экспорте; ничего не восстановлено."))
+	ErrPath       = newRefusal("path", locale.T("This file holds a part with a path, which an export never has; nothing was restored.", "В этом файле есть часть с путём, а в экспорте такого не бывает; ничего не восстановлено."))
+	ErrSignature  = newRefusal("signature", locale.T("This file was changed after it was exported, or was not exported here; nothing was restored.", "Этот файл изменили после экспорта или он создан не здесь; ничего не восстановлено."))
+	ErrPrincipal  = newRefusal("principal", locale.T("This export belongs to another user, and you can restore only your own; nothing was restored.", "Этот экспорт принадлежит другому пользователю, а восстановить можно только свой; ничего не восстановлено."))
+	ErrNewer      = newRefusal("newer", locale.T("This export was made by a newer version of the assistant; nothing was restored.", "Этот экспорт создан более новой версией ассистента; ничего не восстановлено."))
 )
 
 // manifest is what the signature covers: who the file is for, when it was made, and each

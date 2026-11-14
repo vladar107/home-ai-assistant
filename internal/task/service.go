@@ -50,11 +50,10 @@ const (
 
 	// webSearchTool is the runtime's own search, which the broker's budget does not count.
 	webSearchTool = "web_search"
-
-	LimitText = "This background task reached its limit and could not write a report in time."
 )
 
 var (
+	LimitReply           = locale.T("This background task reached its limit and could not write a report in time.", "Эта фоновая задача достигла лимита и не успела написать отчёт.")
 	InterruptedTwiceText = locale.T("This background task was interrupted by a restart twice, so I stopped it. Ask again if you still need it.", "Эта фоновая задача дважды была прервана перезапуском, поэтому она остановлена. Попросите снова, если она всё ещё нужна.")
 )
 
@@ -101,6 +100,9 @@ type Config struct {
 	Exposure ExposureChecker
 	// Telemetry measures task runs; nil measures nothing.
 	Telemetry Telemetry
+	// Languages gives each task's status messages and report the principal's interface language;
+	// nil uses the repository when it keeps languages, and otherwise English.
+	Languages locale.Preferences
 	// Traces links a delivered report to the trace of the start that wrote it; nil links nothing.
 	Traces turn.MessageRecorder
 }
@@ -116,6 +118,7 @@ type Service struct {
 	telemetry  Telemetry
 	proposer   Proposer
 	exposure   ExposureChecker
+	languages  locale.Preferences
 
 	mu      sync.Mutex
 	ctx     context.Context
@@ -178,6 +181,10 @@ func NewService(cfg Config, repository Repository, chats Chats, messenger Messen
 	}
 	if cfg.Telemetry != nil {
 		service.telemetry = cfg.Telemetry
+	}
+	service.languages = cfg.Languages
+	if preferences, ok := repository.(locale.Preferences); ok && service.languages == nil {
+		service.languages = preferences
 	}
 	return service, nil
 }
@@ -271,9 +278,9 @@ func (s *Service) Create(ctx context.Context, principalID, requestID, title, bri
 		return Task{}, err
 	}
 	s.logger.InfoContext(ctx, "task.created", "principal_id", principalID, "task_id", id, "queued_behind", ahead)
-	text := StatusText(task, task.CreatedAt)
+	text := StatusText(ctx, task, task.CreatedAt)
 	if ahead == 0 {
-		text = "Starting: " + title
+		text = StartingText(ctx, title)
 	}
 	if statusID, err := s.messenger.SendStatus(ctx, chatID, messageID, text, id); err != nil {
 		s.logger.WarnContext(ctx, "task.status.failed", "principal_id", principalID, "task_id", id, "stage", "send", "error", err)
@@ -443,16 +450,27 @@ func (s *Service) runWorker(ctx context.Context, principalID string, wake <-chan
 			if !found {
 				break
 			}
+			// The run gets no language: its failure texts are stored in task.Result, which the model reads.
 			if task.Open() {
 				err = s.execute(ctx, task)
 			} else {
-				err = s.deliver(ctx, task)
+				err = s.deliver(s.withLanguage(ctx, principalID), task)
 			}
 			if err != nil && !s.retry(ctx, principalID, task.ID, "work", err) {
 				return
 			}
 		}
 	}
+}
+
+// withLanguage reads the principal's interface language when a piece of work starts, so a change
+// made meanwhile reaches the next one.
+func (s *Service) withLanguage(ctx context.Context, principalID string) context.Context {
+	withLanguage, err := locale.ForPrincipal(ctx, s.languages, principalID)
+	if err != nil {
+		s.logger.WarnContext(ctx, "task.language.load_failed", "principal_id", principalID, "error", err)
+	}
+	return withLanguage
 }
 
 func (s *Service) retry(ctx context.Context, principalID, taskID, stage string, err error) bool {
@@ -595,7 +613,7 @@ func (s *Service) run(ctx context.Context, task Task, sink *progressSink) (Outco
 	case ctx.Err() != nil:
 		return Outcome{}, false
 	case err != nil:
-		return Outcome{Status: StatusFailed, Result: LimitText, ErrorKind: "limit"}, true
+		return Outcome{Status: StatusFailed, Result: LimitReply.In(locale.English), ErrorKind: "limit"}, true
 	case reply.ErrorKind != "":
 		return Outcome{Status: StatusFailed, Result: reply.Text, ErrorKind: reply.ErrorKind}, true
 	default:
@@ -639,6 +657,7 @@ func (s *Service) watch(ctx context.Context, task Task, sink *progressSink) func
 }
 
 func (s *Service) editStatus(ctx context.Context, task Task) {
+	ctx = s.withLanguage(ctx, task.PrincipalID)
 	// A worker can start a task before task_start has stored the id of its status message.
 	if task.StatusMessageID == 0 {
 		if stored, found, err := s.repository.LoadTask(ctx, task.PrincipalID, task.ID); err == nil && found {
@@ -648,7 +667,7 @@ func (s *Service) editStatus(ctx context.Context, task Task) {
 	if task.StatusMessageID == 0 {
 		return
 	}
-	if err := s.messenger.EditStatus(ctx, task.ChatID, task.StatusMessageID, StatusText(task, time.Now()), task.ID, task.Open()); err != nil && ctx.Err() == nil {
+	if err := s.messenger.EditStatus(ctx, task.ChatID, task.StatusMessageID, StatusText(ctx, task, time.Now()), task.ID, task.Open()); err != nil && ctx.Err() == nil {
 		s.logger.WarnContext(ctx, "task.status.failed", "principal_id", task.PrincipalID, "task_id", task.ID, "stage", "edit", "error", err)
 	}
 }
@@ -665,7 +684,7 @@ func (s *Service) deliver(ctx context.Context, task Task) error {
 		return s.finishDelivery(ctx, task)
 	}
 	replyTo := task.RequestMessageID
-	chunks := conversation.SplitReply(ReportText(task))
+	chunks := conversation.SplitReply(ReportText(ctx, task))
 	// The card goes before the first chunk, so a delivery that already sent a chunk is past it.
 	sent := min(task.DeliveredChunks, len(chunks))
 	switch {

@@ -3,13 +3,23 @@
 package weekday
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 )
 
 var names = []string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+
+var (
+	everyDay   = locale.T("every day", "каждый день")
+	workdays   = locale.T("Mon–Fri", "пн–пт")
+	weekend    = locale.T("Sat–Sun", "сб–вс")
+	shortNames = [...]locale.Text{locale.T("Mon", "пн"), locale.T("Tue", "вт"), locale.T("Wed", "ср"), locale.T("Thu", "чт"), locale.T("Fri", "пт"), locale.T("Sat", "сб"), locale.T("Sun", "вс")}
+)
 
 // All returns every day, Monday first.
 func All() []string { return slices.Clone(names) }
@@ -35,18 +45,24 @@ func Normalize(values []string) ([]string, error) {
 }
 
 // Describe names normalized days for a reader, such as "Mon–Fri" or "Mon, Wed".
-func Describe(days []string) string {
+func Describe(days []string) string { return DescribeFor(context.Background(), days) }
+
+// DescribeFor is Describe in the context's language, for text the user reads; Describe stays
+// English for the model.
+func DescribeFor(ctx context.Context, days []string) string {
 	switch {
 	case slices.Equal(days, names):
-		return "every day"
+		return everyDay.Format(ctx)
 	case slices.Equal(days, names[:5]):
-		return "Mon–Fri"
+		return workdays.Format(ctx)
 	case slices.Equal(days, names[5:]):
-		return "Sat–Sun"
+		return weekend.Format(ctx)
 	}
 	described := make([]string, 0, len(days))
 	for _, day := range days {
-		described = append(described, strings.ToUpper(day[:1])+day[1:])
+		if index := slices.Index(names, day); index >= 0 {
+			described = append(described, shortNames[index].Format(ctx))
+		}
 	}
 	return strings.Join(described, ", ")
 }

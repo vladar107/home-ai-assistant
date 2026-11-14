@@ -35,6 +35,15 @@ var (
 	RestoreHeading = locale.T("Restore from your export", "Восстановление из вашего экспорта")
 )
 
+var (
+	refusedNewer      = locale.T("made by a newer version of the assistant", "создан более новой версией ассистента")
+	refusedUnknown    = locale.T("not known to this version of the assistant", "неизвестен этой версии ассистента")
+	skipUnknownTable  = locale.N("%d records of %[2]s", "%d records of %[2]s", "%d запись из %[2]s", "%d записи из %[2]s", "%d записей из %[2]s")
+	skipNoSuchRecords = locale.T("this version keeps no such records", "эта версия не хранит таких записей")
+	skipRecordOf      = locale.T("a record of %s", "запись раздела %s")
+	skipUnknownField  = locale.T("it holds a field this version does not know", "в ней есть поле, которого эта версия не знает")
+)
+
 // Files sends a file to a principal's own chat.
 type Files interface {
 	SendFile(ctx context.Context, principalID string, file delivery.File) error
@@ -275,7 +284,7 @@ func (s *Service) run(ctx context.Context, principalID string, a *archive, key [
 		}
 		seen[section.Name] = true
 		if file.Version > section.Version {
-			report.Sections = append(report.Sections, SectionResult{Section: section.Name, Label: section.Label, Refused: "made by a newer version of the assistant"})
+			report.Sections = append(report.Sections, SectionResult{Section: section.Name, Label: section.Label, Refused: refusedNewer.Format(ctx)})
 			continue
 		}
 		planning := newPlanning(principalID, now, s.store, known, derive, section, apply)
@@ -309,7 +318,7 @@ func (s *Service) run(ctx context.Context, principalID string, a *archive, key [
 	}
 	for _, name := range a.sectionNames() {
 		if !seen[name] {
-			report.Sections = append(report.Sections, SectionResult{Section: name, Label: name, Refused: "not known to this version of the assistant"})
+			report.Sections = append(report.Sections, SectionResult{Section: name, Label: name, Refused: refusedUnknown.Format(ctx)})
 		}
 	}
 	return report, nil
@@ -322,7 +331,7 @@ func (s *Service) readable(ctx context.Context, plan *Planning, section Section,
 	result := make(Tables, len(tables))
 	for table, rows := range tables {
 		if !slices.ContainsFunc(section.Tables, func(known Table) bool { return known.Name == table }) {
-			plan.Skip(fmt.Sprintf("%d records of %s", len(rows), table), "this version keeps no such records")
+			plan.Skip(skipUnknownTable.Format(ctx, len(rows), table), skipNoSuchRecords.Format(ctx))
 			continue
 		}
 		columns, err := s.store.Columns(ctx, table)
@@ -343,7 +352,7 @@ func (s *Service) readable(ctx context.Context, plan *Planning, section Section,
 				}
 			}
 			if !fits {
-				plan.Skip("a record of "+section.Label, "it holds a field this version does not know")
+				plan.Skip(skipRecordOf.Format(ctx, labelNamed(ctx, section.Name, section.Label)), skipUnknownField.Format(ctx))
 				continue
 			}
 			kept = append(kept, row)
@@ -422,7 +431,7 @@ func (s *Service) PreviewRestore(ctx context.Context, principalID string, data [
 	}
 	s.logger.InfoContext(ctx, "export.restore.previewed", "principal_id", principalID, "additions", report.Additions())
 	return Preview{
-		Pages: pages(s.previewText(report)), Summary: s.summaryText(report), Additions: report.Additions(),
+		Pages: pages(s.previewText(ctx, report)), Summary: s.summaryText(ctx, report), Additions: report.Additions(),
 		digest: digest(data), additions: report.fingerprint(), data: data,
 	}, nil
 }
@@ -503,25 +512,25 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 	held, found := s.held[record.PrincipalID]
 	s.mu.Unlock()
 	if !found || held.digest != arguments.Digest || !s.cfg.Now().Before(held.expires) {
-		return approval.Outcome{}, &approval.ActionError{Reason: "gone", Text: RestoreGoneText.In(locale.English)}
+		return approval.Outcome{}, &approval.ActionError{Reason: "gone", Text: RestoreGoneText.In(locale.English), UserText: RestoreGoneText.Format(ctx)}
 	}
 	s.release(record.PrincipalID, held.digest)
 	report, err := s.restore(ctx, record.PrincipalID, held.data, held.additions)
 	if err != nil {
 		var refusal *Refusal
 		if errors.As(err, &refusal) {
-			return approval.Outcome{}, &approval.ActionError{Reason: refusal.Reason, Text: refusal.Text}
+			return approval.Outcome{}, &approval.ActionError{Reason: refusal.Reason, Text: refusal.Text, UserText: refusal.Message.Format(ctx)}
 		}
 		return approval.Outcome{}, err
 	}
-	return approval.Outcome{Text: restoredText(report)}, nil
+	return approval.Outcome{Text: restoredText(locale.With(ctx, locale.English), report), UserText: restoredText(ctx, report)}, nil
 }
 
 // RestoreGoneText is the outcome of a confirmation whose file is no longer held.
 var RestoreGoneText = locale.T("I no longer hold that file, so nothing was restored; send it again with /restore.", "Этого файла у меня больше нет, поэтому ничего не восстановлено; отправьте его снова с /restore.")
 
 // ErrChanged refuses a confirmed restore that would no longer add what its preview showed.
-var ErrChanged = &Refusal{"changed", "What this file would add changed since you saw the preview, so nothing was restored; send it again with /restore to see what it adds now."}
+var ErrChanged = newRefusal("changed", locale.T("What this file would add changed since you saw the preview, so nothing was restored; send it again with /restore to see what it adds now.", "То, что добавит этот файл, изменилось с момента предпросмотра, поэтому ничего не восстановлено; отправьте его снова с /restore, чтобы увидеть, что он добавит теперь."))
 
 // Restore verifies the principal's file and restores it, section by section.
 func (s *Service) Restore(ctx context.Context, principalID string, data []byte) (Report, error) {

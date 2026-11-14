@@ -7,11 +7,12 @@ package task
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/modelcatalog"
+	"github.com/vladar107/home-ai-assistant/internal/turn"
 )
 
 const (
@@ -143,81 +144,128 @@ type Telemetry interface {
 	StartTask(ctx context.Context, principal string) (context.Context, func(outcome string, modelCalls, toolCalls int, promptTokens, outputTokens int64))
 }
 
-// StatusText is the status message of a task at the given moment.
-func StatusText(task Task, now time.Time) string {
+var (
+	queuedStatus       = locale.T("Queued: %s\nIt starts when your current background task is done.", "В очереди: %s\nЗапустится, когда закончится ваша текущая фоновая задача.")
+	runningStatus      = locale.T("Working on: %s\n%s so far, %s.", "Работаю над: %s\nПрошло %s, %s.")
+	doneStatus         = locale.T("%s: %s\nTook %s, %s. The report is below.", "%s: %s\nЗаняло %s, %s. Отчёт ниже.")
+	doneLabel          = locale.T("Done", "Готово")
+	partialLabel       = locale.T("Stopped at its limit", "Достигнут лимит")
+	failedStatus       = locale.T("Failed: %s", "Не удалось: %s")
+	cancelledStatus    = locale.T("Cancelled: %s", "Отменено: %s")
+	startingStatus     = locale.T("Starting: %s", "Запускаю: %s")
+	queuedSummary      = locale.T("queued", "в очереди")
+	runningSummary     = locale.T("running for %s, %s", "выполняется уже %s, %s")
+	partialSummary     = locale.T("partial report, finished %s ago", "частичный отчёт, завершено %s назад")
+	doneSummary        = locale.T("done, finished %s ago", "готово, завершено %s назад")
+	failedSummary      = locale.T("failed %s ago", "ошибка %s назад")
+	cancelledSummary   = locale.T("cancelled %s ago", "отменено %s назад")
+	underAMinute       = locale.T("under a minute", "меньше минуты")
+	minutesDuration    = locale.T("%d min", "%d мин")
+	hoursDuration      = locale.T("%d h", "%d ч")
+	hoursMinutesLength = locale.T("%d h %d min", "%d ч %d мин")
+	lookupCount        = locale.N("%d lookup", "%d lookups", "%d запрос", "%d запроса", "%d запросов")
+	reportHeading      = locale.T("**Background task: %s**", "**Фоновая задача: %s**")
+	partialNote        = locale.T("Partial report: the task reached its limit before it finished.", "Частичный отчёт: задача достигла лимита, не закончив работу.")
+)
+
+// StatusText is the status message of a task at the given moment, in the context's language.
+func StatusText(ctx context.Context, task Task, now time.Time) string {
 	switch task.Status {
 	case StatusQueued:
-		return fmt.Sprintf("Queued: %s\nIt starts when your current background task is done.", task.Title)
+		return queuedStatus.Format(ctx, task.Title)
 	case StatusRunning:
-		return fmt.Sprintf("Working on: %s\n%s so far, %s.", task.Title, Elapsed(task.StartedAt, now), lookups(task.Progress.ToolCalls))
+		return runningStatus.Format(ctx, task.Title, ElapsedFor(ctx, task.StartedAt, now), lookups(ctx, task.Progress.ToolCalls))
 	case StatusDone:
-		label := "Done"
+		label := doneLabel.Format(ctx)
 		if task.Partial {
-			label = "Stopped at its limit"
+			label = partialLabel.Format(ctx)
 		}
-		return fmt.Sprintf("%s: %s\nTook %s, %s. The report is below.", label, task.Title, Elapsed(task.StartedAt, task.FinishedAt), lookups(task.Progress.ToolCalls))
+		return doneStatus.Format(ctx, label, task.Title, ElapsedFor(ctx, task.StartedAt, task.FinishedAt), lookups(ctx, task.Progress.ToolCalls))
 	case StatusFailed:
-		return fmt.Sprintf("Failed: %s", task.Title)
+		return failedStatus.Format(ctx, task.Title)
 	default:
-		return fmt.Sprintf("Cancelled: %s", task.Title)
+		return cancelledStatus.Format(ctx, task.Title)
 	}
 }
 
-// Summary is one task's line in a list: its state, how long it has run, and its lookups.
-func Summary(task Task, now time.Time) string {
+// StartingText is the status message of a task that starts at once.
+func StartingText(ctx context.Context, title string) string { return startingStatus.Format(ctx, title) }
+
+// Summary is one task's line in a list, in English: its state, how long it has run, and its
+// lookups. SummaryFor writes it in the context's language.
+func Summary(task Task, now time.Time) string { return SummaryFor(context.Background(), task, now) }
+
+// SummaryFor is Summary in the context's language.
+func SummaryFor(ctx context.Context, task Task, now time.Time) string {
 	switch task.Status {
 	case StatusQueued:
-		return "queued"
+		return queuedSummary.Format(ctx)
 	case StatusRunning:
-		return fmt.Sprintf("running for %s, %s", Elapsed(task.StartedAt, now), lookups(task.Progress.ToolCalls))
+		return runningSummary.Format(ctx, ElapsedFor(ctx, task.StartedAt, now), lookups(ctx, task.Progress.ToolCalls))
 	case StatusDone:
 		if task.Partial {
-			return fmt.Sprintf("partial report, finished %s ago", Elapsed(task.FinishedAt, now))
+			return partialSummary.Format(ctx, ElapsedFor(ctx, task.FinishedAt, now))
 		}
-		return fmt.Sprintf("done, finished %s ago", Elapsed(task.FinishedAt, now))
+		return doneSummary.Format(ctx, ElapsedFor(ctx, task.FinishedAt, now))
 	case StatusFailed:
-		return fmt.Sprintf("failed %s ago", Elapsed(task.FinishedAt, now))
+		return failedSummary.Format(ctx, ElapsedFor(ctx, task.FinishedAt, now))
 	default:
-		return fmt.Sprintf("cancelled %s ago", Elapsed(task.FinishedAt, now))
+		return cancelledSummary.Format(ctx, ElapsedFor(ctx, task.FinishedAt, now))
 	}
 }
 
 // Elapsed is the time between two moments as Duration renders it; an unknown start is no time.
-func Elapsed(from, to time.Time) string {
+func Elapsed(from, to time.Time) string { return ElapsedFor(context.Background(), from, to) }
+
+// ElapsedFor is Elapsed in the context's language.
+func ElapsedFor(ctx context.Context, from, to time.Time) string {
 	if from.IsZero() {
-		return Duration(0)
+		return DurationFor(ctx, 0)
 	}
-	return Duration(to.Sub(from))
+	return DurationFor(ctx, to.Sub(from))
 }
 
-// Duration renders a duration in whole minutes, as a status message updated once a minute can.
-func Duration(duration time.Duration) string {
+// Duration renders a duration in whole minutes, as a status message updated once a minute can. It
+// is English, for what the model reads; DurationFor writes it in the context's language.
+func Duration(duration time.Duration) string { return DurationFor(context.Background(), duration) }
+
+// DurationFor is Duration in the context's language.
+func DurationFor(ctx context.Context, duration time.Duration) string {
 	minutes := int(duration / time.Minute)
 	switch {
 	case minutes < 1:
-		return "under a minute"
+		return underAMinute.Format(ctx)
 	case minutes < 60:
-		return fmt.Sprintf("%d min", minutes)
+		return minutesDuration.Format(ctx, minutes)
 	case minutes%60 == 0:
-		return fmt.Sprintf("%d h", minutes/60)
+		return hoursDuration.Format(ctx, minutes/60)
 	default:
-		return fmt.Sprintf("%d h %d min", minutes/60, minutes%60)
+		return hoursMinutesLength.Format(ctx, minutes/60, minutes%60)
 	}
 }
 
-func lookups(count int) string {
-	if count == 1 {
-		return "1 lookup"
-	}
-	return fmt.Sprintf("%d lookups", count)
-}
+func lookups(ctx context.Context, count int) string { return lookupCount.Format(ctx, count) }
 
 // ReportText is what the report message says: the title, whether the report is partial, and the
-// result.
-func ReportText(task Task) string {
-	heading := "**Background task: " + task.Title + "**"
+// result. The results the service and the turn engine write for a failed task are stored in
+// English for the model and shown in the context's language.
+func ReportText(ctx context.Context, task Task) string {
+	heading := reportHeading.Format(ctx, task.Title)
 	if task.Partial {
-		heading += "\nPartial report: the task reached its limit before it finished."
+		heading += "\n" + partialNote.Format(ctx)
 	}
-	return heading + "\n\n" + strings.TrimSpace(task.Result)
+	result := strings.TrimSpace(task.Result)
+	switch task.Result {
+	case LimitReply.In(locale.English):
+		result = LimitReply.Format(ctx)
+	case InterruptedTwiceText.In(locale.English):
+		result = InterruptedTwiceText.Format(ctx)
+	default:
+		for _, reply := range []locale.Text{turn.TimeoutReply, turn.UnavailableReply, turn.QuotaReply, turn.ReconnectReply, turn.NotConnectedReply} {
+			if task.Result == reply.In(locale.English) {
+				result = reply.Format(ctx)
+			}
+		}
+	}
+	return heading + "\n\n" + result
 }
