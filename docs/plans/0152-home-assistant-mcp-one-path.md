@@ -1,6 +1,9 @@
 # 0152 — Home Assistant's MCP server: the device-control path and the full tool set
 
-Status: `proposed`
+Status: `abandoned`
+
+Abandoned before implementation: the home connector already reaches Home Assistant through its
+MCP server, and the operator chose to keep it as it is, without the hardening or the full tool set.
 
 ## Context
 
