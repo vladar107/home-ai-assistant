@@ -13,7 +13,6 @@ import (
 )
 
 const (
-	BacklogTitle      = "Backlog"
 	BacklogExportHead = "# Assistant backlog"
 
 	backlogExportArgument = "export"
@@ -27,9 +26,16 @@ const (
 )
 
 var (
-	NoBacklogReply   = locale.T("Your backlog is empty. Tell me in conversation, for example: add to the backlog that you should answer weather questions with a chart.", "Бэклог пуст. Расскажите мне в разговоре, например: добавь в бэклог, что на вопросы о погоде нужно отвечать с графиком.")
-	BacklogGoneReply = locale.T("That item is no longer open.", "Этот пункт больше не открыт.")
-	BacklogHelpLine  = locale.T("/backlog export sends your ideas to paste into a development session.", "/backlog export присылает ваши идеи, чтобы вставить их в сессию разработки.")
+	BacklogTitle      = locale.T("Backlog", "Бэклог")
+	backlogPagedTitle = locale.T("Backlog (page %d of %d)", "Бэклог (страница %d из %d)")
+	backlogItemLine   = locale.T("%s. %s (%s)", "%s. %s (%s)")
+	backlogToday      = locale.T("today", "сегодня")
+	backlogDaysAgo    = locale.N("%d day ago", "%d days ago", "%d день назад", "%d дня назад", "%d дней назад")
+	backlogDoneButton = locale.T("Done %s", "Готово %s")
+	backlogExportHint = locale.T("Send /backlog export for the full text.", "Отправьте /backlog export, чтобы получить полный текст.")
+	NoBacklogReply    = locale.T("Your backlog is empty. Tell me in conversation, for example: add to the backlog that you should answer weather questions with a chart.", "Бэклог пуст. Расскажите мне в разговоре, например: добавь в бэклог, что на вопросы о погоде нужно отвечать с графиком.")
+	BacklogGoneReply  = locale.T("That item is no longer open.", "Этот пункт больше не открыт.")
+	BacklogHelpLine   = locale.T("/backlog export sends your ideas to paste into a development session.", "/backlog export присылает ваши идеи, чтобы вставить их в сессию разработки.")
 )
 
 // BacklogController is implemented by the backlog service; nil leaves /backlog out.
@@ -63,45 +69,41 @@ func renderBacklog(ctx context.Context, principalID string, controller BacklogCo
 	now := controller.Now()
 	pages := (len(items) + backlogItemsPerPage - 1) / backlogItemsPerPage
 	page = min(max(page, 1), pages)
-	title := BacklogTitle
+	title := BacklogTitle.Format(ctx)
 	if pages > 1 {
-		title += fmt.Sprintf(" (page %d of %d)", page, pages)
+		title = backlogPagedTitle.Format(ctx, page, pages)
 	}
 	lines := []string{title, ""}
 	var keyboard InlineKeyboard
 	first := (page - 1) * backlogItemsPerPage
 	for index, item := range items[first:min(first+backlogItemsPerPage, len(items))] {
 		number := strconv.Itoa(first + index + 1)
-		lines = append(lines, fmt.Sprintf("%s. %s (%s)", number, item.Title, backlogAge(item.CreatedAt, now)))
+		lines = append(lines, backlogItemLine.Format(ctx, number, item.Title, backlogAge(ctx, item.CreatedAt, now)))
 		keyboard = append(keyboard, []InlineButton{
-			{Text: "Done " + number, CallbackData: backlogCallback(backlogDoneAction, item.ID, page)},
-			{Text: "Delete " + number, CallbackData: backlogCallback(backlogDeleteAction, item.ID, page)},
+			{Text: backlogDoneButton.Format(ctx, number), CallbackData: backlogCallback(backlogDoneAction, item.ID, page)},
+			{Text: deleteNumberButton.Format(ctx, number), CallbackData: backlogCallback(backlogDeleteAction, item.ID, page)},
 		})
 	}
 	var navigation []InlineButton
 	if page > 1 {
-		navigation = append(navigation, InlineButton{Text: "‹ Previous", CallbackData: backlogCallback(backlogPageAction, "", page-1)})
+		navigation = append(navigation, InlineButton{Text: listPreviousButton.Format(ctx), CallbackData: backlogCallback(backlogPageAction, "", page-1)})
 	}
 	if page < pages {
-		navigation = append(navigation, InlineButton{Text: "Next ›", CallbackData: backlogCallback(backlogPageAction, "", page+1)})
+		navigation = append(navigation, InlineButton{Text: listNextButton.Format(ctx), CallbackData: backlogCallback(backlogPageAction, "", page+1)})
 	}
 	if len(navigation) > 0 {
 		keyboard = append(keyboard, navigation)
 	}
-	lines = append(lines, "", "Send /backlog export for the full text.")
+	lines = append(lines, "", backlogExportHint.Format(ctx))
 	return strings.Join(lines, "\n"), keyboard, nil
 }
 
-func backlogAge(created, now time.Time) string {
+func backlogAge(ctx context.Context, created, now time.Time) string {
 	days := int(now.Sub(created).Hours() / 24)
-	switch {
-	case days < 1:
-		return "today"
-	case days == 1:
-		return "1 day ago"
-	default:
-		return fmt.Sprintf("%d days ago", days)
+	if days < 1 {
+		return backlogToday.Format(ctx)
 	}
+	return backlogDaysAgo.Format(ctx, days)
 }
 
 // backlogExport is the open items as Markdown, written to be pasted into a development session.

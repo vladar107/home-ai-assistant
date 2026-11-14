@@ -13,10 +13,6 @@ import (
 const (
 	// privacyItem starts each line /privacy adds below its opening paragraph.
 	privacyItem = "\n• "
-
-	// AttachmentUnavailableReply is read as plain English by the export command, until it reads
-	// AttachmentUnavailableText.
-	AttachmentUnavailableReply = "I could not download that from Telegram. Please send it again."
 )
 
 var (

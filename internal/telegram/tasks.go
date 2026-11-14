@@ -12,16 +12,24 @@ import (
 )
 
 const (
-	TasksTitle       = "Background tasks"
-	NoTasksReply     = "You have no background tasks from the last week. Ask me for something long, such as going through a month of mail, and I will work on it in the background while we keep talking."
 	TaskPrivacyLine  = "Background task reports are kept for 30 days."
 	tasksPrefix      = "tasks"
 	taskCancelAction = "cancel"
 )
 
 var (
-	TaskGoneReply = locale.T("That task has already finished or was cancelled.", "Эта задача уже завершилась или была отменена.")
+	TasksTitle       = locale.T("Background tasks", "Фоновые задачи")
+	NoTasksReply     = locale.T("You have no background tasks from the last week. Ask me for something long, such as going through a month of mail, and I will work on it in the background while we keep talking.", "За последнюю неделю у вас не было фоновых задач. Попросите меня о чём-нибудь долгом, например разобрать почту за месяц, и я займусь этим в фоне, пока мы продолжаем разговор.")
+	TaskGoneReply    = locale.T("That task has already finished or was cancelled.", "Эта задача уже завершилась или была отменена.")
+	taskCancelButton = locale.T("Cancel", "Отменить")
+	taskCancelNumber = locale.T("Cancel %s", "Отменить %s")
 )
+
+// isTasksList reports whether a message is a /tasks list, written in either language, since the
+// user may have switched after it was sent.
+func isTasksList(text string) bool {
+	return strings.HasPrefix(text, TasksTitle.In(locale.English)) || strings.HasPrefix(text, TasksTitle.In(locale.Russian))
+}
 
 // TaskController is implemented by the task service; nil disables /tasks.
 type TaskController interface {
@@ -36,7 +44,7 @@ type TaskMessenger struct {
 }
 
 func (m TaskMessenger) SendStatus(ctx context.Context, chatID, replyTo int64, text, taskID string) (int64, error) {
-	message, err := m.Client.sendMessage(ctx, chatID, replyTo, text, taskKeyboard(taskID, "Cancel"))
+	message, err := m.Client.sendMessage(ctx, chatID, replyTo, text, taskKeyboard(taskID, taskCancelButton.Format(ctx)))
 	if err != nil {
 		return 0, err
 	}
@@ -49,7 +57,7 @@ func (m TaskMessenger) SendStatus(ctx context.Context, chatID, replyTo int64, te
 func (m TaskMessenger) EditStatus(ctx context.Context, chatID, messageID int64, text, taskID string, open bool) error {
 	var keyboard InlineKeyboard
 	if open {
-		keyboard = taskKeyboard(taskID, "Cancel")
+		keyboard = taskKeyboard(taskID, taskCancelButton.Format(ctx))
 	}
 	return m.Client.EditKeyboard(ctx, chatID, messageID, text, keyboard)
 }
@@ -81,16 +89,16 @@ func renderTasks(ctx context.Context, principalID string, tasks TaskController) 
 		return "", nil, err
 	}
 	if len(listed) == 0 {
-		return NoTasksReply, nil, nil
+		return NoTasksReply.Format(ctx), nil, nil
 	}
 	now := tasks.Now()
-	lines := []string{TasksTitle, ""}
+	lines := []string{TasksTitle.Format(ctx), ""}
 	var keyboard InlineKeyboard
 	for index, listedTask := range listed {
 		number := strconv.Itoa(index + 1)
 		lines = append(lines, fmt.Sprintf("%s. %s\n%s", number, listedTask.Title, task.Summary(listedTask, now)))
 		if listedTask.Open() {
-			keyboard = append(keyboard, taskKeyboard(listedTask.ID, "Cancel "+number)...)
+			keyboard = append(keyboard, taskKeyboard(listedTask.ID, taskCancelNumber.Format(ctx, number))...)
 		}
 	}
 	return strings.Join(lines, "\n"), keyboard, nil
@@ -111,7 +119,7 @@ func (s *Service) processTaskPress(ctx context.Context, callback *CallbackQuery,
 	}
 	var text string
 	var keyboard InlineKeyboard
-	if !changed && !strings.HasPrefix(callback.Message.Text, TasksTitle) {
+	if !changed && !isTasksList(callback.Message.Text) {
 		text = strings.TrimSpace(callback.Message.Text)
 		if text == "" {
 			text = TaskGoneReply.Format(ctx)

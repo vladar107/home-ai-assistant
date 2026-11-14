@@ -38,15 +38,51 @@ const (
 	tripCardBookings = 8
 	tripCardRunes    = 3500
 
-	TripCancelledReply = "This trip was cancelled."
-
-	TripsTooManyNote = "You already have the maximum number of scheduled jobs. Remove one in /jobs, then turn Trips on."
-
 	// TripsTabHelp is added to the app_help topic of the page.
 	TripsTabHelp = "With tabs on, each planned trip that has not ended, up to five, has a button \"Use this tab for\" with its title on this page when the page is opened in a tab the trip can use: a tab of conversations the user has, or the tab of a trip that is over. Pressing it moves the trip there with its pinned summary, reminders, notices, and news; the tab keeps its name and icon. The main view, the Reminders and other feed tabs, and the tab of another trip, a project, or a watch cannot be used. The user sends /settings in a tab that already has a message, since /settings as the first message of a new tab is answered in the main view. Saying in a tab that it is the trip's tab also moves the trip."
 )
 
 var (
+	TripCancelledReply = locale.T("This trip was cancelled.", "Эта поездка отменена.")
+	TripsTooManyNote   = locale.T("You already have the maximum number of scheduled jobs. Remove one in /jobs, then turn Trips on.", "У вас уже максимальное число заданий по расписанию. Удалите одно в /jobs, а затем включите «Поездки».")
+
+	tripTrackButton      = locale.T("Track", "Следить")
+	tripIgnoreButton     = locale.T("Ignore", "Игнорировать")
+	tripScanButton       = locale.T("Scan now", "Проверить сейчас")
+	tripTurnOffButton    = locale.T("Turn off Trips", "Выключить поездки")
+	tripTurnOnButton     = locale.T("Turn on Trips", "Включить поездки")
+	tripUseTabButton     = locale.T("Use this tab for %s", "Использовать эту вкладку для: %s")
+	tripsPageName        = locale.T("Trips", "Поездки")
+	tripUsesTabLine      = locale.T("%q uses this tab.", "Эта вкладка используется для %q.")
+	tripAlreadyUsesTab   = locale.T("%q already uses this tab.", "Эта вкладка уже используется для %q.")
+	tripMovedNote        = locale.T("Moved %q to this tab: its summary is pinned here, and its reminders, notices, and news arrive here.", "Поездка %q перенесена в эту вкладку: её сводка закреплена здесь, а напоминания, уведомления и новости приходят сюда.")
+	tripMovedLeftNote    = locale.T("Moved %q to this tab: its summary is pinned here, and its reminders, notices, and news arrive here. The tab it had stays with its messages; you can delete it.", "Поездка %q перенесена в эту вкладку: её сводка закреплена здесь, а напоминания, уведомления и новости приходят сюда. Прежняя вкладка остаётся со своими сообщениями; её можно удалить.")
+	tripCardFromMail     = locale.T("Trip found in mail:", "Найдена поездка в почте:")
+	tripCardFromCalendar = locale.T("Trip found in your calendar:", "Найдена поездка в вашем календаре:")
+	tripCardTitleLine    = locale.T("%s (%s)", "%s (%s)")
+	tripCardSpanLine     = locale.T("%s, times in %s", "%s, время указано в часовом поясе %s")
+	tripCardMore         = locale.T("...and %d more", "...и ещё %d")
+	tripCardBookingLine  = locale.T("- %s, %s", "- %s, %s")
+	tripCardReference    = locale.T("%s (%s)", "%s (%s)")
+	tripCardNoCheckIn    = locale.T("%s: no check-in time", "%s: время регистрации не указано")
+	tripCardCheckIn      = locale.T("%s: check-in opens %s (%s)", "%s: регистрация открывается %s (%s)")
+	tripCardPrompt       = locale.T("Track it for check-in reminders, or ignore it and I won't offer it again.", "Отслеживайте поездку, чтобы получать напоминания о регистрации, или проигнорируйте её, и я больше не буду её предлагать.")
+	tripSpanText         = locale.T("%s to %s", "с %s по %s")
+	tripTrackedHead      = locale.T("Tracking: %s (%s), %s.", "Отслеживается: %s (%s), %s.")
+	tripNoReminder       = locale.T("No reminder for %s: %s.", "Для %s напоминания нет: %s.")
+	tripReminder         = locale.T("Reminder for %s at %s.", "Напоминание для %s: %s.")
+	tripTrackedTip       = locale.T("Tip: ask me to pause your home-bound reminders while you're away.", "Совет: попросите меня приостановить напоминания, связанные с домом, пока вы в отъезде.")
+	tripCheckInStated    = locale.T("stated in the booking", "указано в бронировании")
+	tripCheckInLookedUp  = locale.T("looked up on the provider's site", "найдено на сайте поставщика")
+	tripCheckInAssumed   = locale.T("assumed, 24 h before the start", "предположительно, за 24 ч до начала")
+	tripUnsetReasons     = map[string]locale.Text{
+		trip.UnsetPast:     locale.T("check-in is already open", "регистрация уже открыта"),
+		trip.UnsetCap:      locale.T("too many scheduled jobs", "слишком много заданий по расписанию"),
+		trip.UnsetFar:      locale.T("more than a year ahead", "до начала больше года"),
+		trip.UnsetAfterEnd: locale.T("check-in opens after the trip ends", "регистрация открывается после окончания поездки"),
+		trip.UnsetInvalid:  locale.T("the time was refused", "время отклонено"),
+	}
+
 	TripGoneReply    = locale.T("This trip no longer exists.", "Этой поездки больше нет.")
 	TripTrackedReply = locale.T("Already tracking this trip.", "Эта поездка уже отслеживается.")
 	TripIgnoredReply = locale.T("Ignored; I won't offer it again.", "Пропущено; больше не предложу.")
@@ -115,10 +151,10 @@ func (n TripNotifier) SendTripCard(ctx context.Context, found trip.Trip) error {
 	}
 	ctx = n.inFeed(ctx, found.PrincipalID, chatID, "")
 	keyboard := InlineKeyboard{{
-		{Text: "Track", CallbackData: tripPrefix + ":" + tripTrackAction + ":" + found.ID},
-		{Text: "Ignore", CallbackData: tripPrefix + ":" + tripIgnoreAction + ":" + found.ID},
+		{Text: tripTrackButton.Format(ctx), CallbackData: tripPrefix + ":" + tripTrackAction + ":" + found.ID},
+		{Text: tripIgnoreButton.Format(ctx), CallbackData: tripPrefix + ":" + tripIgnoreAction + ":" + found.ID},
 	}}
-	return n.Client.sendPlain(ctx, chatID, tripCardText(found), keyboard)
+	return n.Client.sendPlain(ctx, chatID, renderTripCard(ctx, found), keyboard)
 }
 
 func (n TripNotifier) Send(ctx context.Context, principalID, tripID, text string) error {
@@ -276,20 +312,26 @@ type plainEditor interface {
 	EditPlain(ctx context.Context, chatID, messageID int64, text string) error
 }
 
-func tripCheckInSource(source string) string {
+func tripCheckInSource(ctx context.Context, source string) string {
 	switch source {
 	case trip.CheckInStated:
-		return "stated in the booking"
+		return tripCheckInStated.Format(ctx)
 	case trip.CheckInLookedUp:
-		return "looked up on the provider's site"
+		return tripCheckInLookedUp.Format(ctx)
 	default:
-		return "assumed, 24 h before the start"
+		return tripCheckInAssumed.Format(ctx)
 	}
 }
 
-func tripSpan(found trip.Trip, location *time.Location) string {
-	const layout = "Mon 2 Jan 2006"
-	return found.StartsAt.In(location).Format(layout) + " to " + found.EndLabel(layout, layout)
+// tripSpan is the trip's first and last day. An end at local midnight is the start of the next
+// day, so it reads as the previous day.
+func tripSpan(ctx context.Context, found trip.Trip, location *time.Location) string {
+	language := locale.From(ctx)
+	end := found.EndsAt.In(location)
+	if end.Hour() == 0 && end.Minute() == 0 && end.Second() == 0 && found.EndsAt.After(found.StartsAt) {
+		end = end.AddDate(0, 0, -1)
+	}
+	return tripSpanText.Format(ctx, locale.Date(language, found.StartsAt.In(location), locale.DayYear), locale.Date(language, end, locale.DayYear))
 }
 
 func tripZone(found trip.Trip) *time.Location {
@@ -300,36 +342,40 @@ func tripZone(found trip.Trip) *time.Location {
 	return location
 }
 
-// tripCardText is built from the validated fields of the trip only.
-func tripCardText(found trip.Trip) string {
+// tripCardText is the card in English, for code that has no context.
+func tripCardText(found trip.Trip) string { return renderTripCard(context.Background(), found) }
+
+// renderTripCard is built from the validated fields of the trip only.
+func renderTripCard(ctx context.Context, found trip.Trip) string {
+	language := locale.From(ctx)
 	location := tripZone(found)
-	source := "mail"
+	head := tripCardFromMail
 	if found.Source == trip.SourceCalendar {
-		source = "your calendar"
+		head = tripCardFromCalendar
 	}
 	lines := []string{
-		"Trip found in " + source + ":",
-		found.Title + " (" + found.Destination + ")",
-		tripSpan(found, location) + ", times in " + found.Zone,
+		head.Format(ctx),
+		tripCardTitleLine.Format(ctx, found.Title, found.Destination),
+		tripCardSpanLine.Format(ctx, tripSpan(ctx, found, location), found.Zone),
 		"",
 	}
 	for index, booking := range found.Bookings {
 		if index == tripCardBookings {
-			lines = append(lines, fmt.Sprintf("...and %d more", len(found.Bookings)-tripCardBookings))
+			lines = append(lines, tripCardMore.Format(ctx, len(found.Bookings)-tripCardBookings))
 			break
 		}
-		line := "- " + booking.Title + ", " + booking.StartsAt.In(location).Format("Mon 2 Jan 15:04")
+		line := tripCardBookingLine.Format(ctx, booking.Title, locale.Date(language, booking.StartsAt.In(location), locale.DayTime))
 		if booking.Reference != "" {
-			line += " (" + booking.Reference + ")"
+			line = tripCardReference.Format(ctx, line, booking.Reference)
 		}
 		if booking.CheckInAt.IsZero() {
-			line += ": no check-in time"
+			line = tripCardNoCheckIn.Format(ctx, line)
 		} else {
-			line += ": check-in opens " + booking.CheckInAt.In(location).Format("Mon 2 Jan 15:04") + " (" + tripCheckInSource(booking.CheckInSource) + ")"
+			line = tripCardCheckIn.Format(ctx, line, locale.Date(language, booking.CheckInAt.In(location), locale.DayTime), tripCheckInSource(ctx, booking.CheckInSource))
 		}
 		lines = append(lines, line)
 	}
-	lines = append(lines, "", "Track it for check-in reminders, or ignore it and I won't offer it again.")
+	lines = append(lines, "", tripCardPrompt.Format(ctx))
 	text := strings.Join(lines, "\n")
 	if runes := []rune(text); len(runes) > tripCardRunes {
 		text = string(runes[:tripCardRunes-1]) + "…"
@@ -337,33 +383,26 @@ func tripCardText(found trip.Trip) string {
 	return text
 }
 
-var tripUnsetReasons = map[string]string{
-	trip.UnsetPast:     "check-in is already open",
-	trip.UnsetCap:      "too many scheduled jobs",
-	trip.UnsetFar:      "more than a year ahead",
-	trip.UnsetAfterEnd: "check-in opens after the trip ends",
-	trip.UnsetInvalid:  "the time was refused",
-}
-
-func tripTrackedText(result trip.Result) string {
+func tripTrackedText(ctx context.Context, result trip.Result) string {
+	language := locale.From(ctx)
 	found := result.Trip
 	location := tripZone(found)
 	unset := make(map[string]string, len(result.Unset))
 	for _, entry := range result.Unset {
-		unset[entry.BookingID] = tripUnsetReasons[entry.Reason]
+		unset[entry.BookingID] = tripUnsetReasons[entry.Reason].Format(ctx)
 	}
-	lines := []string{"Tracking: " + found.Title + " (" + found.Destination + "), " + tripSpan(found, location) + "."}
+	lines := []string{tripTrackedHead.Format(ctx, found.Title, found.Destination, tripSpan(ctx, found, location))}
 	for _, booking := range found.Bookings {
 		if booking.CheckInAt.IsZero() {
 			continue
 		}
 		if reason, skipped := unset[booking.ID]; skipped {
-			lines = append(lines, "No reminder for "+booking.Title+": "+reason+".")
+			lines = append(lines, tripNoReminder.Format(ctx, booking.Title, reason))
 			continue
 		}
-		lines = append(lines, "Reminder for "+booking.Title+" at "+booking.CheckInAt.In(location).Format("Mon 2 Jan 15:04")+".")
+		lines = append(lines, tripReminder.Format(ctx, booking.Title, locale.Date(language, booking.CheckInAt.In(location), locale.DayTime)))
 	}
-	lines = append(lines, "Tip: ask me to pause your home-bound reminders while you're away.")
+	lines = append(lines, tripTrackedTip.Format(ctx))
 	return strings.Join(lines, "\n")
 }
 
@@ -399,7 +438,7 @@ func (s *Service) processTripPress(ctx context.Context, callback *CallbackQuery,
 	text := strings.TrimSpace(callback.Message.Text)
 	switch {
 	case outcome.Rejection == "" && action == tripTrackAction:
-		text = tripTrackedText(outcome)
+		text = tripTrackedText(ctx, outcome)
 	case outcome.Rejection == "":
 		text += "\n\n" + TripIgnoredReply.Format(ctx)
 	default:
@@ -428,7 +467,7 @@ func staleTripReply(ctx context.Context, known trip.Trip, found bool) string {
 	case known.Status == trip.StatusDismissed:
 		return TripIgnoredReply.Format(ctx)
 	case known.Status == trip.StatusCancelled:
-		return TripCancelledReply
+		return TripCancelledReply.Format(ctx)
 	}
 	return TripGoneReply.Format(ctx)
 }
@@ -516,7 +555,7 @@ func (t tripsSection) summary(ctx context.Context, principalID string) (settings
 	if err != nil {
 		return settingsSummary{}, err
 	}
-	return settingsSummary{name: "Trips", state: onOff(enabled)}, nil
+	return settingsSummary{name: tripsPageName.Format(ctx), state: stateOf(ctx, enabled)}, nil
 }
 
 func (t tripsSection) render(ctx context.Context, principalID string) (settingsView, error) {
@@ -541,8 +580,8 @@ func (t tripsSection) scanView(ctx context.Context, principalID string) (setting
 		return settingsView{
 			lines: []string{TripsOnLine.Format(ctx)},
 			buttons: []InlineButton{
-				{Text: "Scan now", CallbackData: tripsSectionPrefix + ":" + tripsScanAction},
-				{Text: "Turn off Trips", CallbackData: tripsSectionPrefix + ":" + tripsOffAction},
+				{Text: tripScanButton.Format(ctx), CallbackData: tripsSectionPrefix + ":" + tripsScanAction},
+				{Text: tripTurnOffButton.Format(ctx), CallbackData: tripsSectionPrefix + ":" + tripsOffAction},
 			},
 		}, nil
 	}
@@ -555,7 +594,7 @@ func (t tripsSection) scanView(ctx context.Context, principalID string) (setting
 	}
 	return settingsView{
 		lines:   []string{TripsOffLine.Format(ctx)},
-		buttons: []InlineButton{{Text: "Turn on Trips", CallbackData: tripsSectionPrefix + ":" + tripsOnAction}},
+		buttons: []InlineButton{{Text: tripTurnOnButton.Format(ctx), CallbackData: tripsSectionPrefix + ":" + tripsOnAction}},
 	}, nil
 }
 
@@ -590,9 +629,9 @@ func (t tripsSection) tabView(ctx context.Context, principalID string) ([]string
 		case move.Refusal == trip.TabsOffRefusal:
 			return nil, nil, nil
 		case move.Already:
-			lines = append(lines, fmt.Sprintf("%q uses this tab.", found.Title))
+			lines = append(lines, tripUsesTabLine.Format(ctx, found.Title))
 		case move.Refusal == "":
-			rows = append(rows, []InlineButton{{Text: "Use this tab for " + found.Title, CallbackData: tripsSectionPrefix + ":" + tripsTabAction + ":" + found.ID}})
+			rows = append(rows, []InlineButton{{Text: tripUseTabButton.Format(ctx, found.Title), CallbackData: tripsSectionPrefix + ":" + tripsTabAction + ":" + found.ID}})
 		}
 	}
 	if len(planned) > 0 && len(lines) == 0 && len(rows) == 0 {
@@ -633,12 +672,12 @@ func (t tripsSection) useTab(ctx context.Context, principalID, tripID string) (s
 		}
 		return settingsOutcome{note: result.Rejection}, nil
 	case result.Move != nil && result.Move.Already:
-		return settingsOutcome{note: fmt.Sprintf("%q already uses this tab.", result.Trip.Title)}, nil
+		return settingsOutcome{note: tripAlreadyUsesTab.Format(ctx, result.Trip.Title)}, nil
 	}
 	t.telemetry.ContextLogger(ctx, t.logger).InfoContext(ctx, "trips.tab.moved", "principal_id", principalID, "trip_id", tripID, "thread_id", threadID)
-	note := fmt.Sprintf("Moved %q to this tab: its summary is pinned here, and its reminders, notices, and news arrive here.", result.Trip.Title)
+	note := tripMovedNote.Format(ctx, result.Trip.Title)
 	if result.Move != nil && result.Move.Left {
-		note += " The tab it had stays with its messages; you can delete it."
+		note = tripMovedLeftNote.Format(ctx, result.Trip.Title)
 	}
 	return settingsOutcome{note: note}, nil
 }
@@ -685,7 +724,7 @@ func (t tripsSection) act(ctx context.Context, principalID string, _ int64, acti
 		created, err := t.schedules.Create(ctx, id, prepared)
 		if err != nil {
 			if errors.Is(err, schedule.ErrTooManyJobs) {
-				return settingsOutcome{note: TripsTooManyNote}, nil
+				return settingsOutcome{note: TripsTooManyNote.Format(ctx)}, nil
 			}
 			return settingsOutcome{}, err
 		}

@@ -2,7 +2,6 @@ package telegram
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
 	"unicode"
@@ -13,9 +12,6 @@ import (
 )
 
 const (
-	CollectionsTitle = "Collections"
-	NoRecordsLine    = "No records yet."
-
 	collectionCallbackPrefix = "col"
 	collectionListAction     = "list"
 	collectionOpenAction     = "open"
@@ -31,6 +27,20 @@ const (
 )
 
 var (
+	CollectionsTitle         = locale.T("Collections", "Коллекции")
+	NoRecordsLine            = locale.T("No records yet.", "Записей пока нет.")
+	collectionPagedTitle     = locale.T("%s (page %d of %d)", "%s (страница %d из %d)")
+	collectionRecordsCount   = locale.N("%d record", "%d records", "%d запись", "%d записи", "%d записей")
+	collectionOpenButton     = locale.T("Open %s", "Открыть %s")
+	collectionDeleteButton   = locale.T("Delete collection", "Удалить коллекцию")
+	collectionAllButton      = locale.T("‹ All collections", "‹ Все коллекции")
+	collectionConfirmButton  = locale.T("Yes, delete it", "Да, удалить")
+	collectionDeleteQuestion = locale.N(
+		"Delete the collection %[2]s and its %[1]d record? This cannot be undone.",
+		"Delete the collection %[2]s and its %[1]d records? This cannot be undone.",
+		"Удалить коллекцию %[2]s и все её записи (%[1]d)? Это нельзя отменить.",
+		"Удалить коллекцию %[2]s и все её записи (%[1]d)? Это нельзя отменить.",
+		"Удалить коллекцию %[2]s и все её записи (%[1]d)? Это нельзя отменить.")
 	NoCollectionsReply       = locale.T("You keep no collections. Ask me in conversation, for example: keep a list of things I lend out, with who and when.", "У вас нет коллекций. Попросите меня в разговоре, например: веди список вещей, которые я даю на время, с указанием, кому и когда.")
 	CollectionGoneReply      = locale.T("That collection no longer exists.", "Этой коллекции больше нет.")
 	CollectionRecordGoneLine = locale.T("That record no longer exists.", "Этой записи больше нет.")
@@ -56,13 +66,13 @@ func renderCollections(ctx context.Context, principalID string, controller Colle
 	if len(collections) == 0 {
 		return NoCollectionsReply.Format(ctx), nil, nil
 	}
-	lines := []string{CollectionsTitle}
+	lines := []string{CollectionsTitle.Format(ctx)}
 	var keyboard InlineKeyboard
 	var opens []InlineButton
 	for index, found := range collections {
 		number := strconv.Itoa(index + 1)
-		lines = append(lines, number+". "+found.Name+": "+recordCount(found.Records))
-		opens = append(opens, InlineButton{Text: "Open " + number, CallbackData: collectionCallback(collectionOpenAction, found.ID, 1)})
+		lines = append(lines, number+". "+found.Name+": "+collectionRecordsCount.Format(ctx, found.Records))
+		opens = append(opens, InlineButton{Text: collectionOpenButton.Format(ctx, number), CallbackData: collectionCallback(collectionOpenAction, found.ID, 1)})
 		if len(opens) == opensPerRow {
 			keyboard, opens = append(keyboard, opens), nil
 		}
@@ -71,13 +81,6 @@ func renderCollections(ctx context.Context, principalID string, controller Colle
 		keyboard = append(keyboard, opens)
 	}
 	return strings.Join(lines, "\n"), keyboard, nil
-}
-
-func recordCount(records int) string {
-	if records == 1 {
-		return "1 record"
-	}
-	return strconv.Itoa(records) + " records"
 }
 
 // renderCollection lists one page of a collection's records, oldest first, with Delete buttons
@@ -92,7 +95,7 @@ func renderCollection(ctx context.Context, principalID string, controller Collec
 	page = min(max(page, 1), pages)
 	title := found.Name
 	if pages > 1 {
-		title += fmt.Sprintf(" (page %d of %d)", page, pages)
+		title = collectionPagedTitle.Format(ctx, found.Name, page, pages)
 	}
 	lines := []string{title}
 	if found.Description != "" {
@@ -100,7 +103,7 @@ func renderCollection(ctx context.Context, principalID string, controller Collec
 	}
 	lines = append(lines, "")
 	if len(records) == 0 {
-		lines = append(lines, NoRecordsLine)
+		lines = append(lines, NoRecordsLine.Format(ctx))
 	}
 	var keyboard InlineKeyboard
 	var deletes []InlineButton
@@ -108,7 +111,7 @@ func renderCollection(ctx context.Context, principalID string, controller Collec
 	for index, record := range records[first:min(first+recordsPerPage, len(records))] {
 		number := strconv.Itoa(first + index + 1)
 		lines = append(lines, number+". "+clipUnits(controller.RecordLine(found, record), recordLineUnits))
-		deletes = append(deletes, InlineButton{Text: "Delete " + number, CallbackData: collectionCallback(collectionRecordDelete, record.ID, page)})
+		deletes = append(deletes, InlineButton{Text: deleteNumberButton.Format(ctx, number), CallbackData: collectionCallback(collectionRecordDelete, record.ID, page)})
 		if len(deletes) == deletesPerRow {
 			keyboard, deletes = append(keyboard, deletes), nil
 		}
@@ -118,17 +121,17 @@ func renderCollection(ctx context.Context, principalID string, controller Collec
 	}
 	var navigation []InlineButton
 	if page > 1 {
-		navigation = append(navigation, InlineButton{Text: "‹ Previous", CallbackData: collectionCallback(collectionOpenAction, found.ID, page-1)})
+		navigation = append(navigation, InlineButton{Text: listPreviousButton.Format(ctx), CallbackData: collectionCallback(collectionOpenAction, found.ID, page-1)})
 	}
 	if page < pages {
-		navigation = append(navigation, InlineButton{Text: "Next ›", CallbackData: collectionCallback(collectionOpenAction, found.ID, page+1)})
+		navigation = append(navigation, InlineButton{Text: listNextButton.Format(ctx), CallbackData: collectionCallback(collectionOpenAction, found.ID, page+1)})
 	}
 	if len(navigation) > 0 {
 		keyboard = append(keyboard, navigation)
 	}
 	keyboard = append(keyboard, []InlineButton{
-		{Text: "Delete collection", CallbackData: collectionCallback(collectionAskAction, found.ID, page)},
-		{Text: "‹ All collections", CallbackData: collectionCallback(collectionListAction, "", 1)},
+		{Text: collectionDeleteButton.Format(ctx), CallbackData: collectionCallback(collectionAskAction, found.ID, page)},
+		{Text: collectionAllButton.Format(ctx), CallbackData: collectionCallback(collectionListAction, "", 1)},
 	})
 	return strings.Join(lines, "\n"), keyboard, true, nil
 }
@@ -138,10 +141,10 @@ func renderCollectionConfirmation(ctx context.Context, principalID string, contr
 	if err != nil || !exists {
 		return "", nil, false, err
 	}
-	return fmt.Sprintf("Delete the collection %s and its %s? This cannot be undone.", found.Name, recordCount(len(records))),
+	return collectionDeleteQuestion.Format(ctx, len(records), found.Name),
 		InlineKeyboard{{
-			{Text: "Yes, delete it", CallbackData: collectionCallback(collectionDeleteAction, found.ID, page)},
-			{Text: "Cancel", CallbackData: collectionCallback(collectionOpenAction, found.ID, page)},
+			{Text: collectionConfirmButton.Format(ctx), CallbackData: collectionCallback(collectionDeleteAction, found.ID, page)},
+			{Text: locale.Cancel.Format(ctx), CallbackData: collectionCallback(collectionOpenAction, found.ID, page)},
 		}}, true, nil
 }
 

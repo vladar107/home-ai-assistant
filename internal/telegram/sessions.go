@@ -2,7 +2,6 @@ package telegram
 
 import (
 	"context"
-	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -13,20 +12,38 @@ import (
 )
 
 const (
-	SessionCurrentReply = "That is already the current conversation."
-	SessionNotInTab     = "That conversation is not open in another tab."
-	// HistoryUnavailable follows a resume whose earlier messages could not be forwarded.
-	HistoryUnavailable = "I could not bring the earlier messages of this conversation into this tab."
-	untitledTab        = "Conversation from "
+	untitledTab = "Conversation from "
 
 	sessionsPrefix       = "sessions"
 	sessionResumeAction  = "resume"
 	sessionCloseAction   = "close"
 	sessionButtonsPerRow = 3
-	untitledSession      = "(no text)"
 )
 
 var (
+	SessionCurrentReply = locale.T("That is already the current conversation.", "Это уже текущий разговор.")
+	SessionNotInTab     = locale.T("That conversation is not open in another tab.", "Этот разговор не открыт в другой вкладке.")
+	// HistoryUnavailable follows a resume whose earlier messages could not be forwarded.
+	HistoryUnavailable = locale.T("I could not bring the earlier messages of this conversation into this tab.", "Не удалось перенести прежние сообщения этого разговора в эту вкладку.")
+	untitledSession    = locale.T("(no text)", "(без текста)")
+
+	sessionLine           = locale.T("%s. %s, %s", "%s. %s, %s")
+	sessionCurrentLine    = locale.T("%s (current)", "%s (текущий)")
+	sessionElsewhereLine  = locale.T("%s (open in another tab)", "%s (открыт в другой вкладке)")
+	sessionNamedTabLine   = locale.T("%s (open in “%s”)", "%s (открыт во вкладке «%s»)")
+	sessionResumeButton   = locale.T("Resume %s", "Продолжить %s")
+	sessionOpenButton     = locale.T("Open %s", "Открыть %s")
+	sessionCloseButton    = locale.T("Close %s", "Закрыть %s")
+	sessionResumedReply   = locale.T("Back in the conversation from %s. Your next message continues it.", "Вы вернулись к разговору от %s. Ваше следующее сообщение продолжит его.")
+	sessionTitleQuote     = locale.T("“%s”", "«%s»")
+	sessionInNamedTab     = locale.T("That conversation is in the tab “%s”. Telegram does not let me switch tabs for you, so I posted there to bring it to the top.", "Этот разговор во вкладке «%s». Telegram не позволяет мне переключать вкладки за вас, поэтому в ней оставлено сообщение, чтобы поднять её наверх.")
+	sessionInOtherTab     = locale.T("That conversation is in another tab. Telegram does not let me switch tabs for you, so I posted there to bring it to the top.", "Этот разговор в другой вкладке. Telegram не позволяет мне переключать вкладки за вас, поэтому в ней оставлено сообщение, чтобы поднять её наверх.")
+	sessionOpenInMainView = locale.T("That conversation is open in the main view. Write there to continue it.", "Этот разговор открыт на главном экране. Напишите там, чтобы продолжить его.")
+	sessionOpenInNamedTab = locale.T("That conversation is open in the tab “%s”. Write there to continue it.", "Этот разговор открыт во вкладке «%s». Напишите там, чтобы продолжить его.")
+	sessionOpenInOther    = locale.T("That conversation is open in another tab. Write there to continue it.", "Этот разговор открыт в другой вкладке. Напишите там, чтобы продолжить его.")
+	closeNamedTabQuestion = locale.T("Close the tab “%s”? Telegram deletes its messages, so resuming the conversation later cannot bring them back. The conversation stays in /sessions.", "Закрыть вкладку «%s»? Telegram удаляет её сообщения, поэтому возобновление разговора позже не вернёт их. Разговор останется в /sessions.")
+	closeHolderQuestion   = locale.T("Close the tab that holds that conversation? Telegram deletes its messages, so resuming the conversation later cannot bring them back. The conversation stays in /sessions.", "Закрыть вкладку с этим разговором? Telegram удаляет её сообщения, поэтому возобновление разговора позже не вернёт их. Разговор останется в /sessions.")
+
 	SessionsTitle    = locale.T("Recent conversations", "Недавние разговоры")
 	NoSessionsReply  = locale.T("There are no conversations to return to yet.", "Пока нет разговоров, к которым можно вернуться.")
 	SessionGoneReply = locale.T("That conversation is no longer available.", "Этот разговор больше недоступен.")
@@ -39,28 +56,42 @@ var (
 	TabSuspectReply = locale.T("That tab did not accept my message, so it may be gone. If you cannot find it, close it here; the conversation stays in /sessions.", "Эта вкладка не приняла моё сообщение, возможно, её уже нет. Если вы не можете её найти, закройте её здесь; разговор останется в /sessions.")
 )
 
-// SessionInTab answers an Open press: the bot cannot switch the user's tab, only post in it.
-func SessionInTab(tabName string) string {
-	return "That conversation is in " + tabPlace(tabName) + ". Telegram does not let me switch tabs for you, so I posted there to bring it to the top."
+// SessionInTab answers an Open press: the bot cannot switch the user's tab, only post in it. It
+// reads in English; sessionInTab reads in the context's language.
+func SessionInTab(tabName string) string { return sessionInTab(context.Background(), tabName) }
+
+func sessionInTab(ctx context.Context, tabName string) string {
+	if tabName == "" {
+		return sessionInOtherTab.Format(ctx)
+	}
+	return sessionInNamedTab.Format(ctx, tabName)
 }
 
 // SessionOpenIn answers a reply to a conversation another tab, or the main view, holds; the message
-// does not run.
+// does not run. It reads in English; sessionOpenIn reads in the context's language.
 func SessionOpenIn(threadID int64, tabName string) string {
-	place := tabPlace(tabName)
-	if threadID == 0 {
-		place = "the main view"
-	}
-	return "That conversation is open in " + place + ". Write there to continue it."
+	return sessionOpenIn(context.Background(), threadID, tabName)
 }
 
-// CloseTabQuestion asks before closing a tab from /sessions.
-func CloseTabQuestion(tabName string) string {
-	place := "the tab that holds that conversation"
-	if tabName != "" {
-		place = tabPlace(tabName)
+func sessionOpenIn(ctx context.Context, threadID int64, tabName string) string {
+	switch {
+	case threadID == 0:
+		return sessionOpenInMainView.Format(ctx)
+	case tabName == "":
+		return sessionOpenInOther.Format(ctx)
 	}
-	return "Close " + place + "? Telegram deletes its messages, so resuming the conversation later cannot bring them back. The conversation stays in /sessions."
+	return sessionOpenInNamedTab.Format(ctx, tabName)
+}
+
+// CloseTabQuestion asks before closing a tab from /sessions. It reads in English;
+// closeTabQuestion reads in the context's language.
+func CloseTabQuestion(tabName string) string { return closeTabQuestion(context.Background(), tabName) }
+
+func closeTabQuestion(ctx context.Context, tabName string) string {
+	if tabName == "" {
+		return closeHolderQuestion.Format(ctx)
+	}
+	return closeNamedTabQuestion.Format(ctx, tabName)
 }
 
 // renderSessions lists the principal's recent conversations, newest first, with a Resume button for
@@ -75,6 +106,7 @@ func renderSessions(ctx context.Context, lane conversation.Lane, conversations C
 	if len(sessions) == 0 || (len(sessions) == 1 && sessions[0].Active) {
 		return NoSessionsReply.Format(ctx), nil, nil
 	}
+	language := locale.From(ctx)
 	lines := []string{SessionsTitle.Format(ctx), ""}
 	var keyboard InlineKeyboard
 	var row []InlineButton
@@ -82,23 +114,23 @@ func renderSessions(ctx context.Context, lane conversation.Lane, conversations C
 		number := strconv.Itoa(index + 1)
 		title := session.Title
 		if title == "" {
-			title = untitledSession
+			title = untitledSession.Format(ctx)
 		}
-		line := fmt.Sprintf("%s. %s, %s", number, session.LastActive.Format("2 Jan 2006"), title)
+		line := sessionLine.Format(ctx, number, locale.Date(language, session.LastActive, locale.DateYear), title)
 		if session.Active {
-			lines = append(lines, line+" (current)")
+			lines = append(lines, sessionCurrentLine.Format(ctx, line))
 			continue
 		}
-		buttons := []InlineButton{{Text: "Resume " + number, CallbackData: sessionCallback(sessionResumeAction, session.ID)}}
+		buttons := []InlineButton{{Text: sessionResumeButton.Format(ctx, number), CallbackData: sessionCallback(sessionResumeAction, session.ID)}}
 		if session.Elsewhere {
-			place := "another tab"
 			if session.TabName != "" {
-				place = "“" + session.TabName + "”"
+				line = sessionNamedTabLine.Format(ctx, line, session.TabName)
+			} else {
+				line = sessionElsewhereLine.Format(ctx, line)
 			}
-			line += " (open in " + place + ")"
-			buttons[0].Text = "Open " + number
+			buttons[0].Text = sessionOpenButton.Format(ctx, number)
 			if closable {
-				buttons = append(buttons, InlineButton{Text: "Close " + number, CallbackData: sessionCallback(sessionCloseAction, session.ID)})
+				buttons = append(buttons, InlineButton{Text: sessionCloseButton.Format(ctx, number), CallbackData: sessionCallback(sessionCloseAction, session.ID)})
 			}
 		}
 		lines = append(lines, line)
@@ -189,9 +221,9 @@ func (s *Service) processSessionClosePress(ctx context.Context, bot Bot, callbac
 	}
 	text, keyboard := SessionGoneReply.Format(ctx), InlineKeyboard(nil)
 	if index := slices.IndexFunc(sessions, func(session conversation.SessionSummary) bool { return session.ID == sessionID }); index >= 0 {
-		text = SessionNotInTab
+		text = SessionNotInTab.Format(ctx)
 		if chosen := sessions[index]; chosen.Elsewhere && bot.HasTopicsEnabled {
-			text, keyboard = CloseTabQuestion(chosen.TabName), closeTabKeyboard(chosen.ThreadID)
+			text, keyboard = closeTabQuestion(ctx, chosen.TabName), closeTabKeyboard(ctx, chosen.ThreadID)
 		}
 	}
 	if err := s.client.SendKeyboard(ctx, callback.Message.Chat.ID, 0, text, keyboard); err != nil {
@@ -228,14 +260,14 @@ func (s *Service) resumeInTab(ctx context.Context, chatID int64, lane conversati
 		verdict, refused := tabRefusal(err)
 		switch {
 		case refused && verdict == TabSuspect:
-			closeButton := InlineButton{Text: "Close " + strconv.Itoa(index+1), CallbackData: sessionCallback(sessionCloseAction, chosen.ID)}
+			closeButton := InlineButton{Text: sessionCloseButton.Format(ctx, strconv.Itoa(index+1)), CallbackData: sessionCallback(sessionCloseAction, chosen.ID)}
 			return TabSuspectReply.Format(ctx), InlineKeyboard{{closeButton}}, ctx, "", nil
 		case refused:
 			logger.InfoContext(ctx, "telegram.sessions.tab_replaced", "principal_id", lane.PrincipalID, "thread_id", chosen.ThreadID)
 		case err != nil && !isPermanentAPIError(err):
 			return "", nil, ctx, "send_message", err
 		default:
-			return SessionInTab(chosen.TabName), nil, ctx, "", nil
+			return sessionInTab(ctx, chosen.TabName), nil, ctx, "", nil
 		}
 	}
 
@@ -273,7 +305,7 @@ func (s *Service) resumeInTab(ctx context.Context, chatID int64, lane conversati
 	}
 	if err != nil {
 		logger.WarnContext(ctx, "telegram.sessions.history_failed", "principal_id", lane.PrincipalID, "error", err)
-		followUp = HistoryUnavailable + "\n\n" + followUp
+		followUp = HistoryUnavailable.Format(ctx) + "\n\n" + followUp
 	}
 	return followUp, nil, tabCtx, "", nil
 }
@@ -287,11 +319,11 @@ func resumedReply(ctx context.Context, resumed conversation.ResumeResult) string
 	case !resumed.Found:
 		return SessionGoneReply.Format(ctx)
 	case resumed.Current:
-		return SessionCurrentReply
+		return SessionCurrentReply.Format(ctx)
 	}
-	reply := conversation.ResumedLine(resumed.Session.LastActive) + " Your next message continues it."
+	reply := sessionResumedReply.Format(ctx, locale.Date(locale.From(ctx), resumed.Session.LastActive, locale.LongDate))
 	if resumed.Session.Title != "" {
-		reply += "\n\n“" + resumed.Session.Title + "”"
+		reply += "\n\n" + sessionTitleQuote.Format(ctx, resumed.Session.Title)
 	}
 	return reply
 }

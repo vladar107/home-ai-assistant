@@ -13,9 +13,6 @@ import (
 )
 
 const (
-	CloseTabButton = "Close tab"
-	KeepTabButton  = "Keep"
-
 	tabsPrefix     = "tabs"
 	tabCloseAction = "close"
 	tabKeepAction  = "keep"
@@ -27,6 +24,8 @@ const (
 )
 
 var (
+	CloseTabButton     = locale.T("Close tab", "Закрыть вкладку")
+	KeepTabButton      = locale.T("Keep", "Оставить")
 	CloseTabPrompt     = locale.T("Close this tab? Telegram deletes its messages, so resuming the conversation later cannot bring them back. The conversation stays in /sessions.", "Закрыть эту вкладку? Telegram удаляет её сообщения, поэтому возобновление разговора позже не вернёт их. Разговор останется в /sessions.")
 	TabKeptReply       = locale.T("Kept the tab.", "Вкладка оставлена.")
 	TabClosedReply     = locale.T("Closed the tab. Its conversation stays in /sessions.", "Вкладка закрыта. Её разговор остаётся в /sessions.")
@@ -185,18 +184,10 @@ func topicName(name string) string {
 	return name
 }
 
-// tabPlace names a tab for a sentence: its name in quotes, or "another tab".
-func tabPlace(name string) string {
-	if name == "" {
-		return "another tab"
-	}
-	return "the tab “" + name + "”"
-}
-
-func closeTabKeyboard(threadID int64) InlineKeyboard {
+func closeTabKeyboard(ctx context.Context, threadID int64) InlineKeyboard {
 	return InlineKeyboard{{
-		{Text: CloseTabButton, CallbackData: tabsPrefix + ":" + tabCloseAction + ":" + strconv.FormatInt(threadID, 10)},
-		{Text: KeepTabButton, CallbackData: tabsPrefix + ":" + tabKeepAction},
+		{Text: CloseTabButton.Format(ctx), CallbackData: tabsPrefix + ":" + tabCloseAction + ":" + strconv.FormatInt(threadID, 10)},
+		{Text: KeepTabButton.Format(ctx), CallbackData: tabsPrefix + ":" + tabKeepAction},
 	}}
 }
 
@@ -226,7 +217,7 @@ func (s *Service) processCloseCommand(ctx context.Context, message *Message, pri
 	if threadID <= 0 {
 		return s.sendCommandReply(ctx, message, principalID, "close", CloseMainViewReply.Format(ctx), nil)
 	}
-	return s.sendCommandReply(ctx, message, principalID, "close", CloseTabPrompt.Format(ctx), closeTabKeyboard(threadID))
+	return s.sendCommandReply(ctx, message, principalID, "close", CloseTabPrompt.Format(ctx), closeTabKeyboard(ctx, threadID))
 }
 
 // processTabPress closes a tab once the user confirmed it, or keeps it. Closing cancels the tab's

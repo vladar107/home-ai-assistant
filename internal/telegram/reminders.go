@@ -18,13 +18,15 @@ var (
 
 // snoozeButtons are the fixed snooze choices, in the order they are shown.
 var snoozeButtons = []struct {
-	label  string
+	label  locale.Text
 	snooze schedule.Snooze
 }{
-	{"Snooze 10 min", schedule.SnoozeTenMinutes},
-	{"Snooze 1 hour", schedule.SnoozeHour},
-	{"Tomorrow", schedule.SnoozeTomorrow},
+	{locale.T("Snooze 10 min", "Отложить на 10 мин"), schedule.SnoozeTenMinutes},
+	{locale.T("Snooze 1 hour", "Отложить на 1 час"), schedule.SnoozeHour},
+	{locale.T("Tomorrow", "Завтра"), schedule.SnoozeTomorrow},
 }
+
+var reminderSnoozedReply = locale.T("Snoozed until %s.", "Напоминание отложено до %s.")
 
 // ReminderSender delivers the scheduler's reminders with their snooze buttons.
 type ReminderSender struct {
@@ -34,7 +36,7 @@ type ReminderSender struct {
 func (r ReminderSender) SendReminder(ctx context.Context, chatID int64, jobID, text string) (int64, int64, error) {
 	row := make([]InlineButton, 0, len(snoozeButtons))
 	for _, button := range snoozeButtons {
-		row = append(row, InlineButton{Text: button.label, CallbackData: reminderPrefix + ":" + string(button.snooze) + ":" + jobID})
+		row = append(row, InlineButton{Text: button.label.Format(ctx), CallbackData: reminderPrefix + ":" + string(button.snooze) + ":" + jobID})
 	}
 	message, err := r.Client.sendMessage(ctx, chatID, 0, text, InlineKeyboard{row})
 	return message.MessageID, message.MessageThreadID, err
@@ -71,7 +73,7 @@ func (s *Service) processSnoozePress(ctx context.Context, callback *CallbackQuer
 		if err != nil {
 			location, _ = schedule.LoadZone(s.schedules.DefaultZone())
 		}
-		outcome = "Snoozed until " + schedule.FormatOccurrence(job.RunAt, location) + "."
+		outcome = reminderSnoozedReply.Format(ctx, locale.Date(locale.From(ctx), job.RunAt.In(location), locale.DayTimeZone))
 	}
 	text := strings.TrimSpace(callback.Message.Text) + "\n\n" + outcome
 	if err := s.client.EditKeyboard(ctx, callback.Message.Chat.ID, callback.Message.MessageID, text, nil); err != nil {

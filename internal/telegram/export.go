@@ -9,13 +9,10 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
-const (
-	ExportFailedReply  = "Your export could not be made. Try again later."
-	RestoreFailedReply = "That file could not be checked right now. Try again later."
-)
-
 var (
-	ExportReply = locale.T("Here is your export: what you set up and keep here, such as your memory, jobs, watches, places, and projects. "+
+	ExportFailedReply  = locale.T("Your export could not be made. Try again later.", "Не удалось подготовить экспорт. Попробуйте позже.")
+	RestoreFailedReply = locale.T("That file could not be checked right now. Try again later.", "Сейчас не удаётся проверить этот файл. Попробуйте позже.")
+	ExportReply        = locale.T("Here is your export: what you set up and keep here, such as your memory, jobs, watches, places, and projects. "+
 		"It holds private data, and Telegram keeps the files it carries on its servers, as it keeps this chat, so keep the file somewhere safe. "+
 		"Secrets, connections, and conversations are never in it. To restore from it, send it back with /restore as its caption.", "Вот ваш экспорт: то, что вы настроили и храните здесь, например память, задания, наблюдения, места и проекты. В нём личные данные, а Telegram хранит файлы, которые передаёт, на своих серверах, как хранит и этот чат, поэтому сохраните файл в надёжном месте. Секретов, подключений и разговоров в нём никогда нет. Чтобы восстановить данные из него, отправьте его обратно с подписью /restore.")
 	RestoreHelpReply = locale.T("To restore from an export, send me the export file with /restore as its caption, or reply /restore to the message that holds it. I show everything it would add before anything changes.", "Чтобы восстановить данные из экспорта, отправьте мне файл экспорта с подписью /restore или ответьте /restore на сообщение с этим файлом. Прежде чем что-либо изменится, я покажу всё, что будет добавлено.")
@@ -40,7 +37,7 @@ func (s *Service) processExport(ctx context.Context, message *Message, principal
 	}
 	if err := s.exports.SendExport(ctx, principalID); err != nil {
 		s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "telegram.export.failed", "principal_id", principalID, "error", err)
-		return s.sendCommandReply(ctx, message, principalID, "export", ExportFailedReply, nil)
+		return s.sendCommandReply(ctx, message, principalID, "export", ExportFailedReply.Format(ctx), nil)
 	}
 	return result, "", nil
 }
@@ -69,7 +66,7 @@ func (s *Service) processRestore(ctx context.Context, message *Message, principa
 	reference, err := s.client.GetFile(ctx, document.FileID)
 	if err != nil {
 		if isPermanentFileError(err) {
-			return s.sendCommandReply(ctx, message, principalID, "restore", AttachmentUnavailableReply, nil)
+			return s.sendCommandReply(ctx, message, principalID, "restore", AttachmentUnavailableText.Format(ctx), nil)
 		}
 		return processingResult{}, "fetch_restore", err
 	}
@@ -80,7 +77,7 @@ func (s *Service) processRestore(ctx context.Context, message *Message, principa
 			return s.sendCommandReply(ctx, message, principalID, "restore", export.ErrTooLarge.Text, nil)
 		}
 		if isPermanentFileError(err) {
-			return s.sendCommandReply(ctx, message, principalID, "restore", AttachmentUnavailableReply, nil)
+			return s.sendCommandReply(ctx, message, principalID, "restore", AttachmentUnavailableText.Format(ctx), nil)
 		}
 		return processingResult{}, "fetch_restore", err
 	}
@@ -91,7 +88,7 @@ func (s *Service) processRestore(ctx context.Context, message *Message, principa
 			return s.sendCommandReply(ctx, message, principalID, "restore", refusal.Text, nil)
 		}
 		s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "telegram.restore.failed", "principal_id", principalID, "error", err)
-		return s.sendCommandReply(ctx, message, principalID, "restore", RestoreFailedReply, nil)
+		return s.sendCommandReply(ctx, message, principalID, "restore", RestoreFailedReply.Format(ctx), nil)
 	}
 	// The preview retells the user's file, so it is sent as plain text, where nothing in it can hide
 	// behind markup.
@@ -109,7 +106,7 @@ func (s *Service) processRestore(ctx context.Context, message *Message, principa
 	}
 	if err := s.exports.OfferRestore(ctx, principalID, message.Chat.ID, thread.From(ctx), preview); err != nil {
 		s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "telegram.restore.offer_failed", "principal_id", principalID, "error", err)
-		return s.sendCommandReply(ctx, message, principalID, "restore", RestoreFailedReply, nil)
+		return s.sendCommandReply(ctx, message, principalID, "restore", RestoreFailedReply.Format(ctx), nil)
 	}
 	return result, "", nil
 }

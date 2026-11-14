@@ -15,8 +15,6 @@ import (
 )
 
 const (
-	JobsTitle = "Scheduled jobs"
-
 	jobsPrefix         = "jobs"
 	jobPauseAction     = "pause"
 	jobResumeAction    = "resume"
@@ -37,6 +35,20 @@ const (
 )
 
 var (
+	JobsTitle           = locale.T("Scheduled jobs", "Задания по расписанию")
+	jobsPagedTitle      = locale.T("Scheduled jobs (page %d of %d)", "Задания по расписанию (страница %d из %d)")
+	jobNextState        = locale.T("%s, next %s", "%s, следующий запуск: %s")
+	jobPausedState      = locale.T("%s, paused", "%s, приостановлено")
+	jobTravelState      = locale.T("%s, pauses while traveling", "%s, приостанавливается на время поездки")
+	jobPauseButton      = locale.T("Pause %s", "Пауза %s")
+	jobResumeButton     = locale.T("Resume %s", "Возобновить %s")
+	jobTravelOnButton   = locale.T("Pause on trip %s", "Пауза в поездке %s")
+	jobTravelOffButton  = locale.T("Run on trip %s", "Выполнять в поездке %s")
+	jobRunButton        = locale.T("Run %s now", "Запустить %s сейчас")
+	deleteNumberButton  = locale.T("Delete %s", "Удалить %s")
+	listPreviousButton  = locale.T("‹ Previous", "‹ Назад")
+	listNextButton      = locale.T("Next ›", "Далее ›")
+	jobRunningReply     = locale.T("Running it now; the report will arrive here.", "Запускаю сейчас; отчёт придёт сюда.")
 	NoJobsReply         = locale.T("You have no reminders or scheduled jobs. Ask me for one in conversation, for example: remind me at 5 to call mom, or every Monday at 9, tell me which of my Notion tasks are overdue.", "У вас нет напоминаний и заданий по расписанию. Попросите меня об этом в разговоре, например: напомни в 5 позвонить маме или каждый понедельник в 9 говори, какие из моих задач в Notion просрочены.")
 	JobGoneReply        = locale.T("That job no longer exists.", "Этого задания больше нет.")
 	SchedulePrivacyLine = locale.T("Reminders and jobs are kept until you delete them in /jobs; one-time jobs, 30 days after they run.", "Напоминания и задания хранятся, пока вы не удалите их в /jobs; разовые задания хранятся 30 дней после выполнения.")
@@ -85,9 +97,9 @@ func renderJobs(ctx context.Context, principalID string, schedules ScheduleContr
 	}
 	pages := (total + jobsPerPage - 1) / jobsPerPage
 	page = min(max(page, 1), pages)
-	title := JobsTitle
+	title := JobsTitle.Format(ctx)
 	if pages > 1 {
-		title += fmt.Sprintf(" (page %d of %d)", page, pages)
+		title = jobsPagedTitle.Format(ctx, page, pages)
 	}
 	lines := []string{title, ""}
 	var keyboard InlineKeyboard
@@ -97,11 +109,11 @@ func renderJobs(ctx context.Context, principalID string, schedules ScheduleContr
 		if index >= len(jobs)+len(watchList) {
 			route := saved[index-len(jobs)-len(watchList)]
 			lines = append(lines, fmt.Sprintf("%s. 🧭 %s\n%s", number, route.Heading(), route.Outline()))
-			keyboard = append(keyboard, []InlineButton{{Text: "Delete " + number, CallbackData: jobCallback(routeDeleteJobAction, route.ID, page)}})
+			keyboard = append(keyboard, []InlineButton{{Text: deleteNumberButton.Format(ctx, number), CallbackData: jobCallback(routeDeleteJobAction, route.ID, page)}})
 			continue
 		}
 		if index >= len(jobs) {
-			line, row := renderWatchEntry(watchList[index-len(jobs)], watches, number, page)
+			line, row := renderWatchEntry(ctx, watchList[index-len(jobs)], watches, number, page)
 			lines = append(lines, line)
 			keyboard = append(keyboard, row)
 			continue
@@ -110,18 +122,19 @@ func renderJobs(ctx context.Context, principalID string, schedules ScheduleContr
 		state := schedule.DescribeJob(job, schedules.DefaultZone())
 		var row []InlineButton
 		if !job.OneTime() {
-			state += ", next " + schedule.NextRunText(job, schedules.DefaultZone())
-			toggle := InlineButton{Text: "Pause " + number, CallbackData: jobCallback(jobPauseAction, job.ID, page)}
+			described := state
+			state = jobNextState.Format(ctx, described, schedule.NextRunText(job, schedules.DefaultZone()))
+			toggle := InlineButton{Text: jobPauseButton.Format(ctx, number), CallbackData: jobCallback(jobPauseAction, job.ID, page)}
 			if !job.Enabled {
-				state = schedule.DescribeJob(job, schedules.DefaultZone()) + ", paused"
-				toggle = InlineButton{Text: "Resume " + number, CallbackData: jobCallback(jobResumeAction, job.ID, page)}
+				state = jobPausedState.Format(ctx, described)
+				toggle = InlineButton{Text: jobResumeButton.Format(ctx, number), CallbackData: jobCallback(jobResumeAction, job.ID, page)}
 			}
 			row = append(row, toggle)
 			if schedule.TravelPausable(job) {
-				travel := InlineButton{Text: "Pause on trip " + number, CallbackData: jobCallback(jobTravelOnAction, job.ID, page)}
+				travel := InlineButton{Text: jobTravelOnButton.Format(ctx, number), CallbackData: jobCallback(jobTravelOnAction, job.ID, page)}
 				if job.TravelPause {
-					state += ", pauses while traveling"
-					travel = InlineButton{Text: "Run on trip " + number, CallbackData: jobCallback(jobTravelOffAction, job.ID, page)}
+					state = jobTravelState.Format(ctx, state)
+					travel = InlineButton{Text: jobTravelOffButton.Format(ctx, number), CallbackData: jobCallback(jobTravelOffAction, job.ID, page)}
 				}
 				row = append(row, travel)
 			}
@@ -132,16 +145,16 @@ func renderJobs(ctx context.Context, principalID string, schedules ScheduleContr
 		}
 		lines = append(lines, fmt.Sprintf("%s. %s\n%s", number, name, state))
 		keyboard = append(keyboard, append(row,
-			InlineButton{Text: "Run " + number + " now", CallbackData: jobCallback(jobRunAction, job.ID, page)},
-			InlineButton{Text: "Delete " + number, CallbackData: jobCallback(jobDeleteAction, job.ID, page)},
+			InlineButton{Text: jobRunButton.Format(ctx, number), CallbackData: jobCallback(jobRunAction, job.ID, page)},
+			InlineButton{Text: deleteNumberButton.Format(ctx, number), CallbackData: jobCallback(jobDeleteAction, job.ID, page)},
 		))
 	}
 	var navigation []InlineButton
 	if page > 1 {
-		navigation = append(navigation, InlineButton{Text: "‹ Previous", CallbackData: jobsPageCallback(page - 1)})
+		navigation = append(navigation, InlineButton{Text: listPreviousButton.Format(ctx), CallbackData: jobsPageCallback(page - 1)})
 	}
 	if page < pages {
-		navigation = append(navigation, InlineButton{Text: "Next ›", CallbackData: jobsPageCallback(page + 1)})
+		navigation = append(navigation, InlineButton{Text: listNextButton.Format(ctx), CallbackData: jobsPageCallback(page + 1)})
 	}
 	if len(navigation) > 0 {
 		keyboard = append(keyboard, navigation)
@@ -150,19 +163,19 @@ func renderJobs(ctx context.Context, principalID string, schedules ScheduleContr
 }
 
 // renderWatchEntry is one watch in /jobs, with pause or resume and delete.
-func renderWatchEntry(w watch.Watch, watches WatchController, number string, page int) (string, []InlineButton) {
-	toggle := InlineButton{Text: "Pause " + number, CallbackData: jobCallback(watchPauseJobAction, w.ID, page)}
+func renderWatchEntry(ctx context.Context, w watch.Watch, watches WatchController, number string, page int) (string, []InlineButton) {
+	toggle := InlineButton{Text: jobPauseButton.Format(ctx, number), CallbackData: jobCallback(watchPauseJobAction, w.ID, page)}
 	if !w.Enabled {
-		toggle = InlineButton{Text: "Resume " + number, CallbackData: jobCallback(watchResumeJobAction, w.ID, page)}
+		toggle = InlineButton{Text: jobResumeButton.Format(ctx, number), CallbackData: jobCallback(watchResumeJobAction, w.ID, page)}
 	}
-	travel := InlineButton{Text: "Pause on trip " + number, CallbackData: jobCallback(watchTravelOnJobAction, w.ID, page)}
+	travel := InlineButton{Text: jobTravelOnButton.Format(ctx, number), CallbackData: jobCallback(watchTravelOnJobAction, w.ID, page)}
 	if w.TravelPause {
-		travel = InlineButton{Text: "Run on trip " + number, CallbackData: jobCallback(watchTravelOffJobAction, w.ID, page)}
+		travel = InlineButton{Text: jobTravelOffButton.Format(ctx, number), CallbackData: jobCallback(watchTravelOffJobAction, w.ID, page)}
 	}
 	return fmt.Sprintf("%s. 👁 %s\n%s", number, w.Label(), watches.DescribeState(w)), []InlineButton{
 		toggle,
 		travel,
-		{Text: "Delete " + number, CallbackData: jobCallback(watchDeleteJobAction, w.ID, page)},
+		{Text: deleteNumberButton.Format(ctx, number), CallbackData: jobCallback(watchDeleteJobAction, w.ID, page)},
 	}
 }
 
@@ -247,7 +260,7 @@ func actOnJob(ctx context.Context, principalID, action, jobID, trigger string, s
 	case jobRunAction:
 		changed, err = schedules.RunNow(ctx, principalID, jobID, trigger)
 		if err == nil && changed {
-			return "Running it now; the report will arrive here.", nil
+			return jobRunningReply.Format(ctx), nil
 		}
 	default:
 		return "", errUnknownJobAction
