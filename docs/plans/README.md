@@ -162,6 +162,7 @@ plan that links back to the earlier record.
 | 0150 | [Choosing the changes of a proposal in a widget](0150-proposal-changes-widget.md) | done |
 | 0151 | [Faster tests: one migration per process everywhere, no fixed waits](0151-faster-test-suite.md) | proposed |
 | 0152 | [Home Assistant's MCP server: the device-control path and the full tool set](0152-home-assistant-mcp-one-path.md) | proposed |
+| 0153 | [Flight status: delays, gates, and cancellations for a trip's flights](0153-flight-status.md) | proposed |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.
