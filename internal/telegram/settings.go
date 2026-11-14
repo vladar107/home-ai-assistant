@@ -436,8 +436,8 @@ func (m modelSection) prefix() string { return modelSectionPrefix }
 
 func (m modelSection) helpTopic() string { return "model" }
 
-func (m modelSection) privacy(context.Context, string) ([]string, error) {
-	return []string{modelUsagePrivacyLine}, nil
+func (m modelSection) privacy(ctx context.Context, _ string) ([]string, error) {
+	return []string{modelUsagePrivacyLine.Format(ctx)}, nil
 }
 
 func (m modelSection) summary(ctx context.Context, principalID string) (settingsSummary, error) {
@@ -463,7 +463,7 @@ func (m modelSection) render(ctx context.Context, principalID string) (settingsV
 		}, nil
 	}
 	return settingsView{
-		lines:   []string{ModelConnectedLine(status), ModelCommandLine.Format(ctx)},
+		lines:   []string{ModelConnectedLine(ctx, status), ModelCommandLine.Format(ctx)},
 		buttons: []InlineButton{{Text: "Disconnect model", CallbackData: modelSectionPrefix + ":" + modelDisconnectAction}},
 	}, nil
 }
@@ -476,7 +476,7 @@ func (m modelSection) act(ctx context.Context, principalID string, chatID int64,
 			m.telemetry.ContextLogger(ctx, m.logger).WarnContext(ctx, "telegram.connection.start_failed", "principal_id", principalID, "error", err)
 			return settingsOutcome{message: connection.ConnectFailedReply}, nil
 		}
-		return settingsOutcome{message: ConnectInstructions(ceremony)}, nil
+		return settingsOutcome{message: ConnectInstructions(ctx, ceremony)}, nil
 	case modelDisconnectAction:
 		if m.conversation != nil {
 			if _, err := m.conversation.CancelAll(ctx, principalID); err != nil {
@@ -717,8 +717,8 @@ func (n nasSection) prefix() string { return nasSectionPrefix }
 
 func (n nasSection) helpTopic() string { return "nas" }
 
-func (n nasSection) privacy(context.Context, string) ([]string, error) {
-	return []string{SentFilePrivacyLine}, nil
+func (n nasSection) privacy(ctx context.Context, _ string) ([]string, error) {
+	return []string{SentFilePrivacyLine.Format(ctx)}, nil
 }
 
 func (n nasSection) summary(ctx context.Context, principalID string) (settingsSummary, error) {

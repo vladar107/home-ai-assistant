@@ -1315,7 +1315,7 @@ func (h *conversationHarness) wantReply(chatID, updateID int64, text string) {
 func (h *conversationHarness) wantStatusReply(chatID, updateID int64) {
 	h.t.Helper()
 	message := h.nextMessage()
-	if message.chatID != chatID || message.replyTo != requestMessageID(updateID) || !strings.HasPrefix(message.text, ConversationStatusReply) {
+	if message.chatID != chatID || message.replyTo != requestMessageID(updateID) || !strings.HasPrefix(message.text, localetest.English(ConversationStatusReply)) {
 		h.t.Fatalf("message = %+v, want chat %d a /status reply quoting message %d", message, chatID, requestMessageID(updateID))
 	}
 }

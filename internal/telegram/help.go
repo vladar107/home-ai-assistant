@@ -134,7 +134,7 @@ func (s *Service) helpText(ctx context.Context, principalID, topic string) (stri
 				}
 			}
 			if section.prefix() == modelSectionPrefix {
-				fmt.Fprintf(&builder, "\n%s", modelCommandHelp)
+				fmt.Fprintf(&builder, "\n%s", modelCommandHelp.Format(ctx))
 			}
 			if section.prefix() == memorySectionPrefix {
 				fmt.Fprintf(&builder, "\n%s", MemoryPrivacyLine.Format(ctx))

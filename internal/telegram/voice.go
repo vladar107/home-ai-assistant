@@ -20,11 +20,10 @@ const (
 	transcriptionTimeout  = 90 * time.Second
 
 	voiceMarker = "[Voice message, transcribed]"
-
-	RecordingTooLargeReply = "That recording is too large for me to listen to; recordings must stay under 20 MB."
 )
 
 var (
+	RecordingTooLargeReply   = locale.T("That recording is too large for me to listen to; recordings must stay under 20 MB.", "Эта запись слишком большая, я не могу её прослушать; записи должны быть меньше 20 МБ.")
 	TranscriptionFailedReply = locale.T("I could not transcribe that voice message. Try again, or send it as text.", "Не удалось расшифровать это голосовое сообщение. Попробуйте ещё раз или отправьте его текстом.")
 	NoSpeechReply            = locale.T("I could not hear any speech in that recording.", "В этой записи не слышно речи.")
 	TranscriptTooLongReply   = locale.T("That recording is too long for one message. Keep voice messages under about four minutes, or split them.", "Эта запись слишком длинная для одного сообщения. Записывайте голосовые сообщения не дольше примерно четырёх минут или разделяйте их.")
@@ -71,25 +70,25 @@ func (s *Service) transcribe(ctx context.Context, principalID string, item recor
 
 func (s *Service) transcribeWithin(parent context.Context, principalID string, item recording) (string, string, string) {
 	if item.fileID == "" {
-		return "", AttachmentUnavailableReply, "unavailable"
+		return "", AttachmentUnavailableText.Format(parent), "unavailable"
 	}
 	if item.size > maximumRecordingBytes {
-		return "", RecordingTooLargeReply, "too_large"
+		return "", RecordingTooLargeReply.Format(parent), "too_large"
 	}
 	ctx, cancel := context.WithTimeout(parent, transcriptionTimeout)
 	defer cancel()
 
 	reference, err := s.client.GetFile(ctx, item.fileID)
 	if err != nil {
-		return "", AttachmentUnavailableReply, "unavailable"
+		return "", AttachmentUnavailableText.Format(parent), "unavailable"
 	}
 	data, err := s.client.DownloadFile(ctx, reference.FilePath, maximumRecordingBytes)
 	if err != nil {
 		var oversized *oversizedFileError
 		if errors.As(err, &oversized) {
-			return "", RecordingTooLargeReply, "too_large"
+			return "", RecordingTooLargeReply.Format(parent), "too_large"
 		}
-		return "", AttachmentUnavailableReply, "unavailable"
+		return "", AttachmentUnavailableText.Format(parent), "unavailable"
 	}
 
 	transcript, err := s.transcriber.Transcribe(ctx, principalID, chatgpt.Audio{FileName: item.name, MimeType: item.mimeType, Data: data})

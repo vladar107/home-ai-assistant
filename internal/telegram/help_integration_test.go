@@ -35,7 +35,7 @@ func chatTools(own []string, integrations ...string) []string {
 // paragraph. Attachments, jobs, voice, and memory are always among them, as the application always
 // runs them.
 func privacyLines(lines ...string) string {
-	return localetest.English(ConversationPrivacyReply) + privacyItem + modelUsagePrivacyLine + privacyItem + strings.Join(lines, privacyItem)
+	return localetest.English(ConversationPrivacyReply) + privacyItem + localetest.English(modelUsagePrivacyLine) + privacyItem + strings.Join(lines, privacyItem)
 }
 
 // onlyCoreTools tells whether a turn carries the core tools alone, as one without any granted

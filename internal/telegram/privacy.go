@@ -36,7 +36,7 @@ var privacyOrder = []string{
 
 func (s *Service) privacyReply(ctx context.Context, principalID string) (string, error) {
 	if s.conversation == nil {
-		return PrivacyReply, nil
+		return PrivacyReply.Format(ctx), nil
 	}
 	core := map[string]string{}
 	if s.attachments != nil {

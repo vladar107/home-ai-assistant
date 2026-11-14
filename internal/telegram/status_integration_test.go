@@ -74,7 +74,7 @@ func TestStatusShowsModelTaskModelLastTurnAndUsage(t *testing.T) {
 
 	first := h.status(1)
 	for _, want := range []string{
-		ConversationStatusReply,
+		localetest.English(ConversationStatusReply),
 		"Model here: gpt-test, effort medium (the default).",
 		"Background tasks: gpt-6.1-sol, effort medium.",
 		"Last turn: none yet since the restart.",
@@ -106,7 +106,7 @@ func TestStatusNotesAStaleChoiceAndATaskFallback(t *testing.T) {
 		t.Fatalf("choice reply = %s", reply.text)
 	}
 	if own := h.status(2); !strings.Contains(own, "Model here: gpt-6.1-sol, effort high (your choice, until /new).") ||
-		!strings.Contains(own, "Background tasks: gpt-test, effort medium.\n"+statusTaskUsageLine) {
+		!strings.Contains(own, "Background tasks: gpt-test, effort medium.\n"+localetest.English(statusTaskUsageLine)) {
 		t.Fatalf("/status with a choice:\n%s", own)
 	}
 
@@ -115,7 +115,7 @@ func TestStatusNotesAStaleChoiceAndATaskFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	stale := h.status(3)
-	if !strings.Contains(stale, "Model here: gpt-test, effort medium (the default).\n"+statusStaleChoiceLine) {
+	if !strings.Contains(stale, "Model here: gpt-test, effort medium (the default).\n"+localetest.English(statusStaleChoiceLine)) {
 		t.Fatalf("/status with a stale choice:\n%s", stale)
 	}
 }
@@ -127,11 +127,11 @@ func TestStatusUsageFailuresShowNoProviderDetail(t *testing.T) {
 		err  error
 		want string
 	}{
-		{"not connected", connection.ErrNotConnected, statusNotConnectedLine},
-		{"unavailable", chatgpt.ErrUsageUnavailable, statusUsageUnavailableLine},
-		{"unauthorized", chatgpt.ErrUnauthorized, statusUsageUnavailableLine},
-		{"provider text", errors.New("boom acct-secret-123 user@example.com"), statusUsageUnavailableLine},
-		{"deadline", context.DeadlineExceeded, statusUsageUnavailableLine},
+		{"not connected", connection.ErrNotConnected, localetest.English(statusNotConnectedLine)},
+		{"unavailable", chatgpt.ErrUsageUnavailable, localetest.English(statusUsageUnavailableLine)},
+		{"unauthorized", chatgpt.ErrUnauthorized, localetest.English(statusUsageUnavailableLine)},
+		{"provider text", errors.New("boom acct-secret-123 user@example.com"), localetest.English(statusUsageUnavailableLine)},
+		{"deadline", context.DeadlineExceeded, localetest.English(statusUsageUnavailableLine)},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -156,7 +156,7 @@ func TestStatusGivesUpOnASlowUsageRead(t *testing.T) {
 		return chatgpt.Usage{}, ctx.Err()
 	}}
 	h, _ := newStatusHarness(t, usage, nil)
-	if reply := h.status(1); !strings.HasSuffix(reply, statusUsageUnavailableLine) {
+	if reply := h.status(1); !strings.HasSuffix(reply, localetest.English(statusUsageUnavailableLine)) {
 		t.Fatalf("/status = %s", reply)
 	}
 }
@@ -168,7 +168,7 @@ func TestPrivacyAndHelpMentionTheModelCommandAndUsageRead(t *testing.T) {
 	h.provision("alice", "acct-alice")
 	h.start()
 	h.push(textUpdate(1, 101, "/privacy"))
-	if reply := h.nextMessage().text; !strings.Contains(reply, modelUsagePrivacyLine) {
+	if reply := h.nextMessage().text; !strings.Contains(reply, localetest.English(modelUsagePrivacyLine)) {
 		t.Fatalf("/privacy lacks the usage line:\n%s", reply)
 	}
 

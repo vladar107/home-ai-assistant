@@ -3,7 +3,6 @@ package telegram
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -16,8 +15,6 @@ import (
 )
 
 const (
-	ModelTitle = "Model and effort"
-
 	modelPrefix        = "mdl"
 	modelPickAction    = "m"
 	modelApplyAction   = "e"
@@ -29,8 +26,39 @@ const (
 )
 
 var (
+	ModelTitle = locale.T("Model and effort", "Модель и глубина рассуждений")
+
 	// ModelCommandDescription is the slash menu entry.
 	ModelCommandDescription = locale.T("Show and change the model and effort", "Показать и сменить модель и глубину рассуждений")
+
+	modelHereDefaultLine    = locale.T("Here: %s, effort %s (the default).", "Здесь: %s, глубина рассуждений %s (по умолчанию).")
+	modelHereChoiceLine     = locale.T("Here: %s, effort %s (your choice, until /new).", "Здесь: %s, глубина рассуждений %s (ваш выбор, до /new).")
+	modelBackgroundLine     = locale.T("Background tasks: %s, effort %s. This is set by the operator, not by /model.", "Фоновые задачи: %s, глубина рассуждений %s. Это задаёт оператор, а не /model.")
+	modelListUnavailable    = locale.T("The model list is unavailable right now, so only the configured defaults are offered.", "Список моделей сейчас недоступен, поэтому предлагаются только настроенные значения по умолчанию.")
+	modelItemLine           = locale.T("%s: %s. Effort: %s", "%s: %s. Глубина рассуждений: %s")
+	modelItemCurrentLine    = locale.T("%s: %s. Effort: %s (current)", "%s: %s. Глубина рассуждений: %s (текущая модель)")
+	modelItemOffLine        = locale.T("%s: %s. Effort: %s (not available on your plan right now)", "%s: %s. Глубина рассуждений: %s (модель сейчас недоступна на вашем тарифе)")
+	modelItemCurrentOffLine = locale.T("%s: %s. Effort: %s (current) (not available on your plan right now)", "%s: %s. Глубина рассуждений: %s (текущая модель) (модель сейчас недоступна на вашем тарифе)")
+	modelChangeHint         = locale.T("Change it with the buttons, or type /model <model> [effort], /model <effort>, or /model default. A choice holds in this conversation until /new.", "Измените это кнопками или введите /model <модель> [глубина], /model <глубина> или /model default. Выбор действует в этом разговоре до /new.")
+	modelBackToDefaults     = locale.T("Back to defaults", "К значениям по умолчанию")
+	modelOtherModels        = locale.T("Other models", "Другие модели")
+	modelChangeModel        = locale.T("Change model", "Сменить модель")
+
+	modelBackOnDefaultReply   = locale.T("This conversation is back on the default: %s, effort %s.", "Этот разговор снова идёт на значениях по умолчанию: %s, глубина рассуждений %s.")
+	modelNotListedReply       = locale.T("%s is not in the model list, so I cannot change its effort. %s", "Модели %s нет в списке, поэтому я не могу изменить её глубину рассуждений. %s")
+	modelAmbiguousReply       = locale.T("%q matches several models: %s. Use the full name.", "Запросу %q подходит несколько моделей: %s. Укажите полное название.")
+	modelUnknownReply         = locale.T("I do not know the model %q. Available models: %s.", "Модель %q мне неизвестна. Доступные модели: %s.")
+	modelNoEffortReply        = locale.T("%s offers no effort level I can use.", "У модели %s нет подходящей мне глубины рассуждений.")
+	modelBadEffortReply       = locale.T("%q is not an effort level. %s supports: %s.", "%q не является глубиной рассуждений. Модель %s поддерживает: %s.")
+	modelUnsupportedEffort    = locale.T("%s does not support effort %s. It supports: %s.", "Модель %s не поддерживает глубину рассуждений %s. Она поддерживает: %s.")
+	modelChoiceUnavailable    = locale.T("%s on effort %s is not available. %s", "Модель %s с глубиной рассуждений %s недоступна. %s")
+	modelNowRunsReply         = locale.T("This conversation now runs on %s, effort %s, until /new.", "Теперь этот разговор идёт на модели %s с глубиной рассуждений %s, до /new.")
+	modelUsageReply           = locale.T("Use /model <model> [effort], /model <effort>, or /model default. Models: %s. Effort levels: %s.", "Используйте /model <модель> [глубина], /model <глубина> или /model default. Модели: %s. Глубина рассуждений: %s.")
+	modelPressDefaultReply    = locale.T("Back on the default: %s, effort %s.", "Снова значения по умолчанию: %s, глубина рассуждений %s.")
+	modelChooseEffortPage     = locale.T("%s\n\nChoose the effort for %s.", "%s\n\nВыберите глубину рассуждений для модели %s.")
+	modelNoLongerAvailable    = locale.T("%s is no longer available.", "Модель %s больше недоступна.")
+	modelPressUnavailableNote = locale.T("%s on effort %s is not available.", "Модель %s с глубиной рассуждений %s недоступна.")
+	modelSavedReply           = locale.T("Saved: %s, effort %s, in this conversation until /new.", "Сохранено: %s, глубина рассуждений %s, в этом разговоре до /new.")
 )
 
 // ModelLanes is the conversation's per-lane model choice, implemented by conversation.Service.
@@ -117,48 +145,50 @@ func (s *Service) renderModel(ctx context.Context, principalID, note string, cat
 	if err != nil {
 		return "", nil, err
 	}
-	lines := []string{ModelTitle, ""}
+	lines := []string{ModelTitle.Format(ctx), ""}
 	if note != "" {
 		lines = append(lines, note, "")
 	}
-	source := "the default"
+	hereLine := modelHereDefaultLine
 	if own && !stale {
-		source = "your choice, until /new"
+		hereLine = modelHereChoiceLine
 	}
-	lines = append(lines, fmt.Sprintf("Here: %s, effort %s (%s).", effective.Model, effective.Effort, source))
+	lines = append(lines, hereLine.Format(ctx, effective.Model, effective.Effort))
 	if stale {
-		lines = append(lines, "Your earlier choice is no longer available, so this conversation runs on the default.")
+		lines = append(lines, statusStaleChoiceLine.Format(ctx))
 	}
-	lines = append(lines, fmt.Sprintf("Background tasks: %s, effort %s. This is set by the operator, not by /model.", m.TaskDefault.Model, m.TaskDefault.Effort), "")
+	lines = append(lines, modelBackgroundLine.Format(ctx, m.TaskDefault.Model, m.TaskDefault.Effort), "")
 	if catalog.listed == nil {
-		lines = append(lines, "The model list is unavailable right now, so only the configured defaults are offered.", "")
+		lines = append(lines, modelListUnavailable.Format(ctx), "")
 	}
-	descriptions := modelcatalog.Describe(catalog.models)
+	descriptions := modelcatalog.DescribeFor(ctx, catalog.models)
 	for index, model := range catalog.models {
-		line := fmt.Sprintf("%s: %s. Effort: %s", model.ID, descriptions[index], strings.Join(model.Efforts, ", "))
-		if model.ID == effective.Model {
-			line += " (current)"
+		itemLine := modelItemLine
+		switch current, off := model.ID == effective.Model, m.unavailable(principalID, model.ID); {
+		case current && off:
+			itemLine = modelItemCurrentOffLine
+		case current:
+			itemLine = modelItemCurrentLine
+		case off:
+			itemLine = modelItemOffLine
 		}
-		if m.unavailable(principalID, model.ID) {
-			line += " (not available on your plan right now)"
-		}
-		lines = append(lines, line)
+		lines = append(lines, itemLine.Format(ctx, model.ID, descriptions[index], strings.Join(model.Efforts, ", ")))
 	}
-	lines = append(lines, "", "Change it with the buttons, or type /model <model> [effort], /model <effort>, or /model default. A choice holds in this conversation until /new.")
-	return strings.Join(lines, "\n"), modelListKeyboard(catalog.models), nil
+	lines = append(lines, "", modelChangeHint.Format(ctx))
+	return strings.Join(lines, "\n"), modelListKeyboard(ctx, catalog.models), nil
 }
 
-func modelListKeyboard(models []modelcatalog.Model) InlineKeyboard {
+func modelListKeyboard(ctx context.Context, models []modelcatalog.Model) InlineKeyboard {
 	var keyboard InlineKeyboard
 	for _, model := range models {
 		if data := modelCallback(modelPickAction, model.ID); len(data) <= maximumCallbackDataBytes && !strings.Contains(model.ID, ":") {
 			keyboard = append(keyboard, []InlineButton{{Text: model.ID, CallbackData: data}})
 		}
 	}
-	return append(keyboard, []InlineButton{{Text: "Back to defaults", CallbackData: modelPrefix + ":" + modelDefaultAction}})
+	return append(keyboard, []InlineButton{{Text: modelBackToDefaults.Format(ctx), CallbackData: modelPrefix + ":" + modelDefaultAction}})
 }
 
-func modelLevelsKeyboard(model modelcatalog.Model) InlineKeyboard {
+func modelLevelsKeyboard(ctx context.Context, model modelcatalog.Model) InlineKeyboard {
 	var keyboard InlineKeyboard
 	var row []InlineButton
 	for _, effort := range model.Efforts {
@@ -175,13 +205,13 @@ func modelLevelsKeyboard(model modelcatalog.Model) InlineKeyboard {
 		keyboard = append(keyboard, row)
 	}
 	return append(keyboard, []InlineButton{
-		{Text: "Other models", CallbackData: modelPrefix + ":" + modelListAction},
-		{Text: "Back to defaults", CallbackData: modelPrefix + ":" + modelDefaultAction},
+		{Text: modelOtherModels.Format(ctx), CallbackData: modelPrefix + ":" + modelListAction},
+		{Text: modelBackToDefaults.Format(ctx), CallbackData: modelPrefix + ":" + modelDefaultAction},
 	})
 }
 
-func modelChangeKeyboard() InlineKeyboard {
-	return InlineKeyboard{{{Text: "Change model", CallbackData: modelPrefix + ":" + modelListAction}}}
+func modelChangeKeyboard(ctx context.Context) InlineKeyboard {
+	return InlineKeyboard{{{Text: modelChangeModel.Format(ctx), CallbackData: modelPrefix + ":" + modelListAction}}}
 }
 
 func modelCallback(action, value string) string {
@@ -242,10 +272,10 @@ func (s *Service) modelReply(ctx context.Context, principalID string, args []str
 			return "", nil, err
 		}
 		chat := s.model.ChatDefault
-		return fmt.Sprintf("This conversation is back on the default: %s, effort %s.", chat.Model, chat.Effort), nil, nil
+		return modelBackOnDefaultReply.Format(ctx, chat.Model, chat.Effort), nil, nil
 	}
 	if len(args) > 2 {
-		return modelUsage(catalog.models), nil, nil
+		return modelUsage(ctx, catalog.models), nil, nil
 	}
 	current, _, err := s.model.Lanes.EffectiveChoiceFrom(ctx, lane, catalog.listed)
 	if err != nil {
@@ -256,7 +286,7 @@ func (s *Service) modelReply(ctx context.Context, principalID string, args []str
 	if len(args) == 1 && agentruntime.ValidEffort(args[0]) {
 		index := slices.IndexFunc(catalog.models, func(m modelcatalog.Model) bool { return m.ID == current.Model })
 		if index < 0 {
-			return fmt.Sprintf("%s is not in the model list, so I cannot change its effort. %s", current.Model, modelUsage(catalog.models)), nil, nil
+			return modelNotListedReply.Format(ctx, current.Model, modelUsage(ctx, catalog.models)), nil, nil
 		}
 		model, effort = catalog.models[index], args[0]
 	} else {
@@ -264,13 +294,13 @@ func (s *Service) modelReply(ctx context.Context, principalID string, args []str
 		var refusal *modelcatalog.ResolveError
 		if errors.As(err, &refusal) {
 			if refusal.Ambiguous {
-				return fmt.Sprintf("%q matches several models: %s. Use the full name.", args[0], strings.Join(refusal.Options, ", ")), nil, nil
+				return modelAmbiguousReply.Format(ctx, args[0], strings.Join(refusal.Options, ", ")), nil, nil
 			}
-			return fmt.Sprintf("I do not know the model %q. Available models: %s.", args[0], strings.Join(refusal.Options, ", ")), nil, nil
+			return modelUnknownReply.Format(ctx, args[0], strings.Join(refusal.Options, ", ")), nil, nil
 		}
 		model = resolved
 		if len(model.Efforts) == 0 {
-			return fmt.Sprintf("%s offers no effort level I can use.", model.ID), nil, nil
+			return modelNoEffortReply.Format(ctx, model.ID), nil, nil
 		}
 		if len(args) == 2 {
 			effort = args[1]
@@ -279,14 +309,14 @@ func (s *Service) modelReply(ctx context.Context, principalID string, args []str
 		}
 	}
 	if !agentruntime.ValidEffort(effort) {
-		return fmt.Sprintf("%q is not an effort level. %s supports: %s.", effort, model.ID, strings.Join(model.Efforts, ", ")), nil, nil
+		return modelBadEffortReply.Format(ctx, effort, model.ID, strings.Join(model.Efforts, ", ")), nil, nil
 	}
 	if !model.Supports(effort) {
-		return fmt.Sprintf("%s does not support effort %s. It supports: %s.", model.ID, effort, strings.Join(model.Efforts, ", ")), nil, nil
+		return modelUnsupportedEffort.Format(ctx, model.ID, effort, strings.Join(model.Efforts, ", ")), nil, nil
 	}
 	if err := s.model.Lanes.SetChoiceFrom(ctx, lane, agentruntime.ModelEffort{Model: model.ID, Effort: effort}, catalog.listed); err != nil {
 		if errors.Is(err, conversation.ErrUnsupportedChoice) {
-			return fmt.Sprintf("%s on effort %s is not available. %s", model.ID, effort, modelUsage(catalog.models)), nil, nil
+			return modelChoiceUnavailable.Format(ctx, model.ID, effort, modelUsage(ctx, catalog.models)), nil, nil
 		}
 		return "", nil, err
 	}
@@ -294,7 +324,7 @@ func (s *Service) modelReply(ctx context.Context, principalID string, args []str
 	if err != nil {
 		return "", nil, err
 	}
-	return fmt.Sprintf("This conversation now runs on %s, effort %s, until /new.", applied.Model, applied.Effort), nil, nil
+	return modelNowRunsReply.Format(ctx, applied.Model, applied.Effort), nil, nil
 }
 
 // defaultEffortFor keeps the effort in use when the model supports it, then medium, then the
@@ -311,12 +341,12 @@ func defaultEffortFor(model modelcatalog.Model, current string) string {
 	return model.Efforts[0]
 }
 
-func modelUsage(models []modelcatalog.Model) string {
+func modelUsage(ctx context.Context, models []modelcatalog.Model) string {
 	ids := make([]string, len(models))
 	for i, model := range models {
 		ids[i] = model.ID
 	}
-	return "Use /model <model> [effort], /model <effort>, or /model default. Models: " + strings.Join(ids, ", ") + ". Effort levels: " + strings.Join(agentruntime.Efforts, ", ") + "."
+	return modelUsageReply.Format(ctx, strings.Join(ids, ", "), strings.Join(agentruntime.Efforts, ", "))
 }
 
 // processModelPress acts on a button of the /model message and refreshes it from current state. A
@@ -338,20 +368,20 @@ func (s *Service) processModelPress(ctx context.Context, callback *CallbackQuery
 			return processingResult{}, "model_action", err
 		}
 		chat := s.model.ChatDefault
-		text, keyboard = fmt.Sprintf("Back on the default: %s, effort %s.", chat.Model, chat.Effort), modelChangeKeyboard()
+		text, keyboard = modelPressDefaultReply.Format(ctx, chat.Model, chat.Effort), modelChangeKeyboard(ctx)
 	case modelPickAction:
 		index := slices.IndexFunc(catalog.models, func(m modelcatalog.Model) bool { return m.ID == press.model })
 		if index >= 0 {
-			text = fmt.Sprintf("%s\n\nChoose the effort for %s.", ModelTitle, press.model)
-			keyboard = modelLevelsKeyboard(catalog.models[index])
+			text = modelChooseEffortPage.Format(ctx, ModelTitle.Format(ctx), press.model)
+			keyboard = modelLevelsKeyboard(ctx, catalog.models[index])
 		} else {
-			note = fmt.Sprintf("%s is no longer available.", press.model)
+			note = modelNoLongerAvailable.Format(ctx, press.model)
 		}
 	case modelApplyAction:
 		err = s.model.Lanes.SetChoiceFrom(ctx, lane, agentruntime.ModelEffort{Model: press.model, Effort: press.effort}, catalog.listed)
 		switch {
 		case errors.Is(err, conversation.ErrUnsupportedChoice):
-			note = fmt.Sprintf("%s on effort %s is not available.", press.model, press.effort)
+			note = modelPressUnavailableNote.Format(ctx, press.model, press.effort)
 		case err != nil:
 			return processingResult{}, "model_action", err
 		default:
@@ -360,7 +390,7 @@ func (s *Service) processModelPress(ctx context.Context, callback *CallbackQuery
 			if err != nil {
 				return processingResult{}, "model_action", err
 			}
-			text, keyboard = fmt.Sprintf("Saved: %s, effort %s, in this conversation until /new.", applied.Model, applied.Effort), modelChangeKeyboard()
+			text, keyboard = modelSavedReply.Format(ctx, applied.Model, applied.Effort), modelChangeKeyboard(ctx)
 		}
 	}
 	if text == "" {

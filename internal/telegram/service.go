@@ -1539,7 +1539,7 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 			reply, err := s.statusReply(ctx, principalID)
 			return reply, nil, err
 		}
-		return StatusReply, nil, nil
+		return StatusReply.Format(ctx), nil, nil
 	case "usage":
 		if s.model == nil || s.model.Usage == nil {
 			return s.helpReply(ctx), nil, nil
@@ -1550,7 +1550,7 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		return reply, nil, err
 	case "cancel":
 		if s.conversation == nil {
-			return NothingToCancelReply, nil, nil
+			return NothingToCancelReply.Format(ctx), nil, nil
 		}
 		cancelled, err := s.conversation.Cancel(ctx, laneOf(ctx, principalID))
 		if err != nil {
@@ -1559,7 +1559,7 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		if cancelled {
 			return CancelledReply.Format(ctx), nil, nil
 		}
-		return NothingToCancelReply, nil, nil
+		return NothingToCancelReply.Format(ctx), nil, nil
 	case "new":
 		if s.conversation == nil {
 			return NoSessionReply.Format(ctx), nil, nil

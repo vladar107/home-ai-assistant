@@ -15,7 +15,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
+)
+
+var (
+	contextDescription = locale.T("%s context", "контекст %s")
+	lowestCost         = locale.T("lowest cost", "самая низкая цена")
+	relativeCost       = locale.T("%sx cost", "цена ×%s")
 )
 
 const (
@@ -342,8 +349,11 @@ func ids(models []Model) []string {
 }
 
 // Describe returns one line per model, in order: its name, context size, and cost relative to the
-// cheapest model of the list.
-func Describe(models []Model) []string {
+// cheapest model of the list, in English. DescribeFor writes them in the context's language.
+func Describe(models []Model) []string { return DescribeFor(context.Background(), models) }
+
+// DescribeFor is Describe in the context's language.
+func DescribeFor(ctx context.Context, models []Model) []string {
 	cheapest := 0.0
 	for _, m := range models {
 		if m.OutputCost > 0 && (cheapest == 0 || m.OutputCost < cheapest) {
@@ -354,13 +364,13 @@ func Describe(models []Model) []string {
 	for i, m := range models {
 		parts := []string{m.Name}
 		if m.ContextWindow > 0 {
-			parts = append(parts, contextSize(m.ContextWindow)+" context")
+			parts = append(parts, contextDescription.Format(ctx, contextSize(m.ContextWindow)))
 		}
 		if cheapest > 0 && m.OutputCost > 0 {
 			if ratio := m.OutputCost / cheapest; ratio < 1.05 {
-				parts = append(parts, "lowest cost")
+				parts = append(parts, lowestCost.Format(ctx))
 			} else {
-				parts = append(parts, strconv.FormatFloat(round1(ratio), 'f', -1, 64)+"x cost")
+				parts = append(parts, relativeCost.Format(ctx, strconv.FormatFloat(round1(ratio), 'f', -1, 64)))
 			}
 		}
 		lines[i] = strings.Join(parts, ", ")

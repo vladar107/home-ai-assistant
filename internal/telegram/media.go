@@ -7,6 +7,12 @@ import (
 	"strings"
 
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
+)
+
+var (
+	imageTooLargeReply = locale.T("That image is too large for me to hold; images must stay under 5 MB.", "Это изображение слишком большое, я не могу его сохранить; изображения должны быть меньше 5 МБ.")
+	fileTooLargeReply  = locale.T("That file is too large for me to hold; files must stay under 20 MB.", "Этот файл слишком большой, я не могу его сохранить; файлы должны быть меньше 20 МБ.")
 )
 
 // inlineImageTypes are the picture formats worth sending to the model as an image. Any other
@@ -101,15 +107,15 @@ func documentMedia(document *MediaFile) media {
 // refuses to hold, or an error for a failure that should be retried with the update.
 func (s *Service) fetchMedia(ctx context.Context, principalID string, items []media) ([]attachment.Incoming, string, error) {
 	if s.attachments == nil {
-		return nil, UnsupportedAttachmentReply, nil
+		return nil, UnsupportedAttachmentReply.Format(ctx), nil
 	}
 	var total int64
 	for _, item := range items {
 		if item.fileID == "" {
-			return nil, AttachmentUnavailableReply, nil
+			return nil, AttachmentUnavailableText.Format(ctx), nil
 		}
 		if item.size > item.limit() {
-			return nil, attachmentTooLargeReply(item), nil
+			return nil, attachmentTooLargeReply(ctx, item), nil
 		}
 		total += item.size
 	}
@@ -118,7 +124,7 @@ func (s *Service) fetchMedia(ctx context.Context, principalID string, items []me
 		return nil, "", err
 	}
 	if room.Files < len(items) || room.Bytes < total {
-		return nil, ConversationFullReply, nil
+		return nil, ConversationFullReply.Format(ctx), nil
 	}
 
 	files := make([]attachment.Incoming, 0, len(items))
@@ -126,7 +132,7 @@ func (s *Service) fetchMedia(ctx context.Context, principalID string, items []me
 		reference, err := s.client.GetFile(ctx, item.fileID)
 		if err != nil {
 			if isPermanentFileError(err) {
-				return nil, AttachmentUnavailableReply, nil
+				return nil, AttachmentUnavailableText.Format(ctx), nil
 			}
 			return nil, "", err
 		}
@@ -134,10 +140,10 @@ func (s *Service) fetchMedia(ctx context.Context, principalID string, items []me
 		if err != nil {
 			var oversized *oversizedFileError
 			if errors.As(err, &oversized) {
-				return nil, attachmentTooLargeReply(item), nil
+				return nil, attachmentTooLargeReply(ctx, item), nil
 			}
 			if isPermanentFileError(err) {
-				return nil, AttachmentUnavailableReply, nil
+				return nil, AttachmentUnavailableText.Format(ctx), nil
 			}
 			return nil, "", err
 		}
@@ -164,22 +170,22 @@ func fileName(item media, filePath string) string {
 }
 
 // attachmentTooLargeReply names the limit the file passed, in the units the sender thinks in.
-func attachmentTooLargeReply(item media) string {
+func attachmentTooLargeReply(ctx context.Context, item media) string {
 	if item.kind == attachment.KindImage {
-		return "That image is too large for me to hold; images must stay under 5 MB."
+		return imageTooLargeReply.Format(ctx)
 	}
-	return "That file is too large for me to hold; files must stay under 20 MB."
+	return fileTooLargeReply.Format(ctx)
 }
 
 // unsupportedMediaReply answers a message carrying something no model reachable here can read.
 func unsupportedMediaReply(ctx context.Context, reason string) string {
 	switch reason {
 	case "audio":
-		return UnsupportedAudioReply
+		return UnsupportedAudioReply.Format(ctx)
 	case "video":
 		return UnsupportedVideoReply.Format(ctx)
 	default:
-		return UnsupportedStickerReply
+		return UnsupportedStickerReply.Format(ctx)
 	}
 }
 
