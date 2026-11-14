@@ -198,7 +198,9 @@ func (s *Service) sendDirect(ctx context.Context, principalID string, chatID int
 			s.logger.WarnContext(ctx, "approval.direct.undeliverable", "principal_id", principalID, "error", err)
 			return
 		}
-		if err := s.repository.SetApprovalMessage(ctx, recordIDs(group), chatID, messageID, NotWidget); err != nil {
+		// A newer turn of the tab cancels this delivery; the message is already in the chat, and one that
+		// is not recorded here is sent again by that turn.
+		if err := s.repository.SetApprovalMessage(context.WithoutCancel(ctx), recordIDs(group), chatID, messageID, NotWidget); err != nil {
 			s.logger.WarnContext(ctx, "approval.direct.unrecorded", "principal_id", principalID, "error", err)
 		}
 	}
