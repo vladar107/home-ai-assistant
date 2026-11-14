@@ -1,6 +1,6 @@
 # 0155 — Regular agent evaluations and prompt experiments
 
-Status: `proposed`
+Status: `in-progress`
 
 ## Context
 
@@ -16,6 +16,10 @@ replies, and a regression shows up later as a 👎 or a 👎-driven reconsider t
 
 How a turn runs today:
 
+- `conversation.Service.runTurn` owns a chat turn around the engine: it picks the tool set from
+  the user's switches, records the user's own message so proposals are judged against it, takes
+  the turn's notice and subject context, starts the Jev tool hint, builds the `tools.Run` the
+  broker and the safety checks read, and turns a timeout or a failure into a reply.
 - `turn.Engine.Compose` builds the message: the current local time line, the user's name, place,
   trip, collections, a notice, an optional tool hint from Jev, then the user's text.
 - `turn.Engine.Run` passes a `runtime.RunRequest` to the Pi runtime (`internal/runtime/pi`),
@@ -84,28 +88,36 @@ with the last one or with another prompt variant, with an honest interval. Later
 runs weekly on its own, and its pass rates show as a trend in Grafana. Choosing between prompt
 wordings becomes reading a comparison, not a few live replies.
 
-Success for the first stage: about fifteen cases, deterministic checks only, three trials each,
-a Markdown report, run by hand from the operator's Mac.
+Success for the first stage: about forty cases covering every failure kind the history review
+found and the flows that work today, chat and scheduled turns alike, with every connector the
+assistant uses served by a local fake; deterministic checks and the operator's review; three
+trials each; a Markdown report, run by hand from the operator's Mac.
 
 ## Decisions
 
 - **Build a small Go harness; adopt no eval framework.** It reuses the turn engine, the Pi
   runtime, the broker and the SQLite store as they run in production, adds no dependency, and
-  sends nothing anywhere but the model provider already in use. Cases and results use JSON, which
-  the standard library reads. Revisit if the judge or report work grows beyond this plan.
+  sends nothing anywhere production does not: the model provider and TypeSafe. Cases and
+  results use JSON, which the standard library reads. Revisit if the judge or report work grows
+  beyond this plan.
 - **An eval case** is a JSON file with:
-  - `id`, `title`, `tags` (such as `regression`, `capability`, `time`, `proposal`, `injection`);
+  - `id`, `title`, `tags` (such as `regression`, `happy`, `capability`, `time`, `proposal`,
+    `injection`, `scheduled`) and the failure kind it covers, when it covers one;
   - `clock`: the fixed local time and the IANA zone the turn sees;
   - `user`: a synthetic display name, the switches that are on, memory text, and a model and
     effort when the case pins one;
-  - `world`: the state the tools see. Internal tools (schedule, memory, watches, collections,
-    trips, projects) run for real on a temporary SQLite store seeded from the case. Connectors
-    whose tool definitions are fixed reach the existing loopback simulators (`googlesim`,
-    `calendarsim`, `notionsim`), seeded from the case, so a mailbox, a calendar or a page is
-    case data, not a scripted tool answer. Connectors whose tools depend on outside state, the
-    home connector and catalogue MCP servers, are left out until a later plan;
-  - `turns`: one or more user messages in one session, optionally with a Confirm or Reject of the
-    proposals the previous turn made;
+  - `world`: the state the tools see. Internal tools (schedule, memory, watches, collections, trips,
+    projects, routes, backlog) run for real on a temporary SQLite store seeded from the case,
+    including scheduled jobs and saved routes. Every connector reaches a loopback fake seeded from
+    the case, so a mailbox, a timetable, a forecast or a device is case data, not a scripted tool
+    answer: the existing `googlesim`, `calendarsim` and `notionsim`; new fakes for the train and bus
+    planners, the weather service, web search and page fetch, places, flights, the monitoring
+    connector and the NAS file search; a fake home server whose synthetic devices, sensors and
+    history the case lists; and `mcpsim` serving the case's catalogue MCP tools and their answers;
+  - `turns`: a sequence of steps in one session. A step is a user message; a Confirm or Reject of
+    the proposals the previous turn made; a 👎 on the previous reply, which starts the reconsider
+    turn the way a reaction in Telegram does; or a run of one of the world's scheduled jobs at
+    the case clock;
   - `expect`: deterministic checks: tools that must be called, with argument predicates (equal,
     contains, matches, within a time range); tools that must not be called; a maximum number of
     calls; proposals that must exist and what they write, or that nothing was written; the final
@@ -115,60 +127,132 @@ a Markdown report, run by hand from the operator's Mac.
   - `trials`: how many times to run it, default three.
 - **Cases are synthetic and public.** They live in `evals/cases/` in this repository, use
   neutral names, places and data, and never copy a real message, trace, memory or device. A case
-  inspired by a real failure is rewritten from scratch by the operator. A Go test loads every case
-  and checks its shape, its unique ID, and that every tool it names is a static tool: an internal
-  tool or one of a connector with fixed definitions. Home and catalogue MCP tools are built from
-  outside state, so the test cannot know them and a case may not name them. It runs in CI with no
+  inspired by a real failure is rewritten from scratch by the operator. Fake home devices and
+  catalogue MCP tools are invented for the case and never copied from the household's. A Go test
+  loads every case and checks its shape and its unique ID. A second test builds each case's eval
+  world with every connector served by its fakes and every switch on, reads the tool names it
+  offers, and checks that every tool the case names is one of them. Both run in CI with no
   model.
+- **Scheduled turns run through the scheduler's own step.** A scheduled step seeds nothing new:
+  it asks the schedule service to run one of the world's jobs now (`RunNow`), so the job's
+  prompt, the Heads-up task and its call budget, conditions and project lines are production's
+  own, and the turn runs unattended on the case clock. The reply is captured where the
+  scheduler would deliver it, including a quiet run that sends nothing.
+- **Happy paths guard what works.** Beside the failure cases, the suite holds cases for flows
+  that work today, drawn from replies the operator marked 👍 and from frequent flows in the
+  history review that went well, rewritten like every case. They carry the `happy` tag. The
+  report shows their pass rate on its own line, and a change that lowers it is a regression even
+  when failure cases improve.
+- **The first cases come from the operator's own history, read locally.** The operator copies
+  their own conversations (the Pi session files of their principal) and a snapshot of the store
+  from the NAS into a private folder on the Mac, outside the repository. No other household
+  member's conversations are read. The review starts from the turns marked 👎, reconsidered,
+  failed or with a tool error, then reads the rest, and groups what went wrong into failure kinds
+  with counts and examples. That analysis stays in the private folder and is never committed.
+  The operator picks the kinds that matter; each becomes one or more synthetic cases written from
+  scratch, and the operator approves every case before it is added.
 - **A local privacy scan backs the operator's review.** Before a run, and as a command of its own
   the operator runs before committing a case, the harness reads the household values from the
   ignored `.env` (such as places, names and addresses its settings hold) and refuses any case or
   variant that contains one. The scan runs only on the operator's machines; CI has no `.env`, and
   the values are never printed, only the file and field that matched.
+- **The operator reviews every trial until the checks earn trust.** A `review` command in the
+  terminal steps through a run's trials, showing the user message, the tool calls, the proposals,
+  the reply and the automatic verdict, and records the operator's own verdict (good, bad or
+  unsure) with an optional note beside the run's results; the local results store of stage 2
+  imports them. Where the operator and the checks
+  disagree, the case is fixed: a check that missed a real failure is tightened, and one that
+  failed an acceptable answer is loosened. The report shows the agreement between the checks and
+  the operator per case; full review stops only when it is consistently high, after which the
+  operator reviews the disagreements and a sample. The same labels later calibrate the judge.
 - **Checks in order: code first, judge second.** A trial passes when every deterministic check
   passes and, when a rubric exists and the judge is on, every judged question is "yes". Grading
   prefers the final state over the exact path: an ordered sequence of calls is checked only when
   the case says the order matters.
-- **The runner plays real turns.** A trial builds the wiring the production binary builds, with
-  the store in a temporary directory and the static connectors pointed at the seeded simulators.
-  The broker's own executor runs every call; there is no scripted layer in front of it. The
-  message is composed by `turn.Engine.Compose` with the case's clock, so the time line, the user
-  line and the tool guidance are what production would send. The Jev tool hint is off, so no
-  text goes to TypeSafe. Every tool definition the model sees is the real one.
+- **The runner plays real turns through the conversation service.** A trial builds the wiring the
+  production binary builds, with the store in a temporary directory and the static connectors
+  pointed at the seeded simulators, and enqueues each user message on `conversation.Service` as
+  a chat turn. The reply is captured at the service's delivery boundary instead of reaching
+  Telegram. The harness never calls `turn.Engine` itself, so tool selection, the recorded user
+  message, notices, the `tools.Run`, and timeout and failure replies are production's own. The
+  broker's own executor runs every call; there is no scripted layer in front of it. The message
+  is composed with the case's clock, so the time line, the user line and the tool guidance are
+  what production would send. Every tool definition the model sees is the real one.
+- **The eval world supplies what the wiring needs from Telegram.** `wiring.Build` requires the
+  chat, reminder, alert, task-message and tab senders, and the chat side alone is several
+  interfaces (the approval deliverer, documents, reactions). The harness implements them in one
+  recording stub, so proposals, cards and replies are captured for the checks and nothing is
+  sent. The `eval` principal is bootstrapped through `identity` with a synthetic Telegram user ID
+  and chat, as a household user would be. Only the services a chat turn needs are started: the
+  model connection, the conversation service and approvals. The scheduler's steps are not
+  started, so no job runs on the eval profile behind the run's back. A runtime decorator that
+  records each run for the cassette forwards the optional interfaces the wiring type-asserts
+  (`conversation.Transcripts`, `history.Directories`).
+- **Safety checks and the tool hint run as in production.** The `eval` principal's switches turn
+  Jev's judgments and tool hint on, using the TypeSafe key from the operator's ignored `.env`, so
+  a trial exercises the layer that withdraws a proposal or a search. Only synthetic case text
+  reaches TypeSafe. A case may turn them off through its `user` switches; the report lists
+  which trials ran with them, since Jev adds variance of its own.
 - **One clock for the whole world.** The case's clock must reach every seam that reads the time,
   or an approval, a reminder or a task would be dated by the wall clock while the turn is told
   another day. The seams are: `wiring.CoreConfig.Now`, which feeds the schedule service and its
   reminder job, collections, intake, search checks, trips, projects, watches, events and routes;
-  `turn.Config.Now`; the memory service's `Now`; the connectors' own `Now` fields; and the direct
-  `time.Now` calls in `store/sqlite/approvals.go`, `store/sqlite/schedules.go` and
-  `task/service.go`, which gain a clock. `tools/broker.go` reads `time.Now` only to time a call,
-  which the case clock need not reach.
+  `turn.Config.Now`; `conversation.Config.Now`; the connectors' own `Now` fields; the approval
+  service, which today fixes its clock to `time.Now` and gains a config field for proposal
+  creation, expiry and confirmation; the user-memory and backlog services, whose `Now` the wiring
+  does not pass today; and the direct `time.Now` calls in `store/sqlite/approvals.go` and
+  `store/sqlite/schedules.go`, which gain a clock. `tools/broker.go` and the conversation
+  service's own `time.Now` calls only time a call or a turn stage for metrics, and SQL
+  `strftime('now')` stamps on exposure flags, job reports, conversations and tabs are never
+  shown to a turn; those stay on the wall clock. Background tasks are not wired into the eval
+  world in stage 1, so the task service keeps its clock until a case needs it.
 - **The runner uses the Pi release the image pins.** It installs Pi from
   `third_party/pi-runtime` as the Dockerfile does and checks at startup, through the runtime's
-  existing version check, that Pi reports the version in `HOME_AGENT_PI_VERSION`'s default. A
-  different Pi refuses to run, so a result always names the Pi production runs.
+  existing version check (`ExpectedVersion`), that Pi reports the version in
+  `HOME_AGENT_PI_VERSION`'s default, which the config package exports for it. A different Pi
+  refuses to run, so a result always names the Pi production runs.
 - **The model is live; replay is for checks, not prompts.** Every trial records a cassette: the
-  composed message, the system prompt's fingerprint, Pi's event stream, each tool call with its
-  arguments and the answer given, the reply, the tokens and the model ID. Replay feeds a cassette
+  composed message, the system prompt's fingerprint, the runtime's event stream
+  (`runtime.Event`), each tool call with its arguments and the answer given, the proposals and
+  cards the recording stub captured, the reply, the tokens and model calls from the run's usage,
+  and the model ID. Replay feeds a cassette
   back through the checks, so a new or fixed check is tried on past runs at no cost. A replay
   cannot judge a prompt change, since the model would answer differently; the report says which
   trials were replayed.
 - **Who pays: the operator's own subscription, through a dedicated eval profile.** The harness
-  runs as a synthetic principal, `eval`, whose Pi profile directory is given on the command line.
-  It never reads the application's profiles directory, never runs as the operator's application
-  principal, and never runs on another user's login, wherever it runs.
-- **The eval profile is logged in by the harness itself.** `home-agent-eval login --profile-dir
-  <dir>` runs the device-code flow of `internal/connection`, printing the verification address
-  and code in the terminal instead of sending them to Telegram, and writes the credential into
-  that directory with the same private permissions. Copying `auth.json` from a production profile
+  runs as a synthetic principal, `eval`. Pi, the connection service, the model catalog and the
+  usage reader all resolve a profile as `<profiles root>/<principal>`, so the command line names
+  an eval profiles root (`--profiles <root>`) and the profile is `<root>/eval`. The root may not
+  be, or lie inside, the application's data directory (`HOME_AGENT_DATA_DIR`, whose `pi`
+  directory holds the household's profiles). The harness never runs as the operator's
+  application principal and never on another user's login, wherever it runs.
+- **The eval profile's binding lives in a persistent eval store.** A credential is usable only
+  when the store binds it: readiness and the credential readers check a `model_connections` row
+  for the principal against the account in `auth.json`. The root therefore holds `eval.sqlite`
+  beside the profile, and login binds the account there. Each trial's temporary store is seeded
+  with that binding, and the `usage` command reads through the eval store.
+- **The eval profile is logged in by the harness itself.** `home-agent-eval login --profiles
+  <root>` runs the device-code flow of `internal/connection`, printing the verification address
+  and code in the terminal instead of sending them to Telegram. It creates `<root>/eval` as a real
+  directory, writes the credential into it with the same private permissions, and binds the
+  account in the eval store. Copying `auth.json` from a production profile
   is forbidden and the documentation says why: the provider rotates the refresh token on use, so
   two copies refreshing apart would leave one of them, possibly the operator's own chat, logged
   out.
 - **A run checks the quota before it starts and stops at its budget.** The pre-flight reads the
   eval profile's usage through the reader `/status` uses (`chatgpt.Client.Usage`) and refuses to
   start when any window is above a set percentage used (default 50%), so an eval never eats the
-  quota the operator's own chat needs. During the run a budget (model calls and tokens) bounds it,
-  and the first quota or authentication failure stops it, reporting the trials it did not run.
+  quota the operator's own chat needs. The usage reader never refreshes and a weekly profile
+  almost always holds an expired access token, so the pre-flight first takes the credential
+  through `connection.Service.Credential`, which refreshes under the profile's file lock. During
+  the run a
+  budget bounds it, by default 300 model calls and raised per run on the command line, and the
+  first quota or authentication failure stops it, reporting the trials it did not run.
+- **Suite size.** Stage 1 starts with about forty cases: two or three for each failure kind the
+  history review found and about ten happy paths. A regression run plays three trials per case,
+  and a variant comparison five.
+- **Cassettes stay local.** Run cassettes are written to the ignored results directory. Only the
+  few cassettes the harness's own tests need are committed.
 - **Prompt variants are named overrides of the fixed sections.** `prompt.System`'s constants
   become fields of a `prompt.Sections` value with a `Default`; production uses `Default` and its
   rendered bytes do not change, which the existing golden files prove. A variant file in
@@ -204,64 +288,112 @@ a Markdown report, run by hand from the operator's Mac.
 ## Approach
 
 Three stages, each useful on its own. Each chunk names its complexity, dependencies and
-acceptance criteria. Chunks 3, 4, 6, 7, 8 and 9 all edit `cmd/home-agent-eval/main.go`, so they
-run one at a time in that order, each on top of the one before.
+acceptance criteria. Chunks 4, 5, 6, 8, 9, 10 and 11 all edit `cmd/home-agent-eval/main.go`, so
+they run one at a time in that order, each on top of the one before.
 
 ### Stage 1: a regression suite run by hand
 
-1. **Case format and the first cases** — Complex; no dependency.
-   - Task: the case types and loader, the CI shape test, and about fifteen synthetic cases over
-     internal tools and static connectors, covering: answering a date question from the time
-     line; creating a one-off reminder at the right local time; not creating a recurring job
-     unless asked; proposing a write instead of claiming it was done; calling a tool before saying
-     something is unavailable; ignoring an instruction inside a seeded mail; replying in the
-     language of the message; taking the likely reading of an ambiguous request and stating it;
-     asking first when a guess would cost something.
+0. **History review** — Operator with the orchestrator; no code; no dependency.
+   - Task: the operator copies their own Pi session files and a store snapshot into a private
+     folder outside the repository; the review groups what went wrong into failure kinds with
+     counts and examples, and the operator picks the kinds the first cases cover; it also lists
+     the flows that work, from 👍 replies and frequent successful turns, as happy-path candidates.
+   - Acceptance: the operator has approved the failure kinds and the happy paths; nothing from
+     the history is in the repository.
+1. **Case format and the first cases** — Complex; depends on 0 for the cases, not the loader.
+   - Task: the case types and loader, the CI shape and ID test, and about forty synthetic cases,
+     chat and scheduled, written from scratch for every failure kind and happy path the operator
+     approved, each case approved one by one. Kinds expected beside them: answering a date question
+     from the time line; creating a one-off reminder at the right local time; not creating a
+     recurring job unless asked; proposing a write instead of claiming it was done; calling a tool
+     before saying something is unavailable; ignoring an instruction inside a seeded mail; replying
+     in the language of the message; taking the likely reading of an ambiguous request and stating
+     it; asking first when a guess would cost something.
    - Files: `internal/eval/case.go`, `internal/eval/case_test.go`, `evals/cases/*.json`.
-   - Acceptance: every case loads; a malformed case, a duplicate ID, an unknown tool name and a
-     home or catalogue MCP tool name each fail the test with the file named; the test runs in CI
-     with no model and no network.
+   - Acceptance: every case loads; a malformed case and a duplicate ID each fail the test with
+     the file named; the test runs in CI with no model and no network. Tool names are checked in
+     chunk 3, once the eval world serves every connector.
 2. **The eval world and its clock** — Complex; depends on 1.
    - Task: build the production wiring for the `eval` principal on a temporary store, seed the
      internal tools and the `googlesim`, `calendarsim` and `notionsim` simulators from the case,
-     and leave the home connector and MCP servers unconfigured. Give the case's clock and zone to
-     every seam listed under "One clock for the whole world", threading a clock into the store's
-     approval and schedule writes and the task service where they call `time.Now` today.
-   - Files: `internal/eval/world.go`, `internal/eval/world_test.go`, `internal/wiring/wiring.go`,
-     `internal/store/sqlite/approvals.go`, `internal/store/sqlite/schedules.go`,
-     `internal/task/service.go`.
-   - Acceptance, with the Pi fixture: the composed message starts with the case's time line; a
+     and leave background tasks unconfigured. Run chat, Confirm and Reject, 👎 and scheduled
+     steps: a 👎 enqueues the reconsider turn as the Telegram reaction handler does, and a
+     scheduled step calls the schedule service's `RunNow` for the job. Implement the
+     recording stub for the chat, reminder, alert, task-message and tab senders, bootstrap the
+     `eval` principal through `identity`, seed the model-connection binding from the eval store,
+     and start only the model connection, the conversation service and approvals. Give the case's
+     clock and zone to every seam listed under "One clock for the whole world", adding a clock to
+     the approval service and to the store's approval and schedule writes, and passing it to the
+     user-memory and backlog services.
+   - Files: `internal/eval/world.go`, `internal/eval/chat.go`, `internal/eval/world_test.go`,
+     `internal/eval/case_test.go`, `internal/wiring/wiring.go`, `internal/approval/approval.go`,
+     `internal/store/sqlite/approvals.go`, `internal/store/sqlite/schedules.go`.
+   - Acceptance, with the Pi fixture: a message enqueued on the conversation service runs a turn
+     whose reply and proposals reach the recording stub and nothing else; no scheduler step runs
+     on its own; a scheduled step runs the job's prompt with the Heads-up budget where it applies
+     and captures a quiet run as quiet; a 👎 step produces a reconsider turn; the safety checks
+     and the tool
+     hint reach a TypeSafe stand-in when the case's switches turn them on and nothing when they
+     are off; the composed message starts with the case's time line; a
      seeded mail, event or page is what the connector's tool returns; an internal tool writes to
      the temporary store; a proposal's creation and expiry, a reminder's next run, a schedule
-     run's record and a task's creation time are all on the case's clock, as are the trip,
+     run's record and a memory proposal are all on the case's clock, as are the trip,
      project, watch and collection lines a turn reads; nothing outside loopback is contacted; the
      production wiring passes `time.Now` and its tests are unchanged.
-3. **Operator commands: login, quota pre-flight and privacy scan** — Complex; no dependency.
-   - Task: `home-agent-eval login --profile-dir <dir>` running the `internal/connection`
-     device-code flow with a terminal deliverer; `home-agent-eval usage --profile-dir <dir>`
-     reading the profile's usage through `chatgpt.Client.Usage`; `home-agent-eval scan` reading
+3. **Fakes for every connector** — Complex; depends on 2.
+   - Task: loopback fakes seeded from the case for the train and bus planners and disruptions,
+     the weather service (its existing forecast and geocoding URL overrides), web search and page
+     fetch, places, flights, the monitoring connector and the NAS file search; a fake home
+     server whose synthetic devices, sensors, history and
+     vacuum schedule come from the case; and `mcpsim` serving the case's catalogue MCP tools.
+     Where a connector has no endpoint override yet, add one that production leaves empty. Add
+     the CI test that checks every tool a case names against the tools its world offers.
+   - Files: `internal/testutil/` (new fakes beside the existing simulators),
+     `internal/eval/world.go`, the connectors that gain an endpoint override,
+     `internal/eval/case_test.go`.
+   - Acceptance: with the Pi fixture, each fake's seeded answer is what its tool returns; a
+     home or MCP tool appears only when the case's world defines it; an unknown tool name in a
+     case fails the tool-name test with the file named; nothing outside loopback is contacted;
+     every connector's own tests are unchanged.
+4. **Operator commands: login, quota pre-flight and privacy scan** — Complex; no dependency.
+   - Task: the eval store; `home-agent-eval login --profiles <root>` running the
+     `internal/connection` device-code flow with a terminal deliverer and binding the account in
+     the eval store; `home-agent-eval usage --profiles <root>` refreshing the credential through
+     `connection.Service.Credential` and reading usage through `chatgpt.Client.Usage` over the
+     eval store; `home-agent-eval scan` reading
      the household values from the ignored `.env` and refusing cases or variants that contain one.
    - Files: `cmd/home-agent-eval/main.go`, `internal/eval/login.go`, `internal/eval/preflight.go`,
-     `internal/eval/scan.go`, and in `internal/connection` only what lets a caller outside the
-     Telegram flow start and finish a ceremony for one profile directory.
-   - Acceptance: against the `codexauth` simulator, login writes a credential readable by Pi in
-     the given directory with private permissions, and refuses a directory inside the
-     application's profiles directory; against a usage stub, a window above the threshold
+     `internal/eval/scan.go`, `internal/eval/profile.go`, `internal/config/conversation.go` (the
+     exported Pi version default), and in `internal/connection` only what lets a caller outside
+     the Telegram flow start and finish a ceremony for one principal.
+   - Acceptance: against the `codexauth` simulator, login creates `<root>/eval`, writes a
+     credential readable by Pi there with private permissions, binds it in the eval store, and
+     refuses a root that is or lies inside `HOME_AGENT_DATA_DIR`; with an expired access token the
+     usage command refreshes and then reads; against a usage stub, a window above the threshold
      refuses with the window named; the scan finds a planted value in a case and prints the file
      and field, never the value; without `.env` the scan says it found nothing to check.
-4. **Runner, cassettes and checks** — Complex; depends on 2 and 3.
+5. **Runner, cassettes and checks** — Complex; depends on 2, 3 and 4.
    - Task: check the Pi version against the pinned one, run the quota pre-flight and the scan,
-     then run each case's trials in a fresh session on the eval profile, record the cassette,
+     then run each case's trials in a fresh session on the eval profile, playing every step
+     through the world and waiting for its captured reply, record the cassette,
      apply the deterministic checks, enforce the budget, stop on quota or authentication failure,
-     and write the JSON result and a Markdown report (pass rate, `pass^k`, failing checks per
-     case, tokens, Pi version, model, prompt fingerprint).
+     and write the JSON result and a Markdown report (pass rate, `pass^k`, the happy-path pass
+     rate on its own line, pass rate per failure kind, failing checks per case, tokens, Pi
+     version, model, prompt fingerprint).
    - Files: `internal/eval/runner.go`, `internal/eval/checks.go`, `internal/eval/report.go`,
      `cmd/home-agent-eval/main.go`, `.gitignore`.
    - Acceptance: an integration test with the Pi fixture covers a passing and a failing trial, a
      budget stop, a quota stop, a Pi of another version refused at startup, and a run refused by
-     the pre-flight; the command refuses to start without an explicit profile directory and never
-     opens the application's profiles directory.
-5. **Operator documentation** — Simple; depends on 4.
+     the pre-flight; the command refuses to start without an explicit profiles root and never
+     opens the application's data directory; the budget counts model calls from the run's usage.
+6. **Operator review** — Complex; depends on 5.
+   - Task: the `review` command over a run's trials, the operator's verdicts and notes stored
+     beside the trials, and the agreement between checks and operator in the report.
+   - Files: `internal/eval/review.go`, `internal/eval/report.go`, `cmd/home-agent-eval/main.go`.
+   - Acceptance: with recorded trials, a review stores a verdict per trial and resumes where it
+     stopped; the report counts agreements and lists every disagreement with its case; a trial
+     the operator marks bad that the checks passed shows as a missed failure.
+7. **Operator documentation** — Simple; depends on 6.
    - Task: how to install the pinned Pi, log in the eval profile (and why `auth.json` is never
      copied), run a suite, read the report, scan and write a new case.
    - Files: `docs/architecture.md` (a section on evals).
@@ -269,7 +401,7 @@ run one at a time in that order, each on top of the one before.
 
 ### Stage 2: variants, history and comparison
 
-6. **Prompt sections and variants** — Complex; depends on 4.
+8. **Prompt sections and variants** — Complex; depends on 5.
    - Task: `prompt.Sections` with `Default`, the optional sections field on `RunRequest` read by
      the Pi runtime, variant files, the prompt fingerprint, and a `--variant` flag on the run
      command.
@@ -279,15 +411,16 @@ run one at a time in that order, each on top of the one before.
    - Acceptance: every existing golden file is unchanged; the Pi fixture receives the variant's
      prompt only when the harness sets one; the fingerprint changes with a section and not with
      memory or jobs; trials of one variant all run before the next starts.
-7. **Local results store, trend and compare** — Complex; depends on 6.
-   - Task: the SQLite file with runs, trials and checks; `trend` (pass rate and `pass^k` per run,
-     split by fingerprint, model and Pi version) and `compare` (the paired report above).
+9. **Local results store, trend and compare** — Complex; depends on 8.
+   - Task: the SQLite file with runs, trials, checks and the operator's verdicts; `trend` (pass rate
+     and `pass^k` per run, split by fingerprint, model and Pi version) and `compare` (the paired
+     report above).
    - Files: `internal/eval/store.go`, `internal/eval/stats.go`, `internal/eval/compare.go`,
      `cmd/home-agent-eval/main.go`.
    - Acceptance: the statistics are tested on hand-computed examples; comparing a run with itself
      reports no difference; runs over different case sets compare only their shared cases and
      say so.
-8. **Replay** — Simple; depends on 7.
+10. **Replay** — Simple; depends on 9.
    - Task: re-score stored cassettes with the current checks, as a `replay` command.
    - Files: `internal/eval/replay.go`, `cmd/home-agent-eval/main.go`.
    - Acceptance: changing a check and replaying a run changes its verdicts without starting Pi,
@@ -295,27 +428,33 @@ run one at a time in that order, each on top of the one before.
 
 ### Stage 3: judge and weekly trend
 
-9. **Rubric and pairwise judge** — Complex; depends on 8.
+11. **Rubric and pairwise judge** — Complex; depends on 10.
    - Task: the judge run, its prompt, `unknown`, order-swapped pairwise verdicts, and a labelling
      command that records the operator's own verdicts and reports agreement per question.
    - Files: `internal/eval/judge.go`, `cmd/home-agent-eval/main.go`.
    - Acceptance: with the Pi fixture, a swapped pair that disagrees counts as no verdict; a
      question below the agreement threshold is reported but does not decide a trial.
-10. **Weekly run and Grafana** — Complex; depends on 7 and on the cadence question below.
+12. **Weekly run and Grafana** — Complex; depends on 9 and on the weekly-run location question
+    below.
     - Task: run the regression suite weekly on the dedicated eval profile, export pass rate,
       `pass^k`, tokens and the fingerprint's short form as metrics, and add a panel to the
       monitoring repository's dashboard.
     - Files: depends on the answer; `internal/observability/telemetry.go` for the metrics either
-      way, and the dashboard in the monitoring repository.
+      way, and the dashboard in the monitoring repository. On the NAS it also needs the harness
+      in the image or a container of its own, the deploy files, and an interactive device login
+      of the eval profile there; those files are named once the question is answered.
     - Acceptance: two runs a week apart show as two points in the panel, and a fingerprint change
       is visible on it; the run refuses to start on any profile but the eval profile.
 
 ## Files affected
 
 - New: `internal/eval/`, `cmd/home-agent-eval/`, `evals/cases/`, `evals/variants/`
-- `internal/wiring/wiring.go`, `internal/store/sqlite/approvals.go`,
-  `internal/store/sqlite/schedules.go`, `internal/task/service.go` (the clock, stage 1)
-- `internal/connection` (a ceremony outside Telegram, stage 1)
+- `internal/testutil/` (new fakes for every connector) and an endpoint override in any connector
+  that lacks one (stage 1)
+- `internal/wiring/wiring.go`, `internal/approval/approval.go`,
+  `internal/store/sqlite/approvals.go`, `internal/store/sqlite/schedules.go` (the clock, stage 1)
+- `internal/connection` (a ceremony outside Telegram, stage 1), `internal/config/conversation.go`
+  (the exported Pi version default, stage 1)
 - `internal/prompt/system.go`, `internal/runtime/runtime.go`, `internal/runtime/pi/runtime.go`
   (stage 2)
 - `internal/observability/telemetry.go` and the monitoring repository's dashboard (stage 3)
@@ -343,28 +482,24 @@ run one at a time in that order, each on top of the one before.
 - **Synthetic cases drift from real use.** New cases come from failures the operator sees,
   rewritten without private data; that review is the operator's, since no check can find private
   data in free text.
-- **Simulators are not the real services, and stage 1 leaves dynamic tools out.** Cases test the
-  agent's choices, not the connectors, which keep their own integration tests. Home and
-  catalogue MCP tools are built from outside state; evaluating them needs a recorded snapshot of
-  their definitions and is left to a later plan.
+- **Fakes are not the real services.** Cases test the agent's choices, not the connectors, which
+  keep their own integration tests. Home and catalogue MCP tools are built from the fake's
+  invented devices and tool lists, so their descriptions can drift from the live ones; a case
+  that depends on a description is updated when the connector changes.
+- **Stage 1 is larger than first planned.** Covering every failure kind means fakes for every
+  connector and scheduled turns before the first run. The chunks stay independent enough that
+  the runner can start on the chat cases while the remaining fakes land.
 - **Threading a clock into the store and the task service touches production code.** Production
   passes `time.Now`, so behaviour does not change, and the existing tests prove it.
-- Open questions for the operator:
-  1. Is the operator's own subscription, logged into a dedicated eval profile, the right payer?
-     The plan never uses the operator's application principal or the application's profiles
-     directory. Recommendation: yes; a second subscription only if eval runs start to crowd the
-     operator's own chat out of its quota.
-  2. Where does the weekly run happen: on the NAS, as a separate run of the harness with its own
+- **Jev adds variance of its own.** With the safety checks and the tool hint on, a trial's
+  outcome also depends on TypeSafe's answers, which may change without a commit here. The report
+  marks the trials that ran with them, and a comparison of prompt variants can turn them off by
+  case when it needs to isolate the prompt.
+- Open questions for the operator, decided after stage 2:
+  1. Where does the weekly run happen: on the NAS, as a separate run of the harness with its own
      eval profile directory beside the application's data, or on the Mac on a schedule, pushing
      metrics? Either way it uses the dedicated eval profile only. Recommendation: the NAS, which
-     is always on and already has the pinned Pi and the OTLP collector; decide after stage 2.
-  3. Which model judges, and may Jev judge simple yes/no questions? Recommendation: a different
-     model on the same subscription through Pi; keep Jev out, so the harness sends nothing to a
-     second provider even though the cases are synthetic.
-  4. How many cases and trials? Recommendation: 20 to 40 cases, three trials for the regression
-     run, five for a variant comparison.
-  5. What budget caps a run, and above what usage does the pre-flight refuse? Recommendation:
-     300 model calls by default, raised per run on the command line, and a refusal above 50% of
-     any usage window.
-  6. Should cassettes of synthetic cases be committed? Recommendation: commit only the few the
-     harness's own tests need; keep run cassettes local.
+     is always on and already has the pinned Pi and the OTLP collector.
+  2. Which model judges, and may Jev judge simple yes/no questions? Recommendation: a different
+     model on the same subscription through Pi; keep Jev out of judging, so the judge does not
+     share a model with the safety checks it may be grading.
