@@ -19,7 +19,7 @@ const (
 
 var (
 	ProjectsTitle    = locale.T("Projects", "Проекты")
-	NoProjectsReply  = locale.T("You have no projects. Ask me in conversation, for example: let's make a project for finding a dentist.", "У вас нет проектов. Попросите меня в разговоре, например: давай заведём проект по поиску стоматолога.")
+	NoProjectsReply  = locale.T("You have no projects. Ask me in conversation, for example: let's make a project for finding a dentist.", "У тебя нет проектов. Попроси меня в разговоре, например: давай заведём проект по поиску стоматолога.")
 	ClosedProjectsOf = locale.T("Done or abandoned", "Завершённые или заброшенные")
 	noOpenProjects   = locale.T("No open projects.", "Открытых проектов нет.")
 	projectItemsOpen = locale.N(

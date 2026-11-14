@@ -34,13 +34,13 @@ var (
 	sessionResumeButton   = locale.T("Resume %s", "Продолжить %s")
 	sessionOpenButton     = locale.T("Open %s", "Открыть %s")
 	sessionCloseButton    = locale.T("Close %s", "Закрыть %s")
-	sessionResumedReply   = locale.T("Back in the conversation from %s. Your next message continues it.", "Вы вернулись к разговору от %s. Ваше следующее сообщение продолжит его.")
+	sessionResumedReply   = locale.T("Back in the conversation from %s. Your next message continues it.", "Возвращаемся к разговору от %s. Твоё следующее сообщение продолжит его.")
 	sessionTitleQuote     = locale.T("“%s”", "«%s»")
-	sessionInNamedTab     = locale.T("That conversation is in the tab “%s”. Telegram does not let me switch tabs for you, so I posted there to bring it to the top.", "Этот разговор во вкладке «%s». Telegram не позволяет мне переключать вкладки за вас, поэтому в ней оставлено сообщение, чтобы поднять её наверх.")
-	sessionInOtherTab     = locale.T("That conversation is in another tab. Telegram does not let me switch tabs for you, so I posted there to bring it to the top.", "Этот разговор в другой вкладке. Telegram не позволяет мне переключать вкладки за вас, поэтому в ней оставлено сообщение, чтобы поднять её наверх.")
-	sessionOpenInMainView = locale.T("That conversation is open in the main view. Write there to continue it.", "Этот разговор открыт на главном экране. Напишите там, чтобы продолжить его.")
-	sessionOpenInNamedTab = locale.T("That conversation is open in the tab “%s”. Write there to continue it.", "Этот разговор открыт во вкладке «%s». Напишите там, чтобы продолжить его.")
-	sessionOpenInOther    = locale.T("That conversation is open in another tab. Write there to continue it.", "Этот разговор открыт в другой вкладке. Напишите там, чтобы продолжить его.")
+	sessionInNamedTab     = locale.T("That conversation is in the tab “%s”. Telegram does not let me switch tabs for you, so I posted there to bring it to the top.", "Этот разговор во вкладке «%s». Telegram не позволяет мне переключать вкладки за тебя, поэтому в ней оставлено сообщение, чтобы поднять её наверх.")
+	sessionInOtherTab     = locale.T("That conversation is in another tab. Telegram does not let me switch tabs for you, so I posted there to bring it to the top.", "Этот разговор в другой вкладке. Telegram не позволяет мне переключать вкладки за тебя, поэтому в ней оставлено сообщение, чтобы поднять её наверх.")
+	sessionOpenInMainView = locale.T("That conversation is open in the main view. Write there to continue it.", "Этот разговор открыт на главном экране. Напиши там, чтобы продолжить его.")
+	sessionOpenInNamedTab = locale.T("That conversation is open in the tab “%s”. Write there to continue it.", "Этот разговор открыт во вкладке «%s». Напиши там, чтобы продолжить его.")
+	sessionOpenInOther    = locale.T("That conversation is open in another tab. Write there to continue it.", "Этот разговор открыт в другой вкладке. Напиши там, чтобы продолжить его.")
 	closeNamedTabQuestion = locale.T("Close the tab “%s”? Telegram deletes its messages, so resuming the conversation later cannot bring them back. The conversation stays in /sessions.", "Закрыть вкладку «%s»? Telegram удаляет её сообщения, поэтому возобновление разговора позже не вернёт их. Разговор останется в /sessions.")
 	closeHolderQuestion   = locale.T("Close the tab that holds that conversation? Telegram deletes its messages, so resuming the conversation later cannot bring them back. The conversation stays in /sessions.", "Закрыть вкладку с этим разговором? Telegram удаляет её сообщения, поэтому возобновление разговора позже не вернёт их. Разговор останется в /sessions.")
 
@@ -50,10 +50,10 @@ var (
 	SessionElsewhere = locale.T("That conversation is open in another tab.", "Этот разговор открыт в другой вкладке.")
 	// SessionHere is posted in the tab that holds a conversation an Open press asked for, which
 	// moves that tab to the top of the list.
-	SessionHere = locale.T("You asked to return to this conversation. Your next message here continues it.", "Вы попросили вернуться к этому разговору. Ваше следующее сообщение здесь продолжит его.")
+	SessionHere = locale.T("You asked to return to this conversation. Your next message here continues it.", "Запрос вернуться к этому разговору принят. Твоё следующее сообщение здесь продолжит его.")
 	// TabSuspectReply answers an Open press whose tab did not take the line, when the tab may still
 	// exist.
-	TabSuspectReply = locale.T("That tab did not accept my message, so it may be gone. If you cannot find it, close it here; the conversation stays in /sessions.", "Эта вкладка не приняла моё сообщение, возможно, её уже нет. Если вы не можете её найти, закройте её здесь; разговор останется в /sessions.")
+	TabSuspectReply = locale.T("That tab did not accept my message, so it may be gone. If you cannot find it, close it here; the conversation stays in /sessions.", "Эта вкладка не приняла моё сообщение, возможно, её уже нет. Если ты не можешь её найти, закрой её здесь; разговор останется в /sessions.")
 )
 
 // SessionInTab answers an Open press: the bot cannot switch the user's tab, only post in it. It

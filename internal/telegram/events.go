@@ -32,25 +32,25 @@ const (
 var (
 	EventsLine = locale.T("Event sources let your own systems, such as a backup script or a home automation, message you: they post to /api/events with a source's token. "+
 		"Forward sends an event as it is; assess lets me decide from your memory whether it is worth telling you, and always sends a critical one.",
-		"Источники событий позволяют вашим собственным системам, например скрипту резервного копирования или умному дому, писать вам: они отправляют POST на /api/events с токеном источника. "+
-			"Режим «пересылка» отправляет событие как есть; режим «оценка» позволяет мне решить по вашей памяти, стоит ли вам о нём сообщать, а критическое событие я отправляю всегда.")
+		"Источники событий позволяют твоим собственным системам, например скрипту резервного копирования или умному дому, писать тебе: они отправляют POST на /api/events с токеном источника. "+
+			"Режим «пересылка» отправляет событие как есть; режим «оценка» позволяет мне решить по твоей памяти, стоит ли тебе о нём сообщать, а критическое событие я отправляю всегда.")
 	EventsNoSourcesLine  = locale.T("No event sources yet.", "Источников событий пока нет.")
-	EventsFullLine       = locale.T("You have the most event sources there can be; delete one to add another.", "У вас максимально возможное число источников событий; удалите один, чтобы добавить другой.")
-	EventsBadNameReply   = locale.T("That is not a usable name: it must be one line of at most 40 characters. Press Add event source again to retry.", "Такое название не подходит: оно должно быть одной строкой не длиннее 40 символов. Нажмите «Добавить источник событий» ещё раз, чтобы повторить.")
-	EventsFullReply      = locale.T("You already have the most event sources there can be, so nothing was added. Delete one in /settings first.", "У вас уже максимально возможное число источников событий, поэтому ничего не добавлено. Сначала удалите один в /settings.")
-	EventsFailedReply    = locale.T("I could not set up that event source. Please try again later.", "Не удалось настроить этот источник событий. Повторите попытку позже.")
+	EventsFullLine       = locale.T("You have the most event sources there can be; delete one to add another.", "У тебя максимально возможное число источников событий; удали один, чтобы добавить другой.")
+	EventsBadNameReply   = locale.T("That is not a usable name: it must be one line of at most 40 characters. Press Add event source again to retry.", "Такое название не подходит: оно должно быть одной строкой не длиннее 40 символов. Нажми «Добавить источник событий» ещё раз, чтобы повторить.")
+	EventsFullReply      = locale.T("You already have the most event sources there can be, so nothing was added. Delete one in /settings first.", "У тебя уже максимально возможное число источников событий, поэтому ничего не добавлено. Сначала удали один в /settings.")
+	EventsFailedReply    = locale.T("I could not set up that event source. Please try again later.", "Не удалось настроить этот источник событий. Повтори попытку позже.")
 	EventsGoneNote       = locale.T("That event source no longer exists.", "Этого источника событий больше нет.")
-	EventsRotateFailNote = locale.T("The old token no longer works, but I could not show the new one. Press New token again.", "Старый токен больше не работает, но показать новый не удалось. Нажмите «Новый токен» ещё раз.")
+	EventsRotateFailNote = locale.T("The old token no longer works, but I could not show the new one. Press New token again.", "Старый токен больше не работает, но показать новый не удалось. Нажми «Новый токен» ещё раз.")
 
-	eventsCreatedReply = locale.T("Event source %q is set up, forwarding events as they are. Its token is in the message above: copy it now, because I delete that message in 10 minutes and never show it again.", "Источник событий %q настроен и пересылает события как есть. Его токен в сообщении выше: скопируйте его сейчас, потому что через 10 минут я удалю это сообщение и больше никогда не покажу токен.")
+	eventsCreatedReply = locale.T("Event source %q is set up, forwarding events as they are. Its token is in the message above: copy it now, because I delete that message in 10 minutes and never show it again.", "Источник событий %q настроен и пересылает события как есть. Его токен в сообщении выше: скопируй его сейчас, потому что через 10 минут я удалю это сообщение и больше никогда не покажу токен.")
 	eventsTokenMessage = locale.T("Token for event source <b>%[1]s</b>:\n<code>%[2]s</code>\n\n"+
 		"Send it as <code>Authorization: Bearer</code> on POST /api/events. I delete this message in 10 minutes and never show the token again.",
 		"Токен источника событий <b>%[1]s</b>:\n<code>%[2]s</code>\n\n"+
-			"Отправляйте его как <code>Authorization: Bearer</code> в POST /api/events. Через 10 минут я удалю это сообщение и больше никогда не покажу токен.")
+			"Отправляй его как <code>Authorization: Bearer</code> в POST /api/events. Через 10 минут я удалю это сообщение и больше никогда не покажу токен.")
 	eventsTokenPlain = locale.T("Token for event source %[1]s:\n%[2]s\n\n"+
 		"Send it as Authorization: Bearer on POST /api/events. I delete this message in 10 minutes and never show the token again.",
 		"Токен источника событий %[1]s:\n%[2]s\n\n"+
-			"Отправляйте его как Authorization: Bearer в POST /api/events. Через 10 минут я удалю это сообщение и больше никогда не покажу токен.")
+			"Отправляй его как Authorization: Bearer в POST /api/events. Через 10 минут я удалю это сообщение и больше никогда не покажу токен.")
 
 	eventsName         = locale.T("Events", "События")
 	eventsNoSources    = locale.T("no sources", "нет источников")
@@ -70,13 +70,13 @@ var (
 	eventsAddButton    = locale.T("Add event source", "Добавить источник событий")
 
 	eventsForwardsNote = locale.T("%q now forwards its events as they are.", "%q теперь пересылает свои события как есть.")
-	eventsAssessNote   = locale.T("%q now has me assess each event and tell you only what is worth it; critical events always reach you.", "%q теперь поручает мне оценивать каждое событие и сообщать вам только то, что того стоит; критические события доходят до вас всегда.")
-	eventsPausedNote   = locale.T("%q is paused: its events are refused until you resume it.", "%q на паузе: его события отклоняются, пока вы не продолжите.")
+	eventsAssessNote   = locale.T("%q now has me assess each event and tell you only what is worth it; critical events always reach you.", "%q теперь поручает мне оценивать каждое событие и сообщать тебе только то, что того стоит; критические события доходят до тебя всегда.")
+	eventsPausedNote   = locale.T("%q is paused: its events are refused until you resume it.", "%q на паузе: его события отклоняются, пока ты не продолжишь.")
 	eventsResumedNote  = locale.T("%q takes events again.", "%q снова принимает события.")
 	eventsTokenNote    = locale.T("%q has a new token, in the message below; the old one no longer works.", "У %q новый токен, он в сообщении ниже; старый больше не работает.")
 	eventsDeletedNote  = locale.T("%q is deleted; its token no longer works.", "%q удалён; его токен больше не работает.")
-	EventsNameReply    = locale.T("Send the new event source's name as your next message within 10 minutes, such as Backups or Home automations; at most 40 characters.", "Отправьте название нового источника событий следующим сообщением в течение 10 минут, например «Резервные копии» или «Умный дом»; не больше 40 символов.")
-	EventsTokenGuard   = locale.T("That looked like an event source token, so I deleted it and did not send it to the model. To get a new one, press New token in /settings.", "Это было похоже на токен источника событий, поэтому сообщение удалено и модели не отправлено. Чтобы получить новый токен, нажмите «Новый токен» в /settings.")
+	EventsNameReply    = locale.T("Send the new event source's name as your next message within 10 minutes, such as Backups or Home automations; at most 40 characters.", "Отправь название нового источника событий следующим сообщением в течение 10 минут, например «Резервные копии» или «Умный дом»; не больше 40 символов.")
+	EventsTokenGuard   = locale.T("That looked like an event source token, so I deleted it and did not send it to the model. To get a new one, press New token in /settings.", "Это было похоже на токен источника событий, поэтому сообщение удалено и модели не отправлено. Чтобы получить новый токен, нажми «Новый токен» в /settings.")
 )
 
 // EventsCreatedReply is the English confirmation of a new source, as a test reads it; its token

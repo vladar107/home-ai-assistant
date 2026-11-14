@@ -220,7 +220,7 @@ func TestAccountsAndFoldersReadInRussian(t *testing.T) {
 	}
 	h.ruPress(4, 101, messageID, "notion:connect")
 	instructions := h.nextMessage()
-	if !strings.HasPrefix(instructions.text, "Отправьте токен Notion следующим сообщением") {
+	if !strings.HasPrefix(instructions.text, "Отправь токен Notion следующим сообщением") {
 		t.Fatalf("notion instructions = %q", instructions.text)
 	}
 	h.push(textUpdate(5, 101, "not a token"))
@@ -291,7 +291,7 @@ func TestAccountsAndFoldersReadInRussian(t *testing.T) {
 		t.Fatalf("overview with an account = %q", overview.text)
 	}
 	tools := h.ruPress(20, 101, messageID, "nav:tools")
-	if !strings.Contains(tools.text, "Разбор почты: выключен. Он читает вашу почту, поэтому сначала включите «Почту»") {
+	if !strings.Contains(tools.text, "Разбор почты: выключен. Он читает твою почту, поэтому сначала включи «Почту»") {
 		t.Fatalf("tools without mail = %q", tools.text)
 	}
 	wantRussianPage(t, "tools", tools.text)
@@ -330,7 +330,7 @@ func TestServicesPageAndKeyStepsReadInRussian(t *testing.T) {
 	}
 	h.ruPress(3, 101, messageID, "mcp:connect:prices")
 	instructions := h.nextMessage()
-	if !strings.HasPrefix(instructions.text, "Отправьте ваш ключ для Prices prices следующим сообщением до 06:10.") {
+	if !strings.HasPrefix(instructions.text, "Отправь твой ключ для Prices prices следующим сообщением до 06:10.") {
 		t.Fatalf("instructions = %q", instructions.text)
 	}
 	h.push(textUpdate(4, 101, "where is my key?"))
@@ -342,7 +342,7 @@ func TestServicesPageAndKeyStepsReadInRussian(t *testing.T) {
 	h.nextMessage()
 	h.push(textUpdate(6, 101, aliceMCPKey))
 	h.wantDeleted(101, 6)
-	if reply := h.nextMessage(); reply.text != "Сервис Prices prices подключён с вашим ключом и включён." {
+	if reply := h.nextMessage(); reply.text != "Сервис Prices prices подключён с твоим ключом и включён." {
 		t.Fatalf("connected reply = %q", reply.text)
 	}
 	h.ruSettings(7, 101)
@@ -352,11 +352,11 @@ func TestServicesPageAndKeyStepsReadInRussian(t *testing.T) {
 		t.Fatalf("connected page = %+v", connected)
 	}
 	privacy := h.ruPrivacy(9, 101)
-	if !strings.Contains(privacy, "Prices prices: то, что вы спрашиваете у сервиса, уходит ему") {
+	if !strings.Contains(privacy, "Prices prices: то, что ты спрашиваешь у сервиса, уходит ему") {
 		t.Fatalf("privacy = %q", privacy)
 	}
 	gone := h.ruPress(10, 101, settingsMessageID(7), "mcp:disconnect:prices")
-	if !strings.Contains(gone.text, "Ваш ключ для Prices prices удалён, сервис выключен.") || !strings.Contains(gone.text, "Prices prices: Выключен") {
+	if !strings.Contains(gone.text, "Твой ключ для Prices prices удалён, сервис выключен.") || !strings.Contains(gone.text, "Prices prices: Выключен") {
 		t.Fatalf("after disconnecting = %q", gone.text)
 	}
 }
@@ -385,7 +385,7 @@ func TestEventSourcesReadInRussian(t *testing.T) {
 		t.Fatalf("empty page = %+v", empty)
 	}
 	h.ruPress(3, 101, messageID, "events:add")
-	if prompt := h.nextMessage(); !strings.HasPrefix(prompt.text, "Отправьте название нового источника событий") {
+	if prompt := h.nextMessage(); !strings.HasPrefix(prompt.text, "Отправь название нового источника событий") {
 		t.Fatalf("prompt = %q", prompt.text)
 	}
 	h.push(textUpdate(4, 101, strings.Repeat("x", 41)))
@@ -396,7 +396,7 @@ func TestEventSourcesReadInRussian(t *testing.T) {
 	h.nextMessage()
 	h.push(textUpdate(6, 101, "Backups"))
 	token := h.nextMessage()
-	if !strings.HasPrefix(token.text, "Токен источника событий <b>Backups</b>:\n<code>hae_") || !strings.Contains(token.text, "Отправляйте его как <code>Authorization: Bearer</code>") {
+	if !strings.HasPrefix(token.text, "Токен источника событий <b>Backups</b>:\n<code>hae_") || !strings.Contains(token.text, "Отправляй его как <code>Authorization: Bearer</code>") {
 		t.Fatalf("token message = %q", token.text)
 	}
 	if created := h.nextMessage(); !strings.HasPrefix(created.text, "Источник событий \"Backups\" настроен и пересылает события как есть.") {
@@ -422,7 +422,7 @@ func TestEventSourcesReadInRussian(t *testing.T) {
 		!strings.Contains(assessed.text, "оценка, включён") || buttonLabels(assessed.keyboard)[2] != "Пересылать" {
 		t.Fatalf("after assess = %+v", assessed)
 	}
-	if paused := h.ruPress(10, 101, messageID, "events:pause:"+id); !strings.Contains(paused.text, "на паузе: его события отклоняются, пока вы не продолжите.") || buttonLabels(paused.keyboard)[3] != "Продолжить" {
+	if paused := h.ruPress(10, 101, messageID, "events:pause:"+id); !strings.Contains(paused.text, "на паузе: его события отклоняются, пока ты не продолжишь.") || buttonLabels(paused.keyboard)[3] != "Продолжить" {
 		t.Fatalf("after pause = %+v", paused)
 	}
 	if resumed := h.ruPress(11, 101, messageID, "events:resume:"+id); !strings.Contains(resumed.text, "снова принимает события.") {
@@ -451,7 +451,7 @@ func TestMemoryPagesReadInRussian(t *testing.T) {
 	h.start()
 
 	h.push(textUpdate(1, 101, "/memory"))
-	if empty := h.nextMessage(); !strings.HasPrefix(empty.text, "Я ничего о вас не помню.") {
+	if empty := h.nextMessage(); !strings.HasPrefix(empty.text, "Я ничего о тебе не помню.") {
 		t.Fatalf("empty /memory = %q", empty.text)
 	}
 	h.seedMemory("alice", "aaaaaaa1", memory.KindInstruction, "answer briefly")
@@ -504,7 +504,7 @@ func TestMemoryPagesReadInRussian(t *testing.T) {
 	}
 	h.push(callbackUpdate(6, 101, settingsMessageID(2), "mem:clear:1"))
 	h.wantAnswer(6)
-	if cleared := h.nextEdit(); !strings.HasPrefix(cleared.text, "Я ничего о вас не помню.") {
+	if cleared := h.nextEdit(); !strings.HasPrefix(cleared.text, "Я ничего о тебе не помню.") {
 		t.Fatalf("after clearing = %q", cleared.text)
 	}
 	if note := h.nextMessage(); note.text != "Всё забыто." {
@@ -570,13 +570,13 @@ func TestLocationPageReadsInRussian(t *testing.T) {
 	h.ruSettings(1, 101)
 	messageID := settingsMessageID(1)
 	page := h.ruPress(2, 101, messageID, "nav:location")
-	if !strings.Contains(page.text, "Местоположение: не передано.\nПередайте местоположение или трансляцию местоположения в этом чате") || slices.Contains(buttonData(page.keyboard), "location:forget") {
+	if !strings.Contains(page.text, "Местоположение: не передано.\nПередай местоположение или трансляцию местоположения в этом чате") || slices.Contains(buttonData(page.keyboard), "location:forget") {
 		t.Fatalf("page before sharing = %+v", page)
 	}
 	h.push(pinUpdate(3, 101, clock.Now(), 52.16612, 4.48105))
 	h.nextMessage()
 	shared := h.ruPress(4, 101, messageID, "nav:location")
-	if !strings.Contains(shared.text, "Местоположение: ") || !strings.Contains(shared.text, "Ваше последнее переданное местоположение используется в вашем разговоре") ||
+	if !strings.Contains(shared.text, "Местоположение: ") || !strings.Contains(shared.text, "Твоё последнее переданное местоположение используется в твоём разговоре") ||
 		!slices.Equal(buttonData(shared.keyboard), []string{"location:forget", "nav:root"}) || buttonLabels(shared.keyboard)[0] != "Забыть моё местоположение" {
 		t.Fatalf("page after sharing = %+v", shared)
 	}

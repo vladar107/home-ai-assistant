@@ -26,7 +26,7 @@ var languageChoices = []struct {
 
 var languagePageLine = locale.T(
 	"Interface language: English. My replies, buttons, and menus are written in it; a conversation goes on in whatever language you write.",
-	"Язык интерфейса: русский. На нём написаны мои ответы, кнопки и меню; разговор идёт на том языке, на котором вы пишете.",
+	"Язык интерфейса: русский. На нём написаны мои ответы, кнопки и меню; разговор идёт на том языке, на котором ты пишешь.",
 )
 
 var languageState = locale.T("English", "русский")

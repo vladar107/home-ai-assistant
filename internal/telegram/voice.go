@@ -24,13 +24,13 @@ const (
 
 var (
 	RecordingTooLargeReply   = locale.T("That recording is too large for me to listen to; recordings must stay under 20 MB.", "Эта запись слишком большая, я не могу её прослушать; записи должны быть меньше 20 МБ.")
-	TranscriptionFailedReply = locale.T("I could not transcribe that voice message. Try again, or send it as text.", "Не удалось расшифровать это голосовое сообщение. Попробуйте ещё раз или отправьте его текстом.")
+	TranscriptionFailedReply = locale.T("I could not transcribe that voice message. Try again, or send it as text.", "Не удалось расшифровать это голосовое сообщение. Попробуй ещё раз или отправь его текстом.")
 	NoSpeechReply            = locale.T("I could not hear any speech in that recording.", "В этой записи не слышно речи.")
-	TranscriptTooLongReply   = locale.T("That recording is too long for one message. Keep voice messages under about four minutes, or split them.", "Эта запись слишком длинная для одного сообщения. Записывайте голосовые сообщения не дольше примерно четырёх минут или разделяйте их.")
-	CaptionTooLongReply      = locale.T("That recording and its caption are too long together for one message. Send the caption as a separate message, or shorten the recording.", "Эта запись вместе с подписью слишком длинная для одного сообщения. Отправьте подпись отдельным сообщением или сократите запись.")
-	UsageLimitReply          = locale.T("Your ChatGPT usage limit is reached, so I cannot do that right now. Try again later.", "Лимит использования вашего ChatGPT исчерпан, поэтому сейчас это сделать нельзя. Попробуйте позже.")
+	TranscriptTooLongReply   = locale.T("That recording is too long for one message. Keep voice messages under about four minutes, or split them.", "Эта запись слишком длинная для одного сообщения. Записывай голосовые сообщения не дольше примерно четырёх минут или разделяй их.")
+	CaptionTooLongReply      = locale.T("That recording and its caption are too long together for one message. Send the caption as a separate message, or shorten the recording.", "Эта запись вместе с подписью слишком длинная для одного сообщения. Отправь подпись отдельным сообщением или сократи запись.")
+	UsageLimitReply          = locale.T("Your ChatGPT usage limit is reached, so I cannot do that right now. Try again later.", "Лимит использования твоего ChatGPT исчерпан, поэтому сейчас это сделать нельзя. Попробуй позже.")
 	// VoicePrivacyLine is added to /privacy while voice messages are transcribed.
-	VoicePrivacyLine = locale.T("Voice: transcribed by your own ChatGPT subscription; the recording is not kept.", "Голос: расшифровывается вашей собственной подпиской на ChatGPT; запись не сохраняется.")
+	VoicePrivacyLine = locale.T("Voice: transcribed by your own ChatGPT subscription; the recording is not kept.", "Голос: расшифровывается твоей собственной подпиской на ChatGPT; запись не сохраняется.")
 )
 
 // Transcriber turns a principal's recording into text with that principal's own subscription.

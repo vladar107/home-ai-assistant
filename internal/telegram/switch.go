@@ -161,7 +161,7 @@ func UnavailableDetails(reason func() string, name locale.Text) SwitchDetails {
 
 var (
 	unavailableAttention = locale.T("%s: unavailable until the operator fixes it.", "%s: недоступно, пока оператор это не исправит.")
-	homeConflictLine     = locale.T("Home actions are paused while these devices that need your confirmation are exposed to Assist; unexpose them in Home Assistant: %s.", "Действия с домом приостановлены, пока открыты для Assist эти устройства, требующие вашего подтверждения; уберите их из доступных для Assist в Home Assistant: %s.")
+	homeConflictLine     = locale.T("Home actions are paused while these devices that need your confirmation are exposed to Assist; unexpose them in Home Assistant: %s.", "Действия с домом приостановлены, пока открыты для Assist эти устройства, требующие твоего подтверждения; убери их из доступных для Assist в Home Assistant: %s.")
 )
 
 type unavailableDetails struct {

@@ -18,7 +18,7 @@ const (
 )
 
 var (
-	previewHeading    = locale.T("Restore preview for your export of %s. Nothing changes until you confirm.\n", "Предпросмотр восстановления из вашего экспорта от %s. Пока вы не подтвердите, ничего не изменится.\n")
+	previewHeading    = locale.T("Restore preview for your export of %s. Nothing changes until you confirm.\n", "Предпросмотр восстановления из твоего экспорта от %s. Пока ты не подтвердишь, ничего не изменится.\n")
 	sectionRefused    = locale.T("not restored, %s.\n", "не восстановлено, %s.\n")
 	skippedLine       = locale.T("Skipped: %s: %s\n", "Пропущено: %s: %s\n")
 	allPresent        = locale.T("\nEverything in this file is already here, so there is nothing to restore.", "\nВсё, что есть в этом файле, уже есть здесь, поэтому восстанавливать нечего.")
@@ -27,11 +27,11 @@ var (
 	countPresent      = locale.N("%d already here", "%d already here", "%d уже есть", "%d уже есть", "%d уже есть")
 	countSkipped      = locale.N("%d skipped", "%d skipped", "%d пропущена", "%d пропущены", "%d пропущено")
 	countNothing      = locale.T("nothing in the file", "в файле ничего нет")
-	restoreSummary    = locale.T("Restore %s from your export of %s: %s. Everything it adds is listed above.", "Восстановить %s из вашего экспорта от %s: %s. Всё, что добавляется, перечислено выше.")
+	restoreSummary    = locale.T("Restore %s from your export of %s: %s. Everything it adds is listed above.", "Восстановить %s из твоего экспорта от %s: %s. Всё, что добавляется, перечислено выше.")
 	restoredNothing   = locale.T("Nothing was added.", "Ничего не добавлено.")
 	restoredLine      = locale.T("Restored %[1]s: %[2]s.", "Восстановлено: %[1]s (%[2]s).")
 	restoredSkipped   = locale.T("Skipped %s.", "Пропущено: %s.")
-	restoredFailed    = locale.T("Could not restore %s, so nothing of it was added; try again.", "Не удалось восстановить: %s; из этого ничего не добавлено, попробуйте ещё раз.")
+	restoredFailed    = locale.T("Could not restore %s, so nothing of it was added; try again.", "Не удалось восстановить: %s; из этого ничего не добавлено, попробуй ещё раз.")
 	recordsCount      = locale.N("%d record", "%d records", "%d запись", "%d записи", "%d записей")
 	sectionLabelTexts = map[string]locale.Text{
 		"jobs":          locale.T("Scheduled jobs and reminders", "Задания по расписанию и напоминания"),

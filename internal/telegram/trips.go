@@ -44,7 +44,7 @@ const (
 
 var (
 	TripCancelledReply = locale.T("This trip was cancelled.", "Эта поездка отменена.")
-	TripsTooManyNote   = locale.T("You already have the maximum number of scheduled jobs. Remove one in /jobs, then turn Trips on.", "У вас уже максимальное число заданий по расписанию. Удалите одно в /jobs, а затем включите «Поездки».")
+	TripsTooManyNote   = locale.T("You already have the maximum number of scheduled jobs. Remove one in /jobs, then turn Trips on.", "У тебя уже максимальное число заданий по расписанию. Удали одно в /jobs, а затем включи «Поездки».")
 
 	tripTrackButton      = locale.T("Track", "Следить")
 	tripIgnoreButton     = locale.T("Ignore", "Игнорировать")
@@ -58,7 +58,7 @@ var (
 	tripMovedNote        = locale.T("Moved %q to this tab: its summary is pinned here, and its reminders, notices, and news arrive here.", "Поездка %q перенесена в эту вкладку: её сводка закреплена здесь, а напоминания, уведомления и новости приходят сюда.")
 	tripMovedLeftNote    = locale.T("Moved %q to this tab: its summary is pinned here, and its reminders, notices, and news arrive here. The tab it had stays with its messages; you can delete it.", "Поездка %q перенесена в эту вкладку: её сводка закреплена здесь, а напоминания, уведомления и новости приходят сюда. Прежняя вкладка остаётся со своими сообщениями; её можно удалить.")
 	tripCardFromMail     = locale.T("Trip found in mail:", "Найдена поездка в почте:")
-	tripCardFromCalendar = locale.T("Trip found in your calendar:", "Найдена поездка в вашем календаре:")
+	tripCardFromCalendar = locale.T("Trip found in your calendar:", "Найдена поездка в твоём календаре:")
 	tripCardTitleLine    = locale.T("%s (%s)", "%s (%s)")
 	tripCardSpanLine     = locale.T("%s, times in %s", "%s, время указано в часовом поясе %s")
 	tripCardMore         = locale.T("...and %d more", "...и ещё %d")
@@ -66,12 +66,12 @@ var (
 	tripCardReference    = locale.T("%s (%s)", "%s (%s)")
 	tripCardNoCheckIn    = locale.T("%s: no check-in time", "%s: время регистрации не указано")
 	tripCardCheckIn      = locale.T("%s: check-in opens %s (%s)", "%s: регистрация открывается %s (%s)")
-	tripCardPrompt       = locale.T("Track it for check-in reminders, or ignore it and I won't offer it again.", "Отслеживайте поездку, чтобы получать напоминания о регистрации, или проигнорируйте её, и я больше не буду её предлагать.")
+	tripCardPrompt       = locale.T("Track it for check-in reminders, or ignore it and I won't offer it again.", "Отслеживай поездку, чтобы получать напоминания о регистрации, или проигнорируй её, и я больше не буду её предлагать.")
 	tripSpanText         = locale.T("%s to %s", "с %s по %s")
 	tripTrackedHead      = locale.T("Tracking: %s (%s), %s.", "Отслеживается: %s (%s), %s.")
 	tripNoReminder       = locale.T("No reminder for %s: %s.", "Для %s напоминания нет: %s.")
 	tripReminder         = locale.T("Reminder for %s at %s.", "Напоминание для %s: %s.")
-	tripTrackedTip       = locale.T("Tip: ask me to pause your home-bound reminders while you're away.", "Совет: попросите меня приостановить напоминания, связанные с домом, пока вы в отъезде.")
+	tripTrackedTip       = locale.T("Tip: ask me to pause your home-bound reminders while you're away.", "Совет: попроси меня приостановить напоминания, связанные с домом, пока ты в отъезде.")
 	tripCheckInStated    = locale.T("stated in the booking", "указано в бронировании")
 	tripCheckInLookedUp  = locale.T("looked up on the provider's site", "найдено на сайте поставщика")
 	tripCheckInAssumed   = locale.T("assumed, 24 h before the start", "предположительно, за 24 ч до начала")
@@ -86,15 +86,15 @@ var (
 	TripGoneReply    = locale.T("This trip no longer exists.", "Этой поездки больше нет.")
 	TripTrackedReply = locale.T("Already tracking this trip.", "Эта поездка уже отслеживается.")
 	TripIgnoredReply = locale.T("Ignored; I won't offer it again.", "Пропущено; больше не предложу.")
-	TripsOnLine      = locale.T("Trips: on. Each morning I look in your mail and calendar for travel bookings and offer each trip with Track and Ignore buttons; nothing is planned without your press. From three days before a tracked trip until it ends, I also check your mail, the web, and your calendar for important news about it about twice a day, between 08:00 and 21:00 where you are, and post what is new in the trip's tab. Press Scan now to look at once; it checks for trip news too. Uses your model subscription.", "Поездки: включены. Каждое утро я ищу в вашей почте и календаре бронирования поездок и предлагаю каждую поездку с кнопками «Следить» и «Игнорировать»; без вашего нажатия ничего не планируется. За три дня до отслеживаемой поездки и до её конца я также примерно дважды в день, с 08:00 до 21:00 по месту, где вы находитесь, проверяю почту, интернет и календарь на важные новости о ней и публикую новое во вкладке поездки. Нажмите «Проверить сейчас», чтобы посмотреть сразу; при этом проверяются и новости о поездках. Использует вашу подписку на модель.")
-	TripsOffLine     = locale.T("Trips: off. Turn it on and I look in your mail and calendar for travel bookings at once and then each morning, and offer each trip with Track and Ignore buttons; nothing is planned without your press. While it is on, I also check tracked trips for important news from three days before they start until they end. Needs a connected model subscription, which it uses.", "Поездки: выключены. Включите, и я сразу поищу в вашей почте и календаре бронирования поездок, а затем буду делать это каждое утро и предлагать каждую поездку с кнопками «Следить» и «Игнорировать»; без вашего нажатия ничего не планируется. Пока функция включена, я также проверяю отслеживаемые поездки на важные новости, начиная с трёх дней до их начала и до конца. Нужна подключённая подписка на модель, которую эта функция использует.")
+	TripsOnLine      = locale.T("Trips: on. Each morning I look in your mail and calendar for travel bookings and offer each trip with Track and Ignore buttons; nothing is planned without your press. From three days before a tracked trip until it ends, I also check your mail, the web, and your calendar for important news about it about twice a day, between 08:00 and 21:00 where you are, and post what is new in the trip's tab. Press Scan now to look at once; it checks for trip news too. Uses your model subscription.", "Поездки: включены. Каждое утро я ищу в твоей почте и календаре бронирования поездок и предлагаю каждую поездку с кнопками «Следить» и «Игнорировать»; без твоего нажатия ничего не планируется. За три дня до отслеживаемой поездки и до её конца я также примерно дважды в день, с 08:00 до 21:00 по месту, где ты находишься, проверяю почту, интернет и календарь на важные новости о ней и публикую новое во вкладке поездки. Нажми «Проверить сейчас», чтобы посмотреть сразу; при этом проверяются и новости о поездках. Использует твою подписку на модель.")
+	TripsOffLine     = locale.T("Trips: off. Turn it on and I look in your mail and calendar for travel bookings at once and then each morning, and offer each trip with Track and Ignore buttons; nothing is planned without your press. While it is on, I also check tracked trips for important news from three days before they start until they end. Needs a connected model subscription, which it uses.", "Поездки: выключены. Включи, и я сразу поищу в твоей почте и календаре бронирования поездок, а затем буду делать это каждое утро и предлагать каждую поездку с кнопками «Следить» и «Игнорировать»; без твоего нажатия ничего не планируется. Пока функция включена, я также проверяю отслеживаемые поездки на важные новости, начиная с трёх дней до их начала и до конца. Нужна подключённая подписка на модель, которую эта функция использует.")
 	// TripsNeedsGoogleLine explains why the switch is not offered.
-	TripsNeedsGoogleLine = locale.T("Trips: off. It reads your mail and calendar, so turn on Mail or Calendar for a connected Google account in Accounts › Google first.", "Поездки: выключены. Они читают вашу почту и календарь, поэтому сначала включите «Почту» или «Календарь» для подключённого аккаунта Google в разделе «Аккаунты › Google».")
-	TripsScanningNote    = locale.T("Scanning your mail and calendar now; any trips I find arrive here as cards, and news about trips near or under way arrives in their tabs.", "Просматриваю вашу почту и календарь; найденные поездки приходят сюда карточками, а новости о ближайших и идущих поездках приходят в их вкладки.")
+	TripsNeedsGoogleLine = locale.T("Trips: off. It reads your mail and calendar, so turn on Mail or Calendar for a connected Google account in Accounts › Google first.", "Поездки: выключены. Они читают твою почту и календарь, поэтому сначала включи «Почту» или «Календарь» для подключённого аккаунта Google в разделе «Аккаунты › Google».")
+	TripsScanningNote    = locale.T("Scanning your mail and calendar now; any trips I find arrive here as cards, and news about trips near or under way arrives in their tabs.", "Просматриваю твою почту и календарь; найденные поездки приходят сюда карточками, а новости о ближайших и идущих поездках приходят в их вкладки.")
 	TripsBusyNote        = locale.T("A scan is already running; any trips it finds arrive here as cards.", "Просмотр уже идёт; найденные поездки придут сюда карточками.")
 	// TripsTabLine stands in for the buttons that move a trip where the page's tab cannot be a
 	// trip's.
-	TripsTabLine     = locale.T("To move a planned trip to a tab of yours, send /settings in that tab and open this page there; a trip cannot use this one. Use a tab that already has a message, because /settings as the first message of a new tab is answered in the main view.", "Чтобы перенести запланированную поездку во вкладку, отправьте /settings в этой вкладке и откройте там эту страницу; эта вкладка для поездки не подойдёт. Используйте вкладку, в которой уже есть сообщение, потому что /settings как первое сообщение новой вкладки обрабатывается на главном экране.")
+	TripsTabLine     = locale.T("To move a planned trip to a tab of yours, send /settings in that tab and open this page there; a trip cannot use this one. Use a tab that already has a message, because /settings as the first message of a new tab is answered in the main view.", "Чтобы перенести запланированную поездку во вкладку, отправь /settings в этой вкладке и открой там эту страницу; эта вкладка для поездки не подойдёт. Используй вкладку, в которой уже есть сообщение, потому что /settings как первое сообщение новой вкладки обрабатывается на главном экране.")
 	TripsTabGoneNote = locale.T("That trip is over or no longer planned, so it has no tab to move.", "Эта поездка закончилась или больше не запланирована, поэтому её нельзя перенести во вкладку.")
 )
 

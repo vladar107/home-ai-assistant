@@ -65,7 +65,7 @@ func TestStatusAndUsageReadInRussian(t *testing.T) {
 	wantRussian(t, first,
 		"Home Agent на связи. Доступ к Telegram активен.",
 		"Модель здесь: gpt-test, глубина рассуждений medium (по умолчанию).",
-		"Фоновые задачи: gpt-6.1-sol, глубина рассуждений medium.\nМодель для задач сейчас недоступна на вашем тарифе",
+		"Фоновые задачи: gpt-6.1-sol, глубина рассуждений medium.\nМодель для задач сейчас недоступна на твоём тарифе",
 		"Последний ответ: после перезапуска ответов ещё не было.",
 		"Использование подписки (тариф plus):",
 		"За 5 часов: использовано 42%, сброс вс 18 окт 21:30",
@@ -91,7 +91,7 @@ func TestPrivacyNewAndCancelReadInRussian(t *testing.T) {
 
 	h.push(textUpdate(1, 101, "/privacy"))
 	privacy := h.nextMessage().text
-	wantRussian(t, privacy, "Ваши сообщения уходят в вашу собственную подписку на модель.", "Голос: расшифровывается")
+	wantRussian(t, privacy, "Твои сообщения уходят в твою собственную подписку на модель.", "Голос: расшифровывается")
 
 	h.push(textUpdate(2, 101, "/cancel"))
 	wantRussian(t, h.nextMessage().text, "Нет ответа, который можно остановить.")
@@ -120,8 +120,8 @@ func TestModelReadsInRussian(t *testing.T) {
 		"Здесь: gpt-test, глубина рассуждений medium (по умолчанию).",
 		"Фоновые задачи: gpt-6.1-sol, глубина рассуждений medium. Это задаёт оператор, а не /model.",
 		"gpt-test: Test, контекст 200k, самая низкая цена. Глубина рассуждений: minimal, low, medium, high (текущая модель)",
-		"(модель сейчас недоступна на вашем тарифе)",
-		"Измените это кнопками или введите /model &lt;модель&gt; [глубина], /model &lt;глубина&gt; или /model default.",
+		"(модель сейчас недоступна на твоём тарифе)",
+		"Измени это кнопками или введи /model &lt;модель&gt; [глубина], /model &lt;глубина&gt; или /model default.",
 	)
 	if labels := buttonLabels(list.keyboard); labels[len(labels)-1] != "К значениям по умолчанию" {
 		t.Fatalf("/model buttons = %v", labels)
@@ -130,7 +130,7 @@ func TestModelReadsInRussian(t *testing.T) {
 	h.push(callbackUpdate(2, 101, list.messageID, "mdl:m:gpt-6.1-sol"))
 	h.wantAnswer(2)
 	levels := h.nextEdit()
-	wantRussian(t, levels.text, "Выберите глубину рассуждений для модели gpt-6.1-sol.")
+	wantRussian(t, levels.text, "Выбери глубину рассуждений для модели gpt-6.1-sol.")
 	if labels := buttonLabels(levels.keyboard); labels[len(labels)-2] != "Другие модели" || labels[len(labels)-1] != "К значениям по умолчанию" {
 		t.Fatalf("level buttons = %v", labels)
 	}
@@ -153,7 +153,7 @@ func TestModelReadsInRussian(t *testing.T) {
 	h.push(textUpdate(6, 101, "/model sol sideways"))
 	wantRussian(t, h.nextMessage().text, `"sideways" не является глубиной рассуждений. Модель gpt-6.1-sol поддерживает:`)
 	h.push(textUpdate(7, 101, "/model a b c"))
-	wantRussian(t, h.nextMessage().text, "Используйте /model &lt;модель&gt; [глубина], /model &lt;глубина&gt; или /model default. Модели:")
+	wantRussian(t, h.nextMessage().text, "Используй /model &lt;модель&gt; [глубина], /model &lt;глубина&gt; или /model default. Модели:")
 	h.push(textUpdate(8, 101, "/model default"))
 	wantRussian(t, h.nextMessage().text, "Этот разговор снова идёт на значениях по умолчанию: gpt-test, глубина рассуждений medium.")
 }
@@ -167,7 +167,7 @@ func TestRefusedMessagesReadInRussian(t *testing.T) {
 	sticker := textUpdate(1, 101, "")
 	sticker.Message.Sticker = &MediaFile{FileID: "sticker-1"}
 	h.push(sticker)
-	h.wantReply(101, 1, "Стикеры я прочитать не могу. Отправьте текст, фото или файл, и я с этим поработаю.")
+	h.wantReply(101, 1, "Стикеры я прочитать не могу. Отправь текст, фото или файл, и я с этим поработаю.")
 
 	recording := textUpdate(2, 101, "")
 	recording.Message.Voice = &MediaFile{FileID: "voice-1", FileSize: 30 << 20}

@@ -20,19 +20,19 @@ const (
 )
 
 var (
-	modelUsagePrivacyLine = locale.T("/status reads your subscription usage from ChatGPT with your own connection.", "/status читает использование вашей подписки в ChatGPT через ваше собственное подключение.")
+	modelUsagePrivacyLine = locale.T("/status reads your subscription usage from ChatGPT with your own connection.", "/status читает использование твоей подписки в ChatGPT через твоё собственное подключение.")
 	modelCommandHelp      = locale.T("Send /model to see the model and effort in use and every model that can be chosen with its effort levels, and to change them with buttons or by typing /model <model> [effort], /model <effort>, or /model default. A choice holds in that conversation until /new. Background tasks run on the model the operator configured, not on this choice. /status shows the model in use, the last turn, and the subscription usage.",
-		"Отправьте /model, чтобы увидеть используемую модель и глубину рассуждений и все модели, которые можно выбрать, с их уровнями глубины, и чтобы сменить их кнопками или командой /model <модель> [глубина], /model <глубина> или /model default. Выбор действует в этом разговоре до /new. Фоновые задачи работают на модели, настроенной оператором, а не на вашем выборе. /status показывает используемую модель, последний ответ и использование подписки.")
+		"Отправь /model, чтобы увидеть используемую модель и глубину рассуждений и все модели, которые можно выбрать, с их уровнями глубины, и чтобы сменить их кнопками или командой /model <модель> [глубина], /model <глубина> или /model default. Выбор действует в этом разговоре до /new. Фоновые задачи работают на модели, настроенной оператором, а не на твоём выборе. /status показывает используемую модель, последний ответ и использование подписки.")
 
 	statusNoTurnLine           = locale.T("Last turn: none yet since the restart.", "Последний ответ: после перезапуска ответов ещё не было.")
 	statusNotConnectedLine     = locale.T("Subscription usage: not connected.", "Использование подписки: подписка не подключена.")
 	statusUsageUnavailableLine = locale.T("Subscription usage: unavailable right now.", "Использование подписки: сейчас недоступно.")
-	statusStaleChoiceLine      = locale.T("Your earlier choice is no longer available, so this conversation runs on the default.", "Ваш прежний выбор больше недоступен, поэтому этот разговор идёт на модели по умолчанию.")
-	statusTaskCatalogLine      = locale.T("The task model is not offered on your subscription, so new tasks run on the chat model.", "Модель для задач не предоставляется по вашей подписке, поэтому новые задачи выполняются на модели чата.")
-	statusTaskUsageLine        = locale.T("The task model is not available on your plan right now, so new tasks run on the chat model.", "Модель для задач сейчас недоступна на вашем тарифе, поэтому новые задачи выполняются на модели чата.")
+	statusStaleChoiceLine      = locale.T("Your earlier choice is no longer available, so this conversation runs on the default.", "Твой прежний выбор больше недоступен, поэтому этот разговор идёт на модели по умолчанию.")
+	statusTaskCatalogLine      = locale.T("The task model is not offered on your subscription, so new tasks run on the chat model.", "Модель для задач не предоставляется по твоей подписке, поэтому новые задачи выполняются на модели чата.")
+	statusTaskUsageLine        = locale.T("The task model is not available on your plan right now, so new tasks run on the chat model.", "Модель для задач сейчас недоступна на твоём тарифе, поэтому новые задачи выполняются на модели чата.")
 
 	statusModelDefaultLine = locale.T("Model here: %s, effort %s (the default).", "Модель здесь: %s, глубина рассуждений %s (по умолчанию).")
-	statusModelChoiceLine  = locale.T("Model here: %s, effort %s (your choice, until /new).", "Модель здесь: %s, глубина рассуждений %s (ваш выбор, до /new).")
+	statusModelChoiceLine  = locale.T("Model here: %s, effort %s (your choice, until /new).", "Модель здесь: %s, глубина рассуждений %s (твой выбор, до /new).")
 	statusTaskModelLine    = locale.T("Background tasks: %s, effort %s.", "Фоновые задачи: %s, глубина рассуждений %s.")
 
 	statusTurnLineText       = locale.T("Last turn: answered by %s, %d input and %d output tokens.", "Последний ответ: модель — %s, токенов на входе — %d, на выходе — %d.")

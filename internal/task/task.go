@@ -145,7 +145,7 @@ type Telemetry interface {
 }
 
 var (
-	queuedStatus       = locale.T("Queued: %s\nIt starts when your current background task is done.", "В очереди: %s\nЗапустится, когда закончится ваша текущая фоновая задача.")
+	queuedStatus       = locale.T("Queued: %s\nIt starts when your current background task is done.", "В очереди: %s\nЗапустится, когда закончится твоя текущая фоновая задача.")
 	runningStatus      = locale.T("Working on: %s\n%s so far, %s.", "Работаю над: %s\nПрошло %s, %s.")
 	doneStatus         = locale.T("%s: %s\nTook %s, %s. The report is below.", "%s: %s\nЗаняло %s, %s. Отчёт ниже.")
 	doneLabel          = locale.T("Done", "Готово")

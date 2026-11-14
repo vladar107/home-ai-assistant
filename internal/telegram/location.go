@@ -26,8 +26,8 @@ const (
 var (
 	LocationDisabledReply = locale.T("Location sharing is not enabled on this assistant.", "Передача местоположения на этом ассистенте не включена.")
 	LocationRefusedReply  = locale.T("I could not read that location, so I did not keep it.", "Не удалось прочитать это местоположение, поэтому оно не сохранено.")
-	LocationSharedLine    = locale.T("Your latest shared location is used in your conversation until it expires; only the latest one is kept, and nothing is kept once it expires or you forget it. Places you save by name are kept until you delete them, and a day more so you can undo it, and are only ever saved when you ask.", "Ваше последнее переданное местоположение используется в вашем разговоре, пока не истечёт срок; хранится только последнее, и ничего не хранится после истечения срока или после того, как вы его забудете. Места, которые вы сохраняете по названию, хранятся, пока вы их не удалите, и ещё сутки, чтобы это можно было отменить, и сохраняются только по вашей просьбе.")
-	LocationNotSharedLine = locale.T("Share a location or a live location in this chat to ask about places, buses, and weather near you.", "Передайте местоположение или трансляцию местоположения в этом чате, чтобы спрашивать о местах, автобусах и погоде рядом с вами.")
+	LocationSharedLine    = locale.T("Your latest shared location is used in your conversation until it expires; only the latest one is kept, and nothing is kept once it expires or you forget it. Places you save by name are kept until you delete them, and a day more so you can undo it, and are only ever saved when you ask.", "Твоё последнее переданное местоположение используется в твоём разговоре, пока не истечёт срок; хранится только последнее, и ничего не хранится после истечения срока или после того, как ты его забудешь. Места, которые ты сохраняешь по названию, хранятся, пока ты их не удалишь, и ещё сутки, чтобы это можно было отменить, и сохраняются только по твоей просьбе.")
+	LocationNotSharedLine = locale.T("Share a location or a live location in this chat to ask about places, buses, and weather near you.", "Передай местоположение или трансляцию местоположения в этом чате, чтобы спрашивать о местах, автобусах и погоде рядом с тобой.")
 
 	locationName          = locale.T("Location", "Местоположение")
 	locationSharedState   = locale.T("shared", "передано")
@@ -37,7 +37,7 @@ var (
 	locationForgetButton  = locale.T("Forget my location", "Забыть моё местоположение")
 	LocationForgottenNote = locale.T("Location forgotten.", "Местоположение забыто.")
 	// LocationPrivacyLine is added to /privacy while location sharing is enabled.
-	LocationPrivacyLine = locale.T("Location: only the latest is kept, until it expires; it goes to your model, Transitous, and OpenStreetMap. Places you save by name are kept until a day after you delete them, never saved from a location without your asking.", "Местоположение: хранится только последнее, пока не истечёт срок; оно передаётся вашей модели, Transitous и OpenStreetMap. Места, которые вы сохраняете по названию, хранятся до дня после их удаления и никогда не сохраняются по местоположению без вашей просьбы.")
+	LocationPrivacyLine = locale.T("Location: only the latest is kept, until it expires; it goes to your model, Transitous, and OpenStreetMap. Places you save by name are kept until a day after you delete them, never saved from a location without your asking.", "Местоположение: хранится только последнее, пока не истечёт срок; оно передаётся твоей модели, Transitous и OpenStreetMap. Места, которые ты сохраняешь по названию, хранятся до дня после их удаления и никогда не сохраняются по местоположению без твоей просьбы.")
 )
 
 // LocationController is implemented by the location service; nil turns shared locations away.

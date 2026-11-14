@@ -8,10 +8,10 @@ import (
 )
 
 var (
-	ConnectFailedText        = locale.T("The connection could not be completed. Use /settings to try again.", "Не удалось завершить подключение. Попробуйте ещё раз через /settings.")
-	ConnectedReply           = locale.T("Your model subscription is connected.", "Ваша подписка на модель подключена.")
-	ConnectDeniedReply       = locale.T("The connection was denied. Use /settings to try again.", "В подключении отказано. Попробуйте ещё раз через /settings.")
-	ConnectExpiredReply      = locale.T("The connection code expired. Use /settings to get a new one.", "Срок действия кода подключения истёк. Получите новый через /settings.")
+	ConnectFailedText        = locale.T("The connection could not be completed. Use /settings to try again.", "Не удалось завершить подключение. Попробуй ещё раз через /settings.")
+	ConnectedReply           = locale.T("Your model subscription is connected.", "Твоя подписка на модель подключена.")
+	ConnectDeniedReply       = locale.T("The connection was denied. Use /settings to try again.", "В подключении отказано. Попробуй ещё раз через /settings.")
+	ConnectExpiredReply      = locale.T("The connection code expired. Use /settings to get a new one.", "Срок действия кода подключения истёк. Получи новый через /settings.")
 	AccountAlreadyBoundReply = locale.T("That ChatGPT account is already connected to another user of this bot.", "Этот аккаунт ChatGPT уже подключён у другого пользователя этого бота.")
 )
 

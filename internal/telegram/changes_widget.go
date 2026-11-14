@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	changesWarning   = locale.T("⚠️ A marked change carries a warning; open it before confirming.", "⚠️ У отмеченного изменения есть предупреждение; откройте его, прежде чем подтверждать.")
+	changesWarning   = locale.T("⚠️ A marked change carries a warning; open it before confirming.", "⚠️ У отмеченного изменения есть предупреждение; открой его, прежде чем подтверждать.")
 	changesConfirm   = locale.T("Confirm %[1]s of %[2]s", "Подтвердить %[1]s из %[2]s")
 	changesRejectAll = locale.T("Reject all", "Отклонить все")
 )

@@ -25,8 +25,8 @@ const (
 )
 
 var (
-	ServicesLine          = locale.T("Services outside the household that I can use for you. Each is off until you turn it on, and what you ask a service that is on goes to it. A service that needs a key uses your own: press Connect to send it.", "Сервисы вне дома, которыми я могу пользоваться для вас. Каждый выключен, пока вы его не включите, и всё, что вы спрашиваете у включённого сервиса, уходит ему. Сервису, которому нужен ключ, подходит только ваш собственный: нажмите «Подключить», чтобы отправить его.")
-	ServicesKeyGuardReply = locale.T("That looked like a key for one of your services, so I deleted it and did not send it to the model. To connect a service, press its Connect button in /settings.", "Это было похоже на ключ одного из ваших сервисов, поэтому сообщение удалено и модели не отправлено. Чтобы подключить сервис, нажмите его кнопку «Подключить» в /settings.")
+	ServicesLine          = locale.T("Services outside the household that I can use for you. Each is off until you turn it on, and what you ask a service that is on goes to it. A service that needs a key uses your own: press Connect to send it.", "Сервисы вне дома, которыми я могу пользоваться для тебя. Каждый выключен, пока ты его не включишь, и всё, что ты спрашиваешь у включённого сервиса, уходит ему. Сервису, которому нужен ключ, подходит только твой собственный: нажми «Подключить», чтобы отправить его.")
+	ServicesKeyGuardReply = locale.T("That looked like a key for one of your services, so I deleted it and did not send it to the model. To connect a service, press its Connect button in /settings.", "Это было похоже на ключ одного из твоих сервисов, поэтому сообщение удалено и модели не отправлено. Чтобы подключить сервис, нажми его кнопку «Подключить» в /settings.")
 )
 
 // ServicesHelp is for the model, which reads it in English whatever the user's language.
@@ -52,21 +52,21 @@ func ServiceLine(ctx context.Context, status mcp.ServerStatus) string {
 var (
 	servicesConnectInstructions = locale.T("Send your key for %[1]s as your next message by %[2]s. I will delete that message right away and never show the key again. "+
 		"The key lets me use %[1]s for you: what you ask it is sent there with your key, to a service outside the household. Connecting also turns it on.",
-		"Отправьте ваш ключ для %[1]s следующим сообщением до %[2]s. Я сразу удалю это сообщение и никогда больше не покажу ключ. "+
-			"Ключ позволяет мне пользоваться %[1]s для вас: всё, что вы спрашиваете, отправляется туда вместе с вашим ключом, в сервис вне дома. Подключение также включает его.")
-	servicesConnectedReply    = locale.T("%s is connected with your key and turned on.", "Сервис %s подключён с вашим ключом и включён.")
-	servicesConnectedOffReply = locale.T("Your key for %[1]s is stored, but I could not turn it on. Press Turn on %[1]s in /settings.", "Ваш ключ для %[1]s сохранён, но включить сервис не удалось. Нажмите «Включить %[1]s» в /settings.")
-	servicesNotAKeyReply      = locale.T("That did not look like a key for %[1]s, so nothing was stored and it was sent nowhere. Press Connect %[1]s again when you have it.", "Это не похоже на ключ для %[1]s, поэтому ничего не сохранено и никуда не отправлено. Когда он у вас будет, снова нажмите «Подключить %[1]s».")
-	servicesRefusedReply      = locale.T("%s refused that key, so nothing was stored. Send the right key as your next message; I am still waiting for it.", "Сервис %s отклонил этот ключ, поэтому ничего не сохранено. Отправьте правильный ключ следующим сообщением; я всё ещё его жду.")
-	servicesUnverifiedReply   = locale.T("%s could not be reached to check that key, so nothing was stored. Send it again to retry; I am still waiting for it.", "Не удалось связаться с сервисом %s, чтобы проверить этот ключ, поэтому ничего не сохранено. Отправьте его снова, чтобы повторить; я всё ещё его жду.")
-	servicesFailedReply       = locale.T("I could not store your key for %s, so nothing was connected. Send it again to retry; I am still waiting for it.", "Не удалось сохранить ваш ключ для %s, поэтому ничего не подключено. Отправьте его снова, чтобы повторить; я всё ещё его жду.")
-	servicesExpiredReply      = locale.T("The wait for your key for %[1]s had ended, so nothing was stored or sent. Press Connect %[1]s again.", "Ожидание вашего ключа для %[1]s закончилось, поэтому ничего не сохранено и не отправлено. Снова нажмите «Подключить %[1]s».")
-	servicesDisconnectedNote  = locale.T("Your key for %s is removed and the service is off.", "Ваш ключ для %s удалён, сервис выключен.")
-	servicePrivacyLine        = locale.T("%s: what you ask it goes to that service, outside the household, and what it returns is treated as outside content.", "%s: то, что вы спрашиваете у сервиса, уходит ему, за пределы дома, а то, что он возвращает, считается внешним содержимым.")
+		"Отправь твой ключ для %[1]s следующим сообщением до %[2]s. Я сразу удалю это сообщение и никогда больше не покажу ключ. "+
+			"Ключ позволяет мне пользоваться %[1]s для тебя: всё, что ты спрашиваешь, отправляется туда вместе с твоим ключом, в сервис вне дома. Подключение также включает его.")
+	servicesConnectedReply    = locale.T("%s is connected with your key and turned on.", "Сервис %s подключён с твоим ключом и включён.")
+	servicesConnectedOffReply = locale.T("Your key for %[1]s is stored, but I could not turn it on. Press Turn on %[1]s in /settings.", "Твой ключ для %[1]s сохранён, но включить сервис не удалось. Нажми «Включить %[1]s» в /settings.")
+	servicesNotAKeyReply      = locale.T("That did not look like a key for %[1]s, so nothing was stored and it was sent nowhere. Press Connect %[1]s again when you have it.", "Это не похоже на ключ для %[1]s, поэтому ничего не сохранено и никуда не отправлено. Когда он у тебя будет, снова нажми «Подключить %[1]s».")
+	servicesRefusedReply      = locale.T("%s refused that key, so nothing was stored. Send the right key as your next message; I am still waiting for it.", "Сервис %s отклонил этот ключ, поэтому ничего не сохранено. Отправь правильный ключ следующим сообщением; я всё ещё его жду.")
+	servicesUnverifiedReply   = locale.T("%s could not be reached to check that key, so nothing was stored. Send it again to retry; I am still waiting for it.", "Не удалось связаться с сервисом %s, чтобы проверить этот ключ, поэтому ничего не сохранено. Отправь его снова, чтобы повторить; я всё ещё его жду.")
+	servicesFailedReply       = locale.T("I could not store your key for %s, so nothing was connected. Send it again to retry; I am still waiting for it.", "Не удалось сохранить твой ключ для %s, поэтому ничего не подключено. Отправь его снова, чтобы повторить; я всё ещё его жду.")
+	servicesExpiredReply      = locale.T("The wait for your key for %[1]s had ended, so nothing was stored or sent. Press Connect %[1]s again.", "Ожидание твоего ключа для %[1]s закончилось, поэтому ничего не сохранено и не отправлено. Снова нажми «Подключить %[1]s».")
+	servicesDisconnectedNote  = locale.T("Your key for %s is removed and the service is off.", "Твой ключ для %s удалён, сервис выключен.")
+	servicePrivacyLine        = locale.T("%s: what you ask it goes to that service, outside the household, and what it returns is treated as outside content.", "%s: то, что ты спрашиваешь у сервиса, уходит ему, за пределы дома, а то, что он возвращает, считается внешним содержимым.")
 
 	servicesName          = locale.T("Services", "Сервисы")
 	servicesOnCount       = locale.T("%d of %d on", "включено %d из %d")
-	servicesStaleNote     = locale.T("Connect your key again for %s in Services.", "Подключите ключ заново для %s в разделе «Сервисы».")
+	servicesStaleNote     = locale.T("Connect your key again for %s in Services.", "Подключи ключ заново для %s в разделе «Сервисы».")
 	servicesTurnOnButton  = locale.T("Turn on %s", "Включить %s")
 	servicesTurnOffButton = locale.T("Turn off %s", "Выключить %s")
 	servicesConnectButton = locale.T("Connect %s", "Подключить %s")

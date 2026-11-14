@@ -41,7 +41,7 @@ var (
 		"Удалить коллекцию %[2]s и все её записи (%[1]d)? Это нельзя отменить.",
 		"Удалить коллекцию %[2]s и все её записи (%[1]d)? Это нельзя отменить.",
 		"Удалить коллекцию %[2]s и все её записи (%[1]d)? Это нельзя отменить.")
-	NoCollectionsReply       = locale.T("You keep no collections. Ask me in conversation, for example: keep a list of things I lend out, with who and when.", "У вас нет коллекций. Попросите меня в разговоре, например: веди список вещей, которые я даю на время, с указанием, кому и когда.")
+	NoCollectionsReply       = locale.T("You keep no collections. Ask me in conversation, for example: keep a list of things I lend out, with who and when.", "У тебя нет коллекций. Попроси меня в разговоре, например: веди список вещей, которые я даю на время, с указанием, кому и когда.")
 	CollectionGoneReply      = locale.T("That collection no longer exists.", "Этой коллекции больше нет.")
 	CollectionRecordGoneLine = locale.T("That record no longer exists.", "Этой записи больше нет.")
 	CollectionDeletedNote    = locale.T("Deleted the collection.", "Коллекция удалена.")

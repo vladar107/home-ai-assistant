@@ -27,7 +27,7 @@ func TestTimedOutTurnRepliesInTheUsersLanguage(t *testing.T) {
 
 	h.push(textUpdate(1, 101, "plan my day"))
 	receive(t, h.ctx, runtime.calls)
-	h.wantReply(101, 1, "Ответ занял слишком много времени. Попробуйте ещё раз с более коротким запросом.")
+	h.wantReply(101, 1, "Ответ занял слишком много времени. Попробуй ещё раз с более коротким запросом.")
 	h.waitState(1, "delivered")
 
 	h.push(textUpdate(2, 202, "plan my day"))
@@ -47,7 +47,7 @@ func TestUsageLimitTurnRepliesInRussian(t *testing.T) {
 	}
 
 	h.push(textUpdate(1, 101, "fixture:quota"))
-	h.wantReply(101, 1, "Ваша подписка на модель достигла лимита использования. Попробуйте позже.")
+	h.wantReply(101, 1, "Твоя подписка на модель достигла лимита использования. Попробуй позже.")
 	h.waitState(1, "delivered")
 }
 
@@ -150,8 +150,8 @@ func TestRestorePreviewReadsInRussian(t *testing.T) {
 
 	preview := target.restorePreview(1, 101, data)
 	for _, want := range []string{
-		"Предпросмотр восстановления из вашего экспорта от ",
-		"Пока вы не подтвердите, ничего не изменится.",
+		"Предпросмотр восстановления из твоего экспорта от ",
+		"Пока ты не подтвердишь, ничего не изменится.",
 		"\nПамять: ",
 		"\nСохранённые места: 1 к добавлению.",
 		"Добавляется только то, что отмечено знаком +; уже имеющееся не меняется.",
@@ -166,7 +166,7 @@ func TestRestorePreviewReadsInRussian(t *testing.T) {
 		}
 	}
 	card := target.nextMessage()
-	if !strings.HasPrefix(card.text, "Восстановление из вашего экспорта\n") || !strings.Contains(card.text, "Восстановить ") || !strings.Contains(card.text, "Всё, что добавляется, перечислено выше.") {
+	if !strings.HasPrefix(card.text, "Восстановление из твоего экспорта\n") || !strings.Contains(card.text, "Восстановить ") || !strings.Contains(card.text, "Всё, что добавляется, перечислено выше.") {
 		t.Fatalf("restore card = %q", card.text)
 	}
 }

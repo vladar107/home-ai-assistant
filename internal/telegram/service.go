@@ -343,22 +343,22 @@ func (s *Service) botCommands(language locale.Language) []BotCommand {
 	conversationEnabled := s.conversation != nil
 	modelEnabled := conversationEnabled && s.model != nil
 	return menuCommands(language, []menuCommand{
-		{"backlog", locale.T("Show and export your ideas for developing me", "Показать и выгрузить ваши идеи для моего развития"), s.backlog != nil},
+		{"backlog", locale.T("Show and export your ideas for developing me", "Показать и выгрузить твои идеи для моего развития"), s.backlog != nil},
 		{"cancel", locale.T("Stop the current response", "Остановить текущий ответ"), conversationEnabled},
 		{"close", locale.T("Close this tab", "Закрыть эту вкладку"), conversationEnabled && s.tabs.enabled()},
-		{"collections", locale.T("Show and delete the lists I keep for you", "Показать и удалить списки, которые я веду для вас"), s.collections != nil},
-		{"export", locale.T("Get a file with what you set up and keep here", "Получить файл с тем, что вы настроили и храните здесь"), s.exports != nil},
-		{"jobs", locale.T("Show and manage your reminders and scheduled jobs", "Показать и изменить ваши напоминания и задания по расписанию"), s.schedules != nil},
-		{"memory", locale.T("Show and delete what I remember about you", "Показать и удалить то, что я о вас помню"), s.memory != nil},
+		{"collections", locale.T("Show and delete the lists I keep for you", "Показать и удалить списки, которые я веду для тебя"), s.collections != nil},
+		{"export", locale.T("Get a file with what you set up and keep here", "Получить файл с тем, что настроено и хранится здесь"), s.exports != nil},
+		{"jobs", locale.T("Show and manage your reminders and scheduled jobs", "Показать и изменить твои напоминания и задания по расписанию"), s.schedules != nil},
+		{"memory", locale.T("Show and delete what I remember about you", "Показать и удалить то, что я о тебе помню"), s.memory != nil},
 		{"model", ModelCommandDescription, modelEnabled},
 		{"new", locale.T("Start a fresh conversation", "Начать новый разговор"), conversationEnabled},
-		{"projects", locale.T("Show your projects and what is left in each", "Показать ваши проекты и что осталось в каждом"), s.projects != nil},
+		{"projects", locale.T("Show your projects and what is left in each", "Показать твои проекты и что осталось в каждом"), s.projects != nil},
 		{"restore", locale.T("Restore what is missing from an export file", "Восстановить недостающее из файла экспорта"), s.exports != nil},
 		{"sessions", locale.T("Return to a recent conversation", "Вернуться к недавнему разговору"), conversationEnabled},
 		{"settings", locale.T("Show and change your settings", "Показать и изменить настройки"), len(s.sections) > 0},
-		{"usage", locale.T("Show your ChatGPT subscription usage", "Показать использование вашей подписки ChatGPT"), modelEnabled && s.model.Usage != nil},
-		{"tasks", locale.T("Show and cancel your background tasks", "Показать и отменить ваши фоновые задачи"), s.tasks != nil},
-		{"why", locale.T("Reply with it to one of my messages to see what it was based on", "Ответьте этой командой на моё сообщение, чтобы увидеть, на чём оно основано"), s.why != nil},
+		{"usage", locale.T("Show your ChatGPT subscription usage", "Показать использование твоей подписки ChatGPT"), modelEnabled && s.model.Usage != nil},
+		{"tasks", locale.T("Show and cancel your background tasks", "Показать и отменить твои фоновые задачи"), s.tasks != nil},
+		{"why", locale.T("Reply with it to one of my messages to see what it was based on", "Ответь этой командой на моё сообщение, чтобы увидеть, на чём оно основано"), s.why != nil},
 	})
 }
 

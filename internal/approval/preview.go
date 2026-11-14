@@ -14,7 +14,7 @@ var (
 	previewNothingText     = locale.T("Nothing in this batch can be previewed.", "Для этого предложения предпросмотр недоступен.")
 	previewResolvedText    = locale.T("This batch is no longer waiting for confirmation, so there is nothing to preview.", "Это предложение больше не ждёт подтверждения, поэтому просматривать нечего.")
 	previewUnavailableText = locale.T("Previews are not available right now.", "Предпросмотр сейчас недоступен.")
-	previewFooter          = locale.T("Preview only: nothing is scheduled or changed until you confirm.", "Только предпросмотр: ничего не запланировано и не изменено, пока вы не подтвердите.")
+	previewFooter          = locale.T("Preview only: nothing is scheduled or changed until you confirm.", "Только предпросмотр: ничего не запланировано и не изменено, пока ты не подтвердишь.")
 	previewRunning         = locale.T("Running a preview; its report will follow here. Nothing is saved.", "Запускаю предпросмотр; отчёт появится здесь. Ничего не сохраняется.")
 	previewsRunning        = locale.N(
 		"Running previews of %[1]d item one after another; each report will follow here. Nothing is saved.",

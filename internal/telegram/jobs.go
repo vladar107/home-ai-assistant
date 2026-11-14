@@ -49,9 +49,9 @@ var (
 	listPreviousButton  = locale.T("‹ Previous", "‹ Назад")
 	listNextButton      = locale.T("Next ›", "Далее ›")
 	jobRunningReply     = locale.T("Running it now; the report will arrive here.", "Запускаю сейчас; отчёт придёт сюда.")
-	NoJobsReply         = locale.T("You have no reminders or scheduled jobs. Ask me for one in conversation, for example: remind me at 5 to call mom, or every Monday at 9, tell me which of my Notion tasks are overdue.", "У вас нет напоминаний и заданий по расписанию. Попросите меня об этом в разговоре, например: напомни в 5 позвонить маме или каждый понедельник в 9 говори, какие из моих задач в Notion просрочены.")
+	NoJobsReply         = locale.T("You have no reminders or scheduled jobs. Ask me for one in conversation, for example: remind me at 5 to call mom, or every Monday at 9, tell me which of my Notion tasks are overdue.", "У тебя нет напоминаний и заданий по расписанию. Попроси меня об этом в разговоре, например: напомни в 5 позвонить маме или каждый понедельник в 9 говори, какие из моих задач в Notion просрочены.")
 	JobGoneReply        = locale.T("That job no longer exists.", "Этого задания больше нет.")
-	SchedulePrivacyLine = locale.T("Reminders and jobs are kept until you delete them in /jobs; one-time jobs, 30 days after they run.", "Напоминания и задания хранятся, пока вы не удалите их в /jobs; разовые задания хранятся 30 дней после выполнения.")
+	SchedulePrivacyLine = locale.T("Reminders and jobs are kept until you delete them in /jobs; one-time jobs, 30 days after they run.", "Напоминания и задания хранятся, пока ты не удалишь их в /jobs; разовые задания хранятся 30 дней после выполнения.")
 )
 
 // ScheduleController is implemented by the scheduler; nil disables /jobs.

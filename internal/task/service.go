@@ -54,7 +54,7 @@ const (
 
 var (
 	LimitReply           = locale.T("This background task reached its limit and could not write a report in time.", "Эта фоновая задача достигла лимита и не успела написать отчёт.")
-	InterruptedTwiceText = locale.T("This background task was interrupted by a restart twice, so I stopped it. Ask again if you still need it.", "Эта фоновая задача дважды была прервана перезапуском, поэтому она остановлена. Попросите снова, если она всё ещё нужна.")
+	InterruptedTwiceText = locale.T("This background task was interrupted by a restart twice, so I stopped it. Ask again if you still need it.", "Эта фоновая задача дважды была прервана перезапуском, поэтому она остановлена. Попроси снова, если она всё ещё нужна.")
 )
 
 var (

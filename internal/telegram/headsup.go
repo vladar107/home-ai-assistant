@@ -17,13 +17,13 @@ const (
 
 var (
 	// HeadsUpTooManyNote explains why the switch could not create its job.
-	HeadsUpTooManyNote = locale.T("You already have the maximum number of scheduled jobs. Remove one in /jobs, then turn Heads-up on.", "У вас уже максимальное число заданий по расписанию. Удалите одно в /jobs, а затем включите оповещения.")
+	HeadsUpTooManyNote = locale.T("You already have the maximum number of scheduled jobs. Remove one in /jobs, then turn Heads-up on.", "У тебя уже максимальное число заданий по расписанию. Удали одно в /jobs, а затем включи оповещения.")
 
 	headsUpName      = locale.T("Heads-up", "Оповещения")
 	headsUpOffButton = locale.T("Turn off Heads-up", "Выключить оповещения")
 	headsUpOnButton  = locale.T("Turn on Heads-up", "Включить оповещения")
-	HeadsUpOnLine    = locale.T("Heads-up: on. A message at 07:30 and 18:30 when something needs your attention; quiet otherwise. Uses your model subscription.", "Оповещения: включены. Сообщение в 07:30 и 18:30, когда что-то требует вашего внимания; в остальное время тишина. Использует вашу подписку на модель.")
-	HeadsUpOffLine   = locale.T("Heads-up: off. Turn it on for a message at 07:30 and 18:30 when something needs your attention; quiet otherwise. Needs a connected model subscription, which it uses.", "Оповещения: выключены. Включите, и в 07:30 и 18:30 будет приходить сообщение, когда что-то требует вашего внимания; в остальное время тишина. Нужна подключённая подписка на модель, которую эта функция использует.")
+	HeadsUpOnLine    = locale.T("Heads-up: on. A message at 07:30 and 18:30 when something needs your attention; quiet otherwise. Uses your model subscription.", "Оповещения: включены. Сообщение в 07:30 и 18:30, когда что-то требует твоего внимания; в остальное время тишина. Использует твою подписку на модель.")
+	HeadsUpOffLine   = locale.T("Heads-up: off. Turn it on for a message at 07:30 and 18:30 when something needs your attention; quiet otherwise. Needs a connected model subscription, which it uses.", "Оповещения: выключены. Включи, и в 07:30 и 18:30 будет приходить сообщение, когда что-то требует твоего внимания; в остальное время тишина. Нужна подключённая подписка на модель, которую эта функция использует.")
 )
 
 // NewHeadsUpSection is the page that turns the principal's twice-daily heads-up job on and off.

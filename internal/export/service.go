@@ -32,7 +32,7 @@ const (
 
 var (
 	// RestoreHeading is what the confirmation of a restore is shown under.
-	RestoreHeading = locale.T("Restore from your export", "Восстановление из вашего экспорта")
+	RestoreHeading = locale.T("Restore from your export", "Восстановление из твоего экспорта")
 )
 
 var (
@@ -527,10 +527,10 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 }
 
 // RestoreGoneText is the outcome of a confirmation whose file is no longer held.
-var RestoreGoneText = locale.T("I no longer hold that file, so nothing was restored; send it again with /restore.", "Этого файла у меня больше нет, поэтому ничего не восстановлено; отправьте его снова с /restore.")
+var RestoreGoneText = locale.T("I no longer hold that file, so nothing was restored; send it again with /restore.", "Этого файла у меня больше нет, поэтому ничего не восстановлено; отправь его снова с /restore.")
 
 // ErrChanged refuses a confirmed restore that would no longer add what its preview showed.
-var ErrChanged = newRefusal("changed", locale.T("What this file would add changed since you saw the preview, so nothing was restored; send it again with /restore to see what it adds now.", "То, что добавит этот файл, изменилось с момента предпросмотра, поэтому ничего не восстановлено; отправьте его снова с /restore, чтобы увидеть, что он добавит теперь."))
+var ErrChanged = newRefusal("changed", locale.T("What this file would add changed since you saw the preview, so nothing was restored; send it again with /restore to see what it adds now.", "То, что добавит этот файл, изменилось с момента предпросмотра, поэтому ничего не восстановлено; отправь его снова с /restore, чтобы увидеть, что он добавит теперь."))
 
 // Restore verifies the principal's file and restores it, section by section.
 func (s *Service) Restore(ctx context.Context, principalID string, data []byte) (Report, error) {

@@ -32,10 +32,10 @@ var (
 	backlogToday      = locale.T("today", "сегодня")
 	backlogDaysAgo    = locale.N("%d day ago", "%d days ago", "%d день назад", "%d дня назад", "%d дней назад")
 	backlogDoneButton = locale.T("Done %s", "Готово %s")
-	backlogExportHint = locale.T("Send /backlog export for the full text.", "Отправьте /backlog export, чтобы получить полный текст.")
-	NoBacklogReply    = locale.T("Your backlog is empty. Tell me in conversation, for example: add to the backlog that you should answer weather questions with a chart.", "Бэклог пуст. Расскажите мне в разговоре, например: добавь в бэклог, что на вопросы о погоде нужно отвечать с графиком.")
+	backlogExportHint = locale.T("Send /backlog export for the full text.", "Отправь /backlog export, чтобы получить полный текст.")
+	NoBacklogReply    = locale.T("Your backlog is empty. Tell me in conversation, for example: add to the backlog that you should answer weather questions with a chart.", "Бэклог пуст. Расскажи мне в разговоре, например: добавь в бэклог, что на вопросы о погоде нужно отвечать с графиком.")
 	BacklogGoneReply  = locale.T("That item is no longer open.", "Этот пункт больше не открыт.")
-	BacklogHelpLine   = locale.T("/backlog export sends your ideas to paste into a development session.", "/backlog export присылает ваши идеи, чтобы вставить их в сессию разработки.")
+	BacklogHelpLine   = locale.T("/backlog export sends your ideas to paste into a development session.", "/backlog export присылает твои идеи, чтобы вставить их в сессию разработки.")
 )
 
 // BacklogController is implemented by the backlog service; nil leaves /backlog out.

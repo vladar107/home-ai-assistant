@@ -17,7 +17,7 @@ const (
 var (
 	WatchGoneReply   = locale.T("This watch no longer exists.", "Этого наблюдения больше нет.")
 	WatchMutedReply  = locale.T("Muted for today; it checks again on its next day.", "Без уведомлений до конца дня; следующая проверка — в её следующий день.")
-	WatchPausedReply = locale.T("Paused. Resume it in /jobs.", "Приостановлено. Возобновите его в /jobs.")
+	WatchPausedReply = locale.T("Paused. Resume it in /jobs.", "Приостановлено. Возобнови его в /jobs.")
 )
 
 // WatchController is implemented by the watch service; nil leaves watches out of /jobs and

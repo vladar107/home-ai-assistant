@@ -423,7 +423,7 @@ var (
 	modelName              = locale.T("Model", "Модель")
 	modelNotConnectedState = locale.T("not connected", "не подключена")
 	modelConnectedState    = locale.T("connected", "подключена")
-	modelConnectAttention  = locale.T("Connect your model subscription to start talking to me.", "Подключите подписку на модель, чтобы начать со мной разговор.")
+	modelConnectAttention  = locale.T("Connect your model subscription to start talking to me.", "Подключи подписку на модель, чтобы начать со мной разговор.")
 	modelConnectButton     = locale.T("Connect model", "Подключить модель")
 	modelDisconnectButton  = locale.T("Disconnect model", "Отключить модель")
 )
@@ -510,22 +510,22 @@ const (
 )
 
 var (
-	NotionUnavailableLine     = locale.T("Notion: the installed token could not be verified because Notion is unavailable. Try again later.", "Notion: установленный токен не удалось проверить, потому что Notion недоступен. Повторите попытку позже.")
-	NotionConnectFailedReply  = locale.T("Notion could not be reached to verify the token, so nothing was stored. Please try again later.", "Не удалось связаться с Notion, чтобы проверить токен, поэтому ничего не сохранено. Повторите попытку позже.")
-	NotionWritesOnReply       = locale.T("Notion writes are on. The model may propose to create or update pages; nothing is written until you confirm the exact proposal.", "Запись в Notion включена. Модель может предлагать создать или обновить страницы; ничего не записывается, пока вы не подтвердите конкретное предложение.")
-	NotionWritesOffReply      = locale.T("Notion writes are off. The model can only read your Notion content.", "Запись в Notion выключена. Модель может только читать ваше содержимое Notion.")
+	NotionUnavailableLine     = locale.T("Notion: the installed token could not be verified because Notion is unavailable. Try again later.", "Notion: установленный токен не удалось проверить, потому что Notion недоступен. Повтори попытку позже.")
+	NotionConnectFailedReply  = locale.T("Notion could not be reached to verify the token, so nothing was stored. Please try again later.", "Не удалось связаться с Notion, чтобы проверить токен, поэтому ничего не сохранено. Повтори попытку позже.")
+	NotionWritesOnReply       = locale.T("Notion writes are on. The model may propose to create or update pages; nothing is written until you confirm the exact proposal.", "Запись в Notion включена. Модель может предлагать создать или обновить страницы; ничего не записывается, пока ты не подтвердишь конкретное предложение.")
+	NotionWritesOffReply      = locale.T("Notion writes are off. The model can only read your Notion content.", "Запись в Notion выключена. Модель может только читать твоё содержимое Notion.")
 	NotionNotConnectedLine    = locale.T("Notion: not connected.", "Notion: не подключён.")
-	NotionOperatorLine        = locale.T("Notion: not connected. Ask the operator to install your token with scripts/notion-set-token.", "Notion: не подключён. Попросите оператора установить ваш токен с помощью scripts/notion-set-token.")
-	NotionInvalidTokenLine    = locale.T("Notion: the installed token could not be used. Install a fresh token or disconnect.", "Notion: установленный токен не удалось использовать. Установите новый токен или отключите Notion.")
-	NotionPrivacyLine         = locale.T("Notion pages I read go to your model.", "Страницы Notion, которые я читаю, уходят вашей модели.")
+	NotionOperatorLine        = locale.T("Notion: not connected. Ask the operator to install your token with scripts/notion-set-token.", "Notion: не подключён. Попроси оператора установить твой токен с помощью scripts/notion-set-token.")
+	NotionInvalidTokenLine    = locale.T("Notion: the installed token could not be used. Install a fresh token or disconnect.", "Notion: установленный токен не удалось использовать. Установи новый токен или отключи Notion.")
+	NotionPrivacyLine         = locale.T("Notion pages I read go to your model.", "Страницы Notion, которые я читаю, уходят твоей модели.")
 	NotionConnectInstructions = locale.T("Send your Notion token as your next message within 10 minutes. I will delete that message right away and never show the token again. "+
 		"Recommended: an internal connection with read, update, and insert content capabilities, shared only with the pages and data sources you want me to see. "+
 		"A personal access token also works, but it grants everything you can access and expires. "+
-		"Notion content read through the connection is sent to your own model subscription.", "Отправьте токен Notion следующим сообщением в течение 10 минут. Я сразу удалю это сообщение и никогда больше не покажу токен. Рекомендуется внутреннее подключение с правами на чтение, обновление и вставку содержимого, к которому открыт доступ только для страниц и источников данных, которые вы хотите мне показать. Подойдёт и персональный токен доступа, но он даёт всё, к чему у вас есть доступ, и истекает. Содержимое Notion, прочитанное через подключение, отправляется вашей собственной подписке на модель.")
-	NotionNotATokenReply    = locale.T("That did not look like a Notion token, so nothing was stored and it was not sent to the model. Press Connect Notion again when you have one.", "Это не похоже на токен Notion, поэтому ничего не сохранено и модели не отправлено. Когда он у вас будет, снова нажмите «Подключить Notion».")
-	NotionInvalidTokenReply = locale.T("Notion rejected that token, so nothing was stored. Check it in Notion's developer portal and press Connect Notion again.", "Notion отклонил этот токен, поэтому ничего не сохранено. Проверьте его на портале разработчиков Notion и снова нажмите «Подключить Notion».")
-	NotionTokenGuardReply   = locale.T("That looked like a Notion token, so I deleted it and did not send it to the model. To connect Notion, use Connect Notion in /settings or ask the operator to install it.", "Это было похоже на токен Notion, поэтому сообщение удалено и модели не отправлено. Чтобы подключить Notion, нажмите «Подключить Notion» в /settings или попросите оператора установить его.")
-	DeleteFailedLine        = locale.T("I could not delete your message; please delete it yourself.", "Не удалось удалить ваше сообщение; удалите его, пожалуйста, сами.")
+		"Notion content read through the connection is sent to your own model subscription.", "Отправь токен Notion следующим сообщением в течение 10 минут. Я сразу удалю это сообщение и никогда больше не покажу токен. Рекомендуется внутреннее подключение с правами на чтение, обновление и вставку содержимого, к которому открыт доступ только для страниц и источников данных, которые ты хочешь мне показать. Подойдёт и персональный токен доступа, но он даёт всё, к чему у тебя есть доступ, и истекает. Содержимое Notion, прочитанное через подключение, отправляется твоей собственной подписке на модель.")
+	NotionNotATokenReply    = locale.T("That did not look like a Notion token, so nothing was stored and it was not sent to the model. Press Connect Notion again when you have one.", "Это не похоже на токен Notion, поэтому ничего не сохранено и модели не отправлено. Когда он у тебя будет, снова нажми «Подключить Notion».")
+	NotionInvalidTokenReply = locale.T("Notion rejected that token, so nothing was stored. Check it in Notion's developer portal and press Connect Notion again.", "Notion отклонил этот токен, поэтому ничего не сохранено. Проверь его на портале разработчиков Notion и снова нажми «Подключить Notion».")
+	NotionTokenGuardReply   = locale.T("That looked like a Notion token, so I deleted it and did not send it to the model. To connect Notion, use Connect Notion in /settings or ask the operator to install it.", "Это было похоже на токен Notion, поэтому сообщение удалено и модели не отправлено. Чтобы подключить Notion, нажми «Подключить Notion» в /settings или попроси оператора установить его.")
+	DeleteFailedLine        = locale.T("I could not delete your message; please delete it yourself.", "Не удалось удалить твоё сообщение; удали его, пожалуйста, вручную.")
 )
 
 var (
@@ -597,7 +597,7 @@ func (n notionSection) privacy(ctx context.Context, _ string) ([]string, error) 
 
 var (
 	notionRejectedState     = locale.T("token rejected", "токен отклонён")
-	notionRejectedAttention = locale.T("Notion rejected your token; install a fresh one or disconnect.", "Notion отклонил ваш токен; установите новый или отключите Notion.")
+	notionRejectedAttention = locale.T("Notion rejected your token; install a fresh one or disconnect.", "Notion отклонил твой токен; установи новый или отключи Notion.")
 	notionUnavailableState  = locale.T("unavailable", "недоступен")
 	notionWritesOnState     = locale.T("writes on", "запись включена")
 	notionWritesOffState    = locale.T("writes off", "запись выключена")
@@ -723,9 +723,9 @@ const (
 )
 
 var (
-	NASWritesOnReply         = locale.T("Saving to the NAS is on. The model may propose to file a photo or document you sent in the conversation; nothing is written until you confirm the exact proposal, and a save can only add a new file.", "Сохранение на NAS включено. Модель может предложить сохранить фото или документ, отправленные вами в разговоре; ничего не записывается, пока вы не подтвердите конкретное предложение, а сохранение может только добавить новый файл.")
-	NASWritesOffReply        = locale.T("Saving to the NAS is off. The model can browse and read your NAS folders, but not add anything.", "Сохранение на NAS выключено. Модель может просматривать и читать ваши папки на NAS, но не может ничего добавлять.")
-	NASNoAccessLine          = locale.T("NAS: no folders are configured for you.", "NAS: для вас не настроено ни одной папки.")
+	NASWritesOnReply         = locale.T("Saving to the NAS is on. The model may propose to file a photo or document you sent in the conversation; nothing is written until you confirm the exact proposal, and a save can only add a new file.", "Сохранение на NAS включено. Модель может предложить сохранить фото или документ, отправленные тобой в разговоре; ничего не записывается, пока ты не подтвердишь конкретное предложение, а сохранение может только добавить новый файл.")
+	NASWritesOffReply        = locale.T("Saving to the NAS is off. The model can browse and read your NAS folders, but not add anything.", "Сохранение на NAS выключено. Модель может просматривать и читать твои папки на NAS, но не может ничего добавлять.")
+	NASNoAccessLine          = locale.T("NAS: no folders are configured for you.", "NAS: для тебя не настроено ни одной папки.")
 	nasReadOnlyLine          = locale.T("NAS: %s (read-only).", "NAS: %s (только чтение).")
 	nasSavingLine            = locale.T("NAS: %[1]s. Saving %[2]s, to %[3]s.", "NAS: %[1]s. Сохранение: %[2]s, в %[3]s.")
 	nasNoFoldersState        = locale.T("no folders", "нет папок")
@@ -734,7 +734,7 @@ var (
 	nasSavingOffState        = locale.T("saving off", "сохранение выключено")
 	nasSavingOnButton        = locale.T("Turn NAS saving on", "Включить сохранение на NAS")
 	nasSavingOffButton       = locale.T("Turn NAS saving off", "Выключить сохранение на NAS")
-	NASSavingUnavailableLine = locale.T("Saving is not configured for you, so NAS files can only be read.", "Сохранение для вас не настроено, поэтому файлы на NAS можно только читать.")
+	NASSavingUnavailableLine = locale.T("Saving is not configured for you, so NAS files can only be read.", "Сохранение для тебя не настроено, поэтому файлы на NAS можно только читать.")
 )
 
 // NASConnectedLine names the folders this user can reach and whether saving is on, because those

@@ -437,7 +437,7 @@ type Change struct {
 // ProposalChanged is the same answer in the user's language.
 const ProposalChangedText = "This proposal changed; look at it again."
 
-var ProposalChanged = locale.T("This proposal changed; look at it again.", "Это предложение изменилось; посмотрите его ещё раз.")
+var ProposalChanged = locale.T("This proposal changed; look at it again.", "Это предложение изменилось; посмотри его ещё раз.")
 
 // DirectActions is a turn's "Done" message: its text and the Undo buttons of the actions that can
 // still be undone, in order.
@@ -1709,16 +1709,16 @@ var (
 	replacedLine        = locale.T("Replaced by a newer proposal; nothing was written.", "Заменено более новым предложением, ничего не записано.")
 	restartExpiredLine  = locale.T("Expired because the assistant restarted; nothing was written.", "Срок истёк: ассистент перезапустился, ничего не записано.")
 	expiredLine         = locale.T("Expired; nothing was written.", "Истекло, ничего не записано.")
-	interruptedLine     = locale.T("The assistant restarted while executing this; check whether it took effect before trying again.", "Ассистент перезапустился во время выполнения; проверьте, сработало ли изменение, прежде чем пробовать снова.")
-	timedOutLine        = locale.T("Execution timed out; check the target before trying again.", "Выполнение заняло слишком много времени; проверьте, что получилось, прежде чем пробовать снова.")
+	interruptedLine     = locale.T("The assistant restarted while executing this; check whether it took effect before trying again.", "Ассистент перезапустился во время выполнения; проверь, сработало ли изменение, прежде чем пробовать снова.")
+	timedOutLine        = locale.T("Execution timed out; check the target before trying again.", "Выполнение заняло слишком много времени; проверь, что получилось, прежде чем пробовать снова.")
 	failedEarlyLine     = locale.T("Execution failed before anything was written.", "Не удалось выполнить: ничего не было записано.")
 	failedWithLine      = locale.T("Failed. %[1]s", "Не удалось. %[1]s")
 	failedLine          = locale.T("Failed.", "Не удалось.")
 	lessThanAMinute     = locale.T("less than a minute", "меньше минуты")
 	minutesLeft         = locale.N("%[1]d minute", "%[1]d minutes", "%[1]d минуту", "%[1]d минуты", "%[1]d минут")
 	hoursLeft           = locale.N("%[1]d hour", "%[1]d hours", "%[1]d час", "%[1]d часа", "%[1]d часов")
-	intentWarning       = locale.T("⚠️ This does not look like something you asked for. Check it carefully before confirming.", "⚠️ Похоже, вы об этом не просили. Внимательно проверьте, прежде чем подтверждать.")
-	directIntentWarning = locale.T("⚠️ This does not look like something you asked for. Check it, and press Undo if it is wrong.", "⚠️ Похоже, вы об этом не просили. Проверьте и нажмите «Отменить», если это ошибка.")
+	intentWarning       = locale.T("⚠️ This does not look like something you asked for. Check it carefully before confirming.", "⚠️ Похоже, это не по твоей просьбе. Внимательно проверь, прежде чем подтверждать.")
+	directIntentWarning = locale.T("⚠️ This does not look like something you asked for. Check it, and press Undo if it is wrong.", "⚠️ Похоже, это не по твоей просьбе. Проверь и нажми «Отменить», если это ошибка.")
 	changeWords         = []struct {
 		state ChangeState
 		key   string

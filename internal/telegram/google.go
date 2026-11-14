@@ -22,23 +22,23 @@ var (
 		"2. Allow reading your email, your calendar, or both. Nothing can send, change, or delete anything.\n"+
 		"3. Your browser then fails to open a localhost page. Copy that page's full address and send it here within 10 minutes. I will delete it right away.\n\n",
 		"Чтобы подключить аккаунт Google только для чтения:\n"+
-			"1. Откройте ссылку ниже и войдите в аккаунт Google, который хотите подключить. Google сообщит, что приложение не проверено; это собственное приложение вашей семьи, так что продолжайте.\n"+
-			"2. Разрешите чтение почты, календаря или того и другого. Ничего нельзя ни отправить, ни изменить, ни удалить.\n"+
-			"3. Затем браузер не сможет открыть страницу localhost. Скопируйте полный адрес этой страницы и отправьте его сюда в течение 10 минут. Я сразу его удалю.\n\n")
+			"1. Открой ссылку ниже и войди в аккаунт Google, который хочешь подключить. Google сообщит, что приложение не проверено; это собственное приложение твоей семьи, так что продолжай.\n"+
+			"2. Разреши чтение почты, календаря или того и другого. Ничего нельзя ни отправить, ни изменить, ни удалить.\n"+
+			"3. Затем браузер не сможет открыть страницу localhost. Скопируй полный адрес этой страницы и отправь его сюда в течение 10 минут. Я сразу его удалю.\n\n")
 	googleLinkFollows = locale.T("(a personal sign-in link follows)", "(следом придёт персональная ссылка для входа)")
 
 	GoogleAccountsLine       = locale.T("Google accounts:", "Аккаунты Google:")
-	GooglePrivacyLine        = locale.T("Mail and calendar events I read go to your model.", "Почта и события календаря, которые я читаю, уходят вашей модели.")
-	GoogleRejectedReply      = locale.T("Google refused that sign-in, so nothing was connected. Codes work once and only for a few minutes; press Connect a Google account in /settings to try again.", "Google отклонил этот вход, поэтому ничего не подключено. Коды работают один раз и только несколько минут; нажмите «Подключить аккаунт Google» в /settings, чтобы попробовать снова.")
-	GoogleConnectFailedReply = locale.T("Google could not be reached to finish the sign-in, so nothing was connected. Please try again later.", "Не удалось связаться с Google, чтобы завершить вход, поэтому ничего не подключено. Повторите попытку позже.")
+	GooglePrivacyLine        = locale.T("Mail and calendar events I read go to your model.", "Почта и события календаря, которые я читаю, уходят твоей модели.")
+	GoogleRejectedReply      = locale.T("Google refused that sign-in, so nothing was connected. Codes work once and only for a few minutes; press Connect a Google account in /settings to try again.", "Google отклонил этот вход, поэтому ничего не подключено. Коды работают один раз и только несколько минут; нажми «Подключить аккаунт Google» в /settings, чтобы попробовать снова.")
+	GoogleConnectFailedReply = locale.T("Google could not be reached to finish the sign-in, so nothing was connected. Please try again later.", "Не удалось связаться с Google, чтобы завершить вход, поэтому ничего не подключено. Повтори попытку позже.")
 
 	googleNotAllowedState  = locale.T("not allowed", "не разрешено")
-	googleReconnectLine    = locale.T("%s: Google no longer accepts the connection. Reconnect or disconnect.", "%s: Google больше не принимает подключение. Подключите аккаунт заново или отключите его.")
+	googleReconnectLine    = locale.T("%s: Google no longer accepts the connection. Reconnect or disconnect.", "%s: Google больше не принимает подключение. Подключи аккаунт заново или отключи его.")
 	googleAccountLine      = locale.T("%[1]s: Mail %[2]s, Calendar %[3]s.", "%[1]s: почта: %[2]s, календарь: %[3]s.")
 	googleConnectedReply   = locale.T("%[1]s is connected read-only: Mail %[2]s, Calendar %[3]s.", "Аккаунт %[1]s подключён только для чтения: почта: %[2]s, календарь: %[3]s.")
 	googleNotConnected     = locale.T("not connected", "не подключён")
 	googleAccountCount     = locale.N("%[1]d account", "%[1]d accounts", "%[1]d аккаунт", "%[1]d аккаунта", "%[1]d аккаунтов")
-	googleReconnectNote    = locale.T("Reconnect %s in Accounts › Google.", "Подключите заново %s в разделе «Аккаунты › Google».")
+	googleReconnectNote    = locale.T("Reconnect %s in Accounts › Google.", "Подключи заново %s в разделе «Аккаунты › Google».")
 	googleConnectButton    = locale.T("Connect a Google account", "Подключить аккаунт Google")
 	googleDisconnectLabel  = locale.T("Disconnect", "Отключить")
 	googleMailOn           = locale.T("Mail on", "Включить почту")
@@ -46,11 +46,11 @@ var (
 	googleCalendarOn       = locale.T("Calendar on", "Включить календарь")
 	googleCalendarOff      = locale.T("Calendar off", "Выключить календарь")
 	GoogleNotConnectedLine = locale.T("Google: no accounts connected.", "Google: аккаунты не подключены.")
-	GoogleNoSignInReply    = locale.T("That sign-in address does not match a pending sign-in, or it expired, so nothing was connected. Press Connect a Google account in /settings to start again. I deleted the message.", "Этот адрес входа не соответствует ожидающему входу или устарел, поэтому ничего не подключено. Нажмите «Подключить аккаунт Google» в /settings, чтобы начать заново. Сообщение удалено.")
-	GoogleDeniedReply      = locale.T("Neither Gmail nor Calendar access was granted, so nothing was connected. Press Connect a Google account in /settings and allow at least one.", "Доступ не дан ни к Gmail, ни к Календарю, поэтому ничего не подключено. Нажмите «Подключить аккаунт Google» в /settings и разрешите хотя бы один из них.")
-	GoogleTakenReply       = locale.T("That Google account is already connected for another household member, so it was not connected for you.", "Этот аккаунт Google уже подключён у другого члена семьи, поэтому для вас он не подключён.")
-	GoogleNotGrantedReply  = locale.T("That account did not allow it when it was connected. Press Connect a Google account, sign in with the same account, and leave it ticked.", "При подключении этот аккаунт не дал такого разрешения. Нажмите «Подключить аккаунт Google», войдите в тот же аккаунт и оставьте галочку отмеченной.")
-	GoogleSignInGuardReply = locale.T("That looked like a Google sign-in address, so I deleted it and did not send it to the model. To finish signing in, send the address on its own as a text message.", "Это было похоже на адрес входа в Google, поэтому сообщение удалено и модели не отправлено. Чтобы завершить вход, отправьте адрес отдельным текстовым сообщением.")
+	GoogleNoSignInReply    = locale.T("That sign-in address does not match a pending sign-in, or it expired, so nothing was connected. Press Connect a Google account in /settings to start again. I deleted the message.", "Этот адрес входа не соответствует ожидающему входу или устарел, поэтому ничего не подключено. Нажми «Подключить аккаунт Google» в /settings, чтобы начать заново. Сообщение удалено.")
+	GoogleDeniedReply      = locale.T("Neither Gmail nor Calendar access was granted, so nothing was connected. Press Connect a Google account in /settings and allow at least one.", "Доступ не дан ни к Gmail, ни к Календарю, поэтому ничего не подключено. Нажми «Подключить аккаунт Google» в /settings и разреши хотя бы один из них.")
+	GoogleTakenReply       = locale.T("That Google account is already connected for another household member, so it was not connected for you.", "Этот аккаунт Google уже подключён у другого члена семьи, поэтому для тебя он не подключён.")
+	GoogleNotGrantedReply  = locale.T("That account did not allow it when it was connected. Press Connect a Google account, sign in with the same account, and leave it ticked.", "При подключении этот аккаунт не дал такого разрешения. Нажми «Подключить аккаунт Google», войди в тот же аккаунт и оставь галочку отмеченной.")
+	GoogleSignInGuardReply = locale.T("That looked like a Google sign-in address, so I deleted it and did not send it to the model. To finish signing in, send the address on its own as a text message.", "Это было похоже на адрес входа в Google, поэтому сообщение удалено и модели не отправлено. Чтобы завершить вход, отправь адрес отдельным текстовым сообщением.")
 )
 
 // GoogleController is implemented by the Google connector, for the Google and Trips settings

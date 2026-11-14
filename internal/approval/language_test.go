@@ -343,7 +343,7 @@ func TestWarnedProposalKeepsItsTitleAndWarningAfterALanguageSwitch(t *testing.T)
 	ctx := t.Context()
 	f.service.SetIntentChecker(flagEverything{})
 	intent := approval.Intent{Verb: "rename", TargetKind: "note", TargetName: "Groceries"}
-	english, russian := approval.IntentWarning, "⚠️ Похоже, вы об этом не просили."
+	english, russian := approval.IntentWarning, "⚠️ Похоже, это не по твоей просьбе."
 
 	for _, tc := range []struct {
 		principal, from, to string

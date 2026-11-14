@@ -28,8 +28,8 @@ var (
 	// WidgetIgnoredAnswer answers a tap that names nothing the user can act on.
 	WidgetIgnoredAnswer = locale.T("This no longer does anything.", "Эта кнопка больше не действует.")
 
-	widgetTooManyTaps = locale.T("Too many taps; wait a moment and try again.", "Слишком много нажатий; подождите немного и попробуйте снова.")
-	widgetNoAnswer    = locale.T("No answer came; try again.", "Ответ не пришёл; попробуйте ещё раз.")
+	widgetTooManyTaps = locale.T("Too many taps; wait a moment and try again.", "Слишком много нажатий; подожди немного и попробуй снова.")
+	widgetNoAnswer    = locale.T("No answer came; try again.", "Ответ не пришёл; попробуй ещё раз.")
 )
 
 // widgetLanguages are the languages a widget's template can draw its labels in.

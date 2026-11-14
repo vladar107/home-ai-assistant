@@ -123,7 +123,7 @@ func TestBacklogReadsInRussian(t *testing.T) {
 	}
 	h.push(textUpdate(2, 101, "/backlog"))
 	list := h.nextMessage()
-	want := "Бэклог\n\n1. Идея 6 (21 день назад)\n2. Идея 5 (11 дней назад)\n3. Идея 4 (5 дней назад)\n4. Идея 3 (3 дня назад)\n5. Идея 2 (1 день назад)\n6. Идея 1 (сегодня)\n\nОтправьте /backlog export, чтобы получить полный текст."
+	want := "Бэклог\n\n1. Идея 6 (21 день назад)\n2. Идея 5 (11 дней назад)\n3. Идея 4 (5 дней назад)\n4. Идея 3 (3 дня назад)\n5. Идея 2 (1 день назад)\n6. Идея 1 (сегодня)\n\nОтправь /backlog export, чтобы получить полный текст."
 	if list.text != want {
 		t.Fatalf("/backlog = %q, want %q", list.text, want)
 	}
@@ -276,7 +276,7 @@ func TestSessionsReadInRussian(t *testing.T) {
 		t.Fatalf("/sessions after resume = %q", edit.text)
 	}
 	followUp := h.nextMessage()
-	if !strings.HasPrefix(followUp.text, "Вы вернулись к разговору от ") || !russianLongDate.MatchString(followUp.text) || !strings.Contains(followUp.text, "Ваше следующее сообщение продолжит его.") {
+	if !strings.HasPrefix(followUp.text, "Возвращаемся к разговору от ") || !russianLongDate.MatchString(followUp.text) || !strings.Contains(followUp.text, "Твоё следующее сообщение продолжит его.") {
 		t.Fatalf("resume follow-up = %q", followUp.text)
 	}
 	wantRussianList(t, followUp.text)
@@ -305,7 +305,7 @@ func TestTripCardReadsInRussian(t *testing.T) {
 	for _, part := range []string{
 		"Найдена поездка в почте:", "Example trip (Example City)", "с чт 1 окт 2026 по сб 3 окт 2026, время указано в часовом поясе Europe/Lisbon",
 		"- Flight to Example City, чт 1 окт 07:00 (ABC123): регистрация открывается ср 30 сен 07:00 (найдено на сайте поставщика)",
-		"предположительно, за 24 ч до начала", "Отслеживайте поездку, чтобы получать напоминания о регистрации",
+		"предположительно, за 24 ч до начала", "Отслеживай поездку, чтобы получать напоминания о регистрации",
 	} {
 		if !strings.Contains(card.text, part) {
 			t.Fatalf("card lacks %q: %q", part, card.text)
@@ -317,7 +317,7 @@ func TestTripCardReadsInRussian(t *testing.T) {
 	wantRussianList(t, card.text, "Example", "trip", "City", "Flight", "to", "Hotel", "ABC", "Europe", "Lisbon")
 
 	tracked := h.pressCard(1, 101, card.messageID, "trip:track:"+found.ID)
-	for _, part := range []string{"Отслеживается: Example trip (Example City), с чт 1 окт 2026 по сб 3 окт 2026.", "Напоминание для Flight to Example City: ср 30 сен 07:00.", "Для Example Hotel напоминания нет: регистрация уже открыта.", "Совет: попросите меня приостановить"} {
+	for _, part := range []string{"Отслеживается: Example trip (Example City), с чт 1 окт 2026 по сб 3 окт 2026.", "Напоминание для Flight to Example City: ср 30 сен 07:00.", "Для Example Hotel напоминания нет: регистрация уже открыта.", "Совет: попроси меня приостановить"} {
 		if !strings.Contains(tracked.text, part) {
 			t.Fatalf("tracked card lacks %q: %q", part, tracked.text)
 		}

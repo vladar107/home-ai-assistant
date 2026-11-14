@@ -33,8 +33,8 @@ const (
 )
 
 var (
-	BusyReply         = locale.T("I am still working on your previous message. You can wait for it or use /cancel.", "Я всё ещё работаю над вашим предыдущим сообщением. Можно дождаться ответа или воспользоваться /cancel.")
-	InterruptedReply  = locale.T("The previous response was interrupted by a restart, so I did not retry it. Please send it again if you still need it.", "Предыдущий ответ был прерван перезапуском и повторно не запускался. Отправьте сообщение ещё раз, если оно всё ещё нужно.")
+	BusyReply         = locale.T("I am still working on your previous message. You can wait for it or use /cancel.", "Я всё ещё работаю над твоим предыдущим сообщением. Можно дождаться ответа или воспользоваться /cancel.")
+	InterruptedReply  = locale.T("The previous response was interrupted by a restart, so I did not retry it. Please send it again if you still need it.", "Предыдущий ответ был прерван перезапуском и повторно не запускался. Отправь сообщение ещё раз, если оно всё ещё нужно.")
 	TimeoutReply      = turn.TimeoutReply
 	UnavailableReply  = turn.UnavailableReply
 	QuotaReply        = turn.QuotaReply

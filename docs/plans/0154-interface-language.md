@@ -170,6 +170,9 @@ watch and trip rewrites use it when they have no language of their own.
   text the fake received through a check that flags words written only in Latin letters, with an
   allowlist for commands, product names such as Telegram and Notion, and values from the test's
   own data.
+- **The Russian texts address the user informally («ты»)**, as the operator chose, not with the
+  formal «вы». Sentences that would need the user's gender in the past tense are worded
+  without it.
 
 ## Approach
 
