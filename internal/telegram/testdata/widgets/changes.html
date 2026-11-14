@@ -1,0 +1,278 @@
+<style>
+body{margin:0;padding:12px;font:15px/1.4 -apple-system,system-ui,sans-serif;background:var(--tg-theme-bg-color,#fff);color:var(--tg-theme-text-color,#000)}
+#status{margin-top:8px;color:var(--tg-theme-hint-color,#888)}
+#status:empty{display:none}
+button{flex:1;padding:10px 4px;border:0;border-radius:8px;font:inherit;background:var(--tg-theme-button-color,#2481cc);color:var(--tg-theme-button-text-color,#fff)}
+button.quiet{background:var(--tg-theme-secondary-bg-color,#eee);color:var(--tg-theme-text-color,#000)}
+button:disabled{opacity:.5}
+.row{display:flex;gap:8px;align-items:flex-start;padding:6px 0}
+.tick{flex:none;width:22px;height:22px;border-radius:6px;border:2px solid var(--tg-theme-hint-color,#888);text-align:center;line-height:22px;font-size:15px}
+.tick.on{background:var(--tg-theme-button-color,#2481cc);border-color:var(--tg-theme-button-color,#2481cc);color:var(--tg-theme-button-text-color,#fff)}
+.tick.off{border-color:transparent}
+.name{flex:1;min-width:0;overflow-wrap:anywhere}
+.name b{font-weight:600}
+.note{color:var(--tg-theme-hint-color,#888)}
+.full{margin-top:4px;white-space:pre-wrap;overflow-wrap:anywhere}
+#heading{font-weight:600}
+#count{color:var(--tg-theme-hint-color,#888)}
+#warning{margin-top:8px}
+#warning:empty{display:none}
+#actions{display:flex;gap:8px;margin-top:10px}
+button.reject{background:var(--tg-theme-secondary-bg-color,#eee);color:var(--tg-theme-destructive-text-color,#d33)}
+</style>
+<div id="view"><div id="heading"></div>
+<div id="count"></div>
+<div id="list"></div>
+<div id="state"></div>
+<div id="warning"></div>
+<div id="actions"></div></div>
+<div id="status"></div>
+<script>
+(function () {
+  var widget = window.TelegramWidget;
+  if (!widget) {
+    return;
+  }
+  var view = document.getElementById('view');
+  var status = document.getElementById('status');
+  var controlsReturn = 'controls';
+  var dataChanges = 'data';
+  var drawn = 0;
+  var busy = false;
+
+  function current() {
+    try {
+      var raw = widget.chatData;
+      var data = raw && typeof raw === 'object' ? raw : JSON.parse(raw || '{}');
+      return data && typeof data === 'object' ? data : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function setBusy(on) {
+    var buttons = view.getElementsByTagName('button');
+    for (var i = 0; i < buttons.length; i++) {
+      buttons[i].disabled = on || buttons[i].getAttribute('data-off') === '1';
+    }
+    busy = on;
+  }
+
+  function failure(error) {
+    if (error && error.code === 'RATE_LIMITED') {
+      return 'Too many taps; wait a moment and try again.';
+    }
+    return 'No answer came; try again.';
+  }
+
+  function request(data, after) {
+    if (busy) {
+      return;
+    }
+    var tapped = drawn;
+    setBusy(true);
+    status.textContent = 'Working on it…';
+    widget.request(data).then(function (response) {
+      if (tapped !== drawn) {
+        return;
+      }
+      if (typeof after === 'function') {
+        status.textContent = '';
+        setBusy(false);
+        after(response && response.result ? String(response.result) : '');
+        return;
+      }
+      if (response && response.result) {
+        status.textContent = String(response.result);
+      }
+      if (after === controlsReturn) {
+        setBusy(false);
+      } else {
+        setTimeout(function () {
+          if (tapped === drawn) {
+            redraw();
+          }
+        }, 20000);
+      }
+    }, function (error) {
+      if (tapped !== drawn) {
+        return;
+      }
+      status.textContent = failure(error);
+      setBusy(false);
+    });
+  }
+
+  function redraw() {
+    drawn++;
+    busy = false;
+    status.textContent = '';
+    draw(current());
+  }
+
+  var heading = document.getElementById('heading');
+  var count = document.getElementById('count');
+  var list = document.getElementById('list');
+  var state = document.getElementById('state');
+  var warning = document.getElementById('warning');
+  var actions = document.getElementById('actions');
+  var words = {w: 'waiting', x: 'executing', d: 'done', r: 'rejected', l: 'left out', h: 'withdrawn', e: 'expired', p: 'replaced', f: 'failed'};
+  var warningSentence = '⚠️ A marked change carries a warning; open it before confirming.';
+  var unticked = {};
+  var opened = {};
+  var answers = {};
+  var ignored = 'This no longer does anything.';
+
+  function clear(element) {
+    while (element.firstChild) {
+      element.removeChild(element.firstChild);
+    }
+  }
+
+  function element(tag, className, text) {
+    var made = document.createElement(tag);
+    if (className) {
+      made.className = className;
+    }
+    if (text !== undefined) {
+      made.textContent = text;
+    }
+    return made;
+  }
+
+  function stateText(change) {
+    var code = String(change.s || '');
+    if (words[code]) {
+      if (code === 'f') {
+        return change.o ? String(change.o) : words[code];
+      }
+      return code === 'd' && change.o ? words[code] + '. ' + change.o : words[code];
+    }
+    return String(change.o || '');
+  }
+
+  function fullText(change, index) {
+    if (change.x) {
+      return String(change.x);
+    }
+    return answers[index] || '';
+  }
+
+  function toggle(data, index) {
+    if (opened[index]) {
+      opened[index] = false;
+      draw(data);
+      return;
+    }
+    var change = data.c[index];
+    if (fullText(change, index)) {
+      opened[index] = true;
+      draw(data);
+      return;
+    }
+    request('approval:read:' + data.i + ':' + (index + 1), function (answer) {
+      if (answer === ignored) {
+        status.textContent = answer;
+      } else if (answer) {
+        answers[index] = answer;
+        opened[index] = true;
+      }
+      draw(current());
+    });
+  }
+
+  function row(data, index) {
+    var change = data.c[index];
+    var line = element('div', 'row');
+    var tick = element('div', 'tick');
+    if (change.s === 'w') {
+      tick.className = unticked[index] ? 'tick' : 'tick on';
+      tick.textContent = unticked[index] ? '' : '✓';
+      tick.onclick = function () {
+        if (busy) {
+          return;
+        }
+        unticked[index] = !unticked[index];
+        draw(data);
+      };
+    } else {
+      tick.className = 'tick off';
+    }
+    var name = element('div', 'name');
+    var title = element('b', '', (change.w ? '⚠️ ' : '') + (index + 1) + '. ' + String(change.t || ''));
+    title.onclick = function () {
+      if (!busy) {
+        toggle(data, index);
+      }
+    };
+    name.appendChild(title);
+    var note = change.s === 'w' ? '' : stateText(change);
+    if (note) {
+      name.appendChild(element('div', 'note', note));
+    }
+    if (opened[index]) {
+      name.appendChild(element('div', 'full', fullText(change, index)));
+    }
+    line.appendChild(tick);
+    line.appendChild(name);
+    return line;
+  }
+
+  function control(label, className, data, after, off) {
+    var button = element('button', className, label);
+    if (off) {
+      button.setAttribute('data-off', '1');
+      button.disabled = true;
+    }
+    button.onclick = function () {
+      request(data, after);
+    };
+    return button;
+  }
+
+  function draw(data) {
+    var changes = data.c instanceof Array ? data.c : [];
+    var waiting = false;
+    var marked = false;
+    var kept = 0;
+    var open = 0;
+    var flags = '';
+    clear(list);
+    for (var i = 0; i < changes.length; i++) {
+      if (!changes[i] || typeof changes[i] !== 'object') {
+        flags += '1';
+        continue;
+      }
+      if (changes[i].s === 'w') {
+        waiting = true;
+        open++;
+        if (!unticked[i]) {
+          kept++;
+        }
+      }
+      if (changes[i].w) {
+        marked = true;
+      }
+      flags += unticked[i] ? '0' : '1';
+      list.appendChild(row(data, i));
+    }
+    heading.textContent = String(data.h || '');
+    count.textContent = changes.length + (changes.length === 1 ? ' change' : ' changes');
+    state.textContent = String(data.s || '');
+    warning.textContent = marked ? warningSentence : '';
+    clear(actions);
+    if (waiting) {
+      actions.appendChild(control('Confirm ' + kept + ' of ' + open, '', 'approval:keep:' + data.i + ':' + flags, dataChanges, kept === 0));
+      actions.appendChild(control('Reject all', 'reject', 'approval:reject:' + data.i, dataChanges, false));
+      if (data.p) {
+        actions.appendChild(control('Preview', 'quiet', 'approval:preview:' + data.i, controlsReturn, false));
+      }
+    }
+    actions.style.display = actions.firstChild ? 'flex' : 'none';
+  }
+
+  redraw();
+  widget.onEvent('chatDataChanged', redraw);
+  widget.ready();
+})();
+</script>

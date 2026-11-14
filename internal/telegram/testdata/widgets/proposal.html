@@ -44,7 +44,7 @@ button.reject{background:var(--tg-theme-secondary-bg-color,#eee);color:var(--tg-
   function setBusy(on) {
     var buttons = view.getElementsByTagName('button');
     for (var i = 0; i < buttons.length; i++) {
-      buttons[i].disabled = on;
+      buttons[i].disabled = on || buttons[i].getAttribute('data-off') === '1';
     }
     busy = on;
   }
@@ -65,6 +65,12 @@ button.reject{background:var(--tg-theme-secondary-bg-color,#eee);color:var(--tg-
     status.textContent = 'Working on it…';
     widget.request(data).then(function (response) {
       if (tapped !== drawn) {
+        return;
+      }
+      if (typeof after === 'function') {
+        status.textContent = '';
+        setBusy(false);
+        after(response && response.result ? String(response.result) : '');
         return;
       }
       if (response && response.result) {

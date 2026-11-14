@@ -613,6 +613,7 @@ func (r review) proposals(ctx context.Context, principalID string, reply reviewR
 // screener flags the reason or the given prose, such as a backlog item.
 func (r review) label(ctx context.Context, principalID string, proposal approval.Proposal, reason, screened string) approval.Proposal {
 	reason = clip.Runes(normalize(reason), reviewReasonRunes)
+	proposal.Title = approval.TitleOf(proposal.Summary)
 	label := reviewLabel + ":"
 	if reason != "" {
 		label += " " + reason

@@ -250,7 +250,7 @@ func (h *conversationHarness) wantNoWidgetTextEdit() {
 // widgetFlagged reports whether the records shown in a message say it is a widget.
 func (h *conversationHarness) widgetFlagged(messageID int64) bool {
 	h.t.Helper()
-	return h.countRows(`SELECT count(*) FROM approvals WHERE message_id = ? AND widget = 1`, messageID) > 0
+	return h.countRows(`SELECT count(*) FROM approvals WHERE message_id = ? AND widget_kind = 'proposal'`, messageID) > 0
 }
 
 // waitUntil polls until done holds.
@@ -707,11 +707,10 @@ func (h *conversationHarness) proposeReports(runtime *controlledRuntime, updateI
 	h.waitState(updateID, "delivered")
 }
 
-// The model withdraws part of a widget's batch: the widget keeps its actions for the rest, and
-// loses them once nothing is left. A withdrawal that makes the text too long for the data shortens
-// it there, keeps the status whole, and sends the whole text as a reply. No edit tries the widget's
-// text first.
-func TestWidgetShowsWithdrawals(t *testing.T) {
+// The model withdraws part of a changes widget's list: the widget keeps its controls for the rest,
+// and loses them once nothing is left. A long change carries no text in the data, only its title,
+// and no reply is sent.
+func TestChangesWidgetShowsWithdrawals(t *testing.T) {
 	t.Parallel()
 	runtime := newControlledRuntime()
 	h := newWidgetHarness(t, runtime, harnessOptions{})
@@ -719,23 +718,96 @@ func TestWidgetShowsWithdrawals(t *testing.T) {
 
 	h.proposeReports(runtime, 1, "Summarise report one.", "Summarise report two.")
 	widget := h.nextWidget()
-	frame := len(widget.data) - len("Summarise report two.")
-	if caption := widget.caption; caption != "2 changes" {
-		t.Fatalf("caption of a batch = %q", caption)
+	list := decodeChanges(t, widget.data)
+	if widget.caption != "2 changes" || len(list.Changes) != 2 || !list.Preview {
+		t.Fatalf("batch widget = %q, %+v", widget.caption, list)
 	}
-	_, reject, _ := widgetActions(t, widget.data)
-	h.push(widgetTap(2, 101, widget.messageID, reject))
+	h.push(widgetTap(2, 101, widget.messageID, "approval:reject:"+list.ID))
 	h.wantWidgetAnswer(2)
-	if caption, _ := h.wantOutcome(widget.messageID, "Rejected; nothing was written."); caption.caption != "2 changes — rejected" {
-		t.Fatalf("caption of a rejected batch = %q", caption.caption)
+	caption := h.nextWidgetEdit("editMessageCaption", widget.messageID)
+	list = decodeChanges(t, h.nextWidgetEdit("editMessageWidgetData", widget.messageID).data)
+	if caption.caption != "2 changes — rejected" || list.Status != "Rejected." && list.Status != "2 rejected." || list.Changes[0].State != "r" || list.Changes[1].State != "r" {
+		t.Fatalf("rejected batch = %q, %+v", caption.caption, list)
 	}
+
+	long := "Summarise report two" + strings.Repeat(" and its appendix", 80)
+	h.proposeReports(runtime, 3, "Summarise report one.", long)
+	widget = h.nextWidget()
+	list = decodeChanges(t, widget.data)
+	if list.Changes[1].Text != "" || list.Changes[1].Title != `Schedule "Report 2"` {
+		t.Fatalf("widget of a long change = %+v", list)
+	}
+
+	h.push(textUpdate(4, 101, "drop the second one"))
+	chat := receive(t, h.ctx, runtime.calls)
+	if withdrawn := toolCaller(t, chat)("proposal_withdraw", `{"items":[2]}`); withdrawn.IsError {
+		t.Fatalf("proposal_withdraw = %+v", withdrawn)
+	}
+	caption = h.nextWidgetEdit("editMessageCaption", widget.messageID)
+	list = decodeChanges(t, h.nextWidgetEdit("editMessageWidgetData", widget.messageID).data)
+	if caption.caption != "2 changes — 1 waiting, 1 withdrawn" || list.Status != "1 waiting, 1 withdrawn." || list.Changes[0].State != "w" || list.Changes[1].State != "h" || !list.Preview {
+		t.Fatalf("widget after a withdrawal = %q, %+v", caption.caption, list)
+	}
+	chat.answer <- agentruntime.RunResult{Response: "withdrawn"}
+	h.wantReply(101, 4, "withdrawn")
+	h.waitState(4, "delivered")
+
+	h.push(textUpdate(5, 101, "forget all of it"))
+	chat = receive(t, h.ctx, runtime.calls)
+	if withdrawn := toolCaller(t, chat)("proposal_withdraw", `{"all":true}`); withdrawn.IsError {
+		t.Fatalf("withdraw all = %+v", withdrawn)
+	}
+	caption = h.nextWidgetEdit("editMessageCaption", widget.messageID)
+	list = decodeChanges(t, h.nextWidgetEdit("editMessageWidgetData", widget.messageID).data)
+	if caption.caption != "2 changes — withdrawn" || list.Changes[0].State != "h" || list.Changes[1].State != "h" {
+		t.Fatalf("widget once nothing is left = %q, %+v", caption.caption, list)
+	}
+	chat.answer <- agentruntime.RunResult{Response: "done"}
+	h.wantReply(101, 5, "done")
+	h.waitState(5, "delivered")
+	if count := len(h.messages); count != 0 {
+		t.Fatalf("withdrawals sent %d messages", count)
+	}
+	h.wantNoWidgetTextEdit()
+}
+
+// A record of the proposal kind with several changes, as a message sent before the changes widget
+// is, is still edited in the proposal view's shape: the widget keeps its actions for the rest, and
+// loses them once nothing is left. A withdrawal that makes the text too long for the data shortens
+// it there, keeps the status whole, and sends the whole text as a reply. No edit tries the widget's
+// text first.
+func TestProposalKindRecordOfSeveralChangesKeepsItsShape(t *testing.T) {
+	t.Parallel()
+	runtime := newControlledRuntime()
+	h := newWidgetHarness(t, runtime, harnessOptions{})
+	h.setWidgets("alice", true)
+
+	// A probe pair, as a proposal widget shows it, gives the size of the data around the second
+	// text, which is then grown until the data just fits.
+	h.proposeReports(runtime, 1, "Summarise report one.", "Summarise report two.")
+	probe := h.nextWidget()
+	h.exec(`UPDATE approvals SET widget_kind = 'proposal' WHERE message_id = ?`, probe.messageID)
+	probeID := decodeChanges(t, probe.data).ID
+	pressed, err := h.approvals.PressKept(h.ctx, "alice", probeID, nil)
+	if err != nil || !pressed.Changed || pressed.Shown.Widget != approval.ProposalWidget {
+		t.Fatalf("probe = %+v %v", pressed, err)
+	}
+	frame := len(marshalWidgetData(widgetData{Text: plainWidgetText(pressed.Shown.Body), Status: plainWidgetText(pressed.Shown.Status), Actions: proposalActions(pressed.Buttons)})) - len("Summarise report two.")
+	h.push(widgetTap(2, 101, probe.messageID, "approval:reject:"+probeID))
+	h.wantWidgetAnswer(2)
+	h.wantOutcome(probe.messageID, "Rejected; nothing was written.")
 
 	long := "Summarise report two" + strings.Repeat(" and its appendix", 50)
 	long = strings.TrimSpace(long[:widgetDataLimit-frame-12]) + "."
 	h.proposeReports(runtime, 3, "Summarise report one.", long)
-	widget = h.nextWidget()
-	if len(widget.data) > widgetDataLimit || len(widget.data) < widgetDataLimit-20 {
-		t.Fatalf("batch widget data = %d bytes, want just under the limit", len(widget.data))
+	widget := h.nextWidget()
+	h.exec(`UPDATE approvals SET widget_kind = 'proposal' WHERE message_id = ?`, widget.messageID)
+	pressed, err = h.approvals.PressKept(h.ctx, "alice", decodeChanges(t, widget.data).ID, nil)
+	if err != nil || !pressed.Changed {
+		t.Fatalf("press = %+v %v", pressed, err)
+	}
+	if data, fits := encodeWidgetData(pressed.Shown.Body, pressed.Shown.Status, proposalActions(pressed.Buttons)); !fits || len(data) < widgetDataLimit-20 {
+		t.Fatalf("batch data in the proposal shape = %d bytes, want just under the limit", len(data))
 	}
 
 	h.push(textUpdate(4, 101, "drop the second one"))
@@ -978,18 +1050,18 @@ func TestWidgetCaptionNamesTheProposalInOneLine(t *testing.T) {
 		outcomeProposal(t, "Save the note C", "The note is locked.", true),
 		outcomeProposal(t, "Save the note D", "Saved.", false),
 	)
-	data = decodeWidget(t, batch.data)
-	if batch.caption != "Weekly review: 3 changes" || !strings.HasPrefix(data.Text, "Weekly review\n\n3 changes, confirmed or rejected together:") ||
-		data.Status != "Expires in 10 minutes." || strings.Contains(data.Text, "Expires") {
-		t.Fatalf("offered batch = %q, %+v", batch.caption, data)
+	list := decodeChanges(t, batch.data)
+	if batch.caption != "Weekly review: 3 changes" || list.Heading != "Weekly review" || list.Status != "Expires in 10 minutes." || len(list.Changes) != 3 ||
+		list.Changes[1].Title != "Save the note C" || list.Changes[1].Text != "Save the note C" || list.Changes[1].State != "w" {
+		t.Fatalf("offered batch = %q, %+v", batch.caption, list)
 	}
-	h.push(widgetTap(2, 101, batch.messageID, data.Actions[0].Data))
+	h.push(widgetTap(2, 101, batch.messageID, keepTap(list.ID, "111")))
 	h.wantWidgetAnswer(2)
 	caption := h.nextWidgetEdit("editMessageCaption", batch.messageID)
-	data = decodeWidget(t, h.nextWidgetEdit("editMessageWidgetData", batch.messageID).data)
-	if caption.caption != "Weekly review: 3 changes — 2 done, 1 failed" || data.Status != "2 done, 1 failed." || len(data.Actions) != 0 ||
-		!strings.Contains(data.Text, "1. Save the note B\nDone. Saved.") || !strings.Contains(data.Text, "2. Save the note C\nFailed. The note is locked.") {
-		t.Fatalf("batch whose items ended differently = %q, %+v", caption.caption, data)
+	list = decodeChanges(t, h.nextWidgetEdit("editMessageWidgetData", batch.messageID).data)
+	if caption.caption != "Weekly review: 3 changes — 2 done, 1 failed" || list.Status != "2 done, 1 failed." ||
+		list.Changes[0].State != "d" || list.Changes[0].Outcome != "Saved." || list.Changes[1].State != "f" || list.Changes[1].Outcome != "Failed. The note is locked." || list.Changes[2].State != "d" {
+		t.Fatalf("batch whose items ended differently = %q, %+v", caption.caption, list)
 	}
 	h.waitOffset(3)
 	if count := len(h.messages); count != 0 {
@@ -1088,13 +1160,13 @@ func TestWidgetFlagFollowsDelivery(t *testing.T) {
 		t.Fatal("an offer whose widget failed was delivered")
 	}
 	unflagged := func() bool {
-		return h.countRows(`SELECT count(*) FROM approvals WHERE id = ? AND message_id IS NULL AND widget = 0`, records[0].ID) == 1
+		return h.countRows(`SELECT count(*) FROM approvals WHERE id = ? AND message_id IS NULL AND widget_kind = ''`, records[0].ID) == 1
 	}
 	if !unflagged() {
 		t.Fatal("a failed delivery left the proposal flagged or shown")
 	}
 	// A stale flag, as a message recorded earlier would leave, must be cleared by the next failure.
-	if _, err := h.db.ExecContext(h.ctx, `UPDATE approvals SET widget = 1 WHERE id = ?`, records[0].ID); err != nil {
+	if _, err := h.db.ExecContext(h.ctx, `UPDATE approvals SET widget_kind = 'proposal' WHERE id = ?`, records[0].ID); err != nil {
 		t.Fatal(err)
 	}
 	h.waitUntil("a failed resend clear the widget flag", unflagged)
@@ -1138,7 +1210,7 @@ func TestUnflaggedWidgetIsEditedThroughTheRefusedTextEdit(t *testing.T) {
 	h.wantNoWidgetTextEdit()
 
 	records, legacy := h.offerWidget(2*time.Second, outcomeProposal(t, "Save the note B", "Saved.", false))
-	if _, err := h.db.ExecContext(h.ctx, `UPDATE approvals SET widget = 0 WHERE bundle_id = ?`, records[0].BundleID); err != nil {
+	if _, err := h.db.ExecContext(h.ctx, `UPDATE approvals SET widget_kind = '' WHERE bundle_id = ?`, records[0].BundleID); err != nil {
 		t.Fatal(err)
 	}
 	caption := h.nextWidgetEdit("editMessageCaption", legacy.messageID)

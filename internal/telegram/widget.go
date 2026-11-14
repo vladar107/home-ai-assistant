@@ -29,7 +29,10 @@ const (
 // views already sent.
 type widgetKind string
 
-const proposalWidget widgetKind = "proposal"
+const (
+	proposalWidget widgetKind = "proposal"
+	changesWidget  widgetKind = "changes"
+)
 
 //go:embed widgets
 var widgetFiles embed.FS
@@ -38,6 +41,7 @@ var widgetFiles embed.FS
 // it, built once when the program starts. No part of it comes from a conversation.
 var widgetTemplates = map[widgetKind]string{
 	proposalWidget: composeWidget(proposalWidget),
+	changesWidget:  composeWidget(changesWidget),
 }
 
 // composeWidget puts a kind's view into the base: its styles from widgets/<kind>.css, its markup

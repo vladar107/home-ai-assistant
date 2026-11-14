@@ -44,6 +44,7 @@ type botAPI interface {
 	SendKeyboard(context.Context, int64, int64, string, InlineKeyboard) error
 	EditKeyboard(context.Context, int64, int64, string, InlineKeyboard) error
 	EditText(context.Context, int64, int64, approval.Shown) error
+	EditProposal(context.Context, int64, int64, approval.Shown, approval.Buttons) error
 	DeleteMessage(context.Context, int64, int64) error
 	AnswerCallback(context.Context, string, string) error
 	AnswerWidgetQuery(context.Context, string, string) error
@@ -137,6 +138,12 @@ type ApprovalController interface {
 	ProposalPlace(ctx context.Context, principalID, approvalID string) (approval.ProposalPlace, bool, error)
 	// DeferContinuation keeps a continuation until the tab's in-flight turn is delivered.
 	DeferContinuation(principalID string, threadID int64, continuation func(context.Context))
+	// PressKept resolves a Confirm that names which changes are kept, by position.
+	PressKept(ctx context.Context, principalID, approvalID string, keep []bool) (approval.Pressed, error)
+	// KeepIsCurrent reports whether such a Confirm still matches the proposal, without acting.
+	KeepIsCurrent(ctx context.Context, principalID, approvalID string, keep []bool) (bool, error)
+	// ChangeSummary returns the whole summary of one change of the principal's proposal.
+	ChangeSummary(ctx context.Context, principalID, approvalID string, number int) (string, bool, error)
 }
 
 type identityResolver interface {
@@ -179,6 +186,10 @@ type Service struct {
 
 	// freshTabs holds the tabs the user just opened, with when, until their first message.
 	freshTabs sync.Map
+
+	// longReads holds, by approval ID and change number, when the whole text of a change too long
+	// for a widget's answer was sent as a reply.
+	longReads sync.Map
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -1091,6 +1102,9 @@ func (s *Service) processCallback(ctx context.Context, bot Bot, updateID int64, 
 	if strings.HasPrefix(callback.Data, undoCallbackPrefix) {
 		return s.ignoreUnknownPress(ctx, callback, principalID)
 	}
+	if _, _, isApproval := approval.ParseCallback(callback.Data); !isApproval && strings.HasPrefix(callback.Data, approvalCallbackPrefix) {
+		return s.ignoreUnknownPress(ctx, callback, principalID)
+	}
 	if err := s.client.AnswerCallback(ctx, callback.ID, ""); err != nil && !isPermanentAPIError(err) {
 		return processingResult{}, "answer_callback", err
 	}
@@ -1201,10 +1215,12 @@ func (s *Service) processApprovalPress(ctx context.Context, bot Bot, updateID in
 		s.continueConversation(ctx, bot, updateID, tap, principalID)
 	}
 	shown := pressed.Shown
-	shown.Widget = shown.Widget || tap.widget
+	if tap.widget && shown.Widget == approval.NotWidget {
+		shown.Widget = approval.ProposalWidget
+	}
 	err = s.client.EditText(ctx, tap.chatID, tap.messageID, shown)
 	if err != nil && isPermanentAPIError(err) {
-		err = s.client.SendReply(ctx, tap.chatID, 0, shown.Text)
+		err = s.sendReplyChunks(ctx, tap.chatID, 0, shown.Text)
 	}
 	if err != nil {
 		if isPermanentAPIError(err) {
@@ -1370,6 +1386,7 @@ type widgetHandler func(s *Service, ctx context.Context, bot Bot, updateID int64
 // widgetHandlers are offered a tap in turn.
 var widgetHandlers = []widgetHandler{
 	(*Service).processProposalWidgetTap,
+	(*Service).processChangesWidgetTap,
 }
 
 // ignoreWidgetTap answers a tap as doing nothing and logs it as ignored for the reason.
@@ -1389,20 +1406,9 @@ func (s *Service) processProposalWidgetTap(ctx context.Context, bot Bot, updateI
 	if !isApproval || s.approvals == nil {
 		return false, processingResult{}, "", nil
 	}
-	place, owned, err := s.approvals.ProposalPlace(ctx, principalID, approvalID)
-	if err != nil {
-		return true, processingResult{}, "approval_place", err
-	}
-	if !owned || place.ChatID != tap.chatID || place.MessageID != tap.messageID {
-		reason := "foreign_approval"
-		if owned {
-			reason = "misplaced_widget_tap"
-		}
-		result, failure, err := s.ignoreWidgetTap(ctx, tap, principalID, reason)
+	ctx, ignored, result, failure, err := s.placeWidgetTap(ctx, bot, tap, principalID, approvalID)
+	if ignored {
 		return true, result, failure, err
-	}
-	if bot.HasTopicsEnabled {
-		ctx = thread.With(ctx, place.ThreadID)
 	}
 	if action == approval.ActionPreview {
 		result, failure, err := s.processPreviewPress(ctx, pressTrigger(bot, updateID), tap, principalID, approvalID)
@@ -1411,8 +1417,30 @@ func (s *Service) processProposalWidgetTap(ctx context.Context, bot Bot, updateI
 	if err := tap.answer(ctx, WidgetWorkingAnswer); err != nil && !isPermanentAPIError(err) {
 		return true, processingResult{}, tap.failure, err
 	}
-	result, failure, err := s.processApprovalPress(ctx, bot, updateID, tap, principalID, action, approvalID)
+	result, failure, err = s.processApprovalPress(ctx, bot, updateID, tap, principalID, action, approvalID)
 	return true, result, failure, err
+}
+
+// placeWidgetTap checks that a tap names the principal's own proposal and comes from the message
+// that shows it, and restores the proposal's tab. Otherwise the tap is answered as doing nothing,
+// and ignored reports that its result is the one to return.
+func (s *Service) placeWidgetTap(ctx context.Context, bot Bot, tap press, principalID, approvalID string) (_ context.Context, ignored bool, result processingResult, failure string, err error) {
+	place, owned, err := s.approvals.ProposalPlace(ctx, principalID, approvalID)
+	if err != nil {
+		return ctx, true, processingResult{}, "approval_place", err
+	}
+	if !owned || place.ChatID != tap.chatID || place.MessageID != tap.messageID {
+		reason := "foreign_approval"
+		if owned {
+			reason = "misplaced_widget_tap"
+		}
+		result, failure, err := s.ignoreWidgetTap(ctx, tap, principalID, reason)
+		return ctx, true, result, failure, err
+	}
+	if bot.HasTopicsEnabled {
+		ctx = thread.With(ctx, place.ThreadID)
+	}
+	return ctx, false, processingResult{}, "", nil
 }
 
 // widgetChatTypeSender is how Telegram may name the user's own chat with the bot.

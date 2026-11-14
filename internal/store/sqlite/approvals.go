@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,7 +18,7 @@ var _ approval.Repository = (*Store)(nil)
 const approvalColumns = `id, bundle_id, position, principal_id, tool, arguments, arguments_hash, summary, status,
 	COALESCE(reason, ''), COALESCE(outcome, ''), COALESCE(chat_id, 0), COALESCE(message_id, 0),
 	created_at, expires_at, COALESCE(started_at, ''), COALESCE(finished_at, ''), mode, COALESCE(request_id, ''),
-	COALESCE(undo, ''), COALESCE(undo_until, ''), thread_id, COALESCE(heading, ''), widget`
+	COALESCE(undo, ''), COALESCE(undo_until, ''), thread_id, COALESCE(heading, ''), widget_kind, title`
 
 func (s *Store) CreateApproval(ctx context.Context, record approval.Record) ([]approval.Record, error) {
 	return s.CreateApprovals(ctx, []approval.Record{record})
@@ -69,8 +70,8 @@ func createApproval(ctx context.Context, tx *sql.Tx, record approval.Record, rep
 	}
 	if _, err := tx.ExecContext(
 		ctx,
-		`INSERT INTO approvals (id, bundle_id, position, principal_id, tool, arguments, arguments_hash, summary, status, created_at, expires_at, thread_id, heading)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
+		`INSERT INTO approvals (id, bundle_id, position, principal_id, tool, arguments, arguments_hash, summary, status, created_at, expires_at, thread_id, heading, title)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
 		record.ID,
 		record.BundleID,
 		record.Position,
@@ -83,6 +84,7 @@ func createApproval(ctx context.Context, tx *sql.Tx, record approval.Record, rep
 		formatTime(record.ExpiresAt),
 		record.ThreadID,
 		sql.NullString{String: record.Heading, Valid: record.Heading != ""},
+		record.Title,
 	); err != nil {
 		return fmt.Errorf("insert approval: %w", err)
 	}
@@ -151,6 +153,71 @@ func (s *Store) ConfirmBundle(ctx context.Context, bundleID, principalID string,
 	return changed > 0, nil
 }
 
+// ConfirmChosen confirms the kept pending, unexpired records of the principal's bundle and rejects
+// the other pending, unexpired ones as left out, all in one transaction. It changes nothing when no
+// kept record qualifies.
+func (s *Store) ConfirmChosen(ctx context.Context, bundleID, principalID string, kept []string, now time.Time) ([]string, []string, error) {
+	if s == nil || s.db == nil {
+		return nil, nil, fmt.Errorf("confirm chosen approvals: SQLite store is not open")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("begin approval choice: %w", err)
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.QueryContext(
+		ctx,
+		`SELECT id FROM approvals
+		 WHERE bundle_id = ? AND principal_id = ? AND status = 'pending' AND expires_at > ?
+		 ORDER BY position`,
+		bundleID, principalID, formatTime(now),
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list waiting approvals: %w", err)
+	}
+	var confirmed, leftOut []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, nil, fmt.Errorf("scan waiting approval: %w", err)
+		}
+		if slices.Contains(kept, id) {
+			confirmed = append(confirmed, id)
+		} else {
+			leftOut = append(leftOut, id)
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return nil, nil, fmt.Errorf("close waiting approvals: %w", err)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("read waiting approvals: %w", err)
+	}
+	if len(confirmed) == 0 {
+		return nil, nil, nil
+	}
+	for _, id := range confirmed {
+		if _, err := tx.ExecContext(ctx, `UPDATE approvals SET status = 'confirmed' WHERE id = ? AND status = 'pending'`, id); err != nil {
+			return nil, nil, fmt.Errorf("confirm approval: %w", err)
+		}
+	}
+	for _, id := range leftOut {
+		if _, err := tx.ExecContext(
+			ctx,
+			`UPDATE approvals SET status = 'rejected', reason = ?, finished_at = ? WHERE id = ? AND status = 'pending'`,
+			approval.ReasonLeftOut, formatTime(now), id,
+		); err != nil {
+			return nil, nil, fmt.Errorf("leave out approval: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, nil, fmt.Errorf("commit approval choice: %w", err)
+	}
+	return confirmed, leftOut, nil
+}
+
 func (s *Store) StartApproval(ctx context.Context, id string, now time.Time) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("start approval: SQLite store is not open")
@@ -205,20 +272,20 @@ func (s *Store) SetApprovalSummary(ctx context.Context, id, summary string) erro
 	return nil
 }
 
-func (s *Store) SetApprovalMessage(ctx context.Context, ids []string, chatID, messageID int64, widget bool) error {
+func (s *Store) SetApprovalMessage(ctx context.Context, ids []string, chatID, messageID int64, widget approval.WidgetKind) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("record approval message: SQLite store is not open")
 	}
 	if len(ids) == 0 {
 		return nil
 	}
-	arguments := []any{chatID, messageID, widget}
+	arguments := []any{chatID, messageID, string(widget)}
 	for _, id := range ids {
 		arguments = append(arguments, id)
 	}
 	if _, err := s.db.ExecContext(
 		ctx,
-		`UPDATE approvals SET chat_id = ?, message_id = NULLIF(?, 0), widget = ? WHERE id IN (?`+strings.Repeat(", ?", len(ids)-1)+`)`,
+		`UPDATE approvals SET chat_id = ?, message_id = NULLIF(?, 0), widget_kind = ? WHERE id IN (?`+strings.Repeat(", ?", len(ids)-1)+`)`,
 		arguments...,
 	); err != nil {
 		return fmt.Errorf("record approval message: %w", err)
@@ -519,7 +586,7 @@ func scanApprovalRow(row rowScanner) (approval.Record, error) {
 	err := row.Scan(
 		&record.ID, &record.BundleID, &record.Position, &record.PrincipalID, &record.Tool, &arguments, &record.Hash, &record.Summary, &record.Status,
 		&record.Reason, &record.Outcome, &record.ChatID, &record.MessageID, &createdAt, &expiresAt, &startedAt, &finishedAt,
-		&record.Mode, &record.RequestID, &undo, &undoUntil, &record.ThreadID, &record.Heading, &record.Widget,
+		&record.Mode, &record.RequestID, &undo, &undoUntil, &record.ThreadID, &record.Heading, &record.Widget, &record.Title,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

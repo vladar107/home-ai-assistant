@@ -159,6 +159,7 @@ plan that links back to the earlier record.
 | 0147 | [A trip moves to the user's tab from its own controls](0147-trip-tab-from-its-controls.md) | done |
 | 0148 | [The MCP servers' Compose project lives in this repository](0148-mcp-servers-in-this-repository.md) | done |
 | 0149 | [One Widgets switch and a shared base for widgets](0149-widgets-shared-base.md) | done |
+| 0150 | [Choosing the changes of a proposal in a widget](0150-proposal-changes-widget.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

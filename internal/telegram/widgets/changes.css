@@ -1,0 +1,14 @@
+.row{display:flex;gap:8px;align-items:flex-start;padding:6px 0}
+.tick{flex:none;width:22px;height:22px;border-radius:6px;border:2px solid var(--tg-theme-hint-color,#888);text-align:center;line-height:22px;font-size:15px}
+.tick.on{background:var(--tg-theme-button-color,#2481cc);border-color:var(--tg-theme-button-color,#2481cc);color:var(--tg-theme-button-text-color,#fff)}
+.tick.off{border-color:transparent}
+.name{flex:1;min-width:0;overflow-wrap:anywhere}
+.name b{font-weight:600}
+.note{color:var(--tg-theme-hint-color,#888)}
+.full{margin-top:4px;white-space:pre-wrap;overflow-wrap:anywhere}
+#heading{font-weight:600}
+#count{color:var(--tg-theme-hint-color,#888)}
+#warning{margin-top:8px}
+#warning:empty{display:none}
+#actions{display:flex;gap:8px;margin-top:10px}
+button.reject{background:var(--tg-theme-secondary-bg-color,#eee);color:var(--tg-theme-destructive-text-color,#d33)}

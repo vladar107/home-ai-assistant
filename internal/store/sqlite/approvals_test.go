@@ -4,6 +4,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -170,23 +173,135 @@ func TestMigrationApprovalWidgetsKeepsExistingRows(t *testing.T) {
 	}
 	store := &Store{db: db}
 	record, found, err := store.LoadApproval(ctx, "aaaaaaaaaaaaaaaa")
-	if err != nil || !found || record.Widget || record.MessageID != 7 || record.ThreadID != 3 || record.Heading != "Weekly review" || record.Summary != "First" {
+	if err != nil || !found || record.Widget != approval.NotWidget || record.MessageID != 7 || record.ThreadID != 3 || record.Heading != "Weekly review" || record.Summary != "First" {
 		t.Fatalf("record after migration = %+v %v %v", record, found, err)
 	}
-	if err := store.SetApprovalMessage(ctx, []string{record.ID}, 101, 8, true); err != nil {
+	if err := store.SetApprovalMessage(ctx, []string{record.ID}, 101, 8, approval.ProposalWidget); err != nil {
 		t.Fatal(err)
 	}
-	if pending, err := store.PendingApprovals(ctx, "alice", 3); err != nil || len(pending) != 1 || !pending[0].Widget || pending[0].MessageID != 8 {
+	if pending, err := store.PendingApprovals(ctx, "alice", 3); err != nil || len(pending) != 1 || pending[0].Widget != approval.ProposalWidget || pending[0].MessageID != 8 {
 		t.Fatalf("record shown in a widget = %+v %v", pending, err)
 	}
-	if err := store.SetApprovalMessage(ctx, []string{record.ID}, 101, 0, false); err != nil {
+	if err := store.SetApprovalMessage(ctx, []string{record.ID}, 101, 0, approval.NotWidget); err != nil {
 		t.Fatal(err)
 	}
-	if undelivered, err := store.UndeliveredApprovals(ctx); err != nil || len(undelivered) != 1 || undelivered[0].Widget {
+	if undelivered, err := store.UndeliveredApprovals(ctx); err != nil || len(undelivered) != 1 || undelivered[0].Widget != approval.NotWidget {
 		t.Fatalf("record after a failed delivery = %+v %v", undelivered, err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE approvals SET widget = 2 WHERE id = 'aaaaaaaaaaaaaaaa'`); err == nil {
-		t.Fatal("the widget flag took a value other than 0 and 1")
+	foreignKeysHold(t, ctx, db)
+}
+
+// Migration 057 replaces the widget flag with the widget's kind: a proposal flagged as a widget
+// becomes a proposal widget, and one not flagged has no kind.
+func TestMigrationApprovalWidgetKindCarriesTheFlagOver(t *testing.T) {
+	ctx := t.Context()
+	db := migrateUpTo(t, ctx, "057")
+	hash := "0000000000000000000000000000000000000000000000000000000000000000"
+	insert := func(id string, messageID, widget int) string {
+		return `INSERT INTO approvals (id, bundle_id, position, principal_id, tool, arguments, arguments_hash, summary, status, chat_id, message_id, created_at, expires_at, thread_id, widget)
+		 VALUES ('` + id + `', '` + id + `', 0, 'alice', 'note_write', '{"name":"a"}', '` + hash + `', 'First', 'pending', 101, ` + strconv.Itoa(messageID) + `, '2026-10-01T10:00:00.000Z', '2099-10-01T10:10:00.000Z', 3, ` + strconv.Itoa(widget) + `)`
+	}
+	exec(t, ctx, db,
+		`INSERT INTO principals (id, display_name) VALUES ('alice', 'Alice')`,
+		insert("aaaaaaaaaaaaaaaa", 7, 1),
+		insert("bbbbbbbbbbbbbbbb", 8, 0),
+	)
+
+	if err := migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	store := &Store{db: db}
+	for id, want := range map[string]approval.WidgetKind{"aaaaaaaaaaaaaaaa": approval.ProposalWidget, "bbbbbbbbbbbbbbbb": approval.NotWidget} {
+		record, found, err := store.LoadApproval(ctx, id)
+		if err != nil || !found || record.Widget != want || record.Summary != "First" {
+			t.Fatalf("record %s after migration = %+v %v %v, want kind %q", id, record, found, err, want)
+		}
+	}
+	if err := store.SetApprovalMessage(ctx, []string{"bbbbbbbbbbbbbbbb"}, 101, 9, approval.ChangesWidget); err != nil {
+		t.Fatal(err)
+	}
+	if record, _, err := store.LoadApproval(ctx, "bbbbbbbbbbbbbbbb"); err != nil || record.Widget != approval.ChangesWidget {
+		t.Fatalf("record shown in a changes widget = %+v %v", record, err)
+	}
+	if count := countRows(t, store, `SELECT count(*) FROM pragma_table_info('approvals') WHERE name = 'widget'`); count != 0 {
+		t.Fatal("the widget flag remains")
+	}
+	if count := countRows(t, store, `SELECT count(*) FROM pragma_table_info('approvals') WHERE name = 'title'`); count != 1 {
+		t.Fatal("the title column is missing")
+	}
+	if count := countRows(t, store, `SELECT count(*) FROM approvals WHERE title = ''`); count != 2 {
+		t.Fatalf("%d rows kept an empty title, want 2", count)
+	}
+	created := approval.Record{
+		ID: "cccccccccccccccc", BundleID: "cccccccccccccccc", PrincipalID: "alice", Tool: "note_write", Arguments: json.RawMessage(`{}`), Hash: hash,
+		Summary: "From a review:\nSave the note", Title: "Save the note", Status: approval.StatusPending,
+		CreatedAt: time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC), ExpiresAt: time.Date(2099, 10, 1, 10, 0, 0, 0, time.UTC),
+	}
+	if _, err := store.CreateApprovals(ctx, []approval.Record{created}); err != nil {
+		t.Fatal(err)
+	}
+	if record, found, err := store.LoadApproval(ctx, created.ID); err != nil || !found || record.Title != "Save the note" {
+		t.Fatalf("stored title = %+v %v %v", record, found, err)
 	}
 	foreignKeysHold(t, ctx, db)
+}
+
+// ConfirmChosen confirms the kept pending records and ends the other pending ones as left out, in
+// one transaction. It changes nothing while no kept record is pending and unexpired.
+func TestConfirmChosenEndsTheOthersOnlyWhileAKeptRecordWaits(t *testing.T) {
+	store, ctx := openTestStore(t)
+	now := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
+	hash := "0000000000000000000000000000000000000000000000000000000000000000"
+	var records []approval.Record
+	for position, id := range []string{"aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "cccccccccccccccc", "dddddddddddddddd"} {
+		records = append(records, approval.Record{
+			ID: id, BundleID: "aaaaaaaaaaaaaaaa", Position: position, PrincipalID: "alice", Tool: "note_write",
+			Arguments: json.RawMessage(`{}`), Hash: hash, Summary: "Change " + id, Status: approval.StatusPending,
+			CreatedAt: now, ExpiresAt: now.Add(10 * time.Minute),
+		})
+	}
+	if _, err := store.CreateApprovals(ctx, records); err != nil {
+		t.Fatal(err)
+	}
+	statuses := func() string {
+		t.Helper()
+		loaded, err := store.LoadBundle(ctx, "aaaaaaaaaaaaaaaa")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var line []string
+		for _, record := range loaded {
+			line = append(line, record.Status+"/"+record.Reason)
+		}
+		return strings.Join(line, " ")
+	}
+	finished, err := store.FinishApproval(ctx, "bbbbbbbbbbbbbbbb", approval.StatusPending, approval.StatusRejected, approval.ReasonWithdrawn, "")
+	if err != nil || !finished {
+		t.Fatalf("withdraw = %v %v", finished, err)
+	}
+	const untouched = "pending/ rejected/withdrawn pending/ pending/"
+
+	confirmed, leftOut, err := store.ConfirmChosen(ctx, "aaaaaaaaaaaaaaaa", "alice", []string{"bbbbbbbbbbbbbbbb"}, now)
+	if err != nil || len(confirmed) != 0 || len(leftOut) != 0 || statuses() != untouched {
+		t.Fatalf("kept record that no longer waits = %v %v %v, %s", confirmed, leftOut, err, statuses())
+	}
+	confirmed, leftOut, err = store.ConfirmChosen(ctx, "aaaaaaaaaaaaaaaa", "alice", []string{"aaaaaaaaaaaaaaaa"}, now.Add(10*time.Minute))
+	if err != nil || len(confirmed) != 0 || len(leftOut) != 0 || statuses() != untouched {
+		t.Fatalf("kept record past its deadline = %v %v %v, %s", confirmed, leftOut, err, statuses())
+	}
+	confirmed, leftOut, err = store.ConfirmChosen(ctx, "aaaaaaaaaaaaaaaa", "bob", []string{"aaaaaaaaaaaaaaaa"}, now)
+	if err != nil || len(confirmed) != 0 || len(leftOut) != 0 || statuses() != untouched {
+		t.Fatalf("another principal's choice = %v %v %v, %s", confirmed, leftOut, err, statuses())
+	}
+
+	confirmed, leftOut, err = store.ConfirmChosen(ctx, "aaaaaaaaaaaaaaaa", "alice", []string{"aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "cccccccccccccccc"}, now)
+	if err != nil || !slices.Equal(confirmed, []string{"aaaaaaaaaaaaaaaa", "cccccccccccccccc"}) || !slices.Equal(leftOut, []string{"dddddddddddddddd"}) {
+		t.Fatalf("choice = %v %v %v", confirmed, leftOut, err)
+	}
+	if got := statuses(); got != "confirmed/ rejected/withdrawn confirmed/ rejected/left_out" {
+		t.Fatalf("statuses after the choice = %s", got)
+	}
+	if again, left, err := store.ConfirmChosen(ctx, "aaaaaaaaaaaaaaaa", "alice", []string{"aaaaaaaaaaaaaaaa"}, now); err != nil || len(again) != 0 || len(left) != 0 {
+		t.Fatalf("repeated choice = %v %v %v", again, left, err)
+	}
 }

@@ -198,7 +198,7 @@ func (s *Service) sendDirect(ctx context.Context, principalID string, chatID int
 			s.logger.WarnContext(ctx, "approval.direct.undeliverable", "principal_id", principalID, "error", err)
 			return
 		}
-		if err := s.repository.SetApprovalMessage(ctx, recordIDs(group), chatID, messageID, false); err != nil {
+		if err := s.repository.SetApprovalMessage(ctx, recordIDs(group), chatID, messageID, NotWidget); err != nil {
 			s.logger.WarnContext(ctx, "approval.direct.unrecorded", "principal_id", principalID, "error", err)
 		}
 	}

@@ -393,9 +393,9 @@ is refused as unreadable instead of exhausting the service's memory.
    answered as doing nothing. The caption is one line the approval service
    builds: the proposal's first line or its number of changes, and what became
    of it once resolved, so an app without widgets still names it, but cannot
-   confirm it. A proposal is a widget only when its whole text and status fit
-   the data with its actions; a longer one, or one Telegram refuses as a
-   widget, gets buttons. The proposal's record says that its message is a
+   confirm it. A single change is a proposal widget only when its whole text
+   and status fit the data with its actions; a longer one, or one Telegram
+   refuses as a widget, gets buttons. The proposal's record says that its message is a
    widget, so its edits go to the caption and the data from the start; a widget
    recorded before that flag existed is still found by Telegram's refusal of a
    text edit. A proposal tap is handled as the press of the button it stands
@@ -403,6 +403,30 @@ is refused as unreadable instead of exhausting the service's memory.
    answered before the actions run, Preview as its button is. An outcome that
    makes the text too long for the data shortens the text there, keeps the
    status whole, and is sent in full as a reply once, when the data changed.
+   A proposal of two or more changes is a second kind, `changes`: one widget
+   that lists them, never text messages before it. Each change shows its number,
+   a tick, and its title, which is the proposal's own title when a connector sets
+   one (the weekly review does, since it puts where a card came from above the
+   change) and otherwise the first line of its summary after any warning, joined
+   with the next line when it ends with a colon. A change with a warning shows
+   the warning's mark, and the list its sentence. The data uses one-letter keys
+   (`changesData`); titles are shortened alike until it fits, down to 24
+   characters, and the full texts travel in it only when they fit beside whole
+   titles, otherwise a tap on a title asks the bot for that change
+   (`approval:read:<id>:<n>`), which answers its summary as plain text and, when
+   it is longer than an answer holds, sends it whole once as a reply. A list
+   whose titles cannot keep 24 characters, or that Telegram refuses, goes out as
+   text with buttons. The user unticks the changes to leave out, which costs no
+   request, and Confirm sends one flag per change (`approval:keep:<id>:<flags>`);
+   the approval service checks the choice against the stored proposal, confirms
+   the kept changes that still wait and ends the other waiting ones rejected with
+   the reason `left_out` in one transaction, runs the kept ones in order, and
+   tells the model which of its proposals the user left out. A choice that no
+   longer matches is answered as changed and resolves nothing; every Confirm ends
+   with an edit of the message to the stored state. The record keeps the kind
+   of its message (`widget_kind`), so an edit sends the data that kind's view
+   reads; a record that learns only that its message is a widget takes it as
+   the proposal kind.
    The switch only decides how proposals are sent: taps on widgets already in
    the chat are handled whatever it says.
    A Confirm that ran the actions queues a

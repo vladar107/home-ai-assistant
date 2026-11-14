@@ -1199,6 +1199,11 @@ func callbackUpdate(id, userID, messageID int64, data string) Update {
 
 func (h *conversationHarness) push(updates ...Update) {
 	h.t.Helper()
+	for _, update := range updates {
+		if query := update.WidgetQuery; query != nil && (len(query.Data) == 0 || len(query.Data) > 64) {
+			h.t.Fatalf("a widget tap carries %d bytes of data, Telegram takes 1 to 64: %q", len(query.Data), query.Data)
+		}
+	}
 	select {
 	case h.updates <- updates:
 	case <-h.ctx.Done():

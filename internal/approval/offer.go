@@ -68,7 +68,7 @@ func (s *Service) offer(ctx context.Context, principalID string, chatID, threadI
 		digest := sha256.Sum256(canonical)
 		records = append(records, Record{
 			ID: id, BundleID: bundleID, Position: position, PrincipalID: principalID, Tool: proposal.Tool,
-			Arguments: canonical, Hash: hex.EncodeToString(digest[:]), Summary: summary, Status: StatusPending,
+			Arguments: canonical, Hash: hex.EncodeToString(digest[:]), Summary: summary, Title: strings.TrimSpace(proposal.Title), Status: StatusPending,
 			ThreadID: thread.From(ctx), CreatedAt: now, ExpiresAt: now.Add(lifetime), Heading: heading,
 		})
 	}
