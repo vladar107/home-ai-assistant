@@ -146,6 +146,7 @@ func stagedCard(t *testing.T, box *outbox.Box, turn string) []byte {
 }
 
 func TestWeatherCardStagesTheDayForTheTurn(t *testing.T) {
+	t.Parallel()
 	f, box := newCardFixture(t)
 	simulator := f.openMeteoDay()
 	turn := outbox.ChatTurn(turnID)
@@ -194,6 +195,7 @@ func TestWeatherCardStagesTheDayForTheTurn(t *testing.T) {
 }
 
 func TestWeatherCardAggregatesLegsInRussian(t *testing.T) {
+	t.Parallel()
 	f, box := newCardFixture(t)
 	simulator := f.openMeteoDay()
 	turn := outbox.ScheduledTurn(turnID)
@@ -218,6 +220,7 @@ func TestWeatherCardAggregatesLegsInRussian(t *testing.T) {
 }
 
 func TestWeatherCardRefusals(t *testing.T) {
+	t.Parallel()
 	f, box := newCardFixture(t)
 	f.openMeteoDay()
 	turn := outbox.ChatTurn(turnID)
@@ -273,6 +276,7 @@ func TestWeatherCardRefusals(t *testing.T) {
 // in the forecast, the card, and a weather watch, and that a card leg can give coordinates under
 // its label.
 func TestWeatherToolsShareOnePlaceLookup(t *testing.T) {
+	t.Parallel()
 	f, box := newCardFixture(t)
 	f.service.SetSavedPlaces(savedPlaces{})
 	var mu sync.Mutex
@@ -326,6 +330,7 @@ func TestWeatherToolsShareOnePlaceLookup(t *testing.T) {
 }
 
 func TestWeatherCardAsksToCheckAPlaceAnIncompleteLookupChose(t *testing.T) {
+	t.Parallel()
 	f, box := newCardFixture(t)
 	geocoder := f.languageGeocoder(languageResults())
 	geocoder.set(map[string]bool{"de": true}, nil)
@@ -349,6 +354,7 @@ func TestWeatherCardAsksToCheckAPlaceAnIncompleteLookupChose(t *testing.T) {
 // TestAReplyCarriesOneImage runs the day card and a chart in one run of a turn, in either order:
 // whichever stages first stays, and the other is refused.
 func TestAReplyCarriesOneImage(t *testing.T) {
+	t.Parallel()
 	f, box := newCardFixture(t)
 	f.openMeteoDay()
 	charts, err := chart.NewService(chart.Config{Images: box, Switches: f.switches}, slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -405,6 +411,7 @@ func TestAReplyCarriesOneImage(t *testing.T) {
 }
 
 func TestWeatherCardFollowsTheWebSwitch(t *testing.T) {
+	t.Parallel()
 	f, _ := newCardFixture(t)
 	f.setWeb("alice", false)
 	if set := f.toolSet("alice"); !set.Empty() {
@@ -486,6 +493,7 @@ func trainsCard(language string, trains ...map[string]any) map[string]any {
 }
 
 func TestWeatherCardShowsTrainStatuses(t *testing.T) {
+	t.Parallel()
 	onTime := trainReport(t, transit.LevelOnTime, [2]string{"08:10", "09:02"}, [2]string{"08:10", "09:02"})
 	onTime.Reason = "on time"
 	late := trainReport(t, transit.LevelSlower, [2]string{"08:10", "09:02"}, [2]string{"08:22", "09:14"})
@@ -555,6 +563,7 @@ func TestWeatherCardShowsTrainStatuses(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 			trains := &fakeTrains{reports: test.reports}
 			f, box := newTrainsFixture(t, trains)
 			f.openMeteoDay()
@@ -590,6 +599,7 @@ func TestWeatherCardShowsTrainStatuses(t *testing.T) {
 }
 
 func TestWeatherCardOffersTrainsOnlyWithTrainInformationOn(t *testing.T) {
+	t.Parallel()
 	f, _ := newTrainsFixture(t, &fakeTrains{off: map[string]bool{"alice": true}})
 	offersTrains := func(principalID string) bool {
 		t.Helper()
@@ -617,6 +627,7 @@ func TestWeatherCardOffersTrainsOnlyWithTrainInformationOn(t *testing.T) {
 }
 
 func TestWeatherCardTrainRefusals(t *testing.T) {
+	t.Parallel()
 	train := map[string]any{"label": "There", "from": "Den Haag", "to": "Zwolle", "date_time": "2026-09-28T08:10"}
 	with := func(key string, value any) map[string]any {
 		changed := maps.Clone(train)
@@ -675,6 +686,7 @@ func TestWeatherCardTrainRefusals(t *testing.T) {
 }
 
 func TestWeatherCardPrintsWindInTheAskedUnit(t *testing.T) {
+	t.Parallel()
 	f, box := newCardFixture(t)
 	f.openMeteoDay()
 	turn := outbox.ScheduledTurn(turnID)

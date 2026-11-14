@@ -9,6 +9,7 @@ import (
 // A precipitation forecast that fails in transit says what kind of failure it was, never the
 // request's address, which carries the coordinates.
 func TestPrecipitationFailureKeepsTheCoordinatesOut(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, "")
 	f.route("forecast.test/v1/forecast", func(w http.ResponseWriter, _ *http.Request) {
 		connection, _, err := w.(http.Hijacker).Hijack()

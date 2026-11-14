@@ -13,6 +13,7 @@ import (
 )
 
 func TestWeatherCardRecordsTheRender(t *testing.T) {
+	t.Parallel()
 	telemetry, reader := newMetricsTelemetry(t)
 	f, _ := newCardFixture(t)
 	f.service.SetTelemetry(telemetry)

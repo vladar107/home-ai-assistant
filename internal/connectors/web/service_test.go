@@ -240,6 +240,7 @@ func wantError(t *testing.T, result agentruntime.ToolResult, fragment string) {
 }
 
 func TestWebAccessIsOnByDefaultAndAPerUserSwitch(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, "")
 	f.serve("public.test/", "text/plain", []byte("hello"))
 
@@ -282,6 +283,7 @@ func TestWebAccessIsOnByDefaultAndAPerUserSwitch(t *testing.T) {
 }
 
 func TestFetchPageRefusesTheHomeNetwork(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, "")
 	f.route("public.test/redirect", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "http://10.0.0.10/admin", http.StatusFound)
@@ -334,6 +336,7 @@ func TestFetchPageRefusesTheHomeNetwork(t *testing.T) {
 }
 
 func TestFetchPageReducesHTML(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, "")
 	f.serve("public.test/article", "text/html; charset=utf-8", []byte(`<!doctype html>
 <html><head><title>  Opening   hours </title><style>body{color:red}</style>
@@ -366,6 +369,7 @@ See <a href="/hours/holidays">holiday hours</a> or <a href="https://example.org/
 }
 
 func TestFetchPageReadsInWindows(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, "")
 	var text strings.Builder
 	for line := 0; text.Len() < 30<<10; line++ {
@@ -392,6 +396,7 @@ func TestFetchPageReadsInWindows(t *testing.T) {
 }
 
 func TestFetchPageLimitsAndRefusals(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, "")
 	pdf, err := os.ReadFile(filepath.Join("..", "..", "pdftext", "testdata", "handbook.pdf"))
 	if err != nil {
@@ -499,6 +504,7 @@ func (f *fixture) openMeteo(forecast string) *[]string {
 }
 
 func TestWeatherForecastSummarisesAPlace(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, "")
 	f.openMeteo(forecastAmsterdam)
 
@@ -516,6 +522,7 @@ func TestWeatherForecastSummarisesAPlace(t *testing.T) {
 }
 
 func TestWeatherForecastFindsAPlaceNamedWithItsCountryOrRegion(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, "")
 	queries := f.openMeteo(forecastAmsterdam)
 
@@ -532,6 +539,7 @@ func TestWeatherForecastFindsAPlaceNamedWithItsCountryOrRegion(t *testing.T) {
 }
 
 func TestWeatherForecastResolvesAStreetAddressToItsTown(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, "")
 	queries := f.openMeteo(forecastAmsterdam)
 
@@ -558,6 +566,7 @@ func TestWeatherForecastResolvesAStreetAddressToItsTown(t *testing.T) {
 }
 
 func TestWeatherForecastPicksTheQualifiedPlaceAmongNamesakes(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, "")
 	f.openMeteo(forecastAmsterdam)
 	f.route("geocoding.test/v1/search", func(w http.ResponseWriter, r *http.Request) {
@@ -789,6 +798,7 @@ func newLanguageFixture(t *testing.T) (*fixture, *languageGeocoder) {
 }
 
 func TestWeatherPlaceNamesResolveInTheirOwnLanguage(t *testing.T) {
+	t.Parallel()
 	f, geocoder := newLanguageFixture(t)
 
 	for _, tc := range []struct {
@@ -827,6 +837,7 @@ func TestWeatherPlaceNamesResolveInTheirOwnLanguage(t *testing.T) {
 // A looser match in another language is mostly another place: when English finds nothing, only a
 // candidate of the very name counts, so a venue's name gives way to the town after it.
 func TestWeatherFuzzyMatchInAnotherLanguageDoesNotWin(t *testing.T) {
+	t.Parallel()
 	f, geocoder := newLanguageFixture(t)
 
 	wantText(t, f.call("alice", "weather_forecast", map[string]any{"location": "Stadionplein, Kleinstad", "days": 2}),
@@ -838,6 +849,7 @@ func TestWeatherFuzzyMatchInAnotherLanguageDoesNotWin(t *testing.T) {
 }
 
 func TestWeatherPlaceQualifiersMustMatch(t *testing.T) {
+	t.Parallel()
 	f, geocoder := newLanguageFixture(t)
 
 	wantText(t, f.call("alice", "weather_forecast", map[string]any{"location": "Wien, AT", "days": 2}), "Weather for Wien, Bundesland Wien, Österreich")
@@ -886,6 +898,7 @@ func TestWeatherPlaceQualifiersMustMatch(t *testing.T) {
 }
 
 func TestWeatherPlaceQualifiersNarrowByCountryCodeAndRegion(t *testing.T) {
+	t.Parallel()
 	f, geocoder := newLanguageFixture(t)
 
 	for _, tc := range []struct {
@@ -923,6 +936,7 @@ func TestWeatherPlaceQualifiersNarrowByCountryCodeAndRegion(t *testing.T) {
 // show is found through the retry languages, and one nothing knows refuses instead of being passed
 // over while another part narrows.
 func TestWeatherEveryQualifierPartMustMatch(t *testing.T) {
+	t.Parallel()
 	f, geocoder := newLanguageFixture(t)
 
 	wantText(t, f.call("alice", "weather_forecast", map[string]any{"location": "Bergen, Niedersachsen, Germany", "days": 2}),
@@ -943,12 +957,14 @@ func TestWeatherEveryQualifierPartMustMatch(t *testing.T) {
 // A qualifier is looked up as an area only when the answer is an area of that very name, so Roma
 // is no qualifier for Romania.
 func TestWeatherQualifierLookupNeedsTheAreasOwnName(t *testing.T) {
+	t.Parallel()
 	f, _ := newLanguageFixture(t)
 
 	wantError(t, f.call("alice", "weather_forecast", map[string]any{"location": "Frascati, Roma", "days": 2}),
 		`No place called "Frascati" was found in Roma, only in Lazio, Italy; Botoșani County, Romania;`)
 }
 
+// Serial: asserts how long the qualifier's lookup takes.
 // The qualifier's lookup, English and retry languages together, stays within one five-second limit.
 func TestWeatherQualifierLookupSharesOneLimit(t *testing.T) {
 	f, geocoder := newLanguageFixture(t)
@@ -968,6 +984,7 @@ func TestWeatherQualifierLookupSharesOneLimit(t *testing.T) {
 // With the retry incomplete, a qualifier that matches nothing may lie in what the failed language
 // would have found, so the lookup failing is reported rather than a refusal.
 func TestWeatherQualifierAfterAnIncompleteRetryIsNoRefusal(t *testing.T) {
+	t.Parallel()
 	f, geocoder := newLanguageFixture(t)
 	geocoder.set(map[string]bool{"de": true}, nil)
 
@@ -980,6 +997,7 @@ func TestWeatherQualifierAfterAnIncompleteRetryIsNoRefusal(t *testing.T) {
 
 // A qualifier whose lookup failed is the weather service failing, not proof the place is elsewhere.
 func TestWeatherQualifierLookupThatFailsIsNoRefusal(t *testing.T) {
+	t.Parallel()
 	f, geocoder := newLanguageFixture(t)
 
 	wantText(t, f.call("alice", "weather_forecast", map[string]any{"location": "Wien, AT", "days": 2}), "Weather for Wien, Bundesland Wien, Österreich")
@@ -995,6 +1013,7 @@ func TestWeatherQualifierLookupThatFailsIsNoRefusal(t *testing.T) {
 }
 
 func TestWeatherStreetAddressIsNotRetriedInOtherLanguages(t *testing.T) {
+	t.Parallel()
 	f, geocoder := newLanguageFixture(t)
 
 	wantText(t, f.call("alice", "weather_forecast", map[string]any{"location": "Kerkstraat 1, 1234 AB Kleinstad, Netherlands", "days": 2}),
@@ -1005,6 +1024,7 @@ func TestWeatherStreetAddressIsNotRetriedInOtherLanguages(t *testing.T) {
 	}
 }
 
+// Serial: asserts how long a stalled retry takes.
 func TestWeatherLanguageRetryThatFailsKeepsTheEnglishAnswer(t *testing.T) {
 	f, geocoder := newLanguageFixture(t)
 
@@ -1051,6 +1071,7 @@ func TestWeatherLanguageRetryThatFailsKeepsTheEnglishAnswer(t *testing.T) {
 // A retry cut short by the caller's own deadline is the weather service failing, not a lookup that
 // found only the English namesakes.
 func TestWeatherRetryCutShortByTheCallerFails(t *testing.T) {
+	t.Parallel()
 	f, geocoder := newLanguageFixture(t)
 	geocoder.set(nil, map[string]bool{"de": true})
 
@@ -1065,6 +1086,7 @@ func TestWeatherRetryCutShortByTheCallerFails(t *testing.T) {
 // A weather watch keeps the coordinates it is given and has no reply to carry a note, so FindPlace
 // fails rather than return a place an incomplete lookup chose.
 func TestFindPlaceRefusesAnIncompleteLookup(t *testing.T) {
+	t.Parallel()
 	f, geocoder := newLanguageFixture(t)
 	geocoder.set(map[string]bool{"de": true}, nil)
 
@@ -1081,6 +1103,7 @@ func TestFindPlaceRefusesAnIncompleteLookup(t *testing.T) {
 // The geocoder's answers are remembered for a day, up to a limit that drops the answer that expires
 // first.
 func TestWeatherGeocodingCacheExpiresAndIsBounded(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
 	f := newFixtureWith(t, web.Config{Now: func() time.Time {
@@ -1136,6 +1159,7 @@ func TestWeatherGeocodingCacheExpiresAndIsBounded(t *testing.T) {
 }
 
 func TestWeatherForecastUsesTheConfiguredHome(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, "Amsterdam")
 	queries := f.openMeteo(forecastAmsterdam)
 
@@ -1150,6 +1174,7 @@ func TestWeatherForecastUsesTheConfiguredHome(t *testing.T) {
 }
 
 func TestWeatherForecastAcceptsCoordinates(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, "Amsterdam")
 	var mu sync.Mutex
 	var geocoded int
@@ -1197,6 +1222,7 @@ func TestWeatherForecastAcceptsCoordinates(t *testing.T) {
 }
 
 func TestWeatherForecastHourByHourForADay(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, "")
 	f.openMeteo(forecastAmsterdam)
 
@@ -1246,6 +1272,7 @@ func TestWeatherForecastHourByHourForADay(t *testing.T) {
 // before, the hourly bound follows the household's calendar: yesterday is refused and the
 // furthest day ahead reaches Open-Meteo.
 func TestWeatherHourlyForCoordinatesFollowsTheHouseholdCalendar(t *testing.T) {
+	t.Parallel()
 	home, err := time.LoadLocation("Europe/Amsterdam")
 	if err != nil {
 		t.Fatal(err)
@@ -1276,6 +1303,7 @@ type exposureFlag bool
 func (e exposureFlag) External(context.Context, string) bool { return bool(e) }
 
 func TestFetchPageAfterOutsideContentOpensOnlySeenAddresses(t *testing.T) {
+	t.Parallel()
 	const address = "http://public.test/article"
 	setup := func(external bool, run *tools.Run) *fixture {
 		f := newFixture(t, "")
@@ -1324,6 +1352,7 @@ func TestFetchPageAfterOutsideContentOpensOnlySeenAddresses(t *testing.T) {
 }
 
 func TestWeatherForecastConvertsWindToTheAskedUnit(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, "")
 	f.openMeteo(forecastAmsterdam)
 
@@ -1353,6 +1382,7 @@ func (savedPlaces) FindSavedPlace(_ context.Context, principalID, name string) (
 }
 
 func TestWeatherForecastFindsTheUsersSavedPlaceBeforeGeocoding(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, "Amsterdam")
 	f.service.SetSavedPlaces(savedPlaces{})
 	var mu sync.Mutex
