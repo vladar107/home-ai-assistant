@@ -21,14 +21,20 @@ const (
 
 	maximumVenueTitleRunes   = 200
 	maximumVenueAddressRunes = 300
-
-	LocationDisabledReply = "Location sharing is not enabled on this assistant."
-	LocationRefusedReply  = "I could not read that location, so I did not keep it."
-	LocationSharedLine    = "Your latest shared location is used in your conversation until it expires; only the latest one is kept, and nothing is kept once it expires or you forget it. Places you save by name are kept until you delete them, and a day more so you can undo it, and are only ever saved when you ask."
-	LocationNotSharedLine = "Share a location or a live location in this chat to ask about places, buses, and weather near you."
 )
 
 var (
+	LocationDisabledReply = locale.T("Location sharing is not enabled on this assistant.", "Передача местоположения на этом ассистенте не включена.")
+	LocationRefusedReply  = locale.T("I could not read that location, so I did not keep it.", "Не удалось прочитать это местоположение, поэтому оно не сохранено.")
+	LocationSharedLine    = locale.T("Your latest shared location is used in your conversation until it expires; only the latest one is kept, and nothing is kept once it expires or you forget it. Places you save by name are kept until you delete them, and a day more so you can undo it, and are only ever saved when you ask.", "Ваше последнее переданное местоположение используется в вашем разговоре, пока не истечёт срок; хранится только последнее, и ничего не хранится после истечения срока или после того, как вы его забудете. Места, которые вы сохраняете по названию, хранятся, пока вы их не удалите, и ещё сутки, чтобы это можно было отменить, и сохраняются только по вашей просьбе.")
+	LocationNotSharedLine = locale.T("Share a location or a live location in this chat to ask about places, buses, and weather near you.", "Передайте местоположение или трансляцию местоположения в этом чате, чтобы спрашивать о местах, автобусах и погоде рядом с вами.")
+
+	locationName          = locale.T("Location", "Местоположение")
+	locationSharedState   = locale.T("shared", "передано")
+	locationNotShared     = locale.T("not shared", "не передано")
+	locationNotSharedHdr  = locale.T("Location: not shared.", "Местоположение: не передано.")
+	locationSummaryLine   = locale.T("Location: %s.", "Местоположение: %s.")
+	locationForgetButton  = locale.T("Forget my location", "Забыть моё местоположение")
 	LocationForgottenNote = locale.T("Location forgotten.", "Местоположение забыто.")
 	// LocationPrivacyLine is added to /privacy while location sharing is enabled.
 	LocationPrivacyLine = locale.T("Location: only the latest is kept, until it expires; it goes to your model, Transitous, and OpenStreetMap. Places you save by name are kept until a day after you delete them, never saved from a location without your asking.", "Местоположение: хранится только последнее, пока не истечёт срок; оно передаётся вашей модели, Transitous и OpenStreetMap. Места, которые вы сохраняете по названию, хранятся до дня после их удаления и никогда не сохраняются по местоположению без вашей просьбы.")
@@ -46,11 +52,11 @@ type LocationController interface {
 // a model call; the question about it comes in a later message.
 func (s *Service) processLocation(ctx context.Context, message *Message, principalID string) (processingResult, string, error) {
 	if s.locations == nil {
-		return s.sendLocationReply(ctx, message, principalID, "disabled", LocationDisabledReply)
+		return s.sendLocationReply(ctx, message, principalID, "disabled", LocationDisabledReply.Format(ctx))
 	}
 	fix := locationFix(principalID, message, false)
 	if err := fix.Validate(); err != nil {
-		return s.sendLocationReply(ctx, message, principalID, "invalid", LocationRefusedReply)
+		return s.sendLocationReply(ctx, message, principalID, "invalid", LocationRefusedReply.Format(ctx))
 	}
 	ack, err := s.locations.Share(ctx, fix)
 	if err != nil {
@@ -172,11 +178,11 @@ func (l locationSection) summary(ctx context.Context, principalID string) (setti
 	if err != nil {
 		return settingsSummary{}, err
 	}
-	state := "not shared"
+	state := locationNotShared.Format(ctx)
 	if shared {
-		state = "shared"
+		state = locationSharedState.Format(ctx)
 	}
-	return settingsSummary{name: "Location", state: state}, nil
+	return settingsSummary{name: locationName.Format(ctx), state: state}, nil
 }
 
 func (l locationSection) render(ctx context.Context, principalID string) (settingsView, error) {
@@ -185,11 +191,11 @@ func (l locationSection) render(ctx context.Context, principalID string) (settin
 		return settingsView{}, err
 	}
 	if !shared {
-		return settingsView{lines: []string{"Location: not shared.", LocationNotSharedLine}}, nil
+		return settingsView{lines: []string{locationNotSharedHdr.Format(ctx), LocationNotSharedLine.Format(ctx)}}, nil
 	}
 	return settingsView{
-		lines:   []string{"Location: " + text + ".", LocationSharedLine},
-		buttons: []InlineButton{{Text: "Forget my location", CallbackData: locationSectionPrefix + ":" + locationForgetAction}},
+		lines:   []string{locationSummaryLine.Format(ctx, text), LocationSharedLine.Format(ctx)},
+		buttons: []InlineButton{{Text: locationForgetButton.Format(ctx), CallbackData: locationSectionPrefix + ":" + locationForgetAction}},
 	}, nil
 }
 

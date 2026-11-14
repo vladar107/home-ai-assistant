@@ -13,14 +13,17 @@ const (
 	headsUpSectionPrefix = "headsup"
 	headsUpOnAction      = "on"
 	headsUpOffAction     = "off"
-
-	// HeadsUpTooManyNote explains why the switch could not create its job.
-	HeadsUpTooManyNote = "You already have the maximum number of scheduled jobs. Remove one in /jobs, then turn Heads-up on."
 )
 
 var (
-	HeadsUpOnLine  = locale.T("Heads-up: on. A message at 07:30 and 18:30 when something needs your attention; quiet otherwise. Uses your model subscription.", "Предупреждения: включены. Сообщение в 07:30 и 18:30, когда что-то требует вашего внимания; в остальное время тишина. Использует вашу подписку на модель.")
-	HeadsUpOffLine = locale.T("Heads-up: off. Turn it on for a message at 07:30 and 18:30 when something needs your attention; quiet otherwise. Needs a connected model subscription, which it uses.", "Предупреждения: выключены. Включите, и в 07:30 и 18:30 будет приходить сообщение, когда что-то требует вашего внимания; в остальное время тишина. Нужна подключённая подписка на модель, которую эта функция использует.")
+	// HeadsUpTooManyNote explains why the switch could not create its job.
+	HeadsUpTooManyNote = locale.T("You already have the maximum number of scheduled jobs. Remove one in /jobs, then turn Heads-up on.", "У вас уже максимальное число заданий по расписанию. Удалите одно в /jobs, а затем включите оповещения.")
+
+	headsUpName      = locale.T("Heads-up", "Оповещения")
+	headsUpOffButton = locale.T("Turn off Heads-up", "Выключить оповещения")
+	headsUpOnButton  = locale.T("Turn on Heads-up", "Включить оповещения")
+	HeadsUpOnLine    = locale.T("Heads-up: on. A message at 07:30 and 18:30 when something needs your attention; quiet otherwise. Uses your model subscription.", "Оповещения: включены. Сообщение в 07:30 и 18:30, когда что-то требует вашего внимания; в остальное время тишина. Использует вашу подписку на модель.")
+	HeadsUpOffLine   = locale.T("Heads-up: off. Turn it on for a message at 07:30 and 18:30 when something needs your attention; quiet otherwise. Needs a connected model subscription, which it uses.", "Оповещения: выключены. Включите, и в 07:30 и 18:30 будет приходить сообщение, когда что-то требует вашего внимания; в остальное время тишина. Нужна подключённая подписка на модель, которую эта функция использует.")
 )
 
 // NewHeadsUpSection is the page that turns the principal's twice-daily heads-up job on and off.
@@ -58,7 +61,7 @@ func (h headsUpSection) summary(ctx context.Context, principalID string) (settin
 	if err != nil {
 		return settingsSummary{}, err
 	}
-	return settingsSummary{name: "Heads-up", state: onOff(enabled)}, nil
+	return settingsSummary{name: headsUpName.Format(ctx), state: stateOf(ctx, enabled)}, nil
 }
 
 func (h headsUpSection) render(ctx context.Context, principalID string) (settingsView, error) {
@@ -69,12 +72,12 @@ func (h headsUpSection) render(ctx context.Context, principalID string) (setting
 	if enabled {
 		return settingsView{
 			lines:   []string{HeadsUpOnLine.Format(ctx)},
-			buttons: []InlineButton{{Text: "Turn off Heads-up", CallbackData: headsUpSectionPrefix + ":" + headsUpOffAction}},
+			buttons: []InlineButton{{Text: headsUpOffButton.Format(ctx), CallbackData: headsUpSectionPrefix + ":" + headsUpOffAction}},
 		}, nil
 	}
 	return settingsView{
 		lines:   []string{HeadsUpOffLine.Format(ctx)},
-		buttons: []InlineButton{{Text: "Turn on Heads-up", CallbackData: headsUpSectionPrefix + ":" + headsUpOnAction}},
+		buttons: []InlineButton{{Text: headsUpOnButton.Format(ctx), CallbackData: headsUpSectionPrefix + ":" + headsUpOnAction}},
 	}, nil
 }
 
@@ -110,7 +113,7 @@ func (h headsUpSection) act(ctx context.Context, principalID string, _ int64, ac
 		created, err := h.schedules.Create(ctx, id, prepared)
 		if err != nil {
 			if errors.Is(err, schedule.ErrTooManyJobs) {
-				return settingsOutcome{note: HeadsUpTooManyNote}, nil
+				return settingsOutcome{note: HeadsUpTooManyNote.Format(ctx)}, nil
 			}
 			return settingsOutcome{}, err
 		}

@@ -15,14 +15,18 @@ const (
 	inboxOnAction      = "on"
 	inboxOffAction     = "off"
 	inboxCheckAction   = "check"
-
-	InboxTooManyNote = "You already have the maximum number of scheduled jobs. Remove one in /jobs, then turn Inbox intake on."
-	InboxBusyNote    = "A check is already running; anything that needs you arrives in the Inbox tab, or here while tabs are off."
 )
 
 var (
-	InboxOnLine  = locale.T("Inbox intake: on. Every three hours between 08:00 and 22:00 I check your new mail for letters, bills, and notices that need something from you, and send what they say with the follow-ups I propose, such as a reminder before a deadline, on one card to confirm; mail that needs nothing sends nothing. Press Check now to look at once. Uses your model subscription.", "Разбор почты: включён. Каждые три часа с 08:00 до 22:00 я проверяю вашу новую почту на письма, счета и уведомления, от которых что-то требуется, и присылаю их содержание вместе с предлагаемыми действиями, например напоминанием перед сроком, одной карточкой для подтверждения; если от письма ничего не требуется, ничего не приходит. Нажмите «Проверить сейчас», чтобы посмотреть сразу. Использует вашу подписку на модель.")
-	InboxOffLine = locale.T("Inbox intake: off. Turn it on and I check your mail from the last day at once and then every three hours between 08:00 and 22:00 for letters, bills, and notices that need something from you, and propose follow-ups on one card; nothing is set without your press. Needs a connected model subscription, which it uses.", "Разбор почты: выключен. Включите, и я сразу проверю вашу почту за последние сутки, а затем буду проверять её каждые три часа с 08:00 до 22:00 на письма, счета и уведомления, от которых что-то требуется, и предлагать действия одной карточкой; без вашего нажатия ничего не назначается. Нужна подключённая подписка на модель, которую эта функция использует.")
+	InboxTooManyNote = locale.T("You already have the maximum number of scheduled jobs. Remove one in /jobs, then turn Inbox intake on.", "У вас уже максимальное число заданий по расписанию. Удалите одно в /jobs, а затем включите разбор почты.")
+	InboxBusyNote    = locale.T("A check is already running; anything that needs you arrives in the Inbox tab, or here while tabs are off.", "Проверка уже идёт; всё, что требует вашего внимания, придёт во вкладку «Входящие» или сюда, пока вкладки выключены.")
+
+	inboxName      = locale.T("Inbox intake", "Разбор почты")
+	inboxCheckBtn  = locale.T("Check now", "Проверить сейчас")
+	inboxOffButton = locale.T("Turn off Inbox intake", "Выключить разбор почты")
+	inboxOnButton  = locale.T("Turn on Inbox intake", "Включить разбор почты")
+	InboxOnLine    = locale.T("Inbox intake: on. Every three hours between 08:00 and 22:00 I check your new mail for letters, bills, and notices that need something from you, and send what they say with the follow-ups I propose, such as a reminder before a deadline, on one card to confirm; mail that needs nothing sends nothing. Press Check now to look at once. Uses your model subscription.", "Разбор почты: включён. Каждые три часа с 08:00 до 22:00 я проверяю вашу новую почту на письма, счета и уведомления, от которых что-то требуется, и присылаю их содержание вместе с предлагаемыми действиями, например напоминанием перед сроком, одной карточкой для подтверждения; если от письма ничего не требуется, ничего не приходит. Нажмите «Проверить сейчас», чтобы посмотреть сразу. Использует вашу подписку на модель.")
+	InboxOffLine   = locale.T("Inbox intake: off. Turn it on and I check your mail from the last day at once and then every three hours between 08:00 and 22:00 for letters, bills, and notices that need something from you, and propose follow-ups on one card; nothing is set without your press. Needs a connected model subscription, which it uses.", "Разбор почты: выключен. Включите, и я сразу проверю вашу почту за последние сутки, а затем буду проверять её каждые три часа с 08:00 до 22:00 на письма, счета и уведомления, от которых что-то требуется, и предлагать действия одной карточкой; без вашего нажатия ничего не назначается. Нужна подключённая подписка на модель, которую эта функция использует.")
 	// InboxNeedsMailLine explains why the switch is not offered.
 	InboxNeedsMailLine = locale.T("Inbox intake: off. It reads your mail, so turn on Mail for a connected Google account in Accounts › Google first.", "Разбор почты: выключен. Он читает вашу почту, поэтому сначала включите «Почту» для подключённого аккаунта Google в разделе «Аккаунты › Google».")
 	InboxCheckingNote  = locale.T("Checking your new mail now; anything that needs you arrives in the Inbox tab, or here while tabs are off.", "Проверяю новую почту; всё, что требует вашего внимания, придёт во вкладку «Входящие» или сюда, пока вкладки выключены.")
@@ -84,7 +88,7 @@ func (i inboxSection) summary(ctx context.Context, principalID string) (settings
 	if err != nil {
 		return settingsSummary{}, err
 	}
-	return settingsSummary{name: "Inbox intake", state: onOff(enabled)}, nil
+	return settingsSummary{name: inboxName.Format(ctx), state: stateOf(ctx, enabled)}, nil
 }
 
 func (i inboxSection) render(ctx context.Context, principalID string) (settingsView, error) {
@@ -96,8 +100,8 @@ func (i inboxSection) render(ctx context.Context, principalID string) (settingsV
 		return settingsView{
 			lines: []string{InboxOnLine.Format(ctx)},
 			buttons: []InlineButton{
-				{Text: "Check now", CallbackData: inboxSectionPrefix + ":" + inboxCheckAction},
-				{Text: "Turn off Inbox intake", CallbackData: inboxSectionPrefix + ":" + inboxOffAction},
+				{Text: inboxCheckBtn.Format(ctx), CallbackData: inboxSectionPrefix + ":" + inboxCheckAction},
+				{Text: inboxOffButton.Format(ctx), CallbackData: inboxSectionPrefix + ":" + inboxOffAction},
 			},
 		}, nil
 	}
@@ -110,7 +114,7 @@ func (i inboxSection) render(ctx context.Context, principalID string) (settingsV
 	}
 	return settingsView{
 		lines:   []string{InboxOffLine.Format(ctx)},
-		buttons: []InlineButton{{Text: "Turn on Inbox intake", CallbackData: inboxSectionPrefix + ":" + inboxOnAction}},
+		buttons: []InlineButton{{Text: inboxOnButton.Format(ctx), CallbackData: inboxSectionPrefix + ":" + inboxOnAction}},
 	}, nil
 }
 
@@ -151,7 +155,7 @@ func (i inboxSection) act(ctx context.Context, principalID string, _ int64, acti
 		created, err := i.schedules.Create(ctx, id, prepared)
 		if err != nil {
 			if errors.Is(err, schedule.ErrTooManyJobs) {
-				return settingsOutcome{note: InboxTooManyNote}, nil
+				return settingsOutcome{note: InboxTooManyNote.Format(ctx)}, nil
 			}
 			return settingsOutcome{}, err
 		}
@@ -194,7 +198,7 @@ func (i inboxSection) check(ctx context.Context, principalID string) (settingsOu
 		return settingsOutcome{}, err
 	}
 	if busy {
-		return settingsOutcome{note: InboxBusyNote}, nil
+		return settingsOutcome{note: InboxBusyNote.Format(ctx)}, nil
 	}
 	queued, err := i.schedules.RunNow(ctx, principalID, id, pressTriggerFrom(ctx))
 	if err != nil || !queued {

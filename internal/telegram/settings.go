@@ -3,7 +3,6 @@ package telegram
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
@@ -143,15 +142,14 @@ const (
 	// "nav:<group>.<section>". Pages are derived from the data alone, so nothing is stored.
 	settingsNavPrefix = "nav"
 	settingsRootPage  = "root"
-	settingsBackText  = "‹ Back"
-	attentionMark     = "⚠"
+	// settingsBackText is the English label of the Back button; settingsBackLabel is the one drawn.
+	settingsBackText = "‹ Back"
+	attentionMark    = "⚠"
 )
 
 type settingsGroup struct {
 	id    string
-	title string
-	// titleText, when set, is the title in each language; the others are still English.
-	titleText locale.Text
+	title locale.Text
 	// inline groups show their sections' controls on the group page; the others link to a page
 	// per section.
 	inline  bool
@@ -187,25 +185,22 @@ var sectionOrder = []string{
 
 // settingsGroups orders the overview; a section missing from it is never shown.
 var settingsGroups = []settingsGroup{
-	{id: "language", title: "Language", titleText: locale.T("Language", "Язык"), inline: true, members: []string{languageSectionPrefix}},
-	{id: "model", title: "Model", members: []string{modelSectionPrefix}},
-	{id: "accounts", title: "Accounts", members: []string{googleSectionPrefix, notionSectionPrefix}},
-	{id: "home", title: "Home & files", inline: true, members: []string{homeAssistantSectionPrefix, nasSectionPrefix}},
-	{id: "tools", title: "Everyday tools", inline: true, members: []string{webSectionPrefix, nsSectionPrefix, flightsSectionPrefix, busSectionPrefix, headsUpSectionPrefix, tripsSectionPrefix, inboxSectionPrefix}},
-	{id: "services", title: "Services", inline: true, members: []string{mcpSectionPrefix}},
-	{id: "location", title: "Location", inline: true, members: []string{locationSectionPrefix}},
-	{id: "memory", title: "Memory", inline: true, members: []string{memorySectionPrefix}},
-	{id: "monitoring", title: "Monitoring", inline: true, members: []string{grafanaSectionPrefix}},
-	{id: "events", title: "Events", inline: true, members: []string{eventsSectionPrefix}},
-	{id: "widgets", title: "Widgets", inline: true, members: []string{widgetSectionPrefix}},
-	{id: "safety", title: "Safety & privacy", inline: true, members: []string{typeSafeSectionPrefix}},
+	{id: "language", title: locale.T("Language", "Язык"), inline: true, members: []string{languageSectionPrefix}},
+	{id: "model", title: locale.T("Model", "Модель"), members: []string{modelSectionPrefix}},
+	{id: "accounts", title: locale.T("Accounts", "Аккаунты"), members: []string{googleSectionPrefix, notionSectionPrefix}},
+	{id: "home", title: locale.T("Home & files", "Дом и файлы"), inline: true, members: []string{homeAssistantSectionPrefix, nasSectionPrefix}},
+	{id: "tools", title: locale.T("Everyday tools", "Повседневные инструменты"), inline: true, members: []string{webSectionPrefix, nsSectionPrefix, flightsSectionPrefix, busSectionPrefix, headsUpSectionPrefix, tripsSectionPrefix, inboxSectionPrefix}},
+	{id: "services", title: locale.T("Services", "Сервисы"), inline: true, members: []string{mcpSectionPrefix}},
+	{id: "location", title: locale.T("Location", "Местоположение"), inline: true, members: []string{locationSectionPrefix}},
+	{id: "memory", title: locale.T("Memory", "Память"), inline: true, members: []string{memorySectionPrefix}},
+	{id: "monitoring", title: locale.T("Monitoring", "Мониторинг"), inline: true, members: []string{grafanaSectionPrefix}},
+	{id: "events", title: locale.T("Events", "События"), inline: true, members: []string{eventsSectionPrefix}},
+	{id: "widgets", title: locale.T("Widgets", "Виджеты"), inline: true, members: []string{widgetSectionPrefix}},
+	{id: "safety", title: locale.T("Safety & privacy", "Безопасность и приватность"), inline: true, members: []string{typeSafeSectionPrefix}},
 }
 
 func (g settingsGroup) titleIn(ctx context.Context) string {
-	if g.titleText != (locale.Text{}) {
-		return g.titleText.Format(ctx)
-	}
-	return g.title
+	return g.title.Format(ctx)
 }
 
 func settingsMembers(sections []Section, group settingsGroup) []Section {
@@ -253,9 +248,21 @@ func flagged(text string, attention bool) string {
 
 func onOff(enabled bool) string {
 	if enabled {
-		return "on"
+		return locale.On.In(locale.English)
 	}
-	return "off"
+	return locale.Off.In(locale.English)
+}
+
+// stateOf words a switch for the user's language.
+func stateOf(ctx context.Context, enabled bool) string {
+	if enabled {
+		return locale.On.Format(ctx)
+	}
+	return locale.Off.Format(ctx)
+}
+
+func settingsBackLabel(ctx context.Context) string {
+	return "‹ " + locale.Back.Format(ctx)
 }
 
 func crumbs(ctx context.Context, titles ...string) string {
@@ -355,7 +362,7 @@ func renderSettingsGroup(ctx context.Context, principalID string, group settings
 		}
 		keyboard = append(keyboard, row)
 	}
-	return finishPage(lines, keyboard, note, settingsRootPage)
+	return finishPage(ctx, lines, keyboard, note, settingsRootPage)
 }
 
 func renderSettingsSection(ctx context.Context, principalID string, group settingsGroup, section Section, note string) (string, InlineKeyboard, error) {
@@ -368,7 +375,7 @@ func renderSettingsSection(ctx context.Context, principalID string, group settin
 		return "", nil, err
 	}
 	lines := append([]string{crumbs(ctx, group.titleIn(ctx), summary.name), ""}, view.lines...)
-	return finishPage(lines, appendView(nil, view), note, group.id)
+	return finishPage(ctx, lines, appendView(nil, view), note, group.id)
 }
 
 func appendView(keyboard InlineKeyboard, view settingsView) InlineKeyboard {
@@ -378,11 +385,11 @@ func appendView(keyboard InlineKeyboard, view settingsView) InlineKeyboard {
 	return append(keyboard, view.rows...)
 }
 
-func finishPage(lines []string, keyboard InlineKeyboard, note, back string) (string, InlineKeyboard, error) {
+func finishPage(ctx context.Context, lines []string, keyboard InlineKeyboard, note, back string) (string, InlineKeyboard, error) {
 	if note != "" {
 		lines = append(lines, "", note)
 	}
-	keyboard = append(keyboard, []InlineButton{navButton(settingsBackText, back)})
+	keyboard = append(keyboard, []InlineButton{navButton(settingsBackLabel(ctx), back)})
 	return strings.Join(lines, "\n"), keyboard, nil
 }
 
@@ -419,6 +426,15 @@ const (
 	modelDisconnectAction = "disconnect"
 )
 
+var (
+	modelName              = locale.T("Model", "Модель")
+	modelNotConnectedState = locale.T("not connected", "не подключена")
+	modelConnectedState    = locale.T("connected", "подключена")
+	modelConnectAttention  = locale.T("Connect your model subscription to start talking to me.", "Подключите подписку на модель, чтобы начать со мной разговор.")
+	modelConnectButton     = locale.T("Connect model", "Подключить модель")
+	modelDisconnectButton  = locale.T("Disconnect model", "Отключить модель")
+)
+
 // NewModelSection is the page that connects and disconnects the principal's model subscription;
 // disconnecting stops the principal's running turns first when conversation is set.
 func NewModelSection(connections ConnectionController, conversation ConversationController, logger *slog.Logger, telemetry Telemetry) Section {
@@ -446,9 +462,9 @@ func (m modelSection) summary(ctx context.Context, principalID string) (settings
 		return settingsSummary{}, err
 	}
 	if !status.Connected {
-		return settingsSummary{name: "Model", state: "not connected", attention: "Connect your model subscription to start talking to me."}, nil
+		return settingsSummary{name: modelName.Format(ctx), state: modelNotConnectedState.Format(ctx), attention: modelConnectAttention.Format(ctx)}, nil
 	}
-	return settingsSummary{name: "Model", state: "connected"}, nil
+	return settingsSummary{name: modelName.Format(ctx), state: modelConnectedState.Format(ctx)}, nil
 }
 
 func (m modelSection) render(ctx context.Context, principalID string) (settingsView, error) {
@@ -459,12 +475,12 @@ func (m modelSection) render(ctx context.Context, principalID string) (settingsV
 	if !status.Connected {
 		return settingsView{
 			lines:   []string{ModelNotConnectedLine.Format(ctx)},
-			buttons: []InlineButton{{Text: "Connect model", CallbackData: modelSectionPrefix + ":" + modelConnectAction}},
+			buttons: []InlineButton{{Text: modelConnectButton.Format(ctx), CallbackData: modelSectionPrefix + ":" + modelConnectAction}},
 		}, nil
 	}
 	return settingsView{
 		lines:   []string{ModelConnectedLine(ctx, status), ModelCommandLine.Format(ctx)},
-		buttons: []InlineButton{{Text: "Disconnect model", CallbackData: modelSectionPrefix + ":" + modelDisconnectAction}},
+		buttons: []InlineButton{{Text: modelDisconnectButton.Format(ctx), CallbackData: modelSectionPrefix + ":" + modelDisconnectAction}},
 	}, nil
 }
 
@@ -498,12 +514,11 @@ const (
 	notionDisconnectAction = "disconnect"
 	notionWritesOnAction   = "writes-on"
 	notionWritesOffAction  = "writes-off"
-
-	NotionUnavailableLine    = "Notion: the installed token could not be verified because Notion is unavailable. Try again later."
-	NotionConnectFailedReply = "Notion could not be reached to verify the token, so nothing was stored. Please try again later."
 )
 
 var (
+	NotionUnavailableLine     = locale.T("Notion: the installed token could not be verified because Notion is unavailable. Try again later.", "Notion: установленный токен не удалось проверить, потому что Notion недоступен. Повторите попытку позже.")
+	NotionConnectFailedReply  = locale.T("Notion could not be reached to verify the token, so nothing was stored. Please try again later.", "Не удалось связаться с Notion, чтобы проверить токен, поэтому ничего не сохранено. Повторите попытку позже.")
 	NotionWritesOnReply       = locale.T("Notion writes are on. The model may propose to create or update pages; nothing is written until you confirm the exact proposal.", "Запись в Notion включена. Модель может предлагать создать или обновить страницы; ничего не записывается, пока вы не подтвердите конкретное предложение.")
 	NotionWritesOffReply      = locale.T("Notion writes are off. The model can only read your Notion content.", "Запись в Notion выключена. Модель может только читать ваше содержимое Notion.")
 	NotionNotConnectedLine    = locale.T("Notion: not connected.", "Notion: не подключён.")
@@ -520,29 +535,51 @@ var (
 	DeleteFailedLine        = locale.T("I could not delete your message; please delete it yourself.", "Не удалось удалить ваше сообщение; удалите его, пожалуйста, сами.")
 )
 
-func notionKind(status notion.Status) string {
+var (
+	notionPersonalKind = locale.T("personal access token", "персональный токен доступа")
+	notionInternalKind = locale.T("internal connection", "внутреннее подключение")
+
+	notionConnectedLine          = locale.T("Notion: connected as %[1]q (%[2]s), writes %[3]s.", "Notion: подключён как %[1]q (%[2]s), запись %[3]s.")
+	notionConnectedWorkspaceLine = locale.T("Notion: connected to workspace %[1]q as %[2]q (%[3]s), writes %[4]s.", "Notion: подключён к рабочему пространству %[1]q как %[2]q (%[3]s), запись %[4]s.")
+	notionConnectedReply         = locale.T("Notion is connected as %[1]q (%[2]s).", "Notion подключён как %[1]q (%[2]s).")
+	notionConnectedWorkspace     = locale.T("Notion is connected to workspace %[1]q as %[2]q (%[3]s).", "Notion подключён к рабочему пространству %[1]q как %[2]q (%[3]s).")
+	notionWritesOn               = locale.T("on", "включена")
+	notionWritesOff              = locale.T("off", "выключена")
+)
+
+func notionKind(ctx context.Context, status notion.Status) string {
 	if status.TokenKind == "personal" {
-		return "personal access token"
+		return notionPersonalKind.Format(ctx)
 	}
-	return "internal connection"
+	return notionInternalKind.Format(ctx)
 }
 
-func NotionConnectedLine(status notion.Status) string {
-	writes := "off"
+func notionConnectedLineIn(ctx context.Context, status notion.Status) string {
+	writes := notionWritesOff.Format(ctx)
 	if status.WritesEnabled {
-		writes = "on"
+		writes = notionWritesOn.Format(ctx)
 	}
 	if status.WorkspaceName == "" {
-		return fmt.Sprintf("Notion: connected as %q (%s), writes %s.", status.BotName, notionKind(status), writes)
+		return notionConnectedLine.Format(ctx, status.BotName, notionKind(ctx, status), writes)
 	}
-	return fmt.Sprintf("Notion: connected to workspace %q as %q (%s), writes %s.", status.WorkspaceName, status.BotName, notionKind(status), writes)
+	return notionConnectedWorkspaceLine.Format(ctx, status.WorkspaceName, status.BotName, notionKind(ctx, status), writes)
 }
 
-func NotionConnectedReply(status notion.Status) string {
+func notionConnectedReplyIn(ctx context.Context, status notion.Status) string {
 	if status.WorkspaceName == "" {
-		return fmt.Sprintf("Notion is connected as %q (%s).", status.BotName, notionKind(status))
+		return notionConnectedReply.Format(ctx, status.BotName, notionKind(ctx, status))
 	}
-	return fmt.Sprintf("Notion is connected to workspace %q as %q (%s).", status.WorkspaceName, status.BotName, notionKind(status))
+	return notionConnectedWorkspace.Format(ctx, status.WorkspaceName, status.BotName, notionKind(ctx, status))
+}
+
+// NotionConnectedLine is the connected line in English, as a test reads it.
+func NotionConnectedLine(status notion.Status) string {
+	return notionConnectedLineIn(context.Background(), status)
+}
+
+// NotionConnectedReply is the connected reply in English, as a test reads it.
+func NotionConnectedReply(status notion.Status) string {
+	return notionConnectedReplyIn(context.Background(), status)
 }
 
 // NewNotionSection is the page that connects Notion; it also takes the token pasted after Connect
@@ -565,6 +602,19 @@ func (n notionSection) privacy(ctx context.Context, _ string) ([]string, error) 
 	return []string{NotionPrivacyLine.Format(ctx)}, nil
 }
 
+var (
+	notionRejectedState     = locale.T("token rejected", "токен отклонён")
+	notionRejectedAttention = locale.T("Notion rejected your token; install a fresh one or disconnect.", "Notion отклонил ваш токен; установите новый или отключите Notion.")
+	notionUnavailableState  = locale.T("unavailable", "недоступен")
+	notionWritesOnState     = locale.T("writes on", "запись включена")
+	notionWritesOffState    = locale.T("writes off", "запись выключена")
+	notionNotConnectedState = locale.T("not connected", "не подключён")
+	notionDisconnectButton  = locale.T("Disconnect Notion", "Отключить Notion")
+	notionWritesOnButton    = locale.T("Turn Notion writes on", "Включить запись в Notion")
+	notionWritesOffButton   = locale.T("Turn Notion writes off", "Выключить запись в Notion")
+	notionConnectButton     = locale.T("Connect Notion", "Подключить Notion")
+)
+
 func (n notionSection) summary(ctx context.Context, principalID string) (settingsSummary, error) {
 	status, err := n.notion.Status(ctx, principalID)
 	if err != nil {
@@ -572,13 +622,16 @@ func (n notionSection) summary(ctx context.Context, principalID string) (setting
 	}
 	switch {
 	case status.Problem == notion.ProblemInvalidToken:
-		return settingsSummary{name: "Notion", state: "token rejected", attention: "Notion rejected your token; install a fresh one or disconnect."}, nil
+		return settingsSummary{name: "Notion", state: notionRejectedState.Format(ctx), attention: notionRejectedAttention.Format(ctx)}, nil
 	case status.Problem == notion.ProblemUnavailable:
-		return settingsSummary{name: "Notion", state: "unavailable"}, nil
+		return settingsSummary{name: "Notion", state: notionUnavailableState.Format(ctx)}, nil
 	case status.Connected:
-		return settingsSummary{name: "Notion", state: "writes " + onOff(status.WritesEnabled)}, nil
+		if status.WritesEnabled {
+			return settingsSummary{name: "Notion", state: notionWritesOnState.Format(ctx)}, nil
+		}
+		return settingsSummary{name: "Notion", state: notionWritesOffState.Format(ctx)}, nil
 	default:
-		return settingsSummary{name: "Notion", state: "not connected"}, nil
+		return settingsSummary{name: "Notion", state: notionNotConnectedState.Format(ctx)}, nil
 	}
 }
 
@@ -587,22 +640,22 @@ func (n notionSection) render(ctx context.Context, principalID string) (settings
 	if err != nil {
 		return settingsView{}, err
 	}
-	disconnect := []InlineButton{{Text: "Disconnect Notion", CallbackData: notionSectionPrefix + ":" + notionDisconnectAction}}
+	disconnect := []InlineButton{{Text: notionDisconnectButton.Format(ctx), CallbackData: notionSectionPrefix + ":" + notionDisconnectAction}}
 	switch {
 	case status.Problem == notion.ProblemInvalidToken:
 		return settingsView{lines: []string{NotionInvalidTokenLine.Format(ctx)}, buttons: disconnect}, nil
 	case status.Problem == notion.ProblemUnavailable:
-		return settingsView{lines: []string{NotionUnavailableLine}, buttons: disconnect}, nil
+		return settingsView{lines: []string{NotionUnavailableLine.Format(ctx)}, buttons: disconnect}, nil
 	case status.Connected:
-		writes := InlineButton{Text: "Turn Notion writes on", CallbackData: notionSectionPrefix + ":" + notionWritesOnAction}
+		writes := InlineButton{Text: notionWritesOnButton.Format(ctx), CallbackData: notionSectionPrefix + ":" + notionWritesOnAction}
 		if status.WritesEnabled {
-			writes = InlineButton{Text: "Turn Notion writes off", CallbackData: notionSectionPrefix + ":" + notionWritesOffAction}
+			writes = InlineButton{Text: notionWritesOffButton.Format(ctx), CallbackData: notionSectionPrefix + ":" + notionWritesOffAction}
 		}
-		return settingsView{lines: []string{NotionConnectedLine(status)}, buttons: append([]InlineButton{writes}, disconnect...)}, nil
+		return settingsView{lines: []string{notionConnectedLineIn(ctx, status)}, buttons: append([]InlineButton{writes}, disconnect...)}, nil
 	case n.notion.ChatConnectEnabled():
 		return settingsView{
 			lines:   []string{NotionNotConnectedLine.Format(ctx)},
-			buttons: []InlineButton{{Text: "Connect Notion", CallbackData: notionSectionPrefix + ":" + notionConnectAction}},
+			buttons: []InlineButton{{Text: notionConnectButton.Format(ctx), CallbackData: notionSectionPrefix + ":" + notionConnectAction}},
 		}, nil
 	default:
 		return settingsView{lines: []string{NotionOperatorLine.Format(ctx)}}, nil
@@ -655,9 +708,9 @@ func (n notionSection) intercept(ctx context.Context, principalID string, text s
 			return interception{handled: true, remove: true, reply: NotionInvalidTokenReply.Format(ctx), reason: "notion_intake_rejected"}, nil
 		case err != nil:
 			n.telemetry.ContextLogger(ctx, n.logger).WarnContext(ctx, "notion.intake.failed", "principal_id", principalID, "error", err)
-			return interception{handled: true, remove: true, reply: NotionConnectFailedReply, reason: "notion_intake_failed"}, nil
+			return interception{handled: true, remove: true, reply: NotionConnectFailedReply.Format(ctx), reason: "notion_intake_failed"}, nil
 		default:
-			return interception{handled: true, remove: true, reply: NotionConnectedReply(status), reason: "notion_intake_connected"}, nil
+			return interception{handled: true, remove: true, reply: notionConnectedReplyIn(ctx, status), reason: "notion_intake_connected"}, nil
 		}
 	}
 	return n.guard(ctx, principalID, text), nil
@@ -680,24 +733,28 @@ var (
 	NASWritesOnReply         = locale.T("Saving to the NAS is on. The model may propose to file a photo or document you sent in the conversation; nothing is written until you confirm the exact proposal, and a save can only add a new file.", "Сохранение на NAS включено. Модель может предложить сохранить фото или документ, отправленные вами в разговоре; ничего не записывается, пока вы не подтвердите конкретное предложение, а сохранение может только добавить новый файл.")
 	NASWritesOffReply        = locale.T("Saving to the NAS is off. The model can browse and read your NAS folders, but not add anything.", "Сохранение на NAS выключено. Модель может просматривать и читать ваши папки на NAS, но не может ничего добавлять.")
 	NASNoAccessLine          = locale.T("NAS: no folders are configured for you.", "NAS: для вас не настроено ни одной папки.")
+	nasReadOnlyLine          = locale.T("NAS: %s (read-only).", "NAS: %s (только чтение).")
+	nasSavingLine            = locale.T("NAS: %[1]s. Saving %[2]s, to %[3]s.", "NAS: %[1]s. Сохранение: %[2]s, в %[3]s.")
+	nasNoFoldersState        = locale.T("no folders", "нет папок")
+	nasReadOnlyState         = locale.T("read-only", "только чтение")
+	nasSavingOnState         = locale.T("saving on", "сохранение включено")
+	nasSavingOffState        = locale.T("saving off", "сохранение выключено")
+	nasSavingOnButton        = locale.T("Turn NAS saving on", "Включить сохранение на NAS")
+	nasSavingOffButton       = locale.T("Turn NAS saving off", "Выключить сохранение на NAS")
 	NASSavingUnavailableLine = locale.T("Saving is not configured for you, so NAS files can only be read.", "Сохранение для вас не настроено, поэтому файлы на NAS можно только читать.")
 )
 
 // NASConnectedLine names the folders this user can reach and whether saving is on, because those
 // two facts are the whole of what the connector can do for them.
-func NASConnectedLine(status nas.Status) string {
+func NASConnectedLine(ctx context.Context, status nas.Status) string {
 	names := make([]string, 0, len(status.Roots))
 	for _, root := range status.Roots {
 		names = append(names, root.Name)
 	}
 	if !status.CanSave {
-		return fmt.Sprintf("NAS: %s (read-only).", strings.Join(names, ", "))
+		return nasReadOnlyLine.Format(ctx, strings.Join(names, ", "))
 	}
-	writes := "off"
-	if status.WritesEnabled {
-		writes = "on"
-	}
-	return fmt.Sprintf("NAS: %s. Saving %s, to %s.", strings.Join(names, ", "), writes, status.DefaultFolder)
+	return nasSavingLine.Format(ctx, strings.Join(names, ", "), stateOf(ctx, status.WritesEnabled), status.DefaultFolder)
 }
 
 // nasSection renders the NAS folders. There is nothing to connect or disconnect: access is the
@@ -728,11 +785,13 @@ func (n nasSection) summary(ctx context.Context, principalID string) (settingsSu
 	}
 	switch {
 	case !status.Connected:
-		return settingsSummary{name: "NAS", state: "no folders"}, nil
+		return settingsSummary{name: "NAS", state: nasNoFoldersState.Format(ctx)}, nil
 	case !status.CanSave:
-		return settingsSummary{name: "NAS", state: "read-only"}, nil
+		return settingsSummary{name: "NAS", state: nasReadOnlyState.Format(ctx)}, nil
+	case status.WritesEnabled:
+		return settingsSummary{name: "NAS", state: nasSavingOnState.Format(ctx)}, nil
 	default:
-		return settingsSummary{name: "NAS", state: "saving " + onOff(status.WritesEnabled)}, nil
+		return settingsSummary{name: "NAS", state: nasSavingOffState.Format(ctx)}, nil
 	}
 }
 
@@ -745,13 +804,13 @@ func (n nasSection) render(ctx context.Context, principalID string) (settingsVie
 	case !status.Connected:
 		return settingsView{lines: []string{NASNoAccessLine.Format(ctx)}}, nil
 	case !status.CanSave:
-		return settingsView{lines: []string{NASConnectedLine(status), NASSavingUnavailableLine.Format(ctx)}}, nil
+		return settingsView{lines: []string{NASConnectedLine(ctx, status), NASSavingUnavailableLine.Format(ctx)}}, nil
 	default:
-		writes := InlineButton{Text: "Turn NAS saving on", CallbackData: nasSectionPrefix + ":" + nasWritesOnAction}
+		writes := InlineButton{Text: nasSavingOnButton.Format(ctx), CallbackData: nasSectionPrefix + ":" + nasWritesOnAction}
 		if status.WritesEnabled {
-			writes = InlineButton{Text: "Turn NAS saving off", CallbackData: nasSectionPrefix + ":" + nasWritesOffAction}
+			writes = InlineButton{Text: nasSavingOffButton.Format(ctx), CallbackData: nasSectionPrefix + ":" + nasWritesOffAction}
 		}
-		return settingsView{lines: []string{NASConnectedLine(status)}, buttons: []InlineButton{writes}}, nil
+		return settingsView{lines: []string{NASConnectedLine(ctx, status)}, buttons: []InlineButton{writes}}, nil
 	}
 }
 

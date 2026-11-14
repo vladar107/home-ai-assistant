@@ -3,7 +3,6 @@ package telegram
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -14,11 +13,6 @@ import (
 )
 
 const (
-	MemoryTitle = "Memory"
-
-	MemoryReviewBusyNote    = "A review is already running; anything worth learning arrives as cards."
-	MemoryReviewTooManyNote = "You already have the maximum number of scheduled jobs. Remove one in /jobs, then turn the weekly review on."
-
 	memorySectionPrefix = "memory"
 	memoryOnAction      = "on"
 	memoryOffAction     = "off"
@@ -29,9 +23,6 @@ const (
 	reviewOnAction      = "review_on"
 	reviewOffAction     = "review_off"
 	reviewNowAction     = "review_now"
-
-	learnedMarker     = " (learned)"
-	proceduresHeading = "Procedures"
 
 	memoryCallbackPrefix  = "mem"
 	memoryDeleteAction    = "del"
@@ -46,6 +37,35 @@ const (
 )
 
 var (
+	MemoryTitle             = locale.T("Memory", "Память")
+	MemoryReviewBusyNote    = locale.T("A review is already running; anything worth learning arrives as cards.", "Обзор уже идёт; всё, чему стоит научиться, придёт карточками.")
+	MemoryReviewTooManyNote = locale.T("You already have the maximum number of scheduled jobs. Remove one in /jobs, then turn the weekly review on.", "У вас уже максимальное число заданий по расписанию. Удалите одно в /jobs, а затем включите еженедельный обзор.")
+
+	memoryPageTitle         = locale.T("Memory (page %d of %d)", "Память (страница %d из %d)")
+	memoryLearnedMarker     = locale.T(" (learned)", " (из опыта)")
+	memoryInstructions      = locale.T("Instructions", "Инструкции")
+	memoryFacts             = locale.T("Facts", "Факты")
+	memoryProcedures        = locale.T("Procedures", "Процедуры")
+	memoryTurnOffButton     = locale.T("Turn off memory", "Выключить память")
+	memoryTurnOnButton      = locale.T("Turn on memory", "Включить память")
+	memoryLearnButton       = locale.T("Learn from 👎", "Учиться на 👎")
+	memoryStopLearnButton   = locale.T("Stop learning from 👎", "Не учиться на 👎")
+	memoryProceduresOn      = locale.T("Learn procedures", "Запоминать процедуры")
+	memoryProceduresOff     = locale.T("Stop learning procedures", "Не запоминать процедуры")
+	memoryReviewNowButton   = locale.T("Review now", "Обзор сейчас")
+	memoryReviewOffButton   = locale.T("Turn off weekly review", "Выключить еженедельный обзор")
+	memoryReviewOnButton    = locale.T("Turn on weekly review", "Включить еженедельный обзор")
+	memoryDeleteButton      = locale.T("Delete %s", "Удалить %s")
+	memoryPreviousButton    = locale.T("‹ Previous", "‹ Назад")
+	memoryNextButton        = locale.T("Next ›", "Далее ›")
+	memoryForgetAllButton   = locale.T("Forget everything", "Забыть всё")
+	memoryForgetAllYes      = locale.T("Yes, forget everything", "Да, забыть всё")
+	memoryForgetAllQuestion = locale.N("Forget all %[1]d items? I will not know any of it in later conversations, and this cannot be undone.",
+		"Forget all %[1]d items? I will not know any of it in later conversations, and this cannot be undone.",
+		"Забыть всё (%[1]d запись)? Ничего из этого я не буду знать в следующих разговорах, и отменить это нельзя.",
+		"Забыть всё (%[1]d записи)? Ничего из этого я не буду знать в следующих разговорах, и отменить это нельзя.",
+		"Забыть всё (%[1]d записей)? Ничего из этого я не буду знать в следующих разговорах, и отменить это нельзя.")
+
 	NoMemoryReply      = locale.T("I have nothing remembered about you. Tell me in conversation, for example: remember that I prefer short answers.", "Я ничего о вас не помню. Скажите мне в разговоре, например: запомни, что я предпочитаю короткие ответы.")
 	MemoryGoneReply    = locale.T("That entry no longer exists.", "Этой записи больше нет.")
 	MemoryOffNote      = locale.T("Memory is off: nothing here is used until you turn it on in /settings.", "Память выключена: ничего отсюда не используется, пока вы не включите её в /settings.")
@@ -107,7 +127,7 @@ func (m memorySection) summary(ctx context.Context, principalID string) (setting
 	if err != nil {
 		return settingsSummary{}, err
 	}
-	return settingsSummary{name: "Memory", state: onOff(enabled)}, nil
+	return settingsSummary{name: MemoryTitle.Format(ctx), state: stateOf(ctx, enabled)}, nil
 }
 
 func (m memorySection) render(ctx context.Context, principalID string) (settingsView, error) {
@@ -122,11 +142,11 @@ func (m memorySection) render(ctx context.Context, principalID string) (settings
 		}
 		view := settingsView{
 			lines:   []string{MemoryOnLine.Format(ctx), MemoryLearnOffLine.Format(ctx)},
-			buttons: []InlineButton{{Text: "Turn off memory", CallbackData: memorySectionPrefix + ":" + memoryOffAction}, {Text: "Learn from 👎", CallbackData: memorySectionPrefix + ":" + learnOnAction}},
+			buttons: []InlineButton{{Text: memoryTurnOffButton.Format(ctx), CallbackData: memorySectionPrefix + ":" + memoryOffAction}, {Text: memoryLearnButton.Format(ctx), CallbackData: memorySectionPrefix + ":" + learnOnAction}},
 		}
 		if learn {
 			view.lines[1] = MemoryLearnOnLine.Format(ctx)
-			view.buttons[1] = InlineButton{Text: "Stop learning from 👎", CallbackData: memorySectionPrefix + ":" + learnOffAction}
+			view.buttons[1] = InlineButton{Text: memoryStopLearnButton.Format(ctx), CallbackData: memorySectionPrefix + ":" + learnOffAction}
 		}
 		procedures, err := m.memory.LearnsProcedures(ctx, principalID)
 		if err != nil {
@@ -134,10 +154,10 @@ func (m memorySection) render(ctx context.Context, principalID string) (settings
 		}
 		if procedures {
 			view.lines = append(view.lines, MemoryProceduresOnLine.Format(ctx))
-			view.rows = [][]InlineButton{{{Text: "Stop learning procedures", CallbackData: memorySectionPrefix + ":" + proceduresOffAction}}}
+			view.rows = [][]InlineButton{{{Text: memoryProceduresOff.Format(ctx), CallbackData: memorySectionPrefix + ":" + proceduresOffAction}}}
 		} else {
 			view.lines = append(view.lines, MemoryProceduresOffLine.Format(ctx))
-			view.rows = [][]InlineButton{{{Text: "Learn procedures", CallbackData: memorySectionPrefix + ":" + proceduresOnAction}}}
+			view.rows = [][]InlineButton{{{Text: memoryProceduresOn.Format(ctx), CallbackData: memorySectionPrefix + ":" + proceduresOnAction}}}
 		}
 		review, err := m.reviewing(ctx, principalID)
 		if err != nil {
@@ -146,18 +166,18 @@ func (m memorySection) render(ctx context.Context, principalID string) (settings
 		if review {
 			view.lines = append(view.lines, MemoryReviewOnLine.Format(ctx))
 			view.rows = append(view.rows, []InlineButton{
-				{Text: "Review now", CallbackData: memorySectionPrefix + ":" + reviewNowAction},
-				{Text: "Turn off weekly review", CallbackData: memorySectionPrefix + ":" + reviewOffAction},
+				{Text: memoryReviewNowButton.Format(ctx), CallbackData: memorySectionPrefix + ":" + reviewNowAction},
+				{Text: memoryReviewOffButton.Format(ctx), CallbackData: memorySectionPrefix + ":" + reviewOffAction},
 			})
 		} else {
 			view.lines = append(view.lines, MemoryReviewOffLine.Format(ctx))
-			view.rows = append(view.rows, []InlineButton{{Text: "Turn on weekly review", CallbackData: memorySectionPrefix + ":" + reviewOnAction}})
+			view.rows = append(view.rows, []InlineButton{{Text: memoryReviewOnButton.Format(ctx), CallbackData: memorySectionPrefix + ":" + reviewOnAction}})
 		}
 		return view, nil
 	}
 	return settingsView{
 		lines:   []string{MemoryOffLine.Format(ctx)},
-		buttons: []InlineButton{{Text: "Turn on memory", CallbackData: memorySectionPrefix + ":" + memoryOnAction}},
+		buttons: []InlineButton{{Text: memoryTurnOnButton.Format(ctx), CallbackData: memorySectionPrefix + ":" + memoryOnAction}},
 	}, nil
 }
 
@@ -242,7 +262,7 @@ func (m memorySection) actOnReview(ctx context.Context, principalID, action stri
 		created, err := m.schedules.Create(ctx, id, prepared)
 		if err != nil {
 			if errors.Is(err, schedule.ErrTooManyJobs) {
-				return settingsOutcome{note: MemoryReviewTooManyNote}, nil
+				return settingsOutcome{note: MemoryReviewTooManyNote.Format(ctx)}, nil
 			}
 			return settingsOutcome{}, err
 		}
@@ -270,7 +290,7 @@ func (m memorySection) actOnReview(ctx context.Context, principalID, action stri
 			return settingsOutcome{}, err
 		}
 		if busy {
-			return settingsOutcome{note: MemoryReviewBusyNote}, nil
+			return settingsOutcome{note: MemoryReviewBusyNote.Format(ctx)}, nil
 		}
 		queued, err := m.schedules.RunNow(ctx, principalID, id, pressTriggerFrom(ctx))
 		if err != nil || !queued {
@@ -301,13 +321,13 @@ func memoryItems(ctx context.Context, principalID string, controller MemoryContr
 	if err != nil {
 		return nil, err
 	}
-	headings := map[string]string{memory.KindInstruction: "Instructions", memory.KindFact: "Facts"}
+	headings := map[string]string{memory.KindInstruction: memoryInstructions.Format(ctx), memory.KindFact: memoryFacts.Format(ctx)}
 	items := make([]memoryItem, 0, len(entries)+len(procedures))
 	for _, entry := range entries {
 		items = append(items, memoryItem{id: entry.ID, heading: headings[entry.Kind], text: entry.Text, learned: entry.Source == memory.SourceLearned, remove: memoryDeleteAction})
 	}
 	for _, procedure := range procedures {
-		items = append(items, memoryItem{id: procedure.ID, heading: proceduresHeading, text: procedure.Title, learned: procedure.Source == memory.SourceLearned, remove: procedureDeleteAction})
+		items = append(items, memoryItem{id: procedure.ID, heading: memoryProcedures.Format(ctx), text: procedure.Title, learned: procedure.Source == memory.SourceLearned, remove: procedureDeleteAction})
 	}
 	return items, nil
 }
@@ -331,9 +351,9 @@ func renderMemory(ctx context.Context, principalID string, controller MemoryCont
 	}
 	pages := (len(entries) + memoriesPerPage - 1) / memoriesPerPage
 	page = min(max(page, 1), pages)
-	title := MemoryTitle
+	title := MemoryTitle.Format(ctx)
 	if pages > 1 {
-		title += fmt.Sprintf(" (page %d of %d)", page, pages)
+		title = memoryPageTitle.Format(ctx, page, pages)
 	}
 	lines := []string{title}
 	if !enabled {
@@ -351,10 +371,10 @@ func renderMemory(ctx context.Context, principalID string, controller MemoryCont
 		number := strconv.Itoa(first + index + 1)
 		line := number + ". " + entry.text
 		if entry.learned {
-			line += learnedMarker
+			line += memoryLearnedMarker.Format(ctx)
 		}
 		lines = append(lines, line)
-		deletes = append(deletes, InlineButton{Text: "Delete " + number, CallbackData: memoryCallback(entry.remove, entry.id, page)})
+		deletes = append(deletes, InlineButton{Text: memoryDeleteButton.Format(ctx, number), CallbackData: memoryCallback(entry.remove, entry.id, page)})
 		if len(deletes) == deletesPerRow {
 			keyboard, deletes = append(keyboard, deletes), nil
 		}
@@ -364,15 +384,15 @@ func renderMemory(ctx context.Context, principalID string, controller MemoryCont
 	}
 	var navigation []InlineButton
 	if page > 1 {
-		navigation = append(navigation, InlineButton{Text: "‹ Previous", CallbackData: memoryCallback(memoryPageAction, "", page-1)})
+		navigation = append(navigation, InlineButton{Text: memoryPreviousButton.Format(ctx), CallbackData: memoryCallback(memoryPageAction, "", page-1)})
 	}
 	if page < pages {
-		navigation = append(navigation, InlineButton{Text: "Next ›", CallbackData: memoryCallback(memoryPageAction, "", page+1)})
+		navigation = append(navigation, InlineButton{Text: memoryNextButton.Format(ctx), CallbackData: memoryCallback(memoryPageAction, "", page+1)})
 	}
 	if len(navigation) > 0 {
 		keyboard = append(keyboard, navigation)
 	}
-	keyboard = append(keyboard, []InlineButton{{Text: "Forget everything", CallbackData: memoryCallback(memoryAskAction, "", page)}})
+	keyboard = append(keyboard, []InlineButton{{Text: memoryForgetAllButton.Format(ctx), CallbackData: memoryCallback(memoryAskAction, "", page)}})
 	return strings.Join(lines, "\n"), keyboard, nil
 }
 
@@ -384,10 +404,10 @@ func renderMemoryConfirmation(ctx context.Context, principalID string, controlle
 	if len(entries) == 0 {
 		return renderMemory(ctx, principalID, controller, page)
 	}
-	return fmt.Sprintf("Forget all %d items? I will not know any of it in later conversations, and this cannot be undone.", len(entries)),
+	return memoryForgetAllQuestion.Format(ctx, len(entries)),
 		InlineKeyboard{{
-			{Text: "Yes, forget everything", CallbackData: memoryCallback(memoryClearAction, "", page)},
-			{Text: "Cancel", CallbackData: memoryCallback(memoryBackAction, "", page)},
+			{Text: memoryForgetAllYes.Format(ctx), CallbackData: memoryCallback(memoryClearAction, "", page)},
+			{Text: locale.Cancel.Format(ctx), CallbackData: memoryCallback(memoryBackAction, "", page)},
 		}}, nil
 }
 

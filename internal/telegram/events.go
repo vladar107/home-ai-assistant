@@ -3,7 +3,6 @@ package telegram
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/url"
 	"strconv"
@@ -28,26 +27,62 @@ const (
 	eventNamingLifetime = 10 * time.Minute
 	// messageLimit is the longest message Telegram sends, in UTF-16 code units.
 	messageLimit = 4096
-
-	EventsLine = "Event sources let your own systems, such as a backup script or a home automation, message you: they post to /api/events with a source's token. " +
-		"Forward sends an event as it is; assess lets me decide from your memory whether it is worth telling you, and always sends a critical one."
-	EventsNoSourcesLine  = "No event sources yet."
-	EventsFullLine       = "You have the most event sources there can be; delete one to add another."
-	EventsBadNameReply   = "That is not a usable name: it must be one line of at most 40 characters. Press Add event source again to retry."
-	EventsFullReply      = "You already have the most event sources there can be, so nothing was added. Delete one in /settings first."
-	EventsFailedReply    = "I could not set up that event source. Please try again later."
-	EventsGoneNote       = "That event source no longer exists."
-	EventsRotateFailNote = "The old token no longer works, but I could not show the new one. Press New token again."
 )
 
 var (
-	EventsNameReply  = locale.T("Send the new event source's name as your next message within 10 minutes, such as Backups or Home automations; at most 40 characters.", "Отправьте название нового источника событий следующим сообщением в течение 10 минут, например «Резервные копии» или «Умный дом»; не больше 40 символов.")
-	EventsTokenGuard = locale.T("That looked like an event source token, so I deleted it and did not send it to the model. To get a new one, press New token in /settings.", "Это было похоже на токен источника событий, поэтому сообщение удалено и модели не отправлено. Чтобы получить новый токен, нажмите «Новый токен» в /settings.")
+	EventsLine = locale.T("Event sources let your own systems, such as a backup script or a home automation, message you: they post to /api/events with a source's token. "+
+		"Forward sends an event as it is; assess lets me decide from your memory whether it is worth telling you, and always sends a critical one.",
+		"Источники событий позволяют вашим собственным системам, например скрипту резервного копирования или умному дому, писать вам: они отправляют POST на /api/events с токеном источника. "+
+			"Режим «пересылка» отправляет событие как есть; режим «оценка» позволяет мне решить по вашей памяти, стоит ли вам о нём сообщать, а критическое событие я отправляю всегда.")
+	EventsNoSourcesLine  = locale.T("No event sources yet.", "Источников событий пока нет.")
+	EventsFullLine       = locale.T("You have the most event sources there can be; delete one to add another.", "У вас максимально возможное число источников событий; удалите один, чтобы добавить другой.")
+	EventsBadNameReply   = locale.T("That is not a usable name: it must be one line of at most 40 characters. Press Add event source again to retry.", "Такое название не подходит: оно должно быть одной строкой не длиннее 40 символов. Нажмите «Добавить источник событий» ещё раз, чтобы повторить.")
+	EventsFullReply      = locale.T("You already have the most event sources there can be, so nothing was added. Delete one in /settings first.", "У вас уже максимально возможное число источников событий, поэтому ничего не добавлено. Сначала удалите один в /settings.")
+	EventsFailedReply    = locale.T("I could not set up that event source. Please try again later.", "Не удалось настроить этот источник событий. Повторите попытку позже.")
+	EventsGoneNote       = locale.T("That event source no longer exists.", "Этого источника событий больше нет.")
+	EventsRotateFailNote = locale.T("The old token no longer works, but I could not show the new one. Press New token again.", "Старый токен больше не работает, но показать новый не удалось. Нажмите «Новый токен» ещё раз.")
+
+	eventsCreatedReply = locale.T("Event source %q is set up, forwarding events as they are. Its token is in the message above: copy it now, because I delete that message in 10 minutes and never show it again.", "Источник событий %q настроен и пересылает события как есть. Его токен в сообщении выше: скопируйте его сейчас, потому что через 10 минут я удалю это сообщение и больше никогда не покажу токен.")
+	eventsTokenMessage = locale.T("Token for event source <b>%[1]s</b>:\n<code>%[2]s</code>\n\n"+
+		"Send it as <code>Authorization: Bearer</code> on POST /api/events. I delete this message in 10 minutes and never show the token again.",
+		"Токен источника событий <b>%[1]s</b>:\n<code>%[2]s</code>\n\n"+
+			"Отправляйте его как <code>Authorization: Bearer</code> в POST /api/events. Через 10 минут я удалю это сообщение и больше никогда не покажу токен.")
+	eventsTokenPlain = locale.T("Token for event source %[1]s:\n%[2]s\n\n"+
+		"Send it as Authorization: Bearer on POST /api/events. I delete this message in 10 minutes and never show the token again.",
+		"Токен источника событий %[1]s:\n%[2]s\n\n"+
+			"Отправляйте его как Authorization: Bearer в POST /api/events. Через 10 минут я удалю это сообщение и больше никогда не покажу токен.")
+
+	eventsName         = locale.T("Events", "События")
+	eventsNoSources    = locale.T("no sources", "нет источников")
+	eventsSourceCount  = locale.N("%[1]d source", "%[1]d sources", "%[1]d источник", "%[1]d источника", "%[1]d источников")
+	eventsOnState      = locale.T("on", "включён")
+	eventsPausedState  = locale.T("paused", "на паузе")
+	eventsForwardMode  = locale.T("forward", "пересылка")
+	eventsAssessMode   = locale.T("assess", "оценка")
+	eventsSourceLine   = locale.T("• %[1]s: %[2]s, %[3]s.", "• %[1]s: %[2]s, %[3]s.")
+	eventsUsedLine     = locale.T("• %[1]s: %[2]s, %[3]s, last event %[4]s.", "• %[1]s: %[2]s, %[3]s, последнее событие %[4]s.")
+	eventsAssessButton = locale.T("Assess", "Оценивать")
+	eventsForwardBtn   = locale.T("Forward", "Пересылать")
+	eventsPauseButton  = locale.T("Pause", "Пауза")
+	eventsResumeButton = locale.T("Resume", "Продолжить")
+	eventsTokenButton  = locale.T("New token", "Новый токен")
+	eventsDeleteButton = locale.T("Delete", "Удалить")
+	eventsAddButton    = locale.T("Add event source", "Добавить источник событий")
+
+	eventsForwardsNote = locale.T("%q now forwards its events as they are.", "%q теперь пересылает свои события как есть.")
+	eventsAssessNote   = locale.T("%q now has me assess each event and tell you only what is worth it; critical events always reach you.", "%q теперь поручает мне оценивать каждое событие и сообщать вам только то, что того стоит; критические события доходят до вас всегда.")
+	eventsPausedNote   = locale.T("%q is paused: its events are refused until you resume it.", "%q на паузе: его события отклоняются, пока вы не продолжите.")
+	eventsResumedNote  = locale.T("%q takes events again.", "%q снова принимает события.")
+	eventsTokenNote    = locale.T("%q has a new token, in the message below; the old one no longer works.", "У %q новый токен, он в сообщении ниже; старый больше не работает.")
+	eventsDeletedNote  = locale.T("%q is deleted; its token no longer works.", "%q удалён; его токен больше не работает.")
+	EventsNameReply    = locale.T("Send the new event source's name as your next message within 10 minutes, such as Backups or Home automations; at most 40 characters.", "Отправьте название нового источника событий следующим сообщением в течение 10 минут, например «Резервные копии» или «Умный дом»; не больше 40 символов.")
+	EventsTokenGuard   = locale.T("That looked like an event source token, so I deleted it and did not send it to the model. To get a new one, press New token in /settings.", "Это было похоже на токен источника событий, поэтому сообщение удалено и модели не отправлено. Чтобы получить новый токен, нажмите «Новый токен» в /settings.")
 )
 
-// EventsCreatedReply confirms a new source; its token went out just before it.
+// EventsCreatedReply is the English confirmation of a new source, as a test reads it; its token
+// went out just before it.
 func EventsCreatedReply(name string) string {
-	return fmt.Sprintf("Event source %q is set up, forwarding events as they are. Its token is in the message above: copy it now, because I delete that message in 10 minutes and never show it again.", name)
+	return eventsCreatedReply.FormatIn(locale.English, name)
 }
 
 // severityMarkers lead an event's message, so its weight shows before it is read.
@@ -79,11 +114,8 @@ func (e EventSender) SendEvent(ctx context.Context, chatID int64, message events
 }
 
 func (e EventSender) SendToken(ctx context.Context, chatID int64, source, token string) (int64, error) {
-	name := textEscaper.Replace(source)
-	formatted := "Token for event source <b>" + name + "</b>:\n<code>" + token + "</code>\n\n" +
-		"Send it as <code>Authorization: Bearer</code> on POST /api/events. I delete this message in 10 minutes and never show the token again."
-	plain := "Token for event source " + source + ":\n" + token + "\n\n" +
-		"Send it as Authorization: Bearer on POST /api/events. I delete this message in 10 minutes and never show the token again."
+	formatted := eventsTokenMessage.Format(ctx, textEscaper.Replace(source), token)
+	plain := eventsTokenPlain.Format(ctx, source, token)
 	sent, err := e.Client.sendHTML(ctx, chatID, formatted, plain)
 	if err == nil && sent.MessageID <= 0 {
 		err = errors.New("Telegram sendMessage returned no message ID")
@@ -173,11 +205,9 @@ func (e *eventsSection) summary(ctx context.Context, principalID string) (settin
 	}
 	switch len(sources) {
 	case 0:
-		return settingsSummary{name: "Events", state: "no sources"}, nil
-	case 1:
-		return settingsSummary{name: "Events", state: "1 source"}, nil
+		return settingsSummary{name: eventsName.Format(ctx), state: eventsNoSources.Format(ctx)}, nil
 	default:
-		return settingsSummary{name: "Events", state: fmt.Sprintf("%d sources", len(sources))}, nil
+		return settingsSummary{name: eventsName.Format(ctx), state: eventsSourceCount.Format(ctx, len(sources))}, nil
 	}
 }
 
@@ -186,39 +216,46 @@ func (e *eventsSection) render(ctx context.Context, principalID string) (setting
 	if err != nil {
 		return settingsView{}, err
 	}
-	view := settingsView{lines: []string{EventsLine}}
+	view := settingsView{lines: []string{EventsLine.Format(ctx)}}
 	if len(sources) == 0 {
-		view.lines = append(view.lines, EventsNoSourcesLine)
+		view.lines = append(view.lines, EventsNoSourcesLine.Format(ctx))
 	}
 	for _, source := range sources {
-		state := "on"
+		state := eventsOnState.Format(ctx)
 		if !source.Enabled {
-			state = "paused"
+			state = eventsPausedState.Format(ctx)
 		}
-		line := fmt.Sprintf("• %s: %s, %s", source.Name, source.Mode, state)
+		mode := source.Mode
+		switch mode {
+		case events.ModeForward:
+			mode = eventsForwardMode.Format(ctx)
+		case events.ModeAssess:
+			mode = eventsAssessMode.Format(ctx)
+		}
+		line := eventsSourceLine.Format(ctx, source.Name, mode, state)
 		if !source.LastUsedAt.IsZero() {
-			line += ", last event " + source.LastUsedAt.In(e.location).Format("2 Jan 15:04")
+			line = eventsUsedLine.Format(ctx, source.Name, mode, state, locale.Date(locale.From(ctx), source.LastUsedAt.In(e.location), locale.DateTime))
 		}
-		view.lines = append(view.lines, line+".")
-		mode := InlineButton{Text: "Assess", CallbackData: eventsCallback(eventsModeAction, source.ID)}
+		view.lines = append(view.lines, line)
+		modeButton := InlineButton{Text: eventsAssessButton.Format(ctx), CallbackData: eventsCallback(eventsModeAction, source.ID)}
 		if source.Mode == events.ModeAssess {
-			mode.Text = "Forward"
+			modeButton.Text = eventsForwardBtn.Format(ctx)
 		}
-		pause := InlineButton{Text: "Pause", CallbackData: eventsCallback(eventsPauseAction, source.ID)}
+		pause := InlineButton{Text: eventsPauseButton.Format(ctx), CallbackData: eventsCallback(eventsPauseAction, source.ID)}
 		if !source.Enabled {
-			pause = InlineButton{Text: "Resume", CallbackData: eventsCallback(eventsResumeAction, source.ID)}
+			pause = InlineButton{Text: eventsResumeButton.Format(ctx), CallbackData: eventsCallback(eventsResumeAction, source.ID)}
 		}
 		view.rows = append(view.rows,
 			[]InlineButton{{Text: source.Name, CallbackData: labelCallbackData}},
-			[]InlineButton{mode, pause,
-				{Text: "New token", CallbackData: eventsCallback(eventsTokenAction, source.ID)},
-				{Text: "Delete", CallbackData: eventsCallback(eventsDeleteAction, source.ID)}},
+			[]InlineButton{modeButton, pause,
+				{Text: eventsTokenButton.Format(ctx), CallbackData: eventsCallback(eventsTokenAction, source.ID)},
+				{Text: eventsDeleteButton.Format(ctx), CallbackData: eventsCallback(eventsDeleteAction, source.ID)}},
 		)
 	}
 	if len(sources) < events.MaximumSources {
-		view.buttons = []InlineButton{{Text: "Add event source", CallbackData: eventsSectionPrefix + ":" + eventsAddAction}}
+		view.buttons = []InlineButton{{Text: eventsAddButton.Format(ctx), CallbackData: eventsSectionPrefix + ":" + eventsAddAction}}
 	} else {
-		view.lines = append(view.lines, EventsFullLine)
+		view.lines = append(view.lines, EventsFullLine.Format(ctx))
 	}
 	return view, nil
 }
@@ -234,7 +271,7 @@ func (e *eventsSection) act(ctx context.Context, principalID string, _ int64, ac
 			return settingsOutcome{}, err
 		}
 		if len(sources) >= events.MaximumSources {
-			return settingsOutcome{note: EventsFullLine}, nil
+			return settingsOutcome{note: EventsFullLine.Format(ctx)}, nil
 		}
 		e.mu.Lock()
 		e.naming[principalID] = time.Now().Add(eventNamingLifetime)
@@ -256,7 +293,7 @@ func (e *eventsSection) act(ctx context.Context, principalID string, _ int64, ac
 		}
 	}
 	if source.ID == "" {
-		return settingsOutcome{note: EventsGoneNote}, nil
+		return settingsOutcome{note: EventsGoneNote.Format(ctx)}, nil
 	}
 	var changed bool
 	var note string
@@ -267,27 +304,27 @@ func (e *eventsSection) act(ctx context.Context, principalID string, _ int64, ac
 			mode = events.ModeForward
 		}
 		changed, err = e.events.SetMode(ctx, principalID, sourceID, mode)
-		note = fmt.Sprintf("%q now forwards its events as they are.", source.Name)
+		note = eventsForwardsNote.Format(ctx, source.Name)
 		if mode == events.ModeAssess {
-			note = fmt.Sprintf("%q now has me assess each event and tell you only what is worth it; critical events always reach you.", source.Name)
+			note = eventsAssessNote.Format(ctx, source.Name)
 		}
 	case eventsPauseAction, eventsResumeAction:
 		enabled := verb == eventsResumeAction
 		changed, err = e.events.SetEnabled(ctx, principalID, sourceID, enabled)
-		note = fmt.Sprintf("%q is paused: its events are refused until you resume it.", source.Name)
+		note = eventsPausedNote.Format(ctx, source.Name)
 		if enabled {
-			note = fmt.Sprintf("%q takes events again.", source.Name)
+			note = eventsResumedNote.Format(ctx, source.Name)
 		}
 	case eventsTokenAction:
 		changed, err = e.events.Rotate(ctx, principalID, sourceID)
 		if changed && err != nil {
 			e.telemetry.ContextLogger(ctx, e.logger).WarnContext(ctx, "events.token.show_failed", "principal_id", principalID, "source_id", sourceID, "error", err)
-			return settingsOutcome{note: EventsRotateFailNote}, nil
+			return settingsOutcome{note: EventsRotateFailNote.Format(ctx)}, nil
 		}
-		note = fmt.Sprintf("%q has a new token, in the message below; the old one no longer works.", source.Name)
+		note = eventsTokenNote.Format(ctx, source.Name)
 	case eventsDeleteAction:
 		changed, err = e.events.Delete(ctx, principalID, sourceID)
-		note = fmt.Sprintf("%q is deleted; its token no longer works.", source.Name)
+		note = eventsDeletedNote.Format(ctx, source.Name)
 	default:
 		return settingsOutcome{}, errUnknownSettingsAction
 	}
@@ -295,7 +332,7 @@ func (e *eventsSection) act(ctx context.Context, principalID string, _ int64, ac
 		return settingsOutcome{}, err
 	}
 	if !changed {
-		return settingsOutcome{note: EventsGoneNote}, nil
+		return settingsOutcome{note: EventsGoneNote.Format(ctx)}, nil
 	}
 	return settingsOutcome{note: note}, nil
 }
@@ -311,17 +348,17 @@ func (e *eventsSection) intercept(ctx context.Context, principalID string, text 
 	}
 	name, err := events.NormalizeName(text)
 	if err != nil {
-		return interception{handled: true, reply: EventsBadNameReply, reason: "events_name_invalid"}, nil
+		return interception{handled: true, reply: EventsBadNameReply.Format(ctx), reason: "events_name_invalid"}, nil
 	}
 	source, err := e.events.Create(ctx, principalID, name)
 	switch {
 	case errors.Is(err, events.ErrFull):
-		return interception{handled: true, reply: EventsFullReply, reason: "events_full"}, nil
+		return interception{handled: true, reply: EventsFullReply.Format(ctx), reason: "events_full"}, nil
 	case err != nil:
 		e.telemetry.ContextLogger(ctx, e.logger).WarnContext(ctx, "events.source.create_failed", "principal_id", principalID, "error", err)
-		return interception{handled: true, reply: EventsFailedReply, reason: "events_create_failed"}, nil
+		return interception{handled: true, reply: EventsFailedReply.Format(ctx), reason: "events_create_failed"}, nil
 	}
-	return interception{handled: true, reply: EventsCreatedReply(source.Name), reason: "events_source_created"}, nil
+	return interception{handled: true, reply: eventsCreatedReply.Format(ctx, source.Name), reason: "events_source_created"}, nil
 }
 
 func (e *eventsSection) guard(ctx context.Context, _ string, text string) interception {

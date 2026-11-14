@@ -20,12 +20,12 @@ type SwitchPage struct {
 	// Prefix starts the page's callback data and places it in settingsGroups.
 	Prefix string
 	// Name labels the page in the overview and in its group.
-	Name string
+	Name locale.Text
 	// OnLine and OffLine describe the integration in each state; ExtraOnLines follow OnLine.
 	OnLine, OffLine locale.Text
 	ExtraOnLines    []locale.Text
 	// OnButton and OffButton turn the integration on and off.
-	OnButton, OffButton string
+	OnButton, OffButton locale.Text
 	// Event is logged when a principal turns the integration on or off; empty logs nothing.
 	Event string
 	// HelpTopic names the page for app_help.
@@ -34,8 +34,8 @@ type SwitchPage struct {
 	PrivacyLine locale.Text
 	// PrivacyMore follows PrivacyLine on the same line.
 	PrivacyMore []locale.Text
-	// SummaryState words the state for the overview; nil says on or off.
-	SummaryState func(on bool) string
+	// SummaryOn and SummaryOff word the state for the overview; unset says on or off.
+	SummaryOn, SummaryOff locale.Text
 }
 
 // SwitchDetails adds lines to a switch page while its integration is on, and names what the user
@@ -80,11 +80,13 @@ func (s switchSection) summary(ctx context.Context, principalID string) (setting
 	if err != nil {
 		return settingsSummary{}, err
 	}
-	state := onOff(enabled)
-	if s.settings.Page.SummaryState != nil {
-		state = s.settings.Page.SummaryState(enabled)
+	state := stateOf(ctx, enabled)
+	if page := s.settings.Page; enabled && page.SummaryOn != (locale.Text{}) {
+		state = page.SummaryOn.Format(ctx)
+	} else if !enabled && page.SummaryOff != (locale.Text{}) {
+		state = page.SummaryOff.Format(ctx)
 	}
-	summary := settingsSummary{name: s.settings.Page.Name, state: state}
+	summary := settingsSummary{name: s.settings.Page.Name.Format(ctx), state: state}
 	if s.settings.Details != nil {
 		if _, attention := s.settings.Details.Details(ctx); enabled {
 			summary.attention = attention
@@ -102,7 +104,7 @@ func (s switchSection) render(ctx context.Context, principalID string) (settings
 	if !enabled {
 		return settingsView{
 			lines:   []string{page.OffLine.Format(ctx)},
-			buttons: []InlineButton{{Text: page.OnButton, CallbackData: page.Prefix + ":" + switchOnAction}},
+			buttons: []InlineButton{{Text: page.OnButton.Format(ctx), CallbackData: page.Prefix + ":" + switchOnAction}},
 		}, nil
 	}
 	lines := []string{page.OnLine.Format(ctx)}
@@ -115,7 +117,7 @@ func (s switchSection) render(ctx context.Context, principalID string) (settings
 	}
 	return settingsView{
 		lines:   lines,
-		buttons: []InlineButton{{Text: page.OffButton, CallbackData: page.Prefix + ":" + switchOffAction}},
+		buttons: []InlineButton{{Text: page.OffButton.Format(ctx), CallbackData: page.Prefix + ":" + switchOffAction}},
 	}, nil
 }
 
@@ -153,18 +155,23 @@ func HomeDetails(exposure func(context.Context) (checked bool, conflicts []strin
 
 // UnavailableDetails shows on a switch page why its integration cannot work until the operator
 // acts, such as a provider that refused the operator's key, and points the overview at it.
-func UnavailableDetails(reason func() string, name string) SwitchDetails {
+func UnavailableDetails(reason func() string, name locale.Text) SwitchDetails {
 	return unavailableDetails{reason: reason, name: name}
 }
 
+var (
+	unavailableAttention = locale.T("%s: unavailable until the operator fixes it.", "%s: недоступно, пока оператор это не исправит.")
+	homeConflictLine     = locale.T("Home actions are paused while these devices that need your confirmation are exposed to Assist; unexpose them in Home Assistant: %s.", "Действия с домом приостановлены, пока открыты для Assist эти устройства, требующие вашего подтверждения; уберите их из доступных для Assist в Home Assistant: %s.")
+)
+
 type unavailableDetails struct {
 	reason func() string
-	name   string
+	name   locale.Text
 }
 
-func (u unavailableDetails) Details(context.Context) ([]string, string) {
+func (u unavailableDetails) Details(ctx context.Context) ([]string, string) {
 	if reason := u.reason(); reason != "" {
-		return []string{reason}, u.name + ": unavailable until the operator fixes it."
+		return []string{reason}, unavailableAttention.Format(ctx, u.name.Format(ctx))
 	}
 	return nil, ""
 }
@@ -175,9 +182,9 @@ func (h homeDetails) Details(ctx context.Context) ([]string, string) {
 	checked, conflicts := h(ctx)
 	switch {
 	case !checked:
-		return []string{HomeAssistantUncheckedLine}, homeAssistantPausedAttention
+		return []string{HomeAssistantUncheckedLine.Format(ctx)}, homeAssistantPausedAttention.Format(ctx)
 	case len(conflicts) > 0:
-		return []string{HomeAssistantConflictLine + strings.Join(conflicts, "; ") + "."}, homeAssistantPausedAttention
+		return []string{homeConflictLine.Format(ctx, strings.Join(conflicts, "; "))}, homeAssistantPausedAttention.Format(ctx)
 	default:
 		return nil, ""
 	}

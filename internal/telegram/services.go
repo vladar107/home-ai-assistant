@@ -3,7 +3,6 @@ package telegram
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
@@ -38,60 +37,74 @@ const ServicesHelp = "Each service is off until the user presses its Turn on but
 	"Needs a key means the service is on but has no key yet; Needs reconnection means the service moved, so the key must be connected again; " +
 	"Problem means the service refused the key, so connect a new one or disconnect."
 
-var serviceStateLabels = map[mcp.State]string{
-	mcp.StateOff:            "Off",
-	mcp.StateOn:             "On",
-	mcp.StateNeedsKey:       "Needs a key",
-	mcp.StateNeedsReconnect: "Needs reconnection",
-	mcp.StateProblem:        "Problem",
+var serviceStateLabels = map[mcp.State]locale.Text{
+	mcp.StateOff:            locale.T("Off", "Выключен"),
+	mcp.StateOn:             locale.T("On", "Включён"),
+	mcp.StateNeedsKey:       locale.T("Needs a key", "Нужен ключ"),
+	mcp.StateNeedsReconnect: locale.T("Needs reconnection", "Нужно подключить заново"),
+	mcp.StateProblem:        locale.T("Problem", "Проблема"),
 }
 
-func ServiceLine(status mcp.ServerStatus) string {
-	return status.Title + ": " + serviceStateLabels[status.State]
+func ServiceLine(ctx context.Context, status mcp.ServerStatus) string {
+	return status.Title + ": " + serviceStateLabels[status.State].Format(ctx)
 }
 
-// ServicesConnectInstructions asks for the key; the intake ends at expires.
+var (
+	servicesConnectInstructions = locale.T("Send your key for %[1]s as your next message by %[2]s. I will delete that message right away and never show the key again. "+
+		"The key lets me use %[1]s for you: what you ask it is sent there with your key, to a service outside the household. Connecting also turns it on.",
+		"Отправьте ваш ключ для %[1]s следующим сообщением до %[2]s. Я сразу удалю это сообщение и никогда больше не покажу ключ. "+
+			"Ключ позволяет мне пользоваться %[1]s для вас: всё, что вы спрашиваете, отправляется туда вместе с вашим ключом, в сервис вне дома. Подключение также включает его.")
+	servicesConnectedReply    = locale.T("%s is connected with your key and turned on.", "Сервис %s подключён с вашим ключом и включён.")
+	servicesConnectedOffReply = locale.T("Your key for %[1]s is stored, but I could not turn it on. Press Turn on %[1]s in /settings.", "Ваш ключ для %[1]s сохранён, но включить сервис не удалось. Нажмите «Включить %[1]s» в /settings.")
+	servicesNotAKeyReply      = locale.T("That did not look like a key for %[1]s, so nothing was stored and it was sent nowhere. Press Connect %[1]s again when you have it.", "Это не похоже на ключ для %[1]s, поэтому ничего не сохранено и никуда не отправлено. Когда он у вас будет, снова нажмите «Подключить %[1]s».")
+	servicesRefusedReply      = locale.T("%s refused that key, so nothing was stored. Send the right key as your next message; I am still waiting for it.", "Сервис %s отклонил этот ключ, поэтому ничего не сохранено. Отправьте правильный ключ следующим сообщением; я всё ещё его жду.")
+	servicesUnverifiedReply   = locale.T("%s could not be reached to check that key, so nothing was stored. Send it again to retry; I am still waiting for it.", "Не удалось связаться с сервисом %s, чтобы проверить этот ключ, поэтому ничего не сохранено. Отправьте его снова, чтобы повторить; я всё ещё его жду.")
+	servicesFailedReply       = locale.T("I could not store your key for %s, so nothing was connected. Send it again to retry; I am still waiting for it.", "Не удалось сохранить ваш ключ для %s, поэтому ничего не подключено. Отправьте его снова, чтобы повторить; я всё ещё его жду.")
+	servicesExpiredReply      = locale.T("The wait for your key for %[1]s had ended, so nothing was stored or sent. Press Connect %[1]s again.", "Ожидание вашего ключа для %[1]s закончилось, поэтому ничего не сохранено и не отправлено. Снова нажмите «Подключить %[1]s».")
+	servicesDisconnectedNote  = locale.T("Your key for %s is removed and the service is off.", "Ваш ключ для %s удалён, сервис выключен.")
+	servicePrivacyLine        = locale.T("%s: what you ask it goes to that service, outside the household, and what it returns is treated as outside content.", "%s: то, что вы спрашиваете у сервиса, уходит ему, за пределы дома, а то, что он возвращает, считается внешним содержимым.")
+
+	servicesName          = locale.T("Services", "Сервисы")
+	servicesOnCount       = locale.T("%d of %d on", "включено %d из %d")
+	servicesStaleNote     = locale.T("Connect your key again for %s in Services.", "Подключите ключ заново для %s в разделе «Сервисы».")
+	servicesTurnOnButton  = locale.T("Turn on %s", "Включить %s")
+	servicesTurnOffButton = locale.T("Turn off %s", "Выключить %s")
+	servicesConnectButton = locale.T("Connect %s", "Подключить %s")
+	servicesDisconnectBtn = locale.T("Disconnect %s", "Отключить %s")
+)
+
+// The Services replies below are the English texts, as a test reads them.
+
 func ServicesConnectInstructions(title string, expires time.Time) string {
-	return fmt.Sprintf("Send your key for %s as your next message by %s. I will delete that message right away and never show the key again. "+
-		"The key lets me use %s for you: what you ask it is sent there with your key, to a service outside the household. Connecting also turns it on.",
-		title, expires.Format("15:04"), title)
+	return servicesConnectInstructions.FormatIn(locale.English, title, expires.Format("15:04"))
 }
 
 func ServicesConnectedReply(title string) string {
-	return fmt.Sprintf("%s is connected with your key and turned on.", title)
-}
-
-func ServicesConnectedOffReply(title string) string {
-	return fmt.Sprintf("Your key for %s is stored, but I could not turn it on. Press Turn on %s in /settings.", title, title)
+	return servicesConnectedReply.FormatIn(locale.English, title)
 }
 
 func ServicesNotAKeyReply(title string) string {
-	return fmt.Sprintf("That did not look like a key for %s, so nothing was stored and it was sent nowhere. Press Connect %s again when you have it.", title, title)
+	return servicesNotAKeyReply.FormatIn(locale.English, title)
 }
 
 func ServicesRefusedReply(title string) string {
-	return fmt.Sprintf("%s refused that key, so nothing was stored. Send the right key as your next message; I am still waiting for it.", title)
+	return servicesRefusedReply.FormatIn(locale.English, title)
 }
 
 func ServicesUnverifiedReply(title string) string {
-	return fmt.Sprintf("%s could not be reached to check that key, so nothing was stored. Send it again to retry; I am still waiting for it.", title)
-}
-
-func ServicesFailedReply(title string) string {
-	return fmt.Sprintf("I could not store your key for %s, so nothing was connected. Send it again to retry; I am still waiting for it.", title)
+	return servicesUnverifiedReply.FormatIn(locale.English, title)
 }
 
 func ServicesExpiredReply(title string) string {
-	return fmt.Sprintf("The wait for your key for %s had ended, so nothing was stored or sent. Press Connect %s again.", title, title)
+	return servicesExpiredReply.FormatIn(locale.English, title)
 }
 
 func ServicesDisconnectedNote(title string) string {
-	return fmt.Sprintf("Your key for %s is removed and the service is off.", title)
+	return servicesDisconnectedNote.FormatIn(locale.English, title)
 }
 
-// ServicePrivacyLine is added to /privacy for each service the user turned on.
 func ServicePrivacyLine(title string) string {
-	return fmt.Sprintf("%s: what you ask it goes to that service, outside the household, and what it returns is treated as outside content.", title)
+	return servicePrivacyLine.FormatIn(locale.English, title)
 }
 
 // ServicesController is the MCP connector as the Services page sees it.
@@ -148,7 +161,7 @@ func (s servicesSection) privacy(ctx context.Context, principalID string) ([]str
 	var lines []string
 	for _, status := range statuses {
 		if status.Enabled {
-			lines = append(lines, ServicePrivacyLine(status.Title))
+			lines = append(lines, servicePrivacyLine.Format(ctx, status.Title))
 		}
 	}
 	return lines, nil
@@ -169,9 +182,9 @@ func (s servicesSection) summary(ctx context.Context, principalID string) (setti
 			stale = append(stale, status.Title)
 		}
 	}
-	summary := settingsSummary{name: "Services", state: fmt.Sprintf("%d of %d on", on, len(statuses))}
+	summary := settingsSummary{name: servicesName.Format(ctx), state: servicesOnCount.Format(ctx, on, len(statuses))}
 	if len(stale) > 0 {
-		summary.attention = "Connect your key again for " + strings.Join(stale, ", ") + " in Services."
+		summary.attention = servicesStaleNote.Format(ctx, strings.Join(stale, ", "))
 	}
 	return summary, nil
 }
@@ -185,14 +198,14 @@ func (s servicesSection) render(ctx context.Context, principalID string) (settin
 	}
 	view := settingsView{lines: []string{ServicesLine.Format(ctx)}}
 	for _, status := range statuses {
-		view.lines = append(view.lines, "", ServiceLine(status), clipUTF16(status.Description, serviceDescriptionUnits))
+		view.lines = append(view.lines, "", ServiceLine(ctx, status), clipUTF16(status.Description, serviceDescriptionUnits))
 		var row []InlineButton
-		toggle := InlineButton{Text: "Turn on " + status.Title, CallbackData: servicesCallback(mcpOnAction, status.Name)}
+		toggle := InlineButton{Text: servicesTurnOnButton.Format(ctx, status.Title), CallbackData: servicesCallback(mcpOnAction, status.Name)}
 		if status.Enabled {
-			toggle = InlineButton{Text: "Turn off " + status.Title, CallbackData: servicesCallback(mcpOffAction, status.Name)}
+			toggle = InlineButton{Text: servicesTurnOffButton.Format(ctx, status.Title), CallbackData: servicesCallback(mcpOffAction, status.Name)}
 		}
-		connect := InlineButton{Text: "Connect " + status.Title, CallbackData: servicesCallback(mcpConnectAction, status.Name)}
-		disconnect := InlineButton{Text: "Disconnect " + status.Title, CallbackData: servicesCallback(mcpDisconnectAction, status.Name)}
+		connect := InlineButton{Text: servicesConnectButton.Format(ctx, status.Title), CallbackData: servicesCallback(mcpConnectAction, status.Name)}
+		disconnect := InlineButton{Text: servicesDisconnectBtn.Format(ctx, status.Title), CallbackData: servicesCallback(mcpDisconnectAction, status.Name)}
 		switch {
 		case !status.Keyed:
 			row = []InlineButton{toggle}
@@ -237,7 +250,7 @@ func (s servicesSection) act(ctx context.Context, principalID string, _ int64, a
 			return settingsOutcome{}, serviceActionError(err)
 		}
 		logger.InfoContext(ctx, "mcp.intake.started", "principal_id", principalID, "server", server)
-		return settingsOutcome{message: ServicesConnectInstructions(status.Title, expires.In(s.location))}, nil
+		return settingsOutcome{message: servicesConnectInstructions.Format(ctx, status.Title, expires.In(s.location).Format("15:04"))}, nil
 	case mcpDisconnectAction:
 		status, err := s.services.Status(ctx, principalID, server)
 		if err != nil {
@@ -250,7 +263,7 @@ func (s servicesSection) act(ctx context.Context, principalID string, _ int64, a
 		if !removed {
 			return settingsOutcome{}, nil
 		}
-		return settingsOutcome{note: ServicesDisconnectedNote(status.Title)}, nil
+		return settingsOutcome{note: servicesDisconnectedNote.Format(ctx, status.Title)}, nil
 	default:
 		return settingsOutcome{}, errUnknownSettingsAction
 	}
@@ -280,21 +293,21 @@ func (s servicesSection) intercept(ctx context.Context, principalID string, text
 	consumed := interception{handled: true, remove: true, reason: "mcp_intake_" + string(result.Outcome)}
 	switch result.Outcome {
 	case mcp.IntakeConnected:
-		consumed.reply = ServicesConnectedReply(title)
+		consumed.reply = servicesConnectedReply.Format(ctx, title)
 		if !result.Status.Enabled {
-			consumed.reply = ServicesConnectedOffReply(title)
+			consumed.reply = servicesConnectedOffReply.Format(ctx, title)
 		}
 	case mcp.IntakeNotKey:
-		consumed.reply = ServicesNotAKeyReply(title)
+		consumed.reply = servicesNotAKeyReply.Format(ctx, title)
 	case mcp.IntakeRefused:
-		consumed.reply = ServicesRefusedReply(title)
+		consumed.reply = servicesRefusedReply.Format(ctx, title)
 	case mcp.IntakeUnverified:
-		consumed.reply = ServicesUnverifiedReply(title)
+		consumed.reply = servicesUnverifiedReply.Format(ctx, title)
 	case mcp.IntakeExpired:
-		consumed.reply = ServicesExpiredReply(title)
+		consumed.reply = servicesExpiredReply.Format(ctx, title)
 	default:
 		s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "mcp.intake.failed", "principal_id", principalID, "server", result.Server, "error", err)
-		consumed.reply = ServicesFailedReply(title)
+		consumed.reply = servicesFailedReply.Format(ctx, title)
 	}
 	return consumed, nil
 }

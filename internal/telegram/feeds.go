@@ -5,18 +5,28 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
-// feedNames are the fixed names of the feed tabs.
-var feedNames = map[string]string{
-	thread.FeedReminders: "Reminders",
-	thread.FeedReports:   "Reports",
-	thread.FeedHome:      "Home",
-	thread.FeedWatches:   "Watches",
-	thread.FeedEvents:    "Events",
-	thread.FeedInbox:     "Inbox",
+// feedTabNames are the fixed names of the feed tabs in each language.
+var feedTabNames = map[string]locale.Text{
+	thread.FeedReminders: locale.T("Reminders", "Напоминания"),
+	thread.FeedReports:   locale.T("Reports", "Отчёты"),
+	thread.FeedHome:      locale.T("Home", "Дом"),
+	thread.FeedWatches:   locale.T("Watches", "Наблюдения"),
+	thread.FeedEvents:    locale.T("Events", "События"),
+	thread.FeedInbox:     locale.T("Inbox", "Входящие"),
 }
+
+// feedNames are the English names, for text that names a feed tab.
+var feedNames = func() map[string]string {
+	names := make(map[string]string, len(feedTabNames))
+	for feed, name := range feedTabNames {
+		names[feed] = name.In(locale.English)
+	}
+	return names
+}()
 
 // feedIcons are the emoji of the feed tabs' icons, used when Telegram's icon set offers them.
 var feedIcons = map[string]string{
@@ -47,10 +57,11 @@ func (s *Tabs) Thread(ctx context.Context, principalID string, chatID int64, fee
 	if !on {
 		return 0, nil
 	}
-	name, known := feedNames[feed]
+	text, known := feedTabNames[feed]
 	if !known {
 		return 0, fmt.Errorf("unknown feed %q", feed)
 	}
+	name := text.Format(ctx)
 	lock, _ := s.feedLocks.LoadOrStore(principalID+"\x00"+feed, &sync.Mutex{})
 	lock.(*sync.Mutex).Lock()
 	defer lock.(*sync.Mutex).Unlock()

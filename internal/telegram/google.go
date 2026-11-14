@@ -3,7 +3,6 @@ package telegram
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 
@@ -15,18 +14,38 @@ const (
 	googleSectionPrefix    = "google"
 	googleConnectAction    = "connect"
 	googleDisconnectAction = "disconnect"
-
-	GoogleAccountsLine       = "Google accounts:"
-	GooglePrivacyLine        = "Mail and calendar events I read go to your model."
-	GoogleSignInInstructions = "To connect a Google account read-only:\n" +
-		"1. Open the link below and sign in with the Google account to connect. Google will say the app is unverified; it is the household's own app, so continue.\n" +
-		"2. Allow reading your email, your calendar, or both. Nothing can send, change, or delete anything.\n" +
-		"3. Your browser then fails to open a localhost page. Copy that page's full address and send it here within 10 minutes. I will delete it right away.\n\n"
-	GoogleRejectedReply      = "Google refused that sign-in, so nothing was connected. Codes work once and only for a few minutes; press Connect a Google account in /settings to try again."
-	GoogleConnectFailedReply = "Google could not be reached to finish the sign-in, so nothing was connected. Please try again later."
 )
 
 var (
+	googleSignInSteps = locale.T("To connect a Google account read-only:\n"+
+		"1. Open the link below and sign in with the Google account to connect. Google will say the app is unverified; it is the household's own app, so continue.\n"+
+		"2. Allow reading your email, your calendar, or both. Nothing can send, change, or delete anything.\n"+
+		"3. Your browser then fails to open a localhost page. Copy that page's full address and send it here within 10 minutes. I will delete it right away.\n\n",
+		"Чтобы подключить аккаунт Google только для чтения:\n"+
+			"1. Откройте ссылку ниже и войдите в аккаунт Google, который хотите подключить. Google сообщит, что приложение не проверено; это собственное приложение вашей семьи, так что продолжайте.\n"+
+			"2. Разрешите чтение почты, календаря или того и другого. Ничего нельзя ни отправить, ни изменить, ни удалить.\n"+
+			"3. Затем браузер не сможет открыть страницу localhost. Скопируйте полный адрес этой страницы и отправьте его сюда в течение 10 минут. Я сразу его удалю.\n\n")
+	// GoogleSignInInstructions is the English text, for the help page that names the button.
+	GoogleSignInInstructions = googleSignInSteps.In(locale.English)
+
+	GoogleAccountsLine       = locale.T("Google accounts:", "Аккаунты Google:")
+	GooglePrivacyLine        = locale.T("Mail and calendar events I read go to your model.", "Почта и события календаря, которые я читаю, уходят вашей модели.")
+	GoogleRejectedReply      = locale.T("Google refused that sign-in, so nothing was connected. Codes work once and only for a few minutes; press Connect a Google account in /settings to try again.", "Google отклонил этот вход, поэтому ничего не подключено. Коды работают один раз и только несколько минут; нажмите «Подключить аккаунт Google» в /settings, чтобы попробовать снова.")
+	GoogleConnectFailedReply = locale.T("Google could not be reached to finish the sign-in, so nothing was connected. Please try again later.", "Не удалось связаться с Google, чтобы завершить вход, поэтому ничего не подключено. Повторите попытку позже.")
+
+	googleNotAllowedState  = locale.T("not allowed", "не разрешено")
+	googleReconnectLine    = locale.T("%s: Google no longer accepts the connection. Reconnect or disconnect.", "%s: Google больше не принимает подключение. Подключите аккаунт заново или отключите его.")
+	googleAccountLine      = locale.T("%[1]s: Mail %[2]s, Calendar %[3]s.", "%[1]s: почта: %[2]s, календарь: %[3]s.")
+	googleConnectedReply   = locale.T("%[1]s is connected read-only: Mail %[2]s, Calendar %[3]s.", "Аккаунт %[1]s подключён только для чтения: почта: %[2]s, календарь: %[3]s.")
+	googleNotConnected     = locale.T("not connected", "не подключён")
+	googleAccountCount     = locale.N("%[1]d account", "%[1]d accounts", "%[1]d аккаунт", "%[1]d аккаунта", "%[1]d аккаунтов")
+	googleReconnectNote    = locale.T("Reconnect %s in Accounts › Google.", "Подключите заново %s в разделе «Аккаунты › Google».")
+	googleConnectButton    = locale.T("Connect a Google account", "Подключить аккаунт Google")
+	googleDisconnectLabel  = locale.T("Disconnect", "Отключить")
+	googleMailOn           = locale.T("Mail on", "Включить почту")
+	googleMailOff          = locale.T("Mail off", "Выключить почту")
+	googleCalendarOn       = locale.T("Calendar on", "Включить календарь")
+	googleCalendarOff      = locale.T("Calendar off", "Выключить календарь")
 	GoogleNotConnectedLine = locale.T("Google: no accounts connected.", "Google: аккаунты не подключены.")
 	GoogleNoSignInReply    = locale.T("That sign-in address does not match a pending sign-in, or it expired, so nothing was connected. Press Connect a Google account in /settings to start again. I deleted the message.", "Этот адрес входа не соответствует ожидающему входу или устарел, поэтому ничего не подключено. Нажмите «Подключить аккаунт Google» в /settings, чтобы начать заново. Сообщение удалено.")
 	GoogleDeniedReply      = locale.T("Neither Gmail nor Calendar access was granted, so nothing was connected. Press Connect a Google account in /settings and allow at least one.", "Доступ не дан ни к Gmail, ни к Календарю, поэтому ничего не подключено. Нажмите «Подключить аккаунт Google» в /settings и разрешите хотя бы один из них.")
@@ -45,28 +64,24 @@ type GoogleController interface {
 	Disconnect(ctx context.Context, principalID, accountID string) (bool, error)
 }
 
-func productState(granted, enabled bool) string {
-	switch {
-	case !granted:
-		return "not allowed"
-	case enabled:
-		return "on"
-	default:
-		return "off"
+func productState(ctx context.Context, granted, enabled bool) string {
+	if !granted {
+		return googleNotAllowedState.Format(ctx)
 	}
+	return stateOf(ctx, enabled)
 }
 
-func GoogleAccountLine(status google.AccountStatus) string {
+func GoogleAccountLine(ctx context.Context, status google.AccountStatus) string {
 	if status.NeedsReconnect {
-		return fmt.Sprintf("%s: Google no longer accepts the connection. Reconnect or disconnect.", status.Address)
+		return googleReconnectLine.Format(ctx, status.Address)
 	}
-	return fmt.Sprintf("%s: Mail %s, Calendar %s.", status.Address,
-		productState(status.MailGranted, status.MailEnabled), productState(status.CalendarGranted, status.CalendarEnabled))
+	return googleAccountLine.Format(ctx, status.Address,
+		productState(ctx, status.MailGranted, status.MailEnabled), productState(ctx, status.CalendarGranted, status.CalendarEnabled))
 }
 
-func GoogleConnectedReply(status google.AccountStatus) string {
-	return fmt.Sprintf("%s is connected read-only: Mail %s, Calendar %s.", status.Address,
-		productState(status.MailGranted, status.MailEnabled), productState(status.CalendarGranted, status.CalendarEnabled))
+func GoogleConnectedReply(ctx context.Context, status google.AccountStatus) string {
+	return googleConnectedReply.Format(ctx, status.Address,
+		productState(ctx, status.MailGranted, status.MailEnabled), productState(ctx, status.CalendarGranted, status.CalendarEnabled))
 }
 
 // NewGoogleSection is the page that connects Google accounts; it also takes the sign-in address
@@ -85,8 +100,8 @@ func (g googleSection) prefix() string { return googleSectionPrefix }
 
 func (g googleSection) helpTopic() string { return "google" }
 
-func (g googleSection) privacy(context.Context, string) ([]string, error) {
-	return []string{GooglePrivacyLine}, nil
+func (g googleSection) privacy(ctx context.Context, _ string) ([]string, error) {
+	return []string{GooglePrivacyLine.Format(ctx)}, nil
 }
 
 func (g googleSection) summary(ctx context.Context, principalID string) (settingsSummary, error) {
@@ -94,13 +109,9 @@ func (g googleSection) summary(ctx context.Context, principalID string) (setting
 	if err != nil {
 		return settingsSummary{}, err
 	}
-	summary := settingsSummary{name: "Google", state: "not connected"}
-	switch len(statuses) {
-	case 0:
-	case 1:
-		summary.state = "1 account"
-	default:
-		summary.state = fmt.Sprintf("%d accounts", len(statuses))
+	summary := settingsSummary{name: "Google", state: googleNotConnected.Format(ctx)}
+	if len(statuses) > 0 {
+		summary.state = googleAccountCount.Format(ctx, len(statuses))
 	}
 	var stale []string
 	for _, status := range statuses {
@@ -109,7 +120,7 @@ func (g googleSection) summary(ctx context.Context, principalID string) (setting
 		}
 	}
 	if len(stale) > 0 {
-		summary.attention = "Reconnect " + strings.Join(stale, ", ") + " in Accounts › Google."
+		summary.attention = googleReconnectNote.Format(ctx, strings.Join(stale, ", "))
 	}
 	return summary, nil
 }
@@ -121,26 +132,26 @@ func (g googleSection) render(ctx context.Context, principalID string) (settings
 	if err != nil {
 		return settingsView{}, err
 	}
-	view := settingsView{buttons: []InlineButton{{Text: "Connect a Google account", CallbackData: googleSectionPrefix + ":" + googleConnectAction}}}
+	view := settingsView{buttons: []InlineButton{{Text: googleConnectButton.Format(ctx), CallbackData: googleSectionPrefix + ":" + googleConnectAction}}}
 	if len(statuses) == 0 {
 		view.lines = []string{GoogleNotConnectedLine.Format(ctx)}
 		return view, nil
 	}
-	view.lines = []string{GoogleAccountsLine}
+	view.lines = []string{GoogleAccountsLine.Format(ctx)}
 	for _, status := range statuses {
-		view.lines = append(view.lines, GoogleAccountLine(status))
+		view.lines = append(view.lines, GoogleAccountLine(ctx, status))
 		view.rows = append(view.rows, []InlineButton{{Text: status.Address, CallbackData: labelCallbackData}})
 		var row []InlineButton
 		if !status.NeedsReconnect {
 			if status.MailGranted {
-				row = append(row, productButton(status.ID, google.ProductMail, "Mail", status.MailEnabled))
+				row = append(row, productButton(ctx, status.ID, google.ProductMail, status.MailEnabled))
 			}
 			if status.CalendarGranted {
-				row = append(row, productButton(status.ID, google.ProductCalendar, "Calendar", status.CalendarEnabled))
+				row = append(row, productButton(ctx, status.ID, google.ProductCalendar, status.CalendarEnabled))
 			}
 		}
 		row = append(row, InlineButton{
-			Text:         "Disconnect",
+			Text:         googleDisconnectLabel.Format(ctx),
 			CallbackData: googleSectionPrefix + ":" + googleDisconnectAction + ":" + status.ID,
 		})
 		view.rows = append(view.rows, row)
@@ -148,13 +159,18 @@ func (g googleSection) render(ctx context.Context, principalID string) (settings
 	return view, nil
 }
 
-func productButton(accountID string, product google.Product, name string, enabled bool) InlineButton {
-	turn, state := "on", "on"
-	if enabled {
-		turn, state = "off", "off"
+func productButton(ctx context.Context, accountID string, product google.Product, enabled bool) InlineButton {
+	label, state := googleMailOn, "on"
+	switch {
+	case product == google.ProductMail && enabled:
+		label, state = googleMailOff, "off"
+	case product == google.ProductCalendar && enabled:
+		label, state = googleCalendarOff, "off"
+	case product == google.ProductCalendar:
+		label = googleCalendarOn
 	}
 	return InlineButton{
-		Text:         name + " " + turn,
+		Text:         label.Format(ctx),
 		CallbackData: googleSectionPrefix + ":" + string(product) + "-" + state + ":" + accountID,
 	}
 }
@@ -166,7 +182,7 @@ func (g googleSection) act(ctx context.Context, principalID string, _ int64, act
 			return settingsOutcome{}, err
 		}
 		g.telemetry.ContextLogger(ctx, g.logger).InfoContext(ctx, "google.signin.started", "principal_id", principalID)
-		return settingsOutcome{message: GoogleSignInInstructions + link}, nil
+		return settingsOutcome{message: googleSignInSteps.Format(ctx) + link}, nil
 	}
 	verb, accountID, found := strings.Cut(action, ":")
 	if !found || accountID == "" {
@@ -198,18 +214,18 @@ func (g googleSection) intercept(ctx context.Context, principalID string, text s
 	result := interception{handled: true, remove: true}
 	switch {
 	case err == nil:
-		result.reply, result.reason = GoogleConnectedReply(status), "google_signin_connected"
+		result.reply, result.reason = GoogleConnectedReply(ctx, status), "google_signin_connected"
 	case errors.Is(err, google.ErrNoSignIn):
 		result.reply, result.reason = GoogleNoSignInReply.Format(ctx), "google_signin_unmatched"
 	case errors.Is(err, google.ErrDenied):
 		result.reply, result.reason = GoogleDeniedReply.Format(ctx), "google_signin_denied"
 	case errors.Is(err, google.ErrRejected):
-		result.reply, result.reason = GoogleRejectedReply, "google_signin_rejected"
+		result.reply, result.reason = GoogleRejectedReply.Format(ctx), "google_signin_rejected"
 	case errors.Is(err, google.ErrAccountTaken):
 		result.reply, result.reason = GoogleTakenReply.Format(ctx), "google_signin_taken"
 	default:
 		g.telemetry.ContextLogger(ctx, g.logger).WarnContext(ctx, "google.signin.failed", "principal_id", principalID, "error", err)
-		result.reply, result.reason = GoogleConnectFailedReply, "google_signin_failed"
+		result.reply, result.reason = GoogleConnectFailedReply.Format(ctx), "google_signin_failed"
 	}
 	return result, nil
 }
