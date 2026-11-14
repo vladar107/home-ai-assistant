@@ -1,6 +1,6 @@
 # 0154 — An interface language each user chooses: English or Russian
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
@@ -172,7 +172,18 @@ watch and trip rewrites use it when they have no language of their own.
   own data.
 - **The Russian texts address the user informally («ты»)**, as the operator chose, not with the
   formal «вы». Sentences that would need the user's gender in the past tense are worded
-  without it.
+  without it, and so are the assistant's own («был прочитан внешний контент», not «я прочитал»).
+- **Decided during waves 4 and 5:**
+  - The schedule, watch and trip loops read the owner's language per run; the weekly review,
+    which runs outside the conversation lane, reads it itself as well.
+  - An unattended run's failure text is stored in English, in the job report or the task's
+    result the model reads, and the delivery words it in the user's language.
+  - Day cards and charts draw only the caller's text and numeric dates, so of the images only
+    the weather card's fixed words follow the setting: its `language` argument defaults to the
+    user's choice.
+  - Left English inside Russian sentences: validation reasons the code writes, and code values
+    such as a home service name, a route leg's status or an intake record's kind. Event
+    assessment turns are not told the language.
 
 ## Approach
 
