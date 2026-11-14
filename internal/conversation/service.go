@@ -122,6 +122,12 @@ func NewService(
 	if config.DraftInterval <= 0 {
 		config.DraftInterval = defaultDraftInterval
 	}
+	if config.DeliveryRetryDelay < 0 {
+		return nil, fmt.Errorf("conversation delivery retry delay must not be negative")
+	}
+	if config.DeliveryRetryDelay == 0 {
+		config.DeliveryRetryDelay = deliveryRetryDelay
+	}
 	if (config.Cards == nil) != (config.Photos == nil) {
 		return nil, fmt.Errorf("conversation cards and photos must be configured together")
 	}
@@ -588,7 +594,7 @@ func (s *Service) runWorker(ctx context.Context, lane Lane, wake <-chan struct{}
 					return
 				}
 				s.logWorkerError(ctx, principalID, "load_request")
-				if !wait(ctx, deliveryRetryDelay) {
+				if !wait(ctx, s.config.DeliveryRetryDelay) {
 					return
 				}
 				continue
@@ -607,7 +613,7 @@ func (s *Service) runWorker(ctx context.Context, lane Lane, wake <-chan struct{}
 						continue
 					}
 					s.logWorkerError(ctx, principalID, "deliver_response")
-					if !wait(ctx, deliveryRetryDelay) {
+					if !wait(ctx, s.config.DeliveryRetryDelay) {
 						return
 					}
 					continue
@@ -653,7 +659,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 			return
 		}
 		s.logWorkerError(ctx, request.PrincipalID, "claim_request")
-		_ = wait(ctx, deliveryRetryDelay)
+		_ = wait(ctx, s.config.DeliveryRetryDelay)
 		return
 	}
 	if !claimed {
@@ -813,7 +819,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 			return
 		}
 		s.logWorkerError(ctx, request.PrincipalID, "store_response")
-		if !wait(ctx, deliveryRetryDelay) {
+		if !wait(ctx, s.config.DeliveryRetryDelay) {
 			endTurn("cancelled", "shutdown")
 			return
 		}

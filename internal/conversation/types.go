@@ -594,6 +594,9 @@ type Config struct {
 	DraftDelay time.Duration
 	// DraftInterval is how often a shown draft is refreshed; zero means 20s.
 	DraftInterval time.Duration
+	// DeliveryRetryDelay is how long a lane waits before it retries a failed load, delivery, or
+	// stored response, each without bound; zero means 5s, and NewService refuses a negative one.
+	DeliveryRetryDelay time.Duration
 	// History titles the conversations /sessions lists; nil lists them without titles.
 	History History
 	// Reactions turns a chat turn's emoji-only reply into a reaction on the user's message; nil

@@ -206,6 +206,9 @@ type harnessOptions struct {
 	// cards adds the stage_card test tool that stages a card for the turn's reply.
 	cards       bool
 	turnTimeout time.Duration
+	// deliveryRetry replaces the wait before a failed delivery is retried, for the tests that wait
+	// for a retry.
+	deliveryRetry time.Duration
 	// location is the household's time zone, Europe/Amsterdam without it, and turns on the
 	// current-time line, read from clock when one is given.
 	location *time.Location
@@ -327,6 +330,10 @@ type conversationHarness struct {
 	tabs tabSimulator
 	// widgets simulates the widget messages the bot sent and the methods that act on them.
 	widgets widgetSimulator
+	// retryGate, when set, holds every send or photo that succeeds after a failed one until it is
+	// closed, so that a test can read what the failure left before the retry changes it.
+	retryGate <-chan struct{}
+	failed    bool
 }
 
 type setReaction struct {
@@ -488,7 +495,7 @@ func (h *conversationHarness) wiringInputs(t *testing.T, runtime agentruntime.Ag
 		Principals: unnamed, DataDir: filepath.Dir(h.attachmentsDir), Zone: zone,
 		Core: wiring.CoreConfig{
 			TurnTimeout: cmp.Or(options.turnTimeout, 10*time.Second), TurnZone: options.location, Now: now,
-			TypingInterval: options.typingInterval, DraftDelay: options.draftDelay, DraftInterval: options.draftInterval,
+			TypingInterval: options.typingInterval, DraftDelay: options.draftDelay, DraftInterval: options.draftInterval, DeliveryRetryDelay: options.deliveryRetry,
 			ChatModel:    agentruntime.ModelEffort{Model: "gpt-test", Effort: agentruntime.DefaultEffort},
 			TaskModel:    agentruntime.ModelEffort{Model: "gpt-6.1-sol", Effort: agentruntime.DefaultEffort},
 			HeadsUpModel: agentruntime.ModelEffort{Model: "gpt-6.1-sol", Effort: "high"},
@@ -739,10 +746,14 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 			h.sendStatuses = h.sendStatuses[1:]
 		}
 		gate, reason := h.sendGate, h.sendReason
+		retryGate := h.retryGateFor(status)
 		h.sent = append(h.sent, r.Form.Get("text"))
 		h.sentCount++
 		messageID := sentMessageID(h.sentCount)
 		h.mu.Unlock()
+		if !h.waitGate(r, retryGate) {
+			return
+		}
 		select {
 		case h.messages <- sentMessage{chatID: chatID, replyTo: replyTo, text: r.Form.Get("text"), parseMode: r.Form.Get("parse_mode"), keyboard: h.parseKeyboard(r.Form.Get("reply_markup")), status: status, gated: gate != nil, messageID: messageID, threadID: threadID, preview: r.Form.Get("link_preview_options")}:
 		case <-r.Context().Done():
@@ -1502,7 +1513,7 @@ func TestConversationDeliveryFailuresAndUnicodeChunks(t *testing.T) {
 		t.Run(strconv.Itoa(status), func(t *testing.T) {
 			t.Parallel()
 			runtime := newControlledRuntime()
-			h := newConversationHarness(t, runtime)
+			h := newConversationHarnessWithOptions(t, runtime, harnessOptions{deliveryRetry: 100 * time.Millisecond})
 			h.provision("alice", "acct-alice")
 			h.sendStatuses = []int{status}
 			h.start()

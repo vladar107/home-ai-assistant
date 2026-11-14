@@ -98,9 +98,13 @@ func (h *conversationHarness) servePhotoUpload(w http.ResponseWriter, r *http.Re
 		h.photoStatuses = h.photoStatuses[1:]
 	}
 	reason := h.photoReason
+	retryGate := h.retryGateFor(status)
 	h.sentCount++
 	messageID := sentMessageID(h.sentCount)
 	h.mu.Unlock()
+	if !h.waitGate(r, retryGate) {
+		return
+	}
 	select {
 	case h.photos <- sentPhoto{chatID: chatID, replyTo: replyTo, caption: r.FormValue("caption"), parseMode: r.FormValue("parse_mode"), data: data, status: status, threadID: threadID}:
 	case <-r.Context().Done():
@@ -115,6 +119,34 @@ func (h *conversationHarness) servePhotoUpload(w http.ResponseWriter, r *http.Re
 	result := Message{MessageID: messageID, Chat: Chat{ID: chatID, Type: ChatTypePrivate}}
 	if err := json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": result}); err != nil && r.Context().Err() == nil {
 		h.t.Error(err)
+	}
+}
+
+// retryGateFor notes a send answered with status and returns the gate it waits at, if it is a
+// success after a failure while retryGate is set. The caller holds h.mu.
+func (h *conversationHarness) retryGateFor(status int) <-chan struct{} {
+	if status != http.StatusOK {
+		h.failed = true
+		return nil
+	}
+	if h.failed {
+		return h.retryGate
+	}
+	return nil
+}
+
+// waitGate waits until gate is closed, and reports false if the request or the test ended first.
+func (h *conversationHarness) waitGate(r *http.Request, gate <-chan struct{}) bool {
+	if gate == nil {
+		return true
+	}
+	select {
+	case <-gate:
+		return true
+	case <-r.Context().Done():
+		return false
+	case <-h.ctx.Done():
+		return false
 	}
 }
 
@@ -259,9 +291,11 @@ func TestCardCaptionRefusedByTelegramIsResentAsVisibleText(t *testing.T) {
 func TestCardPhotoFailureIsRetriedWithTheCardStillStaged(t *testing.T) {
 	t.Parallel()
 	runtime := newControlledRuntime()
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{cards: true})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{cards: true, deliveryRetry: 100 * time.Millisecond})
 	h.provision("alice", "acct-alice")
 	h.photoStatuses = []int{http.StatusInternalServerError}
+	release := make(chan struct{})
+	h.retryGate = release
 	h.start()
 
 	h.push(textUpdate(1, 101, "plan my day"))
@@ -274,6 +308,7 @@ func TestCardPhotoFailureIsRetriedWithTheCardStillStaged(t *testing.T) {
 	if files := h.cardFiles("alice"); !slices.Equal(files, []string{"chat/" + h.requestID(1) + ".png"}) {
 		t.Fatalf("outbox after a failed upload = %v", files)
 	}
+	close(release)
 	if retry := h.nextPhoto(); retry.status != http.StatusOK || retry.caption != "Dry all day." || retry.replyTo != requestMessageID(1) {
 		t.Fatalf("retry = %+v", retry)
 	}
@@ -304,9 +339,11 @@ func TestCardTextFailureAfterThePhotoIsRetriedWithoutASecondPhoto(t *testing.T) 
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			runtime := newControlledRuntime()
-			h := newConversationHarnessWithOptions(t, runtime, harnessOptions{cards: true})
+			h := newConversationHarnessWithOptions(t, runtime, harnessOptions{cards: true, deliveryRetry: 100 * time.Millisecond})
 			h.provision("alice", "acct-alice")
 			h.sendStatuses = []int{http.StatusInternalServerError}
+			release := make(chan struct{})
+			h.retryGate = release
 			h.start()
 
 			h.push(textUpdate(1, 101, "plan my day"))
@@ -323,6 +360,7 @@ func TestCardTextFailureAfterThePhotoIsRetriedWithoutASecondPhoto(t *testing.T) 
 			if files := h.cardFiles("alice"); !slices.Equal(files, []string{"chat/" + h.requestID(1) + ".sent"}) {
 				t.Fatalf("outbox after the photo = %v", files)
 			}
+			close(release)
 			h.wantMessage(101, tc.wantMessage)
 			h.waitState(1, "delivered")
 			h.wantNoPhoto()
