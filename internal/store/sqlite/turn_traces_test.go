@@ -11,6 +11,7 @@ import (
 // its calls after the first's; and pruning removes traces past their retention with their calls and
 // messages, and sooner the checks no delivered message needs.
 func TestTurnTracesAreKeptPerMessageAndPruned(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
 	save := func(key, kind string, finished time.Time, calls ...turn.TraceCall) {

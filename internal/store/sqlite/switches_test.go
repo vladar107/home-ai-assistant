@@ -20,6 +20,7 @@ import (
 // for the integrations on by default and on for the TypeSafe opt-in; every principal keeps the
 // state they had, and the connected accounts stay where they are.
 func TestMigrationIntegrationSwitchesKeepsEachUsersState(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	path, err := filepath.Abs(filepath.Join(t.TempDir(), "assistant.sqlite"))
 	if err != nil {
@@ -124,6 +125,7 @@ func TestMigrationIntegrationSwitchesKeepsEachUsersState(t *testing.T) {
 // Migration 056 carries each principal's proposal widget choice over to the Widgets switch with
 // when it was made; a principal who has both keeps the widgets choice, and the old name is gone.
 func TestMigrationWidgetsSwitchCarriesEachChoiceOver(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db := migrateUpTo(t, ctx, "056")
 	exec(t, ctx, db,

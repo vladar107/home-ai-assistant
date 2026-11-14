@@ -8,6 +8,7 @@ import (
 )
 
 func TestClosedConversationsAreDeletedAfterRetention(t *testing.T) {
+	t.Parallel()
 	env := newFeedEnv(t)
 	expired := env.send("alice", 0, 0).Request
 	if err := env.store.RecordConversationReply(env.ctx, "alice", expired.SessionID, expired.ID, 700); err != nil {

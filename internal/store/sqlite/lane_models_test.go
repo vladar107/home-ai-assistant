@@ -9,6 +9,7 @@ import (
 // Migration 041 only adds: a task from before it keeps its row with no copied model, and lanes
 // start with no choice.
 func TestMigrationModelChoiceKeepsExistingRows(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	path, err := filepath.Abs(filepath.Join(t.TempDir(), "assistant.sqlite"))
 	if err != nil {

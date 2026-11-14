@@ -12,6 +12,7 @@ import (
 // Every kind of object with a tab of its own has a table, each table has the columns the tab and
 // conversation queries read, and the name a conversation about each kind goes by can be read.
 func TestEveryObjectKindHasItsTable(t *testing.T) {
+	t.Parallel()
 	kinds := thread.ObjectKinds()
 	slices.Sort(kinds)
 	if tables := slices.Sorted(maps.Keys(objectTables)); !slices.Equal(tables, kinds) {

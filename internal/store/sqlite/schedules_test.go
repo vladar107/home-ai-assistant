@@ -15,6 +15,7 @@ import (
 // Two ticks that read the same due job must queue its occurrence once, and a job's owner is the
 // only principal who can see or change it.
 func TestScheduledOccurrencesAreClaimedOnce(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	due := time.Date(2026, 9, 28, 7, 0, 0, 0, time.UTC)
 	job := schedule.Job{
@@ -73,6 +74,7 @@ func oneTimeJob(id, principalID string, runAt time.Time) schedule.Job {
 // A one-time job queues its single run and finishes in the same transaction, and a finished job
 // is neither due, listed, nor counted toward the limit, yet still loads so it can be snoozed.
 func TestOneTimeJobQueuesOneRunAndFinishesAtomically(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	due := time.Date(2026, 10, 4, 15, 0, 0, 0, time.UTC)
 	job := oneTimeJob("0123456789abcdef", "alice", due)
@@ -123,6 +125,7 @@ func TestOneTimeJobQueuesOneRunAndFinishesAtomically(t *testing.T) {
 // Recurring and one-time jobs are limited separately, so a full set of one kind never blocks the
 // other.
 func TestRecurringAndOneTimeLimitsAreCountedSeparately(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	at := time.Date(2026, 10, 4, 15, 0, 0, 0, time.UTC)
 	recurring := func(n int) schedule.Job {
@@ -157,6 +160,7 @@ func TestRecurringAndOneTimeLimitsAreCountedSeparately(t *testing.T) {
 
 // Only the owner can bring a finished reminder back, and only a finished one of the named type.
 func TestReviveScheduledJobIsOwnerOnly(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	due := time.Date(2026, 10, 4, 15, 0, 0, 0, time.UTC)
 	job := oneTimeJob("0123456789abcdef", "alice", due)
@@ -196,6 +200,7 @@ func TestReviveScheduledJobIsOwnerOnly(t *testing.T) {
 
 // Pruning removes a finished one-time job only after its runs are done, and never a recurring one.
 func TestPruneRemovesFinishedOneTimeJobsOnly(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	due := time.Date(2026, 10, 4, 15, 0, 0, 0, time.UTC)
 	done := oneTimeJob("0123456789abcdef", "alice", due)
@@ -237,6 +242,7 @@ func TestPruneRemovesFinishedOneTimeJobsOnly(t *testing.T) {
 // Migration 011 rebuilds both schedule tables; the recurring jobs and runs stored before it must
 // survive with their values, and the rebuilt tables must accept one-time jobs.
 func TestMigrationOneTimeJobsKeepsExistingRows(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	path, err := filepath.Abs(filepath.Join(t.TempDir(), "assistant.sqlite"))
 	if err != nil {
@@ -308,6 +314,7 @@ func TestMigrationOneTimeJobsKeepsExistingRows(t *testing.T) {
 
 // An update applies only to the owner's unfinished job as it was read, and keeps the pause state.
 func TestUpdateScheduledJobRefusesAStaleRead(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	read := time.Date(2026, 9, 28, 6, 0, 0, 0, time.UTC)
 	job := schedule.Job{

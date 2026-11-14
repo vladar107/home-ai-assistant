@@ -66,6 +66,7 @@ func foreignKeysHold(t *testing.T, ctx context.Context, db *sql.DB) {
 // later migrations added, the travel flag, the destination, and the delivery progress, and the
 // rebuilt tables must take repeating anchored jobs and refuse a job with two timings.
 func TestMigrationAnchoredJobsKeepsEveryJobAndRun(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db := migrateUpTo(t, ctx, "047")
 	exec(t, ctx, db,
@@ -130,6 +131,7 @@ func TestMigrationAnchoredJobsKeepsEveryJobAndRun(t *testing.T) {
 // window state, and alert must survive with the travel flag, and the rebuilt tables must take a
 // weather watch and its alert.
 func TestMigrationWeatherAndPlaceWatchesKeepsEveryWatch(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db := migrateUpTo(t, ctx, "048")
 	exec(t, ctx, db,

@@ -31,6 +31,7 @@ func tableRows(t *testing.T, store *Store, table string) int {
 }
 
 func TestSentTripUpdatesListNewestFirstWithLimit(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	addTestTrip(t, store, "alice", "aaaaaaaa", tripBase.Add(96*time.Hour))
 	items := []trip.SentUpdate{
@@ -55,6 +56,7 @@ func TestSentTripUpdatesListNewestFirstWithLimit(t *testing.T) {
 }
 
 func TestSentTripUpdateWithKnownReferenceIsIgnored(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	addTestTrip(t, store, "alice", "aaaaaaaa", tripBase.Add(96*time.Hour))
 	first := trip.SentUpdate{Source: trip.SourceMail, Reference: "msg-1", Origin: "Organiser", Title: "First", Text: "First text.", SentAt: tripBase}
@@ -73,6 +75,7 @@ func TestSentTripUpdateWithKnownReferenceIsIgnored(t *testing.T) {
 }
 
 func TestTripUpdateStateRoundTrip(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	addTestTrip(t, store, "alice", "aaaaaaaa", tripBase.Add(96*time.Hour))
 	if _, found, err := store.LoadUpdateState(ctx, "alice", "aaaaaaaa"); err != nil || found {
@@ -108,6 +111,7 @@ func TestTripUpdateStateRoundTrip(t *testing.T) {
 }
 
 func TestMarkingTripUpdateAttemptKeepsTheRestOfTheState(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	addTestTrip(t, store, "alice", "aaaaaaaa", tripBase.Add(96*time.Hour))
 	if err := store.MarkUpdateAttempt(ctx, "alice", "aaaaaaaa", tripBase); err != nil {
@@ -135,6 +139,7 @@ func TestMarkingTripUpdateAttemptKeepsTheRestOfTheState(t *testing.T) {
 }
 
 func TestTripUpdatesGoWithTheirTrip(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	addTestTrip(t, store, "alice", "aaaaaaaa", tripBase.Add(-24*time.Hour))
 	addTestTrip(t, store, "alice", "bbbbbbbb", tripBase.Add(96*time.Hour))
@@ -161,6 +166,7 @@ func TestTripUpdatesGoWithTheirTrip(t *testing.T) {
 }
 
 func TestTripUpdatesBelongToTheTripsOwner(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	addTestTrip(t, store, "alice", "aaaaaaaa", tripBase.Add(96*time.Hour))
 	item := trip.SentUpdate{Source: trip.SourceMail, Reference: "msg", Title: "News", Text: "Text.", SentAt: tripBase}

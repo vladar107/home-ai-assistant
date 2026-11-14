@@ -13,6 +13,7 @@ import (
 // stored before it must survive with their values, and the rebuilt tables must accept a home
 // watch, ten messages in a window, and the start of a condition.
 func TestMigrationHomeWatchesKeepsExistingRows(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	path, err := filepath.Abs(filepath.Join(t.TempDir(), "assistant.sqlite"))
 	if err != nil {
@@ -119,6 +120,7 @@ func TestMigrationHomeWatchesKeepsExistingRows(t *testing.T) {
 // states with the start of a condition, and their queued and finished alerts must survive, and the
 // rebuilt tables must accept an agent watch whose alert is private.
 func TestMigrationAgentWatchesKeepsExistingRows(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	path, err := filepath.Abs(filepath.Join(t.TempDir(), "assistant.sqlite"))
 	if err != nil {

@@ -10,6 +10,7 @@ import (
 // starts as external; a session that read nothing stays clean. Marking then records household
 // content for memory alone, and outside content for both flags.
 func TestConversationExternalExposure(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	path, err := filepath.Abs(filepath.Join(t.TempDir(), "assistant.sqlite"))
 	if err != nil {
@@ -109,6 +110,7 @@ func TestConversationExternalExposure(t *testing.T) {
 // A session from before migration 020 may have read private content, so it starts as private; a
 // session created afterwards, as /new creates one, starts clean. Marking sets the flag once.
 func TestConversationPrivate(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	path, err := filepath.Abs(filepath.Join(t.TempDir(), "assistant.sqlite"))
 	if err != nil {

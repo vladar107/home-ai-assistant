@@ -133,6 +133,7 @@ func (e *feedEnv) wantSession(result conversation.EnqueueResult, subject, label 
 }
 
 func TestFeedTabRepliesKeepEachJobInItsOwnConversation(t *testing.T) {
+	t.Parallel()
 	env := newFeedEnv(t)
 	env.report("alice", binsJob, "Bins", 101, reportsTab)
 	bins := env.wantSession(env.send("alice", reportsTab, 101), conversation.JobSubject(binsJob), "Bins")
@@ -176,6 +177,7 @@ func TestFeedTabRepliesKeepEachJobInItsOwnConversation(t *testing.T) {
 }
 
 func TestFeedTabMessagesWithoutAReplyFollowTheLatestReport(t *testing.T) {
+	t.Parallel()
 	env := newFeedEnv(t)
 	env.report("alice", binsJob, "Bins", 101, reportsTab)
 	bins := env.wantSession(env.send("alice", reportsTab, 0), conversation.JobSubject(binsJob), "Bins")
@@ -211,6 +213,7 @@ func TestFeedTabMessagesWithoutAReplyFollowTheLatestReport(t *testing.T) {
 // A report that lands while a turn is still running is older than that turn's answer, so the
 // follow-up to the answer stays in its conversation.
 func TestFeedTabFollowUpToAnAnswerStaysInItsConversation(t *testing.T) {
+	t.Parallel()
 	env := newFeedEnv(t)
 	env.report("alice", binsJob, "Bins", 101, reportsTab)
 	bins := env.wantSession(env.send("alice", reportsTab, 0), conversation.JobSubject(binsJob), "Bins")
@@ -224,6 +227,7 @@ func TestFeedTabFollowUpToAnAnswerStaysInItsConversation(t *testing.T) {
 
 // /new in a feed tab that holds no conversation still counts as its last exchange.
 func TestNewInAnEmptyFeedTabIsItsLastExchange(t *testing.T) {
+	t.Parallel()
 	env := newFeedEnv(t)
 	env.report("alice", binsJob, "Bins", 101, reportsTab)
 	if _, reset, err := env.store.ResetConversation(env.ctx, conversation.Lane{PrincipalID: "alice", ThreadID: reportsTab}); err != nil || reset {
@@ -234,6 +238,7 @@ func TestNewInAnEmptyFeedTabIsItsLastExchange(t *testing.T) {
 }
 
 func TestRepliesOutsideFeedTabsBehaveAsBefore(t *testing.T) {
+	t.Parallel()
 	env := newFeedEnv(t)
 	main := env.send("alice", 0, 0)
 	env.report("alice", binsJob, "Bins", 101, 0)
@@ -246,6 +251,7 @@ func TestRepliesOutsideFeedTabsBehaveAsBefore(t *testing.T) {
 }
 
 func TestFeedTabReplyToAConversationOpenElsewhereIsRefused(t *testing.T) {
+	t.Parallel()
 	env := newFeedEnv(t)
 	env.report("alice", binsJob, "Bins", 101, reportsTab)
 	bins := env.wantSession(env.send("alice", reportsTab, 101), conversation.JobSubject(binsJob), "Bins")
@@ -275,6 +281,7 @@ func TestFeedTabReplyToAConversationOpenElsewhereIsRefused(t *testing.T) {
 
 // Alert messages are found only by their owner and pruned by count and by age.
 func TestWatchAlertMessagesAreKeptPerPrincipal(t *testing.T) {
+	t.Parallel()
 	env := newFeedEnv(t)
 	for messageID := int64(1); messageID <= 3; messageID++ {
 		if err := env.store.SaveWatchAlertMessage(env.ctx, watch.AlertMessage{

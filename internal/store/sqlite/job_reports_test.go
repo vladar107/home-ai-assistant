@@ -14,6 +14,7 @@ import (
 // Reports are told once, found by their messages only by their owner, outlive their job, and are
 // pruned by age and by count.
 func TestJobReportsAreKeptPerPrincipal(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	at := time.Date(2026, 9, 28, 7, 0, 0, 0, time.UTC)
 	job := schedule.Job{
@@ -96,6 +97,7 @@ func TestJobReportsAreKeptPerPrincipal(t *testing.T) {
 // Migration 028 adds external to reports kept before it, which stay external because their runs
 // are unknown.
 func TestMigrationJobReportExternalKeepsExistingReportsExternal(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	path, err := filepath.Abs(filepath.Join(t.TempDir(), "assistant.sqlite"))
 	if err != nil {

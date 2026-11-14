@@ -11,6 +11,7 @@ import (
 // Migration 015 rebuilds the conversation tables; sessions, requests, and attachments stored before
 // it must survive unchanged and still reference each other, and a session can then be switched.
 func TestMigrationConversationHistoryKeepsExistingRows(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	path, err := filepath.Abs(filepath.Join(t.TempDir(), "assistant.sqlite"))
 	if err != nil {

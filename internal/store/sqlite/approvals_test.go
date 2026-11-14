@@ -16,6 +16,7 @@ import (
 // Migration 027 rebuilds approvals for direct actions; records stored before it must survive
 // unchanged as proposals, and a direct record then lives beside them without joining a bundle.
 func TestMigrationDirectApprovalsKeepsExistingRows(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	path, err := filepath.Abs(filepath.Join(t.TempDir(), "assistant.sqlite"))
 	if err != nil {
@@ -159,6 +160,7 @@ func TestMigrationDirectApprovalsKeepsExistingRows(t *testing.T) {
 // pending while the bot is upgraded, reads as a text message; the flag is then written with the
 // message and cleared with it.
 func TestMigrationApprovalWidgetsKeepsExistingRows(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db := migrateUpTo(t, ctx, "054")
 	hash := "0000000000000000000000000000000000000000000000000000000000000000"
@@ -194,6 +196,7 @@ func TestMigrationApprovalWidgetsKeepsExistingRows(t *testing.T) {
 // Migration 057 replaces the widget flag with the widget's kind: a proposal flagged as a widget
 // becomes a proposal widget, and one not flagged has no kind.
 func TestMigrationApprovalWidgetKindCarriesTheFlagOver(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db := migrateUpTo(t, ctx, "057")
 	hash := "0000000000000000000000000000000000000000000000000000000000000000"
@@ -249,6 +252,7 @@ func TestMigrationApprovalWidgetKindCarriesTheFlagOver(t *testing.T) {
 // ConfirmChosen confirms the kept pending records and ends the other pending ones as left out, in
 // one transaction. It changes nothing while no kept record is pending and unexpired.
 func TestConfirmChosenEndsTheOthersOnlyWhileAKeptRecordWaits(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	now := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
 	hash := "0000000000000000000000000000000000000000000000000000000000000000"

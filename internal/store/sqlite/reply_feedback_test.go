@@ -23,6 +23,7 @@ func countRows(t *testing.T, store *Store, query string, args ...any) int {
 }
 
 func TestReplyOriginReturnsTheRequestOrEmptyForOlderReplies(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	insertFeedbackSession(t, store, "alice", feedbackSession, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 
@@ -49,6 +50,7 @@ func TestReplyOriginReturnsTheRequestOrEmptyForOlderReplies(t *testing.T) {
 }
 
 func TestReplyFeedbackKeepsOnlyTheLatestReaction(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	insertFeedbackSession(t, store, "alice", feedbackSession, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 	if err := store.RecordConversationReply(ctx, "alice", feedbackSession, "request-1", 500); err != nil {
@@ -90,6 +92,7 @@ func TestReplyFeedbackKeepsOnlyTheLatestReaction(t *testing.T) {
 }
 
 func TestReplyReconsiderIsClaimedOncePerKey(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 
 	for _, want := range []bool{true, false} {
@@ -106,6 +109,7 @@ func TestReplyReconsiderIsClaimedOncePerKey(t *testing.T) {
 }
 
 func TestReplyFeedbackGoesWithTheReplyRecords(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	insertFeedbackSession(t, store, "alice", feedbackSession, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 	insertFeedbackSession(t, store, "bob", "22222222-2222-4222-8222-222222222222", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")

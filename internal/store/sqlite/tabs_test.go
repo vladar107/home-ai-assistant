@@ -14,6 +14,7 @@ import (
 // Migration 032 rebuilds the conversation tables again; everything stored before it must survive
 // unchanged and still reference each other, and a tab still holds one active conversation.
 func TestMigrationTabsKeepsExistingRows(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	path, err := filepath.Abs(filepath.Join(t.TempDir(), "assistant.sqlite"))
 	if err != nil {
@@ -104,6 +105,7 @@ func TestMigrationTabsKeepsExistingRows(t *testing.T) {
 }
 
 func TestMigrationExistingTabNamesKeepsTabsAlreadyOpen(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	path, err := filepath.Abs(filepath.Join(t.TempDir(), "assistant.sqlite"))
 	if err != nil {
@@ -194,6 +196,7 @@ func sessionRecord(t *testing.T, store *Store, id string) conversation.SessionRe
 }
 
 func TestGoneTabConversationComesBackWithTheNextMessage(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	tab := conversation.Lane{PrincipalID: "alice", ThreadID: 7}
 	main := conversation.Lane{PrincipalID: "alice"}
@@ -236,6 +239,7 @@ func TestGoneTabConversationComesBackWithTheNextMessage(t *testing.T) {
 }
 
 func TestClosedTabConversationIsNotReopenedByAMessage(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	tab := conversation.Lane{PrincipalID: "alice", ThreadID: 7}
 	closed := tabMessage(t, store, tab, 1)
@@ -255,6 +259,7 @@ func TestClosedTabConversationIsNotReopenedByAMessage(t *testing.T) {
 }
 
 func TestGoneTabConversationStaysClosedWhileAnotherTabHoldsItsSubject(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	tab := conversation.Lane{PrincipalID: "alice", ThreadID: 7}
 	gone := tabMessage(t, store, tab, 1)
@@ -271,6 +276,7 @@ func TestGoneTabConversationStaysClosedWhileAnotherTabHoldsItsSubject(t *testing
 }
 
 func TestTabRegistryKeepsFixedNamesAndConfirmsOnce(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	if added, err := store.AddTab(ctx, "alice", 7, "Reports", thread.NamedByFixed); err != nil || !added {
 		t.Fatalf("add fixed tab = %v %v", added, err)
@@ -315,6 +321,7 @@ func TestTabRegistryKeepsFixedNamesAndConfirmsOnce(t *testing.T) {
 }
 
 func TestASubjectTabIsRecordedWhicheverOfItsTwoWritesLandsFirst(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	reports, reminders := thread.FeedSubject(thread.FeedReports), thread.FeedSubject(thread.FeedReminders)
 	wantTab := func(threadID int64, name, namedBy, subject string) {
@@ -415,6 +422,7 @@ func laneSessionSubject(t *testing.T, store *Store, threadID int64) string {
 // also when the trip's conversation was in a feed tab. A tab that no longer serves what it did
 // is not taken, and a tab of an ended trip can be taken, leaving that trip without a tab.
 func TestTakingATabMovesTheTripsSubjectSummaryAndConversation(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	const (
 		tripTab  = 30
@@ -511,6 +519,7 @@ func TestTakingATabMovesTheTripsSubjectSummaryAndConversation(t *testing.T) {
 // The tab the bot made for a trip that is over stays fixed when another trip takes it, so its name
 // follows the new trip; a tab the user or a conversation named is the user's once taken.
 func TestATakenTabOfAnEndedTripStaysFixed(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	addTestTrip(t, store, "alice", "a1a1a1a1", tripBase.Add(-24*time.Hour))
 	addTestTrip(t, store, "alice", "b2b2b2b2", tripBase.Add(240*time.Hour))
@@ -541,6 +550,7 @@ func TestATakenTabOfAnEndedTripStaysFixed(t *testing.T) {
 // a reply to one of its answers in the tab it was in or from /sessions, so the trip keeps one
 // active conversation.
 func TestAConversationLeftBehindByATripComesBackAboutNothing(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	const tripID = "a1a1a1a1"
 	addTestTrip(t, store, "alice", tripID, tripBase.Add(240*time.Hour))

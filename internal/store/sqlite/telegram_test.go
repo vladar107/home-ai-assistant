@@ -85,6 +85,7 @@ func buildMigratedTemplate() ([]byte, error) {
 // A file is delivered to the chat this resolves, so every way of losing access must resolve to no
 // chat at all rather than to a stale one.
 func TestResolveActiveChatFollowsTheAllowlist(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 
 	chat, found, err := store.ResolveActiveChat(ctx, "alice")
@@ -114,6 +115,7 @@ func TestResolveActiveChatFollowsTheAllowlist(t *testing.T) {
 // The allowlist does not make principal_id unique. Two active identities is an operator mistake,
 // and guessing between them could put a household file in an account its owner has left.
 func TestResolveActiveChatRefusesAnAmbiguousPrincipal(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 
 	if _, err := store.db.ExecContext(ctx, `INSERT INTO telegram_identities (telegram_user_id) VALUES (199)`); err != nil {

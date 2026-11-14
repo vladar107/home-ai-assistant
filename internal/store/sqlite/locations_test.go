@@ -26,6 +26,7 @@ func mustLoad(t *testing.T, store *Store, principal string) (location.Fix, bool)
 }
 
 func TestLocationRoundTrip(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	for _, fix := range []location.Fix{
 		{PrincipalID: "alice", Latitude: 52.16612, Longitude: -4.48105, Accuracy: 15.5, Source: location.SourcePin, UpdatedAt: locationBase},
@@ -44,6 +45,7 @@ func TestLocationRoundTrip(t *testing.T) {
 }
 
 func TestMoveLiveLocationRules(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	move := func(fix location.Fix) bool {
 		t.Helper()
@@ -101,6 +103,7 @@ func TestMoveLiveLocationRules(t *testing.T) {
 }
 
 func TestForgetLocationIgnoresTheRunningShareForGood(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	if err := store.PutLocation(ctx, liveFix("alice", 77, 52.0, locationBase)); err != nil {
 		t.Fatal(err)
@@ -156,6 +159,7 @@ func TestForgetLocationIgnoresTheRunningShareForGood(t *testing.T) {
 }
 
 func TestDeleteLocationOnlyRemovesTheVersionItWasGiven(t *testing.T) {
+	t.Parallel()
 	store, ctx := openTestStore(t)
 	if err := store.PutLocation(ctx, liveFix("alice", 77, 52.0, locationBase)); err != nil {
 		t.Fatal(err)
