@@ -155,12 +155,15 @@ func (s *Service) Explain(ctx context.Context, request Request) (Outcome, error)
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		defer func() {
-			s.mu.Lock()
-			delete(s.explaining, request.PrincipalID)
-			s.mu.Unlock()
-		}()
-		s.answer(thread.With(s.ctx, request.ThreadID), request, trace)
+		ctx := thread.With(s.ctx, request.ThreadID)
+		sent := s.answer(ctx, request, trace)
+		s.mu.Lock()
+		delete(s.explaining, request.PrincipalID)
+		s.mu.Unlock()
+		// Logged once the principal may ask again, so whoever sees it can.
+		if sent {
+			s.config.Logger.InfoContext(ctx, "provenance.reply.sent", "principal_id", request.PrincipalID, "kind", trace.Kind, "calls", len(trace.Calls))
+		}
 	}()
 	return Started, nil
 }
@@ -184,14 +187,14 @@ func (s *Service) Shutdown(ctx context.Context) error {
 	}
 }
 
-func (s *Service) answer(ctx context.Context, request Request, trace turn.Trace) {
+func (s *Service) answer(ctx context.Context, request Request, trace turn.Trace) bool {
 	record := Render(trace, s.config.Location)
 	text := record
 	if trace.Kind != turn.TraceCode {
 		text += "\n\n" + s.explanation(ctx, request, trace, record)
 	}
 	if ctx.Err() != nil {
-		return
+		return false
 	}
 	// The first chunk answers the question; the rest follow it unquoted.
 	replyTo := request.MessageID
@@ -203,11 +206,11 @@ func (s *Service) answer(ctx context.Context, request Request, trace turn.Trace)
 			if ctx.Err() == nil {
 				s.config.Logger.WarnContext(ctx, "provenance.reply.failed", "principal_id", request.PrincipalID, "kind", trace.Kind, "error", err)
 			}
-			return
+			return false
 		}
 		replyTo = 0
 	}
-	s.config.Logger.InfoContext(ctx, "provenance.reply.sent", "principal_id", request.PrincipalID, "kind", trace.Kind, "calls", len(trace.Calls))
+	return true
 }
 
 // explanation is the model's few sentences with the caveat line, or the line saying none came.

@@ -122,6 +122,7 @@ func (h *conversationHarness) waitRecentReply(recent *turnstate.Registry, princi
 // request and the reply.
 func (h *conversationHarness) explain(runtime *controlledRuntime, updateID int64, question string, replied sentMessage, explanation string) (agentruntime.RunRequest, sentMessage) {
 	h.t.Helper()
+	sent := strings.Count(h.logs.String(), "provenance.reply.sent")
 	h.push(replyUpdate(updateID, 101, question, replied))
 	turn := receive(h.t, h.ctx, runtime.calls)
 	if !turn.request.Tools.Empty() || turn.request.WebSearch || turn.request.PrincipalID != "alice" {
@@ -132,6 +133,11 @@ func (h *conversationHarness) explain(runtime *controlledRuntime, updateID int64
 	if answer.chatID != 101 || answer.replyTo != requestMessageID(updateID) {
 		h.t.Fatalf("answer = %+v, want a reply to update %d", answer, updateID)
 	}
+	// The answer reaches Telegram before the explanation ends; a question asked in between is
+	// turned away as busy.
+	h.waitUntil("the explanation to end", func() bool {
+		return strings.Count(h.logs.String(), "provenance.reply.sent") > sent
+	})
 	return turn.request, answer
 }
 
