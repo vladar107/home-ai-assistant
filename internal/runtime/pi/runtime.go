@@ -45,6 +45,10 @@ type Config struct {
 	WebSearchExtension string
 	// StallTimeout overrides the silence that marks a turn as stalled; zero keeps the default.
 	StallTimeout time.Duration
+	// StopGrace is how long a stop waits after closing Pi's input before it interrupts Pi; zero
+	// means 2s, and New refuses a negative one. The waits after the interrupt and after the kill
+	// keep their own margins.
+	StopGrace time.Duration
 	// Logger receives the per-call warning about Pi's own retries; nil discards it.
 	Logger *slog.Logger
 }
@@ -60,6 +64,7 @@ type Runtime struct {
 	logger             *slog.Logger
 	telemetry          Telemetry
 	stallTimeout       time.Duration
+	stopGrace          time.Duration
 	processes          *processLimiter
 
 	gatesMu sync.Mutex
@@ -156,6 +161,13 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 	if stallTimeout <= 0 {
 		stallTimeout = defaultStallTimeout
 	}
+	if cfg.StopGrace < 0 {
+		return nil, fmt.Errorf("Pi stop grace must not be negative")
+	}
+	stopGrace := cfg.StopGrace
+	if stopGrace == 0 {
+		stopGrace = processStopGrace
+	}
 
 	r := &Runtime{
 		binary:             binary,
@@ -167,6 +179,7 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 		webSearchExtension: cfg.WebSearchExtension,
 		logger:             logger,
 		stallTimeout:       stallTimeout,
+		stopGrace:          stopGrace,
 		processes:          newProcessLimiter(maximumProcesses, processCaps),
 		gates:              map[string]*sessionGate{},
 	}
@@ -405,7 +418,7 @@ func (r *Runtime) attempt(ctx context.Context, request agentruntime.RunRequest, 
 		prompt["images"] = images
 	}
 	if err := json.NewEncoder(stdin).Encode(prompt); err != nil {
-		stopProcess(cmd, stdin, waitResult)
+		r.stopProcess(cmd, stdin, waitResult)
 		return agentruntime.RunResult{}, fmt.Errorf("send Pi prompt: request could not be written")
 	}
 	state.openModelCall(ctx)
@@ -421,7 +434,7 @@ func (r *Runtime) attempt(ctx context.Context, request agentruntime.RunRequest, 
 		case event, ok := <-events:
 			silence.Reset(r.stallTimeout)
 			if !ok {
-				exited, waitErr := stopProcess(cmd, stdin, waitResult)
+				exited, waitErr := r.stopProcess(cmd, stdin, waitResult)
 				return agentruntime.RunResult{}, r.exitedEarly(ctx, request.PrincipalID, "read Pi output: event stream ended early", waitErr, exited, stderr)
 			}
 			state.trackModelCall(ctx, event)
@@ -431,16 +444,16 @@ func (r *Runtime) attempt(ctx context.Context, request agentruntime.RunRequest, 
 				}
 				// Pi may be waiting between its own retries; abort_retry ends the turn now.
 				_ = json.NewEncoder(stdin).Encode(map[string]string{"type": "abort_retry"})
-				stopProcess(cmd, stdin, waitResult)
+				r.stopProcess(cmd, stdin, waitResult)
 				return agentruntime.RunResult{}, &agentruntime.ProviderError{Category: category}
 			}
 			settled, err := state.consume(ctx, event)
 			if err != nil {
-				stopProcess(cmd, stdin, waitResult)
+				r.stopProcess(cmd, stdin, waitResult)
 				return agentruntime.RunResult{}, err
 			}
 			if settled {
-				stopProcess(cmd, stdin, waitResult)
+				r.stopProcess(cmd, stdin, waitResult)
 				if !state.promptAcknowledged {
 					return agentruntime.RunResult{}, fmt.Errorf("Pi runtime did not acknowledge the prompt")
 				}
@@ -451,7 +464,7 @@ func (r *Runtime) attempt(ctx context.Context, request agentruntime.RunRequest, 
 				return agentruntime.RunResult{Response: result, Final: strings.TrimSpace(state.message.String()), Usage: state.usage, Model: state.model, Tokens: state.tokens}, nil
 			}
 		case err := <-scanErrors:
-			exited, waitErr := stopProcess(cmd, stdin, waitResult)
+			exited, waitErr := r.stopProcess(cmd, stdin, waitResult)
 			if err != nil {
 				return agentruntime.RunResult{}, fmt.Errorf("read Pi output: invalid event stream")
 			}
@@ -476,10 +489,10 @@ func (r *Runtime) attempt(ctx context.Context, request agentruntime.RunRequest, 
 				continue
 			}
 			state.closeModelCall("stalled")
-			stopProcess(cmd, stdin, waitResult)
+			r.stopProcess(cmd, stdin, waitResult)
 			return agentruntime.RunResult{}, &stallError{}
 		case <-ctx.Done():
-			stopProcess(cmd, stdin, waitResult)
+			r.stopProcess(cmd, stdin, waitResult)
 			return agentruntime.RunResult{}, ctx.Err()
 		}
 	}
@@ -997,12 +1010,12 @@ func (s sessionSnapshot) restore(sessionDir, sessionID string) error {
 }
 
 // stopProcess ends Pi and reports whether it was reaped in time, with what its wait returned.
-func stopProcess(cmd *exec.Cmd, stdin io.Closer, waitResult <-chan error) (bool, error) {
+func (r *Runtime) stopProcess(cmd *exec.Cmd, stdin io.Closer, waitResult <-chan error) (bool, error) {
 	_ = stdin.Close()
 	select {
 	case err := <-waitResult:
 		return true, err
-	case <-time.After(processStopGrace):
+	case <-time.After(r.stopGrace):
 	}
 	if cmd.Process != nil {
 		_ = cmd.Process.Signal(os.Interrupt)

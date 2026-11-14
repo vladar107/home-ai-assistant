@@ -49,6 +49,8 @@ func config(t *testing.T) pi.Config {
 	return pi.Config{
 		Binary: binary, Provider: "fixture-provider", Model: agentruntime.ModelEffort{Model: "fixture-model", Effort: "low"},
 		ExpectedVersion: pifixture.Version, ProfilesDir: filepath.Join(t.TempDir(), "profiles"),
+		// The fixture's hanging scenarios ignore a closed input, so each stop of one waits this out.
+		StopGrace: 500 * time.Millisecond,
 	}
 }
 

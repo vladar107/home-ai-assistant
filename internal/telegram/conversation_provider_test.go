@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
@@ -27,7 +28,7 @@ func newFixtureRuntime(t *testing.T, profilesDir string) *pi.Runtime {
 	}
 	runtime, err := pi.New(t.Context(), pi.Config{
 		Binary: binary, Provider: "fixture-provider", Model: agentruntime.ModelEffort{Model: "fixture-model", Effort: "low"},
-		ExpectedVersion: pifixture.Version, ProfilesDir: profilesDir,
+		ExpectedVersion: pifixture.Version, ProfilesDir: profilesDir, StopGrace: 500 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)
