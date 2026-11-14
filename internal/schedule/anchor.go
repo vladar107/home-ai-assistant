@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 )
 
 // The kinds of event a job can be anchored to. A calendar_event or trip anchor fires once, so its
@@ -133,7 +134,7 @@ func (s *Service) guardAnchor(ctx context.Context, job Job, store func() error) 
 	}
 	err := guard.GuardAnchor(ctx, job.PrincipalID, *anchor, store)
 	if errors.Is(err, ErrAnchorGone) {
-		return &approval.ActionError{Reason: errorAnchorGone, Text: "What this job follows no longer exists, so it was not saved."}
+		return &approval.ActionError{Reason: errorAnchorGone, Text: "What this job follows no longer exists, so it was not saved.", UserText: anchorGoneNotSaved.Format(ctx)}
 	}
 	return err
 }
@@ -343,74 +344,153 @@ func checkStoredAnchor(anchor Anchor) error {
 	return nil
 }
 
-// Describe is the anchor as the user reads it, such as "30 min before Dentist" or "1 h after the
-// end of the trip Lisbon".
-func (a Anchor) Describe() string {
-	relation := "at"
+// Describe is the anchor as the user reads it, in English, such as "30 min before Dentist" or "1 h
+// after the end of the trip Lisbon".
+func (a Anchor) Describe() string { return a.DescribeIn(locale.English) }
+
+var (
+	anchorEvent        = locale.T("the event", "события")
+	anchorAtStart      = locale.T("at the start of %s", "в начале %s")
+	anchorBefore       = locale.T("%[1]s before %[2]s", "за %[1]s до %[2]s")
+	anchorAfter        = locale.T("%[1]s after %[2]s", "через %[1]s после %[2]s")
+	anchorEachEvent    = locale.T("each event titled %s", "каждого события %s")
+	anchorTrip         = locale.T("the trip", "поездки")
+	anchorTripNamed    = locale.T("the trip %s", "поездки %s")
+	anchorTripAt       = locale.T("at the %[1]s of %[2]s", "в %[1]s %[2]s")
+	anchorTripBefore   = locale.T("%[1]s before the %[2]s of %[3]s", "за %[1]s до %[2]s %[3]s")
+	anchorTripAfter    = locale.T("%[1]s after the %[2]s of %[3]s", "через %[1]s после %[2]s %[3]s")
+	anchorEdgeStartAt  = locale.T("start", "начале")
+	anchorEdgeEndAt    = locale.T("end", "конце")
+	anchorEdgeStartOf  = locale.T("start", "начала")
+	anchorEdgeEndOf    = locale.T("end", "конца")
+	anchorPlaceFallout = locale.T("the place", "этого места")
+	anchorPlaceFallin  = locale.T("the place", "это место")
+	anchorArrive       = locale.T("on arriving at %s", "при прибытии в %s")
+	anchorLeave        = locale.T("on leaving %s", "при выходе из %s")
+	anchorArriveAfter  = locale.T("%[1]s after arriving at %[2]s", "через %[1]s после прибытия в %[2]s")
+	anchorLeaveAfter   = locale.T("%[1]s after leaving %[2]s", "через %[1]s после выхода из %[2]s")
+	anchorOnce         = locale.T("%s, once", "%s, один раз")
+
+	anchorGoneNotSaved = locale.T("What this job follows no longer exists, so it was not saved.", "То, за чем следит это задание, больше не существует, поэтому оно не сохранено.")
+
+	offsetDays    = locale.N("%d day", "%d days", "%d день", "%d дня", "%d дней")
+	offsetHours   = locale.T("%d h", "%d ч")
+	offsetMinutes = locale.T("%d min", "%d мин")
+
+	nextNever        = locale.T("never", "никогда")
+	nextWaitsLeaving = locale.T("waits for leaving", "ждёт ухода")
+	nextWaitsArrival = locale.T("waits for arrival", "ждёт прибытия")
+	nextNoEvent      = locale.T("no matching event in the next 14 days", "нет подходящих событий в ближайшие 14 дней")
+)
+
+// quotedIn writes a title the user or an outside source chose: Go-quoted in English, in guillemets
+// in Russian.
+func quotedIn(language locale.Language, text string) string {
+	if language == locale.Russian {
+		return "«" + text + "»"
+	}
+	return strconv.Quote(text)
+}
+
+// labelIn writes an event's or a place's name, which English leaves bare and Russian sets off.
+func labelIn(language locale.Language, label, fallback string) string {
+	switch {
+	case label == "":
+		return fallback
+	case language == locale.Russian:
+		return quotedIn(language, label)
+	}
+	return label
+}
+
+// DescribeIn is Describe in a language.
+func (a Anchor) DescribeIn(language locale.Language) string {
+	offset := ""
 	switch {
 	case a.OffsetMinutes < 0:
-		relation = describeOffset(-a.OffsetMinutes) + " before"
+		offset = describeOffsetIn(language, -a.OffsetMinutes)
 	case a.OffsetMinutes > 0:
-		relation = describeOffset(a.OffsetMinutes) + " after"
+		offset = describeOffsetIn(language, a.OffsetMinutes)
 	}
 	switch a.Kind {
 	case AnchorCalendarEvent:
-		name := a.Label
-		if name == "" {
-			name = "the event"
-		}
-		if a.OffsetMinutes == 0 {
-			return "at the start of " + name
-		}
-		return relation + " " + name
+		return a.relative(language, offset, labelIn(language, a.Label, anchorEvent.In(language)))
 	case AnchorCalendarMatch:
-		event := "each event titled " + strconv.Quote(a.Title)
-		if a.OffsetMinutes == 0 {
-			return "at the start of " + event
-		}
-		return relation + " " + event
+		return a.relative(language, offset, anchorEachEvent.FormatIn(language, quotedIn(language, a.Title)))
 	case AnchorTrip:
-		name := "the trip"
+		name := anchorTrip.In(language)
 		if a.Label != "" {
-			name += " " + strconv.Quote(a.Label)
+			name = anchorTripNamed.FormatIn(language, quotedIn(language, a.Label))
 		}
-		return relation + " the " + a.Edge + " of " + name
+		start := a.Edge == EdgeStart
+		switch {
+		case a.OffsetMinutes < 0:
+			return anchorTripBefore.FormatIn(language, offset, tripEdge(language, start, false), name)
+		case a.OffsetMinutes > 0:
+			return anchorTripAfter.FormatIn(language, offset, tripEdge(language, start, false), name)
+		}
+		return anchorTripAt.FormatIn(language, tripEdge(language, start, true), name)
 	case AnchorPlace:
-		name := a.Label
-		if name == "" {
-			name = "the place"
+		leaving := a.Edge == EdgeLeave
+		fallback := anchorPlaceFallin.In(language)
+		if leaving {
+			fallback = anchorPlaceFallout.In(language)
 		}
-		event := "arriving at " + name
-		if a.Edge == EdgeLeave {
-			event = "leaving " + name
-		}
-		text := "on " + event
-		if a.OffsetMinutes > 0 {
-			text = describeOffset(a.OffsetMinutes) + " after " + event
+		name := labelIn(language, a.Label, fallback)
+		var text string
+		switch {
+		case a.OffsetMinutes > 0 && leaving:
+			text = anchorLeaveAfter.FormatIn(language, offset, name)
+		case a.OffsetMinutes > 0:
+			text = anchorArriveAfter.FormatIn(language, offset, name)
+		case leaving:
+			text = anchorLeave.FormatIn(language, name)
+		default:
+			text = anchorArrive.FormatIn(language, name)
 		}
 		if a.Once {
-			text += ", once"
+			text = anchorOnce.FormatIn(language, text)
 		}
 		return text
 	}
 	return a.Kind
 }
 
-func describeOffset(minutes int) string {
+// relative places a name by the anchor's offset: at its start, before it, or after it.
+func (a Anchor) relative(language locale.Language, offset, name string) string {
+	switch {
+	case a.OffsetMinutes < 0:
+		return anchorBefore.FormatIn(language, offset, name)
+	case a.OffsetMinutes > 0:
+		return anchorAfter.FormatIn(language, offset, name)
+	}
+	return anchorAtStart.FormatIn(language, name)
+}
+
+// tripEdge names the start or the end of a trip, in the case the phrase around it needs.
+func tripEdge(language locale.Language, start, at bool) string {
+	switch {
+	case start && at:
+		return anchorEdgeStartAt.In(language)
+	case start:
+		return anchorEdgeStartOf.In(language)
+	case at:
+		return anchorEdgeEndAt.In(language)
+	}
+	return anchorEdgeEndOf.In(language)
+}
+
+func describeOffsetIn(language locale.Language, minutes int) string {
 	days, hours, rest := minutes/1440, minutes%1440/60, minutes%60
 	var parts []string
 	if days > 0 {
-		unit := "days"
-		if days == 1 {
-			unit = "day"
-		}
-		parts = append(parts, fmt.Sprintf("%d %s", days, unit))
+		parts = append(parts, offsetDays.FormatIn(language, days))
 	}
 	if hours > 0 {
-		parts = append(parts, fmt.Sprintf("%d h", hours))
+		parts = append(parts, offsetHours.FormatIn(language, hours))
 	}
 	if rest > 0 {
-		parts = append(parts, fmt.Sprintf("%d min", rest))
+		parts = append(parts, offsetMinutes.FormatIn(language, rest))
 	}
 	return strings.Join(parts, " ")
 }
@@ -423,25 +503,29 @@ var waitingFrom = time.Date(2100, time.January, 1, 0, 0, 0, 0, time.UTC)
 // its next event, or a place it waits to arrive at.
 func waiting(job Job) bool { return !job.NextRunAt.Before(waitingFrom) }
 
-// NextRunText is when the job runs next as the user reads it: the time, or what it waits for.
-func NextRunText(job Job, zone string) string {
+// NextRunText is when the job runs next as the user reads it, in English: the time, or what it
+// waits for.
+func NextRunText(job Job, zone string) string { return NextRunTextIn(locale.English, job, zone) }
+
+// NextRunTextIn is NextRunText in a language.
+func NextRunTextIn(language locale.Language, job Job, zone string) string {
 	if !waiting(job) {
 		location, err := LoadZone(job.Zone)
 		if err != nil {
 			location, _ = LoadZone(zone)
 		}
-		return FormatOccurrence(job.NextRunAt, location)
+		return FormatOccurrenceIn(language, job.NextRunAt, location)
 	}
 	anchor := JobAnchor(job)
 	switch {
 	case anchor == nil:
-		return "never"
+		return nextNever.In(language)
 	case anchor.Kind == AnchorPlace && anchor.Edge == EdgeLeave:
-		return "waits for leaving"
+		return nextWaitsLeaving.In(language)
 	case anchor.Kind == AnchorPlace:
-		return "waits for arrival"
+		return nextWaitsArrival.In(language)
 	default:
-		return "no matching event in the next 14 days"
+		return nextNoEvent.In(language)
 	}
 }
 

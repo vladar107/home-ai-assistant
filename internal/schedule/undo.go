@@ -9,7 +9,31 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 )
+
+var (
+	undoUnreadable   = locale.T("what to undo could not be read.", "не удалось прочитать, что нужно отменить.")
+	undoImpossible   = locale.T("this action cannot be undone.", "это действие нельзя отменить.")
+	undoJobGone      = locale.T("the job no longer exists.", "задания больше нет.")
+	undoJobRan       = locale.T("the job has already run.", "задание уже выполнялось.")
+	undoJobChanged   = locale.T("the job was changed since; change it in /jobs instead.", "задание с тех пор изменили; измени его в /jobs.")
+	undoJobMoved     = locale.T("the job was moved since; change it in /jobs instead.", "задание с тех пор перенесли; измени его в /jobs.")
+	undoJobForeign   = locale.T("the job belongs to someone else.", "задание принадлежит другому пользователю.")
+	undoJobBack      = locale.T("the job is already back.", "задание уже вернулось.")
+	undoZoneUnknown  = locale.T("its time zone is no longer known.", "его часовой пояс больше не известен.")
+	undoTimePassed   = locale.T("its time, %s, has passed, so it cannot be restored; schedule it again instead.", "его время, %s, уже прошло, поэтому восстановить нельзя; запланируй заново.")
+	undoNotSchedule  = locale.T("it can no longer be scheduled (%s).", "его больше нельзя запланировать (%s).")
+	undoDeleted      = locale.T("Deleted the scheduled job %s.", "Задание %s удалено.")
+	undoRestored     = locale.T("Restored the scheduled job %s as it was.", "Задание %s возвращено как было.")
+	undoRestoredGone = locale.T("Restored the scheduled job %s; its earlier runs are not.", "Задание %s восстановлено; прошлые запуски не вернутся.")
+)
+
+// undoRefusal refuses an Undo with the reason in English for the model and the logs and in the
+// context's language for the user.
+func undoRefusal(ctx context.Context, reason locale.Text, args ...any) *approval.UndoRefusal {
+	return &approval.UndoRefusal{Reason: reason.FormatIn(locale.English, args...), UserReason: reason.Format(ctx, args...)}
+}
 
 // jobUndo reverses a direct job action: After is the job as a create or an update left it, Before
 // the job an update replaced, and Removed the whole job a removal deleted.
@@ -82,7 +106,7 @@ func (s *Service) undoUpdate(ctx context.Context, before Job, travelChanged bool
 func (s *Service) Undo(ctx context.Context, record approval.Record, raw json.RawMessage) (approval.Outcome, error) {
 	var undo jobUndo
 	if err := json.Unmarshal(raw, &undo); err != nil || undo.JobID == "" {
-		return approval.Outcome{}, &approval.UndoRefusal{Reason: "what to undo could not be read."}
+		return approval.Outcome{}, undoRefusal(ctx, undoUnreadable)
 	}
 	switch {
 	case record.Tool == toolPropose && undo.After != nil:
@@ -92,7 +116,7 @@ func (s *Service) Undo(ctx context.Context, record approval.Record, raw json.Raw
 	case record.Tool == toolRemove && undo.Removed != nil:
 		return s.undoRemoved(ctx, record.PrincipalID, *undo.Removed)
 	default:
-		return approval.Outcome{}, &approval.UndoRefusal{Reason: "this action cannot be undone."}
+		return approval.Outcome{}, undoRefusal(ctx, undoImpossible)
 	}
 }
 
@@ -105,11 +129,11 @@ func (s *Service) current(ctx context.Context, principalID string, undo jobUndo)
 	}
 	switch {
 	case !found:
-		return Job{}, &approval.UndoRefusal{Reason: "the job no longer exists."}
+		return Job{}, undoRefusal(ctx, undoJobGone)
 	case !job.FinishedAt.IsZero():
-		return Job{}, &approval.UndoRefusal{Reason: "the job has already run."}
+		return Job{}, undoRefusal(ctx, undoJobRan)
 	case !definitionOf(job).same(*undo.After):
-		return Job{}, &approval.UndoRefusal{Reason: "the job was changed since; change it in /jobs instead."}
+		return Job{}, undoRefusal(ctx, undoJobChanged)
 	}
 	return job, nil
 }
@@ -127,7 +151,7 @@ func (s *Service) undoCreated(ctx context.Context, principalID string, undo jobU
 		return approval.Outcome{}, fmt.Errorf("the job %s changed while it was being deleted", job.ID)
 	}
 	s.logger.InfoContext(ctx, "schedule.job.deleted", "principal_id", principalID, "job_id", job.ID)
-	return approval.Outcome{Text: fmt.Sprintf("Deleted the scheduled job %q.", job.Name)}, nil
+	return approval.Outcome{Text: fmt.Sprintf("Deleted the scheduled job %q.", job.Name), UserText: undoDeleted.Format(ctx, quotedIn(locale.From(ctx), job.Name))}, nil
 }
 
 func (s *Service) undoUpdated(ctx context.Context, principalID string, undo jobUndo) (approval.Outcome, error) {
@@ -136,7 +160,7 @@ func (s *Service) undoUpdated(ctx context.Context, principalID string, undo jobU
 		return approval.Outcome{}, err
 	}
 	if undo.DestinationChanged && job.Destination != undo.Destination {
-		return approval.Outcome{}, &approval.UndoRefusal{Reason: "the job was moved since; change it in /jobs instead."}
+		return approval.Outcome{}, undoRefusal(ctx, undoJobMoved)
 	}
 	previous := *undo.Before
 	prepared, err := s.restorable(ctx, previous)
@@ -156,12 +180,12 @@ func (s *Service) undoUpdated(ctx context.Context, principalID string, undo jobU
 	if !updated {
 		return approval.Outcome{}, fmt.Errorf("the job %s changed while it was being restored", job.ID)
 	}
-	return approval.Outcome{Text: fmt.Sprintf("Restored the scheduled job %q as it was.", previous.Name)}, nil
+	return approval.Outcome{Text: fmt.Sprintf("Restored the scheduled job %q as it was.", previous.Name), UserText: undoRestored.Format(ctx, quotedIn(locale.From(ctx), previous.Name))}, nil
 }
 
 func (s *Service) undoRemoved(ctx context.Context, principalID string, removed Job) (approval.Outcome, error) {
 	if removed.PrincipalID != principalID {
-		return approval.Outcome{}, &approval.UndoRefusal{Reason: "the job belongs to someone else."}
+		return approval.Outcome{}, undoRefusal(ctx, undoJobForeign)
 	}
 	prepared, err := s.restorable(ctx, removed)
 	if err != nil {
@@ -170,15 +194,15 @@ func (s *Service) undoRemoved(ctx context.Context, principalID string, removed J
 	prepared.Job.Enabled, prepared.Job.CreatedAt = removed.Enabled, removed.CreatedAt
 	created, err := s.Create(ctx, removed.ID, prepared)
 	if errors.Is(err, ErrTooManyJobs) {
-		return approval.Outcome{}, &approval.UndoRefusal{Reason: tooManyText(removed.OneTime())}
+		return approval.Outcome{}, &approval.UndoRefusal{Reason: tooManyText(removed.OneTime()), UserReason: tooManyUserText(ctx, removed.OneTime())}
 	}
 	if err != nil {
 		return approval.Outcome{}, err
 	}
 	if !created {
-		return approval.Outcome{}, &approval.UndoRefusal{Reason: "the job is already back."}
+		return approval.Outcome{}, undoRefusal(ctx, undoJobBack)
 	}
-	return approval.Outcome{Text: fmt.Sprintf("Restored the scheduled job %q; its earlier runs are not.", removed.Name)}, nil
+	return approval.Outcome{Text: fmt.Sprintf("Restored the scheduled job %q; its earlier runs are not.", removed.Name), UserText: undoRestoredGone.Format(ctx, quotedIn(locale.From(ctx), removed.Name))}, nil
 }
 
 // restorable validates a job as it was, to store it again, with its next run worked out from now.
@@ -189,10 +213,13 @@ func (s *Service) restorable(ctx context.Context, job Job) (Prepared, error) {
 	if job.OneTime() {
 		location, err := LoadZone(job.Zone)
 		if err != nil {
-			return Prepared{}, &approval.UndoRefusal{Reason: "its time zone is no longer known."}
+			return Prepared{}, undoRefusal(ctx, undoZoneUnknown)
 		}
 		if !job.FinishedAt.IsZero() || !job.RunAt.After(s.now()) {
-			return Prepared{}, &approval.UndoRefusal{Reason: fmt.Sprintf("its time, %s, has passed, so it cannot be restored; schedule it again instead.", FormatOccurrence(job.RunAt, location))}
+			return Prepared{}, &approval.UndoRefusal{
+				Reason:     undoTimePassed.FormatIn(locale.English, FormatOccurrence(job.RunAt, location)),
+				UserReason: undoTimePassed.Format(ctx, FormatOccurrenceIn(locale.From(ctx), job.RunAt, location)),
+			}
 		}
 		if !anchored {
 			timing.At = job.RunAt.In(location).Format(localTimeLayouts[0])
@@ -200,7 +227,7 @@ func (s *Service) restorable(ctx context.Context, job Job) (Prepared, error) {
 	}
 	prepared, err := s.prepareJob(ctx, job.PrincipalID, job.Name, job.Type, timing, job.Config)
 	if err != nil {
-		return Prepared{}, &approval.UndoRefusal{Reason: "it can no longer be scheduled (" + err.Error() + ")."}
+		return Prepared{}, undoRefusal(ctx, undoNotSchedule, err.Error())
 	}
 	prepared.Job.TravelPause, prepared.Job.Destination, prepared.exactDestination = job.TravelPause, job.Destination, true
 	if job.OneTime() && !anchored {

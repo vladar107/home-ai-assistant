@@ -10,6 +10,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/clip"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/modelcatalog"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
@@ -46,6 +47,84 @@ type Proposer interface {
 // household, after which reminders wait for the user's confirmation.
 type ExposureChecker interface {
 	External(ctx context.Context, principalID string) bool
+}
+
+var (
+	whenRepeating = locale.T("%[1]s; next: %[2]s", "%[1]s; следующий запуск: %[2]s")
+	whenAnchored  = locale.T("for %[1]s, %[2]s", "на %[1]s, %[2]s")
+	whenAt        = locale.T("for %s", "на %s")
+	onlyIf        = locale.T("%[1]s, only if %[2]s", "%[1]s, только если %[2]s")
+
+	describeOnce         = locale.T("once, %s", "один раз, %s")
+	describeOnceAnchored = locale.T("once, %[1]s, %[2]s", "один раз, %[1]s, %[2]s")
+
+	setReminderSummary = locale.T("Set a reminder %[1]s:\n%[2]s", "Поставить напоминание %[1]s:\n%[2]s")
+	outsideContentNote = locale.T("I read outside content in this conversation, so I need your confirmation.", "В этом разговоре был прочитан внешний контент, поэтому нужно твоё подтверждение.")
+
+	scheduleHeading      = locale.T("Schedule %s", "Запланировать %s")
+	changeHeading        = locale.T("Change %s", "Изменить %s")
+	changeRenamedHeading = locale.T("Change %[1]s, renamed to %[2]s", "Изменить %[1]s, новое название %[2]s")
+	deleteSummary        = locale.T("Delete the scheduled job %[1]s (%[2]s). It will not run again.", "Удалить задание %[1]s (%[2]s). Оно больше не запустится.")
+
+	instructionsStaySummary   = locale.T("%s. Its instructions stay as they are.", "%s. Инструкции остаются прежними.")
+	instructionsChangeSummary = locale.T("%s. Its instructions change only here:", "%s. Инструкции меняются только здесь:")
+	editRemoved               = locale.T("(removed)", "(удалено)")
+	editWasNow                = locale.T("Was: %[1]s\nNow: %[2]s", "Было: %[1]s\nСтало: %[2]s")
+	defaultModelNote          = locale.T("It goes back to the default model.", "Задание вернётся к модели по умолчанию.")
+	noConditionNote           = locale.T("It no longer has a condition, so it runs every time.", "Условия больше нет, поэтому задание будет запускаться каждый раз.")
+	leftProjectNote           = locale.T("Its runs no longer go to the tab of the project it belonged to.", "Его запуски больше не попадают во вкладку проекта, к которому оно относилось.")
+	joinedProjectNote         = locale.T("Its runs go to the tab of the project it belongs to.", "Его запуски попадают во вкладку проекта, к которому оно относится.")
+	staysPausedNote           = locale.T("It stays paused until you resume it in /jobs.", "Оно остаётся на паузе, пока ты не возобновишь его в /jobs.")
+
+	summaryRuns             = locale.T("Runs: %s", "Запуск: %s")
+	summaryRunsCron         = locale.T("Runs: %[1]s (%[2]s)", "Запуск: %[1]s (%[2]s)")
+	summaryNext             = locale.T("Next: %s", "Следующий запуск: %s")
+	summaryRunsOnce         = locale.T("Runs once: %s", "Один раз: %s")
+	summaryRunsOnceAnchored = locale.T("Runs once: %[1]s, %[2]s, and moves with it", "Один раз: %[1]s, %[2]s; переносится вместе с событием")
+	summaryTravel           = locale.T("Pauses while you are traveling", "Приостанавливается, пока ты в поездке")
+	summaryCondition        = locale.T("Only if: %s, checked when it is due; otherwise it stays silent", "Только если: %s; это проверяется перед запуском, а иначе сообщения не будет")
+	summaryModel            = locale.T("Model: %s", "Модель: %s")
+	summaryEachRun          = locale.T("Each run asks your model, with read-only tools, and sends you the reply", "Каждый запуск спрашивает твою модель, только с инструментами чтения, и присылает тебе ответ")
+	summaryOnceRun          = locale.T("It asks your model, with read-only tools, and sends you the reply", "Задание спрашивает твою модель, только с инструментами чтения, и присылает тебе ответ")
+
+	scheduledAnchored  = locale.T("Scheduled %s.", "Запланировано: %s.")
+	scheduledOnce      = locale.T("Scheduled for %s.", "Запланировано на %s.")
+	scheduledRecurring = locale.T("Scheduled. First run: %s.", "Запланировано. Первый запуск: %s.")
+	reminderSetOutcome = locale.T("Reminder set %s.", "Напоминание поставлено: %s.")
+	deletedOutcome     = locale.T("Deleted.", "Удалено.")
+	changedPaused      = locale.T("Changed. It stays paused until you resume it in /jobs.", "Изменено. Задание остаётся на паузе, пока ты не возобновишь его в /jobs.")
+	changedAnchored    = locale.T("Changed. Runs %s.", "Изменено. Запуск: %s.")
+	changedOnce        = locale.T("Changed. Runs once: %s.", "Изменено. Один раз: %s.")
+	changedRecurring   = locale.T("Changed. Next run: %s.", "Изменено. Следующий запуск: %s.")
+
+	tooManyOneTime   = locale.T("You already have %d pending reminders and one-time jobs, which is the most allowed; delete one in /jobs first.", "У тебя уже %d напоминаний и разовых заданий, это максимум; сначала удали одно в /jobs.")
+	tooManyRecurring = locale.T("You already have %d recurring jobs, which is the most allowed; delete one in /jobs first.", "У тебя уже %d повторяющихся заданий, это максимум; сначала удали одно в /jobs.")
+
+	nothingScheduled     = locale.T("Nothing was scheduled.", "Ничего не запланировано.")
+	nothingSet           = locale.T("Nothing was set.", "Ничего не поставлено.")
+	nothingScheduledWord = locale.T("scheduled", "запланировано")
+	nothingSetWord       = locale.T("set", "поставлено")
+	nothingChangedWord   = locale.T("changed", "изменено")
+
+	jobUnreadable               = locale.T("The confirmed job could not be read; nothing was scheduled.", "Не удалось прочитать подтверждённое задание; ничего не запланировано.")
+	scheduleInvalidNotScheduled = locale.T("That schedule is no longer valid (%s); nothing was scheduled.", "Это расписание больше не подходит (%s); ничего не запланировано.")
+	reminderUnreadable          = locale.T("The confirmed reminder could not be read; nothing was set.", "Не удалось прочитать подтверждённое напоминание; ничего не поставлено.")
+	reminderInvalid             = locale.T("That reminder can no longer be set (%s); nothing was set.", "Это напоминание больше нельзя поставить (%s); ничего не поставлено.")
+	deletionUnreadable          = locale.T("The confirmed action could not be read; nothing was deleted.", "Не удалось прочитать подтверждённое действие; ничего не удалено.")
+	jobGone                     = locale.T("That job no longer exists.", "Этого задания больше нет.")
+	actionUnavailable           = locale.T("That action is no longer available.", "Это действие больше недоступно.")
+	projectInvalid              = locale.T("That project can no longer take jobs (%[1]s); nothing was %[2]s.", "Этот проект больше не принимает задания (%[1]s); ничего не %[2]s.")
+	changeUnreadable            = locale.T("The confirmed change could not be read; nothing was changed.", "Не удалось прочитать подтверждённое изменение; ничего не изменено.")
+	jobGoneNotChanged           = locale.T("That job no longer exists; nothing was changed.", "Этого задания больше нет; ничего не изменено.")
+	jobStale                    = locale.T("That job changed after this was proposed; nothing was changed. Ask again to change it.", "Задание изменилось после этого предложения; ничего не изменено. Попроси изменить его ещё раз.")
+	scheduleInvalidNotChanged   = locale.T("That schedule is no longer valid (%s); nothing was changed.", "Это расписание больше не подходит (%s); ничего не изменено.")
+	tripJobNotMovable           = locale.T("That job's runs go where its trip sends them, so it cannot be moved to a project; nothing was changed.", "Запуски этого задания идут туда, куда их направляет поездка, поэтому его нельзя перенести в проект; ничего не изменено.")
+)
+
+// actionError is a refusal whose English text the model and the logs read and whose user text
+// follows the context's language.
+func actionError(ctx context.Context, reason string, message locale.Text, args ...any) *approval.ActionError {
+	return &approval.ActionError{Reason: reason, Text: message.FormatIn(locale.English, args...), UserText: message.Format(ctx, args...)}
 }
 
 const listGuidance = "Scheduled jobs: schedule_list shows the user's pending reminders and scheduled jobs, each with its id, schedule, next run, and instructions, shortening long instructions; schedule_get shows one of them in full. The user manages them with /jobs as well."
@@ -497,19 +576,21 @@ func (s *Service) setReminder(ctx context.Context, principalID string, call tool
 
 // reminderWhen is when a prepared reminder goes off, as "for Mon 5 Oct 17:00" or, for an anchored
 // one, with the event it follows and its condition.
-func reminderWhen(prepared Prepared) string {
+func reminderWhen(prepared Prepared) string { return reminderWhenIn(locale.English, prepared) }
+
+func reminderWhenIn(language locale.Language, prepared Prepared) string {
 	job := prepared.Job
 	var when string
 	switch {
 	case prepared.Anchor != nil && prepared.Anchor.Repeats():
-		when = prepared.Anchor.Describe() + "; next: " + NextRunText(job, job.Zone)
+		when = whenRepeating.FormatIn(language, prepared.Anchor.DescribeIn(language), NextRunTextIn(language, job, job.Zone))
 	case prepared.Anchor != nil:
-		when = "for " + FormatOccurrence(job.RunAt, prepared.Schedule.Location) + ", " + prepared.Anchor.Describe()
+		when = whenAnchored.FormatIn(language, FormatOccurrenceIn(language, job.RunAt, prepared.Schedule.Location), prepared.Anchor.DescribeIn(language))
 	default:
-		when = "for " + FormatOccurrence(job.RunAt, prepared.Schedule.Location)
+		when = whenAt.FormatIn(language, FormatOccurrenceIn(language, job.RunAt, prepared.Schedule.Location))
 	}
 	if condition := JobCondition(job); condition != nil {
-		when += ", only if " + condition.Description
+		when = onlyIf.FormatIn(language, when, condition.Description)
 	}
 	return when
 }
@@ -527,11 +608,11 @@ func (s *Service) proposeReminder(ctx context.Context, principalID string, call 
 	if s.proposer == nil {
 		return tools.Result{Text: "I read outside content in this conversation, so reminders need the user's confirmation, and confirming is not available. Tell the user the reminder was not set.", IsError: true}, nil
 	}
-	proposal, err := reminderProposal(text, prepared, projectID)
+	proposal, err := reminderProposal(locale.From(ctx), text, prepared, projectID)
 	if err != nil {
 		return tools.Result{}, err
 	}
-	proposal.Summary += "\nI read outside content in this conversation, so I need your confirmation."
+	proposal.Summary += "\n" + outsideContentNote.Format(ctx)
 	if _, err := s.proposer.Propose(ctx, principalID, proposal); err != nil {
 		if approval.Refused(err) {
 			return tools.Result{Text: err.Error(), IsError: true}, nil
@@ -543,7 +624,7 @@ func (s *Service) proposeReminder(ctx context.Context, principalID string, call 
 }
 
 // reminderProposal is the proposal that sets the prepared reminder of text once confirmed.
-func reminderProposal(text string, prepared Prepared, projectID string) (approval.Proposal, error) {
+func reminderProposal(language locale.Language, text string, prepared Prepared, projectID string) (approval.Proposal, error) {
 	job := prepared.Job
 	confirmed := confirmedReminder{Text: text, Zone: job.Zone, Anchor: prepared.Anchor, Condition: JobCondition(job), ProjectID: projectID}
 	if prepared.Anchor == nil {
@@ -555,7 +636,7 @@ func reminderProposal(text string, prepared Prepared, projectID string) (approva
 	}
 	return approval.Proposal{
 		Tool: toolReminderSet, Arguments: canonical,
-		Summary: fmt.Sprintf("Set a reminder %s:\n%s", reminderWhen(prepared), text),
+		Summary: setReminderSummary.FormatIn(language, reminderWhenIn(language, prepared), text),
 		Intent:  approval.Intent{Verb: "set", TargetKind: "reminder", TargetName: job.Name},
 	}, nil
 }
@@ -573,7 +654,7 @@ func (s *Service) ReminderProposal(ctx context.Context, principalID, text, at st
 	if err != nil {
 		return approval.Proposal{}, err
 	}
-	return reminderProposal(ReminderText(config), prepared, "")
+	return reminderProposal(locale.From(ctx), ReminderText(config), prepared, "")
 }
 
 func (s *Service) cancelReminder(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
@@ -656,7 +737,8 @@ func (s *Service) proposeJob(ctx context.Context, principalID string, call tools
 	if err != nil {
 		return tools.Result{}, err
 	}
-	summary := proposalSummary(fmt.Sprintf("Schedule %q", job.Name), prepared)
+	language := locale.From(ctx)
+	summary := proposalSummary(language, scheduleHeading.FormatIn(language, quotedIn(language, job.Name)), prepared)
 	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolPropose, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "schedule", TargetKind: targetKind, TargetName: job.Name}}, longNewJobText)
 }
 
@@ -812,33 +894,34 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 	if err != nil {
 		return tools.Result{}, err
 	}
-	heading := fmt.Sprintf("Change %q", job.Name)
+	language := locale.From(ctx)
+	heading := changeHeading.FormatIn(language, quotedIn(language, job.Name))
 	if changed.Name != job.Name {
-		heading += fmt.Sprintf(", renamed to %q", changed.Name)
+		heading = changeRenamedHeading.FormatIn(language, quotedIn(language, job.Name), quotedIn(language, changed.Name))
 	}
 	// Unchanged instructions are left out, so a job grown past one message by prompt_edits can still
 	// be renamed or rescheduled.
-	summary, tooLong := scheduleSummary(heading, prepared)+". Its instructions stay as they are.", ""
+	summary, tooLong := instructionsStaySummary.FormatIn(language, scheduleSummary(language, heading, prepared)), ""
 	switch {
 	case len(arguments.PromptEdits) > 0:
-		summary, tooLong = patchSummary(heading, prepared, arguments.PromptEdits), longEditsText
+		summary, tooLong = patchSummary(language, heading, prepared, arguments.PromptEdits), longEditsText
 	case confirmed.Prompt != current.Prompt:
-		summary, tooLong = proposalSummary(heading, prepared), longRewriteText
+		summary, tooLong = proposalSummary(language, heading, prepared), longRewriteText
 	}
 	if next.Model == "" && current.Model != "" {
-		summary += "\nIt goes back to the default model."
+		summary += "\n" + defaultModelNote.In(language)
 	}
 	if next.Condition == nil && current.Condition != nil {
-		summary += "\nIt no longer has a condition, so it runs every time."
+		summary += "\n" + noConditionNote.In(language)
 	}
 	switch {
 	case next.ProjectID != current.ProjectID && next.ProjectID == "":
-		summary += "\nIts runs no longer go to the tab of the project it belonged to."
+		summary += "\n" + leftProjectNote.In(language)
 	case next.ProjectID != current.ProjectID:
-		summary += "\nIts runs go to the tab of the project it belongs to."
+		summary += "\n" + joinedProjectNote.In(language)
 	}
 	if !job.Enabled {
-		summary += "\nIt stays paused until you resume it in /jobs."
+		summary += "\n" + staysPausedNote.In(language)
 	}
 	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolUpdate, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "change", TargetKind: "scheduled job", TargetName: job.Name, NewName: changed.Name}}, tooLong)
 }
@@ -902,7 +985,8 @@ func (s *Service) proposeRemoval(ctx context.Context, principalID string, call t
 	if err != nil {
 		return tools.Result{}, err
 	}
-	summary := fmt.Sprintf("Delete the scheduled job %q (%s). It will not run again.", job.Name, DescribeJob(job, s.zone))
+	language := locale.From(ctx)
+	summary := deleteSummary.FormatIn(language, quotedIn(language, job.Name), DescribeJobIn(language, job, s.zone))
 	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolRemove, Arguments: canonical, Summary: summary, Intent: approval.Intent{Verb: "remove", TargetKind: "scheduled job", TargetName: job.Name}}, "")
 }
 
@@ -918,7 +1002,7 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 	case toolPropose:
 		var confirmed confirmedJob
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
-			return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed job could not be read; nothing was scheduled."}
+			return approval.Outcome{}, actionError(ctx, "malformed", jobUnreadable)
 		}
 		config, err := confirmed.config()
 		if err != nil {
@@ -927,15 +1011,15 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		timing := Timing{Cron: confirmed.Cron, At: confirmed.At, Zone: confirmed.Zone}
 		prepared, err := s.prepareJob(ctx, record.PrincipalID, confirmed.Name, TypeModelTurn, timing, config)
 		if err != nil {
-			return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "That schedule is no longer valid (" + err.Error() + "); nothing was scheduled."}
+			return approval.Outcome{}, actionError(ctx, "invalid", scheduleInvalidNotScheduled, err.Error())
 		}
 		prepared.Job.TravelPause = confirmed.TravelPause != nil && *confirmed.TravelPause && !prepared.Job.OneTime()
-		if err := s.confirmedProject(ctx, record.PrincipalID, confirmed.ProjectID, &prepared, "scheduled"); err != nil {
+		if err := s.confirmedProject(ctx, record.PrincipalID, confirmed.ProjectID, &prepared, "scheduled", nothingScheduledWord); err != nil {
 			return approval.Outcome{}, err
 		}
 		if _, err := s.Create(ctx, record.ID, prepared); err != nil {
 			if errors.Is(err, ErrTooManyJobs) {
-				return approval.Outcome{}, &approval.ActionError{Reason: "too_many", Text: tooManyText(prepared.Job.OneTime()) + " Nothing was scheduled."}
+				return approval.Outcome{}, &approval.ActionError{Reason: "too_many", Text: tooManyText(prepared.Job.OneTime()) + " Nothing was scheduled.", UserText: tooManyUserText(ctx, prepared.Job.OneTime()) + " " + nothingScheduled.Format(ctx)}
 			}
 			return approval.Outcome{}, err
 		}
@@ -943,18 +1027,19 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		if err != nil {
 			return approval.Outcome{}, err
 		}
-		at := FormatOccurrence(prepared.Job.NextRunAt, prepared.Schedule.Location)
+		language := locale.From(ctx)
+		at, userAt := FormatOccurrence(prepared.Job.NextRunAt, prepared.Schedule.Location), FormatOccurrenceIn(language, prepared.Job.NextRunAt, prepared.Schedule.Location)
 		switch {
 		case prepared.Anchor != nil:
-			return approval.Outcome{Text: withNote("Scheduled "+reminderWhen(prepared)+".", prepared), Undo: undo}, nil
+			return approval.Outcome{Text: withNote("Scheduled "+reminderWhen(prepared)+".", prepared), UserText: withNote(scheduledAnchored.FormatIn(language, reminderWhenIn(language, prepared)), prepared), Undo: undo}, nil
 		case prepared.Job.OneTime():
-			return approval.Outcome{Text: "Scheduled for " + at + ".", Undo: undo}, nil
+			return approval.Outcome{Text: "Scheduled for " + at + ".", UserText: scheduledOnce.FormatIn(language, userAt), Undo: undo}, nil
 		}
-		return approval.Outcome{Text: "Scheduled. First run: " + at + ".", Undo: undo}, nil
+		return approval.Outcome{Text: "Scheduled. First run: " + at + ".", UserText: scheduledRecurring.FormatIn(language, userAt), Undo: undo}, nil
 	case toolReminderSet:
 		var confirmed confirmedReminder
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
-			return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed reminder could not be read; nothing was set."}
+			return approval.Outcome{}, actionError(ctx, "malformed", reminderUnreadable)
 		}
 		text, err := ReminderConfig(confirmed.Text)
 		if err != nil {
@@ -966,24 +1051,24 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		}
 		prepared, err := s.prepareJob(ctx, record.PrincipalID, ReminderName(confirmed.Text), TypeReminder, Timing{At: confirmed.At, Zone: confirmed.Zone}, config)
 		if err != nil {
-			return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "That reminder can no longer be set (" + err.Error() + "); nothing was set."}
+			return approval.Outcome{}, actionError(ctx, "invalid", reminderInvalid, err.Error())
 		}
-		if err := s.confirmedProject(ctx, record.PrincipalID, confirmed.ProjectID, &prepared, "set"); err != nil {
+		if err := s.confirmedProject(ctx, record.PrincipalID, confirmed.ProjectID, &prepared, "set", nothingSetWord); err != nil {
 			return approval.Outcome{}, err
 		}
 		if _, err := s.Create(ctx, record.ID, prepared); err != nil {
 			if errors.Is(err, ErrTooManyJobs) {
-				return approval.Outcome{}, &approval.ActionError{Reason: "too_many", Text: tooManyText(true) + " Nothing was set."}
+				return approval.Outcome{}, &approval.ActionError{Reason: "too_many", Text: tooManyText(true) + " Nothing was set.", UserText: tooManyUserText(ctx, true) + " " + nothingSet.Format(ctx)}
 			}
 			return approval.Outcome{}, err
 		}
-		return approval.Outcome{Text: withNote("Reminder set "+reminderWhen(prepared)+".", prepared)}, nil
+		return approval.Outcome{Text: withNote("Reminder set "+reminderWhen(prepared)+".", prepared), UserText: withNote(reminderSetOutcome.Format(ctx, reminderWhenIn(locale.From(ctx), prepared)), prepared)}, nil
 	case toolUpdate:
 		return s.executeUpdate(ctx, record)
 	case toolRemove:
 		var confirmed removeArguments
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
-			return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed action could not be read; nothing was deleted."}
+			return approval.Outcome{}, actionError(ctx, "malformed", deletionUnreadable)
 		}
 		// The whole job is read before it goes, so an Undo can put it back.
 		job, found, err := s.repository.LoadScheduledJob(ctx, record.PrincipalID, confirmed.JobID)
@@ -997,27 +1082,27 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 			}
 		}
 		if !deleted {
-			return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That job no longer exists."}
+			return approval.Outcome{}, actionError(ctx, "not_found", jobGone)
 		}
 		undo, err := json.Marshal(jobUndo{JobID: job.ID, Removed: &job})
 		if err != nil {
 			return approval.Outcome{}, err
 		}
-		return approval.Outcome{Text: "Deleted.", Undo: undo}, nil
+		return approval.Outcome{Text: "Deleted.", UserText: deletedOutcome.Format(ctx), Undo: undo}, nil
 	default:
-		return approval.Outcome{}, &approval.ActionError{Reason: "unavailable", Text: "That action is no longer available."}
+		return approval.Outcome{}, actionError(ctx, "unavailable", actionUnavailable)
 	}
 }
 
 // confirmedProject checks again the project a confirmed job goes to and routes the prepared job
 // there; "" leaves it as it is. what says what was not done, such as scheduled.
-func (s *Service) confirmedProject(ctx context.Context, principalID, projectID string, prepared *Prepared, what string) error {
+func (s *Service) confirmedProject(ctx context.Context, principalID, projectID string, prepared *Prepared, what string, done locale.Text) error {
 	if projectID == "" {
 		return nil
 	}
 	id, err := s.projectDestination(ctx, principalID, projectID)
 	if err != nil {
-		return &approval.ActionError{Reason: "invalid", Text: "That project can no longer take jobs (" + err.Error() + "); nothing was " + what + "."}
+		return &approval.ActionError{Reason: "invalid", Text: "That project can no longer take jobs (" + err.Error() + "); nothing was " + what + ".", UserText: projectInvalid.Format(ctx, err.Error(), done.Format(ctx))}
 	}
 	prepared.Job.Destination = thread.ProjectDestination(id)
 	return nil
@@ -1026,16 +1111,16 @@ func (s *Service) confirmedProject(ctx context.Context, principalID, projectID s
 func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (approval.Outcome, error) {
 	var confirmed confirmedUpdate
 	if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
-		return approval.Outcome{}, &approval.ActionError{Reason: "malformed", Text: "The confirmed change could not be read; nothing was changed."}
+		return approval.Outcome{}, actionError(ctx, "malformed", changeUnreadable)
 	}
 	job, found, err := s.repository.LoadScheduledJob(ctx, record.PrincipalID, confirmed.JobID)
 	if err != nil {
 		return approval.Outcome{}, err
 	}
 	if !found || !job.FinishedAt.IsZero() || job.Type != TypeModelTurn {
-		return approval.Outcome{}, &approval.ActionError{Reason: "not_found", Text: "That job no longer exists; nothing was changed."}
+		return approval.Outcome{}, actionError(ctx, "not_found", jobGoneNotChanged)
 	}
-	stale := &approval.ActionError{Reason: "stale", Text: "That job changed after this was proposed; nothing was changed. Ask again to change it."}
+	stale := actionError(ctx, "stale", jobStale)
 	if !job.UpdatedAt.Equal(confirmed.UpdatedAt) {
 		return approval.Outcome{}, stale
 	}
@@ -1046,7 +1131,7 @@ func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (ap
 	timing := Timing{Cron: confirmed.Cron, At: confirmed.At, Zone: confirmed.Zone}
 	prepared, err := s.prepareJob(ctx, record.PrincipalID, confirmed.Name, TypeModelTurn, timing, config)
 	if err != nil {
-		return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "That schedule is no longer valid (" + err.Error() + "); nothing was changed."}
+		return approval.Outcome{}, actionError(ctx, "invalid", scheduleInvalidNotChanged, err.Error())
 	}
 	prepared.Job.TravelPause = job.TravelPause
 	if confirmed.TravelPause != nil {
@@ -1054,9 +1139,9 @@ func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (ap
 	}
 	if current, _ := thread.ProjectOf(job.Destination); confirmed.ProjectID != current {
 		if job.Destination != "" && current == "" {
-			return approval.Outcome{}, &approval.ActionError{Reason: "invalid", Text: "That job's runs go where its trip sends them, so it cannot be moved to a project; nothing was changed."}
+			return approval.Outcome{}, actionError(ctx, "invalid", tripJobNotMovable)
 		}
-		if err := s.confirmedProject(ctx, record.PrincipalID, confirmed.ProjectID, &prepared, "changed"); err != nil {
+		if err := s.confirmedProject(ctx, record.PrincipalID, confirmed.ProjectID, &prepared, "changed", nothingChangedWord); err != nil {
 			return approval.Outcome{}, err
 		}
 		// Taken off its project, the job goes to the feed of its kind again.
@@ -1073,17 +1158,18 @@ func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (ap
 	if err != nil {
 		return approval.Outcome{}, err
 	}
+	language := locale.From(ctx)
 	if !job.Enabled {
-		return approval.Outcome{Text: "Changed. It stays paused until you resume it in /jobs.", Undo: undo}, nil
+		return approval.Outcome{Text: "Changed. It stays paused until you resume it in /jobs.", UserText: changedPaused.FormatIn(language), Undo: undo}, nil
 	}
-	at := FormatOccurrence(prepared.Job.NextRunAt, prepared.Schedule.Location)
+	at, userAt := FormatOccurrence(prepared.Job.NextRunAt, prepared.Schedule.Location), FormatOccurrenceIn(language, prepared.Job.NextRunAt, prepared.Schedule.Location)
 	switch {
 	case prepared.Anchor != nil:
-		return approval.Outcome{Text: withNote("Changed. Runs "+reminderWhen(prepared)+".", prepared), Undo: undo}, nil
+		return approval.Outcome{Text: withNote("Changed. Runs "+reminderWhen(prepared)+".", prepared), UserText: withNote(changedAnchored.FormatIn(language, reminderWhenIn(language, prepared)), prepared), Undo: undo}, nil
 	case prepared.Job.OneTime():
-		return approval.Outcome{Text: "Changed. Runs once: " + at + ".", Undo: undo}, nil
+		return approval.Outcome{Text: "Changed. Runs once: " + at + ".", UserText: changedOnce.FormatIn(language, userAt), Undo: undo}, nil
 	}
-	return approval.Outcome{Text: "Changed. Next run: " + at + ".", Undo: undo}, nil
+	return approval.Outcome{Text: "Changed. Next run: " + at + ".", UserText: changedRecurring.FormatIn(language, userAt), Undo: undo}, nil
 }
 
 // Previewable reports whether a proposal runs instructions that are new or changed: a proposed job,
@@ -1184,6 +1270,13 @@ func tooManyText(oneTime bool) string {
 	return fmt.Sprintf("You already have %d recurring jobs, which is the most allowed; delete one in /jobs first.", MaximumJobsPerPrincipal)
 }
 
+func tooManyUserText(ctx context.Context, oneTime bool) string {
+	if oneTime {
+		return tooManyOneTime.Format(ctx, MaximumOneTimeJobsPerPrincipal)
+	}
+	return tooManyRecurring.Format(ctx, MaximumJobsPerPrincipal)
+}
+
 func countKind(jobs []Job, oneTime bool) int {
 	count := 0
 	for _, job := range jobs {
@@ -1196,79 +1289,81 @@ func countKind(jobs []Job, oneTime bool) int {
 
 // proposalSummary is the confirmation the user reads. It is rendered from the parsed schedule, not
 // from the model's description of it, so the next run times are the ones that will happen.
-func proposalSummary(heading string, prepared Prepared) string {
-	return scheduleSummary(heading, prepared) + ":\n" + ModelTurnPrompt(prepared.Job.Config)
+func proposalSummary(language locale.Language, heading string, prepared Prepared) string {
+	return scheduleSummary(language, heading, prepared) + ":\n" + ModelTurnPrompt(prepared.Job.Config)
 }
 
 // patchSummary is the confirmation of a change made by prompt edits: the schedule as it will be and
 // only the passages that change, so the user reads the change instead of the whole prompt again.
-func patchSummary(heading string, prepared Prepared, edits []promptEdit) string {
+func patchSummary(language locale.Language, heading string, prepared Prepared, edits []promptEdit) string {
 	var builder strings.Builder
-	builder.WriteString(scheduleSummary(heading, prepared) + ". Its instructions change only here:")
+	builder.WriteString(instructionsChangeSummary.FormatIn(language, scheduleSummary(language, heading, prepared)))
 	for index, edit := range edits {
 		replacement := edit.Replace
 		if strings.TrimSpace(replacement) == "" {
-			replacement = "(removed)"
+			replacement = editRemoved.In(language)
 		}
 		if len(edits) > 1 {
 			fmt.Fprintf(&builder, "\n%d.", index+1)
 		}
-		builder.WriteString("\nWas: " + edit.Find + "\nNow: " + replacement)
+		builder.WriteString("\n" + editWasNow.FormatIn(language, edit.Find, replacement))
 	}
 	return builder.String()
 }
 
 // scheduleSummary is the heading and the parsed schedule of a proposal, ending with the sentence
 // that introduces its instructions.
-func scheduleSummary(heading string, prepared Prepared) string {
+func scheduleSummary(language locale.Language, heading string, prepared Prepared) string {
 	job := prepared.Job
 	var builder strings.Builder
 	builder.WriteString(heading + "\n")
 	model := ModelTurnModel(job.Config)
+	line := func(text string) { builder.WriteString(text + "\n") }
 	if prepared.Anchor != nil {
 		if prepared.Anchor.Repeats() {
-			fmt.Fprintf(&builder, "Runs: %s\nNext: %s\n", prepared.Anchor.Describe(), NextRunText(job, job.Zone))
+			line(summaryRuns.FormatIn(language, prepared.Anchor.DescribeIn(language)))
+			line(summaryNext.FormatIn(language, NextRunTextIn(language, job, job.Zone)))
 		} else {
-			fmt.Fprintf(&builder, "Runs once: %s, %s, and moves with it\n", FormatOccurrence(job.RunAt, prepared.Schedule.Location), prepared.Anchor.Describe())
+			line(summaryRunsOnceAnchored.FormatIn(language, FormatOccurrenceIn(language, job.RunAt, prepared.Schedule.Location), prepared.Anchor.DescribeIn(language)))
 		}
-		writeCondition(&builder, job)
+		writeCondition(&builder, language, job)
 		if model != "" {
-			fmt.Fprintf(&builder, "Model: %s\n", model)
+			line(summaryModel.FormatIn(language, model))
 		}
-		builder.WriteString("Each run asks your model, with read-only tools, and sends you the reply")
+		builder.WriteString(summaryEachRun.In(language))
 		return builder.String()
 	}
 	if job.OneTime() {
-		fmt.Fprintf(&builder, "Runs once: %s\n", FormatOccurrence(job.RunAt, prepared.Schedule.Location))
-		writeCondition(&builder, job)
+		line(summaryRunsOnce.FormatIn(language, FormatOccurrenceIn(language, job.RunAt, prepared.Schedule.Location)))
+		writeCondition(&builder, language, job)
 		if model != "" {
-			fmt.Fprintf(&builder, "Model: %s\n", model)
+			line(summaryModel.FormatIn(language, model))
 		}
-		builder.WriteString("It asks your model, with read-only tools, and sends you the reply")
+		builder.WriteString(summaryOnceRun.In(language))
 		return builder.String()
 	}
 	upcoming := prepared.Schedule.Upcoming(job.CreatedAt, upcomingShown)
 	times := make([]string, 0, len(upcoming))
 	for _, at := range upcoming {
-		times = append(times, FormatOccurrence(at, prepared.Schedule.Location))
+		times = append(times, FormatOccurrenceIn(language, at, prepared.Schedule.Location))
 	}
-	fmt.Fprintf(&builder, "Runs: %s (%s)\n", job.Cron, job.Zone)
-	fmt.Fprintf(&builder, "Next: %s\n", strings.Join(times, "; "))
+	line(summaryRunsCron.FormatIn(language, job.Cron, job.Zone))
+	line(summaryNext.FormatIn(language, strings.Join(times, "; ")))
 	if job.TravelPause {
-		builder.WriteString("Pauses while you are traveling\n")
+		line(summaryTravel.In(language))
 	}
-	writeCondition(&builder, job)
+	writeCondition(&builder, language, job)
 	if model != "" {
-		fmt.Fprintf(&builder, "Model: %s\n", model)
+		line(summaryModel.FormatIn(language, model))
 	}
-	builder.WriteString("Each run asks your model, with read-only tools, and sends you the reply")
+	builder.WriteString(summaryEachRun.In(language))
 	return builder.String()
 }
 
 // writeCondition adds the job's condition to a confirmation.
-func writeCondition(builder *strings.Builder, job Job) {
+func writeCondition(builder *strings.Builder, language locale.Language, job Job) {
 	if condition := JobCondition(job); condition != nil {
-		fmt.Fprintf(builder, "Only if: %s, checked when it is due; otherwise it stays silent\n", condition.Description)
+		builder.WriteString(summaryCondition.FormatIn(language, condition.Description) + "\n")
 	}
 }
 
@@ -1308,7 +1403,10 @@ func renderJob(job Job, zone string, limit int, model string) string {
 
 // DescribeJob is a job's schedule as the user reads it, with the event it follows and its
 // condition, falling back to the default zone for a zone the binary no longer knows.
-func DescribeJob(job Job, zone string) string {
+func DescribeJob(job Job, zone string) string { return DescribeJobIn(locale.English, job, zone) }
+
+// DescribeJobIn is DescribeJob in a language.
+func DescribeJobIn(language locale.Language, job Job, zone string) string {
 	location, err := LoadZone(job.Zone)
 	if err != nil {
 		location, _ = LoadZone(zone)
@@ -1316,25 +1414,34 @@ func DescribeJob(job Job, zone string) string {
 	var described string
 	switch anchor := JobAnchor(job); {
 	case anchor != nil && job.OneTime():
-		described = "once, " + FormatOccurrence(job.RunAt, location) + ", " + anchor.Describe()
+		described = describeOnceAnchored.FormatIn(language, FormatOccurrenceIn(language, job.RunAt, location), anchor.DescribeIn(language))
 	case anchor != nil:
-		described = anchor.Describe()
+		described = anchor.DescribeIn(language)
 	default:
 		schedule, err := JobSchedule(job)
 		if err != nil {
 			schedule = Schedule{Expression: job.Cron, Once: job.RunAt, Location: location}
 		}
-		described = schedule.Describe()
+		if schedule.Once.IsZero() {
+			described = schedule.Describe()
+		} else {
+			described = describeOnce.FormatIn(language, FormatOccurrenceIn(language, schedule.Once, schedule.Location))
+		}
 	}
 	if condition := JobCondition(job); condition != nil {
-		described += ", only if " + condition.Description
+		described = onlyIf.FormatIn(language, described, condition.Description)
 	}
 	return described
 }
 
 // FormatOccurrence renders an occurrence in the job's own zone, as the user reads it.
 func FormatOccurrence(at time.Time, location *time.Location) string {
-	return at.In(location).Format("Mon 2 Jan 15:04 MST")
+	return FormatOccurrenceIn(locale.English, at, location)
+}
+
+// FormatOccurrenceIn is FormatOccurrence in a language.
+func FormatOccurrenceIn(language locale.Language, at time.Time, location *time.Location) string {
+	return locale.Date(language, at.In(location), locale.DayTimeZone)
 }
 
 // offeredModel checks a model chat asked for, "id:effort", against the principal's catalog as
