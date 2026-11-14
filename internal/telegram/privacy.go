@@ -40,19 +40,19 @@ func (s *Service) privacyReply(ctx context.Context, principalID string) (string,
 	}
 	core := map[string]string{}
 	if s.attachments != nil {
-		core[privacyAttachments] = AttachmentPrivacyLine
+		core[privacyAttachments] = AttachmentPrivacyLine.Format(ctx)
 	}
 	if s.schedules != nil {
-		core[privacySchedules] = SchedulePrivacyLine
+		core[privacySchedules] = SchedulePrivacyLine.Format(ctx)
 	}
 	if s.tasks != nil {
 		core[privacyTasks] = TaskPrivacyLine
 	}
 	if s.transcriber != nil {
-		core[privacyVoice] = VoicePrivacyLine
+		core[privacyVoice] = VoicePrivacyLine.Format(ctx)
 	}
 	sections := sectionsFor(s.sections, principalID)
-	reply := ConversationPrivacyReply
+	reply := ConversationPrivacyReply.Format(ctx)
 	for _, key := range privacyOrder {
 		if line, found := core[key]; found {
 			reply += privacyItem + line

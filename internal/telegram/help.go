@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -32,9 +33,9 @@ const webSearchHelp = "Web search is offered while web access is on for the user
 
 // pressMessages are what a button sends as a message of its own, such as sign-in steps, keyed by
 // the button's callback data.
-var pressMessages = map[string]string{
-	notionSectionPrefix + ":" + notionConnectAction: NotionConnectInstructions,
-	googleSectionPrefix + ":" + googleConnectAction: GoogleSignInInstructions + "(a personal sign-in link follows)",
+var pressMessages = map[string]func(context.Context) string{
+	notionSectionPrefix + ":" + notionConnectAction: func(ctx context.Context) string { return NotionConnectInstructions.Format(ctx) },
+	googleSectionPrefix + ":" + googleConnectAction: func(context.Context) string { return GoogleSignInInstructions + "(a personal sign-in link follows)" },
 }
 
 // Help is the app_help tool: this app's own instructions for a principal, rendered from the same
@@ -105,9 +106,9 @@ func (s *Service) helpText(ctx context.Context, principalID, topic string) (stri
 		}
 		fmt.Fprintf(&builder, "The user sends /settings and sees:\n%s\nButtons, each opening a group: %s", text, buttonTexts(keyboard))
 	case helpTopicCommands:
-		builder.WriteString("Chat commands:" + commandList(s.botCommands()) + "\nNot in the menu but answered when typed:" + commandList(typedCommands))
+		builder.WriteString("Chat commands:" + commandList(s.botCommands(locale.From(ctx))) + "\nNot in the menu but answered when typed:" + commandList(menuCommands(locale.From(ctx), typedCommands)))
 	case helpTopicJobs:
-		fmt.Fprintf(&builder, "/jobs: %s. It lists reminders, scheduled jobs, watches, and saved routes. Each job and reminder has buttons there to pause, resume, run now, or delete it; a watch has pause, resume, and delete, and a saved route has delete.\n%s\n%s", jobsDescription(s.botCommands()), NoJobsReply, SchedulePrivacyLine)
+		fmt.Fprintf(&builder, "/jobs: %s. It lists reminders, scheduled jobs, watches, and saved routes. Each job and reminder has buttons there to pause, resume, run now, or delete it; a watch has pause, resume, and delete, and a saved route has delete.\n%s\n%s", jobsDescription(s.botCommands(locale.From(ctx))), NoJobsReply.Format(ctx), SchedulePrivacyLine.Format(ctx))
 	case helpTopicWebSearch:
 		builder.WriteString(webSearchHelp)
 	default:
@@ -124,11 +125,11 @@ func (s *Service) helpText(ctx context.Context, principalID, topic string) (stri
 			if err != nil {
 				return "", err
 			}
-			fmt.Fprintf(&builder, "Where: send /settings, then %s.\nThat page shows the user now:\n%s\nButtons on it: %s", pathTo(page, summary.name), text, buttonTexts(keyboard))
+			fmt.Fprintf(&builder, "Where: send /settings, then %s.\nThat page shows the user now:\n%s\nButtons on it: %s", pathTo(ctx, page, summary.name), text, buttonTexts(keyboard))
 			for _, row := range keyboard {
 				for _, button := range row {
 					if message, found := pressMessages[button.CallbackData]; found {
-						fmt.Fprintf(&builder, "\nPressing %s sends: %s", button.Text, message)
+						fmt.Fprintf(&builder, "\nPressing %s sends: %s", button.Text, message(ctx))
 					}
 				}
 			}
@@ -136,7 +137,7 @@ func (s *Service) helpText(ctx context.Context, principalID, topic string) (stri
 				fmt.Fprintf(&builder, "\n%s", modelCommandHelp)
 			}
 			if section.prefix() == memorySectionPrefix {
-				fmt.Fprintf(&builder, "\n%s", MemoryPrivacyLine)
+				fmt.Fprintf(&builder, "\n%s", MemoryPrivacyLine.Format(ctx))
 			}
 			if section.prefix() == mcpSectionPrefix {
 				fmt.Fprintf(&builder, "\n%s", ServicesHelp)
@@ -159,16 +160,16 @@ func helpTopicOf(section Section) string {
 }
 
 // pathTo names the buttons that lead from the overview to a section's page.
-func pathTo(page, sectionName string) string {
+func pathTo(ctx context.Context, page, sectionName string) string {
 	groupID, sectionPrefix, _ := strings.Cut(page, ".")
 	for _, group := range settingsGroups {
 		if group.id != groupID {
 			continue
 		}
 		if sectionPrefix != "" {
-			return fmt.Sprintf("press %q, then %q", group.title, sectionName)
+			return fmt.Sprintf("press %q, then %q", group.titleIn(ctx), sectionName)
 		}
-		return fmt.Sprintf("press %q", group.title)
+		return fmt.Sprintf("press %q", group.titleIn(ctx))
 	}
 	return "look at the overview"
 }

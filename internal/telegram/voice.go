@@ -11,6 +11,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/chatgpt"
 	"github.com/vladar107/home-ai-assistant/internal/connection"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 )
 
 const (
@@ -20,14 +21,17 @@ const (
 
 	voiceMarker = "[Voice message, transcribed]"
 
-	TranscriptionFailedReply = "I could not transcribe that voice message. Try again, or send it as text."
-	NoSpeechReply            = "I could not hear any speech in that recording."
-	RecordingTooLargeReply   = "That recording is too large for me to listen to; recordings must stay under 20 MB."
-	TranscriptTooLongReply   = "That recording is too long for one message. Keep voice messages under about four minutes, or split them."
-	CaptionTooLongReply      = "That recording and its caption are too long together for one message. Send the caption as a separate message, or shorten the recording."
-	UsageLimitReply          = "Your ChatGPT usage limit is reached, so I cannot do that right now. Try again later."
+	RecordingTooLargeReply = "That recording is too large for me to listen to; recordings must stay under 20 MB."
+)
+
+var (
+	TranscriptionFailedReply = locale.T("I could not transcribe that voice message. Try again, or send it as text.", "Не удалось расшифровать это голосовое сообщение. Попробуйте ещё раз или отправьте его текстом.")
+	NoSpeechReply            = locale.T("I could not hear any speech in that recording.", "В этой записи не слышно речи.")
+	TranscriptTooLongReply   = locale.T("That recording is too long for one message. Keep voice messages under about four minutes, or split them.", "Эта запись слишком длинная для одного сообщения. Записывайте голосовые сообщения не дольше примерно четырёх минут или разделяйте их.")
+	CaptionTooLongReply      = locale.T("That recording and its caption are too long together for one message. Send the caption as a separate message, or shorten the recording.", "Эта запись вместе с подписью слишком длинная для одного сообщения. Отправьте подпись отдельным сообщением или сократите запись.")
+	UsageLimitReply          = locale.T("Your ChatGPT usage limit is reached, so I cannot do that right now. Try again later.", "Лимит использования вашего ChatGPT исчерпан, поэтому сейчас это сделать нельзя. Попробуйте позже.")
 	// VoicePrivacyLine is added to /privacy while voice messages are transcribed.
-	VoicePrivacyLine = "Voice: transcribed by your own ChatGPT subscription; the recording is not kept."
+	VoicePrivacyLine = locale.T("Voice: transcribed by your own ChatGPT subscription; the recording is not kept.", "Голос: расшифровывается вашей собственной подпиской на ChatGPT; запись не сохраняется.")
 )
 
 // Transcriber turns a principal's recording into text with that principal's own subscription.
@@ -90,43 +94,43 @@ func (s *Service) transcribeWithin(parent context.Context, principalID string, i
 
 	transcript, err := s.transcriber.Transcribe(ctx, principalID, chatgpt.Audio{FileName: item.name, MimeType: item.mimeType, Data: data})
 	if err != nil {
-		reply, reason := transcriptionFailure(err)
+		reply, reason := transcriptionFailure(ctx, err)
 		s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "telegram.voice.failed", "principal_id", principalID, "reason", reason, "error", err)
 		return "", reply, reason
 	}
 	if transcript == "" {
-		return "", NoSpeechReply, "no_speech"
+		return "", NoSpeechReply.Format(ctx), "no_speech"
 	}
 	return transcript, "", ""
 }
 
 // voiceTurn builds the turn's message from a transcript and the caption, or the reply that refuses
 // one the conversation could not take.
-func voiceTurn(transcript, caption string) (string, string, string) {
+func voiceTurn(ctx context.Context, transcript, caption string) (string, string, string) {
 	message := voiceMarker + "\n" + transcript
 	if utf8.RuneCountInString(message) > conversation.MaximumMessageRunes {
-		return "", TranscriptTooLongReply, "too_long"
+		return "", TranscriptTooLongReply.Format(ctx), "too_long"
 	}
 	if caption = strings.TrimSpace(caption); caption != "" {
 		message += "\n\n" + caption
 	}
 	if utf8.RuneCountInString(message) > conversation.MaximumMessageRunes {
-		return "", CaptionTooLongReply, "caption_too_long"
+		return "", CaptionTooLongReply.Format(ctx), "caption_too_long"
 	}
 	return message, "", ""
 }
 
-func transcriptionFailure(err error) (string, string) {
+func transcriptionFailure(ctx context.Context, err error) (string, string) {
 	switch {
 	case errors.Is(err, connection.ErrNotConnected):
-		return conversation.NotConnectedReply, "not_connected"
+		return conversation.NotConnectedReply.Format(ctx), "not_connected"
 	case errors.Is(err, chatgpt.ErrUnauthorized):
-		return conversation.ReconnectReply, "unauthorized"
+		return conversation.ReconnectReply.Format(ctx), "unauthorized"
 	case errors.Is(err, chatgpt.ErrUsageLimit):
-		return UsageLimitReply, "usage_limit"
+		return UsageLimitReply.Format(ctx), "usage_limit"
 	case errors.Is(err, context.DeadlineExceeded):
-		return TranscriptionFailedReply, "timeout"
+		return TranscriptionFailedReply.Format(ctx), "timeout"
 	default:
-		return TranscriptionFailedReply, "failed"
+		return TranscriptionFailedReply.Format(ctx), "failed"
 	}
 }

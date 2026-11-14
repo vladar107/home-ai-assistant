@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/task"
 )
@@ -211,7 +212,7 @@ func TestBackgroundTaskCancelStopsTheRun(t *testing.T) {
 
 	h.push(callbackUpdate(3, 202, status.messageID, "tasks:cancel:"+id))
 	h.wantAnswer(3)
-	if edit := h.nextEdit(); edit.chatID != 202 || !strings.Contains(edit.text, TaskGoneReply) {
+	if edit := h.nextEdit(); edit.chatID != 202 || !strings.Contains(edit.text, localetest.English(TaskGoneReply)) {
 		t.Fatalf("bob's press = %+v", edit)
 	}
 	if got := h.taskColumn(id, "status"); got != task.StatusRunning {
@@ -275,7 +276,7 @@ func TestBackgroundTaskResumesAfterRestart(t *testing.T) {
 
 	h.restartTasks(*cfg)
 	waitDone(t, h.ctx, resumed)
-	if failure := h.nextMessage(); failure.replyTo != requestMessageID(1) || !strings.Contains(failure.text, task.InterruptedTwiceText) {
+	if failure := h.nextMessage(); failure.replyTo != requestMessageID(1) || !strings.Contains(failure.text, localetest.English(task.InterruptedTwiceText)) {
 		t.Fatalf("failure = %+v", failure)
 	}
 	h.wantStatusEdit(first, "Failed: Insurance letters", false)

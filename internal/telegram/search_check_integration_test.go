@@ -15,6 +15,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/judgment"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
@@ -381,7 +382,7 @@ func TestSearchCheckThroughTheRealRuntimeAndBridge(t *testing.T) {
 
 	// A fresh conversation has read nothing, so the same query runs again.
 	h.push(textUpdate(6, 101, "/new"))
-	h.wantReply(101, 6, NewSessionReply)
+	h.wantReply(101, 6, localetest.English(NewSessionReply))
 	h.push(textUpdate(7, 101, "fixture:search "+heldQuery))
 	h.wantReply(101, 7, "Searching.\n\nsaw: found: synthetic search answer")
 }

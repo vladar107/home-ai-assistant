@@ -8,22 +8,13 @@ import (
 	"strings"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
 const (
-	SessionsTitle       = "Recent conversations"
-	NoSessionsReply     = "There are no conversations to return to yet."
-	SessionGoneReply    = "That conversation is no longer available."
 	SessionCurrentReply = "That is already the current conversation."
-	SessionElsewhere    = "That conversation is open in another tab."
 	SessionNotInTab     = "That conversation is not open in another tab."
-	// SessionHere is posted in the tab that holds a conversation an Open press asked for, which
-	// moves that tab to the top of the list.
-	SessionHere = "You asked to return to this conversation. Your next message here continues it."
-	// TabSuspectReply answers an Open press whose tab did not take the line, when the tab may still
-	// exist.
-	TabSuspectReply = "That tab did not accept my message, so it may be gone. If you cannot find it, close it here; the conversation stays in /sessions."
 	// HistoryUnavailable follows a resume whose earlier messages could not be forwarded.
 	HistoryUnavailable = "I could not bring the earlier messages of this conversation into this tab."
 	untitledTab        = "Conversation from "
@@ -33,6 +24,19 @@ const (
 	sessionCloseAction   = "close"
 	sessionButtonsPerRow = 3
 	untitledSession      = "(no text)"
+)
+
+var (
+	SessionsTitle    = locale.T("Recent conversations", "Недавние разговоры")
+	NoSessionsReply  = locale.T("There are no conversations to return to yet.", "Пока нет разговоров, к которым можно вернуться.")
+	SessionGoneReply = locale.T("That conversation is no longer available.", "Этот разговор больше недоступен.")
+	SessionElsewhere = locale.T("That conversation is open in another tab.", "Этот разговор открыт в другой вкладке.")
+	// SessionHere is posted in the tab that holds a conversation an Open press asked for, which
+	// moves that tab to the top of the list.
+	SessionHere = locale.T("You asked to return to this conversation. Your next message here continues it.", "Вы попросили вернуться к этому разговору. Ваше следующее сообщение здесь продолжит его.")
+	// TabSuspectReply answers an Open press whose tab did not take the line, when the tab may still
+	// exist.
+	TabSuspectReply = locale.T("That tab did not accept my message, so it may be gone. If you cannot find it, close it here; the conversation stays in /sessions.", "Эта вкладка не приняла моё сообщение, возможно, её уже нет. Если вы не можете её найти, закройте её здесь; разговор останется в /sessions.")
 )
 
 // SessionInTab answers an Open press: the bot cannot switch the user's tab, only post in it.
@@ -69,9 +73,9 @@ func renderSessions(ctx context.Context, lane conversation.Lane, conversations C
 		return "", nil, err
 	}
 	if len(sessions) == 0 || (len(sessions) == 1 && sessions[0].Active) {
-		return NoSessionsReply, nil, nil
+		return NoSessionsReply.Format(ctx), nil, nil
 	}
-	lines := []string{SessionsTitle, ""}
+	lines := []string{SessionsTitle.Format(ctx), ""}
 	var keyboard InlineKeyboard
 	var row []InlineButton
 	for index, session := range sessions {
@@ -151,7 +155,7 @@ func (s *Service) processSessionPress(ctx context.Context, bot Bot, callback *Ca
 		if err != nil {
 			return processingResult{}, "sessions_action", err
 		}
-		followUp = resumedReply(resumed)
+		followUp = resumedReply(ctx, resumed)
 	}
 
 	text, keyboard, err := renderSessions(ctx, lane, s.conversation, bot.HasTopicsEnabled)
@@ -183,7 +187,7 @@ func (s *Service) processSessionClosePress(ctx context.Context, bot Bot, callbac
 	if err != nil {
 		return processingResult{}, "render_sessions", err
 	}
-	text, keyboard := SessionGoneReply, InlineKeyboard(nil)
+	text, keyboard := SessionGoneReply.Format(ctx), InlineKeyboard(nil)
 	if index := slices.IndexFunc(sessions, func(session conversation.SessionSummary) bool { return session.ID == sessionID }); index >= 0 {
 		text = SessionNotInTab
 		if chosen := sessions[index]; chosen.Elsewhere && bot.HasTopicsEnabled {
@@ -220,12 +224,12 @@ func (s *Service) resumeInTab(ctx context.Context, chatID int64, lane conversati
 	if chosen.Elsewhere {
 		// The line in the other tab only surfaces it; the answer here says where it went. It never
 		// falls back to the main view, which would claim a tab that is gone.
-		err := s.client.SendInTab(thread.With(ctx, chosen.ThreadID), chatID, SessionHere)
+		err := s.client.SendInTab(thread.With(ctx, chosen.ThreadID), chatID, SessionHere.Format(ctx))
 		verdict, refused := tabRefusal(err)
 		switch {
 		case refused && verdict == TabSuspect:
 			closeButton := InlineButton{Text: "Close " + strconv.Itoa(index+1), CallbackData: sessionCallback(sessionCloseAction, chosen.ID)}
-			return TabSuspectReply, InlineKeyboard{{closeButton}}, ctx, "", nil
+			return TabSuspectReply.Format(ctx), InlineKeyboard{{closeButton}}, ctx, "", nil
 		case refused:
 			logger.InfoContext(ctx, "telegram.sessions.tab_replaced", "principal_id", lane.PrincipalID, "thread_id", chosen.ThreadID)
 		case err != nil && !isPermanentAPIError(err):
@@ -260,9 +264,9 @@ func (s *Service) resumeInTab(ctx context.Context, chatID int64, lane conversati
 		if err != nil {
 			return "", nil, ctx, "sessions_action", err
 		}
-		return resumedReply(resumed), nil, ctx, "", nil
+		return resumedReply(ctx, resumed), nil, ctx, "", nil
 	}
-	followUp := resumedReply(resumed)
+	followUp := resumedReply(ctx, resumed)
 	messages, err := s.conversation.SessionMessages(ctx, lane.PrincipalID, sessionID)
 	if err == nil {
 		err = s.client.ForwardMessages(tabCtx, chatID, messages)
@@ -274,14 +278,14 @@ func (s *Service) resumeInTab(ctx context.Context, chatID int64, lane conversati
 	return followUp, nil, tabCtx, "", nil
 }
 
-func resumedReply(resumed conversation.ResumeResult) string {
+func resumedReply(ctx context.Context, resumed conversation.ResumeResult) string {
 	switch {
 	case resumed.Busy:
-		return conversation.BusyReply
+		return conversation.BusyReply.Format(ctx)
 	case resumed.Elsewhere:
-		return SessionElsewhere
+		return SessionElsewhere.Format(ctx)
 	case !resumed.Found:
-		return SessionGoneReply
+		return SessionGoneReply.Format(ctx)
 	case resumed.Current:
 		return SessionCurrentReply
 	}

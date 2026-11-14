@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 )
 
 func homeAssistantGateway(t *testing.T) string {
@@ -41,22 +43,22 @@ func TestHomeSwitchIsPerUser(t *testing.T) {
 		t.Fatalf("settings overview = %+v", overview)
 	}
 	settings := h.openSettingsPage(2, 101, settingsMessageID(1), "home")
-	if !strings.Contains(settings.text, HomeAssistantOnLine) || !slices.Contains(buttonData(settings.keyboard), "ha:off") || slices.Contains(buttonData(settings.keyboard), "ha:on") {
+	if !strings.Contains(settings.text, localetest.English(HomeAssistantOnLine)) || !slices.Contains(buttonData(settings.keyboard), "ha:off") || slices.Contains(buttonData(settings.keyboard), "ha:on") {
 		t.Fatalf("settings by default = %+v", settings)
 	}
 
 	edit := h.press(3, 101, settingsMessageID(1), "ha:off")
-	if !strings.Contains(edit.text, HomeAssistantOffLine) || buttonData(edit.keyboard)[len(buttonData(edit.keyboard))-1] != "nav:root" || !slices.Contains(buttonData(edit.keyboard), "ha:on") || slices.Contains(buttonData(edit.keyboard), "ha:off") {
+	if !strings.Contains(edit.text, localetest.English(HomeAssistantOffLine)) || buttonData(edit.keyboard)[len(buttonData(edit.keyboard))-1] != "nav:root" || !slices.Contains(buttonData(edit.keyboard), "ha:on") || slices.Contains(buttonData(edit.keyboard), "ha:off") {
 		t.Fatalf("settings after turning home off = %+v", edit)
 	}
 
 	h.requestSettings(4, 202)
-	if other := h.openSettingsPage(5, 202, settingsMessageID(4), "home"); !strings.Contains(other.text, HomeAssistantOnLine) || !slices.Contains(buttonData(other.keyboard), "ha:off") {
+	if other := h.openSettingsPage(5, 202, settingsMessageID(4), "home"); !strings.Contains(other.text, localetest.English(HomeAssistantOnLine)) || !slices.Contains(buttonData(other.keyboard), "ha:off") {
 		t.Fatalf("settings for another user = %+v", other)
 	}
 
 	h.requestSettings(6, 101)
-	if edit := h.press(7, 101, settingsMessageID(6), "ha:on"); !strings.Contains(edit.text, HomeAssistantOnLine) || !slices.Contains(buttonData(edit.keyboard), "ha:off") {
+	if edit := h.press(7, 101, settingsMessageID(6), "ha:on"); !strings.Contains(edit.text, localetest.English(HomeAssistantOnLine)) || !slices.Contains(buttonData(edit.keyboard), "ha:off") {
 		t.Fatalf("settings after turning home back on = %+v", edit)
 	}
 }

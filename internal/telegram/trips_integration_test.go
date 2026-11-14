@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/googlesim"
@@ -133,7 +134,7 @@ func TestTripCardTracksAndIgnoresForItsOwnerOnly(t *testing.T) {
 		}
 	}
 
-	if edit := h.pressCard(1, 202, card.messageID, want[0]); !strings.Contains(edit.text, TripGoneReply) || h.tripStatus(first.ID) != trip.StatusSuggested {
+	if edit := h.pressCard(1, 202, card.messageID, want[0]); !strings.Contains(edit.text, localetest.English(TripGoneReply)) || h.tripStatus(first.ID) != trip.StatusSuggested {
 		t.Fatalf("bob's press = %+v, status %s", edit, h.tripStatus(first.ID))
 	}
 
@@ -145,19 +146,19 @@ func TestTripCardTracksAndIgnoresForItsOwnerOnly(t *testing.T) {
 	if h.tripStatus(first.ID) != trip.StatusPlanned || h.countRows(`SELECT count(*) FROM scheduled_jobs WHERE job_type = ?`, schedule.TypeReminder) != 1 {
 		t.Fatalf("status %s, reminders %d", h.tripStatus(first.ID), h.countRows(`SELECT count(*) FROM scheduled_jobs`))
 	}
-	if edit := h.pressCard(3, 101, card.messageID, want[1]); !strings.Contains(edit.text, TripTrackedReply) || h.tripStatus(first.ID) != trip.StatusPlanned {
+	if edit := h.pressCard(3, 101, card.messageID, want[1]); !strings.Contains(edit.text, localetest.English(TripTrackedReply)) || h.tripStatus(first.ID) != trip.StatusPlanned {
 		t.Fatalf("stale ignore = %+v", edit)
 	}
 
 	other := h.card(second)
 	ignore := "trip:ignore:" + second.ID
-	if edit := h.pressCard(4, 101, other.messageID, ignore); !strings.Contains(edit.text, TripIgnoredReply) || h.tripStatus(second.ID) != trip.StatusDismissed {
+	if edit := h.pressCard(4, 101, other.messageID, ignore); !strings.Contains(edit.text, localetest.English(TripIgnoredReply)) || h.tripStatus(second.ID) != trip.StatusDismissed {
 		t.Fatalf("ignore = %+v", edit)
 	}
-	if edit := h.pressCard(5, 101, other.messageID, "trip:track:"+second.ID); !strings.Contains(edit.text, TripIgnoredReply) || h.tripStatus(second.ID) != trip.StatusDismissed {
+	if edit := h.pressCard(5, 101, other.messageID, "trip:track:"+second.ID); !strings.Contains(edit.text, localetest.English(TripIgnoredReply)) || h.tripStatus(second.ID) != trip.StatusDismissed {
 		t.Fatalf("stale track = %+v", edit)
 	}
-	if edit := h.pressCard(6, 101, other.messageID, "trip:track:ffffffff"); !strings.Contains(edit.text, TripGoneReply) {
+	if edit := h.pressCard(6, 101, other.messageID, "trip:track:ffffffff"); !strings.Contains(edit.text, localetest.English(TripGoneReply)) {
 		t.Fatalf("unknown trip = %+v", edit)
 	}
 }
@@ -171,7 +172,7 @@ func TestTripsSwitchNeedsGoogleAndManagesItsJob(t *testing.T) {
 	h.requestSettings(1, 101)
 	messageID := settingsMessageID(1)
 	page := h.openSettingsPage(2, 101, messageID, "tools")
-	if !strings.Contains(page.text, TripsNeedsGoogleLine) || slices.Contains(buttonData(page.keyboard), "trips:on") {
+	if !strings.Contains(page.text, localetest.English(TripsNeedsGoogleLine)) || slices.Contains(buttonData(page.keyboard), "trips:on") {
 		t.Fatalf("page without Google = %+v", page)
 	}
 	if page = h.press(3, 101, messageID, "trips:on"); h.countRows(`SELECT count(*) FROM scheduled_jobs`) != 0 {
@@ -182,12 +183,12 @@ func TestTripsSwitchNeedsGoogleAndManagesItsJob(t *testing.T) {
 		t.Fatalf("connected reply = %q", reply)
 	}
 	page = h.openSettingsPage(20, 101, settingsMessageID(10), "tools")
-	if !strings.Contains(page.text, TripsOffLine) || !slices.Contains(buttonData(page.keyboard), "trips:on") {
+	if !strings.Contains(page.text, localetest.English(TripsOffLine)) || !slices.Contains(buttonData(page.keyboard), "trips:on") {
 		t.Fatalf("page with Google = %+v", page)
 	}
 	messageID = settingsMessageID(10)
 	page = h.press(21, 101, messageID, "trips:on")
-	if !strings.Contains(page.text, TripsOnLine) || !slices.Contains(buttonData(page.keyboard), "trips:off") {
+	if !strings.Contains(page.text, localetest.English(TripsOnLine)) || !slices.Contains(buttonData(page.keyboard), "trips:off") {
 		t.Fatalf("page after on = %+v", page)
 	}
 	h.press(22, 101, messageID, "trips:on")
@@ -205,7 +206,7 @@ func TestTripsSwitchNeedsGoogleAndManagesItsJob(t *testing.T) {
 	}
 
 	page = h.press(23, 101, messageID, "trips:off")
-	if !strings.Contains(page.text, TripsOffLine) || h.countRows(`SELECT count(*) FROM scheduled_jobs`) != 0 {
+	if !strings.Contains(page.text, localetest.English(TripsOffLine)) || h.countRows(`SELECT count(*) FROM scheduled_jobs`) != 0 {
 		t.Fatalf("page after off = %+v", page)
 	}
 }
@@ -232,11 +233,11 @@ func TestTripsSwitchScansAtOnceAndScanNowScansAgain(t *testing.T) {
 	messageID := settingsMessageID(10)
 	h.openSettingsPage(11, 101, messageID, "tools")
 	page := h.press(12, 101, messageID, "trips:on")
-	if !strings.Contains(page.text, TripsScanningNote) || !slices.Contains(buttonData(page.keyboard), "trips:scan") || manualRuns() != 1 {
+	if !strings.Contains(page.text, localetest.English(TripsScanningNote)) || !slices.Contains(buttonData(page.keyboard), "trips:scan") || manualRuns() != 1 {
 		t.Fatalf("page after on = %+v, manual runs %d", page, manualRuns())
 	}
 	wantQuietReport()
-	if page = h.press(13, 101, messageID, "trips:on"); strings.Contains(page.text, TripsScanningNote) || manualRuns() != 1 {
+	if page = h.press(13, 101, messageID, "trips:on"); strings.Contains(page.text, localetest.English(TripsScanningNote)) || manualRuns() != 1 {
 		t.Fatalf("a second on press = %+v, manual runs %d", page, manualRuns())
 	}
 
@@ -247,13 +248,13 @@ func TestTripsSwitchScansAtOnceAndScanNowScansAgain(t *testing.T) {
 		t.Fatalf("scan while paused = %+v, manual runs %d", page, manualRuns())
 	}
 	h.clock.Set(t, "2026-09-28T08:05:00+02:00")
-	if page = h.press(15, 101, messageID, "trips:on"); !strings.Contains(page.text, TripsScanningNote) || manualRuns() != 2 {
+	if page = h.press(15, 101, messageID, "trips:on"); !strings.Contains(page.text, localetest.English(TripsScanningNote)) || manualRuns() != 2 {
 		t.Fatalf("page after resume = %+v, manual runs %d", page, manualRuns())
 	}
 	wantQuietReport()
 
 	h.clock.Set(t, "2026-09-28T08:10:00+02:00")
-	if page = h.press(16, 101, messageID, "trips:scan"); !strings.Contains(page.text, TripsScanningNote) || manualRuns() != 3 {
+	if page = h.press(16, 101, messageID, "trips:scan"); !strings.Contains(page.text, localetest.English(TripsScanningNote)) || manualRuns() != 3 {
 		t.Fatalf("page after scan now = %+v, manual runs %d", page, manualRuns())
 	}
 	wantQuietReport()
@@ -286,17 +287,17 @@ func TestTripsScanNowWaitsForTheScanUnderWay(t *testing.T) {
 	h.requestSettings(10, 101)
 	messageID := settingsMessageID(10)
 	h.openSettingsPage(11, 101, messageID, "tools")
-	if page := h.press(12, 101, messageID, "trips:on"); !strings.Contains(page.text, TripsScanningNote) || manualRuns() != 1 {
+	if page := h.press(12, 101, messageID, "trips:on"); !strings.Contains(page.text, localetest.English(TripsScanningNote)) || manualRuns() != 1 {
 		t.Fatalf("page after on = %+v, manual runs %d", page, manualRuns())
 	}
 	h.clock.Set(t, "2026-09-28T08:05:00+02:00")
-	if page := h.press(13, 101, messageID, "trips:scan"); !strings.Contains(page.text, TripsBusyNote) || manualRuns() != 1 {
+	if page := h.press(13, 101, messageID, "trips:scan"); !strings.Contains(page.text, localetest.English(TripsBusyNote)) || manualRuns() != 1 {
 		t.Fatalf("scan now during a scan = %+v, manual runs %d", page, manualRuns())
 	}
 	if changed, err := h.scheduler.SetEnabled(h.ctx, "alice", id, false); err != nil || !changed {
 		t.Fatalf("pause: %v %v", changed, err)
 	}
-	if page := h.press(14, 101, messageID, "trips:on"); !strings.Contains(page.text, TripsBusyNote) || manualRuns() != 1 {
+	if page := h.press(14, 101, messageID, "trips:on"); !strings.Contains(page.text, localetest.English(TripsBusyNote)) || manualRuns() != 1 {
 		t.Fatalf("resume during a scan = %+v, manual runs %d", page, manualRuns())
 	}
 
@@ -305,7 +306,7 @@ func TestTripsScanNowWaitsForTheScanUnderWay(t *testing.T) {
 		t.Fatalf("report = %+v", report)
 	}
 	h.waitRun(id, schedule.StatusDelivered)
-	if page := h.press(15, 101, messageID, "trips:scan"); !strings.Contains(page.text, TripsScanningNote) || manualRuns() != 2 {
+	if page := h.press(15, 101, messageID, "trips:scan"); !strings.Contains(page.text, localetest.English(TripsScanningNote)) || manualRuns() != 2 {
 		t.Fatalf("scan now after the scan = %+v, manual runs %d", page, manualRuns())
 	}
 }

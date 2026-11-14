@@ -9,13 +9,11 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/backlog"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 )
 
 const (
 	BacklogTitle      = "Backlog"
-	NoBacklogReply    = "Your backlog is empty. Tell me in conversation, for example: add to the backlog that you should answer weather questions with a chart."
-	BacklogGoneReply  = "That item is no longer open."
-	BacklogHelpLine   = "/backlog export sends your ideas to paste into a development session."
 	BacklogExportHead = "# Assistant backlog"
 
 	backlogExportArgument = "export"
@@ -26,6 +24,12 @@ const (
 	backlogPageAction     = "page"
 
 	backlogItemsPerPage = 8
+)
+
+var (
+	NoBacklogReply   = locale.T("Your backlog is empty. Tell me in conversation, for example: add to the backlog that you should answer weather questions with a chart.", "Бэклог пуст. Расскажите мне в разговоре, например: добавь в бэклог, что на вопросы о погоде нужно отвечать с графиком.")
+	BacklogGoneReply = locale.T("That item is no longer open.", "Этот пункт больше не открыт.")
+	BacklogHelpLine  = locale.T("/backlog export sends your ideas to paste into a development session.", "/backlog export присылает ваши идеи, чтобы вставить их в сессию разработки.")
 )
 
 // BacklogController is implemented by the backlog service; nil leaves /backlog out.
@@ -54,7 +58,7 @@ func renderBacklog(ctx context.Context, principalID string, controller BacklogCo
 		return "", nil, err
 	}
 	if len(items) == 0 {
-		return NoBacklogReply, nil, nil
+		return NoBacklogReply.Format(ctx), nil, nil
 	}
 	now := controller.Now()
 	pages := (len(items) + backlogItemsPerPage - 1) / backlogItemsPerPage
@@ -102,9 +106,9 @@ func backlogAge(created, now time.Time) string {
 
 // backlogExport is the open items as Markdown, written to be pasted into a development session.
 // Headings stay literal in Telegram, so a copied message keeps its structure.
-func backlogExport(items []backlog.Item, day func(time.Time) string) string {
+func backlogExport(ctx context.Context, items []backlog.Item, day func(time.Time) string) string {
 	if len(items) == 0 {
-		return NoBacklogReply
+		return NoBacklogReply.Format(ctx)
 	}
 	var builder strings.Builder
 	builder.WriteString(BacklogExportHead)
@@ -123,7 +127,7 @@ func (s *Service) sendBacklogExport(ctx context.Context, message *Message, princ
 	if err != nil {
 		return processingResult{}, "handle_command", err
 	}
-	chunks := conversation.SplitReply(backlogExport(items, s.backlog.Day))
+	chunks := conversation.SplitReply(backlogExport(ctx, items, s.backlog.Day))
 	for _, chunk := range chunks[:len(chunks)-1] {
 		if err := s.client.SendReply(ctx, message.Chat.ID, message.MessageID, chunk); err != nil {
 			if isPermanentAPIError(err) {
@@ -199,7 +203,7 @@ func (s *Service) processBacklogPress(ctx context.Context, callback *CallbackQue
 	}
 	var followUp string
 	if press.action != backlogPageAction && !changed {
-		followUp = BacklogGoneReply
+		followUp = BacklogGoneReply.Format(ctx)
 	}
 
 	text, keyboard, err := renderBacklog(ctx, principalID, s.backlog, press.page)

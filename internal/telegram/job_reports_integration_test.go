@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
@@ -129,7 +130,7 @@ func TestJobReportsReachLaterTurns(t *testing.T) {
 	}
 
 	h.push(textUpdate(5, 101, "/new"))
-	h.wantReply(101, 5, NewSessionReply)
+	h.wantReply(101, 5, localetest.English(NewSessionReply))
 	h.push(textUpdate(6, 101, "the report this morning"))
 	fresh := receive(t, h.ctx, runtime.calls)
 	if !strings.Contains(fresh.request.Message, "report id "+firstID) || !strings.Contains(fresh.request.Message, "report id "+secondID) ||

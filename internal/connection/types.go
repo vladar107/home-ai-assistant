@@ -3,14 +3,19 @@ package connection
 import (
 	"context"
 	"time"
+
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 )
 
 const (
-	ConnectedReply           = "Your model subscription is connected."
-	ConnectDeniedReply       = "The connection was denied. Use /settings to try again."
-	ConnectExpiredReply      = "The connection code expired. Use /settings to get a new one."
-	ConnectFailedReply       = "The connection could not be completed. Use /settings to try again."
-	AccountAlreadyBoundReply = "That ChatGPT account is already connected to another user of this bot."
+	ConnectFailedReply = "The connection could not be completed. Use /settings to try again."
+)
+
+var (
+	ConnectedReply           = locale.T("Your model subscription is connected.", "Ваша подписка на модель подключена.")
+	ConnectDeniedReply       = locale.T("The connection was denied. Use /settings to try again.", "В подключении отказано. Попробуйте ещё раз через /settings.")
+	ConnectExpiredReply      = locale.T("The connection code expired. Use /settings to get a new one.", "Срок действия кода подключения истёк. Получите новый через /settings.")
+	AccountAlreadyBoundReply = locale.T("That ChatGPT account is already connected to another user of this bot.", "Этот аккаунт ChatGPT уже подключён у другого пользователя этого бота.")
 )
 
 // Ceremony describes a started device-code login the user must complete elsewhere.

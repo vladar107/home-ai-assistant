@@ -15,6 +15,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/intake"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/googlesim"
@@ -185,7 +186,7 @@ func (h *inboxHarness) checkTurn(action string, turn func(runtimeCall) string) s
 		}
 	}
 	h.clock.Set(h.t, h.clock.Now().Add(5*time.Minute).Format(time.RFC3339))
-	if page := h.press(h.update(), 101, h.settings, "inbox:"+action); !strings.Contains(page.text, InboxCheckingNote) {
+	if page := h.press(h.update(), 101, h.settings, "inbox:"+action); !strings.Contains(page.text, localetest.English(InboxCheckingNote)) {
 		h.t.Fatalf("page after %s = %q", action, page.text)
 	}
 	call := receive(h.t, h.ctx, h.runtime.calls)
@@ -451,7 +452,7 @@ func TestInboxSwitchNeedsMailAndManagesItsJob(t *testing.T) {
 	h.start()
 	h.requestSettings(1, 101)
 	page := h.openSettingsPage(2, 101, settingsMessageID(1), "tools")
-	if !strings.Contains(page.text, InboxNeedsMailLine) || slices.Contains(buttonData(page.keyboard), "inbox:on") {
+	if !strings.Contains(page.text, localetest.English(InboxNeedsMailLine)) || slices.Contains(buttonData(page.keyboard), "inbox:on") {
 		t.Fatalf("page without mail = %+v", page)
 	}
 	if page = h.press(3, 101, settingsMessageID(1), "inbox:on"); h.countRows(`SELECT count(*) FROM scheduled_jobs`) != 0 {
@@ -460,16 +461,16 @@ func TestInboxSwitchNeedsMailAndManagesItsJob(t *testing.T) {
 
 	h.connectGoogle(sim, 10, 101, aliceMailbox, googlesim.Grant{Calendar: true})
 	h.requestSettings(20, 101)
-	if page = h.openSettingsPage(21, 101, settingsMessageID(20), "tools"); !strings.Contains(page.text, InboxNeedsMailLine) {
+	if page = h.openSettingsPage(21, 101, settingsMessageID(20), "tools"); !strings.Contains(page.text, localetest.English(InboxNeedsMailLine)) {
 		t.Fatalf("page with calendar only = %+v", page)
 	}
 	h.connectGoogle(sim, 30, 101, "alice@work.example", googlesim.Grant{Mail: true})
 	h.requestSettings(40, 101)
 	page = h.openSettingsPage(41, 101, settingsMessageID(40), "tools")
-	if !strings.Contains(page.text, InboxOffLine) || !slices.Contains(buttonData(page.keyboard), "inbox:on") {
+	if !strings.Contains(page.text, localetest.English(InboxOffLine)) || !slices.Contains(buttonData(page.keyboard), "inbox:on") {
 		t.Fatalf("page with mail = %+v", page)
 	}
-	if page = h.press(42, 101, settingsMessageID(40), "inbox:on"); !strings.Contains(page.text, InboxOnLine) || !strings.Contains(page.text, InboxCheckingNote) {
+	if page = h.press(42, 101, settingsMessageID(40), "inbox:on"); !strings.Contains(page.text, localetest.English(InboxOnLine)) || !strings.Contains(page.text, localetest.English(InboxCheckingNote)) {
 		t.Fatalf("page after on = %+v", page)
 	}
 	call := receive(t, h.ctx, runtime.calls)
@@ -491,7 +492,7 @@ func TestInboxSwitchNeedsMailAndManagesItsJob(t *testing.T) {
 		t.Fatalf("bob's jobs = %+v %v", bobs, err)
 	}
 
-	if page = h.press(43, 101, settingsMessageID(40), "inbox:off"); !strings.Contains(page.text, InboxOffLine) || h.countRows(`SELECT count(*) FROM scheduled_jobs`) != 0 {
+	if page = h.press(43, 101, settingsMessageID(40), "inbox:off"); !strings.Contains(page.text, localetest.English(InboxOffLine)) || h.countRows(`SELECT count(*) FROM scheduled_jobs`) != 0 {
 		t.Fatalf("page after off = %+v", page)
 	}
 	// Turning it off forgets where it read to and what waited, so turning it on again starts from

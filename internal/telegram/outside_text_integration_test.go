@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	"github.com/vladar107/home-ai-assistant/internal/memory"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
@@ -59,7 +60,7 @@ func TestNotionAndNASReadsAreOutsideContent(t *testing.T) {
 		updateID := int64(2*index + 1)
 		if index > 0 {
 			h.push(textUpdate(updateID-1, 101, "/new"))
-			h.wantReply(101, updateID-1, NewSessionReply)
+			h.wantReply(101, updateID-1, localetest.English(NewSessionReply))
 		}
 		h.push(textUpdate(updateID, 101, "read it"))
 		call := receive(t, h.ctx, runtime.calls)

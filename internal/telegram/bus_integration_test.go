@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 )
 
@@ -59,30 +60,30 @@ func TestBusesSwitchControlsToolsPerUser(t *testing.T) {
 
 	wantBuses(offered(1, 101), true)
 	h.push(textUpdate(2, 101, "/privacy"))
-	h.wantReply(101, 2, privacyLines(AttachmentPrivacyLine, SchedulePrivacyLine, BusPrivacyLine+" "+BusPlanningPrivacyLine, VoicePrivacyLine, MemoryPrivacyLine))
+	h.wantReply(101, 2, privacyLines(localetest.English(AttachmentPrivacyLine), localetest.English(SchedulePrivacyLine), localetest.English(BusPrivacyLine)+" "+localetest.English(BusPlanningPrivacyLine), localetest.English(VoicePrivacyLine), localetest.English(MemoryPrivacyLine)))
 
 	overview := h.requestSettings(3, 101)
 	if !strings.Contains(overview.text, "Everyday tools: Buses on") || !slices.Contains(buttonData(overview.keyboard), "nav:tools") {
 		t.Fatalf("settings overview = %+v", overview)
 	}
 	settings := h.openSettingsPage(4, 101, settingsMessageID(3), "tools")
-	if !strings.Contains(settings.text, BusOnLine) || !strings.Contains(settings.text, BusPlanningLine) ||
+	if !strings.Contains(settings.text, localetest.English(BusOnLine)) || !strings.Contains(settings.text, localetest.English(BusPlanningLine)) ||
 		!slices.Contains(buttonData(settings.keyboard), "bus:off") || slices.Contains(buttonData(settings.keyboard), "bus:on") {
 		t.Fatalf("settings by default = %+v", settings)
 	}
 
 	edit := h.press(5, 101, settingsMessageID(3), "bus:off")
-	if !strings.Contains(edit.text, BusOffLine) || !slices.Contains(buttonData(edit.keyboard), "bus:on") || !slices.Contains(buttonData(edit.keyboard), "nav:root") || slices.Contains(buttonData(edit.keyboard), "bus:off") {
+	if !strings.Contains(edit.text, localetest.English(BusOffLine)) || !slices.Contains(buttonData(edit.keyboard), "bus:on") || !slices.Contains(buttonData(edit.keyboard), "nav:root") || slices.Contains(buttonData(edit.keyboard), "bus:off") {
 		t.Fatalf("settings after turning buses off = %+v", edit)
 	}
 	wantBuses(offered(6, 101), false)
 	h.push(textUpdate(7, 101, "/privacy"))
-	h.wantReply(101, 7, privacyLines(AttachmentPrivacyLine, SchedulePrivacyLine, VoicePrivacyLine, MemoryPrivacyLine))
+	h.wantReply(101, 7, privacyLines(localetest.English(AttachmentPrivacyLine), localetest.English(SchedulePrivacyLine), localetest.English(VoicePrivacyLine), localetest.English(MemoryPrivacyLine)))
 
 	wantBuses(offered(8, 202), true)
 
 	h.requestSettings(9, 101)
-	if edit := h.press(10, 101, settingsMessageID(9), "bus:on"); !strings.Contains(edit.text, BusOnLine) || !slices.Contains(buttonData(edit.keyboard), "bus:off") {
+	if edit := h.press(10, 101, settingsMessageID(9), "bus:on"); !strings.Contains(edit.text, localetest.English(BusOnLine)) || !slices.Contains(buttonData(edit.keyboard), "bus:off") {
 		t.Fatalf("settings after turning buses back on = %+v", edit)
 	}
 	wantBuses(offered(11, 101), true)

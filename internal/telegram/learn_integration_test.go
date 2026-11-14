@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	"github.com/vladar107/home-ai-assistant/internal/memory"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
@@ -93,10 +94,10 @@ func TestLearningOffLeavesTheReconsiderTurnWithoutALesson(t *testing.T) {
 
 	h.requestSettings(1, 101)
 	page := h.openSettingsPage(2, 101, settingsMessageID(1), "memory")
-	if !strings.Contains(page.text, MemoryLearnOnLine) {
+	if !strings.Contains(page.text, localetest.English(MemoryLearnOnLine)) {
 		t.Fatalf("memory page = %+v", page)
 	}
-	if off := h.press(3, 101, settingsMessageID(1), "memory:learn_off"); !strings.Contains(off.text, MemoryLearnOffLine) || !strings.Contains(off.text, MemoryOnLine) {
+	if off := h.press(3, 101, settingsMessageID(1), "memory:learn_off"); !strings.Contains(off.text, localetest.English(MemoryLearnOffLine)) || !strings.Contains(off.text, localetest.English(MemoryOnLine)) {
 		t.Fatalf("after turning learning off = %+v", off)
 	}
 

@@ -5,16 +5,20 @@ import (
 	"errors"
 
 	"github.com/vladar107/home-ai-assistant/internal/export"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
 const (
-	ExportReply = "Here is your export: what you set up and keep here, such as your memory, jobs, watches, places, and projects. " +
-		"It holds private data, and Telegram keeps the files it carries on its servers, as it keeps this chat, so keep the file somewhere safe. " +
-		"Secrets, connections, and conversations are never in it. To restore from it, send it back with /restore as its caption."
 	ExportFailedReply  = "Your export could not be made. Try again later."
-	RestoreHelpReply   = "To restore from an export, send me the export file with /restore as its caption, or reply /restore to the message that holds it. I show everything it would add before anything changes."
 	RestoreFailedReply = "That file could not be checked right now. Try again later."
+)
+
+var (
+	ExportReply = locale.T("Here is your export: what you set up and keep here, such as your memory, jobs, watches, places, and projects. "+
+		"It holds private data, and Telegram keeps the files it carries on its servers, as it keeps this chat, so keep the file somewhere safe. "+
+		"Secrets, connections, and conversations are never in it. To restore from it, send it back with /restore as its caption.", "Вот ваш экспорт: то, что вы настроили и храните здесь, например память, задания, наблюдения, места и проекты. В нём личные данные, а Telegram хранит файлы, которые передаёт, на своих серверах, как хранит и этот чат, поэтому сохраните файл в надёжном месте. Секретов, подключений и разговоров в нём никогда нет. Чтобы восстановить данные из него, отправьте его обратно с подписью /restore.")
+	RestoreHelpReply = locale.T("To restore from an export, send me the export file with /restore as its caption, or reply /restore to the message that holds it. I show everything it would add before anything changes.", "Чтобы восстановить данные из экспорта, отправьте мне файл экспорта с подписью /restore или ответьте /restore на сообщение с этим файлом. Прежде чем что-либо изменится, я покажу всё, что будет добавлено.")
 )
 
 // ExportController makes a user's export and restores one; nil leaves /export and /restore out.
@@ -30,7 +34,7 @@ type ExportController interface {
 
 // processExport answers /export: what the file holds and where Telegram keeps it, then the file.
 func (s *Service) processExport(ctx context.Context, message *Message, principalID string) (processingResult, string, error) {
-	result, failure, err := s.sendCommandReply(ctx, message, principalID, "export", ExportReply, nil)
+	result, failure, err := s.sendCommandReply(ctx, message, principalID, "export", ExportReply.Format(ctx), nil)
 	if err != nil || result.event != "telegram.command.handled" {
 		return result, failure, err
 	}
@@ -57,7 +61,7 @@ func restoreDocument(message *Message) *MediaFile {
 func (s *Service) processRestore(ctx context.Context, message *Message, principalID string) (processingResult, string, error) {
 	document := restoreDocument(message)
 	if document == nil || document.FileID == "" {
-		return s.sendCommandReply(ctx, message, principalID, "restore", RestoreHelpReply, nil)
+		return s.sendCommandReply(ctx, message, principalID, "restore", RestoreHelpReply.Format(ctx), nil)
 	}
 	if document.FileSize > export.MaximumFileBytes {
 		return s.sendCommandReply(ctx, message, principalID, "restore", export.ErrTooLarge.Text, nil)

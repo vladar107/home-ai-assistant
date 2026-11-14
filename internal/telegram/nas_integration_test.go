@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 )
 
@@ -59,12 +60,12 @@ func TestSettingsShowsNASFoldersAndSavingSwitch(t *testing.T) {
 	}
 
 	enabled := h.press(3, 101, settingsMessageID(1), "nas:writes-on")
-	if !strings.Contains(enabled.text, "Saving on, to inbox.") || !strings.Contains(enabled.text, NASWritesOnReply) || !slices.Contains(buttonData(enabled.keyboard), "nas:writes-off") || !slices.Contains(buttonData(enabled.keyboard), "nav:root") {
+	if !strings.Contains(enabled.text, "Saving on, to inbox.") || !strings.Contains(enabled.text, localetest.English(NASWritesOnReply)) || !slices.Contains(buttonData(enabled.keyboard), "nas:writes-off") || !slices.Contains(buttonData(enabled.keyboard), "nav:root") {
 		t.Fatalf("settings after enabling saving = %+v", enabled)
 	}
 
 	disabled := h.press(4, 101, settingsMessageID(1), "nas:writes-off")
-	if !strings.Contains(disabled.text, "Saving off, to inbox.") || !strings.Contains(disabled.text, NASWritesOffReply) {
+	if !strings.Contains(disabled.text, "Saving off, to inbox.") || !strings.Contains(disabled.text, localetest.English(NASWritesOffReply)) {
 		t.Fatalf("settings after disabling saving = %+v", disabled)
 	}
 }
@@ -78,7 +79,7 @@ func TestSettingsHidesSavingSwitchWithoutAWritableRoot(t *testing.T) {
 
 	h.requestSettings(1, 101)
 	settings := h.openSettingsPage(2, 101, settingsMessageID(1), "home")
-	if !strings.Contains(settings.text, "NAS: home (read-only).") || !strings.Contains(settings.text, NASSavingUnavailableLine) {
+	if !strings.Contains(settings.text, "NAS: home (read-only).") || !strings.Contains(settings.text, localetest.English(NASSavingUnavailableLine)) {
 		t.Fatalf("settings without a writable root = %+v", settings)
 	}
 	if slices.Contains(buttonData(settings.keyboard), "nas:writes-on") {
@@ -98,7 +99,7 @@ func TestSettingsReportsNoNASFoldersForAnUnconfiguredUser(t *testing.T) {
 
 	h.requestSettings(1, 101)
 	settings := h.openSettingsPage(2, 101, settingsMessageID(1), "home")
-	if !strings.Contains(settings.text, NASNoAccessLine) {
+	if !strings.Contains(settings.text, localetest.English(NASNoAccessLine)) {
 		t.Fatalf("settings for an unconfigured user = %+v", settings)
 	}
 	if slices.Contains(buttonData(settings.keyboard), "nas:writes-on") {

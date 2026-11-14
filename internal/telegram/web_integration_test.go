@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/runtime/pi"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
@@ -144,14 +145,14 @@ func TestWebAccessSwitchControlsSearchAndWebTools(t *testing.T) {
 	h.waitState(1, "delivered")
 	assertWebTurn(t, latestReport(t, profiles, "alice"), extension)
 	h.push(textUpdate(2, 101, "/privacy"))
-	h.wantReply(101, 2, privacyLines(AttachmentPrivacyLine, SchedulePrivacyLine, WebPrivacyLine, VoicePrivacyLine, MemoryPrivacyLine))
+	h.wantReply(101, 2, privacyLines(localetest.English(AttachmentPrivacyLine), localetest.English(SchedulePrivacyLine), localetest.English(WebPrivacyLine), localetest.English(VoicePrivacyLine), localetest.English(MemoryPrivacyLine)))
 
 	overview := h.requestSettings(3, 101)
 	if !strings.Contains(overview.text, "Everyday tools: Web on") || !slices.Contains(buttonData(overview.keyboard), "nav:tools") {
 		t.Fatalf("settings overview = %+v", overview)
 	}
 	settings := h.openSettingsPage(4, 101, settingsMessageID(3), "tools")
-	if !strings.Contains(settings.text, WebOnLine) || !slices.Contains(buttonData(settings.keyboard), "web:off") || slices.Contains(buttonData(settings.keyboard), "web:on") {
+	if !strings.Contains(settings.text, localetest.English(WebOnLine)) || !slices.Contains(buttonData(settings.keyboard), "web:off") || slices.Contains(buttonData(settings.keyboard), "web:on") {
 		t.Fatalf("settings by default = %+v", settings)
 	}
 
@@ -172,7 +173,7 @@ func TestWebAccessSwitchControlsSearchAndWebTools(t *testing.T) {
 	assertWebTurn(t, latestReport(t, profiles, "alice"), extension)
 
 	edit := h.press(7, 101, settingsMessageID(3), "web:off")
-	if !strings.Contains(edit.text, WebOffLine) || !slices.Contains(buttonData(edit.keyboard), "web:on") || !slices.Contains(buttonData(edit.keyboard), "nav:root") || slices.Contains(buttonData(edit.keyboard), "web:off") {
+	if !strings.Contains(edit.text, localetest.English(WebOffLine)) || !slices.Contains(buttonData(edit.keyboard), "web:on") || !slices.Contains(buttonData(edit.keyboard), "nav:root") || slices.Contains(buttonData(edit.keyboard), "web:off") {
 		t.Fatalf("settings after turning web access off = %+v", edit)
 	}
 	h.push(textUpdate(8, 101, "hello again"))
@@ -180,17 +181,17 @@ func TestWebAccessSwitchControlsSearchAndWebTools(t *testing.T) {
 	h.waitState(8, "delivered")
 	assertSearchless(t, latestReport(t, profiles, "alice"))
 	h.push(textUpdate(9, 101, "/privacy"))
-	h.wantReply(101, 9, privacyLines(AttachmentPrivacyLine, SchedulePrivacyLine, VoicePrivacyLine, MemoryPrivacyLine))
+	h.wantReply(101, 9, privacyLines(localetest.English(AttachmentPrivacyLine), localetest.English(SchedulePrivacyLine), localetest.English(VoicePrivacyLine), localetest.English(MemoryPrivacyLine)))
 
 	h.push(textUpdate(10, 202, "hello"))
 	h.wantReply(202, 10, "reply: hello")
 	h.waitState(10, "delivered")
 	assertWebTurn(t, latestReport(t, profiles, "bob"), extension)
 	h.push(textUpdate(11, 202, "/privacy"))
-	h.wantReply(202, 11, privacyLines(AttachmentPrivacyLine, SchedulePrivacyLine, WebPrivacyLine, VoicePrivacyLine, MemoryPrivacyLine))
+	h.wantReply(202, 11, privacyLines(localetest.English(AttachmentPrivacyLine), localetest.English(SchedulePrivacyLine), localetest.English(WebPrivacyLine), localetest.English(VoicePrivacyLine), localetest.English(MemoryPrivacyLine)))
 
 	h.requestSettings(12, 101)
-	if edit := h.press(13, 101, settingsMessageID(12), "web:on"); !strings.Contains(edit.text, WebOnLine) || !slices.Contains(buttonData(edit.keyboard), "web:off") {
+	if edit := h.press(13, 101, settingsMessageID(12), "web:on"); !strings.Contains(edit.text, localetest.English(WebOnLine)) || !slices.Contains(buttonData(edit.keyboard), "web:off") {
 		t.Fatalf("settings after turning web access back on = %+v", edit)
 	}
 	// The search earlier in this conversation read outside content, and search stays available:
@@ -200,7 +201,7 @@ func TestWebAccessSwitchControlsSearchAndWebTools(t *testing.T) {
 	h.waitState(14, "delivered")
 	assertWebTurn(t, latestReport(t, profiles, "alice"), extension)
 	h.push(textUpdate(15, 101, "/new"))
-	h.wantReply(101, 15, NewSessionReply)
+	h.wantReply(101, 15, localetest.English(NewSessionReply))
 	h.push(textUpdate(16, 101, "hello after new"))
 	h.wantReply(101, 16, "reply: hello after new")
 	h.waitState(16, "delivered")

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 )
 
@@ -168,7 +169,7 @@ func TestPDFIsReadAsTextFromACacheThatNewRemoves(t *testing.T) {
 	h.waitState(1, "delivered")
 
 	h.push(textUpdate(2, 101, "/new"))
-	h.wantReply(101, 2, NewSessionReply)
+	h.wantReply(101, 2, localetest.English(NewSessionReply))
 	if files := countFiles(t, h.attachmentsDir); files != 0 {
 		t.Fatalf("attachment files on disk = %d after /new, want neither the PDF nor its text", files)
 	}
@@ -211,7 +212,7 @@ func TestUnsupportedAndOversizedMediaAreAnswered(t *testing.T) {
 	video := textUpdate(1, 101, "")
 	video.Message.Video = &MediaFile{FileID: "video-1", MimeType: "video/mp4", FileSize: 4096}
 	h.push(video)
-	h.wantReply(101, 1, UnsupportedVideoReply)
+	h.wantReply(101, 1, localetest.English(UnsupportedVideoReply))
 
 	h.push(documentUpdate(2, 101, "", MediaFile{
 		FileID: "doc-huge", FileName: "backup.zip", MimeType: "application/zip", FileSize: 21 << 20,
@@ -248,7 +249,7 @@ func TestFilesOfARefusedMessageAreNotKept(t *testing.T) {
 	h.push(documentUpdate(2, 101, "and this", MediaFile{
 		FileID: "doc-b", FileName: "b.txt", MimeType: "text/plain", FileSize: int64(len(second)),
 	}))
-	h.wantReply(101, 2, conversation.BusyReply)
+	h.wantReply(101, 2, localetest.English(conversation.BusyReply))
 	if files := countFiles(t, h.attachmentsDir); files != 1 {
 		t.Fatalf("attachment files on disk = %d, want only the accepted one", files)
 	}
@@ -278,7 +279,7 @@ func TestNewSessionRemovesStoredAttachments(t *testing.T) {
 	}
 
 	h.push(textUpdate(2, 101, "/new"))
-	h.wantReply(101, 2, NewSessionReply)
+	h.wantReply(101, 2, localetest.English(NewSessionReply))
 
 	if stored := storedAttachments(t, h); stored != 0 {
 		t.Fatalf("stored attachments = %d after /new, want none", stored)

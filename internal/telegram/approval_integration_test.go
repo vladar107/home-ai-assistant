@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/notionsim"
@@ -34,7 +35,7 @@ func (h *conversationHarness) enableNotionWrites(settingsUpdate, pressUpdate, us
 	h.t.Helper()
 	h.requestSettings(settingsUpdate, userID)
 	edit := h.press(pressUpdate, userID, settingsMessageID(settingsUpdate), "notion:writes-on")
-	if !strings.Contains(edit.text, NotionWritesOnReply) {
+	if !strings.Contains(edit.text, localetest.English(NotionWritesOnReply)) {
 		h.t.Fatalf("settings after enabling writes = %+v", edit)
 	}
 	return edit
@@ -299,7 +300,7 @@ func TestNotionWritesAreProposedConfirmedAndExecutedOnce(t *testing.T) {
 
 	// Writes off again removes the write tools.
 	h.requestSettings(20, 101)
-	if edit := h.press(21, 101, settingsMessageID(20), "notion:writes-off"); !strings.Contains(edit.text, NotionWritesOffReply) {
+	if edit := h.press(21, 101, settingsMessageID(20), "notion:writes-off"); !strings.Contains(edit.text, localetest.English(NotionWritesOffReply)) {
 		t.Fatalf("settings after disabling writes = %+v", edit)
 	}
 	h.push(textUpdate(22, 101, "read only again"))

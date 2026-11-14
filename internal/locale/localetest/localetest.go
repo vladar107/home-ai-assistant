@@ -4,6 +4,8 @@ package localetest
 import (
 	"strings"
 	"unicode"
+
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 )
 
 // Latin returns the words of a text written only in Latin letters, which a Russian text should
@@ -32,3 +34,7 @@ func Latin(text string, allowed ...string) []string {
 	}
 	return found
 }
+
+// English reads a message in English, for tests that compare what the assistant wrote with a
+// reply the code exports.
+func English(text locale.Text) string { return text.In(locale.English) }

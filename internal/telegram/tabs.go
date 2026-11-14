@@ -8,17 +8,13 @@ import (
 	"unicode"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
 const (
-	CloseTabPrompt     = "Close this tab? Telegram deletes its messages, so resuming the conversation later cannot bring them back. The conversation stays in /sessions."
-	CloseTabButton     = "Close tab"
-	KeepTabButton      = "Keep"
-	TabKeptReply       = "Kept the tab."
-	TabClosedReply     = "Closed the tab. Its conversation stays in /sessions."
-	TabNotRemovedReply = "I ended that tab's conversation, which stays in /sessions, but Telegram did not let me remove the tab. You can delete it from the tab's menu."
-	CloseMainViewReply = "The main view cannot be closed. /new starts a fresh conversation here."
+	CloseTabButton = "Close tab"
+	KeepTabButton  = "Keep"
 
 	tabsPrefix     = "tabs"
 	tabCloseAction = "close"
@@ -28,6 +24,14 @@ const (
 	// the bot made it and it never took a send. Telegram refuses sends to some tabs that exist,
 	// including fresh ones the bot made, and says nothing when a tab is deleted.
 	tabSuspectWindow = 24 * time.Hour
+)
+
+var (
+	CloseTabPrompt     = locale.T("Close this tab? Telegram deletes its messages, so resuming the conversation later cannot bring them back. The conversation stays in /sessions.", "Закрыть эту вкладку? Telegram удаляет её сообщения, поэтому возобновление разговора позже не вернёт их. Разговор останется в /sessions.")
+	TabKeptReply       = locale.T("Kept the tab.", "Вкладка оставлена.")
+	TabClosedReply     = locale.T("Closed the tab. Its conversation stays in /sessions.", "Вкладка закрыта. Её разговор остаётся в /sessions.")
+	TabNotRemovedReply = locale.T("I ended that tab's conversation, which stays in /sessions, but Telegram did not let me remove the tab. You can delete it from the tab's menu.", "Разговор этой вкладки завершён и остаётся в /sessions, но Telegram не позволил убрать саму вкладку. Её можно удалить из меню вкладки.")
+	CloseMainViewReply = locale.T("The main view cannot be closed. /new starts a fresh conversation here.", "Главный экран закрыть нельзя. Команда /new начинает здесь новый разговор.")
 )
 
 // TabStore is the registry of the tabs in each principal's chat; nil leaves tabs unnamed and
@@ -220,9 +224,9 @@ func parseTabCallback(data string) (string, int64, bool) {
 func (s *Service) processCloseCommand(ctx context.Context, message *Message, principalID string) (processingResult, string, error) {
 	threadID := thread.From(ctx)
 	if threadID <= 0 {
-		return s.sendCommandReply(ctx, message, principalID, "close", CloseMainViewReply, nil)
+		return s.sendCommandReply(ctx, message, principalID, "close", CloseMainViewReply.Format(ctx), nil)
 	}
-	return s.sendCommandReply(ctx, message, principalID, "close", CloseTabPrompt, closeTabKeyboard(threadID))
+	return s.sendCommandReply(ctx, message, principalID, "close", CloseTabPrompt.Format(ctx), closeTabKeyboard(threadID))
 }
 
 // processTabPress closes a tab once the user confirmed it, or keeps it. Closing cancels the tab's
@@ -232,7 +236,7 @@ func (s *Service) processCloseCommand(ctx context.Context, message *Message, pri
 func (s *Service) processTabPress(ctx context.Context, callback *CallbackQuery, principalID, action string, threadID int64) (processingResult, string, error) {
 	result := processingResult{event: "telegram.callback.handled", principalID: principalID, command: tabsPrefix + "." + action}
 	chatID, messageID := callback.Message.Chat.ID, callback.Message.MessageID
-	text := TabKeptReply
+	text := TabKeptReply.Format(ctx)
 	inClosedTab := false
 	if action == tabCloseAction {
 		lane := conversation.Lane{PrincipalID: principalID, ThreadID: threadID}
@@ -248,9 +252,9 @@ func (s *Service) processTabPress(ctx context.Context, callback *CallbackQuery, 
 		s.tabs.forget(ctx, chatID, lane)
 		s.telemetry.RecordTab(ctx, principalID, "tab_closed")
 		s.telemetry.ContextLogger(ctx, s.logger).InfoContext(ctx, "telegram.tab.closed", "principal_id", principalID, "thread_id", threadID, "removed", removed)
-		text = TabClosedReply
+		text = TabClosedReply.Format(ctx)
 		if !removed {
-			text = TabNotRemovedReply
+			text = TabNotRemovedReply.Format(ctx)
 		}
 		inClosedTab = thread.From(ctx) == threadID
 	}

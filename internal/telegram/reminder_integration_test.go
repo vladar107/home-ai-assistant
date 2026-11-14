@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
@@ -165,7 +166,7 @@ func TestReminderSnoozeEditsMessageAndRedelivers(t *testing.T) {
 	}
 
 	gone := h.pressJob(3, first.messageID, "remind:1h:0000000000000001")
-	if !strings.Contains(gone.text, ReminderGoneReply) || len(buttonData(gone.keyboard)) != 0 {
+	if !strings.Contains(gone.text, localetest.English(ReminderGoneReply)) || len(buttonData(gone.keyboard)) != 0 {
 		t.Fatalf("second press = %+v", gone)
 	}
 	if next := h.nextRunTime("0000000000000001"); next != "2026-09-28T15:10:10.000Z" {
@@ -201,7 +202,7 @@ func TestReminderSnoozeIsOwnerOnly(t *testing.T) {
 
 	h.push(callbackUpdate(1, 202, message.messageID, "remind:10m:0000000000000001"))
 	h.wantAnswer(1)
-	if edit := h.nextEdit(); !strings.Contains(edit.text, ReminderGoneReply) {
+	if edit := h.nextEdit(); !strings.Contains(edit.text, localetest.English(ReminderGoneReply)) {
 		t.Fatalf("bob's press = %+v", edit)
 	}
 	if count := h.countRows(`SELECT count(*) FROM scheduled_jobs WHERE id = '0000000000000001' AND finished_at IS NOT NULL`); count != 1 {
@@ -301,7 +302,7 @@ func TestOneTimeJobIsProposedConfirmedRunOnceAndLeavesJobs(t *testing.T) {
 	if count := h.countRows(`SELECT count(*) FROM schedule_runs`); count != 1 {
 		t.Fatalf("runs = %d, want 1", count)
 	}
-	if list := h.requestJobs(4); list.text != NoJobsReply {
+	if list := h.requestJobs(4); list.text != localetest.English(NoJobsReply) {
 		t.Fatalf("jobs after the run = %q", list.text)
 	}
 }
@@ -335,7 +336,7 @@ func TestOneTimeJobMissedForTooLongIsReportedNotRun(t *testing.T) {
 	}
 	h.waitRun("0000000000000001", schedule.StatusDelivered)
 	expectNoRuntimeCall(t, runtime, 50*time.Millisecond)
-	if list := h.requestJobs(1); list.text != NoJobsReply {
+	if list := h.requestJobs(1); list.text != localetest.English(NoJobsReply) {
 		t.Fatalf("jobs after the missed run = %q", list.text)
 	}
 }

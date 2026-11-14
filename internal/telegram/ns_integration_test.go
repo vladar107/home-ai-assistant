@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 )
 
@@ -68,31 +69,31 @@ func TestTrainsSwitchControlsToolsPerUser(t *testing.T) {
 
 	wantTrains(offered(1, 101), true)
 	h.push(textUpdate(2, 101, "/privacy"))
-	h.wantReply(101, 2, privacyLines(AttachmentPrivacyLine, SchedulePrivacyLine, NSPrivacyLine, VoicePrivacyLine, MemoryPrivacyLine))
+	h.wantReply(101, 2, privacyLines(localetest.English(AttachmentPrivacyLine), localetest.English(SchedulePrivacyLine), localetest.English(NSPrivacyLine), localetest.English(VoicePrivacyLine), localetest.English(MemoryPrivacyLine)))
 
 	overview := h.requestSettings(3, 101)
 	if !strings.Contains(overview.text, "Everyday tools: Trains on") || !slices.Contains(buttonData(overview.keyboard), "nav:tools") {
 		t.Fatalf("settings overview = %+v", overview)
 	}
 	settings := h.openSettingsPage(4, 101, settingsMessageID(3), "tools")
-	if !strings.Contains(settings.text, NSOnLine) || !slices.Contains(buttonData(settings.keyboard), "ns:off") || slices.Contains(buttonData(settings.keyboard), "ns:on") {
+	if !strings.Contains(settings.text, localetest.English(NSOnLine)) || !slices.Contains(buttonData(settings.keyboard), "ns:off") || slices.Contains(buttonData(settings.keyboard), "ns:on") {
 		t.Fatalf("settings by default = %+v", settings)
 	}
 
 	edit := h.press(5, 101, settingsMessageID(3), "ns:off")
-	if !strings.Contains(edit.text, NSOffLine) || !slices.Contains(buttonData(edit.keyboard), "ns:on") || !slices.Contains(buttonData(edit.keyboard), "nav:root") || slices.Contains(buttonData(edit.keyboard), "ns:off") {
+	if !strings.Contains(edit.text, localetest.English(NSOffLine)) || !slices.Contains(buttonData(edit.keyboard), "ns:on") || !slices.Contains(buttonData(edit.keyboard), "nav:root") || slices.Contains(buttonData(edit.keyboard), "ns:off") {
 		t.Fatalf("settings after turning trains off = %+v", edit)
 	}
 	wantTrains(offered(6, 101), false)
 	h.push(textUpdate(7, 101, "/privacy"))
-	h.wantReply(101, 7, privacyLines(AttachmentPrivacyLine, SchedulePrivacyLine, VoicePrivacyLine, MemoryPrivacyLine))
+	h.wantReply(101, 7, privacyLines(localetest.English(AttachmentPrivacyLine), localetest.English(SchedulePrivacyLine), localetest.English(VoicePrivacyLine), localetest.English(MemoryPrivacyLine)))
 
 	wantTrains(offered(8, 202), true)
 	h.push(textUpdate(9, 202, "/privacy"))
-	h.wantReply(202, 9, privacyLines(AttachmentPrivacyLine, SchedulePrivacyLine, NSPrivacyLine, VoicePrivacyLine, MemoryPrivacyLine))
+	h.wantReply(202, 9, privacyLines(localetest.English(AttachmentPrivacyLine), localetest.English(SchedulePrivacyLine), localetest.English(NSPrivacyLine), localetest.English(VoicePrivacyLine), localetest.English(MemoryPrivacyLine)))
 
 	h.requestSettings(10, 101)
-	if edit := h.press(11, 101, settingsMessageID(10), "ns:on"); !strings.Contains(edit.text, NSOnLine) || !slices.Contains(buttonData(edit.keyboard), "ns:off") {
+	if edit := h.press(11, 101, settingsMessageID(10), "ns:on"); !strings.Contains(edit.text, localetest.English(NSOnLine)) || !slices.Contains(buttonData(edit.keyboard), "ns:off") {
 		t.Fatalf("settings after turning trains back on = %+v", edit)
 	}
 	wantTrains(offered(12, 101), true)

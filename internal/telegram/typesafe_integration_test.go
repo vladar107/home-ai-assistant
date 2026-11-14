@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/vladar107/home-ai-assistant/internal/judgment"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 )
 
 func TestTypeSafeSettingsToggleThroughTheSettingsFlow(t *testing.T) {
@@ -42,7 +43,7 @@ func TestTypeSafeSettingsToggleThroughTheSettingsFlow(t *testing.T) {
 		t.Fatalf("after turning on: %+v", on)
 	}
 	h.push(textUpdate(4, 101, "/privacy"))
-	if privacy := h.nextMessage(); !strings.Contains(privacy.text, TypeSafePrivacyLine) {
+	if privacy := h.nextMessage(); !strings.Contains(privacy.text, localetest.English(TypeSafePrivacyLine)) {
 		t.Fatalf("privacy reply = %q", privacy.text)
 	}
 

@@ -172,12 +172,12 @@ func attachmentTooLargeReply(item media) string {
 }
 
 // unsupportedMediaReply answers a message carrying something no model reachable here can read.
-func unsupportedMediaReply(reason string) string {
+func unsupportedMediaReply(ctx context.Context, reason string) string {
 	switch reason {
 	case "audio":
 		return UnsupportedAudioReply
 	case "video":
-		return UnsupportedVideoReply
+		return UnsupportedVideoReply.Format(ctx)
 	default:
 		return UnsupportedStickerReply
 	}

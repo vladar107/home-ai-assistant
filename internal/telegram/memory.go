@@ -8,29 +8,14 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/memory"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 )
 
 const (
-	MemoryTitle        = "Memory"
-	NoMemoryReply      = "I have nothing remembered about you. Tell me in conversation, for example: remember that I prefer short answers."
-	MemoryGoneReply    = "That entry no longer exists."
-	MemoryOffNote      = "Memory is off: nothing here is used until you turn it on in /settings."
-	MemoryClearedNote  = "Forgot everything."
-	MemoryOnLine       = "Memory: on (the default). I keep the preferences and facts you ask me to remember, or that I learn in conversation, and use them in every conversation, scheduled run, and background task. See and delete them with /memory."
-	MemoryOffLine      = "Memory: off. I do not use or add to what I remembered; the saved entries are kept until you delete them in /memory."
-	MemoryLearnOnLine  = "Learn from 👎: on (the default). When you mark a reply 👎 and the mistake would recur, I may propose an instruction to avoid it; it is kept only if you confirm."
-	MemoryLearnOffLine = "Learn from 👎: off. A 👎 only makes me look at that reply again."
-	MemoryPrivacyLine  = "Memory, including the procedures you kept, is kept until you delete it in /memory and goes to your model with every request while it is on; a procedure's steps go only when I read it. " +
-		"For the weekly review I count each day how often each tool's calls succeeded or failed, never what they were asked or answered, and delete the counts after 30 days."
+	MemoryTitle = "Memory"
 
-	MemoryProceduresOnLine  = "Learn procedures: on (the default). After a request that took several steps, I may offer to keep how it was done as a procedure, which I read before similar requests; it is kept only if you confirm."
-	MemoryProceduresOffLine = "Learn procedures: off. I offer no new procedures; the ones you kept are still used until you delete them in /memory."
-
-	MemoryReviewOnLine      = "Weekly review: on. Every Sunday at 18:00 I look back at the week: the replies you marked 👎, the tools that failed, and your instructions and procedures. I offer at most three changes and two backlog items as cards; nothing changes unless you confirm. Press Review now to look at once. Uses your model subscription."
-	MemoryReviewOffLine     = "Weekly review: off (the default). Turn it on and every Sunday evening I look back at the week and offer what is worth learning, at most three changes and two backlog items, as cards; nothing changes unless you confirm. Uses your model subscription."
-	MemoryReviewingNote     = "Reviewing the past week now; anything worth learning arrives as cards."
 	MemoryReviewBusyNote    = "A review is already running; anything worth learning arrives as cards."
 	MemoryReviewTooManyNote = "You already have the maximum number of scheduled jobs. Remove one in /jobs, then turn the weekly review on."
 
@@ -58,6 +43,24 @@ const (
 
 	memoriesPerPage = 8
 	deletesPerRow   = 4
+)
+
+var (
+	NoMemoryReply      = locale.T("I have nothing remembered about you. Tell me in conversation, for example: remember that I prefer short answers.", "Я ничего о вас не помню. Скажите мне в разговоре, например: запомни, что я предпочитаю короткие ответы.")
+	MemoryGoneReply    = locale.T("That entry no longer exists.", "Этой записи больше нет.")
+	MemoryOffNote      = locale.T("Memory is off: nothing here is used until you turn it on in /settings.", "Память выключена: ничего отсюда не используется, пока вы не включите её в /settings.")
+	MemoryClearedNote  = locale.T("Forgot everything.", "Всё забыто.")
+	MemoryOnLine       = locale.T("Memory: on (the default). I keep the preferences and facts you ask me to remember, or that I learn in conversation, and use them in every conversation, scheduled run, and background task. See and delete them with /memory.", "Память: включена (по умолчанию). Я храню предпочтения и факты, которые вы просите запомнить или которые я узнаю в разговоре, и использую их в каждом разговоре, запуске по расписанию и фоновой задаче. Посмотреть и удалить их можно через /memory.")
+	MemoryOffLine      = locale.T("Memory: off. I do not use or add to what I remembered; the saved entries are kept until you delete them in /memory.", "Память: выключена. Я не использую и не пополняю то, что запомнено; сохранённые записи остаются, пока вы не удалите их в /memory.")
+	MemoryLearnOnLine  = locale.T("Learn from 👎: on (the default). When you mark a reply 👎 and the mistake would recur, I may propose an instruction to avoid it; it is kept only if you confirm.", "Учиться на 👎: включено (по умолчанию). Когда вы ставите ответу 👎 и ошибка могла бы повториться, я могу предложить инструкцию, чтобы её избежать; она сохраняется, только если вы подтвердите.")
+	MemoryLearnOffLine = locale.T("Learn from 👎: off. A 👎 only makes me look at that reply again.", "Учиться на 👎: выключено. 👎 лишь заставляет меня ещё раз посмотреть на этот ответ.")
+	MemoryPrivacyLine  = locale.T("Memory, including the procedures you kept, is kept until you delete it in /memory and goes to your model with every request while it is on; a procedure's steps go only when I read it. "+
+		"For the weekly review I count each day how often each tool's calls succeeded or failed, never what they were asked or answered, and delete the counts after 30 days.", "Память, включая сохранённые вами процедуры, хранится, пока вы не удалите её в /memory, и, пока она включена, уходит вашей модели с каждым запросом; шаги процедуры уходят, только когда я её читаю. Для еженедельного обзора я каждый день считаю, как часто вызовы каждого инструмента завершались успехом или ошибкой, но не то, о чём их спрашивали и что они отвечали, и удаляю счётчики через 30 дней.")
+	MemoryProceduresOnLine  = locale.T("Learn procedures: on (the default). After a request that took several steps, I may offer to keep how it was done as a procedure, which I read before similar requests; it is kept only if you confirm.", "Запоминать процедуры: включено (по умолчанию). После запроса, который потребовал нескольких шагов, я могу предложить сохранить, как он был выполнен, в виде процедуры, которую я прочитаю перед похожими запросами; она сохраняется, только если вы подтвердите.")
+	MemoryProceduresOffLine = locale.T("Learn procedures: off. I offer no new procedures; the ones you kept are still used until you delete them in /memory.", "Запоминать процедуры: выключено. Новых процедур я не предлагаю; сохранённые вами продолжают использоваться, пока вы не удалите их в /memory.")
+	MemoryReviewOnLine      = locale.T("Weekly review: on. Every Sunday at 18:00 I look back at the week: the replies you marked 👎, the tools that failed, and your instructions and procedures. I offer at most three changes and two backlog items as cards; nothing changes unless you confirm. Press Review now to look at once. Uses your model subscription.", "Еженедельный обзор: включён. Каждое воскресенье в 18:00 я оглядываюсь на неделю: ответы с вашим 👎, инструменты, давшие сбой, ваши инструкции и процедуры. Я предлагаю карточками не больше трёх изменений и двух пунктов бэклога; без вашего подтверждения ничего не меняется. Нажмите «Обзор сейчас», чтобы посмотреть сразу. Использует вашу подписку на модель.")
+	MemoryReviewOffLine     = locale.T("Weekly review: off (the default). Turn it on and every Sunday evening I look back at the week and offer what is worth learning, at most three changes and two backlog items, as cards; nothing changes unless you confirm. Uses your model subscription.", "Еженедельный обзор: выключен (по умолчанию). Включите, и каждый воскресный вечер я буду оглядываться на неделю и предлагать карточками то, чему стоит научиться, не больше трёх изменений и двух пунктов бэклога; без вашего подтверждения ничего не меняется. Использует вашу подписку на модель.")
+	MemoryReviewingNote     = locale.T("Reviewing the past week now; anything worth learning arrives as cards.", "Подвожу итоги недели; всё, чему стоит научиться, придёт карточками.")
 )
 
 // MemoryController is implemented by the memory service; nil leaves /memory out. Its /settings
@@ -95,8 +98,8 @@ func (m memorySection) prefix() string { return memorySectionPrefix }
 
 func (m memorySection) helpTopic() string { return "memory" }
 
-func (m memorySection) privacy(context.Context, string) ([]string, error) {
-	return []string{MemoryPrivacyLine}, nil
+func (m memorySection) privacy(ctx context.Context, _ string) ([]string, error) {
+	return []string{MemoryPrivacyLine.Format(ctx)}, nil
 }
 
 func (m memorySection) summary(ctx context.Context, principalID string) (settingsSummary, error) {
@@ -118,11 +121,11 @@ func (m memorySection) render(ctx context.Context, principalID string) (settings
 			return settingsView{}, err
 		}
 		view := settingsView{
-			lines:   []string{MemoryOnLine, MemoryLearnOffLine},
+			lines:   []string{MemoryOnLine.Format(ctx), MemoryLearnOffLine.Format(ctx)},
 			buttons: []InlineButton{{Text: "Turn off memory", CallbackData: memorySectionPrefix + ":" + memoryOffAction}, {Text: "Learn from 👎", CallbackData: memorySectionPrefix + ":" + learnOnAction}},
 		}
 		if learn {
-			view.lines[1] = MemoryLearnOnLine
+			view.lines[1] = MemoryLearnOnLine.Format(ctx)
 			view.buttons[1] = InlineButton{Text: "Stop learning from 👎", CallbackData: memorySectionPrefix + ":" + learnOffAction}
 		}
 		procedures, err := m.memory.LearnsProcedures(ctx, principalID)
@@ -130,10 +133,10 @@ func (m memorySection) render(ctx context.Context, principalID string) (settings
 			return settingsView{}, err
 		}
 		if procedures {
-			view.lines = append(view.lines, MemoryProceduresOnLine)
+			view.lines = append(view.lines, MemoryProceduresOnLine.Format(ctx))
 			view.rows = [][]InlineButton{{{Text: "Stop learning procedures", CallbackData: memorySectionPrefix + ":" + proceduresOffAction}}}
 		} else {
-			view.lines = append(view.lines, MemoryProceduresOffLine)
+			view.lines = append(view.lines, MemoryProceduresOffLine.Format(ctx))
 			view.rows = [][]InlineButton{{{Text: "Learn procedures", CallbackData: memorySectionPrefix + ":" + proceduresOnAction}}}
 		}
 		review, err := m.reviewing(ctx, principalID)
@@ -141,19 +144,19 @@ func (m memorySection) render(ctx context.Context, principalID string) (settings
 			return settingsView{}, err
 		}
 		if review {
-			view.lines = append(view.lines, MemoryReviewOnLine)
+			view.lines = append(view.lines, MemoryReviewOnLine.Format(ctx))
 			view.rows = append(view.rows, []InlineButton{
 				{Text: "Review now", CallbackData: memorySectionPrefix + ":" + reviewNowAction},
 				{Text: "Turn off weekly review", CallbackData: memorySectionPrefix + ":" + reviewOffAction},
 			})
 		} else {
-			view.lines = append(view.lines, MemoryReviewOffLine)
+			view.lines = append(view.lines, MemoryReviewOffLine.Format(ctx))
 			view.rows = append(view.rows, []InlineButton{{Text: "Turn on weekly review", CallbackData: memorySectionPrefix + ":" + reviewOnAction}})
 		}
 		return view, nil
 	}
 	return settingsView{
-		lines:   []string{MemoryOffLine},
+		lines:   []string{MemoryOffLine.Format(ctx)},
 		buttons: []InlineButton{{Text: "Turn on memory", CallbackData: memorySectionPrefix + ":" + memoryOnAction}},
 	}, nil
 }
@@ -274,7 +277,7 @@ func (m memorySection) actOnReview(ctx context.Context, principalID, action stri
 			return settingsOutcome{}, err
 		}
 		logger.InfoContext(ctx, "memory.review.queued", "principal_id", principalID)
-		return settingsOutcome{note: MemoryReviewingNote}, nil
+		return settingsOutcome{note: MemoryReviewingNote.Format(ctx)}, nil
 	}
 }
 
@@ -322,9 +325,9 @@ func renderMemory(ctx context.Context, principalID string, controller MemoryCont
 	}
 	if len(entries) == 0 {
 		if !enabled {
-			return NoMemoryReply + "\n\n" + MemoryOffNote, nil, nil
+			return NoMemoryReply.Format(ctx) + "\n\n" + MemoryOffNote.Format(ctx), nil, nil
 		}
-		return NoMemoryReply, nil, nil
+		return NoMemoryReply.Format(ctx), nil, nil
 	}
 	pages := (len(entries) + memoriesPerPage - 1) / memoriesPerPage
 	page = min(max(page, 1), pages)
@@ -334,7 +337,7 @@ func renderMemory(ctx context.Context, principalID string, controller MemoryCont
 	}
 	lines := []string{title}
 	if !enabled {
-		lines = append(lines, MemoryOffNote)
+		lines = append(lines, MemoryOffNote.Format(ctx))
 	}
 	var keyboard InlineKeyboard
 	var deletes []InlineButton
@@ -446,16 +449,16 @@ func (s *Service) processMemoryPress(ctx context.Context, callback *CallbackQuer
 	case memoryDeleteAction:
 		var removed bool
 		if removed, err = s.memory.Remove(ctx, principalID, press.id); err == nil && !removed {
-			followUp = MemoryGoneReply
+			followUp = MemoryGoneReply.Format(ctx)
 		}
 	case procedureDeleteAction:
 		var removed bool
 		if removed, err = s.memory.RemoveProcedure(ctx, principalID, press.id); err == nil && !removed {
-			followUp = MemoryGoneReply
+			followUp = MemoryGoneReply.Format(ctx)
 		}
 	case memoryClearAction:
 		if _, err = s.memory.Clear(ctx, principalID); err == nil {
-			followUp = MemoryClearedNote
+			followUp = MemoryClearedNote.Format(ctx)
 		}
 	}
 	if err != nil {

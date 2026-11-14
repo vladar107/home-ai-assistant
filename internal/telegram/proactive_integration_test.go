@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
@@ -166,7 +167,7 @@ func TestHeadsUpSwitchCreatesResumesAndDeletesItsJob(t *testing.T) {
 		t.Fatalf("overview = %q", settings.text)
 	}
 	page := h.openSettingsPage(2, 101, messageID, "tools")
-	if !strings.Contains(page.text, HeadsUpOffLine) || !slices.Contains(buttonData(page.keyboard), "headsup:on") {
+	if !strings.Contains(page.text, localetest.English(HeadsUpOffLine)) || !slices.Contains(buttonData(page.keyboard), "headsup:on") {
 		t.Fatalf("page by default = %+v", page)
 	}
 	if got := h.countRows(`SELECT count(*) FROM scheduled_jobs`); got != 0 {
@@ -174,11 +175,11 @@ func TestHeadsUpSwitchCreatesResumesAndDeletesItsJob(t *testing.T) {
 	}
 
 	page = h.press(3, 101, messageID, "headsup:on")
-	if !strings.Contains(page.text, HeadsUpOnLine) || !slices.Contains(buttonData(page.keyboard), "headsup:off") {
+	if !strings.Contains(page.text, localetest.English(HeadsUpOnLine)) || !slices.Contains(buttonData(page.keyboard), "headsup:off") {
 		t.Fatalf("page after on = %+v", page)
 	}
 	page = h.press(4, 101, messageID, "headsup:on")
-	if !strings.Contains(page.text, HeadsUpOnLine) {
+	if !strings.Contains(page.text, localetest.English(HeadsUpOnLine)) {
 		t.Fatalf("page after a second on = %+v", page)
 	}
 	jobs, err := h.scheduler.Jobs(h.ctx, "alice")
@@ -199,11 +200,11 @@ func TestHeadsUpSwitchCreatesResumesAndDeletesItsJob(t *testing.T) {
 		t.Fatalf("pause = %v %v", changed, err)
 	}
 	page = h.press(5, 101, messageID, settingsNavPrefix+":tools")
-	if !strings.Contains(page.text, HeadsUpOffLine) || !slices.Contains(buttonData(page.keyboard), "headsup:on") {
+	if !strings.Contains(page.text, localetest.English(HeadsUpOffLine)) || !slices.Contains(buttonData(page.keyboard), "headsup:on") {
 		t.Fatalf("page for a paused job = %+v", page)
 	}
 	page = h.press(6, 101, messageID, "headsup:on")
-	if !strings.Contains(page.text, HeadsUpOnLine) {
+	if !strings.Contains(page.text, localetest.English(HeadsUpOnLine)) {
 		t.Fatalf("page after resuming = %+v", page)
 	}
 	if got := h.countRows(`SELECT count(*) FROM scheduled_jobs WHERE enabled = 1`); got != 1 {
@@ -211,7 +212,7 @@ func TestHeadsUpSwitchCreatesResumesAndDeletesItsJob(t *testing.T) {
 	}
 
 	page = h.press(7, 101, messageID, "headsup:off")
-	if !strings.Contains(page.text, HeadsUpOffLine) {
+	if !strings.Contains(page.text, localetest.English(HeadsUpOffLine)) {
 		t.Fatalf("page after off = %+v", page)
 	}
 	if got := h.countRows(`SELECT count(*) FROM scheduled_jobs`); got != 0 {

@@ -18,17 +18,21 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/delivery"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 )
 
 const (
 	// RestoreTool is the confirmed action that restores a previewed file.
 	RestoreTool = "export_restore"
-	// RestoreHeading is what the confirmation of a restore is shown under.
-	RestoreHeading = "Restore from your export"
 	// RestoreLifetime is how long a previewed restore waits for the user's confirmation.
 	RestoreLifetime = 15 * time.Minute
 
 	fileLayout = "2006-01-02"
+)
+
+var (
+	// RestoreHeading is what the confirmation of a restore is shown under.
+	RestoreHeading = locale.T("Restore from your export", "Восстановление из вашего экспорта")
 )
 
 // Files sends a file to a principal's own chat.
@@ -458,7 +462,7 @@ func (s *Service) OfferRestore(ctx context.Context, principalID string, chatID, 
 	s.held[principalID] = held
 	s.mu.Unlock()
 	time.AfterFunc(s.cfg.Lifetime+time.Minute, func() { s.release(principalID, held.digest) })
-	records, err := s.offers.Offer(ctx, principalID, chatID, threadID, RestoreHeading, s.cfg.Lifetime, []approval.Proposal{{
+	records, err := s.offers.Offer(ctx, principalID, chatID, threadID, RestoreHeading.Format(ctx), s.cfg.Lifetime, []approval.Proposal{{
 		Tool: RestoreTool, Arguments: arguments, Summary: preview.Summary,
 		Intent: approval.Intent{Verb: "restore", TargetKind: "export"},
 	}})
@@ -499,7 +503,7 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 	held, found := s.held[record.PrincipalID]
 	s.mu.Unlock()
 	if !found || held.digest != arguments.Digest || !s.cfg.Now().Before(held.expires) {
-		return approval.Outcome{}, &approval.ActionError{Reason: "gone", Text: RestoreGoneText}
+		return approval.Outcome{}, &approval.ActionError{Reason: "gone", Text: RestoreGoneText.In(locale.English)}
 	}
 	s.release(record.PrincipalID, held.digest)
 	report, err := s.restore(ctx, record.PrincipalID, held.data, held.additions)
@@ -514,7 +518,7 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 }
 
 // RestoreGoneText is the outcome of a confirmation whose file is no longer held.
-const RestoreGoneText = "I no longer hold that file, so nothing was restored; send it again with /restore."
+var RestoreGoneText = locale.T("I no longer hold that file, so nothing was restored; send it again with /restore.", "Этого файла у меня больше нет, поэтому ничего не восстановлено; отправьте его снова с /restore.")
 
 // ErrChanged refuses a confirmed restore that would no longer add what its preview showed.
 var ErrChanged = &Refusal{"changed", "What this file would add changed since you saw the preview, so nothing was restored; send it again with /restore to see what it adds now."}

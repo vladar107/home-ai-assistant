@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
@@ -92,7 +93,7 @@ func TestABotNamedTabIsNamedOncePerConversationWithAnIcon(t *testing.T) {
 
 	// A new conversation in the tab may name it again.
 	h.push(tabMessage(7, 40, "/new"))
-	h.wantReply(101, 7, NewSessionReply)
+	h.wantReply(101, 7, localetest.English(NewSessionReply))
 	h.turnInTab(runtime, 8, 40, "which seeds to order")
 	h.namingCall(runtime, "which seeds to order", `{"name":"Seed order","icon":"📚"}`)
 	if edit := receive(t, h.ctx, h.tabs.topicEdits); edit.threadID != 40 || edit.name != "Seed order" || edit.iconID != "5000000000000000003" {
@@ -259,7 +260,7 @@ func TestAnEarlierConversationsNameDoesNotReplaceALaterOne(t *testing.T) {
 
 	// While the first conversation's name is still being chosen, a new one names the tab.
 	h.push(tabMessage(3, 40, "/new"))
-	h.wantReply(101, 3, NewSessionReply)
+	h.wantReply(101, 3, localetest.English(NewSessionReply))
 	h.turnInTab(runtime, 4, 40, "which seeds to order")
 	// The closed conversation can share the new one's updated_at, so the newest row is not enough.
 	var later string

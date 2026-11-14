@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/chatgptsim"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/googlesim"
@@ -21,7 +22,7 @@ func TestInvalidMessageIsAnsweredAndThePollerMovesOn(t *testing.T) {
 	h.start()
 
 	h.push(textUpdate(1, 101, strings.Repeat("a", 4097)))
-	h.wantReply(101, 1, InvalidMessageReply)
+	h.wantReply(101, 1, localetest.English(InvalidMessageReply))
 
 	h.push(textUpdate(2, 101, "are you there?"))
 	call := receive(t, h.ctx, runtime.calls)
@@ -47,7 +48,7 @@ func TestNotionTokenGuardCoversCaptionsAndTranscripts(t *testing.T) {
 	h.requestSettings(1, 101)
 	h.openSettingsPage(2, 101, settingsMessageID(1), "accounts")
 	h.press(3, 101, settingsMessageID(1), "notion:connect")
-	h.wantMessage(101, NotionConnectInstructions)
+	h.wantMessage(101, localetest.English(NotionConnectInstructions))
 
 	picture := []byte("\xff\xd8\xff\xe0 a screenshot")
 	h.addFile("photo-1", "photos/file_1.jpg", picture)
@@ -55,7 +56,7 @@ func TestNotionTokenGuardCoversCaptionsAndTranscripts(t *testing.T) {
 	if deleted := h.nextDelete(); deleted.chatID != 101 || deleted.messageID != requestMessageID(4) {
 		t.Fatalf("captioned photo deletion = %+v", deleted)
 	}
-	h.wantMessage(101, NotionTokenGuardReply)
+	h.wantMessage(101, localetest.English(NotionTokenGuardReply))
 	if _, exists := h.notionTokenFile("alice"); exists {
 		t.Fatal("a photo caption completed the pending intake")
 	}
@@ -66,7 +67,7 @@ func TestNotionTokenGuardCoversCaptionsAndTranscripts(t *testing.T) {
 	if deleted := h.nextDelete(); deleted.messageID != requestMessageID(5) {
 		t.Fatalf("transcribed token deletion = %+v", deleted)
 	}
-	h.wantMessage(101, NotionTokenGuardReply)
+	h.wantMessage(101, localetest.English(NotionTokenGuardReply))
 
 	chatSim.SetTranscript("here is my token")
 	captioned := voiceUpdate(6, 101)
@@ -75,7 +76,7 @@ func TestNotionTokenGuardCoversCaptionsAndTranscripts(t *testing.T) {
 	if deleted := h.nextDelete(); deleted.messageID != requestMessageID(6) {
 		t.Fatalf("voice caption token deletion = %+v", deleted)
 	}
-	h.wantMessage(101, NotionTokenGuardReply)
+	h.wantMessage(101, localetest.English(NotionTokenGuardReply))
 	expectNoRuntimeCall(t, runtime, 50*time.Millisecond)
 
 	// The intake is still pending for the text message it asked for.
@@ -98,6 +99,6 @@ func TestGoogleSignInAddressInACaptionIsGuarded(t *testing.T) {
 	if deleted := h.nextDelete(); deleted.chatID != 101 || deleted.messageID != requestMessageID(1) {
 		t.Fatalf("captioned photo deletion = %+v", deleted)
 	}
-	h.wantMessage(101, GoogleSignInGuardReply)
+	h.wantMessage(101, localetest.English(GoogleSignInGuardReply))
 	expectNoRuntimeCall(t, runtime, 50*time.Millisecond)
 }

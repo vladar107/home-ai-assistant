@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	"github.com/vladar107/home-ai-assistant/internal/memory"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
@@ -275,7 +276,7 @@ func TestMemoryCommandListsAndDeletesProcedures(t *testing.T) {
 	h.push(callbackUpdate(3, 101, settingsMessageID(1), "mem:pdel:ddddddd1:1"))
 	h.wantAnswer(3)
 	h.nextEdit()
-	h.wantMessage(101, MemoryGoneReply)
+	h.wantMessage(101, localetest.English(MemoryGoneReply))
 	if procedures := h.procedures("bob"); len(procedures) != 1 {
 		t.Fatalf("bob's procedures after alice's forged press = %+v", procedures)
 	}
@@ -287,10 +288,10 @@ func TestMemoryCommandListsAndDeletesProcedures(t *testing.T) {
 	}
 	h.push(callbackUpdate(5, 101, settingsMessageID(1), "mem:clear:1"))
 	h.wantAnswer(5)
-	if cleared := h.nextEdit(); cleared.text != NoMemoryReply {
+	if cleared := h.nextEdit(); cleared.text != localetest.English(NoMemoryReply) {
 		t.Fatalf("after clearing = %+v", cleared)
 	}
-	h.wantMessage(101, MemoryClearedNote)
+	h.wantMessage(101, localetest.English(MemoryClearedNote))
 	if procedures := h.procedures("alice"); len(procedures) != 0 {
 		t.Fatalf("alice's procedures = %+v", procedures)
 	}
@@ -309,11 +310,11 @@ func TestLearnProceduresSwitchAndMemorySwitch(t *testing.T) {
 
 	h.requestSettings(1, 101)
 	page := h.openSettingsPage(2, 101, settingsMessageID(1), "memory")
-	if !strings.Contains(page.text, MemoryProceduresOnLine) || !slices.Contains(buttonData(page.keyboard), "memory:procedures_off") {
+	if !strings.Contains(page.text, localetest.English(MemoryProceduresOnLine)) || !slices.Contains(buttonData(page.keyboard), "memory:procedures_off") {
 		t.Fatalf("memory page = %+v", page)
 	}
 	off := h.press(3, 101, settingsMessageID(1), "memory:procedures_off")
-	if !strings.Contains(off.text, MemoryProceduresOffLine) || !strings.Contains(off.text, MemoryLearnOnLine) || !slices.Contains(buttonData(off.keyboard), "memory:procedures_on") {
+	if !strings.Contains(off.text, localetest.English(MemoryProceduresOffLine)) || !strings.Contains(off.text, localetest.English(MemoryLearnOnLine)) || !slices.Contains(buttonData(off.keyboard), "memory:procedures_on") {
 		t.Fatalf("after turning procedures off = %+v", off)
 	}
 
@@ -329,7 +330,7 @@ func TestLearnProceduresSwitchAndMemorySwitch(t *testing.T) {
 		t.Fatalf("memory with procedures off = %q", request.Memory)
 	}
 
-	if on := h.press(5, 101, settingsMessageID(1), "memory:procedures_on"); !strings.Contains(on.text, MemoryProceduresOnLine) {
+	if on := h.press(5, 101, settingsMessageID(1), "memory:procedures_on"); !strings.Contains(on.text, localetest.English(MemoryProceduresOnLine)) {
 		t.Fatalf("after turning procedures on = %+v", on)
 	}
 	h.press(6, 101, settingsMessageID(1), "memory:off")

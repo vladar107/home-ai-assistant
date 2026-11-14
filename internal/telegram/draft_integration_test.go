@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
@@ -85,8 +86,8 @@ func TestStoppedDraftReachesTheConversationOnlyFromAnAuthorizedPrivateChat(t *te
 	}
 
 	h.push(stopUpdate(6, Chat{ID: 101, Type: ChatTypePrivate}, 42))
-	if message := h.nextMessage(); message.chatID != 101 || message.replyTo != 0 || message.text != CancelledReply {
-		t.Fatalf("message = %+v, want %q to chat 101", message, CancelledReply)
+	if message := h.nextMessage(); message.chatID != 101 || message.replyTo != 0 || message.text != localetest.English(CancelledReply) {
+		t.Fatalf("message = %+v, want %q to chat 101", message, localetest.English(CancelledReply))
 	}
 	if got, want := recorder.recorded(), []string{"alice:42"}; !slices.Equal(got, want) {
 		t.Fatalf("stops = %v, want %v", got, want)
@@ -96,7 +97,7 @@ func TestStoppedDraftReachesTheConversationOnlyFromAnAuthorizedPrivateChat(t *te
 	recorder.matches = false
 	recorder.mu.Unlock()
 	h.push(stopUpdate(7, Chat{ID: 101, Type: ChatTypePrivate}, 43), textUpdate(8, 101, "/status"))
-	if message := h.nextMessage(); message.text == CancelledReply {
+	if message := h.nextMessage(); message.text == localetest.English(CancelledReply) {
 		t.Fatalf("stale stop was confirmed: %+v", message)
 	}
 	if got, want := recorder.recorded(), []string{"alice:42", "alice:43"}; !slices.Equal(got, want) {
@@ -284,7 +285,7 @@ func TestTurnIndicatorsStopWithTheTurn(t *testing.T) {
 		call := receive(t, h.ctx, runtime.calls)
 		h.waitDraft(0, "Thinking…")
 		call.answer <- agentruntime.RunResult{}
-		h.wantReply(101, 1, conversation.UnavailableReply)
+		h.wantReply(101, 1, localetest.English(conversation.UnavailableReply))
 		h.wantIndicatorsQuiet()
 	})
 	t.Run("cancel", func(t *testing.T) {
@@ -294,7 +295,7 @@ func TestTurnIndicatorsStopWithTheTurn(t *testing.T) {
 		call := receive(t, h.ctx, runtime.calls)
 		h.waitDraft(0, "Thinking…")
 		h.push(textUpdate(2, 101, "/cancel"))
-		h.wantReply(101, 2, CancelledReply)
+		h.wantReply(101, 2, localetest.English(CancelledReply))
 		receive(t, h.ctx, call.ctx.Done())
 		h.waitTurnOutcome("cancelled")
 		h.wantIndicatorsQuiet()
@@ -318,8 +319,8 @@ func TestDraftStopCancelsOnlyTheTurnItShows(t *testing.T) {
 	}
 
 	h.push(stopUpdate(4, private, draft))
-	if message := h.nextMessage(); message.chatID != 101 || message.replyTo != 0 || message.text != CancelledReply {
-		t.Fatalf("message = %+v, want %q", message, CancelledReply)
+	if message := h.nextMessage(); message.chatID != 101 || message.replyTo != 0 || message.text != localetest.English(CancelledReply) {
+		t.Fatalf("message = %+v, want %q", message, localetest.English(CancelledReply))
 	}
 	receive(t, h.ctx, call.ctx.Done())
 	h.waitState(1, "cancelled")

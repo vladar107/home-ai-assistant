@@ -301,20 +301,20 @@ func (e *Engine) jobsText(ctx context.Context, principalID string) string {
 }
 
 // FailureReply maps a failed run to the reply the user sees and the category telemetry reports.
-func FailureReply(err error) (string, string) {
+func FailureReply(ctx context.Context, err error) (string, string) {
 	if errors.Is(err, agentruntime.ErrStalled) {
-		return TimeoutReply, ErrorKindTimeout
+		return TimeoutReply.Format(ctx), ErrorKindTimeout
 	}
 	var providerErr *agentruntime.ProviderError
 	if errors.As(err, &providerErr) {
 		switch providerErr.Category {
 		case agentruntime.FailureQuota:
-			return QuotaReply, ErrorKindProviderQuota
+			return QuotaReply.Format(ctx), ErrorKindProviderQuota
 		case agentruntime.FailureAuth:
-			return ReconnectReply, ErrorKindProviderAuth
+			return ReconnectReply.Format(ctx), ErrorKindProviderAuth
 		}
 	}
-	return UnavailableReply, ErrorKindRuntime
+	return UnavailableReply.Format(ctx), ErrorKindRuntime
 }
 
 // WebSearchTool runs inside the runtime rather than through the broker, so its calls get no

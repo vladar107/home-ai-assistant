@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	"github.com/vladar107/home-ai-assistant/internal/project"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
@@ -254,7 +255,7 @@ func TestAProjectHasATabWithItsSummaryPinned(t *testing.T) {
 	h.expectNoNewTab()
 
 	h.push(textUpdate(4, 101, "/projects"))
-	if list := h.nextMessage(); list.text != "Projects\nNo open projects.\n\n"+ClosedProjectsOf+"\n- Find a dentist: done, 1 of 2 items open, next due 2026-10-01" {
+	if list := h.nextMessage(); list.text != "Projects\nNo open projects.\n\n"+localetest.English(ClosedProjectsOf)+"\n- Find a dentist: done, 1 of 2 items open, next due 2026-10-01" {
 		t.Fatalf("/projects = %q", list.text)
 	}
 	for _, private := range []string{"dentist", "neighbours", "clinic"} {

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
@@ -102,7 +103,7 @@ func TestTurnsCarryOnlyThePrincipalsGrantedTools(t *testing.T) {
 	provider.fail = true
 	provider.mu.Unlock()
 	h.push(textUpdate(3, 101, "again?"))
-	h.wantReply(101, 3, conversation.UnavailableReply)
+	h.wantReply(101, 3, localetest.English(conversation.UnavailableReply))
 	h.waitState(3, "delivered")
 	for range 2 {
 		receive(t, h.ctx, h.turns)

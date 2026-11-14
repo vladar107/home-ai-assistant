@@ -1220,6 +1220,25 @@ the same rendering and strings as the pages themselves, so the model's setup
 instructions cannot drift from the app. Turns therefore always carry the tool
 bridge; web search is still offered only while the principal's web access is on, and its extension asks the bridge to check each query.
 
+### Interface language
+
+Each user chooses English or Russian on the Language page at the top of `/settings`, the
+first section of the page order, whose two buttons are each written in their own language.
+The choice is one row per principal in `principal_languages`, and no row means English, so
+a user who never chose sees nothing change. `internal/locale` holds the texts: a message is
+a Go value written in both languages where it is used (`locale.T`, `locale.N` for a count),
+and the language of the moment travels in the context, as the tab does. The Telegram
+service reads the language through `locale.Preferences` right after it authorizes the
+sender of an update, and again after the Language page's own press so the page is redrawn
+at once; the conversation lane reads it when each request starts. A change made on the page sets the menu of the chat the press came from, in that
+chat's own scope (`ChatCommandScope`); choosing English deletes the chat's list so it
+falls back to the shared English one. A restore that sets a language does the same for
+the principal's chat found through `ResolveActiveChat`, and the service sets the menu
+again at start for each user who chose Russian; the default and all-private-chats scopes
+keep the English list. The model-facing
+system prompt, tool descriptions, and tool results stay English. The export carries the
+choice as the `language` section, and a restore leaves a choice already made as it is.
+
 ### Charts
 
 `chart` draws up to four time series as one 1200×700 PNG for the reply. The model

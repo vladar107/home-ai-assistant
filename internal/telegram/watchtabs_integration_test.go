@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 	"github.com/vladar107/home-ai-assistant/internal/watch"
 )
@@ -335,7 +336,7 @@ func TestAWatchsSummaryAndTabNameFollowTheWatch(t *testing.T) {
 	h.push(tabPress(3, tab, alert.messageID, "watch:mute:"+id))
 	h.wantAnswer(3)
 	// A summary edit would come before the alert's own, since the watch's change makes it.
-	if edit := h.nextEdit(); edit.messageID != alert.messageID || !strings.Contains(edit.text, WatchMutedReply) {
+	if edit := h.nextEdit(); edit.messageID != alert.messageID || !strings.Contains(edit.text, localetest.English(WatchMutedReply)) {
 		t.Fatalf("edit after Mute today = %+v, want only the alert's", edit)
 	}
 
@@ -348,7 +349,7 @@ func TestAWatchsSummaryAndTabNameFollowTheWatch(t *testing.T) {
 	if text := h.wantSummaryEdit(summary, id); !strings.HasSuffix(text, "\nPaused; resume it in /jobs.") {
 		t.Fatalf("summary of the paused watch:\n%s", text)
 	}
-	if edit := h.nextEdit(); edit.messageID != second.messageID || !strings.Contains(edit.text, WatchPausedReply) {
+	if edit := h.nextEdit(); edit.messageID != second.messageID || !strings.Contains(edit.text, localetest.English(WatchPausedReply)) {
 		t.Fatalf("edit after Pause = %+v", edit)
 	}
 	h.checks.set(id, triggered("23", "The kettle costs 23 euros."))
@@ -609,7 +610,7 @@ func TestAWatchsTabLeavesAConversationOpenInTheWatchesTab(t *testing.T) {
 	}
 	h.waitOffset(4)
 	h.push(tabMessage(4, watches, "/new"))
-	if reply := h.nextMessage(); reply.threadID != watches || reply.text != NewSessionReply {
+	if reply := h.nextMessage(); reply.threadID != watches || reply.text != localetest.English(NewSessionReply) {
 		t.Fatalf("/new in the Watches tab = %+v", reply)
 	}
 	h.push(replyInTab(5, tab, "is that the lowest?", alert.messageID))
@@ -655,7 +656,7 @@ func TestAReplyToAnotherKindOfWatchStaysInTheWatchesTab(t *testing.T) {
 
 	h.push(tabPress(3, watches, alert.messageID, "watch:pause:"+train))
 	h.wantAnswer(3)
-	if edit := h.nextEdit(); edit.messageID != alert.messageID || !strings.Contains(edit.text, WatchPausedReply) {
+	if edit := h.nextEdit(); edit.messageID != alert.messageID || !strings.Contains(edit.text, localetest.English(WatchPausedReply)) {
 		t.Fatalf("edit after Pause = %+v, want only the alert's", edit)
 	}
 	h.noWatchTab(train)

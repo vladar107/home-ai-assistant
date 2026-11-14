@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	"github.com/vladar107/home-ai-assistant/internal/memory"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
@@ -55,7 +56,7 @@ func newReviewHarness(t *testing.T) *reviewHarness {
 func (h *reviewHarness) turnOn(updateID int64) editedMessage {
 	h.t.Helper()
 	page := h.press(updateID, 101, h.settings, "memory:review_on")
-	if !strings.Contains(page.text, MemoryReviewOnLine) || !slices.Contains(buttonData(page.keyboard), "memory:review_now") {
+	if !strings.Contains(page.text, localetest.English(MemoryReviewOnLine)) || !slices.Contains(buttonData(page.keyboard), "memory:review_now") {
 		h.t.Fatalf("page after turning the review on = %+v", page)
 	}
 	return page
@@ -64,7 +65,7 @@ func (h *reviewHarness) turnOn(updateID int64) editedMessage {
 // reviewNow presses Review now and returns the review's model turn.
 func (h *reviewHarness) reviewNow(updateID int64) runtimeCall {
 	h.t.Helper()
-	if page := h.press(updateID, 101, h.settings, "memory:review_now"); !strings.Contains(page.text, MemoryReviewingNote) {
+	if page := h.press(updateID, 101, h.settings, "memory:review_now"); !strings.Contains(page.text, localetest.English(MemoryReviewingNote)) {
 		h.t.Fatalf("page after Review now = %+v", page)
 	}
 	return receive(h.t, h.ctx, h.runtime.calls)
@@ -198,7 +199,7 @@ func TestWeeklyReviewTurnsTheWeeksSignalsIntoOneCard(t *testing.T) {
 	}
 
 	page := h.press(11, 101, h.settings, "memory:review_off")
-	if !strings.Contains(page.text, MemoryReviewOffLine) || !slices.Contains(buttonData(page.keyboard), "memory:review_on") {
+	if !strings.Contains(page.text, localetest.English(MemoryReviewOffLine)) || !slices.Contains(buttonData(page.keyboard), "memory:review_on") {
 		t.Fatalf("memory page with the review off = %+v", page)
 	}
 	h.turnOn(12)
@@ -549,7 +550,7 @@ func TestWeeklyReviewStopsWhenTurnedOffOrWhenMemoryIsOff(t *testing.T) {
 
 	h.turnOn(10)
 	page := h.press(11, 101, h.settings, "memory:review_off")
-	if !strings.Contains(page.text, MemoryReviewOffLine) || slices.Contains(buttonData(page.keyboard), "memory:review_now") ||
+	if !strings.Contains(page.text, localetest.English(MemoryReviewOffLine)) || slices.Contains(buttonData(page.keyboard), "memory:review_now") ||
 		h.countRows(`SELECT count(*) FROM scheduled_jobs WHERE id = ?`, id) != 0 {
 		t.Fatalf("page after turning the review off = %+v", page)
 	}

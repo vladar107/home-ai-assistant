@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/events"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 )
 
 const (
@@ -32,13 +33,16 @@ const (
 		"Forward sends an event as it is; assess lets me decide from your memory whether it is worth telling you, and always sends a critical one."
 	EventsNoSourcesLine  = "No event sources yet."
 	EventsFullLine       = "You have the most event sources there can be; delete one to add another."
-	EventsNameReply      = "Send the new event source's name as your next message within 10 minutes, such as Backups or Home automations; at most 40 characters."
 	EventsBadNameReply   = "That is not a usable name: it must be one line of at most 40 characters. Press Add event source again to retry."
 	EventsFullReply      = "You already have the most event sources there can be, so nothing was added. Delete one in /settings first."
 	EventsFailedReply    = "I could not set up that event source. Please try again later."
 	EventsGoneNote       = "That event source no longer exists."
-	EventsTokenGuard     = "That looked like an event source token, so I deleted it and did not send it to the model. To get a new one, press New token in /settings."
 	EventsRotateFailNote = "The old token no longer works, but I could not show the new one. Press New token again."
+)
+
+var (
+	EventsNameReply  = locale.T("Send the new event source's name as your next message within 10 minutes, such as Backups or Home automations; at most 40 characters.", "Отправьте название нового источника событий следующим сообщением в течение 10 минут, например «Резервные копии» или «Умный дом»; не больше 40 символов.")
+	EventsTokenGuard = locale.T("That looked like an event source token, so I deleted it and did not send it to the model. To get a new one, press New token in /settings.", "Это было похоже на токен источника событий, поэтому сообщение удалено и модели не отправлено. Чтобы получить новый токен, нажмите «Новый токен» в /settings.")
 )
 
 // EventsCreatedReply confirms a new source; its token went out just before it.
@@ -235,7 +239,7 @@ func (e *eventsSection) act(ctx context.Context, principalID string, _ int64, ac
 		e.mu.Lock()
 		e.naming[principalID] = time.Now().Add(eventNamingLifetime)
 		e.mu.Unlock()
-		return settingsOutcome{message: EventsNameReply}, nil
+		return settingsOutcome{message: EventsNameReply.Format(ctx)}, nil
 	}
 	verb, sourceID, found := strings.Cut(action, ":")
 	if !found || sourceID == "" {
@@ -299,7 +303,7 @@ func (e *eventsSection) act(ctx context.Context, principalID string, _ int64, ac
 // intercept takes the message after Add event source as the new source's name, and keeps any
 // token-looking message out of the model whether or not a name is awaited.
 func (e *eventsSection) intercept(ctx context.Context, principalID string, text string) (interception, error) {
-	if guarded := e.guard(principalID, text); guarded.handled {
+	if guarded := e.guard(ctx, principalID, text); guarded.handled {
 		return guarded, nil
 	}
 	if !e.consumeNaming(principalID) {
@@ -320,11 +324,11 @@ func (e *eventsSection) intercept(ctx context.Context, principalID string, text 
 	return interception{handled: true, reply: EventsCreatedReply(source.Name), reason: "events_source_created"}, nil
 }
 
-func (e *eventsSection) guard(_ string, text string) interception {
+func (e *eventsSection) guard(ctx context.Context, _ string, text string) interception {
 	if !events.LooksLikeToken(text) {
 		return interception{}
 	}
-	return interception{handled: true, remove: true, reply: EventsTokenGuard, reason: "events_token_guard"}
+	return interception{handled: true, remove: true, reply: EventsTokenGuard.Format(ctx), reason: "events_token_guard"}
 }
 
 func (e *eventsSection) consumeNaming(principalID string) bool {

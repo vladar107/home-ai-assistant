@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 )
 
@@ -62,27 +63,27 @@ func TestMonitoringSwitchControlsToolsAndPrivacyForTheAllowedUser(t *testing.T) 
 
 	wantMonitoring(offered(1), true)
 	h.push(textUpdate(2, 101, "/privacy"))
-	h.wantReply(101, 2, privacyLines(AttachmentPrivacyLine, SchedulePrivacyLine, VoicePrivacyLine, GrafanaPrivacyLine, MemoryPrivacyLine))
+	h.wantReply(101, 2, privacyLines(localetest.English(AttachmentPrivacyLine), localetest.English(SchedulePrivacyLine), localetest.English(VoicePrivacyLine), localetest.English(GrafanaPrivacyLine), localetest.English(MemoryPrivacyLine)))
 
 	overview := h.requestSettings(3, 101)
 	if !strings.Contains(overview.text, "Monitoring: on") || !slices.Contains(buttonData(overview.keyboard), "nav:monitoring") {
 		t.Fatalf("settings overview = %+v", overview)
 	}
 	settings := h.openSettingsPage(4, 101, settingsMessageID(3), "monitoring")
-	if !strings.Contains(settings.text, GrafanaOnLine) || !slices.Contains(buttonData(settings.keyboard), "grafana:off") || slices.Contains(buttonData(settings.keyboard), "grafana:on") {
+	if !strings.Contains(settings.text, localetest.English(GrafanaOnLine)) || !slices.Contains(buttonData(settings.keyboard), "grafana:off") || slices.Contains(buttonData(settings.keyboard), "grafana:on") {
 		t.Fatalf("settings by default = %+v", settings)
 	}
 
 	edit := h.press(5, 101, settingsMessageID(3), "grafana:off")
-	if !strings.Contains(edit.text, GrafanaOffLine) || !slices.Contains(buttonData(edit.keyboard), "grafana:on") || slices.Contains(buttonData(edit.keyboard), "grafana:off") {
+	if !strings.Contains(edit.text, localetest.English(GrafanaOffLine)) || !slices.Contains(buttonData(edit.keyboard), "grafana:on") || slices.Contains(buttonData(edit.keyboard), "grafana:off") {
 		t.Fatalf("settings after turning monitoring off = %+v", edit)
 	}
 	wantMonitoring(offered(6), false)
 	h.push(textUpdate(7, 101, "/privacy"))
-	h.wantReply(101, 7, privacyLines(AttachmentPrivacyLine, SchedulePrivacyLine, VoicePrivacyLine, MemoryPrivacyLine))
+	h.wantReply(101, 7, privacyLines(localetest.English(AttachmentPrivacyLine), localetest.English(SchedulePrivacyLine), localetest.English(VoicePrivacyLine), localetest.English(MemoryPrivacyLine)))
 
 	h.requestSettings(8, 101)
-	if edit := h.press(9, 101, settingsMessageID(8), "grafana:on"); !strings.Contains(edit.text, GrafanaOnLine) || !slices.Contains(buttonData(edit.keyboard), "grafana:off") {
+	if edit := h.press(9, 101, settingsMessageID(8), "grafana:on"); !strings.Contains(edit.text, localetest.English(GrafanaOnLine)) || !slices.Contains(buttonData(edit.keyboard), "grafana:off") {
 		t.Fatalf("settings after turning monitoring back on = %+v", edit)
 	}
 	wantMonitoring(offered(10), true)
@@ -111,7 +112,7 @@ func TestMonitoringIsInvisibleToUsersTheOperatorDidNotName(t *testing.T) {
 	h.waitState(2, "delivered")
 
 	h.push(textUpdate(3, 202, "/privacy"))
-	h.wantReply(202, 3, privacyLines(AttachmentPrivacyLine, SchedulePrivacyLine, VoicePrivacyLine, MemoryPrivacyLine))
+	h.wantReply(202, 3, privacyLines(localetest.English(AttachmentPrivacyLine), localetest.English(SchedulePrivacyLine), localetest.English(VoicePrivacyLine), localetest.English(MemoryPrivacyLine)))
 
 	forged := h.press(4, 202, settingsMessageID(1), "grafana:off")
 	if strings.Contains(forged.text, "Monitoring") || hasGrafanaButton(buttonData(forged.keyboard)) {

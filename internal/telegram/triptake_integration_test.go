@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
@@ -96,7 +97,7 @@ func (h *tripTabHarness) refusedIn(updateID, threadID int64, tool, arguments, wa
 
 func (h *tripTabHarness) wantMovedNote(summary sentMessage, title string) {
 	h.t.Helper()
-	if edit := h.nextEdit(); edit.messageID != summary.messageID || edit.text != TripMovedNote+"\n"+title {
+	if edit := h.nextEdit(); edit.messageID != summary.messageID || edit.text != localetest.English(TripMovedNote)+"\n"+title {
 		h.t.Fatalf("summary in the tab the trip left = %+v, want the moved note", edit)
 	}
 }
@@ -375,7 +376,7 @@ func TestATabOfAnEndedTripCanBeTaken(t *testing.T) {
 
 	h.moveTrip(1, endedTab, planned.ID)
 	h.wantMovedNote(first, "Example trip")
-	if edit := h.nextEdit(); edit.messageID != visitSummary.messageID || edit.text != TripTabPassedNote+"\nExample visit" {
+	if edit := h.nextEdit(); edit.messageID != visitSummary.messageID || edit.text != localetest.English(TripTabPassedNote)+"\nExample visit" {
 		t.Fatalf("the ended trip's summary after the take = %+v", edit)
 	}
 	if edit := receive(t, h.ctx, h.tabs.topicEdits); edit != (editedTopic{threadID: endedTab, name: "Example trip", named: true}) {
@@ -743,7 +744,7 @@ func TestNewAndCloseInATakenTab(t *testing.T) {
 	moved, _ := h.requestSession(1)
 
 	h.push(tabMessage(2, userTab, "/new"))
-	if reset := h.nextMessage(); reset.threadID != userTab || reset.text != NewSessionReply {
+	if reset := h.nextMessage(); reset.threadID != userTab || reset.text != localetest.English(NewSessionReply) {
 		t.Fatalf("/new = %+v", reset)
 	}
 	call := h.tripTurn(3, userTab, "and the hotel?")
@@ -757,7 +758,7 @@ func TestNewAndCloseInATakenTab(t *testing.T) {
 
 	h.push(tabMessage(4, userTab, "/close"))
 	prompt := h.nextMessage()
-	if prompt.threadID != userTab || prompt.text != CloseTabPrompt {
+	if prompt.threadID != userTab || prompt.text != localetest.English(CloseTabPrompt) {
 		t.Fatalf("/close = %+v", prompt)
 	}
 	h.push(tabPress(5, userTab, prompt.messageID, "tabs:close:50"))
@@ -765,7 +766,7 @@ func TestNewAndCloseInATakenTab(t *testing.T) {
 	if deleted := receive(t, h.ctx, h.tabs.deleted); deleted != userTab {
 		t.Fatalf("deleted tab %d, want %d", deleted, userTab)
 	}
-	if outcome := h.nextMessage(); outcome.threadID != 0 || outcome.text != TabClosedReply {
+	if outcome := h.nextMessage(); outcome.threadID != 0 || outcome.text != localetest.English(TabClosedReply) {
 		t.Fatalf("close outcome = %+v", outcome)
 	}
 	if _, kept := h.registryTab(userTab); kept || h.summaryMessage(planned.ID) != 0 {

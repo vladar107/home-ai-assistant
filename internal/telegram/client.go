@@ -1210,10 +1210,18 @@ func documentName(name string) string {
 	return sanitized
 }
 
-// CommandScope names a Bot API BotCommandScope type; the empty scope is the default scope.
-type CommandScope string
+// CommandScope names a Bot API BotCommandScope; the zero scope is the default scope.
+type CommandScope struct {
+	Type string `json:"type"`
+	// ChatID is the chat of a chat scope.
+	ChatID int64 `json:"chat_id,omitempty"`
+}
 
-const CommandScopeAllPrivateChats CommandScope = "all_private_chats"
+var CommandScopeAllPrivateChats = CommandScope{Type: "all_private_chats"}
+
+func ChatCommandScope(chatID int64) CommandScope {
+	return CommandScope{Type: "chat", ChatID: chatID}
+}
 
 func (c *Client) SetMyCommands(ctx context.Context, scope CommandScope, commands []BotCommand) error {
 	encoded, err := json.Marshal(commands)
@@ -1221,16 +1229,24 @@ func (c *Client) SetMyCommands(ctx context.Context, scope CommandScope, commands
 		return fmt.Errorf("Telegram setMyCommands command list could not be encoded")
 	}
 	params := url.Values{"commands": {string(encoded)}}
-	if scope != "" {
-		encodedScope, err := json.Marshal(struct {
-			Type string `json:"type"`
-		}{string(scope)})
+	if scope != (CommandScope{}) {
+		encodedScope, err := json.Marshal(scope)
 		if err != nil {
 			return fmt.Errorf("Telegram setMyCommands scope could not be encoded")
 		}
 		params.Set("scope", string(encodedScope))
 	}
 	_, err = execute[bool](c, ctx, "setMyCommands", params)
+	return err
+}
+
+// DeleteMyCommands removes the commands of a scope, so the chat falls back to the shared scopes.
+func (c *Client) DeleteMyCommands(ctx context.Context, scope CommandScope) error {
+	encodedScope, err := json.Marshal(scope)
+	if err != nil {
+		return fmt.Errorf("Telegram deleteMyCommands scope could not be encoded")
+	}
+	_, err = execute[bool](c, ctx, "deleteMyCommands", url.Values{"scope": {string(encodedScope)}})
 	return err
 }
 

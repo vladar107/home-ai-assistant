@@ -15,6 +15,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/clip"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/modelcatalog"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
@@ -50,8 +51,11 @@ const (
 	// webSearchTool is the runtime's own search, which the broker's budget does not count.
 	webSearchTool = "web_search"
 
-	InterruptedTwiceText = "This background task was interrupted by a restart twice, so I stopped it. Ask again if you still need it."
-	LimitText            = "This background task reached its limit and could not write a report in time."
+	LimitText = "This background task reached its limit and could not write a report in time."
+)
+
+var (
+	InterruptedTwiceText = locale.T("This background task was interrupted by a restart twice, so I stopped it. Ask again if you still need it.", "Эта фоновая задача дважды была прервана перезапуском, поэтому она остановлена. Попросите снова, если она всё ещё нужна.")
 )
 
 var (
@@ -192,7 +196,7 @@ func (s *Service) Start(ctx context.Context) error {
 	if err := s.repository.PruneTasks(ctx, now.Add(-retention)); err != nil {
 		s.logger.WarnContext(ctx, "task.prune.failed", "error", err)
 	}
-	principals, err := s.repository.RecoverTasks(ctx, maximumAttempts, InterruptedTwiceText, now)
+	principals, err := s.repository.RecoverTasks(ctx, maximumAttempts, InterruptedTwiceText.In(locale.English), now)
 	if err != nil {
 		return fmt.Errorf("recover background tasks: %w", err)
 	}

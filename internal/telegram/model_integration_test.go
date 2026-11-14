@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/chatgpt"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
@@ -315,10 +316,10 @@ func TestModelIsInTheMenuAndHelp(t *testing.T) {
 	h.start()
 	registration := receive(t, h.ctx, h.registrations)
 	receive(t, h.ctx, h.registrations)
-	if !slices.Contains(registration.commands, BotCommand{Command: "model", Description: ModelCommandDescription}) {
+	if !slices.Contains(registration.commands, BotCommand{Command: "model", Description: localetest.English(ModelCommandDescription)}) {
 		t.Fatalf("menu = %+v", registration.commands)
 	}
-	if help := h.modelCommand(1, "/help").text; !strings.Contains(help, "\n/model: "+ModelCommandDescription) {
+	if help := h.modelCommand(1, "/help").text; !strings.Contains(help, "\n/model: "+localetest.English(ModelCommandDescription)) {
 		t.Fatalf("help = %s", help)
 	}
 }

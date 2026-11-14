@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
@@ -34,12 +35,12 @@ func TurnErrorKinds() []string {
 }
 
 // The replies a failed turn gives the user.
-const (
-	TimeoutReply      = "That response took too long. Please try again with a smaller request."
-	UnavailableReply  = "I could not complete that response. /status and /privacy are still available."
-	QuotaReply        = "Your model subscription has reached its usage limit. Please try again later."
-	ReconnectReply    = "Your model subscription is not connected or has expired. Reconnect it and try again."
-	NotConnectedReply = "Your model subscription is not connected. Use /settings to connect it."
+var (
+	TimeoutReply      = locale.T("That response took too long. Please try again with a smaller request.", "Ответ занял слишком много времени. Попробуйте ещё раз с более коротким запросом.")
+	UnavailableReply  = locale.T("I could not complete that response. /status and /privacy are still available.", "Не удалось завершить ответ. Команды /status и /privacy по-прежнему доступны.")
+	QuotaReply        = locale.T("Your model subscription has reached its usage limit. Please try again later.", "Ваша подписка на модель достигла лимита использования. Попробуйте позже.")
+	ReconnectReply    = locale.T("Your model subscription is not connected or has expired. Reconnect it and try again.", "Ваша подписка на модель не подключена или истекла. Подключите её заново и попробуйте ещё раз.")
+	NotConnectedReply = locale.T("Your model subscription is not connected. Use /settings to connect it.", "Ваша подписка на модель не подключена. Подключите её через /settings.")
 )
 
 // Lane is one conversation place of a principal: a Telegram tab, or the chat's main view at thread

@@ -10,6 +10,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/export"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	"github.com/vladar107/home-ai-assistant/internal/trip"
 )
 
@@ -33,7 +34,7 @@ func TestRestorePreviewIsPlainTextAndWorksInReplyToTheFile(t *testing.T) {
 	if page.parseMode != "" || !strings.Contains(page.text, "+ Instruction:\n"+planted) {
 		t.Fatalf("preview page = %+v", page)
 	}
-	if card := target.nextMessage(); !strings.HasPrefix(card.text, export.RestoreHeading) {
+	if card := target.nextMessage(); !strings.HasPrefix(card.text, localetest.English(export.RestoreHeading)) {
 		t.Fatalf("restore card = %+v", card)
 	}
 }
@@ -65,7 +66,7 @@ func TestRestoreConfirmationExpiresAndForgetsTheFile(t *testing.T) {
 		Tool: export.RestoreTool, PrincipalID: "alice", Arguments: json.RawMessage(`{"digest":"0123"}`),
 	})
 	var failed *approval.ActionError
-	if !errors.As(err, &failed) || failed.Text != export.RestoreGoneText {
+	if !errors.As(err, &failed) || failed.Text != localetest.English(export.RestoreGoneText) {
 		t.Fatalf("confirming a file no longer held = %v", err)
 	}
 }

@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/notionsim"
 )
@@ -33,7 +35,7 @@ func chatTools(own []string, integrations ...string) []string {
 // paragraph. Attachments, jobs, voice, and memory are always among them, as the application always
 // runs them.
 func privacyLines(lines ...string) string {
-	return ConversationPrivacyReply + privacyItem + modelUsagePrivacyLine + privacyItem + strings.Join(lines, privacyItem)
+	return localetest.English(ConversationPrivacyReply) + privacyItem + modelUsagePrivacyLine + privacyItem + strings.Join(lines, privacyItem)
 }
 
 // onlyCoreTools tells whether a turn carries the core tools alone, as one without any granted
@@ -50,11 +52,11 @@ func TestHelpListsTheRegisteredCommands(t *testing.T) {
 	h.start()
 	registration := receive(t, h.ctx, h.registrations)
 
-	want := HelpHeading
-	for _, command := range append(registration.commands, typedCommands...) {
+	want := localetest.English(HelpHeading)
+	for _, command := range append(registration.commands, menuCommands(locale.English, typedCommands)...) {
 		want += "\n/" + command.Command + ": " + command.Description
 	}
-	want += "\n" + BacklogHelpLine + "\n\n" + HelpConversationLine
+	want += "\n" + localetest.English(BacklogHelpLine) + "\n\n" + localetest.English(HelpConversationLine)
 	if !strings.Contains(want, "\n/jobs: ") {
 		t.Fatalf("registered commands = %+v, want /jobs among them", registration.commands)
 	}
@@ -92,13 +94,13 @@ func TestAppHelpShowsTheSettingsPagesTheUserSees(t *testing.T) {
 		t.Fatalf("trains help = %+v\npage = %s", train, trains.text)
 	}
 	notion := help("notion")
-	if notion.IsError || !strings.Contains(notion.Text, accounts.text) || !strings.Contains(notion.Text, "Pressing Connect Notion sends: "+NotionConnectInstructions) {
+	if notion.IsError || !strings.Contains(notion.Text, accounts.text) || !strings.Contains(notion.Text, "Pressing Connect Notion sends: "+localetest.English(NotionConnectInstructions)) {
 		t.Fatalf("notion help = %+v\npage = %s", notion, accounts.text)
 	}
 	if commands := help("commands"); commands.IsError || !strings.Contains(commands.Text, "/jobs: Show and manage your reminders and scheduled jobs") || !strings.Contains(commands.Text, "/new: Start a fresh conversation") {
 		t.Fatalf("commands help = %+v", commands)
 	}
-	if jobs := help("jobs"); jobs.IsError || !strings.Contains(jobs.Text, NoJobsReply) {
+	if jobs := help("jobs"); jobs.IsError || !strings.Contains(jobs.Text, localetest.English(NoJobsReply)) {
 		t.Fatalf("jobs help = %+v", jobs)
 	}
 	if search := help("web_search"); search.IsError || !strings.Contains(search.Text, "each query is checked") || !strings.Contains(search.Text, "Confirm and Reject") {

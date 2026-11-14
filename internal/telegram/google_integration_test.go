@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/connectors/gmail"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/calendarsim"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/googlesim"
@@ -230,7 +231,7 @@ func TestGoogleAccountsSearchSwitchesAndDisconnect(t *testing.T) {
 	if revoked := sim.Revoked(); !slices.Equal(revoked, []string{aliceWork}) {
 		t.Fatalf("revoked at Google = %v", revoked)
 	}
-	if edit := h.press(19, 101, settingsMessageID(17), "google:disconnect:"+personal); !strings.Contains(edit.text, GoogleNotConnectedLine) {
+	if edit := h.press(19, 101, settingsMessageID(17), "google:disconnect:"+personal); !strings.Contains(edit.text, localetest.English(GoogleNotConnectedLine)) {
 		t.Fatalf("settings after disconnecting both = %+v", edit)
 	}
 }
@@ -247,12 +248,12 @@ func TestGoogleSignInRefusalsAndRevokedGrant(t *testing.T) {
 	h.start()
 
 	// A sign-in address with nothing pending is still kept away from the model.
-	if reply := h.pasteRedirect(1, 101, googlesim.RedirectURL+"?state=x&code=4/stray"); reply != GoogleNoSignInReply {
+	if reply := h.pasteRedirect(1, 101, googlesim.RedirectURL+"?state=x&code=4/stray"); reply != localetest.English(GoogleNoSignInReply) {
 		t.Fatalf("stray address = %q", reply)
 	}
 	expectNoRuntimeCall(t, runtime, 50*time.Millisecond)
 
-	if reply := h.connectGoogle(sim, 2, 101, aliceMailbox, googlesim.Grant{}); reply != GoogleDeniedReply {
+	if reply := h.connectGoogle(sim, 2, 101, aliceMailbox, googlesim.Grant{}); reply != localetest.English(GoogleDeniedReply) {
 		t.Fatalf("both products unticked = %q", reply)
 	}
 	if revoked := sim.Revoked(); !slices.Equal(revoked, []string{aliceMailbox}) {
@@ -262,14 +263,14 @@ func TestGoogleSignInRefusalsAndRevokedGrant(t *testing.T) {
 	// Bob cannot finish Alice's sign-in with the address meant for her.
 	aliceLink := h.startGoogleSignIn(5, 6, 101)
 	h.startGoogleSignIn(7, 8, 202)
-	if reply := h.pasteRedirect(9, 202, sim.Consent(aliceLink, aliceMailbox, bothProducts)); reply != GoogleNoSignInReply {
+	if reply := h.pasteRedirect(9, 202, sim.Consent(aliceLink, aliceMailbox, bothProducts)); reply != localetest.English(GoogleNoSignInReply) {
 		t.Fatalf("bob pasting alice's address = %q", reply)
 	}
 
 	if reply := h.connectGoogle(sim, 10, 101, aliceMailbox, bothProducts); !strings.Contains(reply, "connected read-only") {
 		t.Fatalf("alice connecting = %q", reply)
 	}
-	if reply := h.connectGoogle(sim, 13, 202, aliceMailbox, bothProducts); reply != GoogleTakenReply {
+	if reply := h.connectGoogle(sim, 13, 202, aliceMailbox, bothProducts); reply != localetest.English(GoogleTakenReply) {
 		t.Fatalf("bob connecting alice's account = %q", reply)
 	}
 	if h.googleCredential("bob", sim.Subject(aliceMailbox)) || len(sim.Revoked()) != 1 {
@@ -302,7 +303,7 @@ func TestGoogleSignInRefusalsAndRevokedGrant(t *testing.T) {
 		slices.Contains(buttonData(page.keyboard), "google:mail-off:"+sim.Subject(aliceMailbox)) {
 		t.Fatalf("settings after revocation = %+v", page)
 	}
-	if edit := h.press(22, 101, settingsMessageID(20), "google:mail-on:"+sim.Subject(aliceWork)); !strings.Contains(edit.text, "Mail not allowed") || !strings.Contains(edit.text, GoogleNotGrantedReply) {
+	if edit := h.press(22, 101, settingsMessageID(20), "google:mail-on:"+sim.Subject(aliceWork)); !strings.Contains(edit.text, "Mail not allowed") || !strings.Contains(edit.text, localetest.English(GoogleNotGrantedReply)) {
 		t.Fatalf("switching on a product that was not granted = %+v", edit)
 	}
 }

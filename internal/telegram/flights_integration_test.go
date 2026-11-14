@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/vladar107/home-ai-assistant/internal/connectors/flights"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 )
 
@@ -101,15 +102,15 @@ func TestFlightStatusSwitchAndAttribution(t *testing.T) {
 	h.waitState(3, "delivered")
 
 	h.push(textUpdate(4, 101, "/privacy"))
-	if message := h.nextMessage(); !strings.Contains(message.text, FlightsPrivacyLine) {
+	if message := h.nextMessage(); !strings.Contains(message.text, localetest.English(FlightsPrivacyLine)) {
 		t.Fatalf("privacy = %q", message.text)
 	}
 	h.requestSettings(5, 101)
 	settings := h.openSettingsPage(6, 101, settingsMessageID(5), "tools")
-	if !strings.Contains(settings.text, FlightsOnLine) || !slices.Contains(buttonData(settings.keyboard), "flights:off") {
+	if !strings.Contains(settings.text, localetest.English(FlightsOnLine)) || !slices.Contains(buttonData(settings.keyboard), "flights:off") {
 		t.Fatalf("settings = %+v", settings)
 	}
-	if edit := h.press(7, 101, settingsMessageID(5), "flights:off"); !strings.Contains(edit.text, FlightsOffLine) {
+	if edit := h.press(7, 101, settingsMessageID(5), "flights:off"); !strings.Contains(edit.text, localetest.English(FlightsOffLine)) {
 		t.Fatalf("after turning flights off = %+v", edit)
 	}
 	if names := turn(8, "ok", "", nil); strings.Contains(names, "flight_status") {

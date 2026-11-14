@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/runtime/pi"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/pifixture"
@@ -43,8 +44,8 @@ func TestProviderFailuresProduceActionableReplies(t *testing.T) {
 		reply    string
 		category agentruntime.FailureCategory
 	}{
-		{"quota", conversation.QuotaReply, agentruntime.FailureQuota},
-		{"auth", conversation.ReconnectReply, agentruntime.FailureAuth},
+		{"quota", localetest.English(conversation.QuotaReply), agentruntime.FailureQuota},
+		{"auth", localetest.English(conversation.ReconnectReply), agentruntime.FailureAuth},
 	} {
 		t.Run(tc.scenario, func(t *testing.T) {
 			t.Parallel()

@@ -4,13 +4,16 @@ import (
 	"context"
 	"strings"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 )
 
 const (
-	ReminderGoneReply = "This reminder was cancelled or is already set again."
-
 	reminderPrefix = "remind"
+)
+
+var (
+	ReminderGoneReply = locale.T("This reminder was cancelled or is already set again.", "Это напоминание отменено или уже назначено заново.")
 )
 
 // snoozeButtons are the fixed snooze choices, in the order they are shown.
@@ -62,7 +65,7 @@ func (s *Service) processSnoozePress(ctx context.Context, callback *CallbackQuer
 	if err != nil {
 		return processingResult{}, "snooze_reminder", err
 	}
-	outcome := ReminderGoneReply
+	outcome := ReminderGoneReply.Format(ctx)
 	if snoozed {
 		location, err := schedule.LoadZone(job.Zone)
 		if err != nil {

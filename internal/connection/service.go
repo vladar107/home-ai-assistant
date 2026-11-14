@@ -319,9 +319,9 @@ func (s *Service) finish(ctx context.Context, principalID string, device deviceA
 	case errors.Is(err, context.Canceled):
 		return "", "cancelled"
 	case errors.Is(err, context.DeadlineExceeded):
-		return ConnectExpiredReply, "expired"
+		return ConnectExpiredReply.Format(ctx), "expired"
 	case errors.Is(err, errDenied):
-		return ConnectDeniedReply, "denied"
+		return ConnectDeniedReply.Format(ctx), "denied"
 	case err != nil:
 		return ConnectFailedReply, "failed"
 	}
@@ -347,7 +347,7 @@ func (s *Service) finish(ctx context.Context, principalID string, device deviceA
 		return ConnectFailedReply, "failed"
 	}
 	if !bound {
-		return AccountAlreadyBoundReply, "already_bound"
+		return AccountAlreadyBoundReply.Format(ctx), "already_bound"
 	}
 	if err := writeCredential(profileDir, s.provider, credential); err != nil {
 		_, _ = s.repository.DeleteModelConnection(ctx, principalID)
@@ -359,7 +359,7 @@ func (s *Service) finish(ctx context.Context, principalID string, device deviceA
 		_, _ = s.repository.DeleteModelConnection(context.WithoutCancel(ctx), principalID)
 		return "", "cancelled"
 	}
-	return ConnectedReply, "connected"
+	return ConnectedReply.Format(ctx), "connected"
 }
 
 func (s *Service) Disconnect(ctx context.Context, principalID string) (bool, error) {

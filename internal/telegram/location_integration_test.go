@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 )
 
@@ -214,7 +215,7 @@ func TestForgettingDuringALiveShareStopsLaterEdits(t *testing.T) {
 		t.Fatalf("location page = %+v", page)
 	}
 	edit := h.press(4, 101, settingsMessageID(2), "location:forget")
-	if !strings.Contains(edit.text, LocationForgottenNote) || !strings.Contains(edit.text, "Location: not shared") {
+	if !strings.Contains(edit.text, localetest.English(LocationForgottenNote)) || !strings.Contains(edit.text, "Location: not shared") {
 		t.Fatalf("settings after forgetting = %+v", edit)
 	}
 	if _, found, _ := h.store.LoadLocation(h.ctx, "alice"); found {
@@ -272,7 +273,7 @@ func TestPrivacyMentionsLocationsWhenEnabled(t *testing.T) {
 	h, _, _ := locationHarness(t, nil)
 	h.start()
 	h.push(textUpdate(1, 101, "/privacy"))
-	if reply := h.nextMessage(); !strings.Contains(reply.text, privacyItem+LocationPrivacyLine) {
+	if reply := h.nextMessage(); !strings.Contains(reply.text, privacyItem+localetest.English(LocationPrivacyLine)) {
 		t.Fatalf("privacy = %q", reply.text)
 	}
 }

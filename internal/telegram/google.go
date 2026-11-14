@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/vladar107/home-ai-assistant/internal/connectors/google"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 )
 
 const (
@@ -15,20 +16,23 @@ const (
 	googleConnectAction    = "connect"
 	googleDisconnectAction = "disconnect"
 
-	GoogleNotConnectedLine   = "Google: no accounts connected."
 	GoogleAccountsLine       = "Google accounts:"
 	GooglePrivacyLine        = "Mail and calendar events I read go to your model."
 	GoogleSignInInstructions = "To connect a Google account read-only:\n" +
 		"1. Open the link below and sign in with the Google account to connect. Google will say the app is unverified; it is the household's own app, so continue.\n" +
 		"2. Allow reading your email, your calendar, or both. Nothing can send, change, or delete anything.\n" +
 		"3. Your browser then fails to open a localhost page. Copy that page's full address and send it here within 10 minutes. I will delete it right away.\n\n"
-	GoogleNoSignInReply      = "That sign-in address does not match a pending sign-in, or it expired, so nothing was connected. Press Connect a Google account in /settings to start again. I deleted the message."
-	GoogleDeniedReply        = "Neither Gmail nor Calendar access was granted, so nothing was connected. Press Connect a Google account in /settings and allow at least one."
 	GoogleRejectedReply      = "Google refused that sign-in, so nothing was connected. Codes work once and only for a few minutes; press Connect a Google account in /settings to try again."
-	GoogleTakenReply         = "That Google account is already connected for another household member, so it was not connected for you."
 	GoogleConnectFailedReply = "Google could not be reached to finish the sign-in, so nothing was connected. Please try again later."
-	GoogleNotGrantedReply    = "That account did not allow it when it was connected. Press Connect a Google account, sign in with the same account, and leave it ticked."
-	GoogleSignInGuardReply   = "That looked like a Google sign-in address, so I deleted it and did not send it to the model. To finish signing in, send the address on its own as a text message."
+)
+
+var (
+	GoogleNotConnectedLine = locale.T("Google: no accounts connected.", "Google: аккаунты не подключены.")
+	GoogleNoSignInReply    = locale.T("That sign-in address does not match a pending sign-in, or it expired, so nothing was connected. Press Connect a Google account in /settings to start again. I deleted the message.", "Этот адрес входа не соответствует ожидающему входу или устарел, поэтому ничего не подключено. Нажмите «Подключить аккаунт Google» в /settings, чтобы начать заново. Сообщение удалено.")
+	GoogleDeniedReply      = locale.T("Neither Gmail nor Calendar access was granted, so nothing was connected. Press Connect a Google account in /settings and allow at least one.", "Доступ не дан ни к Gmail, ни к Календарю, поэтому ничего не подключено. Нажмите «Подключить аккаунт Google» в /settings и разрешите хотя бы один из них.")
+	GoogleTakenReply       = locale.T("That Google account is already connected for another household member, so it was not connected for you.", "Этот аккаунт Google уже подключён у другого члена семьи, поэтому для вас он не подключён.")
+	GoogleNotGrantedReply  = locale.T("That account did not allow it when it was connected. Press Connect a Google account, sign in with the same account, and leave it ticked.", "При подключении этот аккаунт не дал такого разрешения. Нажмите «Подключить аккаунт Google», войдите в тот же аккаунт и оставьте галочку отмеченной.")
+	GoogleSignInGuardReply = locale.T("That looked like a Google sign-in address, so I deleted it and did not send it to the model. To finish signing in, send the address on its own as a text message.", "Это было похоже на адрес входа в Google, поэтому сообщение удалено и модели не отправлено. Чтобы завершить вход, отправьте адрес отдельным текстовым сообщением.")
 )
 
 // GoogleController is implemented by the Google connector, for the Google and Trips settings
@@ -119,7 +123,7 @@ func (g googleSection) render(ctx context.Context, principalID string) (settings
 	}
 	view := settingsView{buttons: []InlineButton{{Text: "Connect a Google account", CallbackData: googleSectionPrefix + ":" + googleConnectAction}}}
 	if len(statuses) == 0 {
-		view.lines = []string{GoogleNotConnectedLine}
+		view.lines = []string{GoogleNotConnectedLine.Format(ctx)}
 		return view, nil
 	}
 	view.lines = []string{GoogleAccountsLine}
@@ -176,7 +180,7 @@ func (g googleSection) act(ctx context.Context, principalID string, _ int64, act
 		product, state, _ := strings.Cut(verb, "-")
 		_, err := g.google.SetProduct(ctx, principalID, accountID, google.Product(product), state == "on")
 		if errors.Is(err, google.ErrNotGranted) {
-			return settingsOutcome{note: GoogleNotGrantedReply}, nil
+			return settingsOutcome{note: GoogleNotGrantedReply.Format(ctx)}, nil
 		}
 		return settingsOutcome{}, err
 	default:
@@ -196,13 +200,13 @@ func (g googleSection) intercept(ctx context.Context, principalID string, text s
 	case err == nil:
 		result.reply, result.reason = GoogleConnectedReply(status), "google_signin_connected"
 	case errors.Is(err, google.ErrNoSignIn):
-		result.reply, result.reason = GoogleNoSignInReply, "google_signin_unmatched"
+		result.reply, result.reason = GoogleNoSignInReply.Format(ctx), "google_signin_unmatched"
 	case errors.Is(err, google.ErrDenied):
-		result.reply, result.reason = GoogleDeniedReply, "google_signin_denied"
+		result.reply, result.reason = GoogleDeniedReply.Format(ctx), "google_signin_denied"
 	case errors.Is(err, google.ErrRejected):
 		result.reply, result.reason = GoogleRejectedReply, "google_signin_rejected"
 	case errors.Is(err, google.ErrAccountTaken):
-		result.reply, result.reason = GoogleTakenReply, "google_signin_taken"
+		result.reply, result.reason = GoogleTakenReply.Format(ctx), "google_signin_taken"
 	default:
 		g.telemetry.ContextLogger(ctx, g.logger).WarnContext(ctx, "google.signin.failed", "principal_id", principalID, "error", err)
 		result.reply, result.reason = GoogleConnectFailedReply, "google_signin_failed"
@@ -210,9 +214,9 @@ func (g googleSection) intercept(ctx context.Context, principalID string, text s
 	return result, nil
 }
 
-func (g googleSection) guard(_ string, text string) interception {
+func (g googleSection) guard(ctx context.Context, _ string, text string) interception {
 	if !google.LooksLikeRedirect(text) {
 		return interception{}
 	}
-	return interception{handled: true, remove: true, reply: GoogleSignInGuardReply, reason: "google_signin_guard"}
+	return interception{handled: true, remove: true, reply: GoogleSignInGuardReply.Format(ctx), reason: "google_signin_guard"}
 }

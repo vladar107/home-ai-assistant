@@ -440,6 +440,8 @@ func (a *App) buildTelegram(ctx context.Context, client *telegram.Client, config
 		deps.Backlog = asm.Backlog
 		deps.Why = asm.Why
 		deps.Exports = asm.Exports
+		deps.Languages = a.store
+		deps.Chats = a.store
 		deps.Transcriber = asm.ChatGPT
 		deps.Model = &telegram.ModelCommand{
 			Lanes: asm.Conversation, Catalog: asm.Models, Usage: asm.ChatGPT,
@@ -468,6 +470,9 @@ func (a *App) buildTelegram(ctx context.Context, client *telegram.Client, config
 		return fmt.Errorf("initialize Telegram service: %w", err)
 	}
 	client.ObserveTabs(service)
+	if asm != nil {
+		asm.LanguageRestored = service.ChatMenuChanged
+	}
 	if asm != nil {
 		if err := asm.Tools.Register(service.Help()); err != nil {
 			return err

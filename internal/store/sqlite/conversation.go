@@ -9,6 +9,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
 
@@ -183,7 +184,7 @@ func (s *Store) RecoverConversations(ctx context.Context) ([]conversation.Lane, 
 		`UPDATE conversation_requests
 		 SET state = 'ready', message = '', response_text = ?, error_kind = 'runtime'
 		 WHERE state = 'running'`,
-		conversation.InterruptedReply,
+		conversation.InterruptedReply.In(locale.English),
 	); err != nil {
 		return nil, fmt.Errorf("recover interrupted conversations: %w", err)
 	}

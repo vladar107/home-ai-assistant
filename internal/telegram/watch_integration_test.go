@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
@@ -90,7 +91,7 @@ func TestWatchAlertButtonsMuteAndPause(t *testing.T) {
 
 	h.push(callbackUpdate(1, 202, alert.messageID, "watch:mute:"+id))
 	h.wantAnswer(1)
-	if edit := h.nextEdit(); !strings.Contains(edit.text, WatchGoneReply) {
+	if edit := h.nextEdit(); !strings.Contains(edit.text, localetest.English(WatchGoneReply)) {
 		t.Fatalf("bob's press = %+v", edit)
 	}
 	if enabled, muted := h.watchState(id); !enabled || muted != "" {
@@ -100,7 +101,7 @@ func TestWatchAlertButtonsMuteAndPause(t *testing.T) {
 	for update := int64(2); update <= 3; update++ {
 		h.push(callbackUpdate(update, 101, alert.messageID, "watch:mute:"+id))
 		h.wantAnswer(update)
-		if edit := h.nextEdit(); !strings.Contains(edit.text, WatchMutedReply) || len(buttonData(edit.keyboard)) != 0 {
+		if edit := h.nextEdit(); !strings.Contains(edit.text, localetest.English(WatchMutedReply)) || len(buttonData(edit.keyboard)) != 0 {
 			t.Fatalf("mute press %d = %+v", update, edit)
 		}
 	}
@@ -110,7 +111,7 @@ func TestWatchAlertButtonsMuteAndPause(t *testing.T) {
 
 	h.push(callbackUpdate(4, 101, alert.messageID, "watch:pause:"+id))
 	h.wantAnswer(4)
-	if edit := h.nextEdit(); !strings.Contains(edit.text, WatchPausedReply) {
+	if edit := h.nextEdit(); !strings.Contains(edit.text, localetest.English(WatchPausedReply)) {
 		t.Fatalf("pause press = %+v", edit)
 	}
 	if enabled, _ := h.watchState(id); enabled {
@@ -230,10 +231,10 @@ func TestWatchIsProposedConfirmedAndManagedByItsOwnerOnly(t *testing.T) {
 
 	h.push(callbackUpdate(9, 202, jobs.messageID, "jobs:wdelete:"+id+":1"))
 	h.wantAnswer(9)
-	if edit := h.nextEdit(); edit.text != NoJobsReply {
+	if edit := h.nextEdit(); edit.text != localetest.English(NoJobsReply) {
 		t.Fatalf("bob's list after his press = %+v", edit)
 	}
-	h.wantMessage(202, WatchGoneReply)
+	h.wantMessage(202, localetest.English(WatchGoneReply))
 	if count := h.countRows(`SELECT count(*) FROM watches`); count != 1 {
 		t.Fatalf("bob's press deleted alice's watch: %d left", count)
 	}
@@ -253,7 +254,7 @@ func TestWatchIsProposedConfirmedAndManagedByItsOwnerOnly(t *testing.T) {
 	if !strings.Contains(paused.text, "Mon–Fri, 07:00–08:30, paused") || buttonData(paused.keyboard)[0] != "jobs:wresume:"+id+":1" {
 		t.Fatalf("after pause = %+v", paused)
 	}
-	if deleted := h.pressJob(13, jobs.messageID, "jobs:wdelete:"+id+":1"); deleted.text != NoJobsReply {
+	if deleted := h.pressJob(13, jobs.messageID, "jobs:wdelete:"+id+":1"); deleted.text != localetest.English(NoJobsReply) {
 		t.Fatalf("after delete = %+v", deleted)
 	}
 	if count := h.countRows(`SELECT count(*) FROM watches`); count != 0 {

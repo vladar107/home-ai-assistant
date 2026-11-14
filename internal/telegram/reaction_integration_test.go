@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
@@ -104,7 +105,7 @@ func TestReactOnlyTurnInAResumedConversationSendsNothing(t *testing.T) {
 	earlierAnswer := h.nextMessage()
 	h.waitState(1, "delivered")
 	h.push(textUpdate(2, 101, "/new"))
-	h.wantReply(101, 2, NewSessionReply)
+	h.wantReply(101, 2, localetest.English(NewSessionReply))
 	h.push(textUpdate(3, 101, "book a table for Friday"))
 	later := receive(t, h.ctx, runtime.calls)
 	later.answer <- agentruntime.RunResult{Response: "Booked."}
@@ -410,7 +411,7 @@ func TestThumbsDownOnAnEarlierConversationReturnsToIt(t *testing.T) {
 	earlier := h.nextMessage()
 	h.waitState(1, "delivered")
 	h.push(textUpdate(2, 101, "/new"))
-	h.wantReply(101, 2, NewSessionReply)
+	h.wantReply(101, 2, localetest.English(NewSessionReply))
 	h.push(textUpdate(3, 101, "book a table for Friday"))
 	later := receive(t, h.ctx, runtime.calls)
 	later.answer <- agentruntime.RunResult{Response: "Booked."}

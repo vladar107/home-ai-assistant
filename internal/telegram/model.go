@@ -10,14 +10,13 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/chatgpt"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/modelcatalog"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 )
 
 const (
 	ModelTitle = "Model and effort"
-	// ModelCommandDescription is the slash menu entry.
-	ModelCommandDescription = "Show and change the model and effort"
 
 	modelPrefix        = "mdl"
 	modelPickAction    = "m"
@@ -27,6 +26,11 @@ const (
 
 	// modelUsageMaxAge bounds how old a cached usage read may be to mark a model unavailable.
 	modelUsageMaxAge = 15 * time.Minute
+)
+
+var (
+	// ModelCommandDescription is the slash menu entry.
+	ModelCommandDescription = locale.T("Show and change the model and effort", "Показать и сменить модель и глубину рассуждений")
 )
 
 // ModelLanes is the conversation's per-lane model choice, implemented by conversation.Service.

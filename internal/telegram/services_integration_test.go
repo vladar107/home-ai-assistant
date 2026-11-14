@@ -1,6 +1,7 @@
 package telegram
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/config"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/mcp"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/googlesim"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/mcpsim"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/notionsim"
@@ -110,7 +112,7 @@ func (h *conversationHarness) wantDeleted(userID, updateID int64) {
 }
 
 func servicesPage(lines ...string) string {
-	return strings.Join(append([]string{crumbs("Services"), "", ServicesLine}, lines...), "\n")
+	return strings.Join(append([]string{crumbs(context.Background(), "Services"), "", localetest.English(ServicesLine)}, lines...), "\n")
 }
 
 // The page shows each server the user may use, in catalog order, in each of its five states, with
@@ -393,7 +395,7 @@ func TestServicesKeyIntakeTakesOnlyAKeyInTime(t *testing.T) {
 	h.mu.Unlock()
 	h.push(textUpdate(8, 101, bobMCPKey))
 	h.wantDeleted(101, 8)
-	h.wantMessage(101, ServicesUnverifiedReply("Prices quotes")+" "+DeleteFailedLine)
+	h.wantMessage(101, ServicesUnverifiedReply("Prices quotes")+" "+localetest.English(DeleteFailedLine))
 	h.mu.Lock()
 	h.deleteStatus = 0
 	h.mu.Unlock()
@@ -463,7 +465,7 @@ func TestServicesIntakeAndTheOtherGuards(t *testing.T) {
 	connect(4, "quotes")
 	h.push(textUpdate(5, 101, "secret_abcDEF123"))
 	h.wantDeleted(101, 5)
-	h.wantMessage(101, NotionTokenGuardReply)
+	h.wantMessage(101, localetest.English(NotionTokenGuardReply))
 	if _, pending := h.mcp.PendingIntake("alice"); pending {
 		t.Fatal("a Notion token left the intake pending")
 	}
@@ -471,7 +473,7 @@ func TestServicesIntakeAndTheOtherGuards(t *testing.T) {
 	connect(6, "quotes")
 	h.push(textUpdate(7, 101, "http://localhost/?code=4/0AbCdEfGhIjKlMnOp&scope=email"))
 	h.wantDeleted(101, 7)
-	h.wantMessage(101, GoogleNoSignInReply)
+	h.wantMessage(101, localetest.English(GoogleNoSignInReply))
 	if _, pending := h.mcp.PendingIntake("alice"); pending {
 		t.Fatal("a sign-in address left the intake pending")
 	}
@@ -484,10 +486,10 @@ func TestServicesIntakeAndTheOtherGuards(t *testing.T) {
 
 	h.push(textUpdate(8, 101, "secret_abcDEF123"))
 	h.wantDeleted(101, 8)
-	h.wantMessage(101, NotionTokenGuardReply)
+	h.wantMessage(101, localetest.English(NotionTokenGuardReply))
 	h.push(textUpdate(9, 101, "secret_fedcba9876543210XYZ"))
 	h.wantDeleted(101, 9)
-	h.wantMessage(101, ServicesKeyGuardReply)
+	h.wantMessage(101, localetest.English(ServicesKeyGuardReply))
 	h.assertNothingReachedTheModel(runtime, 10)
 	if requests := notionSim.Requests(); len(requests) != 0 {
 		t.Fatalf("Notion was called %d times", len(requests))
@@ -587,7 +589,7 @@ func TestServicesKeyAsACaptionNeverReachesTheModel(t *testing.T) {
 	}
 	h.push(documentUpdate(4, 101, patternedKey, MediaFile{FileID: "doc-1", FileName: "notes.txt", MimeType: "text/plain", FileSize: 64}))
 	h.wantDeleted(101, 4)
-	h.wantMessage(101, ServicesKeyGuardReply)
+	h.wantMessage(101, localetest.English(ServicesKeyGuardReply))
 	h.assertNothingReachedTheModel(runtime, 5)
 	if requests := tokens.Requests(); len(requests) != 0 {
 		t.Fatalf("a guarded caption reached the server: %d requests", len(requests))
@@ -621,7 +623,7 @@ func TestServicesForgedPressesChangeNothing(t *testing.T) {
 	}
 	// Nothing was sent for the forged presses, so the next message is the answer to this one.
 	h.push(textUpdate(8, 101, "/privacy"))
-	h.wantReply(101, 8, privacyLines(AttachmentPrivacyLine, SchedulePrivacyLine, ServicePrivacyLine("Listings shop"), VoicePrivacyLine, MemoryPrivacyLine))
+	h.wantReply(101, 8, privacyLines(localetest.English(AttachmentPrivacyLine), localetest.English(SchedulePrivacyLine), ServicePrivacyLine("Listings shop"), localetest.English(VoicePrivacyLine), localetest.English(MemoryPrivacyLine)))
 }
 
 // A full catalog of twelve servers with the longest names, titles, and descriptions renders
@@ -761,10 +763,10 @@ func TestServicesPrivacyAndHelp(t *testing.T) {
 	h.start()
 
 	h.push(textUpdate(1, 101, "/privacy"))
-	h.wantReply(101, 1, privacyLines(AttachmentPrivacyLine, SchedulePrivacyLine, VoicePrivacyLine, MemoryPrivacyLine))
+	h.wantReply(101, 1, privacyLines(localetest.English(AttachmentPrivacyLine), localetest.English(SchedulePrivacyLine), localetest.English(VoicePrivacyLine), localetest.English(MemoryPrivacyLine)))
 	h.setMCP("alice", "shop", true)
 	h.push(textUpdate(2, 101, "/privacy"))
-	h.wantReply(101, 2, privacyLines(AttachmentPrivacyLine, SchedulePrivacyLine, ServicePrivacyLine("Listings shop"), VoicePrivacyLine, MemoryPrivacyLine))
+	h.wantReply(101, 2, privacyLines(localetest.English(AttachmentPrivacyLine), localetest.English(SchedulePrivacyLine), ServicePrivacyLine("Listings shop"), localetest.English(VoicePrivacyLine), localetest.English(MemoryPrivacyLine)))
 
 	h.requestSettings(3, 101)
 	page := h.openSettingsPage(4, 101, settingsMessageID(3), "services")

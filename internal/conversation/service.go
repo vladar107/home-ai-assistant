@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
@@ -31,9 +32,9 @@ const (
 	CardRetention = 24 * time.Hour
 )
 
-const (
-	BusyReply         = "I am still working on your previous message. You can wait for it or use /cancel."
-	InterruptedReply  = "The previous response was interrupted by a restart, so I did not retry it. Please send it again if you still need it."
+var (
+	BusyReply         = locale.T("I am still working on your previous message. You can wait for it or use /cancel.", "Я всё ещё работаю над вашим предыдущим сообщением. Можно дождаться ответа или воспользоваться /cancel.")
+	InterruptedReply  = locale.T("The previous response was interrupted by a restart, so I did not retry it. Please send it again if you still need it.", "Предыдущий ответ был прерван перезапуском и повторно не запускался. Отправьте сообщение ещё раз, если оно всё ещё нужно.")
 	TimeoutReply      = turn.TimeoutReply
 	UnavailableReply  = turn.UnavailableReply
 	QuotaReply        = turn.QuotaReply
@@ -602,8 +603,9 @@ func (s *Service) runWorker(ctx context.Context, lane Lane, wake <-chan struct{}
 			if !found {
 				break
 			}
+			requestCtx := s.withLanguage(ctx, principalID)
 			if request.State == RequestStateReady {
-				if err := s.deliver(ctx, request); err != nil {
+				if err := s.deliver(requestCtx, request); err != nil {
 					if ctx.Err() != nil {
 						return
 					}
@@ -620,9 +622,19 @@ func (s *Service) runWorker(ctx context.Context, lane Lane, wake <-chan struct{}
 				}
 				continue
 			}
-			s.runTurn(ctx, request)
+			s.runTurn(requestCtx, request)
 		}
 	}
+}
+
+// withLanguage reads the principal's interface language when a request starts, so a change made
+// while the lane runs reaches its next request.
+func (s *Service) withLanguage(ctx context.Context, principalID string) context.Context {
+	withLanguage, err := locale.ForPrincipal(ctx, s.config.Languages, principalID)
+	if err != nil {
+		s.logger.WarnContext(ctx, "conversation.language.load_failed", "principal_id", principalID, "error", err)
+	}
+	return withLanguage
 }
 
 func (s *Service) runTurn(ctx context.Context, request Request) {
@@ -725,13 +737,13 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		}
 	} else if runErr == nil {
 		errorKind, reportedKind = ErrorKindRuntime, ErrorKindNotConnected
-		reply = NotConnectedReply
+		reply = NotConnectedReply.Format(ctx)
 	} else {
 		errorKind = ErrorKindRuntime
 	}
 	if errorKind != "" {
 		if reply == "" {
-			reply = UnavailableReply
+			reply = UnavailableReply.Format(ctx)
 		}
 	} else {
 		// A continuation's or a reconsider's message is ours, and a forwarded one someone else's, so
@@ -775,14 +787,14 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		switch {
 		case errors.Is(turnCtx.Err(), context.DeadlineExceeded) || errors.Is(runErr, agentruntime.ErrStalled):
 			errorKind = ErrorKindTimeout
-			reply = TimeoutReply
+			reply = TimeoutReply.Format(ctx)
 		case errors.Is(turnCtx.Err(), context.Canceled):
 			s.removeCard(request)
 			endTurn("cancelled", "cancelled")
 			return
 		case runErr != nil || strings.TrimSpace(result.Response) == "":
 			errorKind = ErrorKindRuntime
-			reply, reportedKind = turn.FailureReply(runErr)
+			reply, reportedKind = turn.FailureReply(ctx, runErr)
 		default:
 			reply = result.Response
 			if s.replyAsReaction(turnCtx, request.PrincipalID, reply) {
@@ -1222,7 +1234,7 @@ func (s *Service) logWorkerError(ctx context.Context, principalID, errorKind str
 func SplitReply(reply string) []string {
 	runes := []rune(strings.TrimSpace(reply))
 	if len(runes) == 0 {
-		return []string{UnavailableReply}
+		return []string{UnavailableReply.In(locale.English)}
 	}
 	chunks := make([]string, 0, (len(runes)+maximumReplyRunes-1)/maximumReplyRunes)
 	for len(runes) > maximumReplyRunes {

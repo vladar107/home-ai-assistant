@@ -7,16 +7,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/task"
 )
 
 const (
 	TasksTitle       = "Background tasks"
 	NoTasksReply     = "You have no background tasks from the last week. Ask me for something long, such as going through a month of mail, and I will work on it in the background while we keep talking."
-	TaskGoneReply    = "That task has already finished or was cancelled."
 	TaskPrivacyLine  = "Background task reports are kept for 30 days."
 	tasksPrefix      = "tasks"
 	taskCancelAction = "cancel"
+)
+
+var (
+	TaskGoneReply = locale.T("That task has already finished or was cancelled.", "Эта задача уже завершилась или была отменена.")
 )
 
 // TaskController is implemented by the task service; nil disables /tasks.
@@ -110,9 +114,9 @@ func (s *Service) processTaskPress(ctx context.Context, callback *CallbackQuery,
 	if !changed && !strings.HasPrefix(callback.Message.Text, TasksTitle) {
 		text = strings.TrimSpace(callback.Message.Text)
 		if text == "" {
-			text = TaskGoneReply
+			text = TaskGoneReply.Format(ctx)
 		} else {
-			text += "\n\n" + TaskGoneReply
+			text += "\n\n" + TaskGoneReply.Format(ctx)
 		}
 	} else if text, keyboard, err = renderTasks(ctx, principalID, s.tasks); err != nil {
 		return processingResult{}, "render_tasks", err

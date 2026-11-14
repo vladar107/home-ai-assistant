@@ -9,15 +9,12 @@ import (
 	"unicode/utf16"
 
 	"github.com/vladar107/home-ai-assistant/internal/collection"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 )
 
 const (
-	CollectionsTitle         = "Collections"
-	NoCollectionsReply       = "You keep no collections. Ask me in conversation, for example: keep a list of things I lend out, with who and when."
-	NoRecordsLine            = "No records yet."
-	CollectionGoneReply      = "That collection no longer exists."
-	CollectionRecordGoneLine = "That record no longer exists."
-	CollectionDeletedNote    = "Deleted the collection."
+	CollectionsTitle = "Collections"
+	NoRecordsLine    = "No records yet."
 
 	collectionCallbackPrefix = "col"
 	collectionListAction     = "list"
@@ -31,6 +28,13 @@ const (
 	// 300-character description, and 8 records of this many units each leave room to spare.
 	recordLineUnits = 400
 	opensPerRow     = 4
+)
+
+var (
+	NoCollectionsReply       = locale.T("You keep no collections. Ask me in conversation, for example: keep a list of things I lend out, with who and when.", "У вас нет коллекций. Попросите меня в разговоре, например: веди список вещей, которые я даю на время, с указанием, кому и когда.")
+	CollectionGoneReply      = locale.T("That collection no longer exists.", "Этой коллекции больше нет.")
+	CollectionRecordGoneLine = locale.T("That record no longer exists.", "Этой записи больше нет.")
+	CollectionDeletedNote    = locale.T("Deleted the collection.", "Коллекция удалена.")
 )
 
 // CollectionController is implemented by the collection service; nil leaves /collections out.
@@ -50,7 +54,7 @@ func renderCollections(ctx context.Context, principalID string, controller Colle
 		return "", nil, err
 	}
 	if len(collections) == 0 {
-		return NoCollectionsReply, nil, nil
+		return NoCollectionsReply.Format(ctx), nil, nil
 	}
 	lines := []string{CollectionsTitle}
 	var keyboard InlineKeyboard
@@ -219,14 +223,14 @@ func (s *Service) processCollectionPress(ctx context.Context, callback *Callback
 	case collectionRecordDelete:
 		var removed bool
 		if collectionID, removed, err = s.collections.RemoveRecord(ctx, principalID, press.id); err == nil && !removed {
-			followUp = CollectionRecordGoneLine
+			followUp = CollectionRecordGoneLine.Format(ctx)
 		}
 	case collectionDeleteAction:
 		var deleted bool
 		if deleted, err = s.collections.DeleteCollection(ctx, principalID, press.id); err == nil {
-			followUp, collectionID = CollectionDeletedNote, ""
+			followUp, collectionID = CollectionDeletedNote.Format(ctx), ""
 			if !deleted {
-				followUp = CollectionGoneReply
+				followUp = CollectionGoneReply.Format(ctx)
 			}
 		}
 	}
@@ -246,7 +250,7 @@ func (s *Service) processCollectionPress(ctx context.Context, callback *Callback
 			return processingResult{}, "render_collections", err
 		}
 		if !shown && followUp == "" {
-			followUp = CollectionGoneReply
+			followUp = CollectionGoneReply.Format(ctx)
 		}
 	}
 	if !shown {

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"github.com/vladar107/home-ai-assistant/internal/intake"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 )
 
@@ -15,13 +16,16 @@ const (
 	inboxOffAction     = "off"
 	inboxCheckAction   = "check"
 
-	InboxOnLine  = "Inbox intake: on. Every three hours between 08:00 and 22:00 I check your new mail for letters, bills, and notices that need something from you, and send what they say with the follow-ups I propose, such as a reminder before a deadline, on one card to confirm; mail that needs nothing sends nothing. Press Check now to look at once. Uses your model subscription."
-	InboxOffLine = "Inbox intake: off. Turn it on and I check your mail from the last day at once and then every three hours between 08:00 and 22:00 for letters, bills, and notices that need something from you, and propose follow-ups on one card; nothing is set without your press. Needs a connected model subscription, which it uses."
+	InboxTooManyNote = "You already have the maximum number of scheduled jobs. Remove one in /jobs, then turn Inbox intake on."
+	InboxBusyNote    = "A check is already running; anything that needs you arrives in the Inbox tab, or here while tabs are off."
+)
+
+var (
+	InboxOnLine  = locale.T("Inbox intake: on. Every three hours between 08:00 and 22:00 I check your new mail for letters, bills, and notices that need something from you, and send what they say with the follow-ups I propose, such as a reminder before a deadline, on one card to confirm; mail that needs nothing sends nothing. Press Check now to look at once. Uses your model subscription.", "Разбор почты: включён. Каждые три часа с 08:00 до 22:00 я проверяю вашу новую почту на письма, счета и уведомления, от которых что-то требуется, и присылаю их содержание вместе с предлагаемыми действиями, например напоминанием перед сроком, одной карточкой для подтверждения; если от письма ничего не требуется, ничего не приходит. Нажмите «Проверить сейчас», чтобы посмотреть сразу. Использует вашу подписку на модель.")
+	InboxOffLine = locale.T("Inbox intake: off. Turn it on and I check your mail from the last day at once and then every three hours between 08:00 and 22:00 for letters, bills, and notices that need something from you, and propose follow-ups on one card; nothing is set without your press. Needs a connected model subscription, which it uses.", "Разбор почты: выключен. Включите, и я сразу проверю вашу почту за последние сутки, а затем буду проверять её каждые три часа с 08:00 до 22:00 на письма, счета и уведомления, от которых что-то требуется, и предлагать действия одной карточкой; без вашего нажатия ничего не назначается. Нужна подключённая подписка на модель, которую эта функция использует.")
 	// InboxNeedsMailLine explains why the switch is not offered.
-	InboxNeedsMailLine = "Inbox intake: off. It reads your mail, so turn on Mail for a connected Google account in Accounts › Google first."
-	InboxTooManyNote   = "You already have the maximum number of scheduled jobs. Remove one in /jobs, then turn Inbox intake on."
-	InboxCheckingNote  = "Checking your new mail now; anything that needs you arrives in the Inbox tab, or here while tabs are off."
-	InboxBusyNote      = "A check is already running; anything that needs you arrives in the Inbox tab, or here while tabs are off."
+	InboxNeedsMailLine = locale.T("Inbox intake: off. It reads your mail, so turn on Mail for a connected Google account in Accounts › Google first.", "Разбор почты: выключен. Он читает вашу почту, поэтому сначала включите «Почту» для подключённого аккаунта Google в разделе «Аккаунты › Google».")
+	InboxCheckingNote  = locale.T("Checking your new mail now; anything that needs you arrives in the Inbox tab, or here while tabs are off.", "Проверяю новую почту; всё, что требует вашего внимания, придёт во вкладку «Входящие» или сюда, пока вкладки выключены.")
 )
 
 // InboxController is the intake service as the Inbox intake switch sees it.
@@ -90,7 +94,7 @@ func (i inboxSection) render(ctx context.Context, principalID string) (settingsV
 	}
 	if enabled {
 		return settingsView{
-			lines: []string{InboxOnLine},
+			lines: []string{InboxOnLine.Format(ctx)},
 			buttons: []InlineButton{
 				{Text: "Check now", CallbackData: inboxSectionPrefix + ":" + inboxCheckAction},
 				{Text: "Turn off Inbox intake", CallbackData: inboxSectionPrefix + ":" + inboxOffAction},
@@ -102,10 +106,10 @@ func (i inboxSection) render(ctx context.Context, principalID string) (settingsV
 		return settingsView{}, err
 	}
 	if !readable {
-		return settingsView{lines: []string{InboxNeedsMailLine}}, nil
+		return settingsView{lines: []string{InboxNeedsMailLine.Format(ctx)}}, nil
 	}
 	return settingsView{
-		lines:   []string{InboxOffLine},
+		lines:   []string{InboxOffLine.Format(ctx)},
 		buttons: []InlineButton{{Text: "Turn on Inbox intake", CallbackData: inboxSectionPrefix + ":" + inboxOnAction}},
 	}, nil
 }
@@ -120,7 +124,7 @@ func (i inboxSection) act(ctx context.Context, principalID string, _ int64, acti
 			return settingsOutcome{}, err
 		}
 		if !readable {
-			return settingsOutcome{note: InboxNeedsMailLine}, nil
+			return settingsOutcome{note: InboxNeedsMailLine.Format(ctx)}, nil
 		}
 		jobs, err := i.schedules.Jobs(ctx, principalID)
 		if err != nil {
@@ -197,5 +201,5 @@ func (i inboxSection) check(ctx context.Context, principalID string) (settingsOu
 		return settingsOutcome{}, err
 	}
 	i.telemetry.ContextLogger(ctx, i.logger).InfoContext(ctx, "inbox.check.queued", "principal_id", principalID)
-	return settingsOutcome{note: InboxCheckingNote}, nil
+	return settingsOutcome{note: InboxCheckingNote.Format(ctx)}, nil
 }

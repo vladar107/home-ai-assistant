@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
@@ -544,7 +545,7 @@ func TestATripsTabTalksAboutTheTrip(t *testing.T) {
 	}
 
 	h.push(tabMessage(3, tab, "/new"))
-	if reset := h.nextMessage(); reset.threadID != tab || reset.text != NewSessionReply {
+	if reset := h.nextMessage(); reset.threadID != tab || reset.text != localetest.English(NewSessionReply) {
 		t.Fatalf("/new = %+v", reset)
 	}
 	turn(tabMessage(4, tab, "and the hotel?"), "It has no check-in time.", true)
@@ -565,7 +566,7 @@ func TestATripsTabTalksAboutTheTrip(t *testing.T) {
 	}
 	h.write(`DELETE FROM trips WHERE id = ?`, planned.ID)
 	h.push(tabMessage(6, tab, "/new"))
-	if reset := h.nextMessage(); reset.text != NewSessionReply {
+	if reset := h.nextMessage(); reset.text != localetest.English(NewSessionReply) {
 		t.Fatalf("/new = %+v", reset)
 	}
 	h.push(tabMessage(7, tab, "still there?"))

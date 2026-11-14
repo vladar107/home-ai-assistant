@@ -46,6 +46,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/integration"
 	"github.com/vladar107/home-ai-assistant/internal/judgment"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	"github.com/vladar107/home-ai-assistant/internal/location"
 	"github.com/vladar107/home-ai-assistant/internal/memory"
 	"github.com/vladar107/home-ai-assistant/internal/module"
@@ -150,6 +151,7 @@ type deletedMessage struct {
 type commandRegistration struct {
 	commands []BotCommand
 	scope    []string
+	deleted  bool
 }
 
 type lockedBuffer struct {
@@ -243,6 +245,9 @@ type harnessOptions struct {
 	// mcp is the operator's MCP catalog, as HOME_AGENT_MCP_SERVERS_FILE lists it; its servers point
 	// at simulators.
 	mcp []config.MCPServer
+	// languages adds the Language page to /settings and gives each chat a slash menu in its user's
+	// language, as the application does.
+	languages bool
 }
 
 // testFile is one attachment the Telegram simulator will hand out through getFile.
@@ -275,6 +280,7 @@ type conversationHarness struct {
 	bus            *bus.Service
 	mcp            *mcp.Service
 	mcpCatalog     []config.MCPServer
+	languages      bool
 	switches       *integration.Switches
 	locations      *location.Service
 	memory         *memory.Service
@@ -405,7 +411,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		answers: make(chan callbackAnswer, 100), deletes: make(chan deletedMessage, 100), offsets: make(chan int64, 100), registrations: make(chan commandRegistration, 10),
 		turns: make(chan turnOutcome, 20), logs: &lockedBuffer{}, files: make(map[string]testFile), indicatorFailures: make(map[string]int),
 		reactionCounts: make(map[string]int), feedbackCounts: make(map[string]int), tabs: newTabSimulator(options.topics),
-		widgets: newWidgetSimulator(),
+		widgets: newWidgetSimulator(), languages: options.languages,
 	}
 	server := httptest.NewServer(http.HandlerFunc(h.serveHTTP))
 	t.Cleanup(server.Close)
@@ -620,6 +626,9 @@ func (h *conversationHarness) telegramService(identities *identity.Service, logg
 	if asm.Watches != nil {
 		deps.Watches = asm.Watches
 	}
+	if h.languages {
+		deps.Languages, deps.Chats = h.store, h.store
+	}
 	deps.Model = &ModelCommand{
 		Lanes: asm.Conversation, Catalog: asm.Models, Usage: asm.ChatGPT,
 		ChatDefault: asm.ChatModel, TaskDefault: asm.TaskModel, Turns: asm.Conversation,
@@ -672,6 +681,9 @@ func (h *conversationHarness) telegramService(identities *identity.Service, logg
 		h.t.Fatal(err)
 	}
 	h.client.ObserveTabs(service)
+	if h.languages {
+		asm.LanguageRestored = service.ChatMenuChanged
+	}
 	if err := asm.Tools.Register(service.Help()); err != nil {
 		h.t.Fatal(err)
 	}
@@ -908,6 +920,13 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 		if status != 0 {
 			w.WriteHeader(status)
 			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_code": status, "description": reason})
+			return
+		}
+		result = true
+	case "deleteMyCommands":
+		select {
+		case h.registrations <- commandRegistration{scope: r.Form["scope"], deleted: true}:
+		case <-r.Context().Done():
 			return
 		}
 		result = true
@@ -1369,7 +1388,7 @@ func TestConversationSessionsAndUserIsolation(t *testing.T) {
 	h.wantReply(101, 3, "amber")
 	h.waitState(3, "delivered")
 	h.push(textUpdate(4, 101, "/new"))
-	h.wantReply(101, 4, NewSessionReply)
+	h.wantReply(101, 4, localetest.English(NewSessionReply))
 	h.push(textUpdate(5, 101, "recall"), textUpdate(6, 202, "recall"))
 	for range 2 {
 		call := receive(t, h.ctx, runtime.calls)
@@ -1396,10 +1415,10 @@ func TestCommandsRemainResponsiveAndCancelSuppressesLateAnswer(t *testing.T) {
 	h.push(textUpdate(1, 101, "long request"))
 	call := receive(t, h.ctx, runtime.calls)
 	h.push(textUpdate(2, 101, "second request"), textUpdate(3, 101, "/status"), textUpdate(4, 101, "/privacy"), textUpdate(5, 101, "/cancel"))
-	h.wantReply(101, 2, conversation.BusyReply)
+	h.wantReply(101, 2, localetest.English(conversation.BusyReply))
 	h.wantStatusReply(101, 3)
-	h.wantReply(101, 4, privacyLines(AttachmentPrivacyLine, SchedulePrivacyLine, VoicePrivacyLine, MemoryPrivacyLine))
-	h.wantReply(101, 5, CancelledReply)
+	h.wantReply(101, 4, privacyLines(localetest.English(AttachmentPrivacyLine), localetest.English(SchedulePrivacyLine), localetest.English(VoicePrivacyLine), localetest.English(MemoryPrivacyLine)))
+	h.wantReply(101, 5, localetest.English(CancelledReply))
 	receive(t, h.ctx, call.ctx.Done())
 	h.waitState(1, "cancelled")
 	h.push(textUpdate(6, 101, "next request"))
@@ -1501,7 +1520,7 @@ func TestConversationRestartRecovery(t *testing.T) {
 				want = "queued answer"
 			}
 			if state == "running" {
-				want = conversation.InterruptedReply
+				want = localetest.English(conversation.InterruptedReply)
 			}
 			h.wantReply(101, 1, want)
 			h.waitState(1, "delivered")
@@ -1631,7 +1650,7 @@ func TestBusyWhileResponseIsBeingDelivered(t *testing.T) {
 	h.waitState(1, "delivering")
 	h.push(textUpdate(2, 101, "second"))
 	message := h.nextMessage()
-	if message.text != conversation.BusyReply || message.replyTo != requestMessageID(2) {
+	if message.text != localetest.English(conversation.BusyReply) || message.replyTo != requestMessageID(2) {
 		t.Fatalf("during delivery got %+v, want busy reply quoting the second request", message)
 	}
 	close(gate)
@@ -1666,7 +1685,7 @@ func TestBotCommandsRegisteredOnceAtStartup(t *testing.T) {
 	}
 	h.push(textUpdate(1, 101, "/status"), textUpdate(2, 101, "/privacy"))
 	h.wantStatusReply(101, 1)
-	h.wantReply(101, 2, privacyLines(AttachmentPrivacyLine, SchedulePrivacyLine, VoicePrivacyLine, MemoryPrivacyLine))
+	h.wantReply(101, 2, privacyLines(localetest.English(AttachmentPrivacyLine), localetest.English(SchedulePrivacyLine), localetest.English(VoicePrivacyLine), localetest.English(MemoryPrivacyLine)))
 	h.waitOffset(3)
 	select {
 	case extra := <-h.registrations:

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/events"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	"github.com/vladar107/home-ai-assistant/internal/observability"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
@@ -40,7 +41,7 @@ func (h *conversationHarness) addEventSource(updateID, userID int64, name string
 	h.t.Helper()
 	h.requestSettings(updateID, userID)
 	h.press(updateID+1, userID, settingsMessageID(updateID), "events:add")
-	if prompt := h.nextMessage(); prompt.chatID != userID || prompt.text != EventsNameReply {
+	if prompt := h.nextMessage(); prompt.chatID != userID || prompt.text != localetest.English(EventsNameReply) {
 		h.t.Fatalf("add prompt = %+v", prompt)
 	}
 	h.push(textUpdate(updateID+2, userID, name))
@@ -212,7 +213,7 @@ func TestEventsReachOnlyTheirSourcesOwnerAndNeedAValidToken(t *testing.T) {
 	if deleted := receive(t, h.ctx, h.deletes); deleted.chatID != 101 || deleted.messageID != requestMessageID(23) {
 		t.Fatalf("deleted %+v", deleted)
 	}
-	if guard := h.nextMessage(); guard.text != EventsTokenGuard {
+	if guard := h.nextMessage(); guard.text != localetest.English(EventsTokenGuard) {
 		t.Fatalf("guard reply = %+v", guard)
 	}
 

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/googlesim"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 	"github.com/vladar107/home-ai-assistant/internal/trip"
@@ -57,7 +58,7 @@ func (h *tripTabHarness) tripsPageIn(firstUpdateID, threadID int64) (editedMessa
 	}
 	h.push(request)
 	overview := h.nextMessage()
-	if overview.threadID != threadID || !strings.HasPrefix(overview.text, SettingsTitle+"\n") {
+	if overview.threadID != threadID || !strings.HasPrefix(overview.text, localetest.English(SettingsTitle)+"\n") {
 		h.t.Fatalf("settings = %+v, want them in tab %d", overview, threadID)
 	}
 	return h.pressIn(firstUpdateID+1, threadID, overview.messageID, settingsNavPrefix+":tools"), overview.messageID
@@ -74,7 +75,7 @@ func (h *tripTabHarness) pressIn(updateID, threadID, messageID int64, data strin
 func (h *tripTabHarness) settingsEdit(messageID int64) editedMessage {
 	h.t.Helper()
 	edit := h.nextEdit()
-	if edit.messageID != messageID || !strings.HasPrefix(edit.text, SettingsTitle) {
+	if edit.messageID != messageID || !strings.HasPrefix(edit.text, localetest.English(SettingsTitle)) {
 		h.t.Fatalf("settings edit = %+v, want message %d", edit, messageID)
 	}
 	return edit
@@ -110,7 +111,7 @@ func TestTheTripsPageMovesATripToTheTabItIsOpenedIn(t *testing.T) {
 
 	page, messageID := h.tripsPageIn(1, userTab)
 	button := tripTabButton(planned.ID)
-	if !strings.Contains(page.text, TripsNeedsGoogleLine) || strings.Contains(page.text, TripsTabLine) ||
+	if !strings.Contains(page.text, localetest.English(TripsNeedsGoogleLine)) || strings.Contains(page.text, localetest.English(TripsTabLine)) ||
 		!slices.Equal(tripMoveButtons(page), []string{button}) || buttonTitled(page.keyboard, button) != "Use this tab for Example trip" {
 		t.Fatalf("page in Alice's tab = %+v", page)
 	}
@@ -173,15 +174,15 @@ func TestTheTripsPageOffersNoTabWhereATripCannotGo(t *testing.T) {
 	button := tripTabButton(planned.ID)
 
 	page, messageID := h.tripsPageIn(1, 0)
-	if !strings.Contains(page.text, TripsTabLine) || len(tripMoveButtons(page)) != 0 {
+	if !strings.Contains(page.text, localetest.English(TripsTabLine)) || len(tripMoveButtons(page)) != 0 {
 		t.Fatalf("page in the main view = %+v", page)
 	}
-	if page = h.pressIn(3, 0, messageID, button); !strings.HasSuffix(page.text, TripsTabLine) {
+	if page = h.pressIn(3, 0, messageID, button); !strings.HasSuffix(page.text, localetest.English(TripsTabLine)) {
 		t.Fatalf("forged press in the main view = %+v", page)
 	}
 
 	page, messageID = h.tripsPageIn(4, reminders)
-	if !strings.Contains(page.text, TripsTabLine) || len(tripMoveButtons(page)) != 0 {
+	if !strings.Contains(page.text, localetest.English(TripsTabLine)) || len(tripMoveButtons(page)) != 0 {
 		t.Fatalf("page in the Reminders tab = %+v", page)
 	}
 	refusal := "This is the Reminders tab, which keeps its own kind of messages, so it cannot be a trip's tab."
@@ -189,7 +190,7 @@ func TestTheTripsPageOffersNoTabWhereATripCannotGo(t *testing.T) {
 		t.Fatalf("forged press in the Reminders tab = %+v", page)
 	}
 
-	if page, _ = h.tripsPageIn(7, tab); strings.Contains(page.text, TripsTabLine) || !strings.Contains(page.text, `"Example trip" uses this tab.`) || len(tripMoveButtons(page)) != 0 {
+	if page, _ = h.tripsPageIn(7, tab); strings.Contains(page.text, localetest.English(TripsTabLine)) || !strings.Contains(page.text, `"Example trip" uses this tab.`) || len(tripMoveButtons(page)) != 0 {
 		t.Fatalf("page in the trip's own tab = %+v", page)
 	}
 	if h.tripTab(planned.ID) != tab {
@@ -230,10 +231,10 @@ func TestAPressAfterTheTabStoppedBeingUsableIsRefused(t *testing.T) {
 	}
 
 	page = h.pressIn(4, userTab, messageID, tripTabButton(strings.ToUpper(planned.ID)+"-x"))
-	if strings.Contains(page.text, TripsTabGoneNote) || strings.Contains(page.text, "Moved") || strings.Contains(page.text, refusal) || !strings.Contains(page.text, `"Second trip" uses this tab.`) {
+	if strings.Contains(page.text, localetest.English(TripsTabGoneNote)) || strings.Contains(page.text, "Moved") || strings.Contains(page.text, refusal) || !strings.Contains(page.text, `"Second trip" uses this tab.`) {
 		t.Fatalf("press with a malformed trip ID = %+v", page)
 	}
-	if page = h.pressIn(5, userTab, messageID, tripTabButton("ffffffff")); !strings.HasSuffix(page.text, TripsTabGoneNote) {
+	if page = h.pressIn(5, userTab, messageID, tripTabButton("ffffffff")); !strings.HasSuffix(page.text, localetest.English(TripsTabGoneNote)) {
 		t.Fatalf("press for a trip that is not planned = %+v", page)
 	}
 	// The malformed press is recorded by the time the next one is answered.
@@ -261,7 +262,7 @@ func TestTheTripsPageOffersItsTabToFiveTrips(t *testing.T) {
 	if got := tripMoveButtons(page); !slices.Equal(got, want) {
 		t.Fatalf("buttons = %v, want the five nearest trips %v", got, want)
 	}
-	if strings.Contains(page.text, TripsTabLine) || buttonTitled(page.keyboard, want[0]) != "Use this tab for Trip 1" {
+	if strings.Contains(page.text, localetest.English(TripsTabLine)) || buttonTitled(page.keyboard, want[0]) != "Use this tab for Trip 1" {
 		t.Fatalf("page = %+v", page)
 	}
 
@@ -269,7 +270,7 @@ func TestTheTripsPageOffersItsTabToFiveTrips(t *testing.T) {
 		t.Fatalf("connected reply = %q", reply)
 	}
 	page, _ = h.tripsPageIn(20, userTab)
-	if got := tripMoveButtons(page); !strings.Contains(page.text, TripsOffLine) || !slices.Equal(got, want) {
+	if got := tripMoveButtons(page); !strings.Contains(page.text, localetest.English(TripsOffLine)) || !slices.Equal(got, want) {
 		t.Fatalf("page with mail readable = %+v", page)
 	}
 }
@@ -301,7 +302,7 @@ func TestAPressForATripCancelledMeanwhileSaysItIsNoLongerPlanned(t *testing.T) {
 	section := NewTripsSection(nil, nil, trips, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
 
 	outcome, err := section.act(thread.With(context.Background(), userTab), "alice", 101, "tab:0123abcd")
-	if err != nil || outcome.note != TripsTabGoneNote {
+	if err != nil || outcome.note != localetest.English(TripsTabGoneNote) {
 		t.Fatalf("outcome = %+v %v, want the note for a trip no longer planned", outcome, err)
 	}
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/chatgpt"
 	"github.com/vladar107/home-ai-assistant/internal/connection"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/task"
 )
@@ -173,7 +174,7 @@ func TestPrivacyAndHelpMentionTheModelCommandAndUsageRead(t *testing.T) {
 
 	h.push(textUpdate(2, 101, "how do I pick a model?"))
 	call := receive(t, h.ctx, runtime.calls)
-	if help := h.callTool(call, "app_help", `{"topic":"model"}`); help.IsError || !strings.Contains(help.Text, "/model") || !strings.Contains(help.Text, ModelCommandLine) {
+	if help := h.callTool(call, "app_help", `{"topic":"model"}`); help.IsError || !strings.Contains(help.Text, "/model") || !strings.Contains(help.Text, localetest.English(ModelCommandLine)) {
 		t.Fatalf("model help = %+v", help)
 	}
 	call.answer <- agentruntime.RunResult{Response: "Use /model."}

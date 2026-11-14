@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/connectors/google"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 	"github.com/vladar107/home-ai-assistant/internal/trip"
@@ -37,25 +38,28 @@ const (
 	tripCardBookings = 8
 	tripCardRunes    = 3500
 
-	TripGoneReply      = "This trip no longer exists."
-	TripTrackedReply   = "Already tracking this trip."
-	TripIgnoredReply   = "Ignored; I won't offer it again."
 	TripCancelledReply = "This trip was cancelled."
 
-	TripsOnLine  = "Trips: on. Each morning I look in your mail and calendar for travel bookings and offer each trip with Track and Ignore buttons; nothing is planned without your press. From three days before a tracked trip until it ends, I also check your mail, the web, and your calendar for important news about it about twice a day, between 08:00 and 21:00 where you are, and post what is new in the trip's tab. Press Scan now to look at once; it checks for trip news too. Uses your model subscription."
-	TripsOffLine = "Trips: off. Turn it on and I look in your mail and calendar for travel bookings at once and then each morning, and offer each trip with Track and Ignore buttons; nothing is planned without your press. While it is on, I also check tracked trips for important news from three days before they start until they end. Needs a connected model subscription, which it uses."
-	// TripsNeedsGoogleLine explains why the switch is not offered.
-	TripsNeedsGoogleLine = "Trips: off. It reads your mail and calendar, so turn on Mail or Calendar for a connected Google account in Accounts › Google first."
-	TripsTooManyNote     = "You already have the maximum number of scheduled jobs. Remove one in /jobs, then turn Trips on."
-	TripsScanningNote    = "Scanning your mail and calendar now; any trips I find arrive here as cards, and news about trips near or under way arrives in their tabs."
-	TripsBusyNote        = "A scan is already running; any trips it finds arrive here as cards."
+	TripsTooManyNote = "You already have the maximum number of scheduled jobs. Remove one in /jobs, then turn Trips on."
 
+	// TripsTabHelp is added to the app_help topic of the page.
+	TripsTabHelp = "With tabs on, each planned trip that has not ended, up to five, has a button \"Use this tab for\" with its title on this page when the page is opened in a tab the trip can use: a tab of conversations the user has, or the tab of a trip that is over. Pressing it moves the trip there with its pinned summary, reminders, notices, and news; the tab keeps its name and icon. The main view, the Reminders and other feed tabs, and the tab of another trip, a project, or a watch cannot be used. The user sends /settings in a tab that already has a message, since /settings as the first message of a new tab is answered in the main view. Saying in a tab that it is the trip's tab also moves the trip."
+)
+
+var (
+	TripGoneReply    = locale.T("This trip no longer exists.", "Этой поездки больше нет.")
+	TripTrackedReply = locale.T("Already tracking this trip.", "Эта поездка уже отслеживается.")
+	TripIgnoredReply = locale.T("Ignored; I won't offer it again.", "Пропущено; больше не предложу.")
+	TripsOnLine      = locale.T("Trips: on. Each morning I look in your mail and calendar for travel bookings and offer each trip with Track and Ignore buttons; nothing is planned without your press. From three days before a tracked trip until it ends, I also check your mail, the web, and your calendar for important news about it about twice a day, between 08:00 and 21:00 where you are, and post what is new in the trip's tab. Press Scan now to look at once; it checks for trip news too. Uses your model subscription.", "Поездки: включены. Каждое утро я ищу в вашей почте и календаре бронирования поездок и предлагаю каждую поездку с кнопками «Следить» и «Игнорировать»; без вашего нажатия ничего не планируется. За три дня до отслеживаемой поездки и до её конца я также примерно дважды в день, с 08:00 до 21:00 по месту, где вы находитесь, проверяю почту, интернет и календарь на важные новости о ней и публикую новое во вкладке поездки. Нажмите «Проверить сейчас», чтобы посмотреть сразу; при этом проверяются и новости о поездках. Использует вашу подписку на модель.")
+	TripsOffLine     = locale.T("Trips: off. Turn it on and I look in your mail and calendar for travel bookings at once and then each morning, and offer each trip with Track and Ignore buttons; nothing is planned without your press. While it is on, I also check tracked trips for important news from three days before they start until they end. Needs a connected model subscription, which it uses.", "Поездки: выключены. Включите, и я сразу поищу в вашей почте и календаре бронирования поездок, а затем буду делать это каждое утро и предлагать каждую поездку с кнопками «Следить» и «Игнорировать»; без вашего нажатия ничего не планируется. Пока функция включена, я также проверяю отслеживаемые поездки на важные новости, начиная с трёх дней до их начала и до конца. Нужна подключённая подписка на модель, которую эта функция использует.")
+	// TripsNeedsGoogleLine explains why the switch is not offered.
+	TripsNeedsGoogleLine = locale.T("Trips: off. It reads your mail and calendar, so turn on Mail or Calendar for a connected Google account in Accounts › Google first.", "Поездки: выключены. Они читают вашу почту и календарь, поэтому сначала включите «Почту» или «Календарь» для подключённого аккаунта Google в разделе «Аккаунты › Google».")
+	TripsScanningNote    = locale.T("Scanning your mail and calendar now; any trips I find arrive here as cards, and news about trips near or under way arrives in their tabs.", "Просматриваю вашу почту и календарь; найденные поездки приходят сюда карточками, а новости о ближайших и идущих поездках приходят в их вкладки.")
+	TripsBusyNote        = locale.T("A scan is already running; any trips it finds arrive here as cards.", "Просмотр уже идёт; найденные поездки придут сюда карточками.")
 	// TripsTabLine stands in for the buttons that move a trip where the page's tab cannot be a
 	// trip's.
-	TripsTabLine = "To move a planned trip to a tab of yours, send /settings in that tab and open this page there; a trip cannot use this one. Use a tab that already has a message, because /settings as the first message of a new tab is answered in the main view."
-	// TripsTabHelp is added to the app_help topic of the page.
-	TripsTabHelp     = "With tabs on, each planned trip that has not ended, up to five, has a button \"Use this tab for\" with its title on this page when the page is opened in a tab the trip can use: a tab of conversations the user has, or the tab of a trip that is over. Pressing it moves the trip there with its pinned summary, reminders, notices, and news; the tab keeps its name and icon. The main view, the Reminders and other feed tabs, and the tab of another trip, a project, or a watch cannot be used. The user sends /settings in a tab that already has a message, since /settings as the first message of a new tab is answered in the main view. Saying in a tab that it is the trip's tab also moves the trip."
-	TripsTabGoneNote = "That trip is over or no longer planned, so it has no tab to move."
+	TripsTabLine     = locale.T("To move a planned trip to a tab of yours, send /settings in that tab and open this page there; a trip cannot use this one. Use a tab that already has a message, because /settings as the first message of a new tab is answered in the main view.", "Чтобы перенести запланированную поездку во вкладку, отправьте /settings в этой вкладке и откройте там эту страницу; эта вкладка для поездки не подойдёт. Используйте вкладку, в которой уже есть сообщение, потому что /settings как первое сообщение новой вкладки обрабатывается на главном экране.")
+	TripsTabGoneNote = locale.T("That trip is over or no longer planned, so it has no tab to move.", "Эта поездка закончилась или больше не запланирована, поэтому её нельзя перенести во вкладку.")
 )
 
 // TripController is implemented by the trip service; nil leaves the buttons of trip cards and
@@ -397,13 +401,13 @@ func (s *Service) processTripPress(ctx context.Context, callback *CallbackQuery,
 	case outcome.Rejection == "" && action == tripTrackAction:
 		text = tripTrackedText(outcome)
 	case outcome.Rejection == "":
-		text += "\n\n" + TripIgnoredReply
+		text += "\n\n" + TripIgnoredReply.Format(ctx)
 	default:
 		known, found, err := s.trips.Trip(ctx, principalID, tripID)
 		if err != nil {
 			return processingResult{}, "trip_action", err
 		}
-		text += "\n\n" + staleTripReply(known, found)
+		text += "\n\n" + staleTripReply(ctx, known, found)
 	}
 	if err := editPlain(ctx, s.client, callback.Message.Chat.ID, callback.Message.MessageID, text); err != nil {
 		if isPermanentAPIError(err) {
@@ -415,18 +419,18 @@ func (s *Service) processTripPress(ctx context.Context, callback *CallbackQuery,
 	return result, "", nil
 }
 
-func staleTripReply(known trip.Trip, found bool) string {
+func staleTripReply(ctx context.Context, known trip.Trip, found bool) string {
 	switch {
 	case !found:
-		return TripGoneReply
+		return TripGoneReply.Format(ctx)
 	case known.Status == trip.StatusPlanned:
-		return TripTrackedReply
+		return TripTrackedReply.Format(ctx)
 	case known.Status == trip.StatusDismissed:
-		return TripIgnoredReply
+		return TripIgnoredReply.Format(ctx)
 	case known.Status == trip.StatusCancelled:
 		return TripCancelledReply
 	}
-	return TripGoneReply
+	return TripGoneReply.Format(ctx)
 }
 
 func editPlain(ctx context.Context, client botAPI, chatID, messageID int64, text string) error {
@@ -535,7 +539,7 @@ func (t tripsSection) scanView(ctx context.Context, principalID string) (setting
 	}
 	if enabled {
 		return settingsView{
-			lines: []string{TripsOnLine},
+			lines: []string{TripsOnLine.Format(ctx)},
 			buttons: []InlineButton{
 				{Text: "Scan now", CallbackData: tripsSectionPrefix + ":" + tripsScanAction},
 				{Text: "Turn off Trips", CallbackData: tripsSectionPrefix + ":" + tripsOffAction},
@@ -547,10 +551,10 @@ func (t tripsSection) scanView(ctx context.Context, principalID string) (setting
 		return settingsView{}, err
 	}
 	if !readable {
-		return settingsView{lines: []string{TripsNeedsGoogleLine}}, nil
+		return settingsView{lines: []string{TripsNeedsGoogleLine.Format(ctx)}}, nil
 	}
 	return settingsView{
-		lines:   []string{TripsOffLine},
+		lines:   []string{TripsOffLine.Format(ctx)},
 		buttons: []InlineButton{{Text: "Turn on Trips", CallbackData: tripsSectionPrefix + ":" + tripsOnAction}},
 	}, nil
 }
@@ -592,7 +596,7 @@ func (t tripsSection) tabView(ctx context.Context, principalID string) ([]string
 		}
 	}
 	if len(planned) > 0 && len(lines) == 0 && len(rows) == 0 {
-		lines = []string{TripsTabLine}
+		lines = []string{TripsTabLine.Format(ctx)}
 	}
 	return lines, rows, nil
 }
@@ -608,11 +612,11 @@ func (t tripsSection) useTab(ctx context.Context, principalID, tripID string) (s
 		return slices.ContainsFunc(planned, func(found trip.Trip) bool { return found.ID == tripID })
 	}
 	if !isPlanned(planned) {
-		return settingsOutcome{note: TripsTabGoneNote}, nil
+		return settingsOutcome{note: TripsTabGoneNote.Format(ctx)}, nil
 	}
 	threadID := thread.From(ctx)
 	if threadID <= 0 {
-		return settingsOutcome{note: TripsTabLine}, nil
+		return settingsOutcome{note: TripsTabLine.Format(ctx)}, nil
 	}
 	result, err := t.trips.UseTab(ctx, principalID, tripID, threadID)
 	switch {
@@ -625,7 +629,7 @@ func (t tripsSection) useTab(ctx context.Context, principalID, tripID string) (s
 			return settingsOutcome{}, err
 		}
 		if !isPlanned(planned) {
-			return settingsOutcome{note: TripsTabGoneNote}, nil
+			return settingsOutcome{note: TripsTabGoneNote.Format(ctx)}, nil
 		}
 		return settingsOutcome{note: result.Rejection}, nil
 	case result.Move != nil && result.Move.Already:
@@ -654,7 +658,7 @@ func (t tripsSection) act(ctx context.Context, principalID string, _ int64, acti
 			return settingsOutcome{}, err
 		}
 		if !readable {
-			return settingsOutcome{note: TripsNeedsGoogleLine}, nil
+			return settingsOutcome{note: TripsNeedsGoogleLine.Format(ctx)}, nil
 		}
 		jobs, err := t.schedules.Jobs(ctx, principalID)
 		if err != nil {
@@ -720,12 +724,12 @@ func (t tripsSection) scan(ctx context.Context, principalID string) (settingsOut
 		return settingsOutcome{}, err
 	}
 	if busy {
-		return settingsOutcome{note: TripsBusyNote}, nil
+		return settingsOutcome{note: TripsBusyNote.Format(ctx)}, nil
 	}
 	queued, err := t.schedules.RunNow(ctx, principalID, id, pressTriggerFrom(ctx))
 	if err != nil || !queued {
 		return settingsOutcome{}, err
 	}
 	t.telemetry.ContextLogger(ctx, t.logger).InfoContext(ctx, "trips.scan.queued", "principal_id", principalID)
-	return settingsOutcome{note: TripsScanningNote}, nil
+	return settingsOutcome{note: TripsScanningNote.Format(ctx)}, nil
 }

@@ -13,6 +13,7 @@ import (
 	"unicode/utf16"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
@@ -481,7 +482,7 @@ func TestDirectActionsOfACancelledTurnFollowTheNextReply(t *testing.T) {
 	text, err := writeNote(call.ctx, h, "groceries", false)
 	wantDone(t, text, err)
 	h.push(textUpdate(2, 101, "/cancel"))
-	h.wantReply(101, 2, CancelledReply)
+	h.wantReply(101, 2, localetest.English(CancelledReply))
 	receive(t, h.ctx, call.ctx.Done())
 	h.waitState(1, "cancelled")
 	if pending := len(h.messages); pending != 0 {

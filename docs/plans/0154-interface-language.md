@@ -1,6 +1,6 @@
 # 0154 — An interface language each user chooses: English or Russian
 
-Status: `proposed`
+Status: `in-progress`
 
 ## Context
 

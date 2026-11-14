@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/chatgptsim"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/codexauth"
@@ -66,15 +67,15 @@ func TestVoiceFailuresAreAnsweredWithoutATurn(t *testing.T) {
 
 	sim.SetTranscript("  ")
 	h.push(voiceUpdate(1, 101))
-	h.wantReply(101, 1, NoSpeechReply)
+	h.wantReply(101, 1, localetest.English(NoSpeechReply))
 
 	sim.FailWith(http.StatusTooManyRequests)
 	h.push(voiceUpdate(2, 101))
-	h.wantReply(101, 2, UsageLimitReply)
+	h.wantReply(101, 2, localetest.English(UsageLimitReply))
 
 	sim.FailWith(http.StatusBadGateway)
 	h.push(voiceUpdate(3, 101))
-	h.wantReply(101, 3, TranscriptionFailedReply)
+	h.wantReply(101, 3, localetest.English(TranscriptionFailedReply))
 
 	// None of them may have started a turn, which the next text message proves by arriving first.
 	h.push(textUpdate(4, 101, "are you there?"))
@@ -99,14 +100,14 @@ func TestVoiceTurnThatWouldNotFitIsRefusedOnce(t *testing.T) {
 
 	sim.SetTranscript(strings.Repeat("a", 4096))
 	h.push(voiceUpdate(1, 101))
-	h.wantReply(101, 1, TranscriptTooLongReply)
+	h.wantReply(101, 1, localetest.English(TranscriptTooLongReply))
 
 	transcript := strings.Repeat("words ", 600) + "end"
 	sim.SetTranscript(transcript)
 	captioned := voiceUpdate(2, 101)
 	captioned.Message.Caption = strings.Repeat("c", 1000)
 	h.push(captioned)
-	h.wantReply(101, 2, CaptionTooLongReply)
+	h.wantReply(101, 2, localetest.English(CaptionTooLongReply))
 
 	short := voiceUpdate(3, 101)
 	short.Message.Caption = "for later"

@@ -5,19 +5,23 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/project"
 )
 
 const (
-	ProjectsTitle    = "Projects"
-	NoProjectsReply  = "You have no projects. Ask me in conversation, for example: let's make a project for finding a dentist."
-	ClosedProjectsOf = "Done or abandoned"
+	ProjectsTitle   = "Projects"
+	NoProjectsReply = "You have no projects. Ask me in conversation, for example: let's make a project for finding a dentist."
 
 	// listedClosedProjects is how many of the latest done or abandoned projects /projects shows.
 	listedClosedProjects = 10
 	// projectLineUnits keeps the list within Telegram's 4096 UTF-16 units: 20 open and 10 closed
 	// projects of this many units each leave room to spare.
 	projectLineUnits = 120
+)
+
+var (
+	ClosedProjectsOf = locale.T("Done or abandoned", "Завершённые или заброшенные")
 )
 
 // ProjectController is implemented by the project service; nil leaves /projects out.
@@ -50,7 +54,7 @@ func renderProjects(ctx context.Context, principalID string, controller ProjectC
 		lines = append(lines, "No open projects.")
 	}
 	if len(closed) > 0 {
-		lines = append(lines, "", ClosedProjectsOf)
+		lines = append(lines, "", ClosedProjectsOf.Format(ctx))
 		for _, found := range closed[max(0, len(closed)-listedClosedProjects):] {
 			lines = append(lines, "- "+projectLine(found))
 		}

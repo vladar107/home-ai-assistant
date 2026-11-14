@@ -88,7 +88,7 @@ func (e *Engine) runToolless(ctx context.Context, principalID, message string, m
 			if ctx.Err() != nil {
 				return ScheduledReply{}, ctx.Err()
 			}
-			return ScheduledReply{Text: UnavailableReply, ErrorKind: "tool_provider"}, nil
+			return ScheduledReply{Text: UnavailableReply.Format(ctx), ErrorKind: "tool_provider"}, nil
 		}
 		message = e.withUser(principalID, message)
 	}
@@ -135,7 +135,7 @@ func (e *Engine) runUnwatched(ctx context.Context, principalID, turn, message st
 		if ctx.Err() != nil {
 			return ScheduledReply{}, ctx.Err()
 		}
-		return ScheduledReply{Text: UnavailableReply, ErrorKind: "tool_provider"}, nil
+		return ScheduledReply{Text: UnavailableReply.Format(ctx), ErrorKind: "tool_provider"}, nil
 	}
 	sessionID, err := NewID()
 	if err != nil {
@@ -174,9 +174,9 @@ func (e *Engine) unwatchedGate(ctx, turnCtx context.Context, principalID string)
 	case ctx.Err() != nil:
 		return ScheduledReply{}, false, ctx.Err()
 	case err != nil:
-		return ScheduledReply{Text: UnavailableReply, ErrorKind: "runtime"}, false, nil
+		return ScheduledReply{Text: UnavailableReply.Format(ctx), ErrorKind: "runtime"}, false, nil
 	case !connected:
-		return ScheduledReply{Text: NotConnectedReply, ErrorKind: "not_connected"}, false, nil
+		return ScheduledReply{Text: NotConnectedReply.Format(ctx), ErrorKind: "not_connected"}, false, nil
 	}
 	return ScheduledReply{}, true, nil
 }
@@ -188,9 +188,9 @@ func unwatchedReply(ctx, turnCtx context.Context, result agentruntime.RunResult,
 	case ctx.Err() != nil:
 		return ScheduledReply{}, ctx.Err()
 	case errors.Is(turnCtx.Err(), context.DeadlineExceeded) || errors.Is(runErr, agentruntime.ErrStalled):
-		return ScheduledReply{Text: TimeoutReply, ErrorKind: "timeout"}, nil
+		return ScheduledReply{Text: TimeoutReply.Format(ctx), ErrorKind: "timeout"}, nil
 	case runErr != nil || strings.TrimSpace(result.Final) == "":
-		reply, kind := FailureReply(runErr)
+		reply, kind := FailureReply(ctx, runErr)
 		return ScheduledReply{Text: reply, ErrorKind: kind}, nil
 	case run == nil:
 		return ScheduledReply{Text: result.Final}, nil

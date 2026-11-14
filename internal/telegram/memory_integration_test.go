@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	"github.com/vladar107/home-ai-assistant/internal/memory"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
@@ -109,7 +110,7 @@ func TestMemoryFactCarriesToTheNextSessionAndNeverToAnotherUser(t *testing.T) {
 	}
 
 	h.push(textUpdate(2, 101, "/new"))
-	h.wantReply(101, 2, NewSessionReply)
+	h.wantReply(101, 2, localetest.English(NewSessionReply))
 
 	request, _ = h.memoryTurn(runtime, 3, 101, "ok")
 	entries := h.memoryEntries("alice")
@@ -221,7 +222,7 @@ func TestMemoryExposureLastsForTheConversationAndCoversWebSearch(t *testing.T) {
 	h.nextMessage()
 
 	h.push(textUpdate(3, 101, "/new"))
-	h.wantReply(101, 3, NewSessionReply)
+	h.wantReply(101, 3, localetest.English(NewSessionReply))
 	_, results = h.memoryTurn(runtime, 4, 101, "ok\n\nRemembered: likes juice", addCall("fact", "likes juice"))
 	if results[0].IsError || !strings.Contains(results[0].Text, "Saved the fact") {
 		t.Fatalf("write in a fresh conversation = %+v", results[0])
@@ -343,7 +344,7 @@ func TestMemoryCommandListsPagesAndDeletes(t *testing.T) {
 	h := newMemoryHarness(t, runtime)
 
 	h.push(textUpdate(1, 101, "/memory"))
-	if empty := h.nextMessage(); empty.text != NoMemoryReply || len(empty.keyboard) != 0 {
+	if empty := h.nextMessage(); empty.text != localetest.English(NoMemoryReply) || len(empty.keyboard) != 0 {
 		t.Fatalf("empty /memory = %+v", empty)
 	}
 
@@ -389,7 +390,7 @@ func TestMemoryCommandListsPagesAndDeletes(t *testing.T) {
 	h.push(callbackUpdate(6, 101, settingsMessageID(2), "mem:del:bbbbbbb1:1"))
 	h.wantAnswer(6)
 	h.nextEdit()
-	h.wantMessage(101, MemoryGoneReply)
+	h.wantMessage(101, localetest.English(MemoryGoneReply))
 	if entries := h.memoryEntries("bob"); len(entries) != 1 {
 		t.Fatalf("bob's entries after alice's forged press = %+v", entries)
 	}
@@ -422,10 +423,10 @@ func TestMemoryForgetEverythingNeedsASecondPress(t *testing.T) {
 
 	h.push(callbackUpdate(4, 101, settingsMessageID(1), "mem:clear:1"))
 	h.wantAnswer(4)
-	if cleared := h.nextEdit(); cleared.text != NoMemoryReply {
+	if cleared := h.nextEdit(); cleared.text != localetest.English(NoMemoryReply) {
 		t.Fatalf("after clearing = %+v", cleared)
 	}
-	h.wantMessage(101, MemoryClearedNote)
+	h.wantMessage(101, localetest.English(MemoryClearedNote))
 	if entries := h.memoryEntries("alice"); len(entries) != 0 {
 		t.Fatalf("alice's entries = %+v", entries)
 	}
@@ -450,10 +451,10 @@ func TestMemorySwitchRemovesTheSectionAndTheTools(t *testing.T) {
 		t.Fatalf("settings overview = %+v", overview)
 	}
 	page := h.openSettingsPage(3, 101, settingsMessageID(2), "memory")
-	if !strings.Contains(page.text, MemoryOnLine) || !slices.Contains(buttonData(page.keyboard), "memory:off") {
+	if !strings.Contains(page.text, localetest.English(MemoryOnLine)) || !slices.Contains(buttonData(page.keyboard), "memory:off") {
 		t.Fatalf("memory page = %+v", page)
 	}
-	if off := h.press(4, 101, settingsMessageID(2), "memory:off"); !strings.Contains(off.text, MemoryOffLine) || !slices.Contains(buttonData(off.keyboard), "memory:on") {
+	if off := h.press(4, 101, settingsMessageID(2), "memory:off"); !strings.Contains(off.text, localetest.English(MemoryOffLine)) || !slices.Contains(buttonData(off.keyboard), "memory:on") {
 		t.Fatalf("after turning off = %+v", off)
 	}
 
@@ -462,11 +463,11 @@ func TestMemorySwitchRemovesTheSectionAndTheTools(t *testing.T) {
 		t.Fatalf("memory off: %q %v", request.Memory, toolNames(request.Tools))
 	}
 	h.push(textUpdate(6, 101, "/memory"))
-	if list := h.nextMessage(); !strings.Contains(list.text, "likes tea") || !strings.Contains(list.text, MemoryOffNote) {
+	if list := h.nextMessage(); !strings.Contains(list.text, "likes tea") || !strings.Contains(list.text, localetest.English(MemoryOffNote)) {
 		t.Fatalf("/memory while off = %+v", list)
 	}
 
-	if on := h.press(7, 101, settingsMessageID(2), "memory:on"); !strings.Contains(on.text, MemoryOnLine) {
+	if on := h.press(7, 101, settingsMessageID(2), "memory:on"); !strings.Contains(on.text, localetest.English(MemoryOnLine)) {
 		t.Fatalf("after turning on = %+v", on)
 	}
 	request, _ = h.memoryTurn(runtime, 8, 101, "ok")
@@ -541,7 +542,7 @@ func TestMemoryPrivacyLineAndCommandRegistration(t *testing.T) {
 	h := newMemoryHarness(t, runtime)
 
 	h.push(textUpdate(1, 101, "/privacy"))
-	h.wantReply(101, 1, privacyLines(AttachmentPrivacyLine, SchedulePrivacyLine, VoicePrivacyLine, MemoryPrivacyLine))
+	h.wantReply(101, 1, privacyLines(localetest.English(AttachmentPrivacyLine), localetest.English(SchedulePrivacyLine), localetest.English(VoicePrivacyLine), localetest.English(MemoryPrivacyLine)))
 
 	registration := receive(t, h.ctx, h.registrations)
 	if !slices.ContainsFunc(registration.commands, func(command BotCommand) bool { return command.Command == "memory" }) {

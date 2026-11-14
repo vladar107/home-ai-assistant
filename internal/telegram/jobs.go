@@ -8,16 +8,14 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/routes"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/watch"
 )
 
 const (
-	JobsTitle           = "Scheduled jobs"
-	NoJobsReply         = "You have no reminders or scheduled jobs. Ask me for one in conversation, for example: remind me at 5 to call mom, or every Monday at 9, tell me which of my Notion tasks are overdue."
-	JobGoneReply        = "That job no longer exists."
-	SchedulePrivacyLine = "Reminders and jobs are kept until you delete them in /jobs; one-time jobs, 30 days after they run."
+	JobsTitle = "Scheduled jobs"
 
 	jobsPrefix         = "jobs"
 	jobPauseAction     = "pause"
@@ -36,6 +34,12 @@ const (
 	routeDeleteJobAction    = "rdelete"
 
 	jobsPerPage = 8
+)
+
+var (
+	NoJobsReply         = locale.T("You have no reminders or scheduled jobs. Ask me for one in conversation, for example: remind me at 5 to call mom, or every Monday at 9, tell me which of my Notion tasks are overdue.", "У вас нет напоминаний и заданий по расписанию. Попросите меня об этом в разговоре, например: напомни в 5 позвонить маме или каждый понедельник в 9 говори, какие из моих задач в Notion просрочены.")
+	JobGoneReply        = locale.T("That job no longer exists.", "Этого задания больше нет.")
+	SchedulePrivacyLine = locale.T("Reminders and jobs are kept until you delete them in /jobs; one-time jobs, 30 days after they run.", "Напоминания и задания хранятся, пока вы не удалите их в /jobs; разовые задания хранятся 30 дней после выполнения.")
 )
 
 // ScheduleController is implemented by the scheduler; nil disables /jobs.
@@ -77,7 +81,7 @@ func renderJobs(ctx context.Context, principalID string, schedules ScheduleContr
 	}
 	total := len(jobs) + len(watchList) + len(saved)
 	if total == 0 {
-		return NoJobsReply, nil, nil
+		return NoJobsReply.Format(ctx), nil, nil
 	}
 	pages := (total + jobsPerPage - 1) / jobsPerPage
 	page = min(max(page, 1), pages)
@@ -230,7 +234,7 @@ func actOnJob(ctx context.Context, principalID, action, jobID, trigger string, s
 			changed, err = watches.SetEnabled(ctx, principalID, jobID, action == watchResumeJobAction)
 		}
 		if err == nil && !changed {
-			return WatchGoneReply, nil
+			return WatchGoneReply.Format(ctx), nil
 		}
 	case routeDeleteJobAction:
 		if routeList == nil {
@@ -238,7 +242,7 @@ func actOnJob(ctx context.Context, principalID, action, jobID, trigger string, s
 		}
 		changed, err = routeList.Delete(ctx, principalID, jobID)
 		if err == nil && !changed {
-			return RouteGoneReply, nil
+			return RouteGoneReply.Format(ctx), nil
 		}
 	case jobRunAction:
 		changed, err = schedules.RunNow(ctx, principalID, jobID, trigger)
@@ -252,7 +256,7 @@ func actOnJob(ctx context.Context, principalID, action, jobID, trigger string, s
 		return "", err
 	}
 	if !changed {
-		return JobGoneReply, nil
+		return JobGoneReply.Format(ctx), nil
 	}
 	return "", nil
 }

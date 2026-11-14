@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/backlog"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 	"github.com/vladar107/home-ai-assistant/internal/turn"
@@ -157,7 +158,7 @@ func TestBacklogCommandMarksDoneAndDeletesOwnItems(t *testing.T) {
 	h := newBacklogHarness(t, runtime)
 
 	h.push(textUpdate(1, 101, "/backlog"))
-	if empty := h.nextMessage(); empty.text != NoBacklogReply || len(empty.keyboard) != 0 {
+	if empty := h.nextMessage(); empty.text != localetest.English(NoBacklogReply) || len(empty.keyboard) != 0 {
 		t.Fatalf("empty /backlog = %+v", empty)
 	}
 
@@ -207,7 +208,7 @@ func TestBacklogCommandMarksDoneAndDeletesOwnItems(t *testing.T) {
 		h.push(callbackUpdate(updateID, 101, settingsMessageID(2), data))
 		h.wantAnswer(updateID)
 		h.nextEdit()
-		h.wantMessage(101, BacklogGoneReply)
+		h.wantMessage(101, localetest.English(BacklogGoneReply))
 	}
 	if items := h.backlogItems("bob", backlog.StatusOpen); len(items) != 1 {
 		t.Fatalf("bob's items after alice's forged presses = %+v", items)
@@ -278,7 +279,7 @@ func TestBacklogInHelpAndCommandRegistration(t *testing.T) {
 	h := newBacklogHarness(t, runtime)
 
 	h.push(textUpdate(1, 101, "/help"))
-	if help := h.nextMessage(); !strings.Contains(help.text, BacklogHelpLine) {
+	if help := h.nextMessage(); !strings.Contains(help.text, localetest.English(BacklogHelpLine)) {
 		t.Fatalf("/help = %q", help.text)
 	}
 	registration := receive(t, h.ctx, h.registrations)

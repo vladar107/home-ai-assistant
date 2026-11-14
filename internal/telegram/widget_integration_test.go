@@ -19,6 +19,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/integration"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
@@ -393,10 +394,10 @@ func TestWidgetSwitchDecidesHowProposalsAreSent(t *testing.T) {
 		t.Fatalf("settings overview = %s", settings.text)
 	}
 	page := h.openSettingsPage(2, 101, settings.messageID, "widgets")
-	if !strings.Contains(page.text, WidgetOffLine) || strings.Join(buttonData(page.keyboard), " ") != "widget:on nav:root" {
+	if !strings.Contains(page.text, localetest.English(WidgetOffLine)) || strings.Join(buttonData(page.keyboard), " ") != "widget:on nav:root" {
 		t.Fatalf("widgets page = %+v", page)
 	}
-	if on := h.press(3, 101, settings.messageID, "widget:on"); !strings.Contains(on.text, WidgetOnLine) || buttonData(on.keyboard)[0] != "widget:off" {
+	if on := h.press(3, 101, settings.messageID, "widget:on"); !strings.Contains(on.text, localetest.English(WidgetOnLine)) || buttonData(on.keyboard)[0] != "widget:off" {
 		t.Fatalf("widgets page after turning widgets on = %+v", on)
 	}
 
@@ -415,14 +416,14 @@ func TestWidgetSwitchDecidesHowProposalsAreSent(t *testing.T) {
 	}
 	confirm, _, _ := widgetActions(t, widget.data)
 
-	if off := h.press(5, 101, settings.messageID, "widget:off"); !strings.Contains(off.text, WidgetOffLine) {
+	if off := h.press(5, 101, settings.messageID, "widget:off"); !strings.Contains(off.text, localetest.English(WidgetOffLine)) {
 		t.Fatalf("widgets page after turning widgets off = %+v", off)
 	}
 
 	gate := make(chan struct{})
 	h.setWidgetAnswer(0, gate)
 	h.push(widgetTap(6, 101, widget.messageID, confirm))
-	if answer := h.wantWidgetAnswer(6); answer != WidgetWorkingAnswer {
+	if answer := h.wantWidgetAnswer(6); answer != localetest.English(WidgetWorkingAnswer) {
 		t.Fatalf("confirm tap answer = %q", answer)
 	}
 	if count := h.countRows(`SELECT count(*) FROM scheduled_jobs`); count != 0 {
@@ -465,20 +466,20 @@ func TestWidgetsSettingsPageReplacesConfirmations(t *testing.T) {
 		t.Fatalf("old confirmations button = %+v, want the overview %+v", old, settings)
 	}
 	h.push(textUpdate(3, 101, "/privacy"))
-	if reply := h.nextMessage(); strings.Contains(reply.text, WidgetPrivacyLine) {
+	if reply := h.nextMessage(); strings.Contains(reply.text, localetest.English(WidgetPrivacyLine)) {
 		t.Fatalf("privacy with widgets off = %s", reply.text)
 	}
-	if on := h.press(4, 101, settings.messageID, "widget:on"); !strings.HasPrefix(on.text, crumbs("Widgets")) || !strings.Contains(on.text, WidgetOnLine) {
+	if on := h.press(4, 101, settings.messageID, "widget:on"); !strings.HasPrefix(on.text, crumbs(context.Background(), "Widgets")) || !strings.Contains(on.text, localetest.English(WidgetOnLine)) {
 		t.Fatalf("widgets page after turning widgets on = %+v", on)
 	}
 	h.push(textUpdate(5, 101, "/privacy"))
-	if reply := h.nextMessage(); !strings.Contains(reply.text, privacyItem+WidgetPrivacyLine) {
+	if reply := h.nextMessage(); !strings.Contains(reply.text, privacyItem+localetest.English(WidgetPrivacyLine)) {
 		t.Fatalf("privacy with widgets on = %s", reply.text)
 	}
 
 	h.push(textUpdate(6, 101, "how do widgets work?"))
 	call := receive(t, h.ctx, runtime.calls)
-	if help := h.callTool(call, "app_help", `{"topic":"widgets"}`); help.IsError || !strings.Contains(help.Text, `press "Widgets"`) || !strings.Contains(help.Text, WidgetOnLine) {
+	if help := h.callTool(call, "app_help", `{"topic":"widgets"}`); help.IsError || !strings.Contains(help.Text, `press "Widgets"`) || !strings.Contains(help.Text, localetest.English(WidgetOnLine)) {
 		t.Fatalf("widgets help = %+v", help)
 	}
 	if help := h.callTool(call, "app_help", `{"topic":"confirmations"}`); !help.IsError || !strings.Contains(help.Text, "topic must be one of") {
@@ -518,7 +519,7 @@ func TestWidgetPreviewsAndRejects(t *testing.T) {
 		widgetTap(4, 101, widget.messageID, "approval:confirm:not-an-id"),
 	} {
 		h.push(tap)
-		if answer := h.wantWidgetAnswer(tap.UpdateID); answer != WidgetIgnoredAnswer {
+		if answer := h.wantWidgetAnswer(tap.UpdateID); answer != localetest.English(WidgetIgnoredAnswer) {
 			t.Fatalf("tap %d answer = %q", index, answer)
 		}
 	}
@@ -533,7 +534,7 @@ func TestWidgetPreviewsAndRejects(t *testing.T) {
 	}
 
 	h.push(widgetTap(5, 101, widget.messageID, reject))
-	if answer := h.wantWidgetAnswer(5); answer != WidgetWorkingAnswer {
+	if answer := h.wantWidgetAnswer(5); answer != localetest.English(WidgetWorkingAnswer) {
 		t.Fatalf("reject tap answer = %q", answer)
 	}
 	h.wantOutcome(widget.messageID, "Rejected; nothing was written.")
@@ -913,7 +914,7 @@ func TestWidgetTapMustComeFromTheProposalsMessage(t *testing.T) {
 	confirm, _, _ := widgetActions(t, widget.data)
 
 	h.push(widgetTap(2, 101, widget.messageID+50, confirm))
-	if answer := h.wantWidgetAnswer(2); answer != WidgetIgnoredAnswer {
+	if answer := h.wantWidgetAnswer(2); answer != localetest.English(WidgetIgnoredAnswer) {
 		t.Fatalf("answer to a tap from another message = %q", answer)
 	}
 	h.waitOffset(3)
@@ -924,7 +925,7 @@ func TestWidgetTapMustComeFromTheProposalsMessage(t *testing.T) {
 	tap := widgetTap(3, 101, widget.messageID, confirm)
 	tap.WidgetQuery.Chat, tap.WidgetQuery.ChatType = nil, "sender"
 	h.push(tap)
-	if answer := h.wantWidgetAnswer(3); answer != WidgetWorkingAnswer {
+	if answer := h.wantWidgetAnswer(3); answer != localetest.English(WidgetWorkingAnswer) {
 		t.Fatalf("answer to a tap without a chat = %q", answer)
 	}
 	h.wantOutcome(widget.messageID, "Scheduled. First run:")
@@ -953,7 +954,7 @@ func TestWidgetTapNoHandlerTakesIsAnsweredAsDoingNothing(t *testing.T) {
 		{widgetTap(4, 202, widget.messageID, confirm), "bob", "foreign_approval"},
 	} {
 		h.push(tap.update)
-		if answer := h.wantWidgetAnswer(tap.update.UpdateID); answer != WidgetIgnoredAnswer {
+		if answer := h.wantWidgetAnswer(tap.update.UpdateID); answer != localetest.English(WidgetIgnoredAnswer) {
 			t.Fatalf("answer to a tap ignored as %s = %q", tap.reason, answer)
 		}
 		logged := regexp.MustCompile(`msg=telegram\.update\.ignored reason=` + tap.reason + ` principal_id=` + tap.principal + `\b`)

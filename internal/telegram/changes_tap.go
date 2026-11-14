@@ -104,7 +104,7 @@ func (s *Service) processKeepTap(ctx context.Context, bot Bot, updateID int64, t
 	if err != nil {
 		return processingResult{}, "approval_press", err
 	}
-	answer := WidgetWorkingAnswer
+	answer := WidgetWorkingAnswer.Format(ctx)
 	if !current {
 		answer = approval.ProposalChangedText
 	}

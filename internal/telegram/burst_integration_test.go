@@ -3,6 +3,7 @@ package telegram
 import (
 	"testing"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/notionsim"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
@@ -33,7 +34,7 @@ func TestBurstOfTextsInATabIsOneTurn(t *testing.T) {
 	if deleted := h.nextDelete(); deleted.messageID != requestMessageID(13) {
 		t.Fatalf("token deletion = %+v", deleted)
 	}
-	h.wantMessage(101, NotionTokenGuardReply)
+	h.wantMessage(101, localetest.English(NotionTokenGuardReply))
 	h.wantStatusReply(101, 14)
 	h.waitOffset(15)
 

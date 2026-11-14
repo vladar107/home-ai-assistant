@@ -21,6 +21,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 	"github.com/vladar107/home-ai-assistant/internal/turn"
@@ -49,6 +50,7 @@ type botAPI interface {
 	AnswerCallback(context.Context, string, string) error
 	AnswerWidgetQuery(context.Context, string, string) error
 	SetMyCommands(context.Context, CommandScope, []BotCommand) error
+	DeleteMyCommands(context.Context, CommandScope) error
 	CreateForumTopic(context.Context, int64, string) (int64, error)
 	DeleteForumTopic(context.Context, int64, int64) error
 	ForwardMessages(context.Context, int64, []int64) error
@@ -178,6 +180,8 @@ type Service struct {
 	exports      ExportController
 	transcriber  Transcriber
 	model        *ModelCommand
+	languages    locale.Preferences
+	chats        activeChats
 	tabs         *Tabs
 	sections     []Section
 	interceptors []messageInterceptor
@@ -230,6 +234,11 @@ type Dependencies struct {
 	// Model enables /model; it also needs Conversation.
 	Model *ModelCommand
 
+	// Languages keeps each user's interface language and adds the Language page to /settings;
+	// without it everyone has English. Chats finds the chat whose menu a language change sets.
+	Languages locale.Preferences
+	Chats     activeChats
+
 	// Sections are the /settings pages, in any order: settingsGroups places the pages, sectionOrder
 	// their app_help topics, and privacyOrder their /privacy lines.
 	Sections []Section
@@ -248,7 +257,12 @@ func NewService(deps Dependencies) (*Service, error) {
 	if deps.Logger == nil {
 		return nil, fmt.Errorf("Telegram logger is required")
 	}
-	if err := validateSections(deps.Sections); err != nil {
+	var language *languageSection
+	if deps.Languages != nil {
+		language = &languageSection{}
+	}
+	sections := withLanguageSection(deps.Sections, language)
+	if err := validateSections(sections); err != nil {
 		return nil, err
 	}
 
@@ -273,10 +287,15 @@ func NewService(deps Dependencies) (*Service, error) {
 		exports:      deps.Exports,
 		transcriber:  deps.Transcriber,
 		model:        deps.Model,
+		languages:    deps.Languages,
+		chats:        deps.Chats,
 		tabs:         cmp.Or(deps.Tabs, NewTabs(deps.Client, nil, nil, nil, nil, nil, deps.Logger, deps.Telemetry)),
-		sections:     inSectionOrder(deps.Sections),
+		sections:     inSectionOrder(sections),
 		logger:       deps.Logger,
 		telemetry:    telemetryOrNoop(deps.Telemetry),
+	}
+	if language != nil {
+		language.service = service
 	}
 	for _, section := range service.sections {
 		if interceptor, ok := section.(messageInterceptor); ok {
@@ -320,26 +339,26 @@ func validateSections(sections []Section) error {
 	return nil
 }
 
-func (s *Service) botCommands() []BotCommand {
+func (s *Service) botCommands(language locale.Language) []BotCommand {
 	conversationEnabled := s.conversation != nil
 	modelEnabled := conversationEnabled && s.model != nil
-	return menuCommands([]menuCommand{
-		{BotCommand{Command: "backlog", Description: "Show and export your ideas for developing me"}, s.backlog != nil},
-		{BotCommand{Command: "cancel", Description: "Stop the current response"}, conversationEnabled},
-		{BotCommand{Command: "close", Description: "Close this tab"}, conversationEnabled && s.tabs.enabled()},
-		{BotCommand{Command: "collections", Description: "Show and delete the lists I keep for you"}, s.collections != nil},
-		{BotCommand{Command: "export", Description: "Get a file with what you set up and keep here"}, s.exports != nil},
-		{BotCommand{Command: "jobs", Description: "Show and manage your reminders and scheduled jobs"}, s.schedules != nil},
-		{BotCommand{Command: "memory", Description: "Show and delete what I remember about you"}, s.memory != nil},
-		{BotCommand{Command: "model", Description: ModelCommandDescription}, modelEnabled},
-		{BotCommand{Command: "new", Description: "Start a fresh conversation"}, conversationEnabled},
-		{BotCommand{Command: "projects", Description: "Show your projects and what is left in each"}, s.projects != nil},
-		{BotCommand{Command: "restore", Description: "Restore what is missing from an export file"}, s.exports != nil},
-		{BotCommand{Command: "sessions", Description: "Return to a recent conversation"}, conversationEnabled},
-		{BotCommand{Command: "settings", Description: "Show and change your settings"}, len(s.sections) > 0},
-		{BotCommand{Command: "usage", Description: "Show your ChatGPT subscription usage"}, modelEnabled && s.model.Usage != nil},
-		{BotCommand{Command: "tasks", Description: "Show and cancel your background tasks"}, s.tasks != nil},
-		{BotCommand{Command: "why", Description: "Reply with it to one of my messages to see what it was based on"}, s.why != nil},
+	return menuCommands(language, []menuCommand{
+		{"backlog", locale.T("Show and export your ideas for developing me", "Показать и выгрузить ваши идеи для моего развития"), s.backlog != nil},
+		{"cancel", locale.T("Stop the current response", "Остановить текущий ответ"), conversationEnabled},
+		{"close", locale.T("Close this tab", "Закрыть эту вкладку"), conversationEnabled && s.tabs.enabled()},
+		{"collections", locale.T("Show and delete the lists I keep for you", "Показать и удалить списки, которые я веду для вас"), s.collections != nil},
+		{"export", locale.T("Get a file with what you set up and keep here", "Получить файл с тем, что вы настроили и храните здесь"), s.exports != nil},
+		{"jobs", locale.T("Show and manage your reminders and scheduled jobs", "Показать и изменить ваши напоминания и задания по расписанию"), s.schedules != nil},
+		{"memory", locale.T("Show and delete what I remember about you", "Показать и удалить то, что я о вас помню"), s.memory != nil},
+		{"model", ModelCommandDescription, modelEnabled},
+		{"new", locale.T("Start a fresh conversation", "Начать новый разговор"), conversationEnabled},
+		{"projects", locale.T("Show your projects and what is left in each", "Показать ваши проекты и что осталось в каждом"), s.projects != nil},
+		{"restore", locale.T("Restore what is missing from an export file", "Восстановить недостающее из файла экспорта"), s.exports != nil},
+		{"sessions", locale.T("Return to a recent conversation", "Вернуться к недавнему разговору"), conversationEnabled},
+		{"settings", locale.T("Show and change your settings", "Показать и изменить настройки"), len(s.sections) > 0},
+		{"usage", locale.T("Show your ChatGPT subscription usage", "Показать использование вашей подписки ChatGPT"), modelEnabled && s.model.Usage != nil},
+		{"tasks", locale.T("Show and cancel your background tasks", "Показать и отменить ваши фоновые задачи"), s.tasks != nil},
+		{"why", locale.T("Reply with it to one of my messages to see what it was based on", "Ответьте этой командой на моё сообщение, чтобы увидеть, на чём оно основано"), s.why != nil},
 	})
 }
 
@@ -363,13 +382,14 @@ func (s *Service) Start(ctx context.Context) error {
 		s.tabs.refreshTopicIcons(ctx)
 	}
 
-	commands := s.botCommands()
+	commands := s.botCommands(locale.English)
 	// Private chats resolve the all-private-chats scope before the default one, so a stale list there would hide the default registration.
-	for _, scope := range []CommandScope{"", CommandScopeAllPrivateChats} {
+	for _, scope := range []CommandScope{{}, CommandScopeAllPrivateChats} {
 		if err := s.client.SetMyCommands(ctx, scope, commands); err != nil {
-			s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "telegram.commands.register_failed", "scope", cmp.Or(string(scope), "default"), "error", err)
+			s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "telegram.commands.register_failed", "scope", cmp.Or(scope.Type, "default"), "error", err)
 		}
 	}
+	s.registerChosenMenus(ctx)
 
 	loadCursorCtx, endLoadCursor := s.telemetry.StartStore(ctx, "telegram_cursor_load")
 	committed, found, err := s.cursors.LoadTelegramCursor(loadCursorCtx, bot.ID)
@@ -594,11 +614,11 @@ func (s *Service) mergeRun(ctx context.Context, pending []Update, retryCap int64
 		}
 		if principalID == "" {
 			principalID = s.mergingPrincipal(ctx, first.Message.From)
-			if principalID == "" || s.awaitsMessage(principalID) || s.guardSecrets(principalID, first.Message.Text).handled {
+			if principalID == "" || s.awaitsMessage(principalID) || s.guardSecrets(ctx, principalID, first.Message.Text).handled {
 				return pending[:1], 1
 			}
 		}
-		if s.guardSecrets(principalID, message.Text).handled {
+		if s.guardSecrets(ctx, principalID, message.Text).handled {
 			break
 		}
 		members = append(members, candidate)
@@ -629,10 +649,10 @@ func (s *Service) awaitsMessage(principalID string) bool {
 // yieldForeignSecrets ends a waiting intake that does not claim the text when a guard recognises
 // it, so one service's secret is never taken, and sent out, as another's key; the guard then
 // handles it as it would without the intake.
-func (s *Service) yieldForeignSecrets(principalID, text string) {
+func (s *Service) yieldForeignSecrets(ctx context.Context, principalID, text string) {
 	for _, interceptor := range s.interceptors {
 		intake, ok := interceptor.(intakeSection)
-		if ok && intake.awaiting(principalID) && !intake.claims(principalID, text) && s.guardSecrets(principalID, text).handled {
+		if ok && intake.awaiting(principalID) && !intake.claims(principalID, text) && s.guardSecrets(ctx, principalID, text).handled {
 			intake.yield(principalID)
 		}
 	}
@@ -722,6 +742,7 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 	if reason != "" {
 		return ignoredResult(reason), "", nil
 	}
+	ctx = s.withLanguage(ctx, authorization.Principal.ID)
 	s.tabs.noteTab(ctx, bot, authorization.Principal.ID, message)
 
 	command, isCommand := ParseCommand(message.Text, bot.Username)
@@ -761,10 +782,10 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 			return processingResult{}, "transcribe_voice", err
 		}
 		if reply == "" {
-			if result := s.guardSecrets(authorization.Principal.ID, transcript, message.Caption); result.handled {
+			if result := s.guardSecrets(ctx, authorization.Principal.ID, transcript, message.Caption); result.handled {
 				return s.finishInterception(ctx, message, authorization.Principal.ID, result)
 			}
-			text, reply, reason = voiceTurn(transcript, message.Caption)
+			text, reply, reason = voiceTurn(ctx, transcript, message.Caption)
 		}
 		if reply != "" {
 			return s.sendMediaReply(ctx, message, authorization.Principal.ID, reason, reply)
@@ -784,12 +805,12 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 		}, "", nil
 	}
 	if unsupported != "" || len(carried) > 0 {
-		if result := s.guardSecrets(authorization.Principal.ID, message.Caption); result.handled {
+		if result := s.guardSecrets(ctx, authorization.Principal.ID, message.Caption); result.handled {
 			return s.finishInterception(ctx, message, authorization.Principal.ID, result)
 		}
 	}
 	if unsupported != "" {
-		return s.sendMediaReply(ctx, message, authorization.Principal.ID, unsupported, unsupportedMediaReply(unsupported))
+		return s.sendMediaReply(ctx, message, authorization.Principal.ID, unsupported, unsupportedMediaReply(ctx, unsupported))
 	}
 
 	var attachments []attachment.Incoming
@@ -803,7 +824,7 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 		}
 		attachments = files
 	} else if !transcribed {
-		s.yieldForeignSecrets(authorization.Principal.ID, text)
+		s.yieldForeignSecrets(ctx, authorization.Principal.ID, text)
 		for _, interceptor := range s.interceptors {
 			result, err := interceptor.intercept(ctx, authorization.Principal.ID, text)
 			if err != nil {
@@ -834,7 +855,7 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 		Forwarded:         message.Forwarded(),
 	})
 	if errors.Is(err, conversation.ErrBusy) {
-		return s.sendCommandReply(ctx, message, authorization.Principal.ID, "busy", conversation.BusyReply, nil)
+		return s.sendCommandReply(ctx, message, authorization.Principal.ID, "busy", conversation.BusyReply.Format(ctx), nil)
 	}
 	if elsewhere := (*conversation.OpenElsewhereError)(nil); errors.As(err, &elsewhere) {
 		return s.sendCommandReply(ctx, message, authorization.Principal.ID, "elsewhere", SessionOpenIn(elsewhere.ThreadID, elsewhere.TabName), nil)
@@ -842,7 +863,7 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 	// A retry would be refused the same way and hold every later update behind this one.
 	if errors.Is(err, conversation.ErrInvalidRequest) {
 		s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "telegram.conversation.refused", "principal_id", authorization.Principal.ID, "error", err)
-		return s.sendCommandReply(ctx, message, authorization.Principal.ID, "invalid", InvalidMessageReply, nil)
+		return s.sendCommandReply(ctx, message, authorization.Principal.ID, "invalid", InvalidMessageReply.Format(ctx), nil)
 	}
 	if err != nil {
 		return processingResult{}, "enqueue_conversation", err
@@ -855,10 +876,10 @@ func (s *Service) processUpdate(ctx context.Context, bot Bot, update Update) (pr
 
 // guardSecrets runs only the secret guards, for a caption or transcript that cannot be an intake
 // reply, so it never consumes a pending intake.
-func (s *Service) guardSecrets(principalID string, texts ...string) interception {
+func (s *Service) guardSecrets(ctx context.Context, principalID string, texts ...string) interception {
 	for _, text := range texts {
 		for _, interceptor := range s.interceptors {
-			if result := interceptor.guard(principalID, text); result.handled {
+			if result := interceptor.guard(ctx, principalID, text); result.handled {
 				return result
 			}
 		}
@@ -869,7 +890,7 @@ func (s *Service) guardSecrets(principalID string, texts ...string) interception
 // interceptCaption offers a caption to the intakes waiting for the principal's message, as a text
 // message would be, so a key sent as a photo's or document's caption is consumed with its message.
 func (s *Service) interceptCaption(ctx context.Context, principalID, caption string) (interception, error) {
-	s.yieldForeignSecrets(principalID, caption)
+	s.yieldForeignSecrets(ctx, principalID, caption)
 	for _, interceptor := range s.interceptors {
 		if intake, ok := interceptor.(intakeSection); !ok || !intake.awaiting(principalID) {
 			continue
@@ -901,6 +922,7 @@ func (s *Service) processDraftStop(ctx context.Context, stopped *MessageGenerati
 		return ignoredResult(string(authorization.Status)), "", nil
 	}
 	principalID := authorization.Principal.ID
+	ctx = s.withLanguage(ctx, principalID)
 	cancelled, err := s.conversation.StopDraft(ctx, laneOf(ctx, principalID), stopped.DraftID)
 	if err != nil {
 		return processingResult{}, "stop_draft", err
@@ -911,7 +933,7 @@ func (s *Service) processDraftStop(ctx context.Context, stopped *MessageGenerati
 	result := processingResult{event: "telegram.draft.stopped", principalID: principalID}
 	// The turn is already cancelled and a retried update would find its draft gone, so a failed
 	// confirmation is only reported.
-	if err := s.client.SendReply(ctx, stopped.Chat.ID, 0, CancelledReply); err != nil {
+	if err := s.client.SendReply(ctx, stopped.Chat.ID, 0, CancelledReply.Format(ctx)); err != nil {
 		result.event, result.err = "telegram.command.undeliverable", err
 	}
 	return result, "", nil
@@ -938,6 +960,7 @@ func (s *Service) processReaction(ctx context.Context, bot Bot, updateID int64, 
 	if reason != "" {
 		return ignoredResult(reason), "", nil
 	}
+	ctx = s.withLanguage(ctx, authorization.Principal.ID)
 	principalID := authorization.Principal.ID
 	if s.conversation == nil {
 		return processingResult{event: "telegram.update.ignored", reason: "unhandled_reaction", principalID: principalID}, "", nil
@@ -1006,7 +1029,7 @@ func (s *Service) finishInterception(ctx context.Context, message *Message, prin
 	if result.remove {
 		if err := s.client.DeleteMessage(ctx, message.Chat.ID, message.MessageID); err != nil {
 			s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "telegram.message.delete_failed", "principal_id", principalID, "reason", result.reason, "error", err)
-			reply += " " + DeleteFailedLine
+			reply += " " + DeleteFailedLine.Format(ctx)
 		}
 	}
 	outcome := processingResult{event: "telegram.message.intercepted", reason: result.reason, principalID: principalID}
@@ -1090,6 +1113,7 @@ func (s *Service) processCallback(ctx context.Context, bot Bot, updateID int64, 
 	if reason != "" {
 		return ignoredResult(reason), "", nil
 	}
+	ctx = s.withLanguage(ctx, authorization.Principal.ID)
 	principalID := authorization.Principal.ID
 	chatID := message.Chat.ID
 
@@ -1163,6 +1187,9 @@ func (s *Service) processCallback(ctx context.Context, bot Bot, updateID int64, 
 		case err != nil:
 			return processingResult{}, "settings_action", err
 		default:
+			if _, isLanguage := section.(*languageSection); isLanguage {
+				ctx = s.withLanguage(ctx, principalID)
+			}
 			if named, ok := section.(verbSection); ok {
 				action = named.verb(action)
 			}
@@ -1364,6 +1391,7 @@ func (s *Service) processWidgetQuery(ctx context.Context, bot Bot, updateID int6
 	if reason != "" {
 		return ignoredResult(reason), "", nil
 	}
+	ctx = s.withLanguage(ctx, authorization.Principal.ID)
 	principalID := authorization.Principal.ID
 	tap := press{
 		chatID: chat.ID, messageID: query.MessageID, failure: "answer_widget_query", widget: true,
@@ -1391,7 +1419,7 @@ var widgetHandlers = []widgetHandler{
 
 // ignoreWidgetTap answers a tap as doing nothing and logs it as ignored for the reason.
 func (s *Service) ignoreWidgetTap(ctx context.Context, tap press, principalID, reason string) (processingResult, string, error) {
-	if err := tap.answer(ctx, WidgetIgnoredAnswer); err != nil && !isPermanentAPIError(err) {
+	if err := tap.answer(ctx, WidgetIgnoredAnswer.Format(ctx)); err != nil && !isPermanentAPIError(err) {
 		return processingResult{}, tap.failure, err
 	}
 	return processingResult{event: "telegram.update.ignored", reason: reason, principalID: principalID}, "", nil
@@ -1414,7 +1442,7 @@ func (s *Service) processProposalWidgetTap(ctx context.Context, bot Bot, updateI
 		result, failure, err := s.processPreviewPress(ctx, pressTrigger(bot, updateID), tap, principalID, approvalID)
 		return true, result, failure, err
 	}
-	if err := tap.answer(ctx, WidgetWorkingAnswer); err != nil && !isPermanentAPIError(err) {
+	if err := tap.answer(ctx, WidgetWorkingAnswer.Format(ctx)); err != nil && !isPermanentAPIError(err) {
 		return true, processingResult{}, tap.failure, err
 	}
 	result, failure, err = s.processApprovalPress(ctx, bot, updateID, tap, principalID, action, approvalID)
@@ -1514,7 +1542,7 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		return StatusReply, nil, nil
 	case "usage":
 		if s.model == nil || s.model.Usage == nil {
-			return s.helpReply(), nil, nil
+			return s.helpReply(ctx), nil, nil
 		}
 		return strings.Join(s.model.statusUsageLines(ctx, principalID), "\n"), nil, nil
 	case "privacy":
@@ -1529,59 +1557,59 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 			return "", nil, err
 		}
 		if cancelled {
-			return CancelledReply, nil, nil
+			return CancelledReply.Format(ctx), nil, nil
 		}
 		return NothingToCancelReply, nil, nil
 	case "new":
 		if s.conversation == nil {
-			return NoSessionReply, nil, nil
+			return NoSessionReply.Format(ctx), nil, nil
 		}
 		reset, err := s.conversation.NewSession(ctx, laneOf(ctx, principalID))
 		if err != nil {
 			return "", nil, err
 		}
 		if reset {
-			return NewSessionReply, nil, nil
+			return NewSessionReply.Format(ctx), nil, nil
 		}
-		return NoSessionReply, nil, nil
+		return NoSessionReply.Format(ctx), nil, nil
 	case "sessions":
 		if s.conversation == nil {
-			return s.helpReply(), nil, nil
+			return s.helpReply(ctx), nil, nil
 		}
 		return renderSessions(ctx, laneOf(ctx, principalID), s.conversation, s.tabs.enabled())
 	case "jobs":
 		if s.schedules == nil {
-			return s.helpReply(), nil, nil
+			return s.helpReply(ctx), nil, nil
 		}
 		return renderJobs(ctx, principalID, s.schedules, s.watches, s.routes, 1)
 	case "memory":
 		if s.memory == nil {
-			return s.helpReply(), nil, nil
+			return s.helpReply(ctx), nil, nil
 		}
 		return renderMemory(ctx, principalID, s.memory, 1)
 	case "collections":
 		if s.collections == nil {
-			return s.helpReply(), nil, nil
+			return s.helpReply(ctx), nil, nil
 		}
 		return renderCollections(ctx, principalID, s.collections)
 	case "projects":
 		if s.projects == nil {
-			return s.helpReply(), nil, nil
+			return s.helpReply(ctx), nil, nil
 		}
 		return renderProjects(ctx, principalID, s.projects)
 	case "backlog":
 		if s.backlog == nil {
-			return s.helpReply(), nil, nil
+			return s.helpReply(ctx), nil, nil
 		}
 		return renderBacklog(ctx, principalID, s.backlog, 1)
 	case "tasks":
 		if s.tasks == nil {
-			return s.helpReply(), nil, nil
+			return s.helpReply(ctx), nil, nil
 		}
 		return renderTasks(ctx, principalID, s.tasks)
 	case "settings":
 		if len(s.sections) == 0 {
-			return s.helpReply(), nil, nil
+			return s.helpReply(ctx), nil, nil
 		}
 		text, keyboard, err := renderSettings(ctx, principalID, sectionsFor(s.sections, principalID), settingsRootPage, "")
 		if err != nil {
@@ -1589,19 +1617,20 @@ func (s *Service) handleCommand(ctx context.Context, principalID string, command
 		}
 		return text, keyboard, nil
 	default:
-		return s.helpReply(), nil, nil
+		return s.helpReply(ctx), nil, nil
 	}
 }
 
 // helpReply lists the commands registered with Telegram and those answered only when typed, so it
 // cannot drift from either.
-func (s *Service) helpReply() string {
-	reply := HelpHeading + commandList(s.botCommands()) + commandList(typedCommands)
+func (s *Service) helpReply(ctx context.Context) string {
+	language := locale.From(ctx)
+	reply := HelpHeading.Format(ctx) + commandList(s.botCommands(language)) + commandList(menuCommands(language, typedCommands))
 	if s.backlog != nil {
-		reply += "\n" + BacklogHelpLine
+		reply += "\n" + BacklogHelpLine.Format(ctx)
 	}
 	if s.conversation != nil {
-		reply += "\n\n" + HelpConversationLine
+		reply += "\n\n" + HelpConversationLine.Format(ctx)
 	}
 	return reply
 }

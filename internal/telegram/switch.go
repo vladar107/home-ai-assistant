@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 )
 
 const (
@@ -20,8 +22,8 @@ type SwitchPage struct {
 	// Name labels the page in the overview and in its group.
 	Name string
 	// OnLine and OffLine describe the integration in each state; ExtraOnLines follow OnLine.
-	OnLine, OffLine string
-	ExtraOnLines    []string
+	OnLine, OffLine locale.Text
+	ExtraOnLines    []locale.Text
 	// OnButton and OffButton turn the integration on and off.
 	OnButton, OffButton string
 	// Event is logged when a principal turns the integration on or off; empty logs nothing.
@@ -29,7 +31,9 @@ type SwitchPage struct {
 	// HelpTopic names the page for app_help.
 	HelpTopic string
 	// PrivacyLine is added to /privacy while the integration is on.
-	PrivacyLine string
+	PrivacyLine locale.Text
+	// PrivacyMore follows PrivacyLine on the same line.
+	PrivacyMore []locale.Text
 	// SummaryState words the state for the overview; nil says on or off.
 	SummaryState func(on bool) string
 }
@@ -97,11 +101,14 @@ func (s switchSection) render(ctx context.Context, principalID string) (settings
 	page := s.settings.Page
 	if !enabled {
 		return settingsView{
-			lines:   []string{page.OffLine},
+			lines:   []string{page.OffLine.Format(ctx)},
 			buttons: []InlineButton{{Text: page.OnButton, CallbackData: page.Prefix + ":" + switchOnAction}},
 		}, nil
 	}
-	lines := append([]string{page.OnLine}, page.ExtraOnLines...)
+	lines := []string{page.OnLine.Format(ctx)}
+	for _, extra := range page.ExtraOnLines {
+		lines = append(lines, extra.Format(ctx))
+	}
 	if s.settings.Details != nil {
 		details, _ := s.settings.Details.Details(ctx)
 		lines = append(lines, details...)
@@ -131,7 +138,11 @@ func (s switchSection) privacy(ctx context.Context, principalID string) ([]strin
 	if err != nil || !enabled {
 		return nil, err
 	}
-	return []string{s.settings.Page.PrivacyLine}, nil
+	line := s.settings.Page.PrivacyLine.Format(ctx)
+	for _, more := range s.settings.Page.PrivacyMore {
+		line += " " + more.Format(ctx)
+	}
+	return []string{line}, nil
 }
 
 // HomeDetails shows the Home Assistant connector's exposure check on the home page: whether it

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/connectors/mcp"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 )
 
 const (
@@ -22,16 +23,20 @@ const (
 	// serviceDescriptionUnits bounds a description on the page, so a full catalog of services with
 	// the longest titles stays within Telegram's message limit.
 	serviceDescriptionUnits = 160
-
-	ServicesLine = "Services outside the household that I can use for you. Each is off until you turn it on, and what you ask a service that is on goes to it. A service that needs a key uses your own: press Connect to send it."
-	ServicesHelp = "Each service is off until the user presses its Turn on button, and offers nothing until then; Turn off stops it again. " +
-		"While a service is on, what the user asks it goes to that service, outside the household, and what it returns is treated as outside content. " +
-		"A service that needs a key works only with the user's own key: pressing its Connect button sends instructions, the user sends the key as the next message, " +
-		"the assistant deletes that message at once and never shows the key again, and connecting turns the service on. Disconnect removes the key and turns the service off. " +
-		"Needs a key means the service is on but has no key yet; Needs reconnection means the service moved, so the key must be connected again; " +
-		"Problem means the service refused the key, so connect a new one or disconnect."
-	ServicesKeyGuardReply = "That looked like a key for one of your services, so I deleted it and did not send it to the model. To connect a service, press its Connect button in /settings."
 )
+
+var (
+	ServicesLine          = locale.T("Services outside the household that I can use for you. Each is off until you turn it on, and what you ask a service that is on goes to it. A service that needs a key uses your own: press Connect to send it.", "Сервисы вне дома, которыми я могу пользоваться для вас. Каждый выключен, пока вы его не включите, и всё, что вы спрашиваете у включённого сервиса, уходит ему. Сервису, которому нужен ключ, подходит только ваш собственный: нажмите «Подключить», чтобы отправить его.")
+	ServicesKeyGuardReply = locale.T("That looked like a key for one of your services, so I deleted it and did not send it to the model. To connect a service, press its Connect button in /settings.", "Это было похоже на ключ одного из ваших сервисов, поэтому сообщение удалено и модели не отправлено. Чтобы подключить сервис, нажмите его кнопку «Подключить» в /settings.")
+)
+
+// ServicesHelp is for the model, which reads it in English whatever the user's language.
+const ServicesHelp = "Each service is off until the user presses its Turn on button, and offers nothing until then; Turn off stops it again. " +
+	"While a service is on, what the user asks it goes to that service, outside the household, and what it returns is treated as outside content. " +
+	"A service that needs a key works only with the user's own key: pressing its Connect button sends instructions, the user sends the key as the next message, " +
+	"the assistant deletes that message at once and never shows the key again, and connecting turns the service on. Disconnect removes the key and turns the service off. " +
+	"Needs a key means the service is on but has no key yet; Needs reconnection means the service moved, so the key must be connected again; " +
+	"Problem means the service refused the key, so connect a new one or disconnect."
 
 var serviceStateLabels = map[mcp.State]string{
 	mcp.StateOff:            "Off",
@@ -178,7 +183,7 @@ func (s servicesSection) render(ctx context.Context, principalID string) (settin
 	if err != nil {
 		return settingsView{}, err
 	}
-	view := settingsView{lines: []string{ServicesLine}}
+	view := settingsView{lines: []string{ServicesLine.Format(ctx)}}
 	for _, status := range statuses {
 		view.lines = append(view.lines, "", ServiceLine(status), clipUTF16(status.Description, serviceDescriptionUnits))
 		var row []InlineButton
@@ -266,7 +271,7 @@ func serviceActionError(err error) error {
 func (s servicesSection) intercept(ctx context.Context, principalID string, text string) (interception, error) {
 	result, err := s.services.OfferMessage(ctx, principalID, text)
 	if result.Outcome == mcp.IntakeNone {
-		return s.guard(principalID, text), nil
+		return s.guard(ctx, principalID, text), nil
 	}
 	title := result.Status.Title
 	if result.Outcome != mcp.IntakeConnected {
@@ -305,11 +310,11 @@ func (s servicesSection) titleOf(ctx context.Context, principalID, server string
 
 // guard recognises a key by the key pattern of a server the principal may use; a server without
 // one has keys of no recognisable shape.
-func (s servicesSection) guard(principalID, text string) interception {
+func (s servicesSection) guard(ctx context.Context, principalID, text string) interception {
 	if len(s.services.MatchingKeyServers(principalID, text)) == 0 {
 		return interception{}
 	}
-	return interception{handled: true, remove: true, reply: ServicesKeyGuardReply, reason: "mcp_key_guard"}
+	return interception{handled: true, remove: true, reply: ServicesKeyGuardReply.Format(ctx), reason: "mcp_key_guard"}
 }
 
 func (s servicesSection) awaiting(principalID string) bool {

@@ -16,6 +16,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/judgment"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 	"github.com/vladar107/home-ai-assistant/internal/turnstate"
@@ -199,7 +200,7 @@ func TestIntentCheckSeesTheAssistantQuestionButNeverTheTurnsOwnReply(t *testing.
 
 	h.push(textUpdate(3, 101, "hello"))
 	receive(t, h.ctx, runtime.calls).answer <- agentruntime.RunResult{}
-	h.wantReply(101, 3, conversation.UnavailableReply)
+	h.wantReply(101, 3, localetest.English(conversation.UnavailableReply))
 	h.waitState(3, "delivered")
 
 	h.push(textUpdate(4, 101, "what about tea"))

@@ -11,18 +11,21 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connection"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/nas"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 )
 
 const (
-	SettingsTitle         = "Settings"
-	SettingsPrivacyLine   = "Privacy mode: strict-local. Use /privacy for details and /status to check that I am online."
-	ModelNotConnectedLine = "Model subscription: not connected."
-	ModelCommandLine      = "Choose the model and effort of a conversation with /model."
-
 	maximumCallbackDataBytes = 64
 	// labelCallbackData marks a button that only labels the rows below it; pressing it changes
 	// nothing, so the settings message is not edited.
 	labelCallbackData = "label"
+)
+
+var (
+	SettingsTitle         = locale.T("Settings", "Настройки")
+	SettingsPrivacyLine   = locale.T("Privacy mode: strict-local. Use /privacy for details and /status to check that I am online.", "Режим приватности: strict-local. Команда /privacy расскажет подробнее, а /status покажет, что я на связи.")
+	ModelNotConnectedLine = locale.T("Model subscription: not connected.", "Подписка на модель: не подключена.")
+	ModelCommandLine      = locale.T("Choose the model and effort of a conversation with /model.", "Выбрать модель и глубину рассуждений разговора можно командой /model.")
 )
 
 var errUnknownSettingsAction = errors.New("unknown settings action")
@@ -114,7 +117,7 @@ type settingsView struct {
 // model, consuming no intake, for a caption or transcript that cannot be an intake reply.
 type messageInterceptor interface {
 	intercept(ctx context.Context, principalID string, text string) (interception, error)
-	guard(principalID, text string) interception
+	guard(ctx context.Context, principalID, text string) interception
 }
 
 // intakeSection is an interceptor whose intake waits for a principal's next message, whatever it
@@ -147,6 +150,8 @@ const (
 type settingsGroup struct {
 	id    string
 	title string
+	// titleText, when set, is the title in each language; the others are still English.
+	titleText locale.Text
 	// inline groups show their sections' controls on the group page; the others link to a page
 	// per section.
 	inline  bool
@@ -158,6 +163,7 @@ type settingsGroup struct {
 // every token guard, so a key the user was asked for is taken even when it looks like another
 // service's token.
 var sectionOrder = []string{
+	languageSectionPrefix,
 	modelSectionPrefix,
 	mcpSectionPrefix,
 	notionSectionPrefix,
@@ -181,6 +187,7 @@ var sectionOrder = []string{
 
 // settingsGroups orders the overview; a section missing from it is never shown.
 var settingsGroups = []settingsGroup{
+	{id: "language", title: "Language", titleText: locale.T("Language", "Язык"), inline: true, members: []string{languageSectionPrefix}},
 	{id: "model", title: "Model", members: []string{modelSectionPrefix}},
 	{id: "accounts", title: "Accounts", members: []string{googleSectionPrefix, notionSectionPrefix}},
 	{id: "home", title: "Home & files", inline: true, members: []string{homeAssistantSectionPrefix, nasSectionPrefix}},
@@ -192,6 +199,13 @@ var settingsGroups = []settingsGroup{
 	{id: "events", title: "Events", inline: true, members: []string{eventsSectionPrefix}},
 	{id: "widgets", title: "Widgets", inline: true, members: []string{widgetSectionPrefix}},
 	{id: "safety", title: "Safety & privacy", inline: true, members: []string{typeSafeSectionPrefix}},
+}
+
+func (g settingsGroup) titleIn(ctx context.Context) string {
+	if g.titleText != (locale.Text{}) {
+		return g.titleText.Format(ctx)
+	}
+	return g.title
 }
 
 func settingsMembers(sections []Section, group settingsGroup) []Section {
@@ -244,8 +258,8 @@ func onOff(enabled bool) string {
 	return "off"
 }
 
-func crumbs(titles ...string) string {
-	return strings.Join(append([]string{SettingsTitle}, titles...), " › ")
+func crumbs(ctx context.Context, titles ...string) string {
+	return strings.Join(append([]string{SettingsTitle.Format(ctx)}, titles...), " › ")
 }
 
 // renderSettings renders a page; an unknown page falls back to the overview.
@@ -296,14 +310,14 @@ func renderSettingsOverview(ctx context.Context, principalID string, sections []
 				needsAttention = true
 			}
 		}
-		overview = append(overview, group.title+": "+strings.Join(states, ", "))
-		buttons = append(buttons, navButton(flagged(group.title, needsAttention), group.id))
+		overview = append(overview, group.titleIn(ctx)+": "+strings.Join(states, ", "))
+		buttons = append(buttons, navButton(flagged(group.titleIn(ctx), needsAttention), group.id))
 	}
-	lines := []string{SettingsTitle, ""}
+	lines := []string{SettingsTitle.Format(ctx), ""}
 	if len(attention) > 0 {
 		lines = append(append(lines, attention...), "")
 	}
-	lines = append(append(lines, overview...), "", SettingsPrivacyLine)
+	lines = append(append(lines, overview...), "", SettingsPrivacyLine.Format(ctx))
 	var keyboard InlineKeyboard
 	for start := 0; start < len(buttons); start += 2 {
 		keyboard = append(keyboard, buttons[start:min(start+2, len(buttons))])
@@ -312,7 +326,7 @@ func renderSettingsOverview(ctx context.Context, principalID string, sections []
 }
 
 func renderSettingsGroup(ctx context.Context, principalID string, group settingsGroup, members []Section, note string) (string, InlineKeyboard, error) {
-	lines := []string{crumbs(group.title), ""}
+	lines := []string{crumbs(ctx, group.titleIn(ctx)), ""}
 	var keyboard InlineKeyboard
 	if showsInline(group, members) {
 		for i, section := range members {
@@ -353,7 +367,7 @@ func renderSettingsSection(ctx context.Context, principalID string, group settin
 	if err != nil {
 		return "", nil, err
 	}
-	lines := append([]string{crumbs(group.title, summary.name), ""}, view.lines...)
+	lines := append([]string{crumbs(ctx, group.titleIn(ctx), summary.name), ""}, view.lines...)
 	return finishPage(lines, appendView(nil, view), note, group.id)
 }
 
@@ -444,12 +458,12 @@ func (m modelSection) render(ctx context.Context, principalID string) (settingsV
 	}
 	if !status.Connected {
 		return settingsView{
-			lines:   []string{ModelNotConnectedLine},
+			lines:   []string{ModelNotConnectedLine.Format(ctx)},
 			buttons: []InlineButton{{Text: "Connect model", CallbackData: modelSectionPrefix + ":" + modelConnectAction}},
 		}, nil
 	}
 	return settingsView{
-		lines:   []string{ModelConnectedLine(status), ModelCommandLine},
+		lines:   []string{ModelConnectedLine(status), ModelCommandLine.Format(ctx)},
 		buttons: []InlineButton{{Text: "Disconnect model", CallbackData: modelSectionPrefix + ":" + modelDisconnectAction}},
 	}, nil
 }
@@ -485,23 +499,25 @@ const (
 	notionWritesOnAction   = "writes-on"
 	notionWritesOffAction  = "writes-off"
 
-	NotionWritesOnReply  = "Notion writes are on. The model may propose to create or update pages; nothing is written until you confirm the exact proposal."
-	NotionWritesOffReply = "Notion writes are off. The model can only read your Notion content."
-
-	NotionNotConnectedLine    = "Notion: not connected."
-	NotionOperatorLine        = "Notion: not connected. Ask the operator to install your token with scripts/notion-set-token."
-	NotionInvalidTokenLine    = "Notion: the installed token could not be used. Install a fresh token or disconnect."
-	NotionUnavailableLine     = "Notion: the installed token could not be verified because Notion is unavailable. Try again later."
-	NotionPrivacyLine         = "Notion pages I read go to your model."
-	NotionConnectInstructions = "Send your Notion token as your next message within 10 minutes. I will delete that message right away and never show the token again. " +
-		"Recommended: an internal connection with read, update, and insert content capabilities, shared only with the pages and data sources you want me to see. " +
-		"A personal access token also works, but it grants everything you can access and expires. " +
-		"Notion content read through the connection is sent to your own model subscription."
-	NotionNotATokenReply     = "That did not look like a Notion token, so nothing was stored and it was not sent to the model. Press Connect Notion again when you have one."
-	NotionInvalidTokenReply  = "Notion rejected that token, so nothing was stored. Check it in Notion's developer portal and press Connect Notion again."
+	NotionUnavailableLine    = "Notion: the installed token could not be verified because Notion is unavailable. Try again later."
 	NotionConnectFailedReply = "Notion could not be reached to verify the token, so nothing was stored. Please try again later."
-	NotionTokenGuardReply    = "That looked like a Notion token, so I deleted it and did not send it to the model. To connect Notion, use Connect Notion in /settings or ask the operator to install it."
-	DeleteFailedLine         = "I could not delete your message; please delete it yourself."
+)
+
+var (
+	NotionWritesOnReply       = locale.T("Notion writes are on. The model may propose to create or update pages; nothing is written until you confirm the exact proposal.", "Запись в Notion включена. Модель может предлагать создать или обновить страницы; ничего не записывается, пока вы не подтвердите конкретное предложение.")
+	NotionWritesOffReply      = locale.T("Notion writes are off. The model can only read your Notion content.", "Запись в Notion выключена. Модель может только читать ваше содержимое Notion.")
+	NotionNotConnectedLine    = locale.T("Notion: not connected.", "Notion: не подключён.")
+	NotionOperatorLine        = locale.T("Notion: not connected. Ask the operator to install your token with scripts/notion-set-token.", "Notion: не подключён. Попросите оператора установить ваш токен с помощью scripts/notion-set-token.")
+	NotionInvalidTokenLine    = locale.T("Notion: the installed token could not be used. Install a fresh token or disconnect.", "Notion: установленный токен не удалось использовать. Установите новый токен или отключите Notion.")
+	NotionPrivacyLine         = locale.T("Notion pages I read go to your model.", "Страницы Notion, которые я читаю, уходят вашей модели.")
+	NotionConnectInstructions = locale.T("Send your Notion token as your next message within 10 minutes. I will delete that message right away and never show the token again. "+
+		"Recommended: an internal connection with read, update, and insert content capabilities, shared only with the pages and data sources you want me to see. "+
+		"A personal access token also works, but it grants everything you can access and expires. "+
+		"Notion content read through the connection is sent to your own model subscription.", "Отправьте токен Notion следующим сообщением в течение 10 минут. Я сразу удалю это сообщение и никогда больше не покажу токен. Рекомендуется внутреннее подключение с правами на чтение, обновление и вставку содержимого, к которому открыт доступ только для страниц и источников данных, которые вы хотите мне показать. Подойдёт и персональный токен доступа, но он даёт всё, к чему у вас есть доступ, и истекает. Содержимое Notion, прочитанное через подключение, отправляется вашей собственной подписке на модель.")
+	NotionNotATokenReply    = locale.T("That did not look like a Notion token, so nothing was stored and it was not sent to the model. Press Connect Notion again when you have one.", "Это не похоже на токен Notion, поэтому ничего не сохранено и модели не отправлено. Когда он у вас будет, снова нажмите «Подключить Notion».")
+	NotionInvalidTokenReply = locale.T("Notion rejected that token, so nothing was stored. Check it in Notion's developer portal and press Connect Notion again.", "Notion отклонил этот токен, поэтому ничего не сохранено. Проверьте его на портале разработчиков Notion и снова нажмите «Подключить Notion».")
+	NotionTokenGuardReply   = locale.T("That looked like a Notion token, so I deleted it and did not send it to the model. To connect Notion, use Connect Notion in /settings or ask the operator to install it.", "Это было похоже на токен Notion, поэтому сообщение удалено и модели не отправлено. Чтобы подключить Notion, нажмите «Подключить Notion» в /settings или попросите оператора установить его.")
+	DeleteFailedLine        = locale.T("I could not delete your message; please delete it yourself.", "Не удалось удалить ваше сообщение; удалите его, пожалуйста, сами.")
 )
 
 func notionKind(status notion.Status) string {
@@ -545,8 +561,8 @@ func (n notionSection) prefix() string { return notionSectionPrefix }
 
 func (n notionSection) helpTopic() string { return "notion" }
 
-func (n notionSection) privacy(context.Context, string) ([]string, error) {
-	return []string{NotionPrivacyLine}, nil
+func (n notionSection) privacy(ctx context.Context, _ string) ([]string, error) {
+	return []string{NotionPrivacyLine.Format(ctx)}, nil
 }
 
 func (n notionSection) summary(ctx context.Context, principalID string) (settingsSummary, error) {
@@ -574,7 +590,7 @@ func (n notionSection) render(ctx context.Context, principalID string) (settings
 	disconnect := []InlineButton{{Text: "Disconnect Notion", CallbackData: notionSectionPrefix + ":" + notionDisconnectAction}}
 	switch {
 	case status.Problem == notion.ProblemInvalidToken:
-		return settingsView{lines: []string{NotionInvalidTokenLine}, buttons: disconnect}, nil
+		return settingsView{lines: []string{NotionInvalidTokenLine.Format(ctx)}, buttons: disconnect}, nil
 	case status.Problem == notion.ProblemUnavailable:
 		return settingsView{lines: []string{NotionUnavailableLine}, buttons: disconnect}, nil
 	case status.Connected:
@@ -585,11 +601,11 @@ func (n notionSection) render(ctx context.Context, principalID string) (settings
 		return settingsView{lines: []string{NotionConnectedLine(status)}, buttons: append([]InlineButton{writes}, disconnect...)}, nil
 	case n.notion.ChatConnectEnabled():
 		return settingsView{
-			lines:   []string{NotionNotConnectedLine},
+			lines:   []string{NotionNotConnectedLine.Format(ctx)},
 			buttons: []InlineButton{{Text: "Connect Notion", CallbackData: notionSectionPrefix + ":" + notionConnectAction}},
 		}, nil
 	default:
-		return settingsView{lines: []string{NotionOperatorLine}}, nil
+		return settingsView{lines: []string{NotionOperatorLine.Format(ctx)}}, nil
 	}
 }
 
@@ -601,7 +617,7 @@ func (n notionSection) act(ctx context.Context, principalID string, _ int64, act
 		}
 		n.notion.BeginIntake(principalID)
 		n.telemetry.ContextLogger(ctx, n.logger).InfoContext(ctx, "notion.intake.started", "principal_id", principalID)
-		return settingsOutcome{message: NotionConnectInstructions}, nil
+		return settingsOutcome{message: NotionConnectInstructions.Format(ctx)}, nil
 	case notionDisconnectAction:
 		if _, err := n.notion.Disconnect(ctx, principalID); err != nil {
 			return settingsOutcome{}, err
@@ -618,9 +634,9 @@ func (n notionSection) act(ctx context.Context, principalID string, _ int64, act
 		}
 		n.telemetry.ContextLogger(ctx, n.logger).InfoContext(ctx, "notion.writes.changed", "principal_id", principalID, "enabled", enabled)
 		if enabled {
-			return settingsOutcome{note: NotionWritesOnReply}, nil
+			return settingsOutcome{note: NotionWritesOnReply.Format(ctx)}, nil
 		}
-		return settingsOutcome{note: NotionWritesOffReply}, nil
+		return settingsOutcome{note: NotionWritesOffReply.Format(ctx)}, nil
 	default:
 		return settingsOutcome{}, errUnknownSettingsAction
 	}
@@ -631,12 +647,12 @@ func (n notionSection) act(ctx context.Context, principalID string, _ int64, act
 func (n notionSection) intercept(ctx context.Context, principalID string, text string) (interception, error) {
 	if n.notion.ConsumeIntake(principalID) {
 		if !notion.LooksLikeToken(text) {
-			return interception{handled: true, reply: NotionNotATokenReply, reason: "notion_intake_not_token"}, nil
+			return interception{handled: true, reply: NotionNotATokenReply.Format(ctx), reason: "notion_intake_not_token"}, nil
 		}
 		status, err := n.notion.Connect(ctx, principalID, text)
 		switch {
 		case errors.Is(err, notion.ErrInvalidToken):
-			return interception{handled: true, remove: true, reply: NotionInvalidTokenReply, reason: "notion_intake_rejected"}, nil
+			return interception{handled: true, remove: true, reply: NotionInvalidTokenReply.Format(ctx), reason: "notion_intake_rejected"}, nil
 		case err != nil:
 			n.telemetry.ContextLogger(ctx, n.logger).WarnContext(ctx, "notion.intake.failed", "principal_id", principalID, "error", err)
 			return interception{handled: true, remove: true, reply: NotionConnectFailedReply, reason: "notion_intake_failed"}, nil
@@ -644,26 +660,27 @@ func (n notionSection) intercept(ctx context.Context, principalID string, text s
 			return interception{handled: true, remove: true, reply: NotionConnectedReply(status), reason: "notion_intake_connected"}, nil
 		}
 	}
-	return n.guard(principalID, text), nil
+	return n.guard(ctx, principalID, text), nil
 }
 
-func (n notionSection) guard(_ string, text string) interception {
+func (n notionSection) guard(ctx context.Context, _ string, text string) interception {
 	if !notion.LooksLikeToken(text) {
 		return interception{}
 	}
-	return interception{handled: true, remove: true, reply: NotionTokenGuardReply, reason: "notion_token_guard"}
+	return interception{handled: true, remove: true, reply: NotionTokenGuardReply.Format(ctx), reason: "notion_token_guard"}
 }
 
 const (
 	nasSectionPrefix   = "nas"
 	nasWritesOnAction  = "writes-on"
 	nasWritesOffAction = "writes-off"
+)
 
-	NASWritesOnReply  = "Saving to the NAS is on. The model may propose to file a photo or document you sent in the conversation; nothing is written until you confirm the exact proposal, and a save can only add a new file."
-	NASWritesOffReply = "Saving to the NAS is off. The model can browse and read your NAS folders, but not add anything."
-
-	NASNoAccessLine          = "NAS: no folders are configured for you."
-	NASSavingUnavailableLine = "Saving is not configured for you, so NAS files can only be read."
+var (
+	NASWritesOnReply         = locale.T("Saving to the NAS is on. The model may propose to file a photo or document you sent in the conversation; nothing is written until you confirm the exact proposal, and a save can only add a new file.", "Сохранение на NAS включено. Модель может предложить сохранить фото или документ, отправленные вами в разговоре; ничего не записывается, пока вы не подтвердите конкретное предложение, а сохранение может только добавить новый файл.")
+	NASWritesOffReply        = locale.T("Saving to the NAS is off. The model can browse and read your NAS folders, but not add anything.", "Сохранение на NAS выключено. Модель может просматривать и читать ваши папки на NAS, но не может ничего добавлять.")
+	NASNoAccessLine          = locale.T("NAS: no folders are configured for you.", "NAS: для вас не настроено ни одной папки.")
+	NASSavingUnavailableLine = locale.T("Saving is not configured for you, so NAS files can only be read.", "Сохранение для вас не настроено, поэтому файлы на NAS можно только читать.")
 )
 
 // NASConnectedLine names the folders this user can reach and whether saving is on, because those
@@ -726,9 +743,9 @@ func (n nasSection) render(ctx context.Context, principalID string) (settingsVie
 	}
 	switch {
 	case !status.Connected:
-		return settingsView{lines: []string{NASNoAccessLine}}, nil
+		return settingsView{lines: []string{NASNoAccessLine.Format(ctx)}}, nil
 	case !status.CanSave:
-		return settingsView{lines: []string{NASConnectedLine(status), NASSavingUnavailableLine}}, nil
+		return settingsView{lines: []string{NASConnectedLine(status), NASSavingUnavailableLine.Format(ctx)}}, nil
 	default:
 		writes := InlineButton{Text: "Turn NAS saving on", CallbackData: nasSectionPrefix + ":" + nasWritesOnAction}
 		if status.WritesEnabled {
@@ -751,9 +768,9 @@ func (n nasSection) act(ctx context.Context, principalID string, _ int64, action
 		}
 		n.telemetry.ContextLogger(ctx, n.logger).InfoContext(ctx, "nas.writes.changed", "principal_id", principalID, "enabled", enabled)
 		if enabled {
-			return settingsOutcome{note: NASWritesOnReply}, nil
+			return settingsOutcome{note: NASWritesOnReply.Format(ctx)}, nil
 		}
-		return settingsOutcome{note: NASWritesOffReply}, nil
+		return settingsOutcome{note: NASWritesOffReply.Format(ctx)}, nil
 	default:
 		return settingsOutcome{}, errUnknownSettingsAction
 	}

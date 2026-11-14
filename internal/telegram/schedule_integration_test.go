@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
@@ -447,10 +448,10 @@ func TestJobsCommandControlsAndSharesTheTurnSlot(t *testing.T) {
 	if count := h.countRows(`SELECT count(*) FROM scheduled_jobs WHERE id = ?`, job.ID); count != 1 {
 		t.Fatal("another user deleted the job")
 	}
-	h.wantMessage(202, JobGoneReply)
+	h.wantMessage(202, localetest.English(JobGoneReply))
 
 	deleted := h.pressJob(7, list.messageID, "jobs:delete:"+job.ID)
-	if deleted.text != NoJobsReply {
+	if deleted.text != localetest.English(NoJobsReply) {
 		t.Fatalf("jobs after delete = %q", deleted.text)
 	}
 }
@@ -501,7 +502,7 @@ func TestScheduledRunsForUnavailableOwners(t *testing.T) {
 
 	clock.Set(t, "2026-09-28T09:00:05+02:00")
 	h.scheduler.Wake()
-	h.wantMessage(101, "<b>Scheduled: Morning</b>\n\n"+conversation.NotConnectedReply)
+	h.wantMessage(101, "<b>Scheduled: Morning</b>\n\n"+localetest.English(conversation.NotConnectedReply))
 	h.waitRun(alice.ID, schedule.StatusDelivered)
 	h.waitRun(bob.ID, schedule.StatusSkipped)
 	expectNoRuntimeCall(t, runtime, 50*time.Millisecond)

@@ -12,16 +12,20 @@ import (
 	"unicode"
 
 	"github.com/vladar107/home-ai-assistant/internal/clip"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 )
 
 const (
 	// widgetDataLimit is the most chat data Telegram keeps with a widget message, in bytes.
 	widgetDataLimit = 1024
+)
+
+var (
 	// WidgetWorkingAnswer answers a Confirm or Reject tap, which the widget shows until the outcome
 	// replaces its actions.
-	WidgetWorkingAnswer = "Working on it…"
+	WidgetWorkingAnswer = locale.T("Working on it…", "Выполняется…")
 	// WidgetIgnoredAnswer answers a tap that names nothing the user can act on.
-	WidgetIgnoredAnswer = "This no longer does anything."
+	WidgetIgnoredAnswer = locale.T("This no longer does anything.", "Эта кнопка больше не действует.")
 )
 
 // widgetKind names a kind of widget, which is the program it runs and the data that program reads.

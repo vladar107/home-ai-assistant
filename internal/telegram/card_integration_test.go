@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
@@ -379,7 +380,7 @@ func TestFailedTurnsDeliverTheirTextWithoutTheCard(t *testing.T) {
 		h.push(textUpdate(1, 101, "plan my day"))
 		call := receive(t, h.ctx, runtime.calls)
 		h.stageCard(call)
-		h.wantReply(101, 1, conversation.TimeoutReply)
+		h.wantReply(101, 1, localetest.English(conversation.TimeoutReply))
 		h.waitState(1, "delivered")
 		h.wantNoPhoto()
 		h.wantNoCards("alice")
@@ -394,7 +395,7 @@ func TestFailedTurnsDeliverTheirTextWithoutTheCard(t *testing.T) {
 		call := receive(t, h.ctx, runtime.calls)
 		h.stageCard(call)
 		call.answer <- agentruntime.RunResult{}
-		h.wantReply(101, 1, conversation.UnavailableReply)
+		h.wantReply(101, 1, localetest.English(conversation.UnavailableReply))
 		h.waitState(1, "delivered")
 		h.wantNoPhoto()
 		h.wantNoCards("alice")
@@ -415,7 +416,7 @@ func TestFailedTurnsDeliverTheirTextWithoutTheCard(t *testing.T) {
 			t.Fatal(err)
 		}
 		h.start()
-		h.wantReply(101, 1, conversation.InterruptedReply)
+		h.wantReply(101, 1, localetest.English(conversation.InterruptedReply))
 		h.waitState(1, "delivered")
 		h.wantNoPhoto()
 		h.wantNoCards("alice")
@@ -523,7 +524,7 @@ func TestStartupSweepAndNewSessionRemoveStagedCards(t *testing.T) {
 		t.Fatalf("outbox after the startup sweep = %v", files)
 	}
 	h.push(textUpdate(1, 101, "/new"))
-	h.wantReply(101, 1, NoSessionReply)
+	h.wantReply(101, 1, localetest.English(NoSessionReply))
 	if files := h.cardFiles("alice"); !slices.Equal(files, []string{"schedule/c3d4.png"}) {
 		t.Fatalf("outbox after /new = %v, want only the scheduled run's card", files)
 	}
@@ -543,7 +544,7 @@ func TestScheduledCardSurvivesANewConversation(t *testing.T) {
 	run := receive(t, h.ctx, runtime.calls)
 	h.stageCard(run)
 	h.push(textUpdate(1, 101, "/new"))
-	h.wantReply(101, 1, NoSessionReply)
+	h.wantReply(101, 1, localetest.English(NoSessionReply))
 	run.answer <- agentruntime.RunResult{Response: "Dry all day.", Final: "Dry all day."}
 	if photo := h.nextPhoto(); photo.caption != "<b>Scheduled: Weekly tasks</b>\n\nDry all day." || string(photo.data) != string(cardBytes("alice")) {
 		t.Fatalf("scheduled photo = %+v", photo)

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 	"github.com/vladar107/home-ai-assistant/internal/trip"
 )
@@ -17,12 +18,6 @@ const (
 	// tripTabFallbackName names the tab of a trip whose title leaves nothing a tab can show.
 	tripTabFallbackName = "Trip"
 
-	// TripMovedNote replaces the summary in the tab a trip left, above the trip's title.
-	TripMovedNote = "This trip moved to another tab."
-	// TripTabPassedNote replaces the summary of a trip that is over in its tab, above its title,
-	// once another trip took the tab.
-	TripTabPassedNote = "This trip is over, and this tab now belongs to another trip."
-
 	tripTabMainViewRefusal = "This is the main view, which cannot be a trip's tab. The user can say it in the tab they want the trip in."
 	tripTabUnknownRefusal  = "This tab is not in my records yet, so a trip cannot use it."
 	tripTabOtherRefusal    = "This tab cannot be a trip's tab."
@@ -31,6 +26,14 @@ const (
 	tripTabChangedRefusal  = "This tab changed while the trip was moving to it; nothing moved."
 	tripGoneRefusal        = "That trip no longer exists."
 	tripClosedRefusal      = "That trip has ended or is no longer planned, so it does not move to another tab."
+)
+
+var (
+	// TripMovedNote replaces the summary in the tab a trip left, above the trip's title.
+	TripMovedNote = locale.T("This trip moved to another tab.", "Эта поездка перенесена в другую вкладку.")
+	// TripTabPassedNote replaces the summary of a trip that is over in its tab, above its title,
+	// once another trip took the tab.
+	TripTabPassedNote = locale.T("This trip is over, and this tab now belongs to another trip.", "Эта поездка закончилась, и теперь эта вкладка принадлежит другой поездке.")
 )
 
 // tripTabHolders say whose tab a trip is refused, by the kind of object the tab serves.
@@ -120,12 +123,12 @@ func (s *Tabs) TakeTripTab(ctx context.Context, principalID string, chatID int64
 	}
 	logger.InfoContext(ctx, kind.event+".taken", "principal_id", principalID, kind.idKey, tripID, "thread_id", threadID, "left_thread_id", left)
 	if hadTab && found.SummaryMessageID > 0 {
-		if err := editPlain(ctx, s.client, chatID, found.SummaryMessageID, TripMovedNote+"\n"+found.Title); err != nil {
+		if err := editPlain(ctx, s.client, chatID, found.SummaryMessageID, TripMovedNote.Format(ctx)+"\n"+found.Title); err != nil {
 			logger.WarnContext(ctx, failed, "principal_id", principalID, kind.idKey, tripID, "thread_id", left, "stage", "moved_note", "error", err)
 		}
 	}
 	if previous.SummaryMessageID > 0 {
-		if err := editPlain(ctx, s.client, chatID, previous.SummaryMessageID, TripTabPassedNote+"\n"+previous.Title); err != nil {
+		if err := editPlain(ctx, s.client, chatID, previous.SummaryMessageID, TripTabPassedNote.Format(ctx)+"\n"+previous.Title); err != nil {
 			logger.WarnContext(ctx, failed, "principal_id", principalID, kind.idKey, tripID, "thread_id", threadID, "stage", "passed_note", "error", err)
 		}
 	}

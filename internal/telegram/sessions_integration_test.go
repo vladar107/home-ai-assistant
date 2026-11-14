@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 )
 
@@ -73,13 +74,13 @@ func TestSessionsResumeContinuesTheEarlierPiSession(t *testing.T) {
 	h.talk(1, 101, "plan the heating schedule for winter")
 	earlierID, earlierRuntimeID := h.activeSession("alice")
 	h.push(textUpdate(2, 101, "/new"))
-	h.wantReply(101, 2, NewSessionReply)
+	h.wantReply(101, 2, localetest.English(NewSessionReply))
 	h.talk(3, 101, "write a groceries list")
 	laterID, _ := h.activeSession("alice")
 
 	h.push(textUpdate(4, 101, "/sessions"))
 	list := h.nextMessage()
-	if !strings.HasPrefix(list.text, SessionsTitle) ||
+	if !strings.HasPrefix(list.text, localetest.English(SessionsTitle)) ||
 		!strings.Contains(list.text, "1. ") || !strings.Contains(list.text, "write a groceries list (current)") ||
 		!strings.Contains(list.text, "2. ") || !strings.Contains(list.text, "plan the heating schedule for winter") {
 		t.Fatalf("/sessions = %q", list.text)
@@ -114,10 +115,10 @@ func TestSessionsResumeContinuesTheEarlierPiSession(t *testing.T) {
 	// Bob's press on Alice's conversation reaches nothing.
 	h.push(callbackUpdate(7, 202, list.messageID, "sessions:resume:"+laterID))
 	h.wantAnswer(7)
-	if edit := h.nextEdit(); edit.text != NoSessionsReply {
+	if edit := h.nextEdit(); edit.text != localetest.English(NoSessionsReply) {
 		t.Fatalf("Bob's list = %+v", edit)
 	}
-	if note := h.nextMessage(); note.chatID != 202 || note.text != SessionGoneReply {
+	if note := h.nextMessage(); note.chatID != 202 || note.text != localetest.English(SessionGoneReply) {
 		t.Fatalf("Bob's press = %+v", note)
 	}
 	if id, _ := h.activeSession("alice"); id != earlierID {
@@ -140,7 +141,7 @@ func TestNewDeletesThePhotoFromTheConversationHistory(t *testing.T) {
 	}
 
 	h.push(textUpdate(2, 101, "/new"))
-	h.wantReply(101, 2, NewSessionReply)
+	h.wantReply(101, 2, localetest.English(NewSessionReply))
 	files, history := sessionFiles(t, profiles, "alice", runtimeID)
 	if files != 1 || strings.Contains(history, encoded) || !strings.Contains(history, "what is on this label?") {
 		t.Fatalf("history after /new keeps the photo or lost its text: %d files: %s", files, history)
@@ -153,7 +154,7 @@ func TestReplyToAnEarlierAnswerReturnsToItsConversation(t *testing.T) {
 	earlierAnswer := h.talk(1, 101, "which plants need water on Sundays")
 	_, earlierRuntimeID := h.activeSession("alice")
 	h.push(textUpdate(2, 101, "/new"))
-	h.wantReply(101, 2, NewSessionReply)
+	h.wantReply(101, 2, localetest.English(NewSessionReply))
 	laterAnswer := h.talk(3, 101, "book a table for Friday")
 	laterID, laterRuntimeID := h.activeSession("alice")
 
@@ -211,10 +212,10 @@ func TestConversationSearchFindsOnlyTheUsersOwnEarlierConversations(t *testing.T
 	h.talk(1, 101, "the boiler service code is 4417")
 	earlierID, _ := h.activeSession("alice")
 	h.push(textUpdate(2, 101, "/new"))
-	h.wantReply(101, 2, NewSessionReply)
+	h.wantReply(101, 2, localetest.English(NewSessionReply))
 	h.talk(3, 202, "my boiler service code is 9925")
 	h.push(textUpdate(4, 202, "/new"))
-	h.wantReply(202, 4, NewSessionReply)
+	h.wantReply(202, 4, localetest.English(NewSessionReply))
 
 	found := h.talk(5, 101, `fixture:call conversation_search {"query":"Boiler CODE"}`)
 	if !strings.Contains(found.text, "conversation "+earlierID) || !strings.Contains(found.text, "message 1 by the user") ||
@@ -256,14 +257,14 @@ func TestConversationSearchFindsOnlyTheUsersOwnEarlierConversations(t *testing.T
 	// A conversation that read private content is found without its excerpt, and only reading it
 	// makes the current conversation private.
 	h.push(textUpdate(9, 101, "/new"))
-	h.wantReply(101, 9, NewSessionReply)
+	h.wantReply(101, 9, localetest.English(NewSessionReply))
 	h.talk(10, 101, "the alarm panel code is 2580")
 	privateID, _ := h.activeSession("alice")
 	if err := h.store.MarkConversationPrivate(h.ctx, "alice", h.requestID(10)); err != nil {
 		t.Fatal(err)
 	}
 	h.push(textUpdate(11, 101, "/new"))
-	h.wantReply(101, 11, NewSessionReply)
+	h.wantReply(101, 11, localetest.English(NewSessionReply))
 	withheld := h.talk(12, 101, `fixture:call conversation_search {"query":"alarm panel"}`)
 	if !strings.Contains(withheld.text, "conversation "+privateID) || !strings.Contains(withheld.text, "message 1 by the user: (excerpt withheld:") ||
 		strings.Contains(withheld.text, "2580") {
@@ -302,14 +303,14 @@ func TestResumeIsRefusedWhileATurnIsPending(t *testing.T) {
 	h.waitState(1, "delivered")
 	earlierID, _ := h.activeSession("alice")
 	h.push(textUpdate(2, 101, "/new"))
-	h.wantReply(101, 2, NewSessionReply)
+	h.wantReply(101, 2, localetest.English(NewSessionReply))
 	h.push(textUpdate(3, 101, "second"))
 	pending := receive(t, h.ctx, runtime.calls)
 
 	h.push(callbackUpdate(4, 101, sentMessageID(9), "sessions:resume:"+earlierID))
 	h.wantAnswer(4)
 	h.nextEdit()
-	if note := h.nextMessage(); note.text != conversation.BusyReply {
+	if note := h.nextMessage(); note.text != localetest.English(conversation.BusyReply) {
 		t.Fatalf("resume during a turn = %+v", note)
 	}
 	if id, _ := h.activeSession("alice"); id == earlierID {

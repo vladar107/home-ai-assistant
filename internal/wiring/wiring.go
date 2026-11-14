@@ -237,10 +237,13 @@ type GoogleConfig struct {
 
 // Assembly is what Build built. A service that was not configured is nil.
 type Assembly struct {
-	Registry    *module.Registry
-	Switches    *integration.Switches
-	Tools       *tools.Broker
-	Connections *connection.Service
+	// LanguageRestored is told when a restore set a principal's interface language, so their chat's
+	// slash menu follows it; the Telegram service, built after the assembly, sets it.
+	LanguageRestored func(ctx context.Context, principalID string)
+	Registry         *module.Registry
+	Switches         *integration.Switches
+	Tools            *tools.Broker
+	Connections      *connection.Service
 	// Models lists the models each principal can choose from; ChatModel and TaskModel are the
 	// defaults that choice falls back to.
 	Models        *modelcatalog.Catalog
@@ -802,6 +805,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 			ChatModel: a.ChatModel,
 			TaskModel: a.TaskModel,
 			Models:    a.Models,
+			Languages: in.Store,
 			// The engine writes a chat turn's trace off the reply's path and holds a link until it is written.
 			Traces:             engine,
 			FollowUp:           approvals,

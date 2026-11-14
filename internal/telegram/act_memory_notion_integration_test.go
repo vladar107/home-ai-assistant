@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	"github.com/vladar107/home-ai-assistant/internal/memory"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/notionsim"
@@ -135,7 +136,7 @@ func TestMemoryInstructionProposesAfterHouseholdOrOutsideContent(t *testing.T) {
 	approvalButtons(t, proposal.keyboard)
 
 	h.push(textUpdate(2, 101, "/new"))
-	h.wantReply(101, 2, NewSessionReply)
+	h.wantReply(101, 2, localetest.English(NewSessionReply))
 	_, results = h.memoryTurn(runtime, 3, 101, "ok", memoryCall("outside_read", `{}`), addCall("instruction", "answer in English"))
 	wantProposedResult(t, results[1])
 	h.nextMessage()

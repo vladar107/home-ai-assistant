@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
@@ -478,7 +479,7 @@ func TestOpenNamesTheTabAndPostsThere(t *testing.T) {
 
 	h.push(callbackUpdate(5, 101, list.messageID, "sessions:resume:"+tabSession))
 	h.wantAnswer(5)
-	if nudge := h.nextMessage(); nudge.threadID != 50 || nudge.text != SessionHere {
+	if nudge := h.nextMessage(); nudge.threadID != 50 || nudge.text != localetest.English(SessionHere) {
 		t.Fatalf("nudge = %+v, want it in the tab", nudge)
 	}
 	h.nextEdit()
@@ -508,7 +509,7 @@ func TestOpenOnAGoneTabMovesTheConversationToANewTab(t *testing.T) {
 	h.wantRefused("sendMessage", 50)
 	h.nextEdit()
 	suspect := h.nextMessage()
-	if suspect.threadID != 0 || suspect.text != TabSuspectReply || !slices.Equal(buttonData(suspect.keyboard), []string{"sessions:close:" + tabSession}) ||
+	if suspect.threadID != 0 || suspect.text != localetest.English(TabSuspectReply) || !slices.Equal(buttonData(suspect.keyboard), []string{"sessions:close:" + tabSession}) ||
 		suspect.keyboard[0][0].Text != "Close 2" {
 		t.Fatalf("Open on a suspect tab = %+v", suspect)
 	}
@@ -550,7 +551,7 @@ func TestCloseCancelsTheTurnClosesTheConversationAndDeletesTheTab(t *testing.T) 
 
 	h.push(tabMessage(2, 50, "/close"))
 	question := h.nextMessage()
-	if question.threadID != 50 || question.text != CloseTabPrompt || !slices.Equal(buttonData(question.keyboard), []string{"tabs:close:50", "tabs:keep"}) {
+	if question.threadID != 50 || question.text != localetest.English(CloseTabPrompt) || !slices.Equal(buttonData(question.keyboard), []string{"tabs:close:50", "tabs:keep"}) {
 		t.Fatalf("/close = %+v", question)
 	}
 	h.push(tabPress(3, 50, question.messageID, "tabs:close:50"))
@@ -563,7 +564,7 @@ func TestCloseCancelsTheTurnClosesTheConversationAndDeletesTheTab(t *testing.T) 
 	if deleted := receive(t, h.ctx, h.tabs.deleted); deleted != 50 {
 		t.Fatalf("deleted tab %d", deleted)
 	}
-	if outcome := h.nextMessage(); outcome.threadID != 0 || outcome.text != TabClosedReply {
+	if outcome := h.nextMessage(); outcome.threadID != 0 || outcome.text != localetest.English(TabClosedReply) {
 		t.Fatalf("outcome = %+v, want it in the main view", outcome)
 	}
 	h.waitState(1, "cancelled")
@@ -590,7 +591,7 @@ func TestCloseCancelsTheTurnClosesTheConversationAndDeletesTheTab(t *testing.T) 
 	h.push(callbackUpdate(7, 101, ask.messageID, "tabs:close:60"))
 	h.wantAnswer(7)
 	receive(t, h.ctx, h.tabs.deleted)
-	if edit := h.nextEdit(); edit.messageID != ask.messageID || edit.text != TabNotRemovedReply {
+	if edit := h.nextEdit(); edit.messageID != ask.messageID || edit.text != localetest.English(TabNotRemovedReply) {
 		t.Fatalf("failed delete = %+v", edit)
 	}
 	if _, status, reason := h.laneSession(60); status != "closed" || reason != conversation.CloseTabClosed {
@@ -599,7 +600,7 @@ func TestCloseCancelsTheTurnClosesTheConversationAndDeletesTheTab(t *testing.T) 
 
 	h.push(callbackUpdate(8, 101, ask.messageID, "tabs:keep"))
 	h.wantAnswer(8)
-	if edit := h.nextEdit(); edit.text != TabKeptReply {
+	if edit := h.nextEdit(); edit.text != localetest.English(TabKeptReply) {
 		t.Fatalf("Keep = %+v", edit)
 	}
 
@@ -610,7 +611,7 @@ func TestCloseCancelsTheTurnClosesTheConversationAndDeletesTheTab(t *testing.T) 
 	h.wantAnswer(10)
 	receive(t, h.ctx, h.tabs.deleted)
 	h.wantRefused("deleteForumTopic", 70)
-	if edit := h.nextEdit(); edit.text != TabClosedReply {
+	if edit := h.nextEdit(); edit.text != localetest.English(TabClosedReply) {
 		t.Fatalf("closing a tab that is already gone = %+v", edit)
 	}
 	if _, status, reason := h.laneSession(70); status != "closed" || reason != conversation.CloseTabClosed {
@@ -621,7 +622,7 @@ func TestCloseCancelsTheTurnClosesTheConversationAndDeletesTheTab(t *testing.T) 
 	}
 
 	h.push(textUpdate(11, 101, "/close"))
-	h.wantReply(101, 11, CloseMainViewReply)
+	h.wantReply(101, 11, localetest.English(CloseMainViewReply))
 }
 
 func TestATabIsConfirmedOnceTheRegistryKnowsIt(t *testing.T) {
@@ -766,11 +767,11 @@ func TestWithTopicsOffNoTabCallIsMade(t *testing.T) {
 	h.push(callbackUpdate(3, 101, list.messageID, "sessions:resume:55555555-5555-4555-8555-555555555555"))
 	h.wantAnswer(3)
 	h.nextEdit()
-	if answer := h.nextMessage(); answer.text != SessionElsewhere || answer.threadID != 0 {
+	if answer := h.nextMessage(); answer.text != localetest.English(SessionElsewhere) || answer.threadID != 0 {
 		t.Fatalf("Open with tabs off = %+v", answer)
 	}
 	h.push(textUpdate(4, 101, "/close"))
-	if reply := h.nextMessage(); !strings.HasPrefix(reply.text, HelpHeading) || strings.Contains(reply.text, "/close") {
+	if reply := h.nextMessage(); !strings.HasPrefix(reply.text, localetest.English(HelpHeading)) || strings.Contains(reply.text, "/close") {
 		t.Fatalf("/close with tabs off = %q", reply.text)
 	}
 }
@@ -782,7 +783,7 @@ func TestACommandThatOpensATabIsAnsweredInTheMainView(t *testing.T) {
 
 	// The client opens a tab for a command sent from the main view and sends the command into it.
 	h.push(implicitTab(1, 70), tabMessage(2, 70, "/sessions"))
-	if answer := h.nextMessage(); answer.threadID != 0 || answer.replyTo != 0 || answer.text != NoSessionsReply {
+	if answer := h.nextMessage(); answer.threadID != 0 || answer.replyTo != 0 || answer.text != localetest.English(NoSessionsReply) {
 		t.Fatalf("answer = %+v, want it in the main view, not as a reply", answer)
 	}
 	if deleted := receive(t, h.ctx, h.tabs.deleted); deleted != 70 {

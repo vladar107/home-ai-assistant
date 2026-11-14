@@ -9,6 +9,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/export"
 	"github.com/vladar107/home-ai-assistant/internal/intake"
 	"github.com/vladar107/home-ai-assistant/internal/integration"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	userlocation "github.com/vladar107/home-ai-assistant/internal/location"
 	usermemory "github.com/vladar107/home-ai-assistant/internal/memory"
 	"github.com/vladar107/home-ai-assistant/internal/project"
@@ -103,6 +104,11 @@ func (a *Assembly) buildExports() error {
 		usermemory.Exporter(),
 		usermemory.SettingsExporter(),
 		switchesExporter{},
+		languageExporter{restored: func(ctx context.Context, principalID string) {
+			if a.LanguageRestored != nil {
+				a.LanguageRestored(ctx, principalID)
+			}
+		}},
 		events.Exporter(),
 		a.Scheduler.Exporter(),
 		watch.Exporter(a.in.Core.Now, available, watchesRestored),
@@ -173,4 +179,51 @@ func (switchesExporter) Plan(ctx context.Context, plan *export.Planning, _ int, 
 		chosen[name] = true
 	}
 	return nil
+}
+
+const languageTable = "principal_languages"
+
+// languageExporter is the language section of a user's export: the interface language they chose.
+// A language already chosen here is left as it is.
+type languageExporter struct {
+	restored func(ctx context.Context, principalID string)
+}
+
+func (e languageExporter) Restored(ctx context.Context, principalID string) {
+	e.restored(ctx, principalID)
+}
+
+func (languageExporter) Section() export.Section {
+	return export.Section{Name: "language", Label: "Interface language", Version: 1, Tables: []export.Table{{Name: languageTable}}}
+}
+
+func (languageExporter) Keep(string, export.Row) bool { return true }
+
+func (languageExporter) Plan(ctx context.Context, plan *export.Planning, _ int, tables export.Tables) error {
+	current, err := plan.Current(ctx, languageTable)
+	if err != nil {
+		return err
+	}
+	for _, row := range tables[languageTable] {
+		if len(current) > 0 {
+			plan.Present()
+			continue
+		}
+		language, valid := locale.Parse(row.Text("language"))
+		if _, timed := row.Time("changed_at"); !valid || !timed || len(row) != 2 {
+			plan.Skip("your interface language", "it could not be read")
+			continue
+		}
+		plan.Add(languageTable, row.Clone())
+		plan.Adding("interface language: " + languageName(language))
+		current = append(current, row)
+	}
+	return nil
+}
+
+func languageName(language locale.Language) string {
+	if language == locale.Russian {
+		return "Русский"
+	}
+	return "English"
 }

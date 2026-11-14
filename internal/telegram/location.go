@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/clip"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/location"
 )
 
@@ -25,9 +26,12 @@ const (
 	LocationRefusedReply  = "I could not read that location, so I did not keep it."
 	LocationSharedLine    = "Your latest shared location is used in your conversation until it expires; only the latest one is kept, and nothing is kept once it expires or you forget it. Places you save by name are kept until you delete them, and a day more so you can undo it, and are only ever saved when you ask."
 	LocationNotSharedLine = "Share a location or a live location in this chat to ask about places, buses, and weather near you."
-	LocationForgottenNote = "Location forgotten."
+)
+
+var (
+	LocationForgottenNote = locale.T("Location forgotten.", "Местоположение забыто.")
 	// LocationPrivacyLine is added to /privacy while location sharing is enabled.
-	LocationPrivacyLine = "Location: only the latest is kept, until it expires; it goes to your model, Transitous, and OpenStreetMap. Places you save by name are kept until a day after you delete them, never saved from a location without your asking."
+	LocationPrivacyLine = locale.T("Location: only the latest is kept, until it expires; it goes to your model, Transitous, and OpenStreetMap. Places you save by name are kept until a day after you delete them, never saved from a location without your asking.", "Местоположение: хранится только последнее, пока не истечёт срок; оно передаётся вашей модели, Transitous и OpenStreetMap. Места, которые вы сохраняете по названию, хранятся до дня после их удаления и никогда не сохраняются по местоположению без вашей просьбы.")
 )
 
 // LocationController is implemented by the location service; nil turns shared locations away.
@@ -159,8 +163,8 @@ func (l locationSection) prefix() string { return locationSectionPrefix }
 
 func (l locationSection) helpTopic() string { return "location" }
 
-func (l locationSection) privacy(context.Context, string) ([]string, error) {
-	return []string{LocationPrivacyLine}, nil
+func (l locationSection) privacy(ctx context.Context, _ string) ([]string, error) {
+	return []string{LocationPrivacyLine.Format(ctx)}, nil
 }
 
 func (l locationSection) summary(ctx context.Context, principalID string) (settingsSummary, error) {
@@ -198,5 +202,5 @@ func (l locationSection) act(ctx context.Context, principalID string, _ int64, a
 		return settingsOutcome{}, err
 	}
 	l.telemetry.ContextLogger(ctx, l.logger).InfoContext(ctx, "location.forgotten", "principal_id", principalID, "existed", forgotten)
-	return settingsOutcome{note: LocationForgottenNote}, nil
+	return settingsOutcome{note: LocationForgottenNote.Format(ctx)}, nil
 }

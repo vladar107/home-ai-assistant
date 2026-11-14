@@ -3,10 +3,11 @@ package telegram
 import (
 	"context"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/routes"
 )
 
-const RouteGoneReply = "This route no longer exists."
+var RouteGoneReply = locale.T("This route no longer exists.", "Этого маршрута больше нет.")
 
 // RouteController is implemented by the routes service; nil leaves routes out of /jobs.
 type RouteController interface {

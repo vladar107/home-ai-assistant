@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -105,7 +106,7 @@ func TestRouteIsSavedChangedAndRemovedOnConfirm(t *testing.T) {
 	h.push(callbackUpdate(8, 202, jobs.messageID, "jobs:rdelete:"+id+":1"))
 	h.wantAnswer(8)
 	h.nextEdit()
-	h.wantMessage(202, RouteGoneReply)
+	h.wantMessage(202, localetest.English(RouteGoneReply))
 	if count := h.countRows(`SELECT count(*) FROM routes`); count != 1 {
 		t.Fatalf("bob's press deleted alice's route: %d left", count)
 	}
@@ -138,7 +139,7 @@ func TestRouteDeletesFromJobs(t *testing.T) {
 	if len(data) != 1 || !strings.HasPrefix(data[0], "jobs:rdelete:") {
 		t.Fatalf("jobs = %+v", jobs)
 	}
-	if deleted := h.pressJob(4, jobs.messageID, data[0]); deleted.text != NoJobsReply {
+	if deleted := h.pressJob(4, jobs.messageID, data[0]); deleted.text != localetest.English(NoJobsReply) {
 		t.Fatalf("after delete = %+v", deleted)
 	}
 	if count := h.countRows(`SELECT count(*) FROM routes`); count != 0 {

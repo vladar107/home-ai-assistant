@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/collection"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -120,7 +121,7 @@ func TestCollectionsCommandPagesAndDeletes(t *testing.T) {
 	h := newMemoryHarness(t, runtime)
 
 	h.push(textUpdate(1, 101, "/collections"))
-	if empty := h.nextMessage(); empty.text != NoCollectionsReply || len(empty.keyboard) != 0 {
+	if empty := h.nextMessage(); empty.text != localetest.English(NoCollectionsReply) || len(empty.keyboard) != 0 {
 		t.Fatalf("empty /collections = %+v", empty)
 	}
 
@@ -162,13 +163,13 @@ func TestCollectionsCommandPagesAndDeletes(t *testing.T) {
 	}
 
 	press(6, "col:rdel:"+bobs[0]+":1")
-	h.wantMessage(101, CollectionRecordGoneLine)
+	h.wantMessage(101, localetest.English(CollectionRecordGoneLine))
 	if forged := press(7, "col:open:"+others+":1"); forged.text != "Collections\n1. Books: 9 records" {
 		t.Fatalf("alice opening bob's collection = %q", forged.text)
 	}
-	h.wantMessage(101, CollectionGoneReply)
+	h.wantMessage(101, localetest.English(CollectionGoneReply))
 	press(8, "col:cdel:"+others+":1")
-	h.wantMessage(101, CollectionGoneReply)
+	h.wantMessage(101, localetest.English(CollectionGoneReply))
 	if count := h.countRows(`SELECT count(*) FROM collection_records WHERE principal_id = 'bob'`); count != 1 {
 		t.Fatalf("bob's records after alice's forged presses = %d", count)
 	}
@@ -183,10 +184,10 @@ func TestCollectionsCommandPagesAndDeletes(t *testing.T) {
 		t.Fatalf("after Cancel = %q", back.text)
 	}
 	press(11, "col:ask:"+books+":1")
-	if gone := press(12, "col:cdel:"+books+":1"); gone.text != NoCollectionsReply {
+	if gone := press(12, "col:cdel:"+books+":1"); gone.text != localetest.English(NoCollectionsReply) {
 		t.Fatalf("after deleting the collection = %q", gone.text)
 	}
-	h.wantMessage(101, CollectionDeletedNote)
+	h.wantMessage(101, localetest.English(CollectionDeletedNote))
 	if count := h.countRows(`SELECT count(*) FROM collection_records WHERE principal_id = 'alice'`); count != 0 {
 		t.Fatalf("alice's records after deleting the collection = %d", count)
 	}

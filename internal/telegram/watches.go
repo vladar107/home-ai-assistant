@@ -4,17 +4,20 @@ import (
 	"context"
 	"strings"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/watch"
 )
 
 const (
-	WatchGoneReply   = "This watch no longer exists."
-	WatchMutedReply  = "Muted for today; it checks again on its next day."
-	WatchPausedReply = "Paused. Resume it in /jobs."
-
 	watchPrefix      = "watch"
 	watchMuteAction  = "mute"
 	watchPauseAction = "pause"
+)
+
+var (
+	WatchGoneReply   = locale.T("This watch no longer exists.", "Этого наблюдения больше нет.")
+	WatchMutedReply  = locale.T("Muted for today; it checks again on its next day.", "Без уведомлений до конца дня; следующая проверка — в её следующий день.")
+	WatchPausedReply = locale.T("Paused. Resume it in /jobs.", "Приостановлено. Возобновите его в /jobs.")
 )
 
 // WatchController is implemented by the watch service; nil leaves watches out of /jobs and
@@ -62,10 +65,10 @@ func (s *Service) processWatchPress(ctx context.Context, callback *CallbackQuery
 	result := processingResult{event: "telegram.callback.handled", principalID: principalID, command: "watch." + action}
 	var changed bool
 	var err error
-	outcome := WatchMutedReply
+	outcome := WatchMutedReply.Format(ctx)
 	if action == watchPauseAction {
 		changed, err = s.watches.SetEnabled(ctx, principalID, watchID, false)
-		outcome = WatchPausedReply
+		outcome = WatchPausedReply.Format(ctx)
 	} else {
 		changed, err = s.watches.Mute(ctx, principalID, watchID)
 	}
@@ -73,7 +76,7 @@ func (s *Service) processWatchPress(ctx context.Context, callback *CallbackQuery
 		return processingResult{}, "watch_action", err
 	}
 	if !changed {
-		outcome = WatchGoneReply
+		outcome = WatchGoneReply.Format(ctx)
 	}
 	text := strings.TrimSpace(callback.Message.Text) + "\n\n" + outcome
 	if err := s.client.EditKeyboard(ctx, callback.Message.Chat.ID, callback.Message.MessageID, text, nil); err != nil {

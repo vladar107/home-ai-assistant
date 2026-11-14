@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 )
 
 func TestSettingsCallbacksAreAuthorizedAnsweredAndRefreshed(t *testing.T) {
@@ -77,11 +79,11 @@ func TestSettingsEditFallsBackWhenTelegramRejectsTheEdit(t *testing.T) {
 	h.mu.Unlock()
 	h.push(callbackUpdate(2, 101, settingsMessageID(1), "model:disconnect"))
 	h.wantAnswer(2)
-	if edit := h.nextEdit(); !strings.Contains(edit.text, ModelNotConnectedLine) {
+	if edit := h.nextEdit(); !strings.Contains(edit.text, localetest.English(ModelNotConnectedLine)) {
 		t.Fatalf("rejected edit = %+v", edit)
 	}
 	fresh := h.nextMessage()
-	if fresh.chatID != 101 || fresh.replyTo != 0 || !strings.Contains(fresh.text, ModelNotConnectedLine) || !slices.Equal(buttonData(fresh.keyboard), []string{"model:connect", "nav:root"}) {
+	if fresh.chatID != 101 || fresh.replyTo != 0 || !strings.Contains(fresh.text, localetest.English(ModelNotConnectedLine)) || !slices.Equal(buttonData(fresh.keyboard), []string{"model:connect", "nav:root"}) {
 		t.Fatalf("fallback settings message = %+v", fresh)
 	}
 
@@ -105,7 +107,7 @@ func TestRemovedConnectionCommandsGetHelp(t *testing.T) {
 	h.start()
 	h.push(textUpdate(1, 101, "/connect"), textUpdate(2, 101, "/connection"), textUpdate(3, 101, "/disconnect"))
 	for id := int64(1); id <= 3; id++ {
-		if reply := h.nextMessage(); reply.replyTo != requestMessageID(id) || !strings.HasPrefix(reply.text, HelpHeading) {
+		if reply := h.nextMessage(); reply.replyTo != requestMessageID(id) || !strings.HasPrefix(reply.text, localetest.English(HelpHeading)) {
 			t.Fatalf("reply to removed command = %+v, want the help reply", reply)
 		}
 	}

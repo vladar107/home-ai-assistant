@@ -12,6 +12,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/connection"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/codexauth"
 )
@@ -41,7 +42,7 @@ func (h *conversationHarness) requestSettings(updateID, userID int64) sentMessag
 	h.push(textUpdate(updateID, userID, "/settings"))
 	message := h.nextMessage()
 	if message.chatID != userID || message.replyTo != requestMessageID(updateID) ||
-		!strings.HasPrefix(message.text, SettingsTitle+"\n") || !strings.HasSuffix(message.text, SettingsPrivacyLine) {
+		!strings.HasPrefix(message.text, localetest.English(SettingsTitle)+"\n") || !strings.HasSuffix(message.text, localetest.English(SettingsPrivacyLine)) {
 		h.t.Fatalf("settings reply = %+v", message)
 	}
 	return message
@@ -53,7 +54,7 @@ func (h *conversationHarness) press(updateID, userID, messageID int64, data stri
 	h.push(callbackUpdate(updateID, userID, messageID, data))
 	h.wantAnswer(updateID)
 	edit := h.nextEdit()
-	if edit.chatID != userID || edit.messageID != messageID || !strings.HasPrefix(edit.text, SettingsTitle) {
+	if edit.chatID != userID || edit.messageID != messageID || !strings.HasPrefix(edit.text, localetest.English(SettingsTitle)) {
 		h.t.Fatalf("settings edit = %+v", edit)
 	}
 	return edit
@@ -75,10 +76,10 @@ func (h *conversationHarness) requestConnect(firstUpdateID, userID int64) string
 		h.t.Fatalf("settings before connect = %+v", settings)
 	}
 	page := h.openSettingsPage(firstUpdateID+1, userID, settingsMessageID(firstUpdateID), "model")
-	if !strings.Contains(page.text, ModelNotConnectedLine) || !slices.Equal(buttonData(page.keyboard), []string{"model:connect", "nav:root"}) {
+	if !strings.Contains(page.text, localetest.English(ModelNotConnectedLine)) || !slices.Equal(buttonData(page.keyboard), []string{"model:connect", "nav:root"}) {
 		h.t.Fatalf("model page before connect = %+v", page)
 	}
-	if edit := h.press(firstUpdateID+2, userID, settingsMessageID(firstUpdateID), "model:connect"); !strings.Contains(edit.text, ModelNotConnectedLine) {
+	if edit := h.press(firstUpdateID+2, userID, settingsMessageID(firstUpdateID), "model:connect"); !strings.Contains(edit.text, localetest.English(ModelNotConnectedLine)) {
 		h.t.Fatalf("settings after pressing connect = %+v", edit)
 	}
 	message := h.nextMessage()
@@ -157,7 +158,7 @@ func TestConnectCeremonyBindsSubscription(t *testing.T) {
 		t.Fatal("credential written before approval")
 	}
 	h.auth.Approve(code, "acct-alice-1234")
-	h.wantMessage(101, connection.ConnectedReply)
+	h.wantMessage(101, localetest.English(connection.ConnectedReply))
 
 	record, exists := h.credentialFile("alice")
 	if !exists {
@@ -212,7 +213,7 @@ func TestConnectOutcomes(t *testing.T) {
 		h.start()
 		code := h.requestConnect(1, 101)
 		h.auth.Deny(code)
-		h.wantMessage(101, connection.ConnectDeniedReply)
+		h.wantMessage(101, localetest.English(connection.ConnectDeniedReply))
 		if _, exists := h.credentialFile("alice"); exists {
 			t.Fatal("denied ceremony wrote a credential")
 		}
@@ -228,7 +229,7 @@ func TestConnectOutcomes(t *testing.T) {
 		h := newConversationHarnessWithOptions(t, newControlledRuntime(), harnessOptions{codeTimeout: 2 * time.Second})
 		h.start()
 		h.requestConnect(1, 101)
-		h.wantMessage(101, connection.ConnectExpiredReply)
+		h.wantMessage(101, localetest.English(connection.ConnectExpiredReply))
 		if _, exists := h.credentialFile("alice"); exists {
 			t.Fatal("expired ceremony wrote a credential")
 		}
@@ -241,7 +242,7 @@ func TestConnectOutcomes(t *testing.T) {
 		second := h.requestConnect(4, 101)
 		h.auth.Approve(first, "acct-old")
 		h.auth.Approve(second, "acct-new")
-		h.wantMessage(101, connection.ConnectedReply)
+		h.wantMessage(101, localetest.English(connection.ConnectedReply))
 		record, exists := h.credentialFile("alice")
 		if !exists || record["accountId"] != "acct-new" {
 			t.Fatalf("credential = %v exists=%v", record, exists)
@@ -258,7 +259,7 @@ func TestConnectOutcomes(t *testing.T) {
 		code := h.requestConnect(1, 101)
 		h.auth.PendingAsError(code)
 		h.auth.Approve(code, "acct-alice")
-		h.wantMessage(101, connection.ConnectedReply)
+		h.wantMessage(101, localetest.English(connection.ConnectedReply))
 	})
 	t.Run("slow down", func(t *testing.T) {
 		t.Parallel()
@@ -268,7 +269,7 @@ func TestConnectOutcomes(t *testing.T) {
 		slowed := time.Now()
 		h.auth.SlowDownOnce(code)
 		h.auth.Approve(code, "acct-alice")
-		h.wantMessage(101, connection.ConnectedReply)
+		h.wantMessage(101, localetest.English(connection.ConnectedReply))
 		if waited := time.Since(slowed); waited < connectSlowDown {
 			t.Fatalf("approval polled %v after slow_down, want at least the %v step", waited, connectSlowDown)
 		}
@@ -283,7 +284,7 @@ func TestAccountBoundToAnotherPrincipalIsRejected(t *testing.T) {
 	h.start()
 	code := h.requestConnect(1, 202)
 	h.auth.Approve(code, "acct-shared")
-	h.wantMessage(202, connection.AccountAlreadyBoundReply)
+	h.wantMessage(202, localetest.English(connection.AccountAlreadyBoundReply))
 	if _, exists := h.credentialFile("bob"); exists {
 		t.Fatal("rejected ceremony wrote a credential")
 	}
@@ -291,7 +292,7 @@ func TestAccountBoundToAnotherPrincipalIsRejected(t *testing.T) {
 		t.Fatalf("bob has a connection row: found=%v err=%v", found, err)
 	}
 	h.push(textUpdate(4, 202, "hello"))
-	h.wantReply(202, 4, conversation.NotConnectedReply)
+	h.wantReply(202, 4, localetest.English(conversation.NotConnectedReply))
 	h.waitState(4, "delivered")
 	select {
 	case call := <-runtime.calls:
@@ -307,7 +308,7 @@ func TestUnconnectedPrincipalGetsGuidance(t *testing.T) {
 	h.provision("alice", "acct-alice")
 	h.start()
 	h.push(textUpdate(1, 202, "hello"))
-	h.wantReply(202, 1, conversation.NotConnectedReply)
+	h.wantReply(202, 1, localetest.English(conversation.NotConnectedReply))
 	h.waitState(1, "delivered")
 	if turn := receive(t, h.ctx, h.turns); turn.outcome != "error" || turn.errorKind != "not_connected" {
 		t.Fatalf("telemetry turn = %+v", turn)
@@ -343,7 +344,7 @@ func TestDisconnectCancelsRunningTurnAndBlocksQueuedWork(t *testing.T) {
 		t.Fatalf("model page while connected = %+v", page)
 	}
 	edit := h.press(4, 101, settingsMessageID(2), "model:disconnect")
-	if !strings.Contains(edit.text, ModelNotConnectedLine) || !slices.Equal(buttonData(edit.keyboard), []string{"model:connect", "nav:root"}) {
+	if !strings.Contains(edit.text, localetest.English(ModelNotConnectedLine)) || !slices.Equal(buttonData(edit.keyboard), []string{"model:connect", "nav:root"}) {
 		t.Fatalf("settings after disconnect = %+v", edit)
 	}
 	receive(t, h.ctx, call.ctx.Done())
@@ -355,10 +356,10 @@ func TestDisconnectCancelsRunningTurnAndBlocksQueuedWork(t *testing.T) {
 		t.Fatalf("connection row survived disconnect: found=%v err=%v", found, err)
 	}
 	h.push(textUpdate(5, 101, "hello again"))
-	h.wantReply(101, 5, conversation.NotConnectedReply)
+	h.wantReply(101, 5, localetest.English(conversation.NotConnectedReply))
 	h.waitState(5, "delivered")
 	// A stale Disconnect button on the old settings message only refreshes the view.
-	if edit := h.press(6, 101, settingsMessageID(2), "model:disconnect"); !strings.Contains(edit.text, ModelNotConnectedLine) {
+	if edit := h.press(6, 101, settingsMessageID(2), "model:disconnect"); !strings.Contains(edit.text, localetest.English(ModelNotConnectedLine)) {
 		t.Fatalf("stale disconnect rendered %+v", edit)
 	}
 	select {
@@ -392,7 +393,7 @@ func TestConnectionSurvivesRestartButPendingCeremonyDoesNot(t *testing.T) {
 	h.waitState(5, "delivered")
 	fresh := h.requestConnect(6, 101)
 	h.auth.Approve(fresh, "acct-alice")
-	h.wantMessage(101, connection.ConnectedReply)
+	h.wantMessage(101, localetest.English(connection.ConnectedReply))
 	if _, exists := h.credentialFile("alice"); !exists {
 		t.Fatal("fresh ceremony after restart did not connect")
 	}

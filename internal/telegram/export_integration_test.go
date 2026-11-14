@@ -20,6 +20,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/export"
 	"github.com/vladar107/home-ai-assistant/internal/integration"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 	"github.com/vladar107/home-ai-assistant/internal/trip"
@@ -128,6 +129,7 @@ func (h *conversationHarness) seedExport(principal string) {
 		{`INSERT INTO memory_procedures (id, principal_id, title, steps, source, created_at, updated_at) VALUES (?, ?, 'Book a table', ?, 'confirmed', ?, ?)`,
 			[]any{exportProcedure, principal, exportSteps, created, created}},
 		{`INSERT INTO memory_settings (principal_id, enabled, learn_from_feedback, learn_procedures) VALUES (?, 1, 0, 1)`, []any{principal}},
+		{`INSERT INTO principal_languages (principal_id, language, changed_at) VALUES (?, 'ru', ?)`, []any{principal, created}},
 		{`INSERT INTO integration_switches (principal_id, integration, enabled, changed_at) VALUES (?, 'web', 0, ?)`, []any{principal, created}},
 		{`INSERT INTO event_sources (id, principal_id, name, mode, token_hash, enabled, created_at) VALUES (?, ?, 'Backup server', 'assess', ?, 1, ?)`,
 			[]any{exportSource, principal, exportTokenHash, created}},
@@ -160,7 +162,7 @@ func (h *conversationHarness) exportKeyPath() string {
 func (h *conversationHarness) takeExport(updateID, userID int64) []byte {
 	h.t.Helper()
 	h.push(textUpdate(updateID, userID, "/export"))
-	if reply := h.nextMessage(); reply.text != ExportReply || reply.replyTo != requestMessageID(updateID) {
+	if reply := h.nextMessage(); reply.text != localetest.English(ExportReply) || reply.replyTo != requestMessageID(updateID) {
 		h.t.Fatalf("export reply = %+v", reply)
 	}
 	document := h.nextDocument()
@@ -194,7 +196,7 @@ func (h *conversationHarness) restore(updateID, userID int64, data []byte) (stri
 	h.t.Helper()
 	preview := h.restorePreview(updateID, userID, data)
 	card := h.nextMessage()
-	if !strings.HasPrefix(card.text, export.RestoreHeading) {
+	if !strings.HasPrefix(card.text, localetest.English(export.RestoreHeading)) {
 		h.t.Fatalf("restore card = %+v after preview %q", card, preview)
 	}
 	confirm, _ := approvalButtons(h.t, card.keyboard)
@@ -554,7 +556,7 @@ func TestRestoreRefusesFilesThatAreNotTheUsersOwn(t *testing.T) {
 		t.Fatalf("an installation with its own key: reply = %q", reply)
 	}
 	h.push(textUpdate(30, 101, "/restore"))
-	if reply := h.nextMessage(); reply.text != RestoreHelpReply {
+	if reply := h.nextMessage(); reply.text != localetest.English(RestoreHelpReply) {
 		t.Fatalf("/restore without a file = %q", reply.text)
 	}
 	if h.count(`SELECT count(*) FROM approvals`) != 0 {
@@ -874,7 +876,7 @@ func TestRestorePreviewIsPagedAndShowsEveryTextInFull(t *testing.T) {
 			t.Fatalf("preview lacks %q", text)
 		}
 	}
-	if card := target.nextMessage(); !strings.HasPrefix(card.text, export.RestoreHeading) || !strings.Contains(card.text, "Restore 6 records") {
+	if card := target.nextMessage(); !strings.HasPrefix(card.text, localetest.English(export.RestoreHeading)) || !strings.Contains(card.text, "Restore 6 records") {
 		t.Fatalf("restore card = %+v", card)
 	}
 }

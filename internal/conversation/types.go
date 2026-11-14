@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/modelcatalog"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
@@ -555,6 +556,9 @@ type Memory interface {
 type Config struct {
 	// Engine runs the model turns; the coordinator owns the lanes around them.
 	Engine *turn.Engine
+	// Languages gives each request's turn and delivery the principal's interface language; nil
+	// leaves them in English.
+	Languages locale.Preferences
 	// ChatModel is the model and effort a chat turn runs on when its lane has no choice of its own.
 	ChatModel agentruntime.ModelEffort
 	// TaskModel is the task default; with ChatModel it is what a choice may name while the

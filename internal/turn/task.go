@@ -62,9 +62,9 @@ func (e *Engine) RunTask(ctx context.Context, run TaskRun) (TaskReply, error) {
 	case ctx.Err() != nil:
 		return TaskReply{}, ctx.Err()
 	case err != nil:
-		return TaskReply{Text: UnavailableReply, ErrorKind: ErrorKindRuntime}, nil
+		return TaskReply{Text: UnavailableReply.Format(ctx), ErrorKind: ErrorKindRuntime}, nil
 	case !connected:
-		return TaskReply{Text: NotConnectedReply, ErrorKind: ErrorKindNotConnected}, nil
+		return TaskReply{Text: NotConnectedReply.Format(ctx), ErrorKind: ErrorKindNotConnected}, nil
 	}
 	toolSet, err := e.tools.ReadOnlyToolsFor(runCtx, run.PrincipalID)
 	var webSearch bool
@@ -79,7 +79,7 @@ func (e *Engine) RunTask(ctx context.Context, run TaskRun) (TaskReply, error) {
 		if ctx.Err() != nil {
 			return TaskReply{}, ctx.Err()
 		}
-		return TaskReply{Text: UnavailableReply, ErrorKind: ErrorKindToolProvider}, nil
+		return TaskReply{Text: UnavailableReply.Format(ctx), ErrorKind: ErrorKindToolProvider}, nil
 	}
 	message := e.withTime(e.withUser(run.PrincipalID, withPlace(e.placeLines(runCtx, run.PrincipalID), e.withCollections(runCtx, run.PrincipalID, run.Message))))
 	started := e.config.Now()
@@ -109,7 +109,7 @@ func (e *Engine) RunTask(ctx context.Context, run TaskRun) (TaskReply, error) {
 	case ctx.Err() != nil:
 		return TaskReply{}, ctx.Err()
 	case runErr != nil || strings.TrimSpace(result.Final) == "":
-		reply, kind := FailureReply(runErr)
+		reply, kind := FailureReply(ctx, runErr)
 		return TaskReply{Text: reply, ErrorKind: kind}, nil
 	default:
 		return TaskReply{Text: result.Final}, nil

@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
+	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 )
@@ -266,19 +267,19 @@ func TestChangesWidgetReadTapsThatNameNothingDoNothing(t *testing.T) {
 	id := decodeChanges(t, first.data).ID
 
 	h.push(widgetTap(1, 202, first.messageID, readTap(id, 1)))
-	if answer := h.wantWidgetAnswer(1); answer != WidgetIgnoredAnswer {
+	if answer := h.wantWidgetAnswer(1); answer != localetest.English(WidgetIgnoredAnswer) {
 		t.Fatalf("another principal's tap answered %q", answer)
 	}
 	h.push(widgetTap(2, 101, first.messageID+100, readTap(id, 1)))
-	if answer := h.wantWidgetAnswer(2); answer != WidgetIgnoredAnswer {
+	if answer := h.wantWidgetAnswer(2); answer != localetest.English(WidgetIgnoredAnswer) {
 		t.Fatalf("a tap from another message answered %q", answer)
 	}
 	h.push(widgetTap(3, 101, first.messageID, readTap(id, 3)))
-	if answer := h.wantWidgetAnswer(3); answer != WidgetIgnoredAnswer {
+	if answer := h.wantWidgetAnswer(3); answer != localetest.English(WidgetIgnoredAnswer) {
 		t.Fatalf("a tap for a change the proposal does not have answered %q", answer)
 	}
 	h.push(widgetTap(4, 101, first.messageID, "approval:read:"+id+":0"))
-	if answer := h.wantWidgetAnswer(4); answer != WidgetIgnoredAnswer {
+	if answer := h.wantWidgetAnswer(4); answer != localetest.English(WidgetIgnoredAnswer) {
 		t.Fatalf("a malformed read tap answered %q", answer)
 	}
 }
@@ -296,7 +297,7 @@ func TestChangesWidgetConfirmKeepsTheFirstAndLeavesOutTheSecond(t *testing.T) {
 	data := decodeChanges(t, widget.data)
 
 	h.push(widgetTap(2, 101, widget.messageID, keepTap(data.ID, "10")))
-	if answer := h.wantWidgetAnswer(2); answer != WidgetWorkingAnswer {
+	if answer := h.wantWidgetAnswer(2); answer != localetest.English(WidgetWorkingAnswer) {
 		t.Fatalf("answer = %q", answer)
 	}
 	caption := h.nextWidgetEdit("editMessageCaption", widget.messageID)
@@ -359,7 +360,7 @@ func TestChangesWidgetConfirmThatDoesNotMatchResolvesNothing(t *testing.T) {
 	h.nextWidgetEdit("editMessageCaption", widget.messageID)
 	h.nextWidgetEdit("editMessageWidgetData", widget.messageID)
 	h.push(widgetTap(4, 101, widget.messageID, keepTap(id, "1x1")))
-	if answer := h.wantWidgetAnswer(4); answer != WidgetIgnoredAnswer {
+	if answer := h.wantWidgetAnswer(4); answer != localetest.English(WidgetIgnoredAnswer) {
 		t.Fatalf("a Confirm with other flags answered %q", answer)
 	}
 	h.wantStatuses(ids, "pending", "rejected/withdrawn", "pending")
