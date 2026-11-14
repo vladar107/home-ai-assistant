@@ -72,6 +72,7 @@ func metricChart(series ...map[string]any) map[string]any {
 }
 
 func TestChartReadsOneSeriesOverThirtyDaysAtMostFiveHundredPoints(t *testing.T) {
+	t.Parallel()
 	f, box := newChartFixture(t)
 	result := f.call(f.chartSet("alice"), "chart", metricChart(
 		map[string]any{"label": "Load", "source": "grafana", "query": `max(node_load1{instance="nas"})`, "range": "30d"},
@@ -106,6 +107,7 @@ func TestChartReadsOneSeriesOverThirtyDaysAtMostFiveHundredPoints(t *testing.T) 
 }
 
 func TestChartRefusesWhatGrafanaMetricsWouldNotChart(t *testing.T) {
+	t.Parallel()
 	f, _ := newChartFixture(t)
 	set := f.chartSet("alice")
 	before := f.sim.count()
@@ -126,6 +128,7 @@ func TestChartRefusesWhatGrafanaMetricsWouldNotChart(t *testing.T) {
 }
 
 func TestChartKeepsGrafanaToItsPrincipalsAndTheirSwitch(t *testing.T) {
+	t.Parallel()
 	f, box := newChartFixture(t)
 	arguments := metricChart(map[string]any{"label": "Load", "source": "grafana", "query": "node_load1", "range": "1d"})
 

@@ -321,6 +321,7 @@ func wantContains(t *testing.T, text string, fragments ...string) {
 var grafanaTools = []string{"grafana_alerts", "grafana_dashboards", "grafana_logs", "grafana_metrics"}
 
 func TestOnlyAllowedPrincipalsGetTools(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, newSimulator())
 	wantTools(t, f.toolSet(), grafanaTools)
 
@@ -340,6 +341,7 @@ func TestOnlyAllowedPrincipalsGetTools(t *testing.T) {
 }
 
 func TestOptOutWithdrawsToolsEvenMidTurn(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, newSimulator())
 	set := f.toolSet()
 
@@ -361,6 +363,7 @@ func TestOptOutWithdrawsToolsEvenMidTurn(t *testing.T) {
 }
 
 func TestDashboardsListAndDescribe(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, newSimulator())
 
 	list := f.run("grafana_dashboards", map[string]any{})
@@ -388,6 +391,7 @@ func TestDashboardsListAndDescribe(t *testing.T) {
 }
 
 func TestDashboardsRefuseBadUIDAndMapNotFound(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, newSimulator())
 
 	f.fail("grafana_dashboards", map[string]any{"uid": "../x"}, "UID")
@@ -398,6 +402,7 @@ func TestDashboardsRefuseBadUIDAndMapNotFound(t *testing.T) {
 }
 
 func TestInstantMetricQueryRendersLabelsAndValue(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, newSimulator())
 
 	text := f.run("grafana_metrics", map[string]any{"query": "node_load1"})
@@ -419,6 +424,7 @@ func matrixOf(values ...string) func(url.Values) string {
 }
 
 func TestRangeMetricQueryChoosesAndBoundsTheStep(t *testing.T) {
+	t.Parallel()
 	sim := newSimulator()
 	sim.prometheus = matrixOf("1", "2", "3")
 	f := newFixture(t, sim)
@@ -451,6 +457,7 @@ func TestRangeMetricQueryChoosesAndBoundsTheStep(t *testing.T) {
 }
 
 func TestMetricQueryArgumentsAreChecked(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, newSimulator())
 	before := f.sim.count()
 
@@ -468,6 +475,7 @@ func TestMetricQueryArgumentsAreChecked(t *testing.T) {
 }
 
 func TestEndInTheFutureIsClampedToNow(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, newSimulator())
 
 	f.run("grafana_metrics", map[string]any{"query": "node_load1", "end": now.Add(time.Hour).Format(time.RFC3339)})
@@ -483,6 +491,7 @@ func TestEndInTheFutureIsClampedToNow(t *testing.T) {
 }
 
 func TestManySeriesAreCappedAtTwenty(t *testing.T) {
+	t.Parallel()
 	sim := newSimulator()
 	sim.prometheus = func(url.Values) string {
 		var series []string
@@ -501,6 +510,7 @@ func TestManySeriesAreCappedAtTwenty(t *testing.T) {
 }
 
 func TestScalarAndEmptyResults(t *testing.T) {
+	t.Parallel()
 	sim := newSimulator()
 	sim.prometheus = func(url.Values) string { return envelope("scalar", fmt.Sprintf(`[%d,"3"]`, now.Unix())) }
 	f := newFixture(t, sim)
@@ -511,6 +521,7 @@ func TestScalarAndEmptyResults(t *testing.T) {
 }
 
 func TestNaNSamplesDoNotBreakTheSummary(t *testing.T) {
+	t.Parallel()
 	sim := newSimulator()
 	sim.prometheus = matrixOf("1", "NaN", "3")
 	f := newFixture(t, sim)
@@ -527,6 +538,7 @@ func TestNaNSamplesDoNotBreakTheSummary(t *testing.T) {
 }
 
 func TestQueryParseErrorReachesTheModel(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, newSimulator())
 
 	f.fail("grafana_metrics", map[string]any{"query": "bad("}, "parse error: unexpected end of input")
@@ -544,6 +556,7 @@ func twoContainers(url.Values) string {
 }
 
 func TestLogsUseDefaultsAndMergeStreamsNewestFirst(t *testing.T) {
+	t.Parallel()
 	sim := newSimulator()
 	sim.loki = twoContainers
 	f := newFixture(t, sim)
@@ -568,6 +581,7 @@ func TestLogsUseDefaultsAndMergeStreamsNewestFirst(t *testing.T) {
 }
 
 func TestLogsForwardIsOldestFirst(t *testing.T) {
+	t.Parallel()
 	sim := newSimulator()
 	sim.loki = twoContainers
 	f := newFixture(t, sim)
@@ -586,6 +600,7 @@ func TestLogsForwardIsOldestFirst(t *testing.T) {
 }
 
 func TestLogsNoteWhenTheLimitIsReached(t *testing.T) {
+	t.Parallel()
 	sim := newSimulator()
 	sim.loki = twoContainers
 	f := newFixture(t, sim)
@@ -601,6 +616,7 @@ func TestLogsNoteWhenTheLimitIsReached(t *testing.T) {
 }
 
 func TestLogsRefuseBadArguments(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, newSimulator())
 
 	f.fail("grafana_logs", map[string]any{"query": "{a=\"b\"}", "limit": 201}, "limit must be")
@@ -613,6 +629,7 @@ func TestLogsRefuseBadArguments(t *testing.T) {
 }
 
 func TestLogLinesAreCleanedAndClipped(t *testing.T) {
+	t.Parallel()
 	sim := newSimulator()
 	sim.loki = func(url.Values) string {
 		long := strings.Repeat("x", 600)
@@ -632,6 +649,7 @@ func TestLogLinesAreCleanedAndClipped(t *testing.T) {
 }
 
 func TestLogsEmptyAndMetricResults(t *testing.T) {
+	t.Parallel()
 	sim := newSimulator()
 	f := newFixture(t, sim)
 	wantContains(t, f.run("grafana_logs", map[string]any{"query": `{container="none"}`}), "0 lines", "Nothing matched")
@@ -659,6 +677,7 @@ func wantInOrder(t *testing.T, text string, fragments ...string) {
 }
 
 func TestLargeAnswersAreCutShortInsteadOfRefused(t *testing.T) {
+	t.Parallel()
 	sim := newSimulator()
 	sim.loki = func(url.Values) string {
 		var values [][2]string
@@ -692,6 +711,7 @@ func TestLargeAnswersAreCutShortInsteadOfRefused(t *testing.T) {
 }
 
 func TestWrongTokenPointsAtTheServiceAccount(t *testing.T) {
+	t.Parallel()
 	f := newFixtureWithToken(t, newSimulator(), "wrong-token-9a2c")
 	set := f.toolSet()
 
@@ -710,6 +730,7 @@ func TestWrongTokenPointsAtTheServiceAccount(t *testing.T) {
 }
 
 func TestGrafanaDownIsReportedAsUnavailable(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, newSimulator())
 	set := f.toolSet()
 	f.server.Close()
@@ -718,6 +739,7 @@ func TestGrafanaDownIsReportedAsUnavailable(t *testing.T) {
 }
 
 func TestServiceRejectsBadConfiguration(t *testing.T) {
+	t.Parallel()
 	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
 	allowed := []string{"alice"}
 	for name, cfg := range map[string]grafana.Config{
@@ -759,6 +781,7 @@ const rulesWithAlerts = `{"status":"success","data":{"groups":[
 ]}}`
 
 func TestActiveAlertsListFiringPendingAndBrokenRules(t *testing.T) {
+	t.Parallel()
 	sim := newSimulator()
 	sim.rules = rulesWithAlerts
 	f := newFixture(t, sim)
@@ -785,6 +808,7 @@ func TestActiveAlertsListFiringPendingAndBrokenRules(t *testing.T) {
 }
 
 func TestActiveAlertsSayWhenNothingIsWrong(t *testing.T) {
+	t.Parallel()
 	sim := newSimulator()
 	sim.rules = `{"status":"success","data":{"groups":[{"name":"g","rules":[
 		{"state":"inactive","name":"Quiet","health":"ok","alerts":[{"labels":{"alertname":"Quiet"},"state":"Normal"}]}]}]}}`
@@ -794,6 +818,7 @@ func TestActiveAlertsSayWhenNothingIsWrong(t *testing.T) {
 }
 
 func TestActiveAlertsAreCapped(t *testing.T) {
+	t.Parallel()
 	var alerts []string
 	for i := range 60 {
 		alerts = append(alerts, fmt.Sprintf(`{"labels":{"alertname":"Disk","severity":"warning","device":"d%d"},"state":"Alerting","activeAt":"2026-10-02T05:30:00Z"}`, i))
@@ -822,6 +847,7 @@ func annotationsOf(count int) func(url.Values) string {
 }
 
 func TestAlertHistoryDefaultsToADayAndLeavesOutText(t *testing.T) {
+	t.Parallel()
 	sim := newSimulator()
 	sim.annotations = annotationsOf(2)
 	f := newFixture(t, sim)
@@ -843,6 +869,7 @@ func TestAlertHistoryDefaultsToADayAndLeavesOutText(t *testing.T) {
 }
 
 func TestAlertHistoryCapsEntriesAndNotesIt(t *testing.T) {
+	t.Parallel()
 	sim := newSimulator()
 	sim.annotations = annotationsOf(51)
 	f := newFixture(t, sim)
@@ -855,6 +882,7 @@ func TestAlertHistoryCapsEntriesAndNotesIt(t *testing.T) {
 }
 
 func TestAlertHistoryEmptyAndBadArguments(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, newSimulator())
 
 	wantContains(t, f.run("grafana_alerts", map[string]any{"view": "history", "range": "7d"}), "no state changes")
@@ -865,6 +893,7 @@ func TestAlertHistoryEmptyAndBadArguments(t *testing.T) {
 }
 
 func TestAlertsMapGrafanaFailuresToErrorClasses(t *testing.T) {
+	t.Parallel()
 	sim := newSimulator()
 	sim.alertStatus = http.StatusServiceUnavailable
 	f := newFixture(t, sim)
@@ -890,6 +919,7 @@ func TestAlertsMapGrafanaFailuresToErrorClasses(t *testing.T) {
 // Alert names and summaries come from the household's own rules, so reading them must not make
 // later home actions wait for confirmation, while metrics and logs still may.
 func TestOnlyAlertsAreHouseholdData(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, newSimulator())
 	contribution, err := f.service.Contribute(t.Context(), "alice")
 	if err != nil {
