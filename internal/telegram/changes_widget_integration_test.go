@@ -441,12 +441,14 @@ func TestChangesWidgetEditRefusedForGoodRepliesTheText(t *testing.T) {
 	}
 }
 
-// Serial: waits out a 2 s approval lifetime with a 100 ms sweep. An expired list is edited in its
-// own shape, and a Confirm after the sweep has expired it changes nothing and leaves none out.
+// An expired list is edited in its own shape, and a Confirm after the sweep has expired it changes
+// nothing and leaves none out.
 func TestChangesWidgetShowsExpiry(t *testing.T) {
-	h := newOfferHarness(t, harnessOptions{approvalLifetime: 2 * time.Second, approvalSweep: 100 * time.Millisecond})
+	t.Parallel()
+	h := newOfferHarness(t, harnessOptions{approvalSweep: 100 * time.Millisecond})
 	widget, ids := h.proposeChanges(outcomeProposal(t, "Save the note A", "Saved A.", false), outcomeProposal(t, "Save the note B", "Saved B.", false))
 	id := decodeChanges(t, widget.data).ID
+	h.expirePendingApprovals(widget.messageID)
 
 	caption := h.nextWidgetEdit("editMessageCaption", widget.messageID)
 	state := decodeChanges(t, h.nextWidgetEdit("editMessageWidgetData", widget.messageID).data)

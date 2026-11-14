@@ -316,11 +316,11 @@ func TestNotionWritesAreProposedConfirmedAndExecutedOnce(t *testing.T) {
 	}
 }
 
-// Serial: waits out a 2 s approval lifetime with a 100 ms sweep.
 func TestNotionProposalsExpireFailSafelyAndDoNotSurviveRestart(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	sim := writableNotionSimulator(t)
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{notion: sim, approvalLifetime: 2 * time.Second, approvalSweep: 100 * time.Millisecond})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{notion: sim, approvalSweep: 100 * time.Millisecond})
 	h.provision("alice", "acct-alice-1111")
 	h.installNotionToken("alice", aliceNotionToken)
 	h.start()
@@ -328,6 +328,7 @@ func TestNotionProposalsExpireFailSafelyAndDoNotSurviveRestart(t *testing.T) {
 
 	// Expiry is reported in the proposal message and nothing is written.
 	expiring := h.proposeTurn(runtime, 3, "notion_create_page", `{"parent_type":"page","parent_id":"page-groceries","title":"Child"}`)
+	h.expirePendingApprovals(expiring.messageID)
 	if edit := h.nextEdit(); edit.messageID != expiring.messageID || !strings.Contains(edit.text, "Expired; nothing was written.") {
 		t.Fatalf("expired proposal = %+v", edit)
 	}
@@ -344,7 +345,6 @@ func TestNotionProposalsExpireFailSafelyAndDoNotSurviveRestart(t *testing.T) {
 	// A restart expires a pending proposal instead of leaving it confirmable.
 	h.stop()
 	h.start()
-	h.approvals.SetLifetime(time.Minute)
 	pending := h.proposeTurn(runtime, 7, "notion_create_page", `{"parent_type":"page","parent_id":"page-groceries","title":"Survivor"}`)
 	h.stop()
 	h.start()

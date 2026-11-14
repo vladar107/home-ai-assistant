@@ -96,6 +96,18 @@ func (h *conversationHarness) waitMessageRecorded(messageID int64) {
 	}
 }
 
+// expirePendingApprovals back-dates every pending approval so that the next sweep expires it, as a
+// lifetime running out would, without the test waiting for one. It first waits for the proposal's
+// last message to be recorded, because a sweep that finds a record without its message cannot edit
+// it.
+func (h *conversationHarness) expirePendingApprovals(lastMessageID int64) {
+	h.t.Helper()
+	h.waitMessageRecorded(lastMessageID)
+	if _, err := h.db.ExecContext(h.ctx, `UPDATE approvals SET created_at = '2026-08-31T00:00:00.000Z', expires_at = '2026-09-01T00:00:00.000Z' WHERE status = 'pending'`); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
 func (h *conversationHarness) expectNoEdit(wait time.Duration) {
 	h.t.Helper()
 	select {
@@ -173,18 +185,18 @@ func TestLongBatchRejectionEditsTheButtonMessageOnly(t *testing.T) {
 	}
 }
 
-// Serial: waits out a 3 s approval lifetime with a 100 ms sweep.
 func TestLongBatchExpiryEditsTheButtonMessageOnly(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, approvalLifetime: 3 * time.Second, approvalSweep: 100 * time.Millisecond})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, approvalSweep: 100 * time.Millisecond})
 	h.provision("alice", "account-alice")
 	h.start()
 
 	messages := h.proposeLongBatch(runtime, 1, 6)
 	requireSplitBatch(t, messages, 6)
 	last := messages[len(messages)-1]
-	h.waitMessageRecorded(last.messageID)
+	h.expirePendingApprovals(last.messageID)
 
 	edit := h.nextEdit()
 	if edit.messageID != last.messageID || len(edit.keyboard) != 0 || !strings.Contains(edit.text, "Expired; nothing was written.") {

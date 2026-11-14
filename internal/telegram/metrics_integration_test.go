@@ -30,11 +30,11 @@ func approvalsRecorded(t *testing.T, reader sdkmetric.Reader, status string, war
 	})
 }
 
-// Serial: waits out a 2 s approval lifetime with a 100 ms sweep.
 func TestApprovalLifecycleIsRecordedOncePerResolution(t *testing.T) {
+	t.Parallel()
 	telemetry, reader := newMetricsTelemetry(t)
 	runtime := newControlledRuntime()
-	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{notion: writableNotionSimulator(t), approvalLifetime: 2 * time.Second, approvalSweep: 100 * time.Millisecond})
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{notion: writableNotionSimulator(t), approvalSweep: 100 * time.Millisecond})
 	h.provision("alice", "acct-alice-1111")
 	h.installNotionToken("alice", aliceNotionToken)
 	h.approvals.SetTelemetry(telemetry)
@@ -69,6 +69,7 @@ func TestApprovalLifecycleIsRecordedOncePerResolution(t *testing.T) {
 	registry.RecordMessage("alice", 0, "hello")
 	h.approvals.SetIntentChecker(judgment.NewIntentChecker(client, stubOptIn(true), registry, registry))
 	expiring := h.proposeTurn(runtime, 8, "notion_create_page", arguments)
+	h.expirePendingApprovals(expiring.messageID)
 	if edit := h.nextEdit(); edit.messageID != expiring.messageID {
 		t.Fatalf("expiry edit = %+v", edit)
 	}

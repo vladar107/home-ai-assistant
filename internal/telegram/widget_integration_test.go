@@ -846,15 +846,16 @@ func TestProposalKindRecordOfSeveralChangesKeepsItsShape(t *testing.T) {
 	h.wantNoWidgetTextEdit()
 }
 
-// Serial: waits out a 2 s approval lifetime with a 100 ms sweep.
 func TestWidgetShowsExpiry(t *testing.T) {
+	t.Parallel()
 	runtime := newControlledRuntime()
-	h := newWidgetHarness(t, runtime, harnessOptions{approvalLifetime: 2 * time.Second, approvalSweep: 100 * time.Millisecond})
+	h := newWidgetHarness(t, runtime, harnessOptions{approvalSweep: 100 * time.Millisecond})
 	h.setWidgets("alice", true)
 
 	h.proposeJob(runtime, 1, 0, "Weekly tasks", "List my overdue tasks.")
 	widget := h.nextWidget()
 	confirm, _, _ := widgetActions(t, widget.data)
+	h.expirePendingApprovals(widget.messageID)
 	if caption, _ := h.wantOutcome(widget.messageID, "Expired; nothing was written."); caption.caption != widget.caption+" — expired" {
 		t.Fatalf("caption after expiry = %q", caption.caption)
 	}
@@ -1199,20 +1200,23 @@ func TestDirectActionMessageIsNotAWidget(t *testing.T) {
 	}
 }
 
-// Serial: waits out two 2 s offers with a 100 ms sweep. A flagged widget expires without a text edit;
-// one whose records predate the flag is found by Telegram's refusal of the text edit and still shows
-// its outcome, in its text, which is all its older template draws.
+// A flagged widget expires without a text edit; one whose records predate the flag is found by
+// Telegram's refusal of the text edit and still shows its outcome, in its text, which is all its
+// older template draws.
 func TestUnflaggedWidgetIsEditedThroughTheRefusedTextEdit(t *testing.T) {
+	t.Parallel()
 	h := newOfferHarness(t, harnessOptions{approvalSweep: 100 * time.Millisecond})
 
-	_, flagged := h.offerWidget(2*time.Second, outcomeProposal(t, "Save the note A", "Saved.", false))
+	_, flagged := h.offerWidget(10*time.Minute, outcomeProposal(t, "Save the note A", "Saved.", false))
+	h.expirePendingApprovals(flagged.messageID)
 	h.wantOutcome(flagged.messageID, "Expired; nothing was written.")
 	h.wantNoWidgetTextEdit()
 
-	records, legacy := h.offerWidget(2*time.Second, outcomeProposal(t, "Save the note B", "Saved.", false))
+	records, legacy := h.offerWidget(10*time.Minute, outcomeProposal(t, "Save the note B", "Saved.", false))
 	if _, err := h.db.ExecContext(h.ctx, `UPDATE approvals SET widget_kind = '' WHERE bundle_id = ?`, records[0].BundleID); err != nil {
 		t.Fatal(err)
 	}
+	h.expirePendingApprovals(legacy.messageID)
 	caption := h.nextWidgetEdit("editMessageCaption", legacy.messageID)
 	data := decodeWidget(t, h.nextWidgetEdit("editMessageWidgetData", legacy.messageID).data)
 	if caption.caption != "Weekly review: Save the note B — expired" {

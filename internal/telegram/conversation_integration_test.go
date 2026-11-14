@@ -183,7 +183,6 @@ type harnessOptions struct {
 	notion              *notionsim.Simulator
 	notionChatConnect   bool
 	notionIntakeTimeout time.Duration
-	approvalLifetime    time.Duration
 	approvalSweep       time.Duration
 	nasRoots            []nas.PrincipalRoots
 	// schedules runs the scheduler, the watches, the routes, and the trips on the given clock, and
@@ -498,7 +497,7 @@ func (h *conversationHarness) wiringInputs(t *testing.T, runtime agentruntime.Ag
 				Provider: connection.DefaultProvider, ProfilesDir: h.profilesDir, AuthBaseURL: h.auth.URL(), HTTPClient: h.auth.Client(),
 				CodeTimeout: options.codeTimeout, Principals: []string{"alice", "bob"},
 			},
-			Approval: approval.Config{Lifetime: options.approvalLifetime, SweepInterval: options.approvalSweep},
+			Approval: approval.Config{SweepInterval: options.approvalSweep},
 			Recent:   options.recent,
 			Tasks:    options.tasks,
 			Watches:  options.watches != nil,

@@ -45,11 +45,12 @@ func TestRestoreConfirmationExpiresAndForgetsTheFile(t *testing.T) {
 	source := newExportHarness(t)
 	source.seedExport("alice")
 	data := source.takeExport(1, 101)
-	target := newConversationHarnessWithOptions(t, newControlledRuntime(), harnessOptions{watches: &stubEvaluator{}, locations: true, approvalLifetime: time.Second, approvalSweep: 100 * time.Millisecond})
+	target := newConversationHarnessWithOptions(t, newControlledRuntime(), harnessOptions{watches: &stubEvaluator{}, locations: true, approvalSweep: 100 * time.Millisecond})
 	target.start()
 	copyKey(t, source, target)
 	target.restorePreview(1, 101, data)
 	card := target.nextMessage()
+	target.expirePendingApprovals(card.messageID)
 	if edit := target.nextEdit(); edit.messageID != card.messageID || !strings.Contains(edit.text, "Expired; nothing was written.") {
 		t.Fatalf("expired card = %+v", edit)
 	}

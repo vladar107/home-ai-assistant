@@ -523,15 +523,6 @@ func NewService(cfg Config, repository Repository, deliverer Deliverer, logger *
 	}, nil
 }
 
-// SetLifetime changes how long new proposals stay confirmable.
-func (s *Service) SetLifetime(lifetime time.Duration) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if lifetime > 0 {
-		s.lifetime = lifetime
-	}
-}
-
 // Telemetry records the approval lifecycle.
 type Telemetry interface {
 	RecordApproval(ctx context.Context, principal, tool, status string, warned bool)

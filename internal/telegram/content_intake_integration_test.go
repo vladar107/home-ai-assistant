@@ -663,34 +663,32 @@ func TestInboxCheckKeepsWhatItCanReadOfAMessage(t *testing.T) {
 	}
 }
 
-// A card that expired before the sweep reached it gives its follow-ups back to the next check, up
-// to three cards; then the follow-up is dropped, and the summary says so once.
+// A card that expired gives its follow-ups back to the next check, up to three cards; then the
+// follow-up is dropped, and the summary says so once. Each expiry edit is awaited before the next
+// check, so that it cannot come between the press and the settings page it edits.
 func TestInboxFollowUpExpiresOnThreeCardsAndIsDropped(t *testing.T) {
 	t.Parallel()
-	h := newInboxHarness(t, harnessOptions{})
-	expire := func() {
-		t.Helper()
-		if _, err := h.db.ExecContext(h.ctx, `UPDATE approvals SET created_at = '2026-08-31T00:00:00.000Z', expires_at = '2026-09-01T00:00:00.000Z' WHERE status = 'pending'`); err != nil {
-			t.Fatal(err)
-		}
-	}
+	h := newInboxHarness(t, harnessOptions{approvalSweep: 100 * time.Millisecond})
 	h.check("on", scanReplyOf(mail("m1", "invoice", "Water bill", reminderAction("Pay the water bill"))))
-	h.nextCard()
+	_, card := h.nextCard()
 	h.nextMessage()
 	for round := 1; round < intake.MaximumExpiries; round++ {
-		expire()
-		h.check("check", noMail)
-		if text, _ := h.nextCard(); !strings.Contains(text, "Pay the water bill") {
-			t.Fatalf("round %d card = %q", round, text)
-		}
-		if report := h.nextMessage(); !strings.Contains(report.text, "Follow-ups for mail I told you about earlier are on the card above") {
-			t.Fatalf("round %d report = %q", round, report.text)
-		}
+		h.expirePendingApprovals(card.messageID)
 		if edit := h.nextEdit(); !strings.Contains(edit.text, "Replaced by a newer proposal") && !strings.Contains(edit.text, "Expired") {
 			t.Fatalf("round %d edit of the expired card = %q", round, edit.text)
 		}
+		h.check("check", noMail)
+		text, next := h.nextCard()
+		if !strings.Contains(text, "Pay the water bill") {
+			t.Fatalf("round %d card = %q", round, text)
+		}
+		card = next
+		if report := h.nextMessage(); !strings.Contains(report.text, "Follow-ups for mail I told you about earlier are on the card above") {
+			t.Fatalf("round %d report = %q", round, report.text)
+		}
 	}
-	expire()
+	h.expirePendingApprovals(card.messageID)
+	h.nextEdit()
 	h.check("check", noMail)
 	if report := h.nextMessage(); len(report.keyboard) != 0 || !strings.Contains(report.text, "1 follow-up expired unanswered on 3 cards, so I dropped it.") {
 		t.Fatalf("report when the follow-up is dropped = %+v", report)
@@ -698,7 +696,6 @@ func TestInboxFollowUpExpiresOnThreeCardsAndIsDropped(t *testing.T) {
 	if h.countRows(`SELECT count(*) FROM intake_records WHERE pending_actions != '[]'`) != 0 {
 		t.Fatal("the dropped follow-up is still kept")
 	}
-	h.nextEdit()
 	h.check("check", noMail)
 	if report := h.nextMessage(); !strings.HasSuffix(report.text, schedule.QuietManualText) {
 		t.Fatalf("the drop was told again: %q", report.text)
