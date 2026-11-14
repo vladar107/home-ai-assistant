@@ -28,7 +28,7 @@ type WatchController interface {
 	Delete(context.Context, string, string) (bool, error)
 	SetTravelPause(context.Context, string, string, bool) (bool, error)
 	Mute(context.Context, string, string) (bool, error)
-	DescribeState(watch.Watch) string
+	DescribeState(context.Context, watch.Watch) string
 }
 
 // WatchAlertSender delivers watch alerts with their Mute today and Pause buttons.

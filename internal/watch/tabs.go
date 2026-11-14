@@ -3,6 +3,8 @@ package watch
 import (
 	"context"
 	"strings"
+
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 )
 
 // Tabs keeps an agent watch's tab in step with it after a write; with tabs on, an agent watch
@@ -36,13 +38,21 @@ func (r Reader) SetSummaryMessage(ctx context.Context, principalID, id string, m
 // Summary is the text pinned in a watch's tab: its name, its definition as the user confirmed it,
 // and the stored facts a change to the watch writes. A mute for today is left out, since it ends
 // without a write.
-func Summary(watch Watch) string {
-	lines := []string{watch.Label(), watch.Describe()}
+func Summary(watch Watch) string { return SummaryIn(locale.English, watch) }
+
+var (
+	summaryPaused    = locale.T("Paused; resume it in /jobs.", "На паузе; возобнови его в /jobs.")
+	summaryTraveling = locale.T("Pauses while you travel.", "Приостанавливается, пока ты в поездке.")
+)
+
+// SummaryIn is Summary in the given language.
+func SummaryIn(language locale.Language, watch Watch) string {
+	lines := []string{watch.LabelIn(language), watch.DescribeIn(language)}
 	if !watch.Enabled {
-		lines = append(lines, "Paused; resume it in /jobs.")
+		lines = append(lines, summaryPaused.In(language))
 	}
 	if watch.TravelPause {
-		lines = append(lines, "Pauses while you travel.")
+		lines = append(lines, summaryTraveling.In(language))
 	}
 	return strings.Join(lines, "\n")
 }

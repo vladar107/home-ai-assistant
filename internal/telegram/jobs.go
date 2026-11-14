@@ -108,7 +108,7 @@ func renderJobs(ctx context.Context, principalID string, schedules ScheduleContr
 		number := strconv.Itoa(index + 1)
 		if index >= len(jobs)+len(watchList) {
 			route := saved[index-len(jobs)-len(watchList)]
-			lines = append(lines, fmt.Sprintf("%s. 🧭 %s\n%s", number, route.Heading(), route.Outline()))
+			lines = append(lines, fmt.Sprintf("%s. 🧭 %s\n%s", number, route.HeadingFor(ctx), route.OutlineFor(ctx)))
 			keyboard = append(keyboard, []InlineButton{{Text: deleteNumberButton.Format(ctx, number), CallbackData: jobCallback(routeDeleteJobAction, route.ID, page)}})
 			continue
 		}
@@ -119,11 +119,11 @@ func renderJobs(ctx context.Context, principalID string, schedules ScheduleContr
 			continue
 		}
 		job := jobs[index]
-		state := schedule.DescribeJob(job, schedules.DefaultZone())
+		state := schedule.DescribeJobIn(locale.From(ctx), job, schedules.DefaultZone())
 		var row []InlineButton
 		if !job.OneTime() {
 			described := state
-			state = jobNextState.Format(ctx, described, schedule.NextRunText(job, schedules.DefaultZone()))
+			state = jobNextState.Format(ctx, described, schedule.NextRunTextIn(locale.From(ctx), job, schedules.DefaultZone()))
 			toggle := InlineButton{Text: jobPauseButton.Format(ctx, number), CallbackData: jobCallback(jobPauseAction, job.ID, page)}
 			if !job.Enabled {
 				state = jobPausedState.Format(ctx, described)
@@ -172,7 +172,7 @@ func renderWatchEntry(ctx context.Context, w watch.Watch, watches WatchControlle
 	if w.TravelPause {
 		travel = InlineButton{Text: jobTravelOffButton.Format(ctx, number), CallbackData: jobCallback(watchTravelOffJobAction, w.ID, page)}
 	}
-	return fmt.Sprintf("%s. 👁 %s\n%s", number, w.Label(), watches.DescribeState(w)), []InlineButton{
+	return fmt.Sprintf("%s. 👁 %s\n%s", number, w.LabelIn(locale.From(ctx)), watches.DescribeState(ctx, w)), []InlineButton{
 		toggle,
 		travel,
 		{Text: deleteNumberButton.Format(ctx, number), CallbackData: jobCallback(watchDeleteJobAction, w.ID, page)},

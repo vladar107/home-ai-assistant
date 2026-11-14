@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 	"github.com/vladar107/home-ai-assistant/internal/watch"
 )
@@ -53,7 +54,7 @@ func watchKind(watches WatchReader) objectKind {
 			}
 			return tabObject{
 				ID: found.ID, Title: found.Label(), SummaryMessageID: found.SummaryMessageID,
-				Open: true, Summary: clipUnits(watch.Summary(found), messageLimit),
+				Open: true, Summary: clipUnits(watch.SummaryIn(locale.From(ctx), found), messageLimit),
 			}, true, nil
 		},
 		setSummary: watches.SetSummaryMessage,

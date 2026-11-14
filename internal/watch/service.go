@@ -17,6 +17,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/clip"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/localtime"
 	"github.com/vladar107/home-ai-assistant/internal/module"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
@@ -1020,17 +1021,25 @@ func (s *Service) Delete(ctx context.Context, principalID, watchID string) (bool
 	return deleted, err
 }
 
-// DescribeState is a watch's days and window with its pause and mute state, for /jobs.
-func (s *Service) DescribeState(watch Watch) string {
-	state := watch.DescribeDays() + ", " + watch.DescribeWindow()
+var (
+	statePaused    = locale.T("%s, paused", "%s, на паузе")
+	stateMuted     = locale.T("%s, muted today", "%s, сегодня без уведомлений")
+	stateTraveling = locale.T("%s, pauses while traveling", "%s, на паузе в поездках")
+)
+
+// DescribeState is a watch's days and window with its pause and mute state, for /jobs, in the
+// context's language.
+func (s *Service) DescribeState(ctx context.Context, watch Watch) string {
+	language := locale.From(ctx)
+	state := watch.DescribeDaysIn(language) + ", " + watch.DescribeWindowIn(language)
 	if !watch.Enabled {
-		return state + ", paused"
+		return statePaused.FormatIn(language, state)
 	}
 	if occurrence, active := watch.OccurrenceAt(s.now()); active && watch.MutedOn == occurrence.Date {
-		state += ", muted today"
+		state = stateMuted.FormatIn(language, state)
 	}
 	if watch.TravelPause {
-		state += ", pauses while traveling"
+		state = stateTraveling.FormatIn(language, state)
 	}
 	return state
 }
