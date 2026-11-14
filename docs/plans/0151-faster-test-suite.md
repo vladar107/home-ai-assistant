@@ -1,6 +1,6 @@
 # 0151 — Faster tests: one migration per process everywhere, no fixed waits
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
@@ -126,6 +126,26 @@ delay removed saves less than the delay.
   uses `t.Setenv`, stays serial with a one-line reason; a test that flakes under load moves to
   the serial set rather than having its assertion loosened. The app and wiring tests stay serial:
   `app.New` sets `httpretry.SetDefaults` and the OpenTelemetry globals.
+- **Decided while implementing.**
+  - `expirePendingApprovals` waits for the given message to be recorded itself, so a caller cannot
+    back-date first. The harness's approval lifetime option is gone, since no test sets one.
+  - The approval service's `SetLifetime` is gone too. The restart test used it only to undo a
+    short lifetime, and nothing else calls it.
+  - The inbox expiry test waits for each expiry edit before its next check. With a 100 ms sweep,
+    that edit could otherwise come between the press and the settings page edit the press waits
+    for.
+  - The slow-down subtest also checks that approval came at least one slow-down step after
+    `slow_down`. The harness polls at 50 ms with a 300 ms step.
+  - More tests stay serial, each with its reason:
+    - Pi's provider-failure test asserts a 3 s bound, its reader-release test counts goroutines
+      across the process, and its bridge test dials a closed port that another test may reuse.
+    - Two web weather tests assert durations, and the tools deadline test reads the wall clock.
+    - The subtests of the Pi model-pair test share one principal's first turn.
+    - Subtests that share their parent's fixture (several web refusal and geocoding tests, an NS
+      trip-status test) run in order.
+  - Pi's early-exit test stays serial. Under load, Pi's exit can close its output before the
+    runtime reads it, and the turn then reports an invalid event stream instead of the exit code.
+    That is a production race, outside this plan.
 - **No change to `-p`, `-parallel`, GOMAXPROCS or CI sharding.** Locally the suite is bounded by
   waiting, in CI by CPU; neither improves by changing how many tests run at once. Sharding is the
   follow-up only if CI stays above about eight minutes.
