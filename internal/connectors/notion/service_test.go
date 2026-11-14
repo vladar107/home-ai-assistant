@@ -180,6 +180,7 @@ func (f *fixture) contribute() tools.Contribution {
 }
 
 func TestPageSizeCapAndCursor(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	for index := 1; index <= 27; index++ {
 		f.sim.SharePage(token, notionsim.Page{ID: fmt.Sprintf("page-%02d", index), Title: fmt.Sprintf("Item %02d", index), URL: "https://notion.so/p", LastEdited: "2026-09-01T00:00:00.000Z"})
@@ -205,6 +206,7 @@ func TestPageSizeCapAndCursor(t *testing.T) {
 }
 
 func TestRateLimitRetryAndErrorClasses(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.sim.SharePage(token, notionsim.Page{ID: "page-1", Title: "One", URL: "https://notion.so/1", LastEdited: "2026-09-01T00:00:00.000Z"})
 	f.contribute()
@@ -252,6 +254,7 @@ func TestRateLimitRetryAndErrorClasses(t *testing.T) {
 }
 
 func TestPageContentIsFlattenedAndCapped(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.sim.SharePage(token, notionsim.Page{
 		ID: "page-notes", Title: "Notes", URL: "https://notion.so/notes", LastEdited: "2026-09-01T00:00:00.000Z",
@@ -280,6 +283,7 @@ func TestPageContentIsFlattenedAndCapped(t *testing.T) {
 }
 
 func TestConnectRejectsUnknownTokensWithoutStoringThem(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	if status, err := f.service.Status(f.ctx, "alice"); err != nil || !status.Connected || status.TokenKind != "internal" || status.WorkspaceName != "Workspace" {
 		t.Fatalf("adopted status = %+v err=%v", status, err)
@@ -308,6 +312,7 @@ func TestConnectRejectsUnknownTokensWithoutStoringThem(t *testing.T) {
 }
 
 func TestTableNestedInAPageIsReachableThroughItsDatabaseID(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.sim.ShareDataSource(token, notionsim.DataSource{
 		ID: "ds-movies", Title: "Movie nights", URL: "https://notion.so/ds-movies",
@@ -349,6 +354,7 @@ func TestTableNestedInAPageIsReachableThroughItsDatabaseID(t *testing.T) {
 }
 
 func TestSimpleTableRowsAreReadThroughTheirBlockID(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.sim.SharePage(token, notionsim.Page{
 		ID: "page-films", Title: "Кино вечера", URL: "https://notion.so/page-films", LastEdited: "2026-09-01T00:00:00.000Z",
@@ -377,6 +383,7 @@ func TestSimpleTableRowsAreReadThroughTheirBlockID(t *testing.T) {
 }
 
 func TestDataSourceIDIsQueriedWithoutADatabaseLookup(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.sim.ShareDataSource(token, notionsim.DataSource{
 		ID: "ds-movies", Title: "Movie nights", URL: "https://notion.so/ds-movies",
@@ -408,6 +415,7 @@ func TestDataSourceIDIsQueriedWithoutADatabaseLookup(t *testing.T) {
 }
 
 func TestDatabaseWithSeveralDataSourcesAsksWhichOne(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	for _, id := range []string{"ds-2026", "ds-2025"} {
 		f.sim.ShareDataSource(token, notionsim.DataSource{ID: id, Title: id, URL: "https://notion.so/" + id, Properties: map[string]any{"Name": notionsim.SchemaProperty("title")}})
@@ -435,6 +443,7 @@ func TestDatabaseWithSeveralDataSourcesAsksWhichOne(t *testing.T) {
 }
 
 func TestDataSourceOptionsAreVisibleInSearchAndOnItsRows(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.sim.ShareDataSource(token, notionsim.DataSource{
 		ID: "ds-mentoring", Title: "Mentoring", URL: "https://notion.so/ds-mentoring",
@@ -471,6 +480,7 @@ func TestDataSourceOptionsAreVisibleInSearchAndOnItsRows(t *testing.T) {
 }
 
 func TestRowRendersWhenItsDataSourceCannotBeRead(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.sim.SharePage(token, notionsim.Page{
 		ID: "row-private", Title: "Session", URL: "https://notion.so/row-private", LastEdited: "2026-09-01T00:00:00.000Z",
@@ -511,6 +521,7 @@ func shareMentoringTable(f *fixture) {
 }
 
 func TestProposedRowValuesAreCheckedAgainstTheSchemaBeforeAnythingIsRecorded(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	shareMentoringTable(f)
 	f.contribute()
@@ -538,6 +549,7 @@ func TestProposedRowValuesAreCheckedAgainstTheSchemaBeforeAnythingIsRecorded(t *
 }
 
 func TestProposedRowChangeShowsCurrentValuesAndExecutesOnConfirmation(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	shareMentoringTable(f)
 	f.enableWrites()
@@ -580,6 +592,7 @@ func TestProposedRowChangeShowsCurrentValuesAndExecutesOnConfirmation(t *testing
 }
 
 func TestProposedPageCreationNamesItsDataSourceAndChecksItsOptions(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	shareMentoringTable(f)
 	f.contribute()
@@ -597,6 +610,7 @@ func TestProposedPageCreationNamesItsDataSourceAndChecksItsOptions(t *testing.T)
 }
 
 func TestProposalsCarryOnWhenTheDataSourceCannotBeRead(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.sim.SharePage(token, notionsim.Page{
 		ID: "row-private", Title: "Session", URL: "https://notion.so/row-private", LastEdited: "2026-09-01T00:00:00.000Z",
@@ -625,6 +639,7 @@ func TestProposalsCarryOnWhenTheDataSourceCannotBeRead(t *testing.T) {
 }
 
 func TestARejectedWriteNamesTheOptionThatNoLongerMatches(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	shareMentoringTable(f)
 	f.enableWrites()
@@ -655,6 +670,7 @@ func TestARejectedWriteNamesTheOptionThatNoLongerMatches(t *testing.T) {
 }
 
 func TestQueryResultsStateTheirOrder(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.sim.ShareDataSource(token, notionsim.DataSource{
 		ID: "ds-movies", Title: "Movie nights", URL: "https://notion.so/ds-movies",
@@ -677,6 +693,7 @@ func TestQueryResultsStateTheirOrder(t *testing.T) {
 }
 
 func TestProposedCreationRefusesTheTitlePropertyBecauseTheTitleArgumentFillsIt(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	shareMentoringTable(f)
 	f.contribute()
@@ -688,6 +705,7 @@ func TestProposedCreationRefusesTheTitlePropertyBecauseTheTitleArgumentFillsIt(t
 }
 
 func TestProposedRowChangeReadsAClearedTextValueAsEmpty(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	shareMentoringTable(f)
 	f.sim.SharePage(token, notionsim.Page{

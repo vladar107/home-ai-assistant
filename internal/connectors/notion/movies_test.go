@@ -79,6 +79,7 @@ func proposedText(t *testing.T, properties map[string]any, name, kind string) st
 }
 
 func TestNextMovieIsTheEarliestEveningFromTodayInTheHouseholdZone(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	shareMovieTable(f)
 	contribution := f.contribute()
@@ -108,6 +109,7 @@ func TestNextMovieIsTheEarliestEveningFromTodayInTheHouseholdZone(t *testing.T) 
 }
 
 func TestScoreGoesToTheColumnOfTheUserWhoGaveIt(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	shareMovieTable(f)
 	f.enableWrites()
@@ -150,6 +152,7 @@ func TestScoreGoesToTheColumnOfTheUserWhoGaveIt(t *testing.T) {
 }
 
 func TestScheduleContinuesWeeklyFromTheLatestDateInTableOrder(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	shareMovieTable(f)
 	f.enableWrites()
@@ -188,6 +191,7 @@ func TestScheduleContinuesWeeklyFromTheLatestDateInTableOrder(t *testing.T) {
 // Rows are read oldest first, so a table longer than the read leaves out the newest evenings; the
 // writes that depend on them refuse instead of acting on a partial table.
 func TestMovieWritesRefuseATableTooLongToRead(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	shareMovieTable(f)
 	f.enableWrites()
@@ -225,6 +229,7 @@ func shareNonMovieDataSource(f *fixture, id, title string) {
 }
 
 func TestNextMovieFindsTheSharedMovieTableWithoutAnID(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.contribute()
 	shareNonMovieDataSource(f, "ds-recipes", "Рецепты")
@@ -239,6 +244,7 @@ func TestNextMovieFindsTheSharedMovieTableWithoutAnID(t *testing.T) {
 }
 
 func TestNextMovieWithoutAnIDRefusesWhenNoSharedDataSourceLooksLikeTheMovieTable(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.contribute()
 	shareNonMovieDataSource(f, "ds-recipes", "Рецепты")
@@ -250,6 +256,7 @@ func TestNextMovieWithoutAnIDRefusesWhenNoSharedDataSourceLooksLikeTheMovieTable
 }
 
 func TestNextMovieWithoutAnIDListsEveryCandidateWhenSeveralLookLikeTheMovieTable(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.contribute()
 	shareMovieTable(f)
@@ -322,6 +329,7 @@ func movieCreated(t *testing.T, proposal approval.Proposal) (string, map[string]
 }
 
 func TestMoviesAddFillsTheReservedEveningThenAlternatesWithReservedRows(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	shareMovieWhoTable(f, movieWhoRows...)
 	f.enableWrites()
@@ -427,6 +435,7 @@ func newMovieActingService(t *testing.T, f *fixture) (*notion.Service, *movieAct
 }
 
 func TestMovieBatchWithNewRowsProposesItsUpdatesToo(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	shareMovieWhoTable(f, movieWhoRows...)
 	service, proposer := newMovieActingService(t, f)
@@ -461,6 +470,7 @@ func TestMovieBatchWithNewRowsProposesItsUpdatesToo(t *testing.T) {
 }
 
 func TestMoviesAddRefusalsRecordNothing(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	shareMovieWhoTable(f, movieWhoRows...)
 	f.enableWrites()
@@ -485,6 +495,7 @@ func TestMoviesAddRefusalsRecordNothing(t *testing.T) {
 }
 
 func TestMoviesAddRefusesTablesWithoutClearTurns(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		rows []movieWhoRow
@@ -497,6 +508,7 @@ func TestMoviesAddRefusesTablesWithoutClearTurns(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			f := newFixture(t)
 			shareMovieWhoTable(f, c.rows...)
 			f.enableWrites()
@@ -507,6 +519,7 @@ func TestMoviesAddRefusesTablesWithoutClearTurns(t *testing.T) {
 }
 
 func TestMoviesAddRefusesATableTooLongToRead(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	shareMovieWhoTable(f, movieWhoRows...)
 	f.enableWrites()
@@ -518,6 +531,7 @@ func TestMoviesAddRefusesATableTooLongToRead(t *testing.T) {
 }
 
 func TestMoviesAddCatchesUpToTodayKeepingTheAlternation(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	shareMovieWhoTable(f, movieWhoRow{"29.08.2026", "Ким", "Кит"}, movieWhoRow{"05.09.2026", "В", "Дюна"})
 	f.enableWrites()
@@ -545,6 +559,7 @@ func TestMoviesAddCatchesUpToTodayKeepingTheAlternation(t *testing.T) {
 }
 
 func TestScheduleGivesAFilmItsPickersTurnWithAReservedRowBetween(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	shareMovieWhoTable(f, movieWhoRows...)
 	shareMovieWhoPage(f, "who-undated", movieWhoRow{"", "В", "Waiting"})
@@ -581,6 +596,7 @@ func TestScheduleGivesAFilmItsPickersTurnWithAReservedRowBetween(t *testing.T) {
 }
 
 func TestScheduleMovesADatedFilmToItsPickersNextTurnAfterTheLatestOtherDate(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	shareMovieWhoTable(f, movieWhoRow{"26.09.2026", "В", "Дюна"}, movieWhoRow{"03.10.2026", "Ким", "Марли и я"}, movieWhoRow{"10.10.2026", "В", "Старикам тут не место"})
 	f.enableWrites()
@@ -592,6 +608,7 @@ func TestScheduleMovesADatedFilmToItsPickersNextTurnAfterTheLatestOtherDate(t *t
 }
 
 func TestScheduleSeveralFilmsContinueFromTheEarlierPlacement(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	shareMovieWhoTable(f, movieWhoRows...)
 	for index, who := range []string{"В", "В", "Ким"} {
@@ -620,6 +637,7 @@ func TestScheduleSeveralFilmsContinueFromTheEarlierPlacement(t *testing.T) {
 }
 
 func TestNextMovieNamesThePickerAndWhoseTurnAnEmptyEveningIs(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	shareMovieWhoTable(f, movieWhoRows...)
 	f.contribute()
@@ -634,6 +652,7 @@ func TestNextMovieNamesThePickerAndWhoseTurnAnEmptyEveningIs(t *testing.T) {
 }
 
 func TestMovieGuidanceSendsFilmChangesThroughTheMovieTools(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.enableWrites()
 	contribution := f.contribute()
