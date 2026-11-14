@@ -21,6 +21,7 @@ import (
 )
 
 func TestExecuteRecordsToolCallsWithBoundNamesOnly(t *testing.T) {
+	t.Parallel()
 	telemetry, reader := newMetricsTelemetry(t)
 	broker := testBroker(t)
 	broker.SetTelemetry(telemetry)
@@ -66,6 +67,7 @@ func TestExecuteRecordsToolCallsWithBoundNamesOnly(t *testing.T) {
 }
 
 func TestExecuteRecordsBudgetExhaustionForABoundTool(t *testing.T) {
+	t.Parallel()
 	telemetry, reader := newMetricsTelemetry(t)
 	broker := testBroker(t)
 	broker.SetTelemetry(telemetry)
@@ -95,6 +97,7 @@ func TestExecuteRecordsBudgetExhaustionForABoundTool(t *testing.T) {
 }
 
 func TestExecuteTracesEachToolCallUnderTheTurnSpan(t *testing.T) {
+	t.Parallel()
 	reader := sdkmetric.NewManualReader()
 	recorder := tracetest.NewSpanRecorder()
 	telemetry, err := observability.NewWithReader(reader, sdktrace.WithSpanProcessor(recorder))
@@ -168,6 +171,7 @@ func TestExecuteTracesEachToolCallUnderTheTurnSpan(t *testing.T) {
 // A call's source label is kept in the call log under the runtime's call id, cleaned to one short
 // line, and never reaches the log line or the span of the call.
 func TestSourceLabelsStayInTheCallLog(t *testing.T) {
+	t.Parallel()
 	reader := sdkmetric.NewManualReader()
 	recorder := tracetest.NewSpanRecorder()
 	telemetry, err := observability.NewWithReader(reader, sdktrace.WithSpanProcessor(recorder))

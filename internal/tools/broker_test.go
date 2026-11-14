@@ -64,6 +64,7 @@ func testBroker(t *testing.T) *Broker {
 }
 
 func TestToolsForRejectsAnInvalidTimeout(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		timeout time.Duration
@@ -72,6 +73,7 @@ func TestToolsForRejectsAnInvalidTimeout(t *testing.T) {
 		{"above maximum", maximumCallDeadline + time.Second},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			broker := testBroker(t)
 			provider := &fakeProvider{principal: testPrincipal, definitions: []Definition{testDefinition("slow_tool", tc.timeout)}}
 			if err := broker.Register(provider); err != nil {
@@ -84,6 +86,7 @@ func TestToolsForRejectsAnInvalidTimeout(t *testing.T) {
 	}
 }
 
+// Serial: reads each call's remaining deadline off the wall clock.
 func TestExecuteAppliesThePerToolDeadline(t *testing.T) {
 	broker := testBroker(t)
 	remaining := make(map[string]time.Duration)
@@ -126,6 +129,7 @@ func TestExecuteAppliesThePerToolDeadline(t *testing.T) {
 }
 
 func TestExecuteTimesOutWhenTheProviderOutrunsItsDeadline(t *testing.T) {
+	t.Parallel()
 	broker := testBroker(t)
 	provider := &fakeProvider{
 		principal:   testPrincipal,
@@ -154,6 +158,7 @@ func TestExecuteTimesOutWhenTheProviderOutrunsItsDeadline(t *testing.T) {
 // The runtime may call a tool on a context of its own, so the turn key collected with the tools
 // is what the provider must see.
 func TestExecuteCarriesTheTurnKeyToTheProvider(t *testing.T) {
+	t.Parallel()
 	broker := testBroker(t)
 	seen := make(chan string, 1)
 	provider := &fakeProvider{
@@ -183,6 +188,7 @@ func TestExecuteCarriesTheTurnKeyToTheProvider(t *testing.T) {
 // its own record, and its content never enters the chat. A third-party error marks it too, since
 // its text can quote the outside service, and comes back as untrusted data.
 func TestThirdPartyCallMarksThePrincipalExposed(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name string
 		turn string
@@ -193,6 +199,7 @@ func TestThirdPartyCallMarksThePrincipalExposed(t *testing.T) {
 		{name: "task turn", turn: outbox.TaskTurn("task-1"), want: turnstate.LevelNone},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 			for _, name := range []string{"read_page", "read_mail"} {
 				registry := turnstate.New(nil)
 				broker := testBroker(t)
@@ -248,6 +255,7 @@ func (r *recordedPrivate) MarkTurnPrivate(_ context.Context, _, turn string) {
 // the tool is always private or the result says so; a failed private call and an ordinary one are
 // not.
 func TestSuccessfulPrivateCallRecordsItsTurn(t *testing.T) {
+	t.Parallel()
 	broker := testBroker(t)
 	privacy := &recordedPrivate{}
 	broker.SetTurnPrivacy(privacy)
@@ -321,6 +329,7 @@ func (r *recordedTurns) MarkTurnExposed(_ context.Context, _, turn string, exter
 // marks both, and the addresses it names become ones the run has seen, beside those in its
 // instruction. Calls then carry the run record to the provider.
 func TestHouseholdAndOutsideResultsMarkTheRun(t *testing.T) {
+	t.Parallel()
 	broker := testBroker(t)
 	turns := &recordedTurns{}
 	broker.SetTurnExposure(turns)
@@ -376,6 +385,7 @@ func TestHouseholdAndOutsideResultsMarkTheRun(t *testing.T) {
 // An outside call marks its run before it runs, so a write made beside it in the same run is not
 // taken as clean, and a failed one still leaves the run marked. Household calls never mark it.
 func TestOutsideCallMarksTheRunWhenItStarts(t *testing.T) {
+	t.Parallel()
 	broker := testBroker(t)
 	household := testDefinition("home_state", 0)
 	household.ThirdParty, household.Household = true, true
@@ -411,6 +421,7 @@ func TestOutsideCallMarksTheRunWhenItStarts(t *testing.T) {
 // An outside tool's error is outside text too: it marks the turn's conversation external, and the
 // addresses it names become ones the run has seen. A household error marks it for memory alone.
 func TestThirdPartyErrorsMarkTheTurn(t *testing.T) {
+	t.Parallel()
 	broker := testBroker(t)
 	turns := &recordedTurns{}
 	broker.SetTurnExposure(turns)
@@ -452,6 +463,7 @@ func TestThirdPartyErrorsMarkTheTurn(t *testing.T) {
 }
 
 func TestToolsForRejectsHouseholdWithoutThirdParty(t *testing.T) {
+	t.Parallel()
 	broker := testBroker(t)
 	definition := testDefinition("home_state", 0)
 	definition.Household = true
@@ -464,6 +476,7 @@ func TestToolsForRejectsHouseholdWithoutThirdParty(t *testing.T) {
 }
 
 func TestToolsForRejectsScreeningWithoutThirdParty(t *testing.T) {
+	t.Parallel()
 	broker := testBroker(t)
 	definition := testDefinition("read_page", 0)
 	definition.Screen = true
@@ -548,6 +561,7 @@ func (f screeningFixture) call(t *testing.T, name string) string {
 }
 
 func TestScreenedResultWarnsAndMarksThePrincipalSuspicious(t *testing.T) {
+	t.Parallel()
 	f := newScreeningFixture(t, http.StatusOK, 0.95)
 	if got, want := f.call(t, "read_page"), prompt.ToolResultUntrusted+prompt.ToolResultScreened+screenInput; got != want {
 		t.Fatalf("result = %q, want %q", got, want)
@@ -558,6 +572,7 @@ func TestScreenedResultWarnsAndMarksThePrincipalSuspicious(t *testing.T) {
 }
 
 func TestCleanScreenedResultIsUnchanged(t *testing.T) {
+	t.Parallel()
 	f := newScreeningFixture(t, http.StatusOK, 0.05)
 	if got, want := f.call(t, "read_page"), prompt.ToolResultUntrusted+screenInput; got != want {
 		t.Fatalf("result = %q, want %q", got, want)
@@ -568,6 +583,7 @@ func TestCleanScreenedResultIsUnchanged(t *testing.T) {
 }
 
 func TestScreeningFailureLeavesTheResultUnchanged(t *testing.T) {
+	t.Parallel()
 	f := newScreeningFixture(t, http.StatusInternalServerError, 0)
 	if got, want := f.call(t, "read_page"), prompt.ToolResultUntrusted+screenInput; got != want {
 		t.Fatalf("result = %q, want %q", got, want)
@@ -578,6 +594,7 @@ func TestScreeningFailureLeavesTheResultUnchanged(t *testing.T) {
 }
 
 func TestUnscreenedToolsSendNothingToTypeSafe(t *testing.T) {
+	t.Parallel()
 	f := newScreeningFixture(t, http.StatusOK, 0.95)
 	for _, name := range []string{"own_note", "gmail_search"} {
 		if got, want := f.call(t, name), prompt.ToolResultUntrusted+screenInput; got != want {
@@ -590,6 +607,7 @@ func TestUnscreenedToolsSendNothingToTypeSafe(t *testing.T) {
 }
 
 func TestFailedCallsGiveTheirBudgetBackUpToTheCeiling(t *testing.T) {
+	t.Parallel()
 	broker := testBroker(t)
 	provider := &fakeProvider{
 		principal:   testPrincipal,

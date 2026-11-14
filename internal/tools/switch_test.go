@@ -123,6 +123,7 @@ func call(t *testing.T, set agentruntime.ToolSet, name string) agentruntime.Tool
 }
 
 func TestSwitchedOffIntegrationIsNeitherOfferedNorRun(t *testing.T) {
+	t.Parallel()
 	f := newSwitchFixture(t)
 	set := f.toolSet("alice")
 	if got := names(set); !slices.Equal(got, []string{"train_times"}) || !strings.Contains(set.Guidance, "Trains guidance.") {
@@ -154,6 +155,7 @@ func TestSwitchedOffIntegrationIsNeitherOfferedNorRun(t *testing.T) {
 }
 
 func TestDefaultOffIntegrationWaitsForThePrincipal(t *testing.T) {
+	t.Parallel()
 	f := newSwitchFixture(t)
 	f.set("alice", extrasSwitch, true)
 	set := f.toolSet("alice")
@@ -169,6 +171,7 @@ func TestDefaultOffIntegrationWaitsForThePrincipal(t *testing.T) {
 }
 
 func TestSwitchedProviderNeedsSwitches(t *testing.T) {
+	t.Parallel()
 	broker, err := tools.NewBroker(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)

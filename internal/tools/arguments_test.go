@@ -6,6 +6,7 @@ import (
 )
 
 func TestDecodeArguments(t *testing.T) {
+	t.Parallel()
 	type input struct {
 		Name  string `json:"name"`
 		Limit int    `json:"limit"`
