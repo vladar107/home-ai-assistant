@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
@@ -76,9 +77,12 @@ func (e *Engine) RunExplain(ctx context.Context, principalID, message string) (S
 // runToolless runs a turn without tools; a kind traces it under the key ctx names.
 func (e *Engine) runToolless(ctx context.Context, principalID, message string, model agentruntime.ModelEffort, withMemory bool, kind string, runKind agentruntime.RunKind) (ScheduledReply, error) {
 	started := e.config.Now()
+	// A failure reply is stored as the run's reply, which the model reads later, so it stays English
+	// whatever language the run carries.
+	english := locale.With(ctx, locale.English)
 	turnCtx, cancel := context.WithTimeout(ctx, e.config.TurnTimeout)
 	defer cancel()
-	if reply, ready, err := e.unwatchedGate(ctx, turnCtx, principalID); !ready {
+	if reply, ready, err := e.unwatchedGate(english, turnCtx, principalID); !ready {
 		return reply, err
 	}
 	var memory string
@@ -88,7 +92,7 @@ func (e *Engine) runToolless(ctx context.Context, principalID, message string, m
 			if ctx.Err() != nil {
 				return ScheduledReply{}, ctx.Err()
 			}
-			return ScheduledReply{Text: UnavailableReply.Format(ctx), ErrorKind: "tool_provider"}, nil
+			return ScheduledReply{Text: UnavailableReply.Format(english), ErrorKind: "tool_provider"}, nil
 		}
 		message = e.withUser(principalID, message)
 	}
@@ -99,7 +103,7 @@ func (e *Engine) runToolless(ctx context.Context, principalID, message string, m
 	result, runErr := e.runtime.Run(turnCtx, agentruntime.RunRequest{
 		PrincipalID: principalID,
 		SessionID:   sessionID,
-		Message:     e.withTime(message),
+		Message:     e.withTime(withLanguageFor(ctx, runKind, message)),
 		Memory:      memory,
 		Kind:        runKind,
 		Model:       model.Model,
@@ -111,15 +115,16 @@ func (e *Engine) runToolless(ctx context.Context, principalID, message string, m
 			// repeat text from anywhere.
 			external: kind == TraceAssess})
 	}
-	return unwatchedReply(ctx, turnCtx, result, runErr, nil)
+	return unwatchedReply(english, turnCtx, result, runErr, nil)
 }
 
 func (e *Engine) runUnwatched(ctx context.Context, principalID, turn, message string, model agentruntime.ModelEffort, timeout time.Duration, kind, traceKey string) (ScheduledReply, error) {
 	started := e.config.Now()
+	english := locale.With(ctx, locale.English)
 	run := tools.NewRun(message)
 	turnCtx, cancel := context.WithTimeout(tools.WithRun(tools.WithTurn(ctx, turn), run), timeout)
 	defer cancel()
-	if reply, ready, err := e.unwatchedGate(ctx, turnCtx, principalID); !ready {
+	if reply, ready, err := e.unwatchedGate(english, turnCtx, principalID); !ready {
 		return reply, err
 	}
 	tools, err := e.tools.ReadOnlyToolsFor(turnCtx, principalID)
@@ -135,7 +140,7 @@ func (e *Engine) runUnwatched(ctx context.Context, principalID, turn, message st
 		if ctx.Err() != nil {
 			return ScheduledReply{}, ctx.Err()
 		}
-		return ScheduledReply{Text: UnavailableReply.Format(ctx), ErrorKind: "tool_provider"}, nil
+		return ScheduledReply{Text: UnavailableReply.Format(english), ErrorKind: "tool_provider"}, nil
 	}
 	sessionID, err := NewID()
 	if err != nil {
@@ -145,7 +150,7 @@ func (e *Engine) runUnwatched(ctx context.Context, principalID, turn, message st
 	result, runErr := e.runtime.Run(turnCtx, agentruntime.RunRequest{
 		PrincipalID: principalID,
 		SessionID:   sessionID,
-		Message:     e.withTime(e.withUser(principalID, withPlace(e.placeLines(turnCtx, principalID), e.withCollections(turnCtx, principalID, message)))),
+		Message:     e.withTime(withLanguage(ctx, e.withUser(principalID, withPlace(e.placeLines(turnCtx, principalID), e.withCollections(turnCtx, principalID, message))))),
 		Tools:       tools,
 		Memory:      memory,
 		WebSearch:   webSearch,
@@ -157,7 +162,7 @@ func (e *Engine) runUnwatched(ctx context.Context, principalID, turn, message st
 		principalID: principalID, key: traceKey, kind: kind, model: model.Model, effort: model.Effort, started: started,
 		result: result, executor: tools.Executor, run: run, recorder: sink.trace,
 	})
-	reply, err := unwatchedReply(ctx, turnCtx, result, runErr, run)
+	reply, err := unwatchedReply(english, turnCtx, result, runErr, run)
 	// A check's reply is read by code, not shown, so only a scheduled reply names the sources the
 	// user reads; one with nothing to add sends nothing, so it is left as it is.
 	if err == nil && kind == TraceScheduled && reply.ErrorKind == "" && !strings.Contains(reply.Text, prompt.NothingToAdd) {
@@ -201,6 +206,19 @@ func unwatchedReply(ctx, turnCtx context.Context, result agentruntime.RunResult,
 
 func withPlace(place, message string) string {
 	return prompt.Prepend(prompt.Place(place), message)
+}
+
+// withLanguage names the language the user chose, which the caller of an unattended turn put in the
+// context; chat turns are never told, and keep answering in the language the user writes in.
+func withLanguage(ctx context.Context, message string) string {
+	return prompt.Prepend(prompt.InterfaceLanguage(locale.From(ctx)), message)
+}
+
+func withLanguageFor(ctx context.Context, kind agentruntime.RunKind, message string) string {
+	if kind == agentruntime.RunChat {
+		return message
+	}
+	return withLanguage(ctx, message)
 }
 
 func (e *Engine) withUser(principalID, message string) string {

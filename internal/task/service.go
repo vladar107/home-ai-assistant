@@ -450,7 +450,7 @@ func (s *Service) runWorker(ctx context.Context, principalID string, wake <-chan
 			if !found {
 				break
 			}
-			// The run gets no language: its failure texts are stored in task.Result, which the model reads.
+			// The model run is told the language, but its failure texts are stored in task.Result, which the model reads, so the engine writes them in English.
 			if task.Open() {
 				err = s.execute(ctx, task)
 			} else {
@@ -576,7 +576,7 @@ func (s *Service) run(ctx context.Context, task Task, sink *progressSink) (Outco
 		if task.Attempts <= 1 {
 			message = s.firstMessage(task)
 		}
-		deadlineCtx, cancelDeadline := context.WithDeadline(ctx, task.Deadline)
+		deadlineCtx, cancelDeadline := context.WithDeadline(s.withLanguage(ctx, task.PrincipalID), task.Deadline)
 		mainCtx, stopMain := context.WithCancelCause(deadlineCtx)
 		sink.begin(func() { stopMain(errModelBudget) })
 		reply, err := s.runner.RunTask(mainCtx, turn.TaskRun{
@@ -602,7 +602,7 @@ func (s *Service) run(ctx context.Context, task Task, sink *progressSink) (Outco
 		limit = "limit on model calls"
 	}
 
-	reportCtx, cancelReport := context.WithTimeout(ctx, s.config.Grace)
+	reportCtx, cancelReport := context.WithTimeout(s.withLanguage(ctx, task.PrincipalID), s.config.Grace)
 	defer cancelReport()
 	sink.begin(nil)
 	reply, err := s.runner.RunTask(reportCtx, turn.TaskRun{

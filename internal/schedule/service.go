@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/modelcatalog"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
@@ -39,13 +40,25 @@ const (
 	unlinkedTraceRetention = 2 * 24 * time.Hour
 	deliveryStoreTimeout   = 5 * time.Second
 
-	InterruptedText = "This run was interrupted by a restart and was not retried. It will run again at its next scheduled time."
-	FailedText      = "This run could not be completed."
-	QuietManualText = "Nothing to report right now."
-	quietReason     = "quiet"
-	MissedText      = "This one-time job did not run: the assistant was offline when it was due, and it is too late to run it now."
+	quietReason = "quiet"
+)
+
+// The fixed texts of a run are stored in English, and a user who chose Russian reads them in it
+// when the run is delivered.
+var (
+	interruptedMessage        = locale.T("This run was interrupted by a restart and was not retried. It will run again at its next scheduled time.", "Этот запуск прервался из-за перезапуска и не был повторён. Он выполнится снова в следующее запланированное время.")
+	failedMessage             = locale.T("This run could not be completed.", "Этот запуск не удалось выполнить.")
+	quietManualMessage        = locale.T("Nothing to report right now.", "Сейчас сообщить нечего.")
+	missedMessage             = locale.T("This one-time job did not run: the assistant was offline when it was due, and it is too late to run it now.", "Это разовое задание не выполнилось: в нужное время ассистент был не в сети, а теперь запускать его поздно.")
+	oneTimeInterruptedMessage = locale.T("This one-time run was interrupted by a restart and was not retried.", "Этот разовый запуск прервался из-за перезапуска и не был повторён.")
+	scheduledHeader           = locale.T("Scheduled: %s", "По расписанию: %s")
+
+	InterruptedText = interruptedMessage.In(locale.English)
+	FailedText      = failedMessage.In(locale.English)
+	QuietManualText = quietManualMessage.In(locale.English)
+	MissedText      = missedMessage.In(locale.English)
 	// OneTimeInterruptedText replaces InterruptedText for a job that has no next scheduled time.
-	OneTimeInterruptedText = "This one-time run was interrupted by a restart and was not retried."
+	OneTimeInterruptedText = oneTimeInterruptedMessage.In(locale.English)
 )
 
 // Chats resolves the principal's own private chat, which is the only place a run is delivered.
@@ -93,6 +106,9 @@ type Config struct {
 	ChatModel    agentruntime.ModelEffort
 	TaskModel    agentruntime.ModelEffort
 	HeadsUpModel agentruntime.ModelEffort
+	// Languages gives each run the owner's chosen interface language, which its turn is told and
+	// its fixed texts are written in; nil leaves every run in English.
+	Languages locale.Preferences
 	// Projects checks the project a job is routed to with project_id; without it the tools refuse
 	// project_id.
 	Projects Projects
@@ -146,6 +162,7 @@ type Service struct {
 	sessions   SessionPruner
 	traces     Traces
 	logger     *slog.Logger
+	languages  locale.Preferences
 	zone       string
 	tick       time.Duration
 	now        func() time.Time
@@ -238,10 +255,12 @@ func (s *Service) inFeed(ctx context.Context, run Run, chatID int64) context.Con
 	}
 	var threadID int64
 	var err error
+	// A tab an unattended run creates is named in English, as it was before runs carried a language.
+	feeds := locale.With(ctx, locale.English)
 	if run.Destination != "" {
-		threadID, err = s.feeds.Destination(ctx, run.PrincipalID, chatID, run.Destination, feed(run))
+		threadID, err = s.feeds.Destination(feeds, run.PrincipalID, chatID, run.Destination, feed(run))
 	} else {
-		threadID, err = s.feeds.Thread(ctx, run.PrincipalID, chatID, feed(run))
+		threadID, err = s.feeds.Thread(feeds, run.PrincipalID, chatID, feed(run))
 	}
 	if err != nil {
 		threadID = 0
@@ -333,6 +352,7 @@ func NewService(cfg Config, repository Repository, chats Chats, deliverer conver
 		travel:     cfg.Travel,
 		feeds:      cfg.Feeds,
 		projects:   cfg.Projects,
+		languages:  cfg.Languages,
 		models:     jobModels{catalog: cfg.Models, usage: cfg.Usage, chat: cfg.ChatModel, task: cfg.TaskModel, headsUp: cfg.HeadsUpModel},
 		telemetry:  cfg.Telemetry,
 		exposure:   cfg.Exposure,
@@ -596,6 +616,7 @@ func (s *Service) dispatch(ctx context.Context, run Run) {
 	s.mu.Unlock()
 
 	go func() {
+		ctx := s.withLanguage(ctx, run.PrincipalID)
 		defer func() {
 			s.mu.Lock()
 			delete(s.inflight, run.ID)
@@ -806,11 +827,11 @@ func (s *Service) deliver(ctx context.Context, run Run) {
 	sendCtx := s.inFeed(ctx, run, chatID)
 	// A repeating reminder has no single instant to snooze, so it goes without the buttons.
 	if run.JobType == TypeReminder && s.reminders != nil && run.ErrorKind == "" && run.JobOneTime {
-		messageID, threadID, err := s.reminders.SendReminder(sendCtx, chatID, run.JobID, deliveryText(run))
+		messageID, threadID, err := s.reminders.SendReminder(sendCtx, chatID, run.JobID, deliveryText(ctx, run))
 		s.finishDelivery(ctx, run, chatID, []Sent{{MessageID: messageID, ThreadID: threadID}}, err)
 		return
 	}
-	chunks := conversation.SplitReply(deliveryText(run))
+	chunks := conversation.SplitReply(deliveryText(ctx, run))
 	// The card goes before the first chunk, so a delivery that already sent a chunk is past it. A
 	// failed run's text explains the failure, so a card it staged would illustrate nothing.
 	sent := min(run.DeliveredChunks, len(chunks))
@@ -886,14 +907,34 @@ func (s *Service) finishDelivery(ctx context.Context, run Run, chatID int64, mes
 	s.logger.InfoContext(ctx, "schedule.run.delivered", "principal_id", run.PrincipalID, "job_id", run.JobID)
 }
 
-func deliveryText(run Run) string {
+func deliveryText(ctx context.Context, run Run) string {
 	switch {
 	case run.JobType == TypeReminder && run.ErrorKind == "":
-		return "⏰ " + reportText(run)
+		return "⏰ " + userReportText(ctx, run)
 	case run.ErrorKind == errorAnchorGone || run.ErrorKind == errorAnchorFailed:
-		return "**" + run.JobName + "**: " + reportText(run)
+		return "**" + run.JobName + "**: " + userReportText(ctx, run)
 	}
-	return "**Scheduled: " + run.JobName + "**\n\n" + reportText(run)
+	return "**" + scheduledHeader.Format(ctx, run.JobName) + "**\n\n" + userReportText(ctx, run)
+}
+
+// userReportText is reportText for the user: one of the fixed texts of a run is worded in the
+// context's language, and any other text is the run's own.
+func userReportText(ctx context.Context, run Run) string {
+	text := reportText(run)
+	for _, fixed := range []struct {
+		english string
+		message locale.Text
+	}{
+		{InterruptedText, interruptedMessage}, {FailedText, failedMessage}, {QuietManualText, quietManualMessage},
+		{MissedText, missedMessage}, {OneTimeInterruptedText, oneTimeInterruptedMessage},
+		{turn.NotConnectedReply.In(locale.English), turn.NotConnectedReply}, {turn.UnavailableReply.In(locale.English), turn.UnavailableReply},
+		{turn.TimeoutReply.In(locale.English), turn.TimeoutReply},
+	} {
+		if text == fixed.english {
+			return fixed.message.Format(ctx)
+		}
+	}
+	return text
 }
 
 // reportText is what a run tells its owner, without the heading its message carries.
@@ -902,6 +943,16 @@ func reportText(run Run) string {
 		return OneTimeInterruptedText
 	}
 	return strings.TrimSpace(run.Reply)
+}
+
+// withLanguage returns ctx carrying the principal's chosen language, so a run's turn is told it and
+// its notices are written in it; a store failure is logged and leaves English.
+func (s *Service) withLanguage(ctx context.Context, principalID string) context.Context {
+	withLanguage, err := locale.ForPrincipal(ctx, s.languages, principalID)
+	if err != nil && ctx.Err() == nil {
+		s.logger.WarnContext(ctx, "schedule.language.load_failed", "principal_id", principalID, "error", err)
+	}
+	return withLanguage
 }
 
 func (s *Service) skip(ctx context.Context, run Run, from, reason string) {

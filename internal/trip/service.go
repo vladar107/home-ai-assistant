@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/flightnumber"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
@@ -123,10 +124,10 @@ func (s *Service) UseTab(ctx context.Context, principalID, id string, threadID i
 		return Result{}, err
 	}
 	if !found {
-		return rejected(unknownTripText), nil
+		return rejectedWith(unknownTrip), nil
 	}
-	if text := tabMoveRefusal(existing, s.now()); text != "" {
-		return rejected(text), nil
+	if result := tabMoveRejection(existing, s.now()); result.Rejection != "" {
+		return result, nil
 	}
 	if s.tabs == nil {
 		return rejected(TabsOffRefusal), nil
@@ -144,15 +145,21 @@ func (s *Service) UseTab(ctx context.Context, principalID, id string, threadID i
 // tabMoveRefusal says why the trip cannot move to another tab, or "" when it can: only a planned
 // trip that has not ended has a tab to move.
 func tabMoveRefusal(trip Trip, now time.Time) string {
+	return tabMoveRejection(trip, now).Rejection
+}
+
+// tabMoveRejection is tabMoveRefusal as a rejection that also reads in the user's language; its
+// Rejection is empty when the trip can move.
+func tabMoveRejection(trip Trip, now time.Time) Result {
 	switch {
 	case trip.Status == StatusSuggested:
-		return "That trip is not tracked yet, so it has no tab to move; the user decides on its card."
+		return rejectedWith(notTrackedYet)
 	case trip.Status != StatusPlanned:
-		return "That trip is " + trip.Status + " and cannot be changed."
+		return rejectedWith(cannotChange, trip.Status)
 	case trip.Ended(now):
-		return "That trip has ended, so it does not move to another tab."
+		return rejectedWith(ended)
 	}
-	return ""
+	return Result{}
 }
 
 // SetSummaryMessage records the message that sums the trip up in its tab; zero forgets it.
@@ -220,7 +227,9 @@ type Result struct {
 	Trip      Trip
 	Outcome   string
 	Rejection string
-	Unset     []Unset
+	// userRejection words the rejection for the user, when it is one of the fixed ones.
+	userRejection func(locale.Language) string
+	Unset         []Unset
 	// Previous is the trip before a Suggest that updated it, and Added the IDs of the bookings
 	// that update brought in.
 	Previous *Trip
@@ -231,10 +240,34 @@ type Result struct {
 	written bool
 }
 
-const (
-	unknownTripText = "No trip has that id. Use trip_list to find it."
-	staleText       = "The trip changed since this was proposed; propose the change again."
+var (
+	unknownTrip       = locale.T("No trip has that id. Use trip_list to find it.", "Такой поездки нет.")
+	staleTrip         = locale.T("The trip changed since this was proposed; propose the change again.", "Поездка изменилась с тех пор, как это предложили. Попроси изменить её заново.")
+	cannotChange      = locale.T("That trip is %s and cannot be changed.", "Поездка %s, изменить её нельзя.")
+	alreadyThatStatus = locale.T("That trip is already %s.", "Поездка уже %s.")
+	notUnderWay       = locale.T("That trip is not under way. Cancel it instead if it is not going ahead.", "Эта поездка сейчас не идёт. Если она не состоится, отмени её.")
+	notSuggested      = locale.T("That trip is %s, not suggested.", "Поездка %s, а не предложена.")
+	notTrackedYet     = locale.T("That trip is not tracked yet, so it has no tab to move; the user decides on its card.", "Эту поездку ещё не отслеживают, поэтому переносить нечего. Реши это на её карточке.")
+	ended             = locale.T("That trip has ended, so it does not move to another tab.", "Эта поездка закончилась, поэтому во вкладку её не перенести.")
+
+	unknownTripText = unknownTrip.In(locale.English)
 )
+
+var statusWords = map[string]locale.Text{
+	StatusSuggested: locale.T("suggested", "предложена"),
+	StatusPlanned:   locale.T("planned", "запланирована"),
+	StatusDismissed: locale.T("dismissed", "отклонена"),
+	StatusCancelled: locale.T("cancelled", "отменена"),
+}
+
+// RejectionIn is the rejection in a language: the user's own words when it is one of the fixed
+// ones, and the English text otherwise.
+func (r Result) RejectionIn(language locale.Language) string {
+	if r.userRejection == nil {
+		return r.Rejection
+	}
+	return r.userRejection(language)
+}
 
 // stale is true when the trip was updated after the instant the caller read it.
 func stale(trip Trip, expectedUpdatedAt time.Time) bool {
@@ -242,6 +275,25 @@ func stale(trip Trip, expectedUpdatedAt time.Time) bool {
 }
 
 func rejected(text string) Result { return Result{Rejection: text} }
+
+// rejectedWith is a rejection from the catalog, with trip statuses as its arguments: English for
+// the model and in the user's language for them.
+func rejectedWith(message locale.Text, statuses ...string) Result {
+	english := make([]any, len(statuses))
+	for index, status := range statuses {
+		english[index] = status
+	}
+	return Result{Rejection: message.FormatIn(locale.English, english...), userRejection: func(language locale.Language) string {
+		words := make([]any, len(statuses))
+		for index, status := range statuses {
+			words[index] = status
+			if word, known := statusWords[status]; known {
+				words[index] = word.In(language)
+			}
+		}
+		return message.FormatIn(language, words...)
+	}}
+}
 
 // Add stores a planned trip and sets the reminders of its bookings.
 func (s *Service) Add(ctx context.Context, principalID string, draft Draft) (Result, error) {
@@ -424,13 +476,13 @@ func (s *Service) Update(ctx context.Context, principalID, id string, expectedUp
 		return Result{}, err
 	}
 	if !found {
-		return rejected(unknownTripText), nil
+		return rejectedWith(unknownTrip), nil
 	}
 	if existing.Status != StatusSuggested && existing.Status != StatusPlanned {
-		return rejected("That trip is " + existing.Status + " and cannot be changed."), nil
+		return rejectedWith(cannotChange, existing.Status), nil
 	}
 	if stale(existing, expectedUpdatedAt) {
-		return rejected(staleText), nil
+		return rejectedWith(staleTrip), nil
 	}
 	draft.Source = existing.Source
 	normalized, text := normalizeDraft(draft, existing.Bookings, true)
@@ -458,13 +510,13 @@ func (s *Service) Cancel(ctx context.Context, principalID, id string, expectedUp
 	}
 	switch {
 	case !found:
-		return rejected(unknownTripText), nil
+		return rejectedWith(unknownTrip), nil
 	case stale(existing, expectedUpdatedAt):
-		return rejected(staleText), nil
+		return rejectedWith(staleTrip), nil
 	case existing.Status == StatusSuggested:
 		return s.setStatus(ctx, existing, StatusDismissed)
 	case existing.Status != StatusPlanned:
-		return rejected("That trip is already " + existing.Status + "."), nil
+		return rejectedWith(alreadyThatStatus, existing.Status), nil
 	}
 	return s.setStatus(ctx, existing, StatusCancelled)
 }
@@ -481,11 +533,11 @@ func (s *Service) EndNow(ctx context.Context, principalID, id string, expectedUp
 	now := s.now()
 	switch {
 	case !found:
-		return rejected(unknownTripText), nil
+		return rejectedWith(unknownTrip), nil
 	case stale(existing, expectedUpdatedAt):
-		return rejected(staleText), nil
+		return rejectedWith(staleTrip), nil
 	case !existing.Active(now):
-		return rejected("That trip is not under way. Cancel it instead if it is not going ahead."), nil
+		return rejectedWith(notUnderWay), nil
 	}
 	next := existing
 	next.EndsAt = now
@@ -503,9 +555,9 @@ func (s *Service) Track(ctx context.Context, principalID, id string) (result Res
 	}
 	switch {
 	case !found:
-		return rejected(unknownTripText), nil
+		return rejectedWith(unknownTrip), nil
 	case existing.Status != StatusSuggested:
-		return rejected("That trip is " + existing.Status + ", not suggested."), nil
+		return rejectedWith(notSuggested, existing.Status), nil
 	}
 	if text, err := s.checkCap(ctx, principalID); err != nil || text != "" {
 		return rejected(text), err
@@ -524,9 +576,9 @@ func (s *Service) Dismiss(ctx context.Context, principalID, id string) (result R
 	}
 	switch {
 	case !found:
-		return rejected(unknownTripText), nil
+		return rejectedWith(unknownTrip), nil
 	case existing.Status != StatusSuggested:
-		return rejected("That trip is " + existing.Status + ", not suggested."), nil
+		return rejectedWith(notSuggested, existing.Status), nil
 	}
 	return s.setStatus(ctx, existing, StatusDismissed)
 }

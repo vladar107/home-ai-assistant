@@ -9,10 +9,23 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/transit"
 )
 
 const noDisruptions = "none"
+
+var (
+	noDisruptionsLine   = locale.T("NS reports no disruptions or engineering works at %s.", "NS не сообщает о сбоях и ремонтных работах: %s.")
+	newDisruption       = locale.T("New disruption: %s", "Новый сбой: %s")
+	changedDisruption   = locale.T("Changed disruption: %s", "Сбой изменился: %s")
+	newEngineeringWork  = locale.T("New engineering work: %s", "Новые ремонтные работы: %s")
+	changedWork         = locale.T("Changed engineering work: %s", "Ремонтные работы изменились: %s")
+	disruptionAdvice    = locale.T("Advice: %s", "Рекомендация: %s")
+	disruptionExpected  = locale.T("Expected end: %s", "Ожидаемое окончание: %s")
+	disruptionUntil     = locale.T("Until %s", "До %s")
+	disruptionsStayedOn = locale.T("Still in effect: %s", "Всё ещё действуют: %s")
+)
 
 // DisruptionsEvaluator checks disruption watches: the disruptions and engineering works the train
 // service reports at the watch's stations, under the owner's own trains switch.
@@ -75,12 +88,12 @@ func (e *DisruptionsEvaluator) Evaluate(ctx context.Context, principalID string,
 			}
 		}
 	}
-	return disruptionObservation(watch.Spec, current, previousFingerprints(occurrence.Previous), occurrence.End.Location()), nil
+	return disruptionObservation(ctx, watch.Spec, current, previousFingerprints(occurrence.Previous), occurrence.End.Location()), nil
 }
 
-func disruptionObservation(spec Spec, current []transit.Disruption, previous map[string]string, location *time.Location) Observation {
+func disruptionObservation(ctx context.Context, spec Spec, current []transit.Disruption, previous map[string]string, location *time.Location) Observation {
 	if len(current) == 0 {
-		return Observation{State: noDisruptions, Headline: "NS reports no disruptions or engineering works at " + strings.Join(spec.Target.Stations, ", ") + "."}
+		return Observation{State: noDisruptions, Headline: noDisruptionsLine.Format(ctx, strings.Join(spec.Target.Stations, ", "))}
 	}
 	watched := func(trigger string) bool { return slices.Contains(spec.Triggers, trigger) }
 	states := make([]string, 0, len(current))
@@ -91,9 +104,9 @@ func disruptionObservation(spec Spec, current []transit.Disruption, previous map
 		known, found := previous[entry.ID]
 		switch {
 		case !found && watched(TriggerNew):
-			told = append(told, describeDisruption("New", entry, location)...)
+			told = append(told, describeDisruption(ctx, false, entry, location)...)
 		case found && known != mark && watched(TriggerChanged):
-			told = append(told, describeDisruption("Changed", entry, location)...)
+			told = append(told, describeDisruption(ctx, true, entry, location)...)
 		default:
 			others = append(others, entry.Title)
 		}
@@ -106,30 +119,35 @@ func disruptionObservation(spec Spec, current []transit.Disruption, previous map
 	}
 	observation.Headline, observation.Details = told[0], told[1:]
 	if len(others) > 0 {
-		observation.Details = append(observation.Details, "Still in effect: "+strings.Join(others, "; "))
+		observation.Details = append(observation.Details, disruptionsStayedOn.Format(ctx, strings.Join(others, "; ")))
 	}
 	return observation
 }
 
 // describeDisruption is one entry as alert lines: what it is, then NS's situation, advice, and
 // expected end.
-func describeDisruption(change string, entry transit.Disruption, location *time.Location) []string {
-	what := "disruption"
-	if entry.Kind == "maintenance" {
-		what = "engineering work"
+func describeDisruption(ctx context.Context, changed bool, entry transit.Disruption, location *time.Location) []string {
+	heading := newDisruption
+	switch {
+	case entry.Kind == "maintenance" && changed:
+		heading = changedWork
+	case entry.Kind == "maintenance":
+		heading = newEngineeringWork
+	case changed:
+		heading = changedDisruption
 	}
-	lines := []string{fmt.Sprintf("%s %s: %s", change, what, entry.Title)}
+	lines := []string{heading.Format(ctx, entry.Title)}
 	if entry.Situation != "" && entry.Situation != entry.Title {
 		lines = append(lines, entry.Situation)
 	}
 	if entry.Advice != "" {
-		lines = append(lines, "Advice: "+entry.Advice)
+		lines = append(lines, disruptionAdvice.Format(ctx, entry.Advice))
 	}
 	switch {
 	case entry.ExpectedEnd != "":
-		lines = append(lines, "Expected end: "+entry.ExpectedEnd)
+		lines = append(lines, disruptionExpected.Format(ctx, entry.ExpectedEnd))
 	case !entry.End.IsZero():
-		lines = append(lines, "Until "+entry.End.In(location).Format("Mon 2 Jan 15:04"))
+		lines = append(lines, disruptionUntil.Format(ctx, locale.Date(locale.From(ctx), entry.End.In(location), locale.DayTime)))
 	}
 	return lines
 }

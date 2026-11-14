@@ -33,7 +33,6 @@ var (
 	proposeWatchRain    = locale.T("Watch %s\n%s\nYou get a message when rain becomes expected, by the forecast.", "Наблюдение: %[1]s\n%[2]s\nТебе придёт сообщение, когда по прогнозу ожидается дождь.")
 	proposeWatchRainEnd = locale.T("Watch %s\n%s\nYou get a message when rain becomes expected and when it no longer is, by the forecast.", "Наблюдение: %[1]s\n%[2]s\nТебе придёт сообщение, когда по прогнозу ожидается дождь и когда его больше не ожидается.")
 	proposeWatchPlace   = locale.T("Watch %s\n%s\nYou get a message each time, by your live location.", "Наблюдение: %[1]s\n%[2]s\nТебе придёт сообщение каждый раз, по твоей геопозиции.")
-	notSharingMessage   = locale.T("It works only while you share your live location in this chat, and you are not sharing it now.", "Оно работает, только пока ты делишься геопозицией в этом чате, а сейчас ты ею не делишься.")
 	silentWhileTravel   = locale.T("It stays silent while you are traveling.", "В поездках оно молчит.")
 	changeWatch         = locale.T("Change the watch %s to:\n%s\n%s", "Изменить наблюдение %[1]s на:\n%[2]s\n%[3]s")
 	silentWhileTravelTo = locale.T("It will stay silent while you are traveling.", "В поездках оно будет молчать.")
@@ -49,7 +48,6 @@ var (
 	checkingUntilMid    = locale.T("Checking now until midnight.", "Проверка идёт до полуночи.")
 	checkingUntil       = locale.T("Checking now until %s.", "Проверка идёт до %s.")
 	firstCheck          = locale.T("First check: %s.", "Первая проверка: %s.")
-	placeGoneMessage    = locale.T("The saved place %s no longer exists.", "Сохранённого места %s больше нет.")
 	tooManyAgentMessage = locale.N("You already have %d agent watches, which is the most allowed; delete one in /jobs first.", "You already have %d agent watches, which is the most allowed; delete one in /jobs first.", "Наблюдений с проверкой моделью уже максимум: %d. Сначала удали одно в /jobs.", "Наблюдений с проверкой моделью уже максимум: %d. Сначала удали одно в /jobs.", "Наблюдений с проверкой моделью уже максимум: %d. Сначала удали одно в /jobs.")
 	tooManyMessage      = locale.N("You already have %d watches, which is the most allowed; delete one in /jobs first.", "You already have %d watches, which is the most allowed; delete one in /jobs first.", "Наблюдений уже максимум: %d. Сначала удали одно в /jobs.", "Наблюдений уже максимум: %d. Сначала удали одно в /jobs.", "Наблюдений уже максимум: %d. Сначала удали одно в /jobs.")
 	nothingSetUp        = locale.T("%s Nothing was set up.", "%s Ничего не создано.")
@@ -546,8 +544,8 @@ func (s *Service) newWatchProposal(ctx context.Context, principalID, kind string
 		}
 	case KindPlace:
 		summary = proposeWatchPlace.FormatIn(language, label, described)
-		if note := s.placeNote(ctx, principalID); note != "" {
-			summary += "\n" + notSharingMessage.FormatIn(language)
+		if note := s.placeNote(ctx, principalID, language); note != "" {
+			summary += "\n" + note
 		}
 	}
 	if arguments.PauseWhileTraveling != nil && *arguments.PauseWhileTraveling {
@@ -675,7 +673,7 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 				return approval.Outcome{}, &approval.ActionError{Reason: "too_many", Text: tooManyText() + " Nothing was set up.", UserText: nothingSetUp.FormatIn(language, tooManyMessage.FormatIn(language, MaximumWatchesPerPrincipal))}
 			}
 			if errors.Is(err, ErrPlaceGone) {
-				return approval.Outcome{}, &approval.ActionError{Reason: "place_gone", Text: placeGoneText(spec) + " Nothing was set up.", UserText: nothingSetUp.FormatIn(language, placeGoneMessage.FormatIn(language, spec.Target.Name))}
+				return approval.Outcome{}, &approval.ActionError{Reason: "place_gone", Text: placeGoneText(spec) + " Nothing was set up.", UserText: nothingSetUp.FormatIn(language, placeGoneIn(ctx, spec))}
 			}
 			return approval.Outcome{}, err
 		}
@@ -689,7 +687,7 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		}
 		text, userText := "Watching. "+s.nextWindow(spec, locale.English), watchingNow.FormatIn(language, s.nextWindow(spec, language))
 		if spec.Kind == KindPlace {
-			if note := s.placeNote(ctx, record.PrincipalID); note != "" {
+			if note := s.placeNote(ctx, record.PrincipalID, locale.English); note != "" {
 				text += " " + note
 				userText += " " + notSharingMessage.FormatIn(language)
 			}
@@ -767,7 +765,7 @@ func (s *Service) executeUpdate(ctx context.Context, record approval.Record) (ap
 			return err
 		})
 		if errors.Is(err, ErrPlaceGone) {
-			return approval.Outcome{}, &approval.ActionError{Reason: "place_gone", Text: placeGoneText(spec) + " Nothing was changed.", UserText: nothingChanged.FormatIn(language, placeGoneMessage.FormatIn(language, spec.Target.Name))}
+			return approval.Outcome{}, &approval.ActionError{Reason: "place_gone", Text: placeGoneText(spec) + " Nothing was changed.", UserText: nothingChanged.FormatIn(language, placeGoneIn(ctx, spec))}
 		}
 		if err != nil {
 			return approval.Outcome{}, err

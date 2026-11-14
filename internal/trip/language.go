@@ -11,6 +11,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 )
 
 const (
@@ -41,20 +43,29 @@ type Rewriter interface {
 	RewriteAlertLike(ctx context.Context, principalID, sample, text string) (string, error)
 }
 
-// LanguageSamples gives the sample that names the language of a trip's messages; it is *Language.
+// NamedRewriter rewrites a message into a language the code names; the turn engine implements it
+// beside Rewriter.
+type NamedRewriter interface {
+	RewriteAlert(ctx context.Context, principalID, language, text string) (string, error)
+}
+
+// LanguageSamples gives the sample that names the language of a trip's messages, and the language
+// the user chose for when there is none; it is *Language.
 type LanguageSamples interface {
 	Sample(ctx context.Context, principalID, tripID string) string
+	Chosen(ctx context.Context, principalID string) context.Context
 }
 
 // Language puts a trip's messages in the language the user writes in. Nothing names that language:
 // the user's latest message in the tab the trip's messages go to, or in any tab when they never
-// wrote there, is the sample a rewrite is told to follow. A user who never wrote gets the English
-// text the code wrote.
+// wrote there, is the sample a rewrite is told to follow. A user who never wrote gets their chosen
+// interface language when that is Russian, and otherwise the English text the code wrote.
 type Language struct {
 	destinations Destinations
 	messages     Messages
 	rewriter     Rewriter
 	trips        Repository
+	preferences  locale.Preferences
 	logger       *slog.Logger
 }
 
@@ -74,6 +85,23 @@ func NewLanguage(destinations Destinations, messages Messages, rewriter Rewriter
 		return nil, fmt.Errorf("trip language logger is required")
 	}
 	return &Language{destinations: destinations, messages: messages, rewriter: rewriter, trips: trips, logger: logger}, nil
+}
+
+// SetLanguages gives the language each principal chose, which a trip's messages follow when the
+// user never wrote a sample. Without it, or when the rewriter cannot name a language, they stay in
+// English.
+func (l *Language) SetLanguages(preferences locale.Preferences) {
+	l.preferences = preferences
+}
+
+// Chosen returns ctx carrying the principal's chosen interface language, for work that has no
+// sample to follow; a store failure leaves it in English.
+func (l *Language) Chosen(ctx context.Context, principalID string) context.Context {
+	chosen, err := locale.ForPrincipal(ctx, l.preferences, principalID)
+	if err != nil && ctx.Err() == nil {
+		l.logger.WarnContext(ctx, "trip.language.failed", "principal_id", principalID, "stage", "language", "error", err)
+	}
+	return chosen
 }
 
 // Sample returns the user's latest message where the trip's messages go, or anywhere when they
@@ -126,7 +154,8 @@ func (s localizedSender) Send(ctx context.Context, principalID, tripID, text str
 // back by its translation.
 func (l *Language) localize(ctx context.Context, principalID, tripID, text string) string {
 	sample := l.Sample(ctx, principalID, tripID)
-	if sample == "" {
+	named, byName := l.rewriter.(NamedRewriter)
+	if sample == "" && (!byName || locale.From(l.Chosen(ctx, principalID)) != locale.Russian) {
 		return text
 	}
 	found, _, err := l.trips.LoadTrip(ctx, principalID, tripID)
@@ -141,7 +170,12 @@ func (l *Language) localize(ctx context.Context, principalID, tripID, text strin
 		}
 	}
 	rewriteCtx, cancel := context.WithTimeout(ctx, rewriteTimeout)
-	rewritten, err := l.rewriter.RewriteAlertLike(rewriteCtx, principalID, sample, text)
+	var rewritten string
+	if sample == "" {
+		rewritten, err = named.RewriteAlert(rewriteCtx, principalID, "Russian", text)
+	} else {
+		rewritten, err = l.rewriter.RewriteAlertLike(rewriteCtx, principalID, sample, text)
+	}
 	late := errors.Is(rewriteCtx.Err(), context.DeadlineExceeded)
 	cancel()
 	rewritten = strings.TrimSpace(rewritten)

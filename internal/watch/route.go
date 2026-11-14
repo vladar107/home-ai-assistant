@@ -8,11 +8,21 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/routes"
 	"github.com/vladar107/home-ai-assistant/internal/transit"
 )
 
 const onTrack = "on_time"
+
+var (
+	routeOnTrack      = locale.T("Route %q: on track", "Маршрут %q: всё по плану")
+	routeIssues       = locale.T("Route %q: %s", "Маршрут %q: %s")
+	routeLegStatus    = locale.T("leg %d %s", "участок %[1]d: %[2]s")
+	routeLegCancelled = locale.T("leg %d cancelled", "участок %d отменён")
+	routeAlternative  = locale.T("alternative %s", "запасной вариант: %s")
+	routeArrivalMiss  = locale.T("arrival target missed", "к нужному времени не успеть")
+)
 
 // RouteEvaluator checks route watches: the owner's saved route checked leg by leg for the
 // occurrence's day, under the owner's own trains and buses switches.
@@ -58,7 +68,7 @@ func (e *RouteEvaluator) Evaluate(ctx context.Context, principalID string, watch
 	if err := allLegsFailed(result); err != nil {
 		return Observation{}, err
 	}
-	return e.observation(watch.Spec, result, occurrence.Previous), nil
+	return e.observation(ctx, watch.Spec, result, occurrence.Previous), nil
 }
 
 // allLegsFailed is an upstream failure when no departure of any train or bus leg could be
@@ -91,7 +101,7 @@ func allLegsFailed(result routes.Result) error {
 // saved departure left to take, with the alternative the leg takes instead counted the same way. The arrival counts as missed when it is late or when a leg leaves no way
 // to get there. Legs that failed to check are not part of the state, and while some are failing an
 // alert already sent is not called off.
-func (e *RouteEvaluator) observation(spec Spec, result routes.Result, previous string) Observation {
+func (e *RouteEvaluator) observation(ctx context.Context, spec Spec, result routes.Result, previous string) Observation {
 	watched := func(trigger string) bool { return slices.Contains(spec.Triggers, trigger) }
 	var parts, phrases []string
 	if watched(TriggerLeg) {
@@ -102,12 +112,12 @@ func (e *RouteEvaluator) observation(spec Spec, result routes.Result, previous s
 			number := index + 1
 			var legParts, legPhrases []string
 			if leg.SavedUnusable() {
-				phrase := cmp.Or(leg.SavedStatus, leg.Status)
-				if allCancelled(leg.Saved()) {
-					phrase = "cancelled"
-				}
 				legParts = append(legParts, "unusable")
-				legPhrases = append(legPhrases, fmt.Sprintf("leg %d %s", number, phrase))
+				if allCancelled(leg.Saved()) {
+					legPhrases = append(legPhrases, routeLegCancelled.Format(ctx, number))
+				} else {
+					legPhrases = append(legPhrases, routeLegStatus.Format(ctx, number, cmp.Or(leg.SavedStatus, leg.Status)))
+				}
 			}
 			if leg.Taken >= 0 {
 				taken := leg.Departures[leg.Taken]
@@ -121,9 +131,9 @@ func (e *RouteEvaluator) observation(spec Spec, result routes.Result, previous s
 				switch {
 				case len(legParts) == changed:
 				case taken.Alternative:
-					legPhrases = append(legPhrases, "alternative "+taken.StatusText())
+					legPhrases = append(legPhrases, routeAlternative.Format(ctx, taken.StatusText()))
 				default:
-					legPhrases = append(legPhrases, fmt.Sprintf("leg %d %s", number, taken.StatusText()))
+					legPhrases = append(legPhrases, routeLegStatus.Format(ctx, number, taken.StatusText()))
 				}
 			}
 			if len(legParts) > 0 {
@@ -134,7 +144,7 @@ func (e *RouteEvaluator) observation(spec Spec, result routes.Result, previous s
 	}
 	if watched(TriggerArrival) && arrivalMissed(result) {
 		parts = append(parts, "arrival:missed")
-		phrases = append(phrases, "arrival target missed")
+		phrases = append(phrases, routeArrivalMiss.Format(ctx))
 	}
 
 	observation := Observation{Details: e.details(result)}
@@ -143,12 +153,12 @@ func (e *RouteEvaluator) observation(spec Spec, result routes.Result, previous s
 		if len(result.FailedLegs) > 0 && previous != "" && !strings.HasPrefix(previous, onTrack) {
 			observation.State, observation.Triggered = previous, true
 		}
-		observation.Headline = fmt.Sprintf("Route %q: on track", result.Route.Name)
+		observation.Headline = routeOnTrack.Format(ctx, result.Route.Name)
 		return observation
 	}
 	observation.State = strings.Join(parts, "|")
 	observation.Triggered = true
-	observation.Headline = fmt.Sprintf("Route %q: %s", result.Route.Name, strings.Join(phrases, "; "))
+	observation.Headline = routeIssues.Format(ctx, result.Route.Name, strings.Join(phrases, "; "))
 	return observation
 }
 

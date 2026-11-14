@@ -5,6 +5,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
@@ -52,6 +53,9 @@ type TaskReply struct {
 // timeout. Failures come back as the reply a chat turn would have given. An error is returned only
 // when ctx ends, and the caller then decides what the task became.
 func (e *Engine) RunTask(ctx context.Context, run TaskRun) (TaskReply, error) {
+	// The run's tools write for the user in the caller's language, but its failure text is stored
+	// in the task's result, which the model reads, so it stays English.
+	english := locale.With(ctx, locale.English)
 	record := tools.NewRun(cmp.Or(run.Instruction, run.Message))
 	if run.Continued {
 		record.MarkExternal("")
@@ -62,9 +66,9 @@ func (e *Engine) RunTask(ctx context.Context, run TaskRun) (TaskReply, error) {
 	case ctx.Err() != nil:
 		return TaskReply{}, ctx.Err()
 	case err != nil:
-		return TaskReply{Text: UnavailableReply.Format(ctx), ErrorKind: ErrorKindRuntime}, nil
+		return TaskReply{Text: UnavailableReply.Format(english), ErrorKind: ErrorKindRuntime}, nil
 	case !connected:
-		return TaskReply{Text: NotConnectedReply.Format(ctx), ErrorKind: ErrorKindNotConnected}, nil
+		return TaskReply{Text: NotConnectedReply.Format(english), ErrorKind: ErrorKindNotConnected}, nil
 	}
 	toolSet, err := e.tools.ReadOnlyToolsFor(runCtx, run.PrincipalID)
 	var webSearch bool
@@ -79,9 +83,9 @@ func (e *Engine) RunTask(ctx context.Context, run TaskRun) (TaskReply, error) {
 		if ctx.Err() != nil {
 			return TaskReply{}, ctx.Err()
 		}
-		return TaskReply{Text: UnavailableReply.Format(ctx), ErrorKind: ErrorKindToolProvider}, nil
+		return TaskReply{Text: UnavailableReply.Format(english), ErrorKind: ErrorKindToolProvider}, nil
 	}
-	message := e.withTime(e.withUser(run.PrincipalID, withPlace(e.placeLines(runCtx, run.PrincipalID), e.withCollections(runCtx, run.PrincipalID, run.Message))))
+	message := e.withTime(withLanguage(ctx, e.withUser(run.PrincipalID, withPlace(e.placeLines(runCtx, run.PrincipalID), e.withCollections(runCtx, run.PrincipalID, run.Message)))))
 	started := e.config.Now()
 	counting := e.newCountingSink(run.PrincipalID, run.Turn, record)
 	var sink agentruntime.EventSink = counting
@@ -109,7 +113,7 @@ func (e *Engine) RunTask(ctx context.Context, run TaskRun) (TaskReply, error) {
 	case ctx.Err() != nil:
 		return TaskReply{}, ctx.Err()
 	case runErr != nil || strings.TrimSpace(result.Final) == "":
-		reply, kind := FailureReply(ctx, runErr)
+		reply, kind := FailureReply(english, runErr)
 		return TaskReply{Text: reply, ErrorKind: kind}, nil
 	default:
 		return TaskReply{Text: result.Final}, nil

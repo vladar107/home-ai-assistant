@@ -687,7 +687,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		Cards: cards, Photos: in.Chat, Reminders: in.Reminders, Sessions: in.Sessions,
 		Travel: trip.NewTravel(in.Store), Telemetry: telemetry, Exposure: exposures, SafetyChecks: safetyChecks,
 		Feeds: tabs.Feeds, Models: a.Models, Usage: a.ChatGPT, ChatModel: a.ChatModel, TaskModel: a.TaskModel, HeadsUpModel: in.Core.HeadsUpModel,
-		Projects: projectReader, Traces: in.Store,
+		Projects: projectReader, Traces: in.Store, Languages: in.Store,
 	}, in.Store, in.Store, in.Chat, approvals, in.Logger)
 	if err != nil {
 		return fmt.Errorf("initialize scheduler: %w", err)
@@ -755,7 +755,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	}
 	if in.Core.Watches {
 		// Alerts reach only the owner's own chat, resolved from the allowlist at delivery.
-		watches, err := watch.NewService(watch.Config{Zone: in.Zone, Now: in.Core.Now, Travel: trip.NewTravel(in.Store), Telemetry: telemetry, Rewriter: engine, Feeds: tabs.Feeds, Tabs: tabs.Watches, Traces: in.Store}, in.Store, in.Store, in.Alerts, approvals, in.Logger)
+		watches, err := watch.NewService(watch.Config{Zone: in.Zone, Now: in.Core.Now, Travel: trip.NewTravel(in.Store), Telemetry: telemetry, Rewriter: engine, Languages: in.Store, Feeds: tabs.Feeds, Tabs: tabs.Watches, Traces: in.Store}, in.Store, in.Store, in.Alerts, approvals, in.Logger)
 		if err != nil {
 			return fmt.Errorf("initialize watches: %w", err)
 		}
@@ -895,6 +895,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("initialize trip language: %w", err)
 	}
+	tripLanguage.SetLanguages(in.Store)
 	tripSender := tripLanguage.Sender(tabs.Trips)
 	tripUpdates, err := trip.NewUpdates(trip.UpdatesConfig{Zone: a.location, Now: in.Core.Now, Calendar: a.tripState, Language: tripLanguage},
 		in.Store, in.Store, tripScanChecker{engine}, a.tripState, tripSender, tripUpdateNotices, in.Logger)

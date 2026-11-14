@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/localtime"
 )
 
@@ -41,6 +42,16 @@ func ReconsiderAt(sentAt time.Time, learn bool) string {
 // message was sent.
 func Time(now time.Time, location *time.Location) string {
 	return Marker + " Current local time: " + localtime.Format(now, location) + "."
+}
+
+// InterfaceLanguage tells a turn nobody is watching the language the user chose for the assistant,
+// so what it writes for them is in it. A user who never chose English gets no line, which keeps
+// their turns as they were.
+func InterfaceLanguage(language locale.Language) string {
+	if language != locale.Russian {
+		return ""
+	}
+	return Marker + " Interface language: Russian. Write anything meant for the user in Russian."
 }
 
 // User names the household member the turn is for; an empty name gives no line.

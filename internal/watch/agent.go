@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/clip"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/localtime"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	"github.com/vladar107/home-ai-assistant/internal/turn"
@@ -119,7 +120,7 @@ func NewAgentEvaluator(runner CheckRunner, cfg AgentConfig) (*AgentEvaluator, er
 	}, nil
 }
 
-func (e *AgentEvaluator) Evaluate(_ context.Context, principalID string, watch Watch, occurrence Occurrence) (Observation, error) {
+func (e *AgentEvaluator) Evaluate(ctx context.Context, principalID string, watch Watch, occurrence Occurrence) (Observation, error) {
 	if watch.Check == nil {
 		return Observation{}, fmt.Errorf("the agent watch has no check")
 	}
@@ -149,11 +150,11 @@ func (e *AgentEvaluator) Evaluate(_ context.Context, principalID string, watch W
 	e.running[principalID] = watch.ID
 	message := checkMessage(watch, occurrence.Previous, now)
 	e.wg.Add(1)
-	go e.run(principalID, watch, occurrence.Previous, message)
+	go e.run(locale.From(ctx), principalID, watch, occurrence.Previous, message)
 	return Observation{}, ErrSkip
 }
 
-func (e *AgentEvaluator) run(principalID string, watch Watch, previous, message string) {
+func (e *AgentEvaluator) run(language locale.Language, principalID string, watch Watch, previous, message string) {
 	defer e.wg.Done()
 	// The check keeps a trace of its own, which the alert it may raise is linked to. Without a key
 	// the check fails rather than raise an alert that would be explained as written by code.
@@ -162,7 +163,7 @@ func (e *AgentEvaluator) run(principalID string, watch Watch, previous, message 
 	if err == nil {
 		key := checkTraceKind + "/" + id
 		var reply turn.ScheduledReply
-		if reply, err = e.runner.RunCheck(turn.WithTraceKey(e.ctx, key), principalID, message); err == nil {
+		if reply, err = e.runner.RunCheck(turn.WithTraceKey(locale.With(e.ctx, language), key), principalID, message); err == nil {
 			observation, err = observe(watch, previous, reply)
 			observation.Trace = key
 		}

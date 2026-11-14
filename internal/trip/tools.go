@@ -823,7 +823,7 @@ func (t *Tools) ExecuteApproved(ctx context.Context, record approval.Record) (ap
 					return approval.Outcome{}, err
 				}
 				if result.Rejection != "" {
-					return approval.Outcome{}, &approval.ActionError{Reason: "rejected", Text: nothingChanged.Format(english, result.Rejection), UserText: nothingChanged.Format(ctx, result.Rejection)}
+					return approval.Outcome{}, &approval.ActionError{Reason: "rejected", Text: nothingChanged.Format(english, result.Rejection), UserText: nothingChanged.Format(ctx, result.RejectionIn(language))}
 				}
 				moved, userMoved = movedText(locale.English, result), movedText(language, result)
 			}
@@ -833,7 +833,7 @@ func (t *Tools) ExecuteApproved(ctx context.Context, record approval.Record) (ap
 				t.logger.WarnContext(ctx, "trip.update.failed", "principal_id", record.PrincipalID, "trip_id", confirmed.ID, "error", err)
 				return approval.Outcome{}, &approval.ActionError{Reason: "rejected", Text: otherNotSaved.Format(english, moved), UserText: otherNotSaved.Format(ctx, userMoved)}
 			case moved != "" && result.Rejection != "":
-				return approval.Outcome{}, &approval.ActionError{Reason: "rejected", Text: otherNotMade.Format(english, moved, result.Rejection), UserText: otherNotMade.Format(ctx, userMoved, result.Rejection)}
+				return approval.Outcome{}, &approval.ActionError{Reason: "rejected", Text: otherNotMade.Format(english, moved, result.Rejection), UserText: otherNotMade.Format(ctx, userMoved, result.RejectionIn(language))}
 			case err == nil && result.Rejection == "":
 				text, userText = describeSaved(locale.English, true, result), describeSaved(language, true, result)
 				if moved != "" {
@@ -851,7 +851,7 @@ func (t *Tools) ExecuteApproved(ctx context.Context, record approval.Record) (ap
 	case err != nil:
 		return approval.Outcome{}, err
 	case result.Rejection != "":
-		return approval.Outcome{}, &approval.ActionError{Reason: "rejected", Text: nothingChanged.Format(english, result.Rejection), UserText: nothingChanged.Format(ctx, result.Rejection)}
+		return approval.Outcome{}, &approval.ActionError{Reason: "rejected", Text: nothingChanged.Format(english, result.Rejection), UserText: nothingChanged.Format(ctx, result.RejectionIn(language))}
 	}
 	if language != locale.Russian {
 		userText = ""

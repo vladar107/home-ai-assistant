@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"slices"
 	"time"
+
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 )
 
 // SavedPlace is one of the user's saved places as a place watch names it.
@@ -39,8 +41,22 @@ func (s *Service) guardPlace(ctx context.Context, watch Watch, store func() erro
 	return evaluator.places.GuardPlace(ctx, watch.PrincipalID, watch.Target.Place, store)
 }
 
+var (
+	placeGoneMessage   = locale.T("The saved place %s no longer exists.", "Сохранённого места %s больше нет.")
+	notSharingMessage  = locale.T("It works only while you share your live location in this chat, and you are not sharing it now.", "Оно работает, только пока ты делишься геопозицией в этом чате, а сейчас ты ею не делишься.")
+	placeArrived       = locale.T("You arrived at %s.", "Прибытие: %s.")
+	placeLeft          = locale.T("You left %s.", "Уход: %s.")
+	placeNoticedByLive = locale.T("Noticed on your live location.", "Замечено по твоей геопозиции.")
+)
+
+// placeGoneText is the refusal the model reads, in English.
 func placeGoneText(spec Spec) string {
-	return "The saved place " + spec.Target.Name + " no longer exists."
+	return placeGoneMessage.FormatIn(locale.English, spec.Target.Name)
+}
+
+// placeGoneIn is the refusal in the context's language, for the user.
+func placeGoneIn(ctx context.Context, spec Spec) string {
+	return placeGoneMessage.Format(ctx, spec.Target.Name)
 }
 
 // PlaceEvaluator resolves place watches to the user's saved places. A place watch is never checked
@@ -79,13 +95,10 @@ func (e *PlaceEvaluator) Evaluate(context.Context, string, Watch, Occurrence) (O
 	return Observation{}, fmt.Errorf("place watches are told of arrivals and leavings: %w", ErrSkip)
 }
 
-// notSharingNote is what a place watch's owner is told when they set one up without sharing their
-// live location.
-const notSharingNote = "It works only while you share your live location in this chat, and you are not sharing it now."
-
-// placeNote is notSharingNote when the principal shares no live location now, and empty otherwise
-// or when that cannot be told.
-func (s *Service) placeNote(ctx context.Context, principalID string) string {
+// placeNote is what a place watch's owner is told when they set one up without sharing their live
+// location, in the language given: English for the model and the context's for the user. It is
+// empty when the principal shares a live location now or when that cannot be told.
+func (s *Service) placeNote(ctx context.Context, principalID string, language locale.Language) string {
 	evaluator, ok := s.evaluators[KindPlace].(*PlaceEvaluator)
 	if !ok {
 		return ""
@@ -94,7 +107,7 @@ func (s *Service) placeNote(ctx context.Context, principalID string) string {
 	if err != nil || sharing {
 		return ""
 	}
-	return notSharingNote
+	return notSharingMessage.FormatIn(language)
 }
 
 // PlaceEvent alerts the principal's enabled place watches on the place that ask for this edge, when
@@ -102,6 +115,7 @@ func (s *Service) placeNote(ctx context.Context, principalID string) string {
 // alert counts against its window's messages, as any watch's does, and the delivery that follows is
 // the loop's.
 func (s *Service) PlaceEvent(ctx context.Context, principalID, placeID, placeName, edge string, at time.Time) {
+	ctx = s.withLanguage(ctx, principalID)
 	watches, err := s.repository.ListWatches(ctx, principalID)
 	if err != nil {
 		if ctx.Err() == nil {
@@ -137,7 +151,7 @@ func (s *Service) PlaceEvent(ctx context.Context, principalID, placeID, placeNam
 			}
 		}
 		now := s.now()
-		alert := queue(&state, watch, occurrence, now, alertTypeAlert, placeText(watch, placeName, edge))
+		alert := queue(&state, watch, occurrence, now, alertTypeAlert, placeText(ctx, watch, placeName, edge))
 		state.Key, state.CheckedAt = edge, now
 		if err := s.repository.SaveWatchCheck(ctx, state, alert, now); err != nil {
 			s.logWatchError(ctx, watch, "store_check", err)
@@ -156,14 +170,14 @@ func (s *Service) PlaceEvent(ctx context.Context, principalID, placeID, placeNam
 	}
 }
 
-func placeText(watch Watch, placeName, edge string) string {
+func placeText(ctx context.Context, watch Watch, placeName, edge string) string {
 	name := placeName
 	if name == "" {
 		name = watch.Target.Name
 	}
-	headline := "You arrived at " + name + "."
+	headline := placeArrived.Format(ctx, name)
 	if edge == TriggerLeave {
-		headline = "You left " + name + "."
+		headline = placeLeft.Format(ctx, name)
 	}
-	return "**📍 " + watch.Label() + "**\n\n" + headline + " Noticed on your live location."
+	return "**📍 " + watch.LabelIn(locale.From(ctx)) + "**\n\n" + headline + " " + placeNoticedByLive.Format(ctx)
 }

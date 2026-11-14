@@ -373,10 +373,15 @@ func (u *Updates) check(ctx context.Context, item Trip, started time.Time) {
 		if u.language != nil {
 			sample = u.language.Sample(ctx, principalID, item.ID)
 		}
+		turnCtx := ctx
+		if u.language != nil && sample == "" {
+			// With no sample of the user's own writing, the turn is told the language they chose.
+			turnCtx = u.language.Chosen(ctx, principalID)
+		}
 		calls := &tools.CallLog{}
 		message := prompt.TripUpdates(item.Title, started, u.where(item, started),
 			UpdatePrompt(item, days, readable.web, sample, known[:min(len(known), promptedUpdates)]))
-		text, errorKind, err := u.checker.RunCheck(tools.WithCallLog(tools.WithCallBudget(ctx, updateBudget), calls), principalID, message)
+		text, errorKind, err := u.checker.RunCheck(tools.WithCallLog(tools.WithCallBudget(turnCtx, updateBudget), calls), principalID, message)
 		if ctx.Err() != nil {
 			return
 		}

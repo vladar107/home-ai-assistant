@@ -112,6 +112,10 @@ type Config struct {
 	Feeds thread.Feeds
 	// Tabs keeps each agent watch's tab; nil leaves watches without tabs of their own.
 	Tabs Tabs
+	// Languages gives each alert the owner's chosen interface language: its fixed lines are written
+	// in it, and a watch with no language of its own is rewritten into Russian when that is the
+	// choice. Nil leaves every watch in English.
+	Languages locale.Preferences
 	// Traces keeps what each delivered alert was based on: the check turn of an agent watch, or for
 	// the others the rules code checked; nil keeps nothing.
 	Traces Traces
@@ -134,6 +138,7 @@ type Service struct {
 	feeds      thread.Feeds
 	tabs       Tabs
 	traces     Traces
+	languages  locale.Preferences
 	logger     *slog.Logger
 	zone       string
 	tick       time.Duration
@@ -213,6 +218,7 @@ func NewService(cfg Config, repository Repository, chats Chats, sender Sender, p
 		feeds:      cfg.Feeds,
 		tabs:       cfg.Tabs,
 		traces:     cfg.Traces,
+		languages:  cfg.Languages,
 		telemetry:  cfg.Telemetry,
 		logger:     logger,
 		zone:       cfg.Zone,
@@ -288,6 +294,16 @@ func (s *Service) inFeed(ctx context.Context, alert Alert, chatID int64) context
 		threadID = 0
 	}
 	return thread.WithDelivery(ctx, threadID)
+}
+
+// withLanguage returns ctx carrying the principal's chosen language, as the conversation service
+// does for a turn; a store failure is logged and leaves the context in English.
+func (s *Service) withLanguage(ctx context.Context, principalID string) context.Context {
+	withLanguage, err := locale.ForPrincipal(ctx, s.languages, principalID)
+	if err != nil && ctx.Err() == nil {
+		s.logger.WarnContext(ctx, "watch.language.load_failed", "principal_id", principalID, "error", err)
+	}
+	return withLanguage
 }
 
 // SetTelemetry sets where watch metrics are recorded, at wiring time before the service starts.
@@ -438,6 +454,8 @@ func (s *Service) check(ctx context.Context, watch Watch, now time.Time, cache *
 	if found && now.Sub(state.CheckedAt) < interval(watch.Kind, now, occurrence.End)-checkSlack {
 		return
 	}
+	// Read only once the watch is due, since every tick visits every watch.
+	ctx = s.withLanguage(ctx, watch.PrincipalID)
 	checked := state.CheckedAt
 	if !found {
 		state = State{WatchID: watch.ID, PrincipalID: watch.PrincipalID, Occurrence: occurrence.Date}
@@ -504,7 +522,7 @@ func (s *Service) check(ctx context.Context, watch Watch, now time.Time, cache *
 			"kind", watch.Kind, "failures", state.Failures, "service", service, "error", err)
 		if state.Failures >= FailureNoticeAfter && !state.FailureNoticed {
 			state.FailureNoticed = true
-			alert = queue(&state, watch, occurrence, now, alertTypeFailure, failureText(watch))
+			alert = queue(&state, watch, occurrence, now, alertTypeFailure, failureText(ctx, watch))
 		}
 	} else {
 		state.Failures = 0
@@ -521,12 +539,12 @@ func (s *Service) check(ctx context.Context, watch Watch, now time.Time, cache *
 					trigger = TriggerChange
 				}
 				if wanted(watch, trigger) {
-					alert = queue(&state, watch, occurrence, now, alertTypeAlert, alertText(watch, observation))
+					alert = queue(&state, watch, occurrence, now, alertTypeAlert, alertText(ctx, watch, observation))
 				}
 				state.Alerted = true
 			case state.Alerted:
 				if wanted(watch, TriggerClear) {
-					alert = queue(&state, watch, occurrence, now, alertTypeRecovered, recoveredText(watch, observation))
+					alert = queue(&state, watch, occurrence, now, alertTypeRecovered, recoveredText(ctx, watch, observation))
 				}
 				state.Alerted = false
 			}
@@ -611,8 +629,14 @@ func queue(state *State, watch Watch, occurrence Occurrence, now time.Time, aler
 	}
 }
 
-func alertText(watch Watch, observation Observation) string {
-	lines := []string{"**⚠️ " + watch.Label() + "**", ""}
+var (
+	backToNormal    = locale.T("Back to normal.", "Снова всё в порядке.")
+	noLongerTheCase = locale.T("No longer the case.", "Это больше не так.")
+	cannotCheck     = locale.T("I can't check this right now. I'll keep trying and tell you if something goes wrong.", "Сейчас не могу это проверить. Буду пробовать дальше и скажу, если что-то пойдёт не так.")
+)
+
+func alertText(ctx context.Context, watch Watch, observation Observation) string {
+	lines := []string{"**⚠️ " + watch.LabelIn(locale.From(ctx)) + "**", ""}
 	if headline := strings.TrimSpace(observation.Headline); headline != "" {
 		lines = append(lines, headline)
 	}
@@ -625,20 +649,20 @@ func alertText(watch Watch, observation Observation) string {
 	return strings.Join(lines, "\n")
 }
 
-func recoveredText(watch Watch, observation Observation) string {
-	ended := "Back to normal."
+func recoveredText(ctx context.Context, watch Watch, observation Observation) string {
+	ended := backToNormal.Format(ctx)
 	if watch.Kind == KindAgent {
-		ended = "No longer the case."
+		ended = noLongerTheCase.Format(ctx)
 	}
-	text := "**✅ " + watch.Label() + "**\n\n" + ended
+	text := "**✅ " + watch.LabelIn(locale.From(ctx)) + "**\n\n" + ended
 	if headline := strings.TrimSpace(observation.Headline); headline != "" {
 		text += " " + headline
 	}
 	return text
 }
 
-func failureText(watch Watch) string {
-	return "**❔ " + watch.Label() + "**\n\nI can't check this right now. I'll keep trying and tell you if something goes wrong."
+func failureText(ctx context.Context, watch Watch) string {
+	return "**❔ " + watch.LabelIn(locale.From(ctx)) + "**\n\n" + cannotCheck.Format(ctx)
 }
 
 // deliver sends the ready alerts to their owners. An alert past its window, or of a watch paused
@@ -709,7 +733,14 @@ func (s *Service) deliver(ctx context.Context) {
 // rewrite fails, is late, or loses one of the text's numbers, so a message is never lost or held
 // back by its translation.
 func (s *Service) localize(ctx context.Context, alert Alert) string {
-	if alert.Language == "" || s.rewriter == nil {
+	if s.rewriter == nil {
+		return alert.Text
+	}
+	language := alert.Language
+	if language == "" && locale.From(s.withLanguage(ctx, alert.PrincipalID)) == locale.Russian {
+		language = "Russian"
+	}
+	if language == "" {
 		return alert.Text
 	}
 	original, links := alert.Text, []placedLink(nil)
@@ -718,7 +749,7 @@ func (s *Service) localize(ctx context.Context, alert Alert) string {
 	}
 	started := s.now()
 	rewriteCtx, cancel := context.WithTimeout(ctx, rewriteTimeout)
-	rewritten, err := s.rewriter.RewriteAlert(rewriteCtx, alert.PrincipalID, alert.Language, original)
+	rewritten, err := s.rewriter.RewriteAlert(rewriteCtx, alert.PrincipalID, language, original)
 	cancel()
 	rewritten = strings.TrimSpace(rewritten)
 	outcome := rewriteRewritten
