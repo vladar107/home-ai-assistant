@@ -71,6 +71,7 @@ func userMessages(t *testing.T, cfg pi.Config, session, message string) int {
 	return count
 }
 
+// Serial: a start-up slowed by parallel tests must not read as a 1.5 s stall.
 func TestSilentTurnIsRetriedOnceWithoutRepeatingTheUserMessage(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -108,6 +109,7 @@ func TestSilentTurnIsRetriedOnceWithoutRepeatingTheUserMessage(t *testing.T) {
 	}
 }
 
+// Serial: a start-up slowed by parallel tests must not read as a 1.5 s stall.
 func TestSilenceAfterAToolCallWaitsForTheTurnDeadline(t *testing.T) {
 	r, cfg, reader := stallRuntime(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)

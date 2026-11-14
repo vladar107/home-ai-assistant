@@ -69,6 +69,7 @@ func assertStripped(t *testing.T, path string) {
 }
 
 func TestForgetImagesKeepsTheConversationResumable(t *testing.T) {
+	t.Parallel()
 	cfg := config(t)
 	r := newRuntime(t, cfg)
 	run := request("photo-session", "what is on this label?")
@@ -104,6 +105,7 @@ func TestForgetImagesKeepsTheConversationResumable(t *testing.T) {
 }
 
 func TestForgetImagesWaitsForTheRunningTurn(t *testing.T) {
+	t.Parallel()
 	cfg := config(t)
 	r := newRuntime(t, cfg)
 	path := writeSessionFile(t, cfg, "busy-session", time.Now().Add(-time.Hour))
@@ -146,6 +148,7 @@ func (r *sessionReferences) DeleteClosedConversations(_ context.Context, closedB
 }
 
 func TestPrunerKeepsConversationsWithoutPhotosAndRemovesOldUnreferencedFiles(t *testing.T) {
+	t.Parallel()
 	cfg := config(t)
 	r := newRuntime(t, cfg)
 	cutoff := time.Now().Add(-30 * 24 * time.Hour)

@@ -23,6 +23,7 @@ func flagValue(t *testing.T, args []string, flag string) string {
 }
 
 func TestEveryRunNamesModelAndEffort(t *testing.T) {
+	t.Parallel()
 	cfg := config(t)
 	r := newRuntime(t, cfg)
 	tests := []struct {
@@ -63,6 +64,7 @@ func TestEveryRunNamesModelAndEffort(t *testing.T) {
 }
 
 func TestResumedSessionIsGivenTheFlagsAgain(t *testing.T) {
+	t.Parallel()
 	cfg := config(t)
 	r := newRuntime(t, cfg)
 	first := request("resumed", "remember amber")
@@ -84,6 +86,7 @@ func TestResumedSessionIsGivenTheFlagsAgain(t *testing.T) {
 }
 
 func TestResultReportsAnsweringModelAndTokens(t *testing.T) {
+	t.Parallel()
 	cfg := config(t)
 	reader := sdkmetric.NewManualReader()
 	telemetry, err := observability.NewWithReader(reader)
@@ -123,6 +126,7 @@ func TestResultReportsAnsweringModelAndTokens(t *testing.T) {
 }
 
 func TestRunRejectsAnUnknownEffortBeforeStartingPi(t *testing.T) {
+	t.Parallel()
 	cfg := config(t)
 	r := newRuntime(t, cfg)
 	run := request("bad-effort", "fixture:model")

@@ -96,6 +96,7 @@ func principalRequest(principal, session, message string) agentruntime.RunReques
 	return agentruntime.RunRequest{PrincipalID: principal, SessionID: session, Message: message}
 }
 
+// Serial: sets environment variables with t.Setenv.
 func TestProcessConfigurationAndSessionContinuity(t *testing.T) {
 	t.Setenv("HOME_AGENT_TELEGRAM_BOT_TOKEN", "synthetic-private-token")
 	t.Setenv("OPENAI_API_KEY", "synthetic-private-key")
@@ -180,6 +181,7 @@ func TestProcessConfigurationAndSessionContinuity(t *testing.T) {
 }
 
 func TestPromptCarriesImages(t *testing.T) {
+	t.Parallel()
 	cfg := config(t)
 	r := newRuntime(t, cfg)
 	picture := []byte("\x89PNG synthetic picture bytes")
@@ -209,6 +211,7 @@ func TestPromptCarriesImages(t *testing.T) {
 }
 
 func TestConcurrentPrincipalsUseSeparateAgentDirectories(t *testing.T) {
+	t.Parallel()
 	cfg := config(t)
 	r := newUnprovisionedRuntime(t, cfg)
 	principals := []string{"alice", "bob"}
@@ -257,6 +260,7 @@ func TestConcurrentPrincipalsUseSeparateAgentDirectories(t *testing.T) {
 }
 
 func TestUnconnectedPrincipalNeverStartsAProcess(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, principal string
 		prepare         func(*testing.T, pi.Config)
@@ -269,6 +273,7 @@ func TestUnconnectedPrincipalNeverStartsAProcess(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			cfg := config(t)
 			r := newUnprovisionedRuntime(t, cfg)
 			if tc.prepare != nil {
@@ -288,10 +293,12 @@ func TestUnconnectedPrincipalNeverStartsAProcess(t *testing.T) {
 }
 
 func TestInvalidPrincipalIsRejectedBeforeStart(t *testing.T) {
+	t.Parallel()
 	cfg := config(t)
 	r := newUnprovisionedRuntime(t, cfg)
 	for _, principal := range []string{"../escape", "with/slash", "with space", ".hidden", ""} {
 		t.Run(principal, func(t *testing.T) {
+			t.Parallel()
 			_, err := r.Run(context.Background(), principalRequest(principal, "invalid", "hello"), &eventSink{})
 			if err == nil {
 				t.Fatal("invalid principal was accepted")
@@ -306,6 +313,7 @@ func TestInvalidPrincipalIsRejectedBeforeStart(t *testing.T) {
 }
 
 func TestVersionCompatibility(t *testing.T) {
+	t.Parallel()
 	cfg := config(t)
 	cfg.ExpectedVersion = "incompatible-version"
 	_, err := pi.New(context.Background(), cfg)
@@ -320,6 +328,7 @@ func TestVersionCompatibility(t *testing.T) {
 }
 
 func TestProcessFailuresAreBoundedAndContentFree(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ scenario, message string }{
 		{"malformed", "read Pi output"},
 		{"oversized-event", "read Pi output"},
@@ -333,6 +342,7 @@ func TestProcessFailuresAreBoundedAndContentFree(t *testing.T) {
 		{"exit", ""},
 	} {
 		t.Run(tc.scenario, func(t *testing.T) {
+			t.Parallel()
 			cfg := config(t)
 			r := newRuntime(t, cfg)
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -352,6 +362,7 @@ func TestProcessFailuresAreBoundedAndContentFree(t *testing.T) {
 	}
 }
 
+// Serial: asserts that each turn fails within 3 s.
 func TestActionableProviderFailuresEndTheTurn(t *testing.T) {
 	for _, tc := range []struct {
 		scenario string
@@ -395,11 +406,13 @@ func TestActionableProviderFailuresEndTheTurn(t *testing.T) {
 }
 
 func TestUncategorizedProviderFailuresStayWithPi(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ scenario, response, message string }{
 		{"unrelated-error", "", "empty response"},
 		{"retry-transient", "recovered", ""},
 	} {
 		t.Run(tc.scenario, func(t *testing.T) {
+			t.Parallel()
 			cfg := config(t)
 			r := newRuntime(t, cfg)
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -428,8 +441,10 @@ func TestUncategorizedProviderFailuresStayWithPi(t *testing.T) {
 }
 
 func TestCancellationAndTimeoutStopRealProcess(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, message string }{{"cancel", "fixture:hold"}, {"timeout", "fixture:hold"}, {"uncooperative child", "fixture:stubborn"}} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			cfg := config(t)
 			r := newRuntime(t, cfg)
 			ctx, cancel := context.WithCancel(context.Background())
@@ -463,6 +478,7 @@ func TestCancellationAndTimeoutStopRealProcess(t *testing.T) {
 }
 
 func TestSinkFailureStopsProcess(t *testing.T) {
+	t.Parallel()
 	cfg := config(t)
 	r := newRuntime(t, cfg)
 	sinkErr := errors.New("sink closed")
@@ -473,6 +489,7 @@ func TestSinkFailureStopsProcess(t *testing.T) {
 	assertProcessStopped(t, readReport(t, cfg, testPrincipal, "sink-failure"))
 }
 
+// Serial: counts the event readers of the whole test process.
 func TestRejectingQueuedEventsReleasesReader(t *testing.T) {
 	cfg := config(t)
 	r := newRuntime(t, cfg)
@@ -566,6 +583,7 @@ func extensionArgs(args []string) []string {
 }
 
 func TestWebSearchTurnLoadsOnlyTheSearchExtension(t *testing.T) {
+	t.Parallel()
 	cfg := webSearchConfig(t)
 	r := newRuntime(t, cfg)
 	run := request("web-search", "fixture:web-search")
@@ -621,6 +639,7 @@ func TestWebSearchTurnLoadsOnlyTheSearchExtension(t *testing.T) {
 }
 
 func TestWebSearchTurnWithToolsLoadsBridgeFirst(t *testing.T) {
+	t.Parallel()
 	cfg := webSearchConfig(t)
 	r := newRuntime(t, cfg)
 	provider := &echoProvider{principal: testPrincipal}
@@ -651,6 +670,7 @@ func TestWebSearchTurnWithToolsLoadsBridgeFirst(t *testing.T) {
 }
 
 func TestWebSearchWithoutExtensionNeverStarts(t *testing.T) {
+	t.Parallel()
 	cfg := config(t)
 	r := newRuntime(t, cfg)
 	run := request("web-search-unconfigured", "hello")
@@ -663,11 +683,13 @@ func TestWebSearchWithoutExtensionNeverStarts(t *testing.T) {
 }
 
 func TestUnavailableWebSearchExtensionFailsStartup(t *testing.T) {
+	t.Parallel()
 	for name, path := range map[string]string{
 		"missing":   filepath.Join(t.TempDir(), "missing.ts"),
 		"directory": t.TempDir(),
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			cfg := config(t)
 			cfg.WebSearchExtension = path
 			if _, err := pi.New(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "web search extension") {

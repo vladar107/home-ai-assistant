@@ -47,6 +47,7 @@ func searchTurn(t *testing.T, check agentruntime.SearchCheck, query string) stri
 }
 
 func TestSearchRunsOnlyWhenTheCheckAllowsIt(t *testing.T) {
+	t.Parallel()
 	recorder := &searchRecorder{}
 	decisions := map[string]agentruntime.SearchDecision{
 		"plain":   {Verdict: agentruntime.SearchAllow, Reason: "clean"},
@@ -72,6 +73,7 @@ func TestSearchRunsOnlyWhenTheCheckAllowsIt(t *testing.T) {
 // An empty query is the model's slip; it is told so rather than that search is down, and the check
 // never sees it.
 func TestEmptySearchQueryIsRefusedAsEmpty(t *testing.T) {
+	t.Parallel()
 	check := func(context.Context, string) agentruntime.SearchDecision {
 		t.Error("check ran for an empty query")
 		return agentruntime.SearchDecision{Verdict: agentruntime.SearchAllow}
@@ -83,6 +85,7 @@ func TestEmptySearchQueryIsRefusedAsEmpty(t *testing.T) {
 }
 
 func TestSearchWithoutACheckIsRefused(t *testing.T) {
+	t.Parallel()
 	got := searchTurn(t, nil, "plain")
 	if want := "Searching.\n\nsaw: Web search is unavailable right now; the search was not run."; got != want {
 		t.Fatalf("response = %q, want %q", got, want)
@@ -90,6 +93,7 @@ func TestSearchWithoutACheckIsRefused(t *testing.T) {
 }
 
 func TestSearchCheckSeesTheTurnContext(t *testing.T) {
+	t.Parallel()
 	type key struct{}
 	cfg := webSearchConfig(t)
 	r := newRuntime(t, cfg)
@@ -111,6 +115,7 @@ func TestSearchCheckSeesTheTurnContext(t *testing.T) {
 }
 
 func TestSearchCheckEndpointRequiresTheTurnToken(t *testing.T) {
+	t.Parallel()
 	cfg := webSearchConfig(t)
 	r := newRuntime(t, cfg)
 	run := request("search-endpoint", "fixture:hold")
@@ -151,6 +156,7 @@ func TestSearchCheckEndpointRequiresTheTurnToken(t *testing.T) {
 // The vendored extension is written in TypeScript, which only Node can run here, so its fail-closed
 // behaviour is exercised only where Node is installed.
 func TestVendoredExtensionRefusesUnlessTheCheckAllows(t *testing.T) {
+	t.Parallel()
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node is not installed")
@@ -195,6 +201,7 @@ func TestVendoredExtensionRefusesUnlessTheCheckAllows(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			command := exec.Command(node, script)
 			command.Env = append(os.Environ(), "HOME_AGENT_SEARCH_CHECK_URL="+c.url, "HOME_AGENT_TOOL_BRIDGE_TOKEN="+c.token)
 			output, err := command.Output()

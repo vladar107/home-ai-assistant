@@ -74,6 +74,7 @@ func modelTokenCounts(t *testing.T, collected metricdata.ResourceMetrics) map[st
 }
 
 func TestAssistantMessagesRecordModelCallsAndTokens(t *testing.T) {
+	t.Parallel()
 	result, collected, sink := runUsageTurn(t, "fixture:usage")
 	wantUsage := agentruntime.Usage{ModelCalls: 2, PromptTokens: 160 + 150, OutputTokens: 25}
 	if result.Usage != wantUsage {
@@ -104,6 +105,7 @@ func TestAssistantMessagesRecordModelCallsAndTokens(t *testing.T) {
 }
 
 func TestAssistantMessageWithoutUsageCountsTheCallOnly(t *testing.T) {
+	t.Parallel()
 	result, collected, _ := runUsageTurn(t, "fixture:usage-missing")
 	wantUsage := agentruntime.Usage{ModelCalls: 2, PromptTokens: 160, OutputTokens: 20}
 	if result.Usage != wantUsage {

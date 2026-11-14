@@ -120,12 +120,14 @@ func assertModelCalls(t *testing.T, turn modelCallTurn, want map[string]int64) {
 }
 
 func TestUnansweredModelCallTimesOut(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, message string }{
 		{"never answers", "fixture:stubborn"},
 		// Pi exits on SIGINT, so its exit may race ctx.Done in the runtime's select.
 		{"exits on interrupt", "fixture:hold"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			turn := runModelCallTurn(t, tc.message, 500*time.Millisecond)
 			if turn.err == nil {
 				t.Fatal("unanswered turn succeeded")
@@ -136,6 +138,7 @@ func TestUnansweredModelCallTimesOut(t *testing.T) {
 }
 
 func TestModelCallOutcomes(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, message string
 		want          map[string]int64
@@ -144,6 +147,7 @@ func TestModelCallOutcomes(t *testing.T) {
 		{"provider error", "fixture:unrelated-error", map[string]int64{"failed": 1}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			turn := runModelCallTurn(t, tc.message, 10*time.Second)
 			assertModelCalls(t, turn, tc.want)
 		})
@@ -151,6 +155,7 @@ func TestModelCallOutcomes(t *testing.T) {
 }
 
 func TestPiRetriesStayInsideOneModelCall(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, message, outcome string
 		succeeds               bool
@@ -159,6 +164,7 @@ func TestPiRetriesStayInsideOneModelCall(t *testing.T) {
 		{"retries exhausted", "fixture:pi-retry-exhausted", "failed", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			turn := runModelCallTurn(t, tc.message, 10*time.Second)
 			if (turn.err == nil) != tc.succeeds {
 				t.Fatalf("error = %v", turn.err)

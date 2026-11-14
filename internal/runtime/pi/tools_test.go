@@ -105,6 +105,7 @@ func environmentValue(report pifixture.Report, name string) string {
 	return ""
 }
 
+// Serial: it dials the closed bridge's port, which a parallel test's listener may have taken.
 func TestToolTurnBridgesCallsThroughTheBroker(t *testing.T) {
 	cfg := config(t)
 	r := newRuntime(t, cfg)
@@ -202,6 +203,7 @@ func TestToolTurnBridgesCallsThroughTheBroker(t *testing.T) {
 // A call that fails ends with Pi's error flag, under the call's id, and the broker keeps its own
 // outcome under the same id.
 func TestToolEndCarriesTheErrorFlag(t *testing.T) {
+	t.Parallel()
 	cfg := config(t)
 	r := newRuntime(t, cfg)
 	provider := &echoProvider{principal: testPrincipal, respond: func(tools.Call) (tools.Result, error) {
@@ -225,6 +227,7 @@ func TestToolEndCarriesTheErrorFlag(t *testing.T) {
 }
 
 func TestToolBridgeRejectsCallsOutsideTheGrant(t *testing.T) {
+	t.Parallel()
 	cfg := config(t)
 	r := newRuntime(t, cfg)
 	oversized := strings.Repeat("x", (16<<10)+1)
@@ -328,6 +331,7 @@ func TestToolBridgeRejectsCallsOutsideTheGrant(t *testing.T) {
 }
 
 func TestToolTurnWithoutExecutorNeverStarts(t *testing.T) {
+	t.Parallel()
 	cfg := config(t)
 	r := newRuntime(t, cfg)
 	set := agentruntime.ToolSet{Definitions: []agentruntime.ToolDefinition{{Name: "echo_tool", Description: "Echo.", InputSchema: json.RawMessage(echoSchema)}}}
@@ -355,6 +359,7 @@ func assertBridgeRemoved(t *testing.T, cfg pi.Config, extension string) {
 }
 
 func TestMemoryFollowsTheToolGuidanceInTheSystemPrompt(t *testing.T) {
+	t.Parallel()
 	cfg := config(t)
 	r := newRuntime(t, cfg)
 	provider := &echoProvider{principal: testPrincipal, guidance: "Use echo_tool to repeat text."}

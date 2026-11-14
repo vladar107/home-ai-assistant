@@ -130,6 +130,7 @@ func reportExists(cfg pi.Config, session string) bool {
 	return err == nil
 }
 
+// Serial: waits out the 1.5 s stall timeout while it counts the process slots.
 func TestBackgroundTurnsWaitWhileChatTurnsRun(t *testing.T) {
 	r, cfg, reader := limitedRuntime(t)
 	running := startTurns(t, r)
@@ -181,6 +182,7 @@ func TestBackgroundTurnsWaitWhileChatTurnsRun(t *testing.T) {
 	awaitProcessCount(t, reader, "chat", "running", 0)
 }
 
+// Serial: a start-up slowed by parallel tests must not read as a 1.5 s stall.
 func TestFreedSlotGoesToAWaitingChatTurnFirst(t *testing.T) {
 	r, cfg, reader := limitedRuntime(t)
 	running := startTurns(t, r)
@@ -211,6 +213,7 @@ func TestFreedSlotGoesToAWaitingChatTurnFirst(t *testing.T) {
 	awaitProcessCount(t, reader, "background", "waiting", 0)
 }
 
+// Serial: a start-up slowed by parallel tests must not read as a 1.5 s stall.
 func TestWaitingTurnEndsOnCancellation(t *testing.T) {
 	r, cfg, reader := limitedRuntime(t)
 	running := startTurns(t, r)
@@ -231,6 +234,8 @@ func TestWaitingTurnEndsOnCancellation(t *testing.T) {
 	awaitProcessCount(t, reader, "background", "running", 2)
 }
 
+// Serial: under load the exit can close Pi's output before it is read, which reads as an invalid
+// event stream instead of the exit code.
 func TestEarlyExitLogsScrubbedStderr(t *testing.T) {
 	cfg := config(t)
 	var logs bytes.Buffer
