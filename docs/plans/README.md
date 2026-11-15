@@ -167,7 +167,7 @@ plan that links back to the earlier record.
 | 0155 | [Regular agent evaluations and prompt experiments](0155-agent-evals-and-prompt-experiments.md) | in-progress |
 | 0156 | [OAuth for MCP servers](0156-mcp-oauth.md) | proposed |
 | 0157 | [Pi 1.1.0 in production](0157-pi-1-1.md) | done |
-| 0158 | [Resolve feed tabs at first send and replace a gone one at once](0158-feed-tab-replacement.md) | in-progress |
+| 0158 | [Resolve feed tabs at first send and replace a gone one at once](0158-feed-tab-replacement.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

@@ -1,6 +1,6 @@
 # 0158 — Resolve feed tabs at first send and replace a gone one at once
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
