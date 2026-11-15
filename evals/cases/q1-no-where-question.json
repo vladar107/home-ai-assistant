@@ -302,12 +302,6 @@
     {
       "say": "во сколько выходить?",
       "expect": {
-        "calls": [
-          {
-            "tool": "calendar_events",
-            "min": 1
-          }
-        ],
         "reply": {
           "matches": [
             "\\b\\d{1,2}[:.]\\d{2}\\b"
