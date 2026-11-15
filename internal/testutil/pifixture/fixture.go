@@ -31,7 +31,7 @@ type Report struct {
 	Message     string   `json:"message"`
 	Images      []Image  `json:"images"`
 	// SystemPrompt is the prompt Pi would use: the contents of the --system-prompt file when the
-	// argument names one, as Pi 1.0.0 reads it, and the argument itself otherwise.
+	// argument names one, as Pi 1.1.0 reads it, and the argument itself otherwise.
 	// SystemPromptMode is that file's permission bits, zero when it is not a file.
 	SystemPrompt     string      `json:"system_prompt"`
 	SystemPromptMode os.FileMode `json:"system_prompt_mode"`
@@ -273,7 +273,7 @@ func run() error {
 		emit(map[string]any{"type": "message_end", "message": final})
 		settle()
 	case "fixture:pi-tools":
-		// Pi 1.0.0's own order for a parallel tool batch: turn_start precedes every assistant
+		// Pi 1.1.0's own order for a parallel tool batch: turn_start precedes every assistant
 		// request, and tool ends arrive in completion order before the tool result messages.
 		ack()
 		emit(map[string]string{"type": "agent_start"})
@@ -302,7 +302,7 @@ func run() error {
 		emit(map[string]string{"type": "agent_end"})
 		settle()
 	case "fixture:pi-retry", "fixture:pi-retry-exhausted":
-		// Pi 1.0.0 schedules a retry only after the failed attempt's turn and run end, then
+		// Pi 1.1.0 schedules a retry only after the failed attempt's turn and run end, then
 		// sleeps through the backoff before starting a new run.
 		ack()
 		emit(map[string]string{"type": "agent_start"})
@@ -507,7 +507,7 @@ func run() error {
 	return err
 }
 
-// recordExchange appends the turn to the session file the way Pi 1.0.0 does: a JSONL file named
+// recordExchange appends the turn to the session file the way Pi 1.1.0 does: a JSONL file named
 // <timestamp>_<session id>.jsonl, resumed only when its header records the same working directory,
 // with the prompt and the answer as message entries chained by parentId. A prompt's images follow
 // its text in the user message's content, as base64 image blocks.

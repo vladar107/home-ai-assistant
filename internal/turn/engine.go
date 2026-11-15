@@ -33,7 +33,7 @@ type Engine struct {
 	mu sync.Mutex
 	// slots holds one slot per lane, so a lane's chat turns take turns with each other and the main
 	// lane's also with scheduled runs. It once guarded a whole principal against a credential-refresh
-	// race that Pi 1.0.0 removed by locking auth.json, which is why tabs and background tasks run
+	// race that Pi removed from 1.0.0 on by locking auth.json, which is why tabs and background tasks run
 	// beside each other.
 	slots map[Lane]chan struct{}
 

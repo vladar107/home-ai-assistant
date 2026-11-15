@@ -37,7 +37,7 @@ func readFile(t *testing.T, path string) string {
 	return string(data)
 }
 
-// writeSessionFile writes a session the way Pi 1.0.0 records one with a photo in its first message.
+// writeSessionFile writes a session the way Pi 1.1.0 records one with a photo in its first message.
 func writeSessionFile(t *testing.T, cfg pi.Config, session string, modified time.Time) string {
 	t.Helper()
 	directory := sessionDir(cfg, testPrincipal)
