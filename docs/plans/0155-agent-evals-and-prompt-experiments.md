@@ -445,7 +445,12 @@ they run one at a time in that order, each on top of the one before.
      reports no difference; runs over different case sets compare only their shared cases and
      say so.
 10. **Replay** — Simple; depends on 9.
-   - Task: re-score stored cassettes with the current checks, as a `replay` command.
+   - Task: re-score stored cassettes with the current checks, as a `replay --run <id>` command
+     that writes a new run marked replayed and linked to its source, copies the source's review
+     so the agreement report shows what a changed check does to it, and lists the trials whose
+     verdict changed. Store checks need the world's store, which a cassette does not hold, so a
+     trial keeps its store verdicts while the case still expects them; a case whose steps no
+     longer match its cassette, or that no longer exists, reports an error for that trial.
    - Files: `internal/eval/replay.go`, `cmd/home-agent-eval/main.go`.
    - Acceptance: changing a check and replaying a run changes its verdicts without starting Pi,
      and the report marks the run as replayed.

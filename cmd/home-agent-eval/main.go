@@ -19,7 +19,7 @@ import (
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 )
 
-const usageText = "usage: home-agent-eval <login|usage|scan|run|review|report|import|trend|compare> [flags]"
+const usageText = "usage: home-agent-eval <login|usage|scan|run|review|report|import|trend|compare|replay> [flags]"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -47,6 +47,8 @@ func run(ctx context.Context, args []string) error {
 		return runReview(args[1:])
 	case "report":
 		return runReport(args[1:])
+	case "replay":
+		return runReplay(ctx, args[1:])
 	case "import":
 		return runImport(ctx, args[1:])
 	case "trend":
@@ -290,6 +292,32 @@ func openStore(flags *flag.FlagSet, args []string) (*eval.ResultsStore, string, 
 	}
 	store, err := eval.OpenResultsStore(*results)
 	return store, *results, err
+}
+
+func runReplay(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("replay", flag.ContinueOnError)
+	results := flags.String("results", eval.DefaultResultsDir, "directory the runs are written under")
+	runID := flags.String("run", "", "run ID to replay (default: the latest run)")
+	casesDir := flags.String("cases", "evals/cases", "directory of case files holding the checks to score with")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if *runID == "" {
+		latest, err := eval.LatestRun(*results)
+		if err != nil {
+			return err
+		}
+		*runID = latest
+	}
+	replayed, err := eval.Replay(ctx, eval.ReplayOptions{ResultsDir: *results, SourceRunID: *runID, CasesDir: *casesDir})
+	if replayed != nil {
+		fmt.Printf("replayed %s as %s: pass rate %s, pass^k %.1f%% (k=%d); %d verdict(s) changed\nreport: %s\n", *runID, replayed.RunID,
+			replayed.Summary.Overall, 100*replayed.Summary.PassK, replayed.Summary.K, len(replayed.ReplayChanges), filepath.Join(replayed.Dir, "report.md"))
+	}
+	if err != nil {
+		return err
+	}
+	return importRun(ctx, replayed.Dir)
 }
 
 func runImport(ctx context.Context, args []string) error {

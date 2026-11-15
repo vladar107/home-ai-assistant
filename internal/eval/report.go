@@ -131,6 +131,8 @@ type Result struct {
 	Replayed           bool     `json:"replayed,omitempty"`
 	// ReplayOf is the run whose cassettes a replayed run re-scored.
 	ReplayOf string `json:"replay_of,omitempty"`
+	// ReplayChanges lists the trials whose verdict differs from the source run's.
+	ReplayChanges []string `json:"replay_changes,omitempty"`
 	// Variant names the prompt variant the run tried; nil is production's prompt.
 	Variant     *VariantInfo             `json:"variant,omitempty"`
 	Budget      int                      `json:"budget"`
@@ -224,7 +226,16 @@ func (r *Result) Markdown() string {
 		fmt.Fprintf(&b, "**Stopped early: %s.** %s\n\n", r.Stopped, r.StoppedDetail)
 	}
 	if r.Replayed {
-		b.WriteString("This run was replayed from cassettes; no model ran.\n\n")
+		fmt.Fprintf(&b, "This run was replayed from the cassettes of run %s with the current checks; no model ran, so it says nothing about a prompt.\n\n", r.ReplayOf)
+		if len(r.ReplayChanges) == 0 {
+			b.WriteString("Replay changed no trial's verdict.\n\n")
+		} else {
+			b.WriteString("Verdicts the replay changed:\n\n")
+			for _, change := range r.ReplayChanges {
+				fmt.Fprintf(&b, "- %s\n", change)
+			}
+			b.WriteString("\n")
+		}
 	}
 	fmt.Fprintf(&b, "- Pass rate: %s\n", s.Overall)
 	if s.K > 0 {
