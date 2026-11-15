@@ -166,7 +166,7 @@ plan that links back to the earlier record.
 | 0154 | [An interface language each user chooses: English or Russian](0154-interface-language.md) | done |
 | 0155 | [Regular agent evaluations and prompt experiments](0155-agent-evals-and-prompt-experiments.md) | in-progress |
 | 0156 | [OAuth for MCP servers](0156-mcp-oauth.md) | proposed |
-| 0157 | [Pi 1.1.0 in production](0157-pi-1-1.md) | in-progress |
+| 0157 | [Pi 1.1.0 in production](0157-pi-1-1.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.
