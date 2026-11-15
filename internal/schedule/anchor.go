@@ -667,6 +667,8 @@ type anchorWork struct {
 	job    Job
 	anchor Anchor
 	state  *anchorState
+	// now is the instant the pass judged the job against, which its resolution is asked from too.
+	now time.Time
 }
 
 // resolveAnchors is one pass over the enabled anchored jobs. A job is read again every
@@ -726,7 +728,7 @@ func (s *Service) resolveAnchors(ctx context.Context) {
 		if len(work[job.PrincipalID]) == 0 {
 			principals = append(principals, job.PrincipalID)
 		}
-		work[job.PrincipalID] = append(work[job.PrincipalID], anchorWork{job: job, anchor: *anchor, state: state})
+		work[job.PrincipalID] = append(work[job.PrincipalID], anchorWork{job: job, anchor: *anchor, state: state, now: now})
 	}
 	for id := range s.anchorStates {
 		if !seen[id] {
@@ -768,7 +770,7 @@ func (s *Service) resolvePrincipal(ctx context.Context, principalID string, work
 		if ctx.Err() != nil {
 			break
 		}
-		s.resolveJob(ctx, item.job, item.anchor, item.state, s.now())
+		s.resolveJob(ctx, item.job, item.anchor, item.state, item.now)
 	}
 	s.mu.Lock()
 	delete(s.anchorBusy, principalID)
@@ -817,6 +819,11 @@ func (s *Service) resolveJob(ctx context.Context, job Job, anchor Anchor, state 
 		return
 	}
 	state.failures, state.noticed = 0, false
+	// A run that fell due while the anchor was read belongs to the claim loop, which runs it and
+	// then moves the job on; moving the job here would skip it.
+	if !job.NextRunAt.After(s.now()) {
+		return
+	}
 	runAt, next, key := job.RunAt, job.NextRunAt, StoredKey(occurrence.Key)
 	switch {
 	case anchor.Repeats() && occurrence.Key == "":

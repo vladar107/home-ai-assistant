@@ -1,6 +1,7 @@
 package schedule_test
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"strings"
@@ -107,5 +108,62 @@ func TestATripAnchoredJobFollowsTheTrip(t *testing.T) {
 	var reply sql.NullString
 	if err := f.db.QueryRowContext(t.Context(), `SELECT error_kind FROM schedule_runs WHERE job_id = ?`, id).Scan(&reply); err != nil || reply.String != "anchor_gone" || f.job(id).FinishedAt.IsZero() {
 		t.Fatalf("cancelled trip's reminder: run %q %v, job %+v", reply.String, err, f.job(id))
+	}
+}
+
+// holdingResolver reads a repeating anchor slowly: it signals when it is asked, waits to be
+// released, and answers with the next event once the 6th's has passed, as a calendar read while the
+// time moves on may.
+type holdingResolver struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (r *holdingResolver) ResolveAnchor(ctx context.Context, _ string, _ schedule.Anchor, _ time.Time, _ string) (schedule.AnchorOccurrence, error) {
+	select {
+	case r.entered <- struct{}{}:
+	default:
+	}
+	select {
+	case <-r.release:
+	case <-ctx.Done():
+		return schedule.AnchorOccurrence{}, ctx.Err()
+	}
+	return schedule.AnchorOccurrence{Key: "meeting-8", At: utc(8, 10, 0)}, nil
+}
+
+// A run that falls due while its anchor is being read still happens: the read's answer never moves
+// the job past it.
+func TestARunThatFallsDueWhileItsAnchorIsReadStillHappens(t *testing.T) {
+	f := newTravelFixture(t)
+	resolver := &holdingResolver{entered: make(chan struct{}, 1), release: make(chan struct{})}
+	if err := f.service.RegisterAnchor(schedule.AnchorCalendarMatch, resolver); err != nil {
+		t.Fatal(err)
+	}
+	config, err := schedule.ReminderConfig("Agenda time")
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err = schedule.JoinConfig(config, &schedule.Anchor{Kind: schedule.AnchorCalendarMatch, Title: "meeting", OffsetMinutes: -60}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.set(utc(6, 8, 50))
+	job := schedule.Job{
+		ID: "0000000000000002", PrincipalID: "alice", Name: "Agenda time", Type: schedule.TypeReminder, Zone: "UTC",
+		Config: config, Enabled: true, NextRunAt: utc(6, 9, 0), OccurrenceKey: "meeting-6",
+		CreatedAt: utc(5, 8, 0), UpdatedAt: utc(5, 8, 0), AnchorRepeats: true,
+	}
+	if created, err := f.store.CreateScheduledJob(t.Context(), job, schedule.MaximumJobsPerPrincipal); err != nil || !created {
+		t.Fatalf("create = %v %v", created, err)
+	}
+	f.start()
+	<-resolver.entered
+	f.set(utc(6, 9, 1))
+	close(resolver.release)
+	f.service.Wake()
+	f.waitRuns(job.ID, 1)
+	if runs := f.runs(job.ID); runs != 1 {
+		t.Fatalf("runs = %d, job %+v", runs, f.job(job.ID))
 	}
 }

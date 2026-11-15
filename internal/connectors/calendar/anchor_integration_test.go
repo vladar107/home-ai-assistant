@@ -248,14 +248,15 @@ func (f *anchorFixture) runs(jobID string) []time.Time {
 	return times
 }
 
+// waitFor polls until done holds, bounded by the test's own context rather than a fixed time.
 func (f *anchorFixture) waitFor(what string, done func() bool) {
 	f.t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
 	for !done() {
-		if time.Now().After(deadline) {
-			f.t.Fatalf("timed out waiting for %s", what)
+		select {
+		case <-f.ctx.Done():
+			f.t.Fatalf("gave up waiting for %s: %v", what, f.ctx.Err())
+		case <-time.After(5 * time.Millisecond):
 		}
-		time.Sleep(5 * time.Millisecond)
 	}
 }
 
@@ -387,8 +388,10 @@ func TestAReminderBeforeEachMatchingEventRunsForEachInTurn(t *testing.T) {
 	if got := f.onlyJob("alice"); !got.Enabled || !got.FinishedAt.IsZero() {
 		t.Fatalf("job after its first run = %+v", got)
 	}
+	f.waitFor("the first run to be delivered", func() bool { return f.delivered("Agenda time") == 1 })
 	f.set(at(5, 11, 30))
 	f.scheduler.Wake()
+	f.waitFor("the first run's resolver pass to settle", func() bool { return len(f.runs(job.ID)) == 1 })
 	f.set(at(6, 9, 1))
 	f.scheduler.Wake()
 	f.waitFor("the second run", func() bool { return len(f.runs(job.ID)) == 2 })
