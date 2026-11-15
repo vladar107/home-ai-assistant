@@ -162,13 +162,18 @@
       "expect": {
         "calls": [
           {
-            "tool": "bus_trip",
-            "min": 1
+            "any_of": [
+              "bus_stop_status",
+              "bus_trip"
+            ]
           }
         ],
         "reply": {
           "contains": [
             "340"
+          ],
+          "matches": [
+            "\\d{1,2}[:.]\\d{2}"
           ]
         }
       }
