@@ -406,7 +406,7 @@ func (w *World) seedFakes(in *wiring.Inputs) error {
 			})
 		}
 		seedNotionTables(sim, pages.DataSources, edited)
-		in.Notion = &notion.Config{APIBaseURL: sim.URL(), HTTPClient: sim.Client()}
+		in.Notion = &notion.Config{APIBaseURL: sim.URL(), HTTPClient: sim.Client(), Now: w.Clock.Now}
 	}
 	if err := w.seedPlaces(in); err != nil {
 		return err

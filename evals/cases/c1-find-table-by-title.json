@@ -1,6 +1,6 @@
 {
   "id": "c1-find-table-by-title",
-  "title": "The film table is found by its title without asking the user to share it",
+  "title": "The film table is found without anything in memory and without asking the user to share it",
   "tags": [
     "regression"
   ],
@@ -20,29 +20,40 @@
         {
           "id": "film-club",
           "title": "Кино по средам",
+          "title_property": "Дата",
           "properties": [
             {
-              "name": "Date",
-              "type": "date"
+              "name": "Фильм",
+              "type": "rich_text"
             },
             {
-              "name": "Rating",
-              "type": "number"
+              "name": "Кто",
+              "type": "rich_text"
+            },
+            {
+              "name": "С",
+              "type": "rich_text"
+            },
+            {
+              "name": "М",
+              "type": "rich_text"
             }
           ],
           "rows": [
             {
               "id": "row-northern-wind",
-              "title": "Северный ветер",
+              "title": "11.03.2026",
               "values": {
-                "Date": "2026-03-11"
+                "Фильм": "Северный ветер",
+                "Кто": "С"
               }
             },
             {
               "id": "row-quiet-shore",
-              "title": "Тихий берег",
+              "title": "18.03.2026",
               "values": {
-                "Date": "2026-03-18"
+                "Фильм": "Тихий берег",
+                "Кто": "М"
               }
             }
           ]
@@ -56,20 +67,16 @@
       "expect": {
         "calls": [
           {
-            "tool": "notion_search",
-            "min": 1
-          },
-          {
-            "tool": "notion_update_page",
+            "tool": "movies_set_score",
             "min": 1,
             "max": 1,
             "args": [
               {
-                "path": "page_id",
-                "equals": "row-northern-wind"
+                "path": "film",
+                "equals": "Северный ветер"
               },
               {
-                "path": "properties.Rating.number",
+                "path": "score",
                 "equals": 8
               }
             ]

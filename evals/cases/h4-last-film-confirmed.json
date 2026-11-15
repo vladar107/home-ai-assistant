@@ -20,38 +20,50 @@
         {
           "id": "film-club",
           "title": "Кино по средам",
+          "title_property": "Дата",
           "properties": [
             {
-              "name": "Date",
-              "type": "date"
+              "name": "Фильм",
+              "type": "rich_text"
             },
             {
-              "name": "Rating",
-              "type": "number"
+              "name": "Кто",
+              "type": "rich_text"
+            },
+            {
+              "name": "С",
+              "type": "rich_text"
+            },
+            {
+              "name": "М",
+              "type": "rich_text"
             }
           ],
           "rows": [
             {
               "id": "row-northern-wind",
-              "title": "Северный ветер",
+              "title": "25.02.2026",
               "values": {
-                "Date": "2026-02-25",
-                "Rating": 8
+                "Фильм": "Северный ветер",
+                "Кто": "С",
+                "С": "8"
               }
             },
             {
               "id": "row-lighthouse-light",
-              "title": "Свет маяка",
+              "title": "11.03.2026",
               "values": {
-                "Date": "2026-03-11",
-                "Rating": 7
+                "Фильм": "Свет маяка",
+                "Кто": "М",
+                "С": "7"
               }
             },
             {
               "id": "row-quiet-shore",
-              "title": "Тихий берег",
+              "title": "18.03.2026",
               "values": {
-                "Date": "2026-03-18"
+                "Фильм": "Тихий берег",
+                "Кто": "С"
               }
             }
           ]
@@ -65,7 +77,10 @@
       "expect": {
         "calls": [
           {
-            "tool": "notion_query_data_source",
+            "any_of": [
+              "movies_next",
+              "notion_query_data_source"
+            ],
             "min": 1
           }
         ],

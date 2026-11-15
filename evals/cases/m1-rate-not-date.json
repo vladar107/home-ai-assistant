@@ -1,6 +1,6 @@
 {
   "id": "m1-rate-not-date",
-  "title": "A rating for a film sets Rating, not Date",
+  "title": "A score for a film is recorded as a score, not a date change",
   "tags": [
     "regression"
   ],
@@ -20,37 +20,49 @@
         {
           "id": "film-club",
           "title": "Кино по средам",
+          "title_property": "Дата",
           "properties": [
             {
-              "name": "Date",
-              "type": "date"
+              "name": "Фильм",
+              "type": "rich_text"
             },
             {
-              "name": "Rating",
-              "type": "number"
+              "name": "Кто",
+              "type": "rich_text"
+            },
+            {
+              "name": "С",
+              "type": "rich_text"
+            },
+            {
+              "name": "М",
+              "type": "rich_text"
             }
           ],
           "rows": [
             {
               "id": "row-northern-wind",
-              "title": "Северный ветер",
+              "title": "04.03.2026",
               "values": {
-                "Date": "2026-03-04",
-                "Rating": 8
+                "Фильм": "Северный ветер",
+                "Кто": "С",
+                "С": "8"
               }
             },
             {
               "id": "row-quiet-shore",
-              "title": "Тихий берег",
+              "title": "11.03.2026",
               "values": {
-                "Date": "2026-03-11"
+                "Фильм": "Тихий берег",
+                "Кто": "М"
               }
             },
             {
               "id": "row-lighthouse-light",
-              "title": "Свет маяка",
+              "title": "18.03.2026",
               "values": {
-                "Date": "2026-03-18"
+                "Фильм": "Свет маяка",
+                "Кто": "С"
               }
             }
           ]
@@ -64,16 +76,16 @@
       "expect": {
         "calls": [
           {
-            "tool": "notion_update_page",
+            "tool": "movies_set_score",
             "min": 1,
             "max": 1,
             "args": [
               {
-                "path": "page_id",
-                "equals": "row-quiet-shore"
+                "path": "film",
+                "equals": "Тихий берег"
               },
               {
-                "path": "properties.Rating.number",
+                "path": "score",
                 "equals": 7
               }
             ]
@@ -84,11 +96,14 @@
             "max": 0,
             "args": [
               {
-                "path": "properties.Date",
+                "path": "properties.Дата",
                 "matches": ".*"
               }
             ]
           }
+        ],
+        "not_called": [
+          "movies_schedule"
         ]
       }
     }
