@@ -16,7 +16,7 @@ const Forwarded = Marker + " The user forwarded the message below from someone e
 const Continue = Marker + " The user pressed Confirm and the outcome is above. Continue the user's earlier request: " +
 	"if a step remains, do it, which may mean proposing the next change, and answer any question from the user's " +
 	"earlier messages that is still unanswered, using what you know now. Only when every step is done, every " +
-	"question is answered, and the outcome already says everything, reply with exactly " + NothingToAdd + " and nothing else."
+	"question is answered, and the outcome already says everything, reply with only " + NothingToAdd + ", copied verbatim and never translated."
 
 // Reconsider starts the turn that a 👎 on a reply asks for. It quotes no reply text: none is
 // stored, and the turn's message is trusted as the user's instruction.

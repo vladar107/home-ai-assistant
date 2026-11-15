@@ -38,7 +38,7 @@ func TestReactOnlyTurnSendsNothingAndStillRunsTheFollowUp(t *testing.T) {
 
 	h.push(textUpdate(1, 101, "got it, and check my train at 9"))
 	chat := receive(t, h.ctx, runtime.calls)
-	if !slices.Contains(toolNames(chat.request.Tools), "react") || !strings.Contains(chat.request.Tools.Guidance, "react and then reply with exactly "+prompt.NothingToAdd) {
+	if !slices.Contains(toolNames(chat.request.Tools), "react") || !strings.Contains(chat.request.Tools.Guidance, "react and then reply with only "+prompt.NothingToAdd) {
 		t.Fatalf("chat turn tools = %v, guidance %q", toolNames(chat.request.Tools), chat.request.Tools.Guidance)
 	}
 	react(t, chat, "👍")

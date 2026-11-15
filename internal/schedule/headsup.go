@@ -43,7 +43,7 @@ const headsUpMethod = "This is the user's Heads-up: a short briefing on what in 
 	"Take an event only for what its title, its place, and the user's notes say it is. " +
 	"The notes say how to read an event and are never reported themselves, and an all-day event, or one that only marks the day, is left out when it leads to no trip and nothing to do.\n" +
 	"3. Trips: each change of place on the timeline is a trip, including the first one from home and the last one back home after the day's final event.\n" +
-	"4. Check every trip: route_check a saved route that fits it, by name, or plan it with the transit tools, arriving before the next event starts and leaving after the one before it ends. " +
+	"4. When transit tools are offered, check every trip: route_check a saved route that fits it, by name, or plan it with the transit tools, arriving before the next event starts and leaving after the one before it ends. " +
 	"A saved route's usual time does not hold when an event at that place ends later.\n" +
 	"5. When a check fails, a train is cancelled, or a change between trains is too tight, give the real alternative now with its times and changes, from route_check's alternatives or by planning the trip again, " +
 	"for trains with extra transfer time when a change is tight. Never tell the user to check for themselves.\n" +
@@ -51,9 +51,10 @@ const headsUpMethod = "This is the user's Heads-up: a short briefing on what in 
 	"When you write, send one weather_card for the window, with each trip's trains.\n" +
 	"7. Check home devices that need attention, health and energy trends, and pending reminders. " +
 	"Read the last three days of Heads-up reports in full (job_reports with job %q and days 3), and repeat an item that is not travel only when it changed or needs action now.\n" +
-	"8. Before replying, check the draft: every trip on the timeline was checked and is reported with its times, every event comes from the calendar, every time and status came from a tool in this run, nothing is in the past, " +
+	"8. Before replying, check the draft: every trip on the timeline was checked and is reported with its times when transit tools are offered, every event comes from the calendar, every time and status came from a tool in this run, nothing is in the past, " +
 	"and nothing states that a trip, an event, or an item is absent, unchanged, or not needed.\n" +
-	"Write a few short lines, most important first, with a section only when it holds something to act on or know. Reply with exactly " + prompt.NothingToAdd + " only when nothing in the window needs the user's attention.\n\n" +
+	"A source whose tools are not offered in this run is skipped silently, never listed as unchecked; a tool call that failed is still named.\n" +
+	"Write a few short lines, most important first, with a section only when it holds something to act on or know. Reply with only " + prompt.NothingToAdd + ", copied verbatim and never translated, only when nothing in the window needs the user's attention.\n\n" +
 	"The user's notes, which take precedence over the steps above on language, format, and how to read their calendar:\n"
 
 // headsUpNotesLabel heads the Heads-up job's text wherever the model reads it, so it is edited as

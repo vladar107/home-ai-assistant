@@ -19,14 +19,14 @@ const (
 	toolReact = "react"
 
 	guidance = "react sets an emoji reaction on the user's message. React rarely. " +
-		"When the message needs no answer, such as thanks, ok, got it, another acknowledgement, or only an emoji, react and then reply with exactly " +
-		prompt.NothingToAdd + " and nothing else; that reply is never sent. " +
+		"When the message needs no answer, such as thanks, ok, got it, another acknowledgement, or only an emoji, react and then reply with only " +
+		prompt.NothingToAdd + ", copied verbatim and never translated; that reply is never sent. " +
 		"Never answer with only an emoji as text; use react for that. " +
 		"When the message agrees to something you offered or answers your question, do it instead. " +
 		"Add a reaction to a real reply only when it adds warmth, and never react instead of doing what the user asked."
 
-	resultText = "The reaction is set on the user's message. If it is the whole answer, reply with exactly " +
-		prompt.NothingToAdd + " and nothing else; otherwise reply as usual."
+	resultText = "The reaction is set on the user's message. If it is the whole answer, reply with only " +
+		prompt.NothingToAdd + ", copied verbatim and never translated; otherwise reply as usual."
 )
 
 // Outcomes of an emoji-only reply turned into a reaction.
