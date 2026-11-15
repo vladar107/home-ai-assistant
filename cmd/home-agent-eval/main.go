@@ -18,7 +18,7 @@ import (
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 )
 
-const usageText = "usage: home-agent-eval <login|usage|scan|run> [flags]"
+const usageText = "usage: home-agent-eval <login|usage|scan|run|review|report> [flags]"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -42,6 +42,10 @@ func run(ctx context.Context, args []string) error {
 		return runScan(args[1:])
 	case "run":
 		return runSuite(ctx, args[1:])
+	case "review":
+		return runReview(args[1:])
+	case "report":
+		return runReport(args[1:])
 	default:
 		return fmt.Errorf("unknown command %q\n%s", args[0], usageText)
 	}
@@ -203,6 +207,44 @@ func runSuite(ctx context.Context, args []string) error {
 	if result.Stopped != "" {
 		return fmt.Errorf("run stopped early (%s): %s", result.Stopped, result.StoppedDetail)
 	}
+	return nil
+}
+
+func runDir(flags *flag.FlagSet, args []string) (string, error) {
+	results := flags.String("results", eval.DefaultResultsDir, "directory the runs are written under")
+	runID := flags.String("run", "", "run ID (default: the latest run)")
+	if err := flags.Parse(args); err != nil {
+		return "", err
+	}
+	if *runID == "" {
+		latest, err := eval.LatestRun(*results)
+		if err != nil {
+			return "", err
+		}
+		*runID = latest
+	}
+	return filepath.Join(*results, *runID), nil
+}
+
+func runReview(args []string) error {
+	flags := flag.NewFlagSet("review", flag.ContinueOnError)
+	all := flags.Bool("all", false, "show trials that already have a verdict too")
+	dir, err := runDir(flags, args)
+	if err != nil {
+		return err
+	}
+	return eval.Review(eval.ReviewOptions{Dir: dir, All: *all, In: os.Stdin, Out: os.Stdout})
+}
+
+func runReport(args []string) error {
+	dir, err := runDir(flag.NewFlagSet("report", flag.ContinueOnError), args)
+	if err != nil {
+		return err
+	}
+	if err := eval.RewriteReport(dir); err != nil {
+		return err
+	}
+	fmt.Println("report:", filepath.Join(dir, "report.md"))
 	return nil
 }
 

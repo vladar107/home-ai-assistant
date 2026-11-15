@@ -140,6 +140,8 @@ type Result struct {
 	Summary            Summary                  `json:"summary"`
 	// Dir is where the run's files are; it is not part of the file.
 	Dir string `json:"-"`
+	// Review is the operator's review of the run, when there is one; it lives in review.json.
+	Review *ReviewFile `json:"-"`
 }
 
 // Summarize computes the run's rates from its cases.
@@ -195,6 +197,11 @@ func (r *Result) WriteReport() error {
 	}
 	if err := os.WriteFile(filepath.Join(r.Dir, resultFile), append(encoded, '\n'), 0o600); err != nil {
 		return fmt.Errorf("write result: %w", err)
+	}
+	if review, found, err := LoadReview(r.Dir); err != nil {
+		return err
+	} else if found {
+		r.Review = review
 	}
 	if err := os.WriteFile(filepath.Join(r.Dir, reportFile), []byte(r.Markdown()), 0o600); err != nil {
 		return fmt.Errorf("write report: %w", err)
@@ -286,6 +293,9 @@ func (r *Result) Markdown() string {
 		for _, skipped := range r.NotRun {
 			fmt.Fprintf(&b, "- %s: %d trial(s)\n", skipped.Case, skipped.Trials)
 		}
+	}
+	if r.Review != nil {
+		r.reviewMarkdown(&b)
 	}
 	return b.String()
 }
