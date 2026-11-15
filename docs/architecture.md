@@ -1588,6 +1588,60 @@ carried to another host. Calls run in one session per principal and server, so a
 stateful shared server cannot mix users; a session the server forgot is renewed
 once, and sessions end with an HTTP `DELETE` at shutdown, as best effort.
 
+### Agent evaluations
+
+`home-agent-eval` plays synthetic cases through the real turn path on a real model
+and reports how reliably each passes (plan 0155). A case in `evals/cases/` is a
+JSON file: a fixed clock and zone, a synthetic user, the world the tools see, a
+sequence of steps (a message, a Confirm or Reject, a 👎, or a run of a scheduled
+job), and deterministic checks on the tool calls, proposals, reply and store.
+`evals/cases/README.md` documents the format and every world section.
+
+Each trial builds the production wiring for the synthetic principal `eval` on a
+temporary SQLite store, drives turns through the conversation service and the
+scheduler's own `RunNow`, and records replies in a stub instead of Telegram. The
+case's clock reaches every seam that dates stored state. Every connector reaches
+a loopback fake seeded from the case, under `internal/testutil/`; nothing else is
+contacted, except the model provider and its built-in web search, which cannot be
+faked and runs live, and TypeSafe when the case's switches keep the safety checks
+and the tool hint on, as in production.
+
+Cases are public: made-up names, places, devices and data only, never copied from
+a real conversation. `home-agent-eval scan` refuses any case or variant containing
+a value from the ignored `.env`, printing only the file and field.
+
+The eval runs on the operator's own subscription through a dedicated profile,
+never the application's profiles or another user's login:
+
+1. Install the pinned Pi locally: `cd third_party/pi-runtime && npm ci --omit=dev
+   --ignore-scripts`, then set `HOME_AGENT_PI_BINARY` in `.env` to that
+   directory's `node_modules/.bin/pi`. The runner refuses any other Pi version.
+2. Log in the eval profile once: `go run ./cmd/home-agent-eval login --profiles
+   <root>`, outside `HOME_AGENT_DATA_DIR`. It prints a verification address and
+   code, writes `<root>/eval/auth.json` and binds the account in
+   `<root>/eval.sqlite`. Never copy `auth.json` from a production profile: the
+   provider rotates the refresh token on use, so two copies refreshing apart log
+   one of them out.
+3. Check the quota: `usage --profiles <root>`. A run refuses to start when any
+   window is above `--max-used` (50% by default).
+4. Run: `run --profiles <root>` with `--case`, `--tag` and `--trials` to narrow it
+   and `--budget` (300 model calls by default) to bound it. The first quota or
+   login failure stops the run and lists the trials not run.
+5. Read `evals/results/<run>/report.md` (ignored): the pass rate, `pass^k`, the
+   happy-path rate on its own line, the rate per failure kind, failing checks per
+   trial, tokens, Pi version, model and prompt fingerprint. Each trial's cassette
+   is beside it.
+6. Review: `review` steps through the latest run's trials and records good, bad or
+   unsure with a note in `review.json`; quitting resumes later. `report` rewrites
+   `report.md` with the agreement between the checks and the operator, listing
+   missed failures and false alarms. Until agreement is consistently high, every
+   trial is reviewed.
+
+A new case starts from a failure the operator saw, rewritten from scratch with
+made-up data, then `scan` before committing. `go test ./internal/eval/` checks
+every case's shape and that it names only tools its world offers, with no model
+and no network.
+
 ## Security model
 
 - **Identity before anything.** Only allowlisted numeric Telegram IDs in private
