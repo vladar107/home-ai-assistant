@@ -59,8 +59,28 @@ func unquote(value string) string {
 	return value
 }
 
+// runtimeSetting reports a key that names how the application is deployed or which model runtime
+// it uses, not anything about the household. Its values are common words ("home", a model name)
+// that a case may well contain.
+func runtimeSetting(key string) bool {
+	// Scan keys values by their file and name, separated by a NUL.
+	if _, name, found := strings.Cut(key, "\x00"); found {
+		key = name
+	}
+	if key == "DEPLOYMENT_ENVIRONMENT" {
+		return true
+	}
+	for _, suffix := range []string{"_PROVIDER", "_MODEL", "_VERSION", "_BINARY"} {
+		if strings.HasSuffix(key, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
 // HouseholdValues returns the values worth hunting for in a case: at least four characters and
 // not purely a number, a boolean or a duration, plus the parts of comma or semicolon lists.
+// Runtime settings are left out.
 func HouseholdValues(env map[string]string) []string {
 	seen := map[string]struct{}{}
 	var result []string
@@ -75,7 +95,10 @@ func HouseholdValues(env map[string]string) []string {
 			result = append(result, lowered)
 		}
 	}
-	for _, value := range env {
+	for key, value := range env {
+		if runtimeSetting(key) {
+			continue
+		}
 		add(value)
 		if strings.ContainsAny(value, ",;") {
 			for _, part := range strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == ';' }) {

@@ -230,7 +230,8 @@ func TestScanFindsAPlantedValueWithoutPrintingIt(t *testing.T) {
 	dir := t.TempDir()
 	envPath := filepath.Join(dir, ".env")
 	const planted = "Quillfeather Lane"
-	env := "HOME_AGENT_PLACES=Harbourview, " + planted + "\nHOME_AGENT_PORT=8080\nHOME_AGENT_FLAG=true\nHOME_AGENT_TIMEOUT=30s\nSHORT=abc\n"
+	env := "HOME_AGENT_PLACES=Harbourview, " + planted + "\nHOME_AGENT_PORT=8080\nHOME_AGENT_FLAG=true\nHOME_AGENT_TIMEOUT=30s\nSHORT=abc\n" +
+		"DEPLOYMENT_ENVIRONMENT=home\nHOME_AGENT_PI_MODEL=model-plus\nHOME_AGENT_PI_PROVIDER=provider-one\n"
 	if err := os.WriteFile(envPath, []byte(env), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +239,7 @@ func TestScanFindsAPlantedValueWithoutPrintingIt(t *testing.T) {
 	if err := os.MkdirAll(cases, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	clean := `{"id":"clean","turns":[{"text":"What is on today? 8080 true 30s abc"}]}`
+	clean := `{"id":"clean","turns":[{"text":"What is on today? 8080 true 30s abc; leave home on model-plus via provider-one"}]}`
 	dirty := `{"id":"dirty","turns":[{"text":"hello"},{"text":"Meet me on QUILLFEATHER lane at six"}]}`
 	for name, body := range map[string]string{"clean.json": clean, "dirty.json": dirty} {
 		if err := os.WriteFile(filepath.Join(cases, name), []byte(body), 0o644); err != nil {
