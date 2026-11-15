@@ -15,8 +15,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"testing"
 	"time"
+
+	"github.com/vladar107/home-ai-assistant/internal/testutil/simt"
 )
 
 const (
@@ -82,7 +83,7 @@ type token struct {
 
 type Simulator struct {
 	server *httptest.Server
-	t      *testing.T
+	t      simt.T
 
 	mu        sync.Mutex
 	mailboxes map[string][]Message
@@ -96,7 +97,7 @@ type Simulator struct {
 	counter   int
 }
 
-func New(t *testing.T) *Simulator {
+func New(t simt.T) *Simulator {
 	t.Helper()
 	sim := &Simulator{
 		t:         t,

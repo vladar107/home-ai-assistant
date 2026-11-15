@@ -14,7 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"testing"
+
+	"github.com/vladar107/home-ai-assistant/internal/testutil/simt"
 )
 
 const Version = "2026-03-11"
@@ -87,7 +88,7 @@ type Simulator struct {
 	created     int
 }
 
-func New(t *testing.T) *Simulator {
+func New(t simt.T) *Simulator {
 	t.Helper()
 	s := &Simulator{tokens: map[string]Token{}, pageShares: map[string][]string{}, dsShares: map[string][]string{}, dbShares: map[string][]string{}}
 	s.server = httptest.NewServer(http.HandlerFunc(s.serve))

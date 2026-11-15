@@ -13,8 +13,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"testing"
 	"time"
+
+	"github.com/vladar107/home-ai-assistant/internal/testutil/simt"
 )
 
 const apiPrefix = "/calendar/v3"
@@ -85,7 +86,7 @@ type calendarData struct {
 
 type Simulator struct {
 	server     *httptest.Server
-	t          *testing.T
+	t          simt.T
 	accountFor func(accessToken string) (string, bool)
 
 	mu        sync.Mutex
@@ -94,7 +95,7 @@ type Simulator struct {
 	requests  []Request
 }
 
-func New(t *testing.T, accountFor func(accessToken string) (account string, ok bool)) *Simulator {
+func New(t simt.T, accountFor func(accessToken string) (account string, ok bool)) *Simulator {
 	t.Helper()
 	sim := &Simulator{
 		t:          t,
