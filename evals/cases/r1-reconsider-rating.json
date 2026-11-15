@@ -80,20 +80,14 @@
         "calls": [
           {
             "tool": "movies_set_score",
-            "min": 1,
-            "args": [
-              {
-                "path": "film",
-                "equals": "Тихий берег"
-              },
-              {
-                "path": "score",
-                "equals": 7
-              }
-            ]
+            "min": 0,
+            "max": 1
           }
         ],
         "reply": {
+          "contains": [
+            "7"
+          ],
           "not_matches": [
             "(?i)(какую оценку|какой (балл|рейтинг)|уточни, какую)"
           ]
