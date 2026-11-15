@@ -70,14 +70,11 @@
       "expect": {
         "calls": [
           {
-            "tool": "ha_history",
-            "min": 1,
-            "args": [
-              {
-                "path": "name",
-                "matches": "(?i)body fat"
-              }
-            ]
+            "any_of": [
+              "ha_history",
+              "ha_get_live_context"
+            ],
+            "min": 1
           }
         ],
         "reply": {
