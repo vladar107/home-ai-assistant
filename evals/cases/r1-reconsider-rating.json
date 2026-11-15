@@ -1,0 +1,92 @@
+{
+  "id": "r1-reconsider-rating",
+  "title": "After a thumbs down on a rating, the reconsider proposes 7 and does not ask the score",
+  "tags": [
+    "regression"
+  ],
+  "kind": "weak-reconsider",
+  "clock": {
+    "local": "2026-03-12T20:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru"
+  },
+  "world": {
+    "notion": {
+      "writes": true,
+      "data_sources": [
+        {
+          "id": "film-club",
+          "title": "Кино по средам",
+          "properties": [
+            {
+              "name": "Date",
+              "type": "date"
+            },
+            {
+              "name": "Rating",
+              "type": "number"
+            }
+          ],
+          "rows": [
+            {
+              "id": "row-northern-wind",
+              "title": "Северный ветер",
+              "values": {
+                "Date": "2026-03-04",
+                "Rating": 8
+              }
+            },
+            {
+              "id": "row-quiet-shore",
+              "title": "Тихий берег",
+              "values": {
+                "Date": "2026-03-11"
+              }
+            },
+            {
+              "id": "row-lighthouse-light",
+              "title": "Свет маяка",
+              "values": {
+                "Date": "2026-03-18"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "say": "поставь 7 фильму «Тихий берег»"
+    },
+    {
+      "thumbs_down": true,
+      "expect": {
+        "calls": [
+          {
+            "tool": "notion_update_page",
+            "min": 1,
+            "args": [
+              {
+                "path": "page_id",
+                "equals": "row-quiet-shore"
+              },
+              {
+                "path": "properties.Rating.number",
+                "equals": 7
+              }
+            ]
+          }
+        ],
+        "reply": {
+          "not_matches": [
+            "(?i)(какую оценку|какой (балл|рейтинг)|уточни, какую)"
+          ]
+        }
+      }
+    }
+  ]
+}

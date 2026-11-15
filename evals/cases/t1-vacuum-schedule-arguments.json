@@ -1,0 +1,85 @@
+{
+  "id": "t1-vacuum-schedule-arguments",
+  "title": "The vacuum schedule tool gets a day and a time, never an empty call",
+  "tags": [
+    "regression"
+  ],
+  "kind": "tool-misuse",
+  "clock": {
+    "local": "2026-03-13T12:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru"
+  },
+  "world": {
+    "home": {
+      "time_zone": "Europe/Berlin",
+      "entities": [
+        {
+          "entity_id": "vacuum.hall_robot",
+          "name": "Hall robot",
+          "state": "docked",
+          "area": "Hall",
+          "exposed": true,
+          "attributes": {
+            "schedule": "Sun 10:00"
+          }
+        }
+      ],
+      "tools": [
+        {
+          "name": "set_vacuum_schedule",
+          "description": "Sets the weekday and start time of the weekly vacuum cleaning.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "day": {
+                "type": "string"
+              },
+              "time": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "day",
+              "time"
+            ]
+          },
+          "answer": "Schedule saved.",
+          "effects": []
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "say": "перенеси уборку с воскресенья на субботу 11:00",
+      "expect": {
+        "calls": [
+          {
+            "tool": "ha_set_vacuum_schedule",
+            "min": 1,
+            "args": [
+              {
+                "path": "day",
+                "matches": "(?i)(sat|суб)"
+              },
+              {
+                "path": "time",
+                "matches": "11[:.]?00"
+              }
+            ]
+          },
+          {
+            "tool": "ha_set_vacuum_schedule",
+            "min": 0,
+            "max": 1
+          }
+        ],
+        "max_calls": 3
+      }
+    }
+  ]
+}

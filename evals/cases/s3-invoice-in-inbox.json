@@ -1,0 +1,103 @@
+{
+  "id": "s3-invoice-in-inbox",
+  "title": "The inbox job reports the invoice with its due date and skips newsletters",
+  "tags": [
+    "regression",
+    "scheduled"
+  ],
+  "kind": "scheduled-missed",
+  "clock": {
+    "local": "2026-03-12T08:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru"
+  },
+  "world": {
+    "jobs": [
+      {
+        "id": "inbox-check",
+        "name": "Почта",
+        "prompt": "Проверь почту за сутки и пришли только важное: счета и письма, требующие действий. Рассылки не нужны.",
+        "cron": "0 8 * * *"
+      }
+    ],
+    "gmail": {
+      "messages": [
+        {
+          "id": "m1",
+          "from": "Garden Weekly <news@gardenweekly.example>",
+          "subject": "Garden Weekly: spring planting",
+          "received": "2026-03-11T18:00",
+          "body": "Plant early peas now.",
+          "labels": [
+            "INBOX",
+            "UNREAD"
+          ]
+        },
+        {
+          "id": "m2",
+          "from": "Film Digest <digest@filmdigest.example>",
+          "subject": "Film Digest: this month's picks",
+          "received": "2026-03-11T19:10",
+          "body": "Ten films worth your time.",
+          "labels": [
+            "INBOX",
+            "UNREAD"
+          ]
+        },
+        {
+          "id": "m3",
+          "from": "Northwind Energy <billing@northwind.example>",
+          "subject": "Invoice 2026-02 from Northwind Energy",
+          "received": "2026-03-11T21:30",
+          "body": "Invoice 2026-02: 84.20 EUR. Please pay by 2026-03-15.",
+          "labels": [
+            "INBOX",
+            "UNREAD"
+          ]
+        },
+        {
+          "id": "m4",
+          "from": "Deals <offers@dealsmail.example>",
+          "subject": "Deal of the Week",
+          "received": "2026-03-12T06:15",
+          "body": "Half price on everything.",
+          "labels": [
+            "INBOX",
+            "UNREAD"
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "run_job": "inbox-check",
+      "expect": {
+        "calls": [
+          {
+            "tool": "gmail_search",
+            "min": 1
+          }
+        ],
+        "reply": {
+          "contains": [
+            "Northwind",
+            "15"
+          ],
+          "not_contains": [
+            "Garden Weekly",
+            "Film Digest",
+            "Deal of the Week"
+          ]
+        }
+      }
+    }
+  ],
+  "rubric": [
+    "Does the report mention the Northwind Energy invoice and that it is due on 15 March?",
+    "Does the report leave out the newsletters and promotions?"
+  ]
+}

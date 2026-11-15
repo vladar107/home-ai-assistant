@@ -1,0 +1,70 @@
+{
+  "id": "w1-extend-existing-job",
+  "title": "Adding calendar events to the morning job updates that job once",
+  "tags": [
+    "regression"
+  ],
+  "kind": "unasked-write",
+  "clock": {
+    "local": "2026-03-10T21:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru"
+  },
+  "world": {
+    "jobs": [
+      {
+        "id": "morning-weekdays",
+        "name": "Утро, будни",
+        "prompt": "Скажи доброе утро и напомни про погоду.",
+        "cron": "30 7 * * 1-5"
+      }
+    ],
+    "calendar": {
+      "events": [
+        {
+          "id": "ev1",
+          "summary": "Планёрка",
+          "start": "2026-03-11T09:30",
+          "end": "2026-03-11T10:00",
+          "location": "Westfield Office"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "say": "добавь в утреннее напоминание события из календаря",
+      "expect": {
+        "calls": [
+          {
+            "tool": "schedule_update",
+            "min": 1,
+            "max": 1
+          }
+        ],
+        "not_called": [
+          "schedule_remove",
+          "schedule_propose"
+        ],
+        "store": [
+          {
+            "check": "jobs",
+            "count": 1
+          },
+          {
+            "check": "jobs",
+            "name": "Утро, будни",
+            "count": 1
+          }
+        ]
+      }
+    }
+  ],
+  "rubric": [
+    "Did the update to the job «Утро, будни» add today's calendar events to what the job reports?",
+    "Did the assistant keep the job's existing weather reminder and schedule?"
+  ]
+}

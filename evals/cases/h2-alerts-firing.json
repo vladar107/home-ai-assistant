@@ -1,0 +1,75 @@
+{
+  "id": "h2-alerts-firing",
+  "title": "A health question reads the alerts and names the firing one",
+  "tags": [
+    "happy"
+  ],
+  "kind": "happy",
+  "clock": {
+    "local": "2026-03-10T09:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru"
+  },
+  "world": {
+    "monitoring": {
+      "rules": [
+        {
+          "name": "ReportsServiceDown",
+          "health": "ok",
+          "instances": [
+            {
+              "labels": {
+                "severity": "critical"
+              },
+              "annotations": {
+                "summary": "Reports service is down"
+              },
+              "state": "Alerting",
+              "active_at": "2026-03-10T08:30:00Z"
+            }
+          ]
+        },
+        {
+          "name": "BackupFresh",
+          "health": "ok",
+          "instances": [
+            {
+              "labels": {
+                "severity": "warning"
+              },
+              "annotations": {
+                "summary": "Backup is recent"
+              },
+              "state": "Normal",
+              "active_at": "2026-03-09T02:00:00Z"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "say": "как там у нас, нет проблем?",
+      "expect": {
+        "calls": [
+          {
+            "tool": "grafana_alerts",
+            "min": 1
+          }
+        ],
+        "reply": {
+          "contains": [
+            "ReportsServiceDown"
+          ]
+        }
+      }
+    }
+  ],
+  "rubric": [
+    "Does the reply name the firing alert ReportsServiceDown and not report the healthy one as a problem?"
+  ]
+}

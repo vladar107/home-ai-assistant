@@ -1,0 +1,59 @@
+{
+  "id": "s1-hockey-in-report",
+  "title": "A Russian 'check hockey today' job reports tonight's training",
+  "tags": [
+    "regression",
+    "scheduled"
+  ],
+  "kind": "scheduled-missed",
+  "clock": {
+    "local": "2026-03-12T16:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru"
+  },
+  "world": {
+    "jobs": [
+      {
+        "id": "hockey-check",
+        "name": "Хоккей",
+        "prompt": "проверь хоккей сегодня",
+        "cron": "0 16 * * *"
+      }
+    ],
+    "calendar": {
+      "events": [
+        {
+          "id": "ev1",
+          "summary": "Ice Hockey Training",
+          "start": "2026-03-12T19:30",
+          "end": "2026-03-12T21:00",
+          "location": "Westfield Ice Arena"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "run_job": "hockey-check",
+      "expect": {
+        "calls": [
+          {
+            "tool": "calendar_events",
+            "min": 1
+          }
+        ],
+        "reply": {
+          "contains": [
+            "19:30"
+          ]
+        }
+      }
+    }
+  ],
+  "rubric": [
+    "Does the report say there is hockey training tonight at 19:30?"
+  ]
+}

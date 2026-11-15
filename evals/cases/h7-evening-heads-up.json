@@ -1,0 +1,330 @@
+{
+  "id": "h7-evening-heads-up",
+  "title": "The evening Heads-up mentions tomorrow's office day with a leave-home time",
+  "tags": [
+    "happy",
+    "scheduled"
+  ],
+  "kind": "happy",
+  "clock": {
+    "local": "2026-03-11T18:30",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru"
+  },
+  "world": {
+    "trains": {
+      "stations": [
+        {
+          "code": "EBC",
+          "name": "Eastbrook Central",
+          "synonyms": [
+            "Eastbrook",
+            "Eastbrook Centraal"
+          ]
+        },
+        {
+          "code": "WFD",
+          "name": "Westfield"
+        }
+      ],
+      "trips": [
+        {
+          "from": "EBC",
+          "to": "WFD",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 31,
+            "legs": [
+              {
+                "name": "IC 1100",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Westfield",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "1100",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-12T07:43:00+0100",
+                  "plannedTrack": "4"
+                },
+                "destination": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-12T08:14:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "EBC",
+          "to": "WFD",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 31,
+            "legs": [
+              {
+                "name": "IC 1102",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Westfield",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "1102",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-12T08:13:00+0100",
+                  "plannedTrack": "4"
+                },
+                "destination": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-12T08:44:00+0100"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "departures": [
+        {
+          "station": "EBC",
+          "departure": {
+            "direction": "Westfield",
+            "name": "NS 1100",
+            "plannedDateTime": "2026-03-12T07:43:00+0100",
+            "plannedTrack": "4",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "1100"
+            }
+          }
+        },
+        {
+          "station": "EBC",
+          "departure": {
+            "direction": "Westfield",
+            "name": "NS 1102",
+            "plannedDateTime": "2026-03-12T08:13:00+0100",
+            "plannedTrack": "4",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "1102"
+            }
+          }
+        }
+      ]
+    },
+    "buses": {
+      "stops": [
+        {
+          "id": "100",
+          "code": "30000001",
+          "name": "Eastbrook, Market Square",
+          "lat": 52.1,
+          "lon": 5.1,
+          "platform": "A"
+        },
+        {
+          "id": "101",
+          "code": "30000002",
+          "name": "Eastbrook, Central Station",
+          "lat": 52.12,
+          "lon": 5.12
+        },
+        {
+          "id": "102",
+          "code": "30000003",
+          "name": "Westfield, Station",
+          "lat": 52.2,
+          "lon": 5.2
+        }
+      ],
+      "routes": [
+        {
+          "id": "r340",
+          "agency": "UOV",
+          "short": "340",
+          "long": "Eastbrook - Westfield"
+        }
+      ],
+      "timing_points": [
+        {
+          "code": "30000001",
+          "passes": {
+            "J1": {
+              "LinePublicNumber": "340",
+              "JourneyNumber": 100,
+              "UserStopOrderNumber": 1,
+              "DestinationName50": "Eastbrook Central",
+              "TransportType": "BUS",
+              "TripStopStatus": "PLANNED",
+              "JourneyStopType": "FIRST",
+              "TargetDepartureTime": "2026-03-12T07:40:00",
+              "ExpectedDepartureTime": "2026-03-12T07:40:00"
+            },
+            "J2": {
+              "LinePublicNumber": "340",
+              "JourneyNumber": 101,
+              "UserStopOrderNumber": 1,
+              "DestinationName50": "Eastbrook Central",
+              "TransportType": "BUS",
+              "TripStopStatus": "PLANNED",
+              "JourneyStopType": "FIRST",
+              "TargetDepartureTime": "2026-03-12T08:10:00",
+              "ExpectedDepartureTime": "2026-03-12T08:10:00"
+            }
+          }
+        }
+      ],
+      "plans": [],
+      "places": [
+        {
+          "type": "STOP",
+          "name": "Eastbrook, Market Square",
+          "lat": 52.1,
+          "lon": 5.1,
+          "country": "NL"
+        },
+        {
+          "type": "STOP",
+          "name": "Eastbrook, Central Station",
+          "lat": 52.12,
+          "lon": 5.12,
+          "country": "NL"
+        },
+        {
+          "type": "STOP",
+          "name": "Westfield, Station",
+          "lat": 52.2,
+          "lon": 5.2,
+          "country": "NL"
+        }
+      ],
+      "stop_times": [
+        {
+          "stop_id": "100",
+          "stop_time": {
+            "place": {
+              "departure": "2026-03-12T06:40:00Z",
+              "scheduledDeparture": "2026-03-12T06:40:00Z",
+              "track": "A",
+              "scheduledTrack": "A"
+            },
+            "mode": "BUS",
+            "realTime": false,
+            "headsign": "Eastbrook Central",
+            "routeShortName": "340",
+            "displayName": "340",
+            "agencyName": "UOV"
+          }
+        },
+        {
+          "stop_id": "100",
+          "stop_time": {
+            "place": {
+              "departure": "2026-03-12T07:10:00Z",
+              "scheduledDeparture": "2026-03-12T07:10:00Z",
+              "track": "A",
+              "scheduledTrack": "A"
+            },
+            "mode": "BUS",
+            "realTime": false,
+            "headsign": "Eastbrook Central",
+            "routeShortName": "340",
+            "displayName": "340",
+            "agencyName": "UOV"
+          }
+        }
+      ]
+    },
+    "routes": [
+      {
+        "name": "Office",
+        "days": [
+          "mon",
+          "tue",
+          "wed",
+          "thu",
+          "fri"
+        ],
+        "arrive_by": "09:00",
+        "legs": [
+          {
+            "mode": "walk",
+            "minutes": 6
+          },
+          {
+            "mode": "bus",
+            "stop": "Eastbrook, Market Square",
+            "line": "340",
+            "towards": "Eastbrook Central",
+            "minutes": 20,
+            "departures": [
+              "07:40"
+            ]
+          },
+          {
+            "mode": "train",
+            "from": "Eastbrook Central",
+            "to": "Westfield",
+            "departures": [
+              "08:13"
+            ]
+          }
+        ]
+      }
+    ],
+    "jobs": [
+      {
+        "id": "evening-heads-up",
+        "name": "Evening Heads-up",
+        "heads_up": true,
+        "prompt": "Пиши по-русски, коротко. Событие «Планёрка» в Westfield Office значит офисный день.",
+        "cron": "30 18 * * *"
+      }
+    ],
+    "calendar": {
+      "events": [
+        {
+          "id": "ev1",
+          "summary": "Планёрка",
+          "start": "2026-03-12T09:00",
+          "end": "2026-03-12T10:00",
+          "location": "Westfield Office"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "run_job": "evening-heads-up",
+      "expect": {
+        "reply": {
+          "contains": [
+            "09:00"
+          ],
+          "matches": [
+            "\\b\\d{1,2}[:.]\\d{2}\\b"
+          ]
+        }
+      }
+    }
+  ],
+  "rubric": [
+    "Does the report mention tomorrow's office day and the 09:00 meeting?",
+    "Does the report say when to leave home or which train to take?"
+  ]
+}

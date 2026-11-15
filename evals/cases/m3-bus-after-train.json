@@ -1,0 +1,282 @@
+{
+  "id": "m3-bus-after-train",
+  "title": "A follow-up naming line 340 is answered with the bus, not the train again",
+  "tags": [
+    "regression"
+  ],
+  "kind": "misread-request",
+  "clock": {
+    "local": "2026-03-10T08:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru",
+    "memory": [
+      "Живёт в Eastbrook, работает в Westfield."
+    ]
+  },
+  "world": {
+    "trains": {
+      "stations": [
+        {
+          "code": "EBC",
+          "name": "Eastbrook Central",
+          "synonyms": [
+            "Eastbrook",
+            "Eastbrook Centraal"
+          ]
+        },
+        {
+          "code": "WFD",
+          "name": "Westfield"
+        }
+      ],
+      "trips": [
+        {
+          "from": "EBC",
+          "to": "WFD",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 31,
+            "legs": [
+              {
+                "name": "IC 1100",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Westfield",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "1100",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-10T08:13:00+0100",
+                  "plannedTrack": "4"
+                },
+                "destination": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-10T08:44:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "EBC",
+          "to": "WFD",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 31,
+            "legs": [
+              {
+                "name": "IC 1102",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Westfield",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "1102",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-10T08:43:00+0100",
+                  "plannedTrack": "4"
+                },
+                "destination": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-10T09:14:00+0100"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "departures": [
+        {
+          "station": "EBC",
+          "departure": {
+            "direction": "Westfield",
+            "name": "NS 1100",
+            "plannedDateTime": "2026-03-10T08:13:00+0100",
+            "plannedTrack": "4",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "1100"
+            }
+          }
+        },
+        {
+          "station": "EBC",
+          "departure": {
+            "direction": "Westfield",
+            "name": "NS 1102",
+            "plannedDateTime": "2026-03-10T08:43:00+0100",
+            "plannedTrack": "4",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "1102"
+            }
+          }
+        }
+      ]
+    },
+    "buses": {
+      "stops": [
+        {
+          "id": "100",
+          "code": "30000001",
+          "name": "Eastbrook, Market Square",
+          "lat": 52.1,
+          "lon": 5.1,
+          "platform": "A"
+        },
+        {
+          "id": "101",
+          "code": "30000002",
+          "name": "Eastbrook, Central Station",
+          "lat": 52.12,
+          "lon": 5.12
+        },
+        {
+          "id": "102",
+          "code": "30000003",
+          "name": "Westfield, Station",
+          "lat": 52.2,
+          "lon": 5.2
+        }
+      ],
+      "routes": [
+        {
+          "id": "r340",
+          "agency": "UOV",
+          "short": "340",
+          "long": "Eastbrook - Westfield"
+        }
+      ],
+      "timing_points": [
+        {
+          "code": "30000001",
+          "passes": {
+            "J1": {
+              "LinePublicNumber": "340",
+              "JourneyNumber": 1,
+              "UserStopOrderNumber": 1,
+              "DestinationName50": "Westfield",
+              "TransportType": "BUS",
+              "TripStopStatus": "PLANNED",
+              "JourneyStopType": "FIRST",
+              "TargetDepartureTime": "2026-03-10T08:20:00",
+              "ExpectedDepartureTime": "2026-03-10T08:22:00"
+            }
+          }
+        }
+      ],
+      "plans": [
+        {
+          "from": {
+            "lat": 52.1,
+            "lon": 5.1
+          },
+          "to": {
+            "lat": 52.2,
+            "lon": 5.2
+          },
+          "itinerary": {
+            "duration": 2700,
+            "startTime": "2026-03-10T07:20:00Z",
+            "endTime": "2026-03-10T08:05:00Z",
+            "transfers": 0,
+            "legs": [
+              {
+                "mode": "BUS",
+                "routeShortName": "340",
+                "headsign": "Westfield",
+                "duration": 2700,
+                "startTime": "2026-03-10T07:20:00Z",
+                "endTime": "2026-03-10T08:05:00Z",
+                "scheduledStartTime": "2026-03-10T07:20:00Z",
+                "scheduledEndTime": "2026-03-10T08:05:00Z",
+                "from": {
+                  "name": "Eastbrook, Market Square",
+                  "departure": "2026-03-10T07:20:00Z",
+                  "scheduledDeparture": "2026-03-10T07:20:00Z"
+                },
+                "to": {
+                  "name": "Westfield, Station",
+                  "arrival": "2026-03-10T08:05:00Z",
+                  "scheduledArrival": "2026-03-10T08:05:00Z"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "places": [
+        {
+          "type": "STOP",
+          "name": "Eastbrook, Market Square",
+          "lat": 52.1,
+          "lon": 5.1,
+          "country": "NL"
+        },
+        {
+          "type": "STOP",
+          "name": "Eastbrook, Central Station",
+          "lat": 52.12,
+          "lon": 5.12,
+          "country": "NL"
+        },
+        {
+          "type": "STOP",
+          "name": "Westfield, Station",
+          "lat": 52.2,
+          "lon": 5.2,
+          "country": "NL"
+        }
+      ],
+      "stop_times": []
+    }
+  },
+  "steps": [
+    {
+      "say": "когда ближайший поезд в Westfield?",
+      "expect": {
+        "calls": [
+          {
+            "tool": "ns_trips",
+            "min": 1
+          }
+        ]
+      }
+    },
+    {
+      "say": "а на 340?",
+      "expect": {
+        "calls": [
+          {
+            "tool": "bus_trip",
+            "min": 1
+          }
+        ],
+        "reply": {
+          "contains": [
+            "340"
+          ]
+        }
+      }
+    }
+  ],
+  "rubric": [
+    "Does the second answer give the bus on line 340 for the same trip to Westfield?",
+    "Does the second answer avoid repeating the train times?"
+  ]
+}

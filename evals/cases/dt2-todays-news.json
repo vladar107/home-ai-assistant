@@ -1,0 +1,74 @@
+{
+  "id": "dt2-todays-news",
+  "title": "A news question for today does not search or cite another year",
+  "tags": [
+    "regression"
+  ],
+  "kind": "date-time",
+  "clock": {
+    "local": "2026-03-10T10:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru"
+  },
+  "world": {
+    "weather": {
+      "places": [
+        {
+          "name": "Eastbrook",
+          "latitude": 52.1,
+          "longitude": 5.1,
+          "country": "Netherlands",
+          "country_code": "NL",
+          "timezone": "Europe/Berlin"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "say": "что нового сегодня в Eastbrook?",
+      "expect": {
+        "calls": [
+          {
+            "tool": "web_search",
+            "min": 1
+          },
+          {
+            "tool": "web_search",
+            "min": 0,
+            "max": 0,
+            "args": [
+              {
+                "path": "query",
+                "matches": "\\b(19\\d\\d|20(0\\d|1\\d|2[0-5]|2[7-9]|[3-9]\\d))\\b"
+              }
+            ]
+          },
+          {
+            "tool": "web_search",
+            "min": 0,
+            "max": 0,
+            "args": [
+              {
+                "path": "query",
+                "matches": "2026-(0[1245-9]|1[0-2])|2026-03-(0\\d|1[1-9]|[23]\\d)"
+              }
+            ]
+          }
+        ],
+        "reply": {
+          "not_contains": [
+            "2024",
+            "2025"
+          ]
+        }
+      }
+    }
+  ],
+  "rubric": [
+    "Does the reply cite only news items from today, 10 March 2026?"
+  ]
+}

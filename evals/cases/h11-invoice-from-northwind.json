@@ -1,0 +1,65 @@
+{
+  "id": "h11-invoice-from-northwind",
+  "title": "A question about an invoice finds it and gives its date",
+  "tags": [
+    "happy"
+  ],
+  "kind": "happy",
+  "clock": {
+    "local": "2026-03-10T09:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru"
+  },
+  "world": {
+    "gmail": {
+      "messages": [
+        {
+          "id": "m1",
+          "from": "Northwind Energy <billing@northwind.example>",
+          "subject": "Invoice 2026-02 from Northwind Energy",
+          "received": "2026-03-09T14:20",
+          "body": "Invoice 2026-02: 84.20 EUR. Please pay by 2026-03-24.",
+          "labels": [
+            "INBOX",
+            "UNREAD"
+          ]
+        },
+        {
+          "id": "m2",
+          "from": "Garden Weekly <news@gardenweekly.example>",
+          "subject": "Garden Weekly: spring planting",
+          "received": "2026-03-08T18:00",
+          "body": "Plant early peas now.",
+          "labels": [
+            "INBOX",
+            "UNREAD"
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "say": "пришёл счёт от Northwind?",
+      "expect": {
+        "calls": [
+          {
+            "tool": "gmail_search",
+            "min": 1
+          }
+        ],
+        "reply": {
+          "contains": [
+            "Northwind"
+          ],
+          "matches": [
+            "(?i)(9 марта|09\\.03|9\\.03|2026-03-09|вчера)"
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,86 @@
+{
+  "id": "c1-find-table-by-title",
+  "title": "The film table is found by its title without asking the user to share it",
+  "tags": [
+    "regression"
+  ],
+  "kind": "false-inability",
+  "clock": {
+    "local": "2026-03-12T21:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru"
+  },
+  "world": {
+    "notion": {
+      "writes": true,
+      "data_sources": [
+        {
+          "id": "film-club",
+          "title": "Кино по средам",
+          "properties": [
+            {
+              "name": "Date",
+              "type": "date"
+            },
+            {
+              "name": "Rating",
+              "type": "number"
+            }
+          ],
+          "rows": [
+            {
+              "id": "row-northern-wind",
+              "title": "Северный ветер",
+              "values": {
+                "Date": "2026-03-11"
+              }
+            },
+            {
+              "id": "row-quiet-shore",
+              "title": "Тихий берег",
+              "values": {
+                "Date": "2026-03-18"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "say": "поставь 8 фильму «Северный ветер»",
+      "expect": {
+        "calls": [
+          {
+            "tool": "notion_search",
+            "min": 1
+          },
+          {
+            "tool": "notion_update_page",
+            "min": 1,
+            "max": 1,
+            "args": [
+              {
+                "path": "page_id",
+                "equals": "row-northern-wind"
+              },
+              {
+                "path": "properties.Rating.number",
+                "equals": 8
+              }
+            ]
+          }
+        ],
+        "reply": {
+          "not_matches": [
+            "(?i)(поделись|предоставь|дай (мне )?доступ|пришли (мне )?(ссылку|таблицу)|скинь)"
+          ]
+        }
+      }
+    }
+  ]
+}

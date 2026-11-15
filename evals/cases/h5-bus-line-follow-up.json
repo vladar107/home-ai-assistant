@@ -1,0 +1,180 @@
+{
+  "id": "h5-bus-line-follow-up",
+  "title": "A follow-up naming line 340 is answered for the same trip",
+  "tags": [
+    "happy"
+  ],
+  "kind": "happy",
+  "clock": {
+    "local": "2026-03-10T17:30",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru",
+    "memory": [
+      "Дом: Eastbrook, остановка Market Square. Работа в Westfield."
+    ]
+  },
+  "world": {
+    "buses": {
+      "stops": [
+        {
+          "id": "100",
+          "code": "30000001",
+          "name": "Eastbrook, Market Square",
+          "lat": 52.1,
+          "lon": 5.1,
+          "platform": "A"
+        },
+        {
+          "id": "101",
+          "code": "30000002",
+          "name": "Eastbrook, Central Station",
+          "lat": 52.12,
+          "lon": 5.12
+        },
+        {
+          "id": "102",
+          "code": "30000003",
+          "name": "Westfield, Station",
+          "lat": 52.2,
+          "lon": 5.2
+        }
+      ],
+      "routes": [
+        {
+          "id": "r340",
+          "agency": "UOV",
+          "short": "340",
+          "long": "Eastbrook - Westfield"
+        }
+      ],
+      "timing_points": [
+        {
+          "code": "30000003",
+          "passes": {
+            "J1": {
+              "LinePublicNumber": "340",
+              "JourneyNumber": 1,
+              "UserStopOrderNumber": 1,
+              "DestinationName50": "Eastbrook",
+              "TransportType": "BUS",
+              "TripStopStatus": "PLANNED",
+              "JourneyStopType": "FIRST",
+              "TargetDepartureTime": "2026-03-10T17:50:00",
+              "ExpectedDepartureTime": "2026-03-10T17:52:00"
+            },
+            "J2": {
+              "LinePublicNumber": "12",
+              "JourneyNumber": 2,
+              "UserStopOrderNumber": 1,
+              "DestinationName50": "Westfield North",
+              "TransportType": "BUS",
+              "TripStopStatus": "PLANNED",
+              "JourneyStopType": "FIRST",
+              "TargetDepartureTime": "2026-03-10T17:55:00",
+              "ExpectedDepartureTime": "2026-03-10T17:55:00"
+            }
+          }
+        }
+      ],
+      "plans": [
+        {
+          "from": {
+            "lat": 52.2,
+            "lon": 5.2
+          },
+          "to": {
+            "lat": 52.1,
+            "lon": 5.1
+          },
+          "itinerary": {
+            "duration": 2700,
+            "startTime": "2026-03-10T16:50:00Z",
+            "endTime": "2026-03-10T17:35:00Z",
+            "transfers": 0,
+            "legs": [
+              {
+                "mode": "BUS",
+                "routeShortName": "340",
+                "headsign": "Eastbrook",
+                "duration": 2700,
+                "startTime": "2026-03-10T16:50:00Z",
+                "endTime": "2026-03-10T17:35:00Z",
+                "scheduledStartTime": "2026-03-10T16:50:00Z",
+                "scheduledEndTime": "2026-03-10T17:35:00Z",
+                "from": {
+                  "name": "Westfield, Station",
+                  "departure": "2026-03-10T16:50:00Z",
+                  "scheduledDeparture": "2026-03-10T16:50:00Z"
+                },
+                "to": {
+                  "name": "Eastbrook, Market Square",
+                  "arrival": "2026-03-10T17:35:00Z",
+                  "scheduledArrival": "2026-03-10T17:35:00Z"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "places": [
+        {
+          "type": "STOP",
+          "name": "Eastbrook, Market Square",
+          "lat": 52.1,
+          "lon": 5.1,
+          "country": "NL"
+        },
+        {
+          "type": "STOP",
+          "name": "Eastbrook, Central Station",
+          "lat": 52.12,
+          "lon": 5.12,
+          "country": "NL"
+        },
+        {
+          "type": "STOP",
+          "name": "Westfield, Station",
+          "lat": 52.2,
+          "lon": 5.2,
+          "country": "NL"
+        }
+      ],
+      "stop_times": []
+    }
+  },
+  "steps": [
+    {
+      "say": "когда автобус из Westfield домой?",
+      "expect": {
+        "calls": [
+          {
+            "tool": "bus_trip",
+            "min": 1
+          }
+        ]
+      }
+    },
+    {
+      "say": "а 340?",
+      "expect": {
+        "calls": [
+          {
+            "tool": "bus_trip",
+            "min": 1
+          }
+        ],
+        "reply": {
+          "contains": [
+            "340"
+          ]
+        }
+      }
+    }
+  ],
+  "rubric": [
+    "Does the second answer use line 340 for the same Westfield to Eastbrook trip?"
+  ]
+}

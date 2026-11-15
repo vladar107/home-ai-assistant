@@ -1,0 +1,162 @@
+{
+  "id": "t3-recover-after-rejected-call",
+  "title": "After the train planner rejects a call, the next call changes its arguments",
+  "tags": [
+    "regression"
+  ],
+  "kind": "tool-misuse",
+  "clock": {
+    "local": "2026-03-10T16:30",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru",
+    "memory": [
+      "Живёт в Eastbrook, работает в Westfield."
+    ]
+  },
+  "world": {
+    "trains": {
+      "stations": [
+        {
+          "code": "EBC",
+          "name": "Eastbrook Central",
+          "synonyms": [
+            "Eastbrook",
+            "Eastbrook Centraal"
+          ]
+        },
+        {
+          "code": "WFD",
+          "name": "Westfield"
+        }
+      ],
+      "trips": [
+        {
+          "from": "EBC",
+          "to": "WFD",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 31,
+            "legs": [
+              {
+                "name": "IC 1100",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Westfield",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "1100",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-10T17:13:00+0100",
+                  "plannedTrack": "4"
+                },
+                "destination": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-10T17:44:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "EBC",
+          "to": "WFD",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 31,
+            "legs": [
+              {
+                "name": "IC 1102",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Westfield",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "1102",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-10T17:43:00+0100",
+                  "plannedTrack": "4"
+                },
+                "destination": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-10T18:14:00+0100"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "departures": [
+        {
+          "station": "EBC",
+          "departure": {
+            "direction": "Westfield",
+            "name": "NS 1100",
+            "plannedDateTime": "2026-03-10T17:13:00+0100",
+            "plannedTrack": "4",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "1100"
+            }
+          }
+        },
+        {
+          "station": "EBC",
+          "departure": {
+            "direction": "Westfield",
+            "name": "NS 1102",
+            "plannedDateTime": "2026-03-10T17:43:00+0100",
+            "plannedTrack": "4",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "1102"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "say": "поезда в Westfield после 17:00",
+      "expect": {
+        "calls": [
+          {
+            "tool": "ns_trips",
+            "min": 1,
+            "max": 4,
+            "args": [
+              {
+                "path": "date_time",
+                "matches": "T1[7-9]:"
+              }
+            ]
+          }
+        ],
+        "reply": {
+          "contains": [
+            "17:13"
+          ]
+        }
+      }
+    }
+  ],
+  "rubric": [
+    "If a train planner call returned an error, did the next call change its arguments instead of repeating the same call?",
+    "Did the assistant end with a successful lookup of trains after 17:00?"
+  ]
+}

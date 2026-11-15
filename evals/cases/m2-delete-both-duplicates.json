@@ -1,0 +1,71 @@
+{
+  "id": "m2-delete-both-duplicates",
+  "title": "Both duplicate backlog items are removed, not one",
+  "tags": [
+    "regression"
+  ],
+  "kind": "misread-request",
+  "clock": {
+    "local": "2026-03-10T11:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru"
+  },
+  "world": {
+    "backlog": [
+      {
+        "title": "Показывать ветер в узлах",
+        "details": "Единицы ветра в прогнозе."
+      },
+      {
+        "title": "Показывать ветер в узлах",
+        "details": "Единицы ветра в прогнозе, повтор."
+      },
+      {
+        "title": "Добавить курс валют в утренний отчёт",
+        "details": "Одна строка с курсом."
+      }
+    ]
+  },
+  "steps": [
+    {
+      "say": "удали оба дубля",
+      "expect": {
+        "calls": [
+          {
+            "tool": "backlog_update",
+            "min": 2,
+            "max": 2,
+            "args": [
+              {
+                "path": "status",
+                "equals": "done"
+              }
+            ]
+          }
+        ],
+        "not_called": [
+          "backlog_add"
+        ],
+        "store": [
+          {
+            "check": "backlog",
+            "count": 3,
+            "open": 1
+          }
+        ],
+        "reply": {
+          "not_matches": [
+            "(?i)оба[^.]{0,40}(активн|открыт)"
+          ]
+        }
+      }
+    }
+  ],
+  "rubric": [
+    "Did the assistant close exactly the two duplicate items and leave «Добавить курс валют в утренний отчёт» open?",
+    "Does the reply avoid saying that both items are still active or open?"
+  ]
+}

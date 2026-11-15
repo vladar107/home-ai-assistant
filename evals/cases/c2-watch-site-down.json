@@ -1,0 +1,64 @@
+{
+  "id": "c2-watch-site-down",
+  "title": "A request to be told when a shop site works again becomes a watch",
+  "tags": [
+    "regression"
+  ],
+  "kind": "false-inability",
+  "clock": {
+    "local": "2026-03-10T10:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru",
+    "memory": [
+      "Любимый магазин: Northwind Shop, сайт https://shop.example/."
+    ]
+  },
+  "world": {
+    "pages": {
+      "pages": [
+        {
+          "host": "shop.example",
+          "path": "/",
+          "status": 503,
+          "title": "Service unavailable",
+          "body": "Temporarily unavailable."
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "say": "сообщи, когда сайт магазина снова заработает",
+      "expect": {
+        "calls": [
+          {
+            "tool": "watch_propose",
+            "min": 1,
+            "max": 1,
+            "args": [
+              {
+                "path": "kind",
+                "equals": "agent"
+              },
+              {
+                "path": "check.instruction",
+                "contains": "shop.example"
+              }
+            ]
+          }
+        ],
+        "reply": {
+          "not_matches": [
+            "(?i)(не могу (следить|отслеживать|мониторить|проверять)|нет возможности)"
+          ]
+        }
+      }
+    }
+  ],
+  "rubric": [
+    "Does the watch check the shop site https://shop.example/ and tell the user once it works again?"
+  ]
+}

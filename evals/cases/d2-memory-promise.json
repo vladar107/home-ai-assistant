@@ -1,0 +1,50 @@
+{
+  "id": "d2-memory-promise",
+  "title": "A promise to use knots is backed by a saved instruction",
+  "tags": [
+    "regression"
+  ],
+  "kind": "claimed-done",
+  "clock": {
+    "local": "2026-03-10T15:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru"
+  },
+  "steps": [
+    {
+      "say": "указывай ветер в узлах",
+      "expect": {
+        "calls": [
+          {
+            "tool": "memory_add",
+            "min": 1,
+            "args": [
+              {
+                "path": "kind",
+                "equals": "instruction"
+              },
+              {
+                "path": "text",
+                "matches": "(?i)(узл|knot)"
+              }
+            ]
+          }
+        ],
+        "store": [
+          {
+            "check": "memory",
+            "kind": "instruction",
+            "contains": "узл",
+            "min": 1
+          }
+        ]
+      }
+    }
+  ],
+  "rubric": [
+    "Does the reply promise to use knots only because the instruction was actually saved or proposed?"
+  ]
+}

@@ -1,0 +1,68 @@
+{
+  "id": "l1-time-only-change",
+  "title": "Changing a report's time leaves its prompt alone",
+  "tags": [
+    "regression"
+  ],
+  "kind": "language-format",
+  "clock": {
+    "local": "2026-03-10T21:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru"
+  },
+  "world": {
+    "jobs": [
+      {
+        "id": "morning-report",
+        "name": "Утренний отчёт",
+        "prompt": "Send the morning report: today's weather and calendar. Reply in Russian.",
+        "cron": "30 8 * * 1-5"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "say": "поменяй время утреннего отчёта на 7:15",
+      "expect": {
+        "calls": [
+          {
+            "tool": "schedule_update",
+            "min": 1,
+            "max": 1,
+            "args": [
+              {
+                "path": "cron",
+                "matches": "^15 7 \\* \\* "
+              }
+            ]
+          }
+        ],
+        "not_called": [
+          "schedule_remove",
+          "schedule_propose"
+        ],
+        "store": [
+          {
+            "check": "jobs",
+            "name": "Утренний отчёт",
+            "cron": "15 7 * * 1-5",
+            "count": 1
+          },
+          {
+            "check": "jobs",
+            "name": "Утренний отчёт",
+            "prompt_equals": "Send the morning report: today's weather and calendar. Reply in Russian.",
+            "count": 1
+          },
+          {
+            "check": "jobs",
+            "count": 1
+          }
+        ]
+      }
+    }
+  ]
+}

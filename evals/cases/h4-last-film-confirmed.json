@@ -1,0 +1,80 @@
+{
+  "id": "h4-last-film-confirmed",
+  "title": "The last film is confirmed from the table with its title",
+  "tags": [
+    "happy"
+  ],
+  "kind": "happy",
+  "clock": {
+    "local": "2026-03-12T10:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru"
+  },
+  "world": {
+    "notion": {
+      "writes": true,
+      "data_sources": [
+        {
+          "id": "film-club",
+          "title": "Кино по средам",
+          "properties": [
+            {
+              "name": "Date",
+              "type": "date"
+            },
+            {
+              "name": "Rating",
+              "type": "number"
+            }
+          ],
+          "rows": [
+            {
+              "id": "row-northern-wind",
+              "title": "Северный ветер",
+              "values": {
+                "Date": "2026-02-25",
+                "Rating": 8
+              }
+            },
+            {
+              "id": "row-lighthouse-light",
+              "title": "Свет маяка",
+              "values": {
+                "Date": "2026-03-11",
+                "Rating": 7
+              }
+            },
+            {
+              "id": "row-quiet-shore",
+              "title": "Тихий берег",
+              "values": {
+                "Date": "2026-03-18"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "say": "последним же был фильм про свет?",
+      "expect": {
+        "calls": [
+          {
+            "tool": "notion_query_data_source",
+            "min": 1
+          }
+        ],
+        "reply": {
+          "contains": [
+            "Свет маяка"
+          ]
+        }
+      }
+    }
+  ]
+}

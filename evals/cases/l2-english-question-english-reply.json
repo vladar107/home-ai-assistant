@@ -1,0 +1,146 @@
+{
+  "id": "l2-english-question-english-reply",
+  "title": "An English question gets an English reply even for a Russian interface",
+  "tags": [
+    "regression"
+  ],
+  "kind": "language-format",
+  "clock": {
+    "local": "2026-03-10T08:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru",
+    "memory": [
+      "Живёт в Eastbrook, работает в Westfield."
+    ]
+  },
+  "world": {
+    "trains": {
+      "stations": [
+        {
+          "code": "EBC",
+          "name": "Eastbrook Central",
+          "synonyms": [
+            "Eastbrook",
+            "Eastbrook Centraal"
+          ]
+        },
+        {
+          "code": "WFD",
+          "name": "Westfield"
+        }
+      ],
+      "trips": [
+        {
+          "from": "EBC",
+          "to": "WFD",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 31,
+            "legs": [
+              {
+                "name": "IC 1100",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Westfield",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "1100",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-10T08:13:00+0100",
+                  "plannedTrack": "4"
+                },
+                "destination": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-10T08:44:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "EBC",
+          "to": "WFD",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 31,
+            "legs": [
+              {
+                "name": "IC 1102",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Westfield",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "1102",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-10T08:43:00+0100",
+                  "plannedTrack": "4"
+                },
+                "destination": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-10T09:14:00+0100"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "departures": [
+        {
+          "station": "EBC",
+          "departure": {
+            "direction": "Westfield",
+            "name": "NS 1100",
+            "plannedDateTime": "2026-03-10T08:13:00+0100",
+            "plannedTrack": "4",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "1100"
+            }
+          }
+        },
+        {
+          "station": "EBC",
+          "departure": {
+            "direction": "Westfield",
+            "name": "NS 1102",
+            "plannedDateTime": "2026-03-10T08:43:00+0100",
+            "plannedTrack": "4",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "1102"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "say": "When does the next train to Westfield leave?",
+      "expect": {
+        "reply": {
+          "language": "en",
+          "contains": [
+            "08:13"
+          ]
+        }
+      }
+    }
+  ]
+}

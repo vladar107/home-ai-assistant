@@ -1,0 +1,98 @@
+{
+  "id": "c3-body-fat-not-just-weight",
+  "title": "A question about losing weight reads body fat, not only weight",
+  "tags": [
+    "regression"
+  ],
+  "kind": "false-inability",
+  "clock": {
+    "local": "2026-03-10T09:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru"
+  },
+  "world": {
+    "home": {
+      "time_zone": "Europe/Berlin",
+      "entities": [
+        {
+          "entity_id": "sensor.scale_weight",
+          "name": "Scale weight",
+          "state": "82.4",
+          "unit": "kg",
+          "area": "Bathroom",
+          "exposed": true,
+          "statistics": [
+            {
+              "start": "2026-01-01T00:00:00Z",
+              "mean": 84.0
+            },
+            {
+              "start": "2026-02-01T00:00:00Z",
+              "mean": 83.0
+            },
+            {
+              "start": "2026-03-01T00:00:00Z",
+              "mean": 82.4
+            }
+          ]
+        },
+        {
+          "entity_id": "sensor.scale_body_fat",
+          "name": "Scale body fat",
+          "state": "27.4",
+          "unit": "%",
+          "area": "Bathroom",
+          "exposed": true,
+          "statistics": [
+            {
+              "start": "2026-01-01T00:00:00Z",
+              "mean": 29.0
+            },
+            {
+              "start": "2026-02-01T00:00:00Z",
+              "mean": 28.1
+            },
+            {
+              "start": "2026-03-01T00:00:00Z",
+              "mean": 27.4
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "say": "мне ещё надо худеть?",
+      "expect": {
+        "calls": [
+          {
+            "tool": "ha_history",
+            "min": 1,
+            "args": [
+              {
+                "path": "name",
+                "matches": "(?i)body fat"
+              }
+            ]
+          }
+        ],
+        "reply": {
+          "matches": [
+            "(?i)жир"
+          ],
+          "contains": [
+            "27"
+          ]
+        }
+      }
+    }
+  ],
+  "rubric": [
+    "Does the answer rest on body fat, not on weight or BMI alone?",
+    "Does the answer avoid claiming it cannot judge without more data?"
+  ]
+}

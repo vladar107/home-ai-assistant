@@ -1,0 +1,56 @@
+{
+  "id": "h1-film-length",
+  "title": "A film's running time comes from one web search",
+  "tags": [
+    "happy"
+  ],
+  "kind": "happy",
+  "clock": {
+    "local": "2026-03-10T10:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru"
+  },
+  "world": {
+    "weather": {
+      "places": [
+        {
+          "name": "Eastbrook",
+          "latitude": 52.1,
+          "longitude": 5.1,
+          "country": "Netherlands",
+          "country_code": "NL",
+          "timezone": "Europe/Berlin"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "say": "сколько длится «Тихий берег»?",
+      "expect": {
+        "calls": [
+          {
+            "tool": "web_search",
+            "min": 1,
+            "max": 1,
+            "args": [
+              {
+                "path": "query",
+                "contains": "Тихий берег"
+              }
+            ]
+          }
+        ],
+        "reply": {
+          "language": "ru"
+        }
+      }
+    }
+  ],
+  "rubric": [
+    "Does the reply state the film's running time in minutes or hours, as the search found it?"
+  ]
+}

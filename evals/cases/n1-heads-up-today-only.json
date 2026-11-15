@@ -1,0 +1,70 @@
+{
+  "id": "n1-heads-up-today-only",
+  "title": "The morning Heads-up reports today's event and not the one two days out",
+  "tags": [
+    "regression",
+    "scheduled"
+  ],
+  "kind": "noisy-scheduled-report",
+  "clock": {
+    "local": "2026-03-12T07:30",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru"
+  },
+  "world": {
+    "jobs": [
+      {
+        "id": "morning-heads-up",
+        "name": "Morning Heads-up",
+        "heads_up": true,
+        "prompt": "Пиши по-русски, коротко.",
+        "cron": "30 7 * * *"
+      }
+    ],
+    "calendar": {
+      "events": [
+        {
+          "id": "ev1",
+          "summary": "Приём у стоматолога",
+          "start": "2026-03-12T10:00",
+          "end": "2026-03-12T11:00",
+          "location": "Eastbrook Dental"
+        },
+        {
+          "id": "ev2",
+          "summary": "Командный выезд",
+          "start": "2026-03-13T09:00",
+          "end": "2026-03-13T17:00"
+        },
+        {
+          "id": "ev3",
+          "summary": "Мастер-класс по садоводству",
+          "start": "2026-03-14T11:00",
+          "end": "2026-03-14T13:00"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "run_job": "morning-heads-up",
+      "expect": {
+        "reply": {
+          "contains": [
+            "стоматолог"
+          ],
+          "not_contains": [
+            "садовод"
+          ]
+        }
+      }
+    }
+  ],
+  "rubric": [
+    "Does the report mention today's dentist appointment with its time?",
+    "Does the report leave out the gardening workshop two days away?"
+  ]
+}

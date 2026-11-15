@@ -1,0 +1,323 @@
+{
+  "id": "h12-weather-saved-place",
+  "title": "Weather at home draws a card for the saved place",
+  "tags": [
+    "happy"
+  ],
+  "kind": "happy",
+  "clock": {
+    "local": "2026-03-10T08:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru"
+  },
+  "world": {
+    "places": [
+      {
+        "name": "Дом",
+        "lat": 52.1,
+        "lon": 5.1,
+        "radius_m": 150
+      }
+    ],
+    "weather": {
+      "places": [
+        {
+          "name": "Eastbrook",
+          "latitude": 52.1,
+          "longitude": 5.1,
+          "country": "Netherlands",
+          "country_code": "NL",
+          "timezone": "Europe/Berlin"
+        }
+      ],
+      "forecasts": [
+        {
+          "latitude": 52.1,
+          "longitude": 5.1,
+          "timezone": "Europe/Berlin",
+          "current": {
+            "time": "2026-03-10T08:00",
+            "temperature": 7.5,
+            "apparent": 5,
+            "humidity": 80,
+            "precipitation": 0,
+            "code": 3,
+            "wind": 18,
+            "gusts": 30
+          },
+          "days": [
+            {
+              "date": "2026-03-10",
+              "code": 61,
+              "high": 9,
+              "low": 3,
+              "rain": 4.2,
+              "probability": 70,
+              "wind": 25,
+              "sunrise": "2026-03-10T06:45",
+              "sunset": "2026-03-10T18:20"
+            }
+          ],
+          "hours": [
+            {
+              "time": "2026-03-10T00:00",
+              "temperature": 5.2,
+              "apparent": 6,
+              "probability": 20,
+              "rain": 0,
+              "code": 3,
+              "wind": 14,
+              "gusts": 24
+            },
+            {
+              "time": "2026-03-10T01:00",
+              "temperature": 5.5,
+              "apparent": 6,
+              "probability": 20,
+              "rain": 0,
+              "code": 3,
+              "wind": 14,
+              "gusts": 24
+            },
+            {
+              "time": "2026-03-10T02:00",
+              "temperature": 5.8,
+              "apparent": 6,
+              "probability": 20,
+              "rain": 0,
+              "code": 3,
+              "wind": 14,
+              "gusts": 24
+            },
+            {
+              "time": "2026-03-10T03:00",
+              "temperature": 6.1,
+              "apparent": 6,
+              "probability": 20,
+              "rain": 0,
+              "code": 3,
+              "wind": 14,
+              "gusts": 24
+            },
+            {
+              "time": "2026-03-10T04:00",
+              "temperature": 6.4,
+              "apparent": 6,
+              "probability": 20,
+              "rain": 0,
+              "code": 3,
+              "wind": 14,
+              "gusts": 24
+            },
+            {
+              "time": "2026-03-10T05:00",
+              "temperature": 6.7,
+              "apparent": 6,
+              "probability": 20,
+              "rain": 0,
+              "code": 3,
+              "wind": 14,
+              "gusts": 24
+            },
+            {
+              "time": "2026-03-10T06:00",
+              "temperature": 7.0,
+              "apparent": 6,
+              "probability": 20,
+              "rain": 0,
+              "code": 3,
+              "wind": 14,
+              "gusts": 24
+            },
+            {
+              "time": "2026-03-10T07:00",
+              "temperature": 7.3,
+              "apparent": 6,
+              "probability": 20,
+              "rain": 0,
+              "code": 3,
+              "wind": 14,
+              "gusts": 24
+            },
+            {
+              "time": "2026-03-10T08:00",
+              "temperature": 7.6,
+              "apparent": 6,
+              "probability": 20,
+              "rain": 0,
+              "code": 3,
+              "wind": 14,
+              "gusts": 24
+            },
+            {
+              "time": "2026-03-10T09:00",
+              "temperature": 7.9,
+              "apparent": 6,
+              "probability": 20,
+              "rain": 0,
+              "code": 3,
+              "wind": 14,
+              "gusts": 24
+            },
+            {
+              "time": "2026-03-10T10:00",
+              "temperature": 8.2,
+              "apparent": 6,
+              "probability": 20,
+              "rain": 0,
+              "code": 3,
+              "wind": 14,
+              "gusts": 24
+            },
+            {
+              "time": "2026-03-10T11:00",
+              "temperature": 8.5,
+              "apparent": 6,
+              "probability": 20,
+              "rain": 0,
+              "code": 3,
+              "wind": 14,
+              "gusts": 24
+            },
+            {
+              "time": "2026-03-10T12:00",
+              "temperature": 8.8,
+              "apparent": 6,
+              "probability": 20,
+              "rain": 0,
+              "code": 3,
+              "wind": 14,
+              "gusts": 24
+            },
+            {
+              "time": "2026-03-10T13:00",
+              "temperature": 9.1,
+              "apparent": 6,
+              "probability": 20,
+              "rain": 0,
+              "code": 3,
+              "wind": 14,
+              "gusts": 24
+            },
+            {
+              "time": "2026-03-10T14:00",
+              "temperature": 9.4,
+              "apparent": 6,
+              "probability": 20,
+              "rain": 0,
+              "code": 3,
+              "wind": 14,
+              "gusts": 24
+            },
+            {
+              "time": "2026-03-10T15:00",
+              "temperature": 9.7,
+              "apparent": 6,
+              "probability": 20,
+              "rain": 0,
+              "code": 3,
+              "wind": 14,
+              "gusts": 24
+            },
+            {
+              "time": "2026-03-10T16:00",
+              "temperature": 10.0,
+              "apparent": 6,
+              "probability": 20,
+              "rain": 0,
+              "code": 3,
+              "wind": 14,
+              "gusts": 24
+            },
+            {
+              "time": "2026-03-10T17:00",
+              "temperature": 10.3,
+              "apparent": 6,
+              "probability": 20,
+              "rain": 0,
+              "code": 3,
+              "wind": 14,
+              "gusts": 24
+            },
+            {
+              "time": "2026-03-10T18:00",
+              "temperature": 10.6,
+              "apparent": 6,
+              "probability": 20,
+              "rain": 0,
+              "code": 3,
+              "wind": 14,
+              "gusts": 24
+            },
+            {
+              "time": "2026-03-10T19:00",
+              "temperature": 10.9,
+              "apparent": 6,
+              "probability": 20,
+              "rain": 0,
+              "code": 3,
+              "wind": 14,
+              "gusts": 24
+            },
+            {
+              "time": "2026-03-10T20:00",
+              "temperature": 11.2,
+              "apparent": 6,
+              "probability": 20,
+              "rain": 0,
+              "code": 3,
+              "wind": 14,
+              "gusts": 24
+            },
+            {
+              "time": "2026-03-10T21:00",
+              "temperature": 11.5,
+              "apparent": 6,
+              "probability": 20,
+              "rain": 0,
+              "code": 3,
+              "wind": 14,
+              "gusts": 24
+            },
+            {
+              "time": "2026-03-10T22:00",
+              "temperature": 11.8,
+              "apparent": 6,
+              "probability": 20,
+              "rain": 0,
+              "code": 3,
+              "wind": 14,
+              "gusts": 24
+            },
+            {
+              "time": "2026-03-10T23:00",
+              "temperature": 12.1,
+              "apparent": 6,
+              "probability": 20,
+              "rain": 0,
+              "code": 3,
+              "wind": 14,
+              "gusts": 24
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "say": "погода сегодня дома",
+      "expect": {
+        "calls": [
+          {
+            "tool": "weather_card",
+            "min": 1
+          }
+        ]
+      }
+    }
+  ]
+}

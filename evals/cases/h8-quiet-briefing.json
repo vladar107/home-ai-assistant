@@ -1,0 +1,41 @@
+{
+  "id": "h8-quiet-briefing",
+  "title": "A briefing with nothing new sends nothing",
+  "tags": [
+    "happy",
+    "scheduled"
+  ],
+  "kind": "happy",
+  "clock": {
+    "local": "2026-03-11T08:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru"
+  },
+  "world": {
+    "jobs": [
+      {
+        "id": "morning-briefing",
+        "name": "Morning Heads-up",
+        "heads_up": true,
+        "prompt": "Пиши по-русски, коротко.",
+        "cron": "0 8 * * *"
+      }
+    ],
+    "calendar": {
+      "events": []
+    }
+  },
+  "steps": [
+    {
+      "run_job": "morning-briefing",
+      "expect": {
+        "reply": {
+          "quiet": true
+        }
+      }
+    }
+  ]
+}

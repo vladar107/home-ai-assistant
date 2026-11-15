@@ -1,0 +1,166 @@
+{
+  "id": "dt3-quiz-too-late",
+  "title": "A 45-minute trip at 18:30 for a 19:00 quiz is not 'on time'",
+  "tags": [
+    "regression"
+  ],
+  "kind": "date-time",
+  "clock": {
+    "local": "2026-03-10T18:30",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru",
+    "memory": [
+      "Живёт в Eastbrook, работает в Westfield."
+    ]
+  },
+  "world": {
+    "calendar": {
+      "events": [
+        {
+          "id": "ev1",
+          "summary": "Квиз в пабе",
+          "start": "2026-03-10T19:00",
+          "end": "2026-03-10T21:00",
+          "location": "Westfield, The Harbour Pub"
+        }
+      ]
+    },
+    "trains": {
+      "stations": [
+        {
+          "code": "EBC",
+          "name": "Eastbrook Central",
+          "synonyms": [
+            "Eastbrook",
+            "Eastbrook Centraal"
+          ]
+        },
+        {
+          "code": "WFD",
+          "name": "Westfield"
+        }
+      ],
+      "trips": [
+        {
+          "from": "EBC",
+          "to": "WFD",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 45,
+            "legs": [
+              {
+                "name": "IC 1100",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Westfield",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "1100",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-10T18:35:00+0100",
+                  "plannedTrack": "4"
+                },
+                "destination": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-10T19:20:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "EBC",
+          "to": "WFD",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 45,
+            "legs": [
+              {
+                "name": "IC 1102",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Westfield",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "1102",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-10T19:05:00+0100",
+                  "plannedTrack": "4"
+                },
+                "destination": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-10T19:50:00+0100"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "departures": [
+        {
+          "station": "EBC",
+          "departure": {
+            "direction": "Westfield",
+            "name": "NS 1100",
+            "plannedDateTime": "2026-03-10T18:35:00+0100",
+            "plannedTrack": "4",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "1100"
+            }
+          }
+        },
+        {
+          "station": "EBC",
+          "departure": {
+            "direction": "Westfield",
+            "name": "NS 1102",
+            "plannedDateTime": "2026-03-10T19:05:00+0100",
+            "plannedTrack": "4",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "1102"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "say": "успеваю на квиз?",
+      "expect": {
+        "calls": [
+          {
+            "tool": "calendar_events",
+            "min": 1
+          }
+        ],
+        "reply": {
+          "matches": [
+            "(?i)(не успе|опозд|поздно|позже|только к|к 19:[1-5]\\d)"
+          ]
+        }
+      }
+    }
+  ],
+  "rubric": [
+    "Does the reply avoid saying the user will arrive on time?",
+    "Does the reply state when the user would arrive?"
+  ]
+}

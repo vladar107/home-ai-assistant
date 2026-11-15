@@ -1,0 +1,62 @@
+{
+  "id": "h10-todays-events",
+  "title": "Today's calendar is listed with all three events and their times",
+  "tags": [
+    "happy"
+  ],
+  "kind": "happy",
+  "clock": {
+    "local": "2026-03-10T08:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru"
+  },
+  "world": {
+    "calendar": {
+      "events": [
+        {
+          "id": "ev1",
+          "summary": "Планёрка",
+          "start": "2026-03-10T09:30",
+          "end": "2026-03-10T10:00",
+          "location": "Westfield Office"
+        },
+        {
+          "id": "ev2",
+          "summary": "Обед с Робин",
+          "start": "2026-03-10T12:30",
+          "end": "2026-03-10T13:30"
+        },
+        {
+          "id": "ev3",
+          "summary": "Ice Hockey Training",
+          "start": "2026-03-10T19:30",
+          "end": "2026-03-10T21:00",
+          "location": "Westfield Ice Arena"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "say": "что у меня сегодня?",
+      "expect": {
+        "calls": [
+          {
+            "tool": "calendar_events",
+            "min": 1
+          }
+        ],
+        "reply": {
+          "contains": [
+            "09:30",
+            "12:30",
+            "19:30"
+          ]
+        }
+      }
+    }
+  ]
+}

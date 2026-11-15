@@ -1,0 +1,68 @@
+{
+  "id": "h6-vacuum-to-dock",
+  "title": "Sending the vacuum to its base is one device action and a short confirmation",
+  "tags": [
+    "happy"
+  ],
+  "kind": "happy",
+  "clock": {
+    "local": "2026-03-10T14:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru"
+  },
+  "world": {
+    "home": {
+      "time_zone": "Europe/Berlin",
+      "entities": [
+        {
+          "entity_id": "vacuum.hall_robot",
+          "name": "Hall robot",
+          "state": "cleaning",
+          "area": "Hall",
+          "exposed": true
+        }
+      ],
+      "tools": [
+        {
+          "name": "intent__HassVacuumReturnToBase",
+          "description": "Returns a vacuum to its base",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              }
+            }
+          },
+          "answer": "Returning to the dock.",
+          "effects": [
+            {
+              "entity_id": "vacuum.hall_robot",
+              "state": "returning"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "say": "отправь пылесос на базу",
+      "expect": {
+        "calls": [
+          {
+            "tool": "ha_vacuum_return_to_base",
+            "min": 1,
+            "max": 1
+          }
+        ]
+      }
+    }
+  ],
+  "rubric": [
+    "Is the confirmation short, one or two sentences?"
+  ]
+}

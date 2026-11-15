@@ -1,0 +1,83 @@
+{
+  "id": "f1-next-film-date",
+  "title": "The next film is the one with the nearest future date",
+  "tags": [
+    "regression"
+  ],
+  "kind": "made-things-up",
+  "clock": {
+    "local": "2026-03-10T10:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru"
+  },
+  "world": {
+    "notion": {
+      "writes": true,
+      "data_sources": [
+        {
+          "id": "film-club",
+          "title": "Кино по средам",
+          "properties": [
+            {
+              "name": "Date",
+              "type": "date"
+            },
+            {
+              "name": "Rating",
+              "type": "number"
+            }
+          ],
+          "rows": [
+            {
+              "id": "row-lighthouse-light",
+              "title": "Свет маяка",
+              "values": {
+                "Date": "2026-03-04",
+                "Rating": 7
+              }
+            },
+            {
+              "id": "row-northern-wind",
+              "title": "Северный ветер",
+              "values": {
+                "Date": "2026-03-12"
+              }
+            },
+            {
+              "id": "row-quiet-shore",
+              "title": "Тихий берег",
+              "values": {
+                "Date": "2026-03-19"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "say": "какой следующий фильм?",
+      "expect": {
+        "calls": [
+          {
+            "tool": "notion_query_data_source",
+            "min": 1
+          }
+        ],
+        "reply": {
+          "contains": [
+            "Северный ветер"
+          ]
+        }
+      }
+    }
+  ],
+  "rubric": [
+    "Does the reply name «Северный ветер», the film on 12 March, as the next one?",
+    "Does the reply avoid presenting «Тихий берег» as the next film?"
+  ]
+}

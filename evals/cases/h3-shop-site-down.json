@@ -1,0 +1,61 @@
+{
+  "id": "h3-shop-site-down",
+  "title": "A down shop site is checked, answered and a watch is offered",
+  "tags": [
+    "happy"
+  ],
+  "kind": "happy",
+  "clock": {
+    "local": "2026-03-10T10:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru",
+    "memory": [
+      "Любимый магазин: Northwind Shop."
+    ]
+  },
+  "world": {
+    "weather": {
+      "places": [
+        {
+          "name": "Eastbrook",
+          "latitude": 52.1,
+          "longitude": 5.1,
+          "country": "Netherlands",
+          "country_code": "NL",
+          "timezone": "Europe/Berlin"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "say": "сайт и приложение магазина не работают?",
+      "expect": {
+        "calls": [
+          {
+            "tool": "web_search",
+            "min": 1,
+            "args": [
+              {
+                "path": "query",
+                "contains": "Northwind"
+              }
+            ]
+          }
+        ],
+        "reply": {
+          "language": "ru",
+          "matches": [
+            "(?i)(слежу|прослежу|сообщ|уведом|наблюд|отслеж|watch)"
+          ]
+        }
+      }
+    }
+  ],
+  "rubric": [
+    "Does the reply answer, from the search results, whether the shop's site and app are down?"
+  ]
+}

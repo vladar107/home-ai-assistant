@@ -1,0 +1,55 @@
+{
+  "id": "w2-oneoff-reminder",
+  "title": "A Friday reminder is a single one-off reminder",
+  "tags": [
+    "regression"
+  ],
+  "kind": "unasked-write",
+  "clock": {
+    "local": "2026-03-10T10:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru"
+  },
+  "steps": [
+    {
+      "say": "напомни в пятницу в 18:00 купить цветы",
+      "expect": {
+        "calls": [
+          {
+            "tool": "reminder_set",
+            "min": 1,
+            "max": 1,
+            "args": [
+              {
+                "path": "at",
+                "matches": "^2026-03-13[ T]18:00"
+              },
+              {
+                "path": "text",
+                "matches": "(?i)цвет"
+              }
+            ]
+          }
+        ],
+        "not_called": [
+          "schedule_propose"
+        ],
+        "store": [
+          {
+            "check": "jobs",
+            "recurring": true,
+            "count": 0
+          },
+          {
+            "check": "jobs",
+            "at": "2026-03-13T18:00",
+            "count": 1
+          }
+        ]
+      }
+    }
+  ]
+}
