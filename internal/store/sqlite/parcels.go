@@ -704,3 +704,52 @@ func (s *Store) SaveSettings(ctx context.Context, settings parcel.Settings) erro
 	}
 	return nil
 }
+
+func (s *Store) LoadTracking(ctx context.Context, principalID string) (parcel.Tracking, error) {
+	if s == nil || s.db == nil {
+		return parcel.Tracking{}, fmt.Errorf("load parcel tracking: SQLite store is not open")
+	}
+	tracking := parcel.Tracking{PrincipalID: principalID}
+	var baselined sql.NullString
+	var off, owed int
+	err := s.db.QueryRowContext(ctx, `SELECT baselined_at, sources_fingerprint, cards_off, sources_owed FROM parcel_tracking WHERE principal_id = ?`, principalID).
+		Scan(&baselined, &tracking.Fingerprint, &off, &owed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return tracking, nil
+	}
+	if err != nil {
+		return parcel.Tracking{}, fmt.Errorf("load parcel tracking: %w", err)
+	}
+	tracking.CardsOff, tracking.SourcesOwed = off == 1, owed == 1
+	if baselined.Valid {
+		if tracking.BaselinedAt, err = time.Parse(time.RFC3339Nano, baselined.String); err != nil {
+			return parcel.Tracking{}, fmt.Errorf("parse parcel baseline time: %w", err)
+		}
+	}
+	return tracking, nil
+}
+
+func (s *Store) SaveTracking(ctx context.Context, tracking parcel.Tracking) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("save parcel tracking: SQLite store is not open")
+	}
+	var baselined any
+	if !tracking.BaselinedAt.IsZero() {
+		baselined = formatTime(tracking.BaselinedAt)
+	}
+	off, owed := 0, 0
+	if tracking.CardsOff {
+		off = 1
+	}
+	if tracking.SourcesOwed {
+		owed = 1
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO parcel_tracking (principal_id, baselined_at, sources_fingerprint, cards_off, sources_owed) VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT (principal_id) DO UPDATE SET baselined_at = excluded.baselined_at,
+		   sources_fingerprint = excluded.sources_fingerprint, cards_off = excluded.cards_off, sources_owed = excluded.sources_owed`,
+		tracking.PrincipalID, baselined, tracking.Fingerprint, off, owed); err != nil {
+		return fmt.Errorf("save parcel tracking: %w", err)
+	}
+	return nil
+}

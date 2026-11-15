@@ -378,6 +378,30 @@ func TestMailCursorAndSettings(t *testing.T) {
 	}
 }
 
+func TestTrackingStateIsKeptPerPrincipal(t *testing.T) {
+	t.Parallel()
+	store, ctx := openTestStore(t)
+	if tracking, err := store.LoadTracking(ctx, "alice"); err != nil || !tracking.BaselinedAt.IsZero() || tracking.CardsOff || tracking.Fingerprint != "" {
+		t.Fatalf("tracking before saving = %+v %v", tracking, err)
+	}
+	if err := store.SaveTracking(ctx, parcel.Tracking{PrincipalID: "alice", BaselinedAt: parcelNow, Fingerprint: "abc", CardsOff: true, SourcesOwed: true}); err != nil {
+		t.Fatal(err)
+	}
+	tracking, err := store.LoadTracking(ctx, "alice")
+	if err != nil || !tracking.BaselinedAt.Equal(parcelNow) || tracking.Fingerprint != "abc" || !tracking.CardsOff || !tracking.SourcesOwed {
+		t.Fatalf("tracking = %+v %v", tracking, err)
+	}
+	if err := store.SaveTracking(ctx, parcel.Tracking{PrincipalID: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	if tracking, err = store.LoadTracking(ctx, "alice"); err != nil || !tracking.BaselinedAt.IsZero() || tracking.CardsOff || tracking.SourcesOwed {
+		t.Fatalf("cleared tracking = %+v %v", tracking, err)
+	}
+	if bob, err := store.LoadTracking(ctx, "bob"); err != nil || bob.Fingerprint != "" {
+		t.Fatalf("bob = %+v %v", bob, err)
+	}
+}
+
 type parcelFiles struct{}
 
 func (parcelFiles) SendFile(context.Context, string, delivery.File) error { return nil }

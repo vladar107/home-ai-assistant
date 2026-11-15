@@ -233,6 +233,20 @@ type Settings struct {
 	Postcode string
 }
 
+// Tracking is what the tracker loop has settled for one principal, kept so a restart does not
+// redo it. A zero BaselinedAt means the silent baseline has not finished.
+type Tracking struct {
+	PrincipalID string
+	BaselinedAt time.Time
+	// Fingerprint is that of the assigned sources when the baseline finished.
+	Fingerprint string
+	// CardsOff is set once the open cards were marked as tracking off.
+	CardsOff bool
+	// SourcesOwed is set when the baseline finished before every assigned source had read well, so
+	// the reads stay silent until one finds them all read.
+	SourcesOwed bool
+}
+
 // MailCursor is how far the mail job has read: the epoch second of the newest message it read and
 // the IDs of those it already read at or after that second.
 type MailCursor struct {
@@ -291,6 +305,9 @@ type Repository interface {
 
 	LoadMailCursor(ctx context.Context, principalID string) (MailCursor, bool, error)
 	SaveMailCursor(ctx context.Context, principalID string, cursor MailCursor, at time.Time) error
+
+	LoadTracking(ctx context.Context, principalID string) (Tracking, error)
+	SaveTracking(ctx context.Context, tracking Tracking) error
 
 	LoadSettings(ctx context.Context, principalID string) (Settings, error)
 	SaveSettings(ctx context.Context, settings Settings) error

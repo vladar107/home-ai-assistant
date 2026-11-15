@@ -141,6 +141,23 @@ CREATE TABLE parcel_mail_cursors (
         ON UPDATE CASCADE ON DELETE CASCADE
 ) STRICT;
 
+-- What the tracker loop has settled for a principal: when its silent baseline last finished, the
+-- fingerprint of the sources assigned then, whether the cards were marked as tracking off, and
+-- whether the baseline finished before every assigned Home Assistant source had read well, whose
+-- reads are then silent too until they have.
+CREATE TABLE parcel_tracking (
+    principal_id TEXT PRIMARY KEY NOT NULL,
+    baselined_at TEXT,
+    sources_fingerprint TEXT NOT NULL DEFAULT ''
+        CHECK (length(sources_fingerprint) <= 64),
+    cards_off INTEGER NOT NULL DEFAULT 0
+        CHECK (cards_off IN (0, 1)),
+    sources_owed INTEGER NOT NULL DEFAULT 0
+        CHECK (sources_owed IN (0, 1)),
+    FOREIGN KEY (principal_id) REFERENCES principals (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+) STRICT;
+
 -- Each principal's own parcel settings.
 CREATE TABLE parcel_settings (
     principal_id TEXT PRIMARY KEY NOT NULL,
