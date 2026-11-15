@@ -816,19 +816,41 @@ to Inbox. The tab registry records each feed tab with
 the subject `feed:<kind>` under a fixed name, and the Telegram service's resolver
 makes the tab on first use, one at a time per principal and feed.
 
-- **Delivery threads.** A delivery puts its feed tab on its context with
-  `thread.WithDelivery`, which only the Telegram client reads and which takes
-  precedence over the lane's `thread.From`. A scheduled run's own context gets
-  the same, so its files and pictures land in that tab, while `thread.From`
-  stays zero: the run never reads that tab's conversation, attachments,
-  approvals, or exchanges.
-- **Gone and suspect tabs.** A send to a gone feed tab falls back to the main
-  view through the client, and the observer's rules apply: a fresh feed tab
-  that never took a send is suspect for a day and kept, so a tab Telegram
-  refuses costs at most one new tab per feed per day. Once a tab is taken for
-  gone its row is dropped and the next delivery makes a new one. A tab that
-  cannot be made leaves the message in the main view, and the next delivery
-  tries again.
+- **Delivery routes.** A delivery puts a route to its destination or feed on
+  its context with `thread.WithRoute`, which only the Telegram client and the
+  tabs read and which takes precedence over the lane's `thread.From`, as
+  `thread.WithDelivery` does. The route is built by `telegram.Tabs.Route` and
+  finds its tab at the first send that needs it, under that send's context
+  (its deadline, cancellation, and trace) and in the language the route was
+  built in, which is English for scheduled runs; then it keeps it. So a run
+  that sends nothing, such as a quiet inbox check, makes no tab. A lookup the
+  sending context ended is tried again by the next send; any other failure
+  leaves the route in the main view. A scheduled run's own context gets a
+  route too, so its files, pictures, and cards land in its report's tab, while
+  `thread.From` stays zero: the run never reads that tab's conversation,
+  attachments, approvals, or exchanges. `thread.Peek` reads where a route
+  would go without making a tab, as the trip language sample does, and typing
+  and drafts use a route's tab only once it was found.
+- **Gone and suspect tabs.** The client reads a send's tab once and tells the
+  observer how the send went; any 400 refusal of a tab send is logged with
+  Telegram's description, cleaned and cut to 200 runes. When a tab is not
+  found, the observer's rules apply: a fresh tab the bot made that never took a
+  send, or one the user wrote in within a day, is suspect and kept, and its
+  send falls back to the main view, so a tab Telegram refuses costs at most one
+  new tab per feed per day. Any other is gone: its row is dropped, and the
+  route looks itself up again at once (`telegram.feed.replaced`). A feed gets
+  its new tab, or the one a concurrent delivery just made; an open object gets
+  a new tab with a fresh summary, and any other object its feed. The send is
+  made again there and the rest of the delivery follows; a send that cannot be
+  made again only moves the route. A route replaces once: when no replacement
+  can be had, or it refuses too, the delivery goes to the main view and the
+  next delivery tries again.
+- **Cards follow the tab.** A replacement moves the principal's pending
+  proposals offered outside a chat turn from the gone tab to the new one, so
+  the approval sweep and the next offer's idle check find them there; a card
+  already sent went with the topic and is shown again by the sweep. A chat
+  turn's proposals and background tasks belong to the gone tab's closed
+  conversation and stay; their sends fall back to the main view.
 - **Messages kept.** Report messages record the tab they actually landed in and
   when they were sent. Watch alerts are kept the same way in
   `watch_alert_messages`, with their watch, the sent text up to 2000 runes, and
@@ -878,9 +900,9 @@ subject `trip:<id>` under a fixed name, which is the only record of it.
   no longer has it, and renames the tab when the title changed. Plan 0088's
   topic naming never renames a fixed tab.
 - **Gone tabs.** When plan 0085's observer drops a trip tab's row, the trip's
-  summary is forgotten with it, and the trip's next message makes the tab
-  again while the trip is still ahead. Pruning a trip leaves its tab and row
-  for `/close`.
+  summary is forgotten with it, and the message that found the tab gone makes
+  it again while the trip is still ahead, or goes to the Reminders tab once it
+  has ended. Pruning a trip leaves its tab and row for `/close`.
 - **Conversations.** A trip tab routes messages as a feed tab does, and a
   report's trip destination is its subject, so a reply to a check-in reminder
   continues the trip's conversation rather than the reminder job's. A
@@ -928,8 +950,7 @@ there as before.
   gets one then, so a watch that existed before gets its tab with its next
   message. While the tab cannot be made the message goes to the Watches tab,
   and to the main view with tabs off. A send to a tab Telegram no longer has
-  falls back to the main view through the client, as for a feed tab, and the
-  next message makes the tab again with a fresh summary.
+  makes the tab again with a fresh summary and lands there, as for a feed tab.
 - **The summary.** `watch.Summary` is the watch's name, its definition as the
   user confirmed it (what it checks, the condition, its days and window, what it
   tells of, and its language), and the stored facts a change writes: that it is
