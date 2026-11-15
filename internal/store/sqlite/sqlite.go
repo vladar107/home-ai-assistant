@@ -20,7 +20,19 @@ const (
 )
 
 type Store struct {
-	db *sql.DB
+	db  *sql.DB
+	now func() time.Time
+}
+
+// SetClock replaces the clock the store stamps approval and schedule writes with; call it before
+// the store is used. The default is time.Now.
+func (s *Store) SetClock(now func() time.Time) { s.now = now }
+
+func (s *Store) clock() time.Time {
+	if s.now == nil {
+		return time.Now()
+	}
+	return s.now()
 }
 
 func Open(ctx context.Context, databasePath string) (*Store, error) {

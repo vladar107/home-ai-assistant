@@ -228,7 +228,7 @@ func (s *Store) AdvanceScheduledJob(ctx context.Context, jobID string, due, next
 	}
 	defer tx.Rollback()
 
-	now := formatTime(time.Now())
+	now := formatTime(s.clock())
 	// A repeating anchored job's occurrence becomes the last one it ran for, which its resolver
 	// then never returns again.
 	query := `UPDATE scheduled_jobs SET next_run_at = ?, updated_at = ?,
@@ -359,7 +359,7 @@ func (s *Store) QueueScheduledRun(ctx context.Context, run schedule.Run) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("queue scheduled run: SQLite store is not open")
 	}
-	return insertScheduleRun(ctx, s.db, run, formatTime(time.Now()))
+	return insertScheduleRun(ctx, s.db, run, formatTime(s.clock()))
 }
 
 type execer interface {

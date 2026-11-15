@@ -249,7 +249,7 @@ func (s *Store) FinishApproval(ctx context.Context, id, from, status, reason, ou
 		reason,
 		outcome,
 		userOutcome,
-		formatTime(time.Now()),
+		formatTime(s.clock()),
 		id,
 		from,
 	)
@@ -406,7 +406,7 @@ func (s *Store) FinishDirectApproval(ctx context.Context, id, status, reason, ou
 		reason,
 		outcome,
 		userOutcome,
-		formatTime(time.Now()),
+		formatTime(s.clock()),
 		storedUndo,
 		storedUntil,
 		id,

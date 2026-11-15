@@ -475,6 +475,8 @@ type WidgetPreference interface {
 type Config struct {
 	Lifetime      time.Duration
 	SweepInterval time.Duration
+	// Now is the clock of proposal creation, expiry, and confirmation; nil means time.Now.
+	Now func() time.Time
 }
 
 type Service struct {
@@ -537,13 +539,17 @@ func NewService(cfg Config, repository Repository, deliverer Deliverer, logger *
 	if sweepInterval <= 0 {
 		sweepInterval = DefaultSweepInterval
 	}
+	now := cfg.Now
+	if now == nil {
+		now = time.Now
+	}
 	return &Service{
 		repository:    repository,
 		deliverer:     deliverer,
 		logger:        logger,
 		lifetime:      lifetime,
 		sweepInterval: sweepInterval,
-		now:           time.Now,
+		now:           now,
 		executors:     make(map[string]Executor),
 		notices:       make(map[lane]notice),
 		continuations: make(map[lane]func(context.Context)),

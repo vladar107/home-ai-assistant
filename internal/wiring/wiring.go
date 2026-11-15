@@ -319,6 +319,9 @@ func Build(ctx context.Context, in Inputs) (*Assembly, error) {
 	if err != nil || in.Zone == "" {
 		return nil, fmt.Errorf("load household time zone: %w", cmp.Or(err, errors.New("zone is required")))
 	}
+	if in.Core.Now != nil {
+		in.Store.SetClock(in.Core.Now)
+	}
 	a := &Assembly{
 		Registry:     cmp.Or(in.Registry, module.NewRegistry()),
 		in:           in,
@@ -508,7 +511,11 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		return fmt.Errorf("initialize outbox: %w", err)
 	}
 	a.Outbox = cards
-	approvals, err := approval.NewService(in.Core.Approval, in.Store, in.Chat, in.Logger)
+	approvalConfig := in.Core.Approval
+	if approvalConfig.Now == nil {
+		approvalConfig.Now = in.Core.Now
+	}
+	approvals, err := approval.NewService(approvalConfig, in.Store, in.Chat, in.Logger)
 	if err != nil {
 		return fmt.Errorf("initialize approvals: %w", err)
 	}
@@ -530,7 +537,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	if err := broker.Register(reactions); err != nil {
 		return fmt.Errorf("register reaction tools: %w", err)
 	}
-	memoryService, err := usermemory.NewService(usermemory.Config{}, in.Store, approvals, in.Logger)
+	memoryService, err := usermemory.NewService(usermemory.Config{Now: in.Core.Now}, in.Store, approvals, in.Logger)
 	if err != nil {
 		return fmt.Errorf("initialize memory: %w", err)
 	}
@@ -927,7 +934,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		return err
 	}
 	a.TripLoop = tripLoop
-	backlogService, err := backlog.NewService(backlog.Config{Location: a.location}, in.Store, approvals, in.Logger)
+	backlogService, err := backlog.NewService(backlog.Config{Location: a.location, Now: in.Core.Now}, in.Store, approvals, in.Logger)
 	if err != nil {
 		return fmt.Errorf("initialize backlog: %w", err)
 	}

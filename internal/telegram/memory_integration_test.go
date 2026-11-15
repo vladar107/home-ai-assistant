@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	"github.com/vladar107/home-ai-assistant/internal/memory"
@@ -80,7 +79,7 @@ func (h *conversationHarness) memoryEntries(principalID string) []memory.Entry {
 
 func (h *conversationHarness) seedMemory(principalID, id, kind, text string) {
 	h.t.Helper()
-	now := time.Now()
+	now := h.scheduler.Now()
 	if err := h.store.AddMemory(h.ctx, memory.Entry{ID: id, PrincipalID: principalID, Kind: kind, Text: text, Source: memory.SourceModel, CreatedAt: now, UpdatedAt: now}); err != nil {
 		h.t.Fatal(err)
 	}
