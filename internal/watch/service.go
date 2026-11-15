@@ -278,22 +278,16 @@ func feed(alert Alert) string {
 // inFeed returns a context whose sends go to the alert's tab: the watch's own for an agent watch,
 // which gets one when it has none, and the feed of the alert's kind for any other and for an agent
 // watch whose tab cannot be had. A feed tab that cannot be had leaves the alert in the main view,
-// the resolver logs why, and the next alert tries again.
+// the resolver logs why, and the next alert tries again. The tab is found when the alert is sent.
 func (s *Service) inFeed(ctx context.Context, alert Alert, chatID int64) context.Context {
 	if s.feeds == nil {
 		return ctx
 	}
-	var threadID int64
-	var err error
+	destination := ""
 	if alert.Kind == KindAgent {
-		threadID, err = s.feeds.Destination(ctx, alert.PrincipalID, chatID, thread.WatchDestination(alert.WatchID), feed(alert))
-	} else {
-		threadID, err = s.feeds.Thread(ctx, alert.PrincipalID, chatID, feed(alert))
+		destination = thread.WatchDestination(alert.WatchID)
 	}
-	if err != nil {
-		threadID = 0
-	}
-	return thread.WithDelivery(ctx, threadID)
+	return thread.WithRoute(ctx, s.feeds.Route(ctx, alert.PrincipalID, chatID, destination, feed(alert)))
 }
 
 // withLanguage returns ctx carrying the principal's chosen language, as the conversation service

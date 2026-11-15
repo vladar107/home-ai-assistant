@@ -96,6 +96,67 @@ func (s *Tabs) Thread(ctx context.Context, principalID string, chatID int64, fee
 	return threadID, nil
 }
 
+// Route returns the delivery's route to its destination, or with none its feed. Nothing is looked up
+// until a send asks for the tab.
+func (s *Tabs) Route(ctx context.Context, principalID string, chatID int64, destination, feed string) thread.Route {
+	return &tabRoute{tabs: s, principalID: principalID, chatID: chatID, destination: destination, feed: feed, language: locale.From(ctx)}
+}
+
+// tabRoute finds its tab with the first send that asks, under that send's context, so the send's
+// deadline, cancellation, and trace cover the lookup, and names a tab it makes in the language of
+// the context it was made under. A lookup the sending context ended is not kept, so the next send
+// tries again; any other failure leaves the route in the main view, as a delivery whose tab cannot
+// be had always was. Concurrent sends wait for one lookup.
+type tabRoute struct {
+	tabs              *Tabs
+	principalID       string
+	chatID            int64
+	destination, feed string
+	language          locale.Language
+	mu                sync.Mutex
+	resolved          bool
+	threadID          int64
+}
+
+func (r *tabRoute) Tab(ctx context.Context) int64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.resolved {
+		return r.threadID
+	}
+	threadID, _, err := r.tabs.destination(r.lookupContext(ctx), r.principalID, r.chatID, r.destination, r.feed)
+	if err != nil {
+		if ctx.Err() != nil {
+			return 0
+		}
+		threadID = 0
+	}
+	r.resolved, r.threadID = true, threadID
+	return threadID
+}
+
+func (r *tabRoute) Peek(ctx context.Context) (int64, bool) {
+	r.mu.Lock()
+	resolved, threadID := r.resolved, r.threadID
+	r.mu.Unlock()
+	if resolved {
+		return threadID, true
+	}
+	return r.tabs.peekDestination(r.lookupContext(ctx), r.principalID, r.destination, r.feed)
+}
+
+func (r *tabRoute) Resolved() int64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.threadID
+}
+
+// lookupContext is the sending context in the route's language, without the route, so a message
+// the lookup sends, such as a new object tab's summary, never asks the route again.
+func (r *tabRoute) lookupContext(ctx context.Context) context.Context {
+	return locale.With(thread.WithDelivery(ctx, 0), r.language)
+}
+
 // tabsOn reports the bot's tabs switch. Scheduled runs, watches, and trips start before the poller
 // does, so the first of them may ask before Start has read the switch.
 func (s *Tabs) tabsOn(ctx context.Context) (bool, error) {

@@ -165,13 +165,19 @@ func (n TripNotifier) Send(ctx context.Context, principalID, tripID, text string
 	return n.Client.sendPlain(n.inFeed(ctx, principalID, chatID, tripID), chatID, text, nil)
 }
 
-// TripTab is the tab Send puts the trip's messages in, zero for the main view.
+// TripTab is the tab Send puts the trip's messages in, zero for the main view. It only looks: a tab
+// Send would have to make is not made, and the main view stands for it.
 func (n TripNotifier) TripTab(ctx context.Context, principalID, tripID string) (int64, error) {
 	chatID, err := n.chat(ctx, principalID)
 	if err != nil {
 		return 0, err
 	}
-	return sendThread(n.inFeed(ctx, principalID, chatID, tripID)), nil
+	routed := n.inFeed(ctx, principalID, chatID, tripID)
+	if _, isRoute := thread.RouteOf(routed); !isRoute {
+		return sendThread(routed), nil
+	}
+	threadID, _ := thread.Peek(routed)
+	return threadID, nil
 }
 
 // TripChanged keeps the trip's tab and its summary in step with a write to the trip. A failure is
@@ -209,23 +215,17 @@ func (n TripNotifier) TakeTab(ctx context.Context, changed trip.Trip, threadID i
 }
 
 // inFeed returns a context whose sends go to the trip's tab, or to the reminders tab for a trip
-// without one or for no trip. A tab that cannot be had leaves the message in the main view; the
-// resolver logs why.
+// without one or for no trip, found when the message is sent. A tab that cannot be had leaves the
+// message in the main view; the resolver logs why.
 func (n TripNotifier) inFeed(ctx context.Context, principalID string, chatID int64, tripID string) context.Context {
 	if n.Feeds == nil {
 		return ctx
 	}
-	var threadID int64
-	var err error
+	destination := ""
 	if tripID != "" {
-		threadID, err = n.Feeds.Destination(ctx, principalID, chatID, thread.TripDestination(tripID), thread.FeedReminders)
-	} else {
-		threadID, err = n.Feeds.Thread(ctx, principalID, chatID, thread.FeedReminders)
+		destination = thread.TripDestination(tripID)
 	}
-	if err != nil {
-		threadID = 0
-	}
-	return thread.WithDelivery(ctx, threadID)
+	return thread.WithRoute(ctx, n.Feeds.Route(ctx, principalID, chatID, destination, thread.FeedReminders))
 }
 
 func (n TripNotifier) chat(ctx context.Context, principalID string) (int64, error) {

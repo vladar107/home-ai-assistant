@@ -11,6 +11,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/project"
+	"github.com/vladar107/home-ai-assistant/internal/thread"
 	"github.com/vladar107/home-ai-assistant/internal/trip"
 	"github.com/vladar107/home-ai-assistant/internal/turn"
 	"github.com/vladar107/home-ai-assistant/internal/watch"
@@ -210,6 +211,10 @@ func (c *Chat) Thread(context.Context, string, int64, string) (int64, error) { r
 
 func (c *Chat) Destination(context.Context, string, int64, string, string) (int64, error) {
 	return 0, nil
+}
+
+func (c *Chat) Route(context.Context, string, int64, string, string) thread.Route {
+	return thread.FixedRoute(0)
 }
 
 func (c *Chat) TabReplied(context.Context, conversation.TabReply) {}

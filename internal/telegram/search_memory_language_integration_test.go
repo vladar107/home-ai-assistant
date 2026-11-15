@@ -86,12 +86,12 @@ func TestMemoryMergeOutcomesReadInRussian(t *testing.T) {
 	t.Parallel()
 	h := newSearchmemReviewHarness(t)
 	review := h.reviewNow(11)
-	reports := h.wantFeedTab("Reports", thread.FeedReports)
 	if err := h.store.SaveLanguage(h.ctx, "alice", locale.Russian); err != nil {
 		t.Fatal(err)
 	}
 	merge := []map[string]any{{"action": "merge_instructions", "reason": "They say the same.", "ids": []string{"aaaaaaa1", "aaaaaaa2"}, "text": "Answer briefly and keep it short."}}
 	answer(t, review, merge, nil)
+	reports := h.wantFeedTab("Reports", thread.FeedReports)
 	card := h.reviewCard(reports, "1 proposal to confirm or reject.")
 	if edit := h.confirmReview(12, card); !strings.Contains(edit, "Готово. Объединено.") {
 		t.Fatalf("merge after Confirm = %s", edit)
@@ -112,11 +112,11 @@ func TestStaleMemoryMergeReadsInRussian(t *testing.T) {
 	t.Parallel()
 	h := newSearchmemReviewHarness(t)
 	review := h.reviewNow(11)
-	reports := h.wantFeedTab("Reports", thread.FeedReports)
 	if err := h.store.SaveLanguage(h.ctx, "alice", locale.Russian); err != nil {
 		t.Fatal(err)
 	}
 	answer(t, review, []map[string]any{{"action": "merge_instructions", "ids": []string{"aaaaaaa1", "aaaaaaa2"}, "text": "Answer briefly and keep it short."}}, nil)
+	reports := h.wantFeedTab("Reports", thread.FeedReports)
 	card := h.reviewCard(reports, "1 proposal to confirm or reject.")
 	if _, err := h.store.ReplaceMemory(h.ctx, "alice", "aaaaaaa2", "Use 24-hour times.", memory.SourceModel, time.Now()); err != nil {
 		t.Fatal(err)

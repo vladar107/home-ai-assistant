@@ -1,6 +1,7 @@
 package telegram
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -125,12 +126,13 @@ func TestEachKindOfMessageLandsInItsFeedTab(t *testing.T) {
 	clock.Set(t, "2026-09-28T09:00:20+02:00")
 	h.scheduler.Wake()
 	run := receive(t, h.ctx, runtime.calls)
-	reports := h.wantFeedTab("Reports", thread.FeedReports)
-	// The run sends into the Reports tab without being in that tab's conversation.
-	if delivery, set := thread.Delivery(run.ctx); !set || delivery != reports || thread.From(run.ctx) != 0 {
-		t.Fatalf("run context sends to %d (%v) as lane %d, want tab %d as the main lane", delivery, set, thread.From(run.ctx), reports)
+	// The run has a route to its tab, found only when it sends, and stays out of that tab's
+	// conversation.
+	if delivery, set := thread.Resolved(run.ctx); !set || delivery != 0 || thread.From(run.ctx) != 0 || len(h.tabs.created) != 0 {
+		t.Fatalf("run context before a send goes to %d (%v) as lane %d with %d tabs made, want an unfound route as the main lane", delivery, set, thread.From(run.ctx), len(h.tabs.created))
 	}
 	run.answer <- agentruntime.RunResult{Response: "All trains run.", Final: "All trains run."}
+	reports := h.wantFeedTab("Reports", thread.FeedReports)
 	if report := h.nextMessage(); report.threadID != reports {
 		t.Fatalf("report = %+v, want it in tab %d", report, reports)
 	}
@@ -269,6 +271,58 @@ func TestAGoneFeedTabIsMadeAgainOnItsNextMessage(t *testing.T) {
 	again := h.wantFeedTab("Reminders", thread.FeedReminders)
 	if message := h.nextMessage(); again == first || message.threadID != again {
 		t.Fatalf("message after the tab was gone = %+v, want it in a new tab, not %d", message, first)
+	}
+}
+
+// A route finds its tab under the context of the send that needs it; a lookup that send's context
+// ended is not kept, so the route's next send looks again.
+func TestARouteLooksAgainAfterASendThatEndedDuringItsLookup(t *testing.T) {
+	t.Parallel()
+	h, _ := newFeedHarness(t, newControlledRuntime(), nil, true)
+	route := h.tabSet.Route(h.ctx, "alice", 101, "", thread.FeedReminders)
+	hold := make(chan struct{})
+	h.mu.Lock()
+	h.tabs.createHold = hold
+	h.mu.Unlock()
+	sendCtx, cancel := context.WithCancel(thread.WithRoute(h.ctx, route))
+	sent := make(chan error, 1)
+	go func() { sent <- h.client.SendMessage(sendCtx, 101, "first") }()
+	receive(t, h.ctx, h.tabs.created)
+	cancel()
+	if err := receive(t, h.ctx, sent); err == nil {
+		t.Fatal("a send whose context ended was reported sent")
+	}
+	h.mu.Lock()
+	h.tabs.createHold = nil
+	h.mu.Unlock()
+	close(hold)
+
+	if err := h.client.SendMessage(thread.WithRoute(h.ctx, route), 101, "second"); err != nil {
+		t.Fatal(err)
+	}
+	tab := h.wantFeedTab("Reminders", thread.FeedReminders)
+	if message := h.nextMessage(); message.threadID != tab || message.text != "second" {
+		t.Fatalf("message after a cancelled lookup = %+v, want it in the new tab %d", message, tab)
+	}
+}
+
+// Asking which tab a trip's messages go to, as its language sample does, makes no tab.
+func TestTheTripTabIsReadWithoutMakingOne(t *testing.T) {
+	t.Parallel()
+	h, _ := newFeedHarness(t, newControlledRuntime(), nil, true)
+	if threadID, err := h.notifier().TripTab(h.ctx, "alice", ""); err != nil || threadID != 0 {
+		t.Fatalf("trip tab without a Reminders tab = %d %v, want the main view", threadID, err)
+	}
+	if made := len(h.tabs.created); made != 0 {
+		t.Fatalf("reading the trip tab made %d tabs", made)
+	}
+	if err := h.notifier().Send(h.ctx, "alice", "", "first"); err != nil {
+		t.Fatal(err)
+	}
+	reminders := h.wantFeedTab("Reminders", thread.FeedReminders)
+	h.nextMessage()
+	if threadID, err := h.notifier().TripTab(h.ctx, "alice", ""); err != nil || threadID != reminders {
+		t.Fatalf("trip tab = %d %v, want the Reminders tab %d", threadID, err, reminders)
 	}
 }
 

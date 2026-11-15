@@ -48,8 +48,7 @@ What else matters here:
   idle check (`PendingApprovals`), stores it as each record's `ThreadID`, and sends there; the
   sweep (`resendUndelivered`) later sends undelivered records to their stored tab. `OfferIfIdle`
   returns `ErrBundleWaiting` without sending while a card waits, and the inbox check's summary
-  treats follow-ups waiting behind a card as no news, so such a check is quiet. Resolving the tab
-  for the idle check alone would make a tab for a run that sends nothing.
+  treats follow-ups waiting behind a card as no news, so such a check is quiet.
 - `inTab` reads the tab once for its report to the observer, and each send closure reads it again
   through `setThread` or `sendThread`. `SendTyping` and `SendMessageDraft` read it through
   `setThread` too.
@@ -71,8 +70,7 @@ What else matters here:
 
 ## Goal
 
-- A tab is made only when something is sent there. A quiet run, an inbox check whose follow-ups
-  wait behind a card, and a language sample make none.
+- A tab is made only when something is sent there. A quiet run and a language sample make none.
 - When a send to a feed tab or an object's tab is refused and the tab is taken for gone, its
   replacement is found at once (the feed's new tab; for an object, its new tab or its feed), and
   that send and every later send of the same delivery go there. The main view is the fallback only
@@ -95,12 +93,15 @@ What else matters here:
     would make a tab.
   - `thread.Resolved(ctx)` returns a route's tab only once it is resolved, the main view
     otherwise, and never reads the registry.
-- **The inbox check peeks before its idle check.** `intake.scan.stage` peeks. With a tab, it
-  offers with `OfferIfIdle` in that tab, which sends nothing while a card waits. Without one, no
-  card can wait in a feed tab that does not exist, so it resolves the route, which makes the tab,
-  and offers. `approval.offer` is unchanged: the tab it is given is the idle check's lane and the
-  stored `ThreadID`, and its sends go through the route on the context, which by then resolves to
-  that same tab.
+- **The inbox check keeps resolving before its idle check.** A review of this plan proposed that
+  `intake.scan.stage` peek first, so that a check whose follow-ups wait behind a card would not
+  make a tab. Implementing it showed the peek changes nothing:
+  - When the registry has the Inbox tab, resolving returns it and makes nothing.
+  - When it has none, resolving makes a tab that no card can already wait in, so `OfferIfIdle`
+    finds that new tab idle and sends the card there; the tab is never left empty.
+  - `stage` therefore keeps reading `thread.Delivery`. `approval.offer` is unchanged: the tab it is
+    given is the idle check's lane and the stored `ThreadID`, and its sends go through the route on
+    the context, which resolves to that same tab.
 - **`TripTab` peeks.** A language sample reads the tab the trip's messages would go to and never
   makes one; with no tab yet it reads the main view, then anywhere, as `Sample` already does.
 - **`telegram.Tabs` builds the routes.** `thread.Feeds` gains
@@ -194,19 +195,18 @@ that answers a tab's sends with any given 400 description.
        description, and no message text reaches the logs. Fails today: nothing is logged.
 2. **Routes resolved at first send** (Complex; no dependencies). `thread.Route`, `WithRoute`,
    `Delivery`, `Peek`, `Resolved`; `Tabs.Route`; `inTab` reads once and sends under
-   `WithDelivery`; typing and drafts use `Resolved`; the four `inFeed` helpers; the inbox check's
-   peek; `TripTab`'s peek; `eval.Chat`.
+   `WithDelivery`; typing and drafts use `Resolved`; the four `inFeed` helpers; `TripTab`'s peek;
+   `eval.Chat`.
    - Files: `internal/thread/thread.go`, `internal/telegram/feeds.go`, `objecttabs.go`,
      `client.go`, `trips.go`, `internal/schedule/service.go`, `internal/watch/service.go`,
-     `internal/events/events.go`, `internal/intake/scan.go`, `internal/eval/chat.go`, tests.
+     `internal/events/events.go`, `internal/eval/chat.go`, tests.
    - Acceptance:
      - A quiet scheduled inbox check with no Inbox tab registered makes no tab; a later check with
        a report makes it and lands there. Fails today: the simulator records a tab made at the
        start of the quiet run.
-     - An inbox check whose follow-ups wait behind a pending card, with no Inbox tab registered,
-       makes no tab and stays quiet. Fails today: the run's start makes the tab.
-     - A route built in English and resolved by a send whose context is Russian makes a tab
-       named "Inbox". Fails if the route resolved in the sending context's language.
+     - A weekly review run for a Russian-speaking user still names the tab it makes "Reports"
+       (`TestWeeklyReviewBatchReadsInRussian`, kept). It would fail if the route resolved in the
+       sending context's language.
      - With `createHold` holding the tab's creation, cancelling the sending context leaves the
        route unresolved, and the run's next send makes the tab and lands there. Fails if the
        route kept the main view after a cancelled resolution.
@@ -267,8 +267,7 @@ that answers a tab's sends with any given 400 description.
 - `internal/thread/thread.go`
 - `internal/telegram/client.go`, `tabs.go`, `feeds.go`, `objecttabs.go`, `trips.go`,
   `telemetry.go`, and their integration tests
-- `internal/schedule/service.go`, `internal/watch/service.go`, `internal/events/events.go`,
-  `internal/intake/scan.go`
+- `internal/schedule/service.go`, `internal/watch/service.go`, `internal/events/events.go`
 - `internal/store/sqlite/approvals.go`
 - `internal/eval/chat.go`
 - `internal/observability/telemetry.go`

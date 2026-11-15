@@ -247,25 +247,16 @@ func feed(run Run) string {
 }
 
 // inFeed returns a context whose sends go to the run's destination, or its feed tab when it has
-// none. A tab that cannot be had leaves the run's messages in the main view, the resolver logs why,
-// and the next delivery tries again.
+// none, found at the run's first send, so a run that sends nothing makes no tab. A tab that cannot
+// be had leaves the run's messages in the main view, the resolver logs why, and the next delivery
+// tries again.
 func (s *Service) inFeed(ctx context.Context, run Run, chatID int64) context.Context {
 	if s.feeds == nil {
 		return ctx
 	}
-	var threadID int64
-	var err error
 	// A tab an unattended run creates is named in English, as it was before runs carried a language.
-	feeds := locale.With(ctx, locale.English)
-	if run.Destination != "" {
-		threadID, err = s.feeds.Destination(feeds, run.PrincipalID, chatID, run.Destination, feed(run))
-	} else {
-		threadID, err = s.feeds.Thread(feeds, run.PrincipalID, chatID, feed(run))
-	}
-	if err != nil {
-		threadID = 0
-	}
-	return thread.WithDelivery(ctx, threadID)
+	route := s.feeds.Route(locale.With(ctx, locale.English), run.PrincipalID, chatID, run.Destination, feed(run))
+	return thread.WithRoute(ctx, route)
 }
 
 // recordRun counts a finished run. A run that ended with a report also records the time from its

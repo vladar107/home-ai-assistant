@@ -40,14 +40,57 @@ var _ thread.Feeds = (*Tabs)(nil)
 // or no longer exists, and has no tab, resolves to the feed. An object whose tab cannot be had, or
 // was just found gone, falls back to the feed as well.
 func (s *Tabs) Destination(ctx context.Context, principalID string, chatID int64, destination, feed string) (int64, error) {
+	threadID, _, err := s.destination(ctx, principalID, chatID, destination, feed)
+	return threadID, err
+}
+
+// destination is Destination that also reports whether the tab is the object's rather than the
+// feed's.
+func (s *Tabs) destination(ctx context.Context, principalID string, chatID int64, destination, feed string) (int64, bool, error) {
 	if kind, id, isObject := thread.ObjectOf(destination); isObject {
 		if registered, known := s.objects[kind]; known {
 			if threadID, err := s.objectThread(ctx, registered, principalID, chatID, id, false); err == nil && threadID > 0 {
-				return threadID, nil
+				return threadID, true, nil
 			}
 		}
 	}
-	return s.Thread(ctx, principalID, chatID, feed)
+	threadID, err := s.Thread(ctx, principalID, chatID, feed)
+	return threadID, false, err
+}
+
+// peekDestination is the tab destination would resolve to when it would make none, and false when
+// it would make one or the registry cannot be read.
+func (s *Tabs) peekDestination(ctx context.Context, principalID, destination, feed string) (int64, bool) {
+	if s.store == nil {
+		return 0, true
+	}
+	on, err := s.tabsOn(ctx)
+	if err != nil {
+		return 0, false
+	}
+	if !on {
+		return 0, true
+	}
+	if kind, id, isObject := thread.ObjectOf(destination); isObject {
+		if registered, known := s.objects[kind]; known {
+			threadID, tabbed, err := s.store.SubjectTab(ctx, principalID, destination)
+			if err != nil {
+				return 0, false
+			}
+			if tabbed {
+				return threadID, true
+			}
+			found, exists, err := registered.load(ctx, principalID, id)
+			if err != nil || exists && found.Open {
+				return 0, false
+			}
+		}
+	}
+	threadID, tabbed, err := s.store.SubjectTab(ctx, principalID, thread.FeedSubject(feed))
+	if err != nil || !tabbed {
+		return 0, false
+	}
+	return threadID, true
 }
 
 // summarize keeps an object's tab in step after a write to it: an open object without a tab gets

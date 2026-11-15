@@ -441,6 +441,35 @@ func TestInboxCheckFailsOnMalformedJSONSkipsAStuckWindowAndStaysQuietWithoutMail
 	h.expectNoMessage(50 * time.Millisecond)
 }
 
+// A scheduled inbox check that has nothing to tell makes no Inbox tab when it has none, as after
+// its tab was taken for gone; the next check with news makes the tab and reports there.
+func TestAQuietInboxCheckMakesNoTab(t *testing.T) {
+	t.Parallel()
+	h := newInboxHarness(t, harnessOptions{topics: true})
+	h.check("on", noMail)
+	first := h.wantFeedTab("Inbox", thread.FeedInbox)
+	if report := h.nextMessage(); report.threadID != first {
+		t.Fatalf("manual report = %+v, want it in tab %d", report, first)
+	}
+	// The registry forgets a tab it takes for gone.
+	h.write(`DELETE FROM telegram_tabs WHERE principal_id = 'alice' AND thread_id = ?`, first)
+
+	h.clock.Set(t, "2026-09-28T11:00:30+02:00")
+	call := receive(t, h.ctx, h.runtime.calls)
+	call.answer <- agentruntime.RunResult{Final: noMail}
+	h.waitRun(schedule.InboxJobID("alice"), schedule.StatusSkipped)
+	h.expectNoMessage(50 * time.Millisecond)
+	if made := len(h.tabs.created); made != 0 {
+		t.Fatalf("a quiet check made %d tabs", made)
+	}
+
+	h.check("check", scanReplyOf(mail("m1", "invoice", "Water bill")))
+	again := h.wantFeedTab("Inbox", thread.FeedInbox)
+	if report := h.nextMessage(); again == first || report.threadID != again || !strings.Contains(report.text, "Water bill") {
+		t.Fatalf("report = %+v, want it in a new Inbox tab, not %d", report, first)
+	}
+}
+
 // The switch is offered only once mail can be read, and creates and deletes the principal's own
 // job; with it off there is no job to run.
 func TestInboxSwitchNeedsMailAndManagesItsJob(t *testing.T) {

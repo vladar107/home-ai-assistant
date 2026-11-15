@@ -35,10 +35,59 @@ func WithDelivery(ctx context.Context, threadID int64) context.Context {
 	return context.WithValue(ctx, deliveryKey{}, max(threadID, 0))
 }
 
-// Delivery returns the tab WithDelivery set, and whether it set one.
+// Route is where a delivery nobody asked for goes, such as a scheduled run's report: a tab found
+// the first time a send needs it and then kept, so a delivery that sends nothing makes no tab.
+type Route interface {
+	// Tab returns the route's tab, zero for the main view, finding it at the first call under the
+	// sending context.
+	Tab(ctx context.Context) int64
+	// Peek returns the tab the route would use without making one, and false when finding it would
+	// make one.
+	Peek(ctx context.Context) (int64, bool)
+	// Resolved returns the route's tab once it was found, and the main view before.
+	Resolved() int64
+}
+
+// WithRoute returns a context whose sends go where the route finds, whatever tab From names. Like
+// WithDelivery, it replaces any delivery the context had, and a later WithDelivery replaces it.
+func WithRoute(ctx context.Context, route Route) context.Context {
+	return context.WithValue(ctx, deliveryKey{}, route)
+}
+
+// Delivery returns the tab WithDelivery set, or the one its route finds, and whether either set
+// one.
 func Delivery(ctx context.Context) (int64, bool) {
-	threadID, set := ctx.Value(deliveryKey{}).(int64)
-	return threadID, set
+	switch delivery := ctx.Value(deliveryKey{}).(type) {
+	case int64:
+		return delivery, true
+	case Route:
+		return delivery.Tab(ctx), true
+	}
+	return 0, false
+}
+
+// Peek is Delivery without making a tab: it reports false when the context's route would have to
+// make one.
+func Peek(ctx context.Context) (int64, bool) {
+	if route, set := ctx.Value(deliveryKey{}).(Route); set {
+		return route.Peek(ctx)
+	}
+	threadID, _ := Delivery(ctx)
+	return threadID, true
+}
+
+// Resolved is Delivery without finding a tab: a route not yet resolved is the main view.
+func Resolved(ctx context.Context) (int64, bool) {
+	if route, set := ctx.Value(deliveryKey{}).(Route); set {
+		return route.Resolved(), true
+	}
+	return Delivery(ctx)
+}
+
+// RouteOf returns the context's route, when its delivery is one.
+func RouteOf(ctx context.Context) (Route, bool) {
+	route, set := ctx.Value(deliveryKey{}).(Route)
+	return route, set
 }
 
 // The feeds are the tabs that messages nobody asked for go to while the bot has tabs on, one per
@@ -128,4 +177,16 @@ type Feeds interface {
 	// Destination resolves a destination such as TripDestination, ProjectDestination, or
 	// WatchDestination, and the feed when the destination has no tab to offer.
 	Destination(ctx context.Context, principalID string, chatID int64, destination, feed string) (int64, error)
+	// Route is a delivery's Destination, or with no destination its feed, found at its first send.
+	// A tab it makes is named in the language of ctx.
+	Route(ctx context.Context, principalID string, chatID int64, destination, feed string) Route
 }
+
+// FixedRoute is a route to a tab known in advance, zero for the main view.
+type FixedRoute int64
+
+func (r FixedRoute) Tab(context.Context) int64 { return max(int64(r), 0) }
+
+func (r FixedRoute) Peek(context.Context) (int64, bool) { return max(int64(r), 0), true }
+
+func (r FixedRoute) Resolved() int64 { return max(int64(r), 0) }

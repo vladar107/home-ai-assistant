@@ -106,10 +106,11 @@ func tabRefusal(err error) (TabVerdict, bool) {
 // inTab makes a send under the context's tab. When Telegram answers that the tab is not found, the
 // observer hears of it, and a send that may fall back is made once more to the main view, so a
 // reply for a deleted tab still reaches the user. Otherwise the refusal is returned with its
-// verdict.
+// verdict. The tab is read once, so the send and what the observer hears name the same tab even
+// while another send moves the context's route.
 func (c *Client) inTab(ctx context.Context, chatID int64, fallback bool, send func(context.Context) error) error {
 	threadID := sendThread(ctx)
-	err := send(ctx)
+	err := send(thread.WithDelivery(ctx, threadID))
 	if threadID <= 0 {
 		return err
 	}
@@ -135,10 +136,19 @@ func (c *Client) inTab(ctx context.Context, chatID int64, fallback bool, send fu
 	return &tabRefusedError{verdict: verdict, err: err}
 }
 
-// sendThread is the tab a send goes to: the delivery's tab when one is set, and the context's
-// otherwise.
+// sendThread is the tab a send goes to: the delivery's tab when one is set, found now when it is a
+// route, and the context's otherwise.
 func sendThread(ctx context.Context) int64 {
 	if threadID, set := thread.Delivery(ctx); set {
+		return threadID
+	}
+	return thread.From(ctx)
+}
+
+// indicatorThread is sendThread for what shows only while it lasts, such as typing: a route not yet
+// found is the main view, so an indicator never makes a tab.
+func indicatorThread(ctx context.Context) int64 {
+	if threadID, set := thread.Resolved(ctx); set {
 		return threadID
 	}
 	return thread.From(ctx)
@@ -669,6 +679,13 @@ func setThread(ctx context.Context, params url.Values) bool {
 	return true
 }
 
+// setIndicatorThread is setThread for typing and drafts, which never make a tab.
+func setIndicatorThread(ctx context.Context, params url.Values) {
+	if threadID := indicatorThread(ctx); threadID > 0 {
+		params.Set("message_thread_id", strconv.FormatInt(threadID, 10))
+	}
+}
+
 // SendText posts a message without buttons and returns its message ID.
 func (c *Client) SendText(ctx context.Context, chatID int64, text string) (int64, error) {
 	message, err := c.sendMessage(ctx, chatID, 0, text, nil)
@@ -986,7 +1003,7 @@ func (c *Client) SendTyping(ctx context.Context, chatID int64) error {
 		"action":  {"typing"},
 		"chat_id": {strconv.FormatInt(chatID, 10)},
 	}
-	setThread(ctx, params)
+	setIndicatorThread(ctx, params)
 	_, err := execute[bool](c, ctx, "sendChatAction", params)
 	return err
 }
@@ -1003,7 +1020,7 @@ func (c *Client) SendMessageDraft(ctx context.Context, chatID, draftID int64, te
 	if canStop {
 		params.Set("can_stop", "true")
 	}
-	setThread(ctx, params)
+	setIndicatorThread(ctx, params)
 	_, err := execute[bool](c, ctx, "sendMessageDraft", params)
 	return err
 }

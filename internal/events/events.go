@@ -694,16 +694,13 @@ func (s *Service) deliver(ctx context.Context, event Event) {
 }
 
 // inFeed returns a context whose sends go to the Events tab. A tab that cannot be had leaves the
-// event in the main view, the resolver logs why, and the next event tries again.
+// event in the main view, the resolver logs why, and the next event tries again. The tab is found
+// when the event is sent.
 func (s *Service) inFeed(ctx context.Context, principalID string, chatID int64) context.Context {
 	if s.feeds == nil {
 		return ctx
 	}
-	threadID, err := s.feeds.Thread(ctx, principalID, chatID, thread.FeedEvents)
-	if err != nil {
-		threadID = 0
-	}
-	return thread.WithDelivery(ctx, threadID)
+	return thread.WithRoute(ctx, s.feeds.Route(ctx, principalID, chatID, "", thread.FeedEvents))
 }
 
 func (s *Service) finish(ctx context.Context, event Event, outcome, reason string) bool {

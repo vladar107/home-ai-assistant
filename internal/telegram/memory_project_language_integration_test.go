@@ -243,12 +243,12 @@ func TestWeeklyReviewBatchReadsInRussian(t *testing.T) {
 	if cyrillic.MatchString(review.request.Message) {
 		t.Fatalf("the review's prompt carries Russian: %q", review.request.Message)
 	}
-	reports := h.wantFeedTab("Reports", thread.FeedReports)
 	answer(t, review, []map[string]any{
 		{"action": "add_instruction", "reason": "Asked twice.", "text": "Use metric units."},
 		{"action": "merge_instructions", "ids": []string{"aaaaaaa1", "aaaaaaa2"}, "text": "Answer briefly."},
 		{"action": "save_procedure", "title": "Plan a train trip", "steps": "Look up the departures first."},
 	}, nil)
+	reports := h.wantFeedTab("Reports", thread.FeedReports)
 
 	card := h.nextMessage()
 	if card.threadID != reports {
