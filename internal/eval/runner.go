@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -91,6 +90,7 @@ type runner struct {
 	result    *Result
 	prints    map[string]struct{}
 	reported  map[string]struct{}
+	log       *warnLog
 }
 
 type planned struct {
@@ -159,10 +159,11 @@ func Run(ctx context.Context, opts RunOptions) (*Result, error) {
 
 	piVersion := cmp.Or(opts.Pi.ExpectedVersion, config.DefaultPiVersion)
 	provider := cmp.Or(opts.Pi.Provider, DefaultPiProvider)
+	log := newWarnLog()
 	piRuntime, err := pi.New(ctx, pi.Config{
 		Binary: cmp.Or(opts.Pi.Binary, "pi"), NodeBinary: opts.Pi.NodeBinary, Provider: provider,
 		Model: opts.ChatModel, ExpectedVersion: piVersion, ProfilesDir: opts.Profiles.Root,
-		WebSearchExtension: opts.Pi.WebSearchExtension, Logger: slog.New(slog.DiscardHandler),
+		WebSearchExtension: opts.Pi.WebSearchExtension, Logger: log.logger(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("start Pi %s: %w", piVersion, err)
@@ -175,7 +176,7 @@ func Run(ctx context.Context, opts RunOptions) (*Result, error) {
 
 	started := opts.Now()
 	r := &runner{
-		opts: opts, accountID: binding.AccountID, prints: map[string]struct{}{}, reported: map[string]struct{}{},
+		opts: opts, accountID: binding.AccountID, prints: map[string]struct{}{}, reported: map[string]struct{}{}, log: log,
 		result: &Result{
 			RunID: started.UTC().Format("20060102-150405"), StartedAt: started, Commit: cmp.Or(opts.Commit, "unknown"),
 			PiVersion: piVersion, Provider: provider, Model: opts.ChatModel.Model,
@@ -194,7 +195,11 @@ func Run(ctx context.Context, opts RunOptions) (*Result, error) {
 		return nil, fmt.Errorf("create the results directory: %w", err)
 	}
 
+	log.open(r.result.Dir)
 	r.play(ctx, plan)
+	if log.close() {
+		r.result.RunLog = warnLogFile
+	}
 
 	r.result.FinishedAt = opts.Now()
 	r.result.ReportedModels = sortedSet(r.reported)
@@ -314,7 +319,9 @@ func (r *runner) trial(ctx context.Context, c Case, n int) (result TrialResult, 
 		RunID: r.result.RunID, Case: c.ID, Trial: n, PiVersion: r.result.PiVersion, Model: model, Effort: effort, TypeSafe: result.TypeSafe,
 	}
 	started := time.Now()
+	logMark := r.log.mark()
 	defer func() {
+		cassette.Log = r.log.since(logMark)
 		result.DurationMS = time.Since(started).Milliseconds()
 		cassette.Failures = result.Failures
 		cassette.Status, cassette.Error = result.Status, result.Error
@@ -445,6 +452,9 @@ type Cassette struct {
 	Error     string         `json:"error,omitempty"`
 	Failures  []Failure      `json:"failures,omitempty"`
 	Steps     []CassetteStep `json:"steps"`
+	// Log holds the warn-and-above records the runtime logged during the trial, such as the scrubbed
+	// stderr of a Pi that exited early.
+	Log []json.RawMessage `json:"log,omitempty"`
 }
 
 // CassetteStep is one played step: the composed message, each model run, and what came out.

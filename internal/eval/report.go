@@ -133,11 +133,13 @@ type Result struct {
 	ModelCalls         int                      `json:"model_calls"`
 	Tokens             agentruntime.TokenCounts `json:"tokens"`
 	QuotaBefore        []WindowUsage            `json:"quota_before,omitempty"`
-	Stopped            string                   `json:"stopped,omitempty"`
-	StoppedDetail      string                   `json:"stopped_detail,omitempty"`
-	NotRun             []NotRun                 `json:"not_run,omitempty"`
-	Cases              []CaseResult             `json:"cases"`
-	Summary            Summary                  `json:"summary"`
+	// RunLog names the file of warn-and-above runtime records beside the report; empty when none.
+	RunLog        string       `json:"run_log,omitempty"`
+	Stopped       string       `json:"stopped,omitempty"`
+	StoppedDetail string       `json:"stopped_detail,omitempty"`
+	NotRun        []NotRun     `json:"not_run,omitempty"`
+	Cases         []CaseResult `json:"cases"`
+	Summary       Summary      `json:"summary"`
 	// Dir is where the run's files are; it is not part of the file.
 	Dir string `json:"-"`
 	// Review is the operator's review of the run, when there is one; it lives in review.json.
@@ -240,6 +242,9 @@ func (r *Result) Markdown() string {
 		fmt.Fprintf(&b, "- Prompt fingerprint: `%s` (system prompts without memory and jobs: %d)\n", r.PromptFingerprint, len(r.PromptFingerprints))
 	}
 	fmt.Fprintf(&b, "- Commit: %s\n", r.Commit)
+	if r.RunLog != "" {
+		fmt.Fprintf(&b, "- Runtime warnings and errors were logged to `%s` beside this report\n", r.RunLog)
+	}
 	fmt.Fprintf(&b, "- Started %s, finished %s\n", r.StartedAt.Format(time.RFC3339), r.FinishedAt.Format(time.RFC3339))
 	for _, window := range r.QuotaBefore {
 		fmt.Fprintf(&b, "- Quota before the run: %s window %.0f%% used\n", window.Name, window.UsedPercent)
