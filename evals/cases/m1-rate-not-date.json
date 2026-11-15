@@ -104,7 +104,10 @@
         ],
         "not_called": [
           "movies_schedule"
-        ]
+        ],
+        "proposals": {
+          "min": 1
+        }
       }
     }
   ]

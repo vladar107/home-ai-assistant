@@ -121,7 +121,7 @@
             ]
           }
         ],
-        "max_calls": 8,
+        "max_calls": 10,
         "not_called": [
           "movies_add",
           "movies_schedule",

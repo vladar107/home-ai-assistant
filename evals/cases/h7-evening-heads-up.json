@@ -12,7 +12,10 @@
   },
   "user": {
     "name": "Sam",
-    "language": "ru"
+    "language": "ru",
+    "memory": [
+      "Рабочий день обычно заканчивается в 17:30."
+    ]
   },
   "world": {
     "trains": {
@@ -94,6 +97,70 @@
               }
             ]
           }
+        },
+        {
+          "from": "WFD",
+          "to": "EBC",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 31,
+            "legs": [
+              {
+                "name": "IC 1113",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Eastbrook Central",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "1113",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-12T17:46:00+0100",
+                  "plannedTrack": "2"
+                },
+                "destination": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-12T18:17:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "WFD",
+          "to": "EBC",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 31,
+            "legs": [
+              {
+                "name": "IC 1115",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Eastbrook Central",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "1115",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-12T18:16:00+0100",
+                  "plannedTrack": "2"
+                },
+                "destination": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-12T18:47:00+0100"
+                }
+              }
+            ]
+          }
         }
       ],
       "departures": [
@@ -122,6 +189,34 @@
             "product": {
               "categoryCode": "IC",
               "number": "1102"
+            }
+          }
+        },
+        {
+          "station": "WFD",
+          "departure": {
+            "direction": "Eastbrook Central",
+            "name": "NS 1113",
+            "plannedDateTime": "2026-03-12T17:46:00+0100",
+            "plannedTrack": "2",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "1113"
+            }
+          }
+        },
+        {
+          "station": "WFD",
+          "departure": {
+            "direction": "Eastbrook Central",
+            "name": "NS 1115",
+            "plannedDateTime": "2026-03-12T18:16:00+0100",
+            "plannedTrack": "2",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "1115"
             }
           }
         }
@@ -189,7 +284,146 @@
           }
         }
       ],
-      "plans": [],
+      "plans": [
+        {
+          "from": {
+            "lat": 52.202,
+            "lon": 5.203
+          },
+          "to": {
+            "lat": 52.1,
+            "lon": 5.1
+          },
+          "itinerary": {
+            "duration": 4020,
+            "startTime": "2026-03-12T16:38:00Z",
+            "endTime": "2026-03-12T17:45:00Z",
+            "transfers": 1,
+            "legs": [
+              {
+                "mode": "WALK",
+                "duration": 360,
+                "startTime": "2026-03-12T16:38:00Z",
+                "endTime": "2026-03-12T16:44:00Z",
+                "scheduledStartTime": "2026-03-12T16:38:00Z",
+                "scheduledEndTime": "2026-03-12T16:44:00Z",
+                "from": {
+                  "name": "Westfield Office",
+                  "departure": "2026-03-12T16:38:00Z",
+                  "scheduledDeparture": "2026-03-12T16:38:00Z"
+                },
+                "to": {
+                  "name": "Westfield",
+                  "arrival": "2026-03-12T16:44:00Z",
+                  "scheduledArrival": "2026-03-12T16:44:00Z"
+                }
+              },
+              {
+                "mode": "RAIL",
+                "routeShortName": "IC 1113",
+                "headsign": "Eastbrook Central",
+                "duration": 1860,
+                "startTime": "2026-03-12T16:46:00Z",
+                "endTime": "2026-03-12T17:17:00Z",
+                "scheduledStartTime": "2026-03-12T16:46:00Z",
+                "scheduledEndTime": "2026-03-12T17:17:00Z",
+                "from": {
+                  "name": "Westfield",
+                  "departure": "2026-03-12T16:46:00Z",
+                  "scheduledDeparture": "2026-03-12T16:46:00Z",
+                  "track": "2",
+                  "scheduledTrack": "2"
+                },
+                "to": {
+                  "name": "Eastbrook Central",
+                  "arrival": "2026-03-12T17:17:00Z",
+                  "scheduledArrival": "2026-03-12T17:17:00Z"
+                }
+              },
+              {
+                "mode": "BUS",
+                "routeShortName": "340",
+                "headsign": "Eastbrook, Market Square",
+                "duration": 1200,
+                "startTime": "2026-03-12T17:25:00Z",
+                "endTime": "2026-03-12T17:45:00Z",
+                "scheduledStartTime": "2026-03-12T17:25:00Z",
+                "scheduledEndTime": "2026-03-12T17:45:00Z",
+                "from": {
+                  "name": "Eastbrook, Central Station",
+                  "departure": "2026-03-12T17:25:00Z",
+                  "scheduledDeparture": "2026-03-12T17:25:00Z"
+                },
+                "to": {
+                  "name": "Eastbrook, Market Square",
+                  "arrival": "2026-03-12T17:45:00Z",
+                  "scheduledArrival": "2026-03-12T17:45:00Z"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": {
+            "lat": 52.2,
+            "lon": 5.2
+          },
+          "to": {
+            "lat": 52.1,
+            "lon": 5.1
+          },
+          "itinerary": {
+            "duration": 3540,
+            "startTime": "2026-03-12T16:46:00Z",
+            "endTime": "2026-03-12T17:45:00Z",
+            "transfers": 1,
+            "legs": [
+              {
+                "mode": "RAIL",
+                "routeShortName": "IC 1113",
+                "headsign": "Eastbrook Central",
+                "duration": 1860,
+                "startTime": "2026-03-12T16:46:00Z",
+                "endTime": "2026-03-12T17:17:00Z",
+                "scheduledStartTime": "2026-03-12T16:46:00Z",
+                "scheduledEndTime": "2026-03-12T17:17:00Z",
+                "from": {
+                  "name": "Westfield",
+                  "departure": "2026-03-12T16:46:00Z",
+                  "scheduledDeparture": "2026-03-12T16:46:00Z",
+                  "track": "2",
+                  "scheduledTrack": "2"
+                },
+                "to": {
+                  "name": "Eastbrook Central",
+                  "arrival": "2026-03-12T17:17:00Z",
+                  "scheduledArrival": "2026-03-12T17:17:00Z"
+                }
+              },
+              {
+                "mode": "BUS",
+                "routeShortName": "340",
+                "headsign": "Eastbrook, Market Square",
+                "duration": 1200,
+                "startTime": "2026-03-12T17:25:00Z",
+                "endTime": "2026-03-12T17:45:00Z",
+                "scheduledStartTime": "2026-03-12T17:25:00Z",
+                "scheduledEndTime": "2026-03-12T17:45:00Z",
+                "from": {
+                  "name": "Eastbrook, Central Station",
+                  "departure": "2026-03-12T17:25:00Z",
+                  "scheduledDeparture": "2026-03-12T17:25:00Z"
+                },
+                "to": {
+                  "name": "Eastbrook, Market Square",
+                  "arrival": "2026-03-12T17:45:00Z",
+                  "scheduledArrival": "2026-03-12T17:45:00Z"
+                }
+              }
+            ]
+          }
+        }
+      ],
       "places": [
         {
           "type": "STOP",
@@ -210,6 +444,13 @@
           "name": "Westfield, Station",
           "lat": 52.2,
           "lon": 5.2,
+          "country": "NL"
+        },
+        {
+          "type": "PLACE",
+          "name": "Westfield Office",
+          "lat": 52.202,
+          "lon": 5.203,
           "country": "NL"
         }
       ],
@@ -318,6 +559,9 @@
           ],
           "matches": [
             "\\b\\d{1,2}[:.]\\d{2}\\b"
+          ],
+          "not_matches": [
+            "(?i)(не удалось|не получилось|не наш(ёл|ел|ли|лось))"
           ]
         }
       }

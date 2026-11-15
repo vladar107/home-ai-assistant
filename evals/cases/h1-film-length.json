@@ -1,6 +1,6 @@
 {
   "id": "h1-film-length",
-  "title": "A film's running time comes from one web search",
+  "title": "A film's running time is looked up after finding the film in the film table",
   "tags": [
     "happy"
   ],
@@ -25,6 +25,61 @@
           "timezone": "Europe/Berlin"
         }
       ]
+    },
+    "notion": {
+      "writes": true,
+      "data_sources": [
+        {
+          "id": "film-club",
+          "title": "Кино по средам",
+          "title_property": "Дата",
+          "properties": [
+            {
+              "name": "Фильм",
+              "type": "rich_text"
+            },
+            {
+              "name": "Кто",
+              "type": "rich_text"
+            },
+            {
+              "name": "С",
+              "type": "rich_text"
+            },
+            {
+              "name": "М",
+              "type": "rich_text"
+            }
+          ],
+          "rows": [
+            {
+              "id": "row-northern-wind",
+              "title": "04.03.2026",
+              "values": {
+                "Фильм": "Северный ветер",
+                "Кто": "С",
+                "С": "8"
+              }
+            },
+            {
+              "id": "row-quiet-shore",
+              "title": "11.03.2026",
+              "values": {
+                "Фильм": "Тихий берег",
+                "Кто": "М"
+              }
+            },
+            {
+              "id": "row-lighthouse-light",
+              "title": "18.03.2026",
+              "values": {
+                "Фильм": "Свет маяка",
+                "Кто": "С"
+              }
+            }
+          ]
+        }
+      ]
     }
   },
   "steps": [
@@ -33,9 +88,18 @@
       "expect": {
         "calls": [
           {
+            "any_of": [
+              "movies_next",
+              "notion_search",
+              "notion_query_data_source",
+              "notion_get_page"
+            ],
+            "min": 1
+          },
+          {
             "tool": "web_search",
             "min": 1,
-            "max": 1,
+            "max": 2,
             "args": [
               {
                 "path": "query",
@@ -46,7 +110,8 @@
         ],
         "reply": {
           "language": "ru"
-        }
+        },
+        "ordered": true
       }
     }
   ],

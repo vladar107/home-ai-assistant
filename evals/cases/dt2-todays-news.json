@@ -11,7 +11,10 @@
   },
   "user": {
     "name": "Sam",
-    "language": "ru"
+    "language": "ru",
+    "memory": [
+      "Живёт в Eastbrook, Нидерланды, работает в Westfield."
+    ]
   },
   "world": {
     "weather": {
@@ -25,7 +28,44 @@
           "timezone": "Europe/Berlin"
         }
       ]
-    }
+    },
+    "routes": [
+      {
+        "name": "Office",
+        "days": [
+          "mon",
+          "tue",
+          "wed",
+          "thu",
+          "fri"
+        ],
+        "arrive_by": "09:00",
+        "legs": [
+          {
+            "mode": "walk",
+            "minutes": 6
+          },
+          {
+            "mode": "bus",
+            "stop": "Eastbrook, Market Square",
+            "line": "340",
+            "towards": "Eastbrook Central",
+            "minutes": 20,
+            "departures": [
+              "07:40"
+            ]
+          },
+          {
+            "mode": "train",
+            "from": "Eastbrook Central",
+            "to": "Westfield",
+            "departures": [
+              "08:13"
+            ]
+          }
+        ]
+      }
+    ]
   },
   "steps": [
     {
@@ -63,6 +103,9 @@
           "not_contains": [
             "2024",
             "2025"
+          ],
+          "not_matches": [
+            "(?i)(как(ой|ого|ом|ая) (именно )?Eastbrook|which Eastbrook|уточни)"
           ]
         }
       }

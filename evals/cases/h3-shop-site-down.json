@@ -28,20 +28,31 @@
           "timezone": "Europe/Berlin"
         }
       ]
+    },
+    "pages": {
+      "pages": [
+        {
+          "host": "northwind-shop.nl",
+          "path": "/",
+          "status": 503,
+          "title": "Service unavailable",
+          "body": "Temporarily unavailable. We are working on it."
+        }
+      ]
     }
   },
   "steps": [
     {
-      "say": "сайт и приложение магазина не работают?",
+      "say": "сайт и приложение магазина не работают? https://northwind-shop.nl",
       "expect": {
         "calls": [
           {
-            "tool": "web_search",
+            "tool": "fetch_page",
             "min": 1,
             "args": [
               {
-                "path": "query",
-                "contains": "Northwind"
+                "path": "url",
+                "contains": "northwind-shop.nl"
               }
             ]
           }
@@ -49,7 +60,8 @@
         "reply": {
           "language": "ru",
           "matches": [
-            "(?i)(слежу|прослежу|сообщ|уведом|наблюд|отслеж|watch)"
+            "(?i)(слежу|прослежу|сообщ|уведом|наблюд|отслеж|watch)",
+            "(?i)(не работа|недоступ|503|сбой|лежит)"
           ]
         }
       }
