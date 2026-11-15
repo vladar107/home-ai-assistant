@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -103,7 +104,7 @@ func checkCalls(expect *Expect, record TurnRecord, env CheckEnv, fail func(check
 		var matched []int
 		reason := ""
 		for j, got := range record.ToolCalls {
-			if got.Name != want.Tool {
+			if !slices.Contains(want.Names(), got.Name) {
 				continue
 			}
 			ok, why := matchArgs(got, want.Args, env.Location)
@@ -122,16 +123,16 @@ func checkCalls(expect *Expect, record TurnRecord, env CheckEnv, fail func(check
 		}
 		switch {
 		case len(matched) < least:
-			if reason == "" && countCalls(record.ToolCalls, want.Tool) == 0 {
+			if reason == "" && !slices.ContainsFunc(record.ToolCalls, func(call ToolCall) bool { return slices.Contains(want.Names(), call.Name) }) {
 				reason = "never called"
 			}
-			message := fmt.Sprintf("calls[%d] %s: want at least %d matching call(s), got %d", i, want.Tool, least, len(matched))
+			message := fmt.Sprintf("calls[%d] %s: want at least %d matching call(s), got %d", i, strings.Join(want.Names(), " or "), least, len(matched))
 			if reason != "" {
 				message += " (" + reason + ")"
 			}
 			fail("calls", "%s", message)
 		case want.Max != nil && len(matched) > *want.Max:
-			fail("calls", "calls[%d] %s: want at most %d matching call(s), got %d", i, want.Tool, *want.Max, len(matched))
+			fail("calls", "calls[%d] %s: want at most %d matching call(s), got %d", i, strings.Join(want.Names(), " or "), *want.Max, len(matched))
 		}
 		if expect.Ordered && len(matched) > 0 {
 			position = matched[min(max(least, 1), len(matched))-1]

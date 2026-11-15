@@ -79,7 +79,8 @@ neutral names, places and data, never a real message, trace, memory or device.
   `confirm: true`, `reject: true`, `thumbs_down: true` (the last three act on the previous turn
   and cannot start a case), or `run_job` (id of a scheduled job in the world).
 - `expect` (optional per step):
-  - `calls`: `{tool, min (default 1), max, args}`; each arg has a dot `path` into the tool's JSON
+  - `calls`: `{tool | any_of, min (default 1), max, args}`; `any_of` lists two or more tools,
+    any of which satisfies the call (give `tool` or `any_of`, not both); each arg has a dot `path` into the tool's JSON
     arguments and exactly one of `equals`, `contains`, `matches` (regexp) or `within`
     (`{from, to}`, both `YYYY-MM-DDTHH:MM` or both `HH:MM`, local time);
   - `not_called`, `max_calls`, `ordered` (calls occur in the listed order);

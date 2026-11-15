@@ -65,6 +65,7 @@ func TestLoadRejectsInvalidCases(t *testing.T) {
 		{"unknown-world", "case.json", "world.nonexistent: unknown world section"},
 		{"bad-regexp", "case.json", "steps[0]: expect.reply.matches[0]"},
 		{"bad-not-matches", "case.json", "steps[0]: expect.reply.not_matches[0]"},
+		{"bad-call-names", "case.json", "steps[0]: expect.calls[0]: want exactly one of tool and any_of"},
 		{"confirm-first", "case.json", "steps[0]: confirm cannot be the first step"},
 		{"two-actions", "case.json", "steps[0]: want exactly one action"},
 		{"bad-zone", "case.json", `clock.zone "Mars/Olympus"`},

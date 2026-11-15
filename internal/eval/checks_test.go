@@ -65,6 +65,17 @@ func TestChecksOnHandMadeRecords(t *testing.T) {
 			want:   []string{"calls", "args.events.5.id missing"},
 		},
 		{
+			name:   "any_of accepts a call of either tool",
+			expect: Expect{Calls: []Call{{AnyOf: []string{"schedule_update", "schedule_create"}, Min: intp(1), Args: []ArgExpr{{Path: "name", Equals: raw(t, "Dentist")}}}}},
+			record: TurnRecord{ToolCalls: []ToolCall{reminder}},
+		},
+		{
+			name:   "any_of fails when none of its tools was called",
+			expect: Expect{Calls: []Call{{AnyOf: []string{"schedule_update", "schedule_delete"}, Min: intp(1)}}},
+			record: TurnRecord{ToolCalls: []ToolCall{reminder}},
+			want:   []string{"calls", "schedule_update or schedule_delete", "never called"},
+		},
+		{
 			name:   "matches a pattern",
 			expect: Expect{Calls: []Call{{Tool: "schedule_create", Min: intp(1), Args: []ArgExpr{{Path: "name", Matches: strp(`^Den`)}}}}},
 			record: TurnRecord{ToolCalls: []ToolCall{reminder}},

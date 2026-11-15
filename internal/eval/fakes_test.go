@@ -210,7 +210,9 @@ func namedTools(c Case) map[string][]string {
 		}
 		where := func(field string) string { return fmt.Sprintf("steps[%d].expect.%s", i, field) }
 		for _, expected := range step.Expect.Calls {
-			named[expected.Tool] = append(named[expected.Tool], where("calls"))
+			for _, tool := range expected.Names() {
+				named[tool] = append(named[tool], where("calls"))
+			}
 		}
 		for _, tool := range step.Expect.NotCalled {
 			named[tool] = append(named[tool], where("not_called"))

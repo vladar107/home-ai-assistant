@@ -1,0 +1,8 @@
+{
+  "id": "bad-call-names",
+  "title": "A call naming a tool and any_of",
+  "kind": "happy",
+  "clock": {"local": "2026-03-10T08:30", "zone": "UTC"},
+  "user": {},
+  "steps": [{"say": "Hello", "expect": {"calls": [{"tool": "a", "any_of": ["a", "b"]}]}}]
+}

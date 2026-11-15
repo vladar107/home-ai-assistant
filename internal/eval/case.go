@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"time"
 )
@@ -93,12 +94,14 @@ type Expect struct {
 	Store     []json.RawMessage `json:"store,omitempty"`
 }
 
-// Call expects Min..Max calls of Tool; the loader sets an absent Min to 1.
+// Call expects Min..Max calls of Tool, or of any one of the tools in AnyOf; the loader sets an
+// absent Min to 1. Args apply to whichever tool was called.
 type Call struct {
-	Tool string    `json:"tool"`
-	Min  *int      `json:"min,omitempty"`
-	Max  *int      `json:"max,omitempty"`
-	Args []ArgExpr `json:"args,omitempty"`
+	Tool  string    `json:"tool,omitempty"`
+	AnyOf []string  `json:"any_of,omitempty"`
+	Min   *int      `json:"min,omitempty"`
+	Max   *int      `json:"max,omitempty"`
+	Args  []ArgExpr `json:"args,omitempty"`
 }
 
 type ArgExpr struct {
@@ -342,9 +345,20 @@ func (r *Registry) validateExpect(e *Expect) error {
 	return nil
 }
 
+// Names lists the tools whose calls satisfy the expectation.
+func (c Call) Names() []string {
+	if c.Tool != "" {
+		return []string{c.Tool}
+	}
+	return c.AnyOf
+}
+
 func validateCall(c *Call) error {
-	if c.Tool == "" {
-		return errors.New("tool is required")
+	if (c.Tool == "") == (len(c.AnyOf) == 0) {
+		return errors.New("want exactly one of tool and any_of")
+	}
+	if slices.Contains(c.AnyOf, "") || len(c.AnyOf) == 1 {
+		return errors.New("any_of: want at least two tool names, none empty")
 	}
 	if c.Min == nil {
 		one := 1
