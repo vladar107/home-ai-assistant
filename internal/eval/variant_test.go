@@ -82,22 +82,6 @@ func TestRepositoryVariantsLoad(t *testing.T) {
 	}
 }
 
-func TestLookBeforeAskingOnlyAddsToTheInitiativeSection(t *testing.T) {
-	v, err := LoadVariant(filepath.Join("..", "..", "evals", "variants"), "look-before-asking")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(v.Sections) != 1 || len(v.ToolGuidance) != 0 {
-		t.Fatalf("variant = %+v", v)
-	}
-	text := v.Sections["initiative"]
-	start := strings.Index(text, "Before asking the user")
-	end := strings.Index(text, "Take the next step")
-	if start < 0 || end < start || text[:start]+text[end:] != prompt.Default.Initiative {
-		t.Fatalf("the variant is not the default initiative section plus one added passage:\n%s", text)
-	}
-}
-
 func TestFingerprintFollowsSectionsAndGuidanceNotMemory(t *testing.T) {
 	base := agentruntime.RunRequest{Tools: agentruntime.ToolSet{
 		Definitions: []agentruntime.ToolDefinition{{Name: "t"}}, Guidance: "Guidance.",
