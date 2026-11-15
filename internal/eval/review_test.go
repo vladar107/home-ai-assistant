@@ -25,8 +25,10 @@ func reviewRun(t *testing.T) string {
 		if n == 1 {
 			result.Cassette = filepath.Join("cassettes", caseID+"-1.json")
 			cassette := eval.Cassette{Case: caseID, Trial: 1, Steps: []eval.CassetteStep{{
-				Step:      eval.Step{Say: "what is the weather tomorrow?"},
-				ToolCalls: []eval.ToolCall{{Name: "weather", Arguments: json.RawMessage(`{"day":"tomorrow"}`), IsError: true}},
+				Step: eval.Step{Say: "what is the weather tomorrow?", Expect: &eval.Expect{
+					Reply: &eval.ReplyExpect{Contains: []string{"sunny"}},
+				}},
+				ToolCalls: []eval.ToolCall{{Name: "weather", Arguments: json.RawMessage(`{"day":"tomorrow"}`), Result: "No place called\nhome was found", IsError: true}},
 				Reply:     "It will be sunny tomorrow with a light breeze.",
 			}}}
 			encoded, err := json.Marshal(cassette)
@@ -69,6 +71,7 @@ func TestReviewStoresVerdictsAndResumesAtTheFirstUnreviewedTrial(t *testing.T) {
 	shown := review(t, dir, false, "g\nlooks right\nq\n")
 	for _, want := range []string{
 		"alarm trial 1", "[1/4]", "what is the weather tomorrow?", `tool weather({"day":"tomorrow"}) -> ERROR`,
+		"= No place called home was found", `expects: {"reply":{"contains":["sunny"]}}`,
 		"It will be sunny tomorrow", "checks: FAILED", "step 1, calls: weather was never called",
 	} {
 		if !strings.Contains(shown, want) {
@@ -103,6 +106,26 @@ func TestReviewStoresVerdictsAndResumesAtTheFirstUnreviewedTrial(t *testing.T) {
 	}
 	if all := review(t, dir, true, "q\n"); !strings.Contains(all, "[1/4]") || !strings.Contains(all, "previous verdict: good (looks right)") {
 		t.Fatalf("--all should show reviewed trials again:\n%s", all)
+	}
+}
+
+func TestReviewLimitedToCasesShowsOnlyTheirTrials(t *testing.T) {
+	dir := reviewRun(t)
+
+	shown := review(t, dir, false, "q\n")
+	if !strings.Contains(shown, "[1/4]") {
+		t.Fatalf("an unfiltered review should queue every trial:\n%s", shown)
+	}
+	var out bytes.Buffer
+	if err := eval.Review(eval.ReviewOptions{Dir: dir, Cases: []string{"weather"}, In: strings.NewReader("q\n"), Out: &out}); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); !strings.Contains(got, "weather trial 1") || !strings.Contains(got, "[1/2]") || strings.Contains(got, "alarm trial") {
+		t.Fatalf("review limited to weather showed:\n%s", got)
+	}
+	err := eval.Review(eval.ReviewOptions{Dir: dir, Cases: []string{"wether"}, In: strings.NewReader(""), Out: &out})
+	if err == nil || !strings.Contains(err.Error(), `"wether"`) {
+		t.Fatalf("an unknown case ID should be refused, got %v", err)
 	}
 }
 

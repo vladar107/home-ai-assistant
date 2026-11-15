@@ -269,11 +269,16 @@ func runDir(flags *flag.FlagSet, args []string) (string, error) {
 func runReview(args []string) error {
 	flags := flag.NewFlagSet("review", flag.ContinueOnError)
 	all := flags.Bool("all", false, "show trials that already have a verdict too")
+	cases := flags.String("case", "", "comma-separated case IDs to review (default: every case)")
 	dir, err := runDir(flags, args)
 	if err != nil {
 		return err
 	}
-	reviewErr := eval.Review(eval.ReviewOptions{Dir: dir, All: *all, In: os.Stdin, Out: os.Stdout})
+	var only []string
+	if *cases != "" {
+		only = strings.Split(*cases, ",")
+	}
+	reviewErr := eval.Review(eval.ReviewOptions{Dir: dir, All: *all, Cases: only, In: os.Stdin, Out: os.Stdout})
 	return errors.Join(reviewErr, importRun(context.Background(), dir))
 }
 

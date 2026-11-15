@@ -8,10 +8,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/vladar107/home-ai-assistant/internal/prompt"
 )
 
 const (
@@ -21,9 +24,11 @@ const (
 
 	reviewFile = "review.json"
 
-	reviewWidth      = 100
-	reviewArgsRunes  = 160
-	reviewReplyLimit = 4000
+	reviewWidth       = 100
+	reviewArgsRunes   = 160
+	reviewResultRunes = 300
+	reviewExpectRunes = 600
+	reviewReplyLimit  = 4000
 )
 
 // ReviewEntry is the operator's own verdict on one trial.
@@ -113,8 +118,10 @@ type ReviewOptions struct {
 	Dir string
 	// All shows trials that already have a verdict too.
 	All bool
-	In  io.Reader
-	Out io.Writer
+	// Cases limits the review to these case IDs; empty means every case.
+	Cases []string
+	In    io.Reader
+	Out   io.Writer
 }
 
 // Review steps through the run's trials, records the operator's verdicts after every answer and
@@ -130,6 +137,11 @@ func Review(opts ReviewOptions) error {
 		return err
 	}
 	review.RunID = result.RunID
+	for _, id := range opts.Cases {
+		if !slices.ContainsFunc(result.Cases, func(c CaseResult) bool { return c.ID == id }) {
+			return fmt.Errorf("run %s has no case %q", result.RunID, id)
+		}
+	}
 	in := bufio.NewReader(opts.In)
 	out := opts.Out
 
@@ -139,6 +151,9 @@ func Review(opts ReviewOptions) error {
 	}
 	var queue []pending
 	for _, c := range sortedCases(result.Cases) {
+		if len(opts.Cases) > 0 && !slices.Contains(opts.Cases, c.ID) {
+			continue
+		}
 		for _, trial := range sortedTrials(c.Trials) {
 			if !trial.Ran() {
 				continue
@@ -286,12 +301,20 @@ func showTrial(out io.Writer, result *Result, c CaseResult, trial TrialResult) {
 	}
 	for _, step := range cassette.Steps {
 		fmt.Fprintf(out, "\n-- step %d: %s\n", step.Index+1, describeStep(step.Step))
+		if step.Step.Expect != nil {
+			if expect, err := json.Marshal(step.Step.Expect); err == nil {
+				fmt.Fprintf(out, "  expects: %s\n", excerptTo(string(expect), reviewExpectRunes))
+			}
+		}
 		for _, call := range step.ToolCalls {
 			status := "ok"
 			if call.IsError {
 				status = "ERROR"
 			}
 			fmt.Fprintf(out, "  tool %s(%s) -> %s\n", call.Name, excerptTo(string(call.Arguments), reviewArgsRunes), status)
+			if result := strings.TrimPrefix(call.Result, prompt.ToolResultUntrusted); strings.TrimSpace(result) != "" {
+				fmt.Fprintf(out, "      = %s\n", excerptTo(result, reviewResultRunes))
+			}
 		}
 		for _, proposal := range step.Proposals {
 			fmt.Fprintf(out, "  proposal %s: %s [%s]\n", proposal.Tool, excerptTo(proposal.Summary, reviewArgsRunes), proposal.Status)
