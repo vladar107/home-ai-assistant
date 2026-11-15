@@ -235,12 +235,12 @@ func renderTrips(v view, from, to, via station, hasVia, arriveBy bool, at time.T
 		return builder.String()
 	}
 	for index, item := range response.Trips {
-		renderTrip(&builder, v, index+1, item)
+		renderTrip(&builder, v, index+1, item, arriveBy, at)
 	}
 	return strings.TrimRight(builder.String(), "\n")
 }
 
-func renderTrip(builder *strings.Builder, v view, number int, item trip) {
+func renderTrip(builder *strings.Builder, v view, number int, item trip, arriveBy bool, at time.Time) {
 	if len(item.Legs) == 0 {
 		fmt.Fprintf(builder, "%d. No journey details; status %s\n", number, text(item.Status))
 		return
@@ -254,6 +254,14 @@ func renderTrip(builder *strings.Builder, v view, number int, item trip) {
 	}
 	fmt.Fprintf(builder, "%d. %sDepart %s %s", number, status, v.timed(first.Origin.PlannedDateTime, first.Origin.ActualDateTime), track(first.Origin.PlannedTrack, first.Origin.ActualTrack))
 	fmt.Fprintf(builder, ", arrive %s %s", v.timed(last.Destination.PlannedDateTime, last.Destination.ActualDateTime), track(last.Destination.PlannedTrack, last.Destination.ActualTrack))
+	// NS answers an arrive-by search with trips around the time, so a later arrival must not read as on time.
+	arrives, ok := parseTime(last.Destination.ActualDateTime)
+	if !ok {
+		arrives, ok = parseTime(last.Destination.PlannedDateTime)
+	}
+	if arriveBy && ok && arrives.After(at) {
+		builder.WriteString(" (after the requested arrival time)")
+	}
 
 	var facts []string
 	if duration := durationText(item.PlannedDurationInMinutes, item.ActualDurationInMinutes); duration != "" {

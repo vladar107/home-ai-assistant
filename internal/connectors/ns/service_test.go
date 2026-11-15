@@ -448,6 +448,22 @@ func TestTripsReportDelaysTrackChangesAndCancellations(t *testing.T) {
 	}
 }
 
+func TestTripsByArrivalMarkALaterArrival(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.server.serve("v3/trips", fixtureBytes(t, "trips_arrival.json"))
+
+	early := f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal", "date_time": "2026-10-05T08:45", "arrive_by": true})
+	wantText(t, early, "arrive 08:53", "(after the requested arrival time)")
+	byNine := f.call("ns_trips", map[string]any{"from": "Amersfoort Schothorst", "to": "Utrecht Centraal", "date_time": "2026-10-05T09:00", "arrive_by": true})
+	wantText(t, byNine, "arrive 09:23 track 8 (after the requested arrival time)")
+	for _, line := range strings.Split(byNine.Text, "\n") {
+		if strings.Contains(line, "arrive 08:") && strings.Contains(line, "after the requested arrival time") {
+			t.Fatalf("a trip arriving before 09:00 was marked late: %s", line)
+		}
+	}
+}
+
 func TestTripsByArrivalSendTheLocalOffset(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)

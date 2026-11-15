@@ -76,6 +76,18 @@ func TestConnectorReadsSeededTimetable(t *testing.T) {
 	}
 }
 
+func TestArriveByAnswersWithTripsAroundTheTime(t *testing.T) {
+	service := service(t)
+	text := call(t, service, "ns_trips", `{"from":"Eastbrook Centraal","to":"Westfield","date_time":"2026-03-10T08:30","arrive_by":true}`)
+	if !strings.Contains(text, "arrive 08:34") {
+		t.Errorf("arrive-by 08:30 answered %q, want the trip arriving at 08:34", text)
+	}
+	text = call(t, service, "ns_trips", `{"from":"Eastbrook Centraal","to":"Westfield","date_time":"2026-03-10T11:00","arrive_by":true}`)
+	if !strings.Contains(text, "no trips") {
+		t.Errorf("arrive-by 11:00 answered %q, want no trips outside the window", text)
+	}
+}
+
 func TestUnknownQueryParameterIsRefused(t *testing.T) {
 	fake := nssim.New(t, json.RawMessage(seed))
 	response, err := http.Get(fake.BaseURL() + "/v3/trips?fromStation=EBK&toStation=WFD&dateTime=2026-03-10T08:00:00%2B01:00&bogus=1")

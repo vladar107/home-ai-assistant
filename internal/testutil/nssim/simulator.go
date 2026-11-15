@@ -46,6 +46,10 @@ const (
 	APIPrefix = "/reisinformatie-api/api"
 	// PlacesPrefix is the path under the server's URL the connector's PlacesBaseURL takes.
 	PlacesPrefix = "/places-api"
+
+	// NS answers an arrive-by search with trips around the requested time, later arrivals included.
+	arrivalWindowBefore = 90 * time.Minute
+	arrivalWindowAfter  = 60 * time.Minute
 )
 
 type Seed struct {
@@ -276,7 +280,7 @@ func (s *Server) trips(w http.ResponseWriter, r *http.Request) {
 		departs, _ := parseTime(times.Legs[0].Origin.PlannedDateTime)
 		arrives, _ := parseTime(times.Legs[len(times.Legs)-1].Destination.PlannedDateTime)
 		switch {
-		case arrival && !arrives.After(at):
+		case arrival && !arrives.Before(at.Add(-arrivalWindowBefore)) && !arrives.After(at.Add(arrivalWindowAfter)):
 			found = append(found, timed{arrives, item.Trip})
 		case !arrival && !departs.Before(at):
 			found = append(found, timed{departs, item.Trip})
