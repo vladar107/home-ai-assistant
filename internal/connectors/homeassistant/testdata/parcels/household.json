@@ -1,0 +1,105 @@
+{
+  "time_zone": "Europe/Amsterdam",
+  "config_entries": [
+    {"entry_id": "entry_postnl_a", "domain": "postnl", "title": "example-account-a@example.invalid"},
+    {"entry_id": "entry_postnl_free", "domain": "postnl", "title": "example-account-free@example.invalid"},
+    {"entry_id": "entry_dhlnl_a", "domain": "dhl_nl", "title": "Example DHL NL account"},
+    {"entry_id": "entry_dhl_a", "domain": "dhl", "title": "Example DHL account A"},
+    {"entry_id": "entry_dhl_b", "domain": "dhl", "title": "Example DHL account B"},
+    {"entry_id": "entry_gls_b", "domain": "gls", "title": "GLS (1234 AB)"},
+    {"entry_id": "entry_dpd_a", "domain": "dpd", "title": "Example unlisted carrier"}
+  ],
+  "registry": [
+    {"entity_id": "sensor.example_account_delivery", "platform": "postnl", "unique_id": "acct_a_delivery", "config_entry_id": "entry_postnl_a"},
+    {"entity_id": "sensor.example_account_distribution", "platform": "postnl", "unique_id": "acct_a_distribution", "config_entry_id": "entry_postnl_a"},
+    {"entity_id": "sensor.example_free_delivery", "platform": "postnl", "unique_id": "acct_free_delivery", "config_entry_id": "entry_postnl_free"},
+    {"entity_id": "sensor.example_dhl_nl_incoming", "platform": "dhl_nl", "unique_id": "entry_dhlnl_a_incoming_parcels", "config_entry_id": "entry_dhlnl_a"},
+    {"entity_id": "sensor.example_dhl_nl_pickup", "platform": "dhl_nl", "unique_id": "entry_dhlnl_a_en_route_to_pickup_point", "config_entry_id": "entry_dhlnl_a"},
+    {"entity_id": "sensor.example_dhl_nl_delivered", "platform": "dhl_nl", "unique_id": "entry_dhlnl_a_delivered_parcels", "config_entry_id": "entry_dhlnl_a"},
+    {"entity_id": "sensor.example_dhl_nl_outgoing", "platform": "dhl_nl", "unique_id": "entry_dhlnl_a_outgoing_delivered_parcels", "config_entry_id": "entry_dhlnl_a"},
+    {"entity_id": "sensor.example_dhl_nl_parcel", "platform": "dhl_nl", "unique_id": "entry_dhlnl_a_3SEXA123456789", "config_entry_id": "entry_dhlnl_a", "name": "Example DHL NL parcel"},
+    {"entity_id": "sensor.example_dhl_nl_disabled", "platform": "dhl_nl", "unique_id": "entry_dhlnl_a_awaiting_pickup", "config_entry_id": "entry_dhlnl_a", "disabled_by": "user"},
+    {"entity_id": "sensor.example_dhl_a_incoming", "platform": "dhl", "unique_id": "entry_dhl_a_incoming_parcels", "config_entry_id": "entry_dhl_a"},
+    {"entity_id": "sensor.example_dhl_b_incoming", "platform": "dhl", "unique_id": "entry_dhl_b_incoming_parcels", "config_entry_id": "entry_dhl_b"},
+    {"entity_id": "sensor.example_gls_incoming", "platform": "gls", "unique_id": "entry_gls_b_incoming_parcels", "config_entry_id": "entry_gls_b"},
+    {"entity_id": "sensor.example_gls_delivered", "platform": "gls", "unique_id": "entry_gls_b_delivered_parcels", "config_entry_id": "entry_gls_b"},
+    {"entity_id": "sensor.example_dpd_incoming", "platform": "dpd", "unique_id": "entry_dpd_a_incoming_parcels", "config_entry_id": "entry_dpd_a"}
+  ],
+  "entities": [
+    {"entity_id": "sensor.example_account_delivery", "name": "Example account delivery", "state": "2", "attributes": {
+      "enroute": [
+        {"key": "pk-enroute-1", "name": "Example order", "url": "https://example.invalid/track?to=Exampleville", "shipment_type": "Parcel",
+          "status_message": "Parcel for Jane Placeholder is on its way to Example Street 1", "delivered": false,
+          "delivery_address_type": "home", "planned_date": "2026-11-16T00:00:00+01:00",
+          "planned_from": "2026-11-16T13:00:00+01:00", "planned_to": "2026-11-16T15:00:00+01:00",
+          "expected_datetime": "2026-11-16T14:00:00+01:00", "expected_from": "2026-11-16T13:30:00+01:00",
+          "expected_to": "2026-11-16T14:30:00+01:00", "last_update": "2026-11-15T08:00:00+01:00"},
+        {"key": "pk-enroute-2", "name": "Second example order", "url": "https://example.invalid/track?to=Exampleville", "shipment_type": "Parcel",
+          "status_message": "Unknown", "delivered": false, "planned_date": "2026-11-17T00:00:00+01:00"}
+      ],
+      "delivered": [
+        {"key": "pk-done-1", "name": "Old example order", "url": "https://example.invalid/track?to=Exampleville", "shipment_type": "Parcel",
+          "status_message": "Pakket is bezorgd", "delivered": true, "delivery_date": "2026-11-10T11:12:13+01:00",
+          "delivery_address_type": "neighbour"}
+      ]}},
+    {"entity_id": "sensor.example_account_distribution", "name": "Example account distribution", "state": "1", "attributes": {
+      "enroute": [{"key": "pk-outgoing-1", "name": "Outgoing example order", "delivered": false}], "delivered": []}},
+    {"entity_id": "sensor.example_free_delivery", "name": "Example free delivery", "state": "1", "attributes": {
+      "enroute": [{"key": "pk-free-1", "name": "Unassigned example order", "delivered": false}], "delivered": []}},
+    {"entity_id": "sensor.example_dhl_nl_incoming", "name": "Example DHL NL incoming", "state": "2", "attributes": {"parcels": [
+      {"carrier": "DHL", "barcode": "3SEXA123456789", "sender": "Example Shop", "receiver": "Jane Placeholder", "status": "out_for_delivery",
+        "raw_status": "Example Street 1", "delivered": false, "delivered_at": null,
+        "planned_from": "2026-11-16T09:00:00+01:00", "planned_to": "2026-11-16T12:00:00+01:00",
+        "pickup": false, "pickup_point": null, "url": "https://example.invalid/track?to=Exampleville",
+        "history": [{"status": "in_transit", "description": "Left the depot near Example Street 1"}],
+        "raw": {"receiver": {"name": "Jane Placeholder", "address": "Example Street 1, 1234AB Exampleville"}}},
+      {"carrier": "DHL", "barcode": "JVGL00000000000000001", "sender": "Another Shop", "status": "at_pickup_point",
+        "delivered": false, "planned_from": "2026-11-15T09:00:00+01:00", "planned_to": "2026-11-15T12:00:00+01:00",
+        "pickup": true, "pickup_point": "Example Point", "url": "https://example.invalid/track?to=Exampleville",
+        "raw": {"receiver": {"name": "Jane Placeholder", "address": "Example Street 1, 1234AB Exampleville"}}}
+    ]}},
+    {"entity_id": "sensor.example_dhl_nl_pickup", "name": "Example DHL NL pickup", "state": "1", "attributes": {"parcels": [
+      {"carrier": "DHL", "barcode": "JVGL00000000000000001", "sender": "Another Shop", "status": "in_transit",
+        "pickup": true, "pickup_point": "Example Point"}
+    ]}},
+    {"entity_id": "sensor.example_dhl_nl_delivered", "name": "Example DHL NL delivered", "state": "1", "attributes": {"parcels": [
+      {"carrier": "DHL", "barcode": "3SEXA000000001", "sender": "Old Shop", "status": "delivered", "delivered": true,
+        "delivered_at": "2026-11-12T10:00:00+01:00", "pickup": false,
+        "history": [{"description": "Delivered to Jane Placeholder"}]}
+    ]}},
+    {"entity_id": "sensor.example_dhl_nl_outgoing", "name": "Example DHL NL outgoing", "state": "1", "attributes": {"parcels": [
+      {"carrier": "DHL", "barcode": "3SEXAOUTGOING01", "sender": "Jane Placeholder", "status": "delivered", "delivered": true}
+    ]}},
+    {"entity_id": "sensor.example_dhl_nl_parcel", "name": "Example DHL NL parcel", "state": "out_for_delivery", "attributes": {
+      "raw": {"receiver": {"address": "Example Street 1, 1234AB Exampleville"}},
+      "history": [{"description": "Left the depot near Example Street 1"}]}},
+    {"entity_id": "sensor.example_dhl_nl_disabled", "name": "Example DHL NL awaiting", "state": "1", "attributes": {"parcels": [
+      {"barcode": "3SEXADISABLED01", "status": "at_pickup_point", "pickup_point": "Example Point"}
+    ]}},
+    {"entity_id": "sensor.example_dhl_a_incoming", "name": "Example DHL A incoming", "state": "1", "attributes": {"parcels": [
+      {"carrier": "DHL", "barcode": "1234567890", "sender": "Example Seller", "status": "in_transit",
+        "planned_from": "2026-11-18T08:00:00+01:00", "planned_to": "2026-11-18T18:00:00+01:00",
+        "raw": {"receiver": {"address": "Example Street 1, 1234AB Exampleville"}}}
+    ]}},
+    {"entity_id": "sensor.example_dhl_b_incoming", "name": "Example DHL B incoming", "state": "1", "attributes": {"parcels": [
+      {"carrier": "DHL", "barcode": "1234567891", "sender": "Example Seller", "status": "in_transit"}
+    ]}},
+    {"entity_id": "sensor.example_gls_incoming", "name": "Example GLS incoming", "state": "2", "attributes": {"parcels": [
+      {"carrier": "GLS", "barcode": "00000000000", "sender": "Example Warehouse", "status": "registered",
+        "history": [{"description": "Announced for Example Street 1"}]},
+      {"carrier": "GLS", "barcode": "00000000003", "sender": "Example Warehouse", "status": "returning"}
+    ]}},
+    {"entity_id": "sensor.example_gls_delivered", "name": "Example GLS delivered", "state": "1", "attributes": {"parcels": [
+      {"carrier": "GLS", "barcode": "00000000002", "sender": "Example Warehouse", "status": "delivered",
+        "delivered_at": "2026-11-13T15:30:00"}
+    ]}},
+    {"entity_id": "sensor.example_dpd_incoming", "name": "Example DPD incoming", "state": "1", "attributes": {"parcels": [
+      {"carrier": "DPD", "barcode": "DPD00000000001", "status": "in_transit"}
+    ]}}
+  ],
+  "services": [
+    {"domain": "dhl", "services": {"track_parcel": ["tracking_code", "direction", "config_entry_id"], "untrack_parcel": ["tracking_code", "config_entry_id"]}},
+    {"domain": "gls", "services": {"track_parcel": ["tracking_code", "postal_code"], "untrack_parcel": ["tracking_code"]}},
+    {"domain": "lock", "services": {"unlock": []}}
+  ]
+}

@@ -66,6 +66,31 @@ type Seed struct {
 	Entities []Entity  `json:"entities"`
 	Tools    []Tool    `json:"tools"`
 	Services []Service `json:"services"`
+	// Registry and ConfigEntries are what the entity registry and config entries commands list; a
+	// case that reads integrations' entities invents them.
+	Registry      []RegistryEntity `json:"registry"`
+	ConfigEntries []ConfigEntry    `json:"config_entries"`
+}
+
+// RegistryEntity is one entry of the entity registry list.
+type RegistryEntity struct {
+	EntityID      string `json:"entity_id"`
+	Platform      string `json:"platform"`
+	UniqueID      string `json:"unique_id"`
+	ConfigEntryID string `json:"config_entry_id"`
+	// DisabledBy is empty for an enabled entity.
+	DisabledBy string `json:"disabled_by"`
+	// Name and OriginalName are the registry's names for the entity.
+	Name         string `json:"name"`
+	OriginalName string `json:"original_name"`
+}
+
+// ConfigEntry is one config entry; State is "loaded" unless the case says otherwise.
+type ConfigEntry struct {
+	EntryID string `json:"entry_id"`
+	Domain  string `json:"domain"`
+	Title   string `json:"title"`
+	State   string `json:"state"`
 }
 
 type Entity struct {
@@ -186,6 +211,14 @@ type Server struct {
 	states map[string]string
 	calls  []Call
 	tools  []Tool
+	// failStates makes reading an entity's state fail with a server error.
+	failStates bool
+	// holdStates, while set, holds every read of an entity's state until it is closed.
+	holdStates chan struct{}
+	// stateReads are the entities whose state was asked for, and requests counts every REST call
+	// and WebSocket connection.
+	stateReads []string
+	requests   int
 }
 
 // Start runs the fake on a loopback port, with calendar periods counted from the wall clock; the
@@ -259,8 +292,79 @@ func (s *Server) State(entityID string) (string, bool) {
 	return state, found
 }
 
+// SetAttributes replaces the extra attributes of a seeded entity, as a sensor's update would.
+func (s *Server) SetAttributes(entityID string, attributes map[string]any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index := range s.seed.Entities {
+		if s.seed.Entities[index].EntityID == entityID {
+			s.seed.Entities[index].Attributes = attributes
+		}
+	}
+}
+
+// StateReads are the entities whose state was read, in order.
+func (s *Server) StateReads() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.stateReads)
+}
+
+// Requests counts the REST requests and WebSocket connections received so far.
+func (s *Server) Requests() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.requests
+}
+
+// FailStates makes every read of an entity's state fail until it is called again with false.
+func (s *Server) FailStates(fail bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failStates = fail
+}
+
+// HoldStates makes every read of an entity's state wait until release is called or the request
+// ends, as a Home Assistant that stopped answering would.
+func (s *Server) HoldStates() (release func()) {
+	hold := make(chan struct{})
+	s.mu.Lock()
+	s.holdStates = hold
+	s.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.mu.Lock()
+			s.holdStates = nil
+			s.mu.Unlock()
+			close(hold)
+		})
+	}
+}
+
+// RemoveConfigEntry drops a config entry, as deleting the integration's entry would.
+func (s *Server) RemoveConfigEntry(entryID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.seed.ConfigEntries = slices.DeleteFunc(s.seed.ConfigEntries, func(entry ConfigEntry) bool { return entry.EntryID == entryID })
+}
+
+// SetConfigEntryState changes the state a config entry reports, such as "setup_retry".
+func (s *Server) SetConfigEntryState(entryID, state string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index := range s.seed.ConfigEntries {
+		if s.seed.ConfigEntries[index].EntryID == entryID {
+			s.seed.ConfigEntries[index].State = state
+		}
+	}
+}
+
 func (s *Server) authorized(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		s.requests++
+		s.mu.Unlock()
 		if r.Header.Get("Authorization") != "Bearer "+s.token {
 			http.Error(w, "401: Unauthorized", http.StatusUnauthorized)
 			return
@@ -303,7 +407,22 @@ func (s *Server) listStates(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) oneState(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/api/states/")
 	s.mu.Lock()
+	hold := s.holdStates
+	s.mu.Unlock()
+	if hold != nil {
+		select {
+		case <-hold:
+		case <-r.Context().Done():
+			return
+		}
+	}
+	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.stateReads = append(s.stateReads, id)
+	if s.failStates {
+		simkit.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"message": "Unavailable."})
+		return
+	}
 	for _, entity := range s.seed.Entities {
 		if entity.EntityID == id {
 			simkit.WriteJSON(w, http.StatusOK, s.stateObject(entity))
@@ -452,6 +571,7 @@ type socketCommand struct {
 	ID          int      `json:"id"`
 	Type        string   `json:"type"`
 	AccessToken string   `json:"access_token"`
+	Domain      string   `json:"domain"`
 	StatisticID string   `json:"statistic_id"`
 	IDs         []string `json:"statistic_ids"`
 	Period      string   `json:"period"`
@@ -469,6 +589,9 @@ type socketCommand struct {
 }
 
 func (s *Server) socket(conn *websocket.Conn) {
+	s.mu.Lock()
+	s.requests++
+	s.mu.Unlock()
 	if websocket.JSON.Send(conn, map[string]string{"type": "auth_required"}) != nil {
 		return
 	}
@@ -501,6 +624,13 @@ func (s *Server) socket(conn *websocket.Conn) {
 	}
 }
 
+func nilIfEmpty(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
 func labelID(name string) string { return strings.ReplaceAll(name, "-", "_") }
 
 func (s *Server) command(command socketCommand) (any, bool) {
@@ -527,6 +657,32 @@ func (s *Server) command(command socketCommand) (any, bool) {
 			entities = append(entities, map[string]any{"ei": entity.EntityID, "lb": ids})
 		}
 		return map[string]any{"entities": entities}, true
+	case "config/entity_registry/list":
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		entities := []map[string]any{}
+		for _, entity := range s.seed.Registry {
+			var disabled any
+			if entity.DisabledBy != "" {
+				disabled = entity.DisabledBy
+			}
+			entities = append(entities, map[string]any{
+				"entity_id": entity.EntityID, "platform": entity.Platform, "unique_id": entity.UniqueID,
+				"config_entry_id": entity.ConfigEntryID, "disabled_by": disabled, "hidden_by": nil,
+				"name": nilIfEmpty(entity.Name), "original_name": nilIfEmpty(entity.OriginalName),
+			})
+		}
+		return entities, true
+	case "config_entries/get":
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		entries := []map[string]any{}
+		for _, entry := range s.seed.ConfigEntries {
+			if command.Domain == "" || entry.Domain == command.Domain {
+				entries = append(entries, map[string]any{"entry_id": entry.EntryID, "domain": entry.Domain, "title": entry.Title, "state": cmp.Or(entry.State, "loaded")})
+			}
+		}
+		return entries, true
 	case "recorder/statistic_during_period":
 		return s.periodStatistic(command)
 	case "recorder/statistics_during_period":

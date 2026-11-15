@@ -220,6 +220,9 @@ func (s *Service) refresh(ctx context.Context, now time.Time) (*snapshot, error)
 	exposed, guardErr := s.liveContext(ctx)
 	confirmed, readOnly, labelErr := s.labelledEntities(ctx, byID)
 	fresh.exposed = exposed
+	if s.parcels != nil && guardErr == nil {
+		s.parcels.noteExposed(ctx, exposed)
+	}
 	fresh.confirmed = confirmed
 	if guardErr == nil && labelErr == nil {
 		fresh.markReadScripts(readOnly)

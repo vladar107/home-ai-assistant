@@ -55,6 +55,9 @@ type Service struct {
 	snapshotMu sync.Mutex
 	snapshot   *snapshot
 
+	// parcels hears what the live context lists; set once before the service handles turns.
+	parcels *ParcelSource
+
 	running atomic.Bool
 }
 

@@ -301,6 +301,8 @@ type SourceState string
 
 const (
 	SourceOK SourceState = "ok"
+	// SourceUnknown means nothing has been read yet.
+	SourceUnknown SourceState = "unknown"
 	// SourceStale means the last read failed and the parcels shown are from an earlier one.
 	SourceStale SourceState = "stale"
 	// SourceMissing means the assigned config entry is not in Home Assistant.
