@@ -667,3 +667,41 @@ func TestDescriptionWindowsNeverSplitACharacterAndContinueExactly(t *testing.T) 
 }
 
 func utf8Valid(text string) bool { return strings.ToValidUTF8(text, "") == text }
+
+func TestAShortSearchThatFindsNothingListsTheWindow(t *testing.T) {
+	h := newHarness(t, work)
+	h.sim.AddCalendar(work, calendarsim.Calendar{ID: work, Summary: "Work"})
+	h.sim.AddEvents(work, work,
+		calendarsim.Event{ID: "visit", Summary: "Dentist visit", Start: utc(5, 8, 0), End: utc(5, 9, 0)},
+		calendarsim.Event{ID: "lunch", Summary: "Lunch", Start: utc(5, 11, 0), End: utc(5, 12, 0)},
+	)
+	plain := h.events(map[string]any{"start": "2026-10-05", "end": "2026-10-05"})
+	requireText(t, plain, false, "2 events")
+
+	result := h.events(map[string]any{"start": "2026-10-05", "end": "2026-10-05", "query": "стоматолог"})
+	want := "Nothing matched \"стоматолог\". Every event in the window follows; the search matches words in the event's own language.\n" + plain.Text
+	if result.IsError || result.Text != want {
+		t.Fatalf("fallback text:\n%s\nwant:\n%s", result.Text, want)
+	}
+
+	result = h.events(map[string]any{"start": "2026-10-05", "end": "2026-10-05", "query": "Dentist"})
+	requireText(t, result, false, "1 events between 2026-10-05 00:00 and 2026-10-06 00:00 matching \"Dentist\"", "Dentist visit")
+	if strings.Contains(result.Text, "Nothing matched") || strings.Contains(result.Text, "Lunch") {
+		t.Fatalf("a matching query changed:\n%s", result.Text)
+	}
+
+	empty := h.events(map[string]any{"start": "2026-10-07", "end": "2026-10-07", "query": "стоматолог"})
+	if empty.Text != "No events between 2026-10-07 00:00 and 2026-10-08 00:00 matching \"стоматолог\"." {
+		t.Fatalf("an empty window changed:\n%s", empty.Text)
+	}
+}
+
+func TestALongSearchThatFindsNothingStaysEmpty(t *testing.T) {
+	h := newHarness(t, work)
+	h.sim.AddCalendar(work, calendarsim.Calendar{ID: work, Summary: "Work"})
+	h.sim.AddEvents(work, work, calendarsim.Event{ID: "visit", Summary: "Dentist visit", Start: utc(5, 8, 0), End: utc(5, 9, 0)})
+	result := h.events(map[string]any{"start": "2026-10-05", "end": "2026-10-07", "query": "стоматолог"})
+	if result.Text != "No events between 2026-10-05 00:00 and 2026-10-08 00:00 matching \"стоматолог\"." {
+		t.Fatalf("a long window changed:\n%s", result.Text)
+	}
+}
