@@ -184,7 +184,13 @@ func offeredTools(t *testing.T, w testWorld) []string {
 	if len(record.Runs) == 0 {
 		t.Fatal("the turn made no run")
 	}
-	return toolNames(record.Runs[0].Request.Tools)
+	request := record.Runs[0].Request
+	names := toolNames(request.Tools)
+	// The runtime's own search extension is not a broker tool; the request says whether it is loaded.
+	if request.WebSearch {
+		names = append(names, "web_search")
+	}
+	return names
 }
 
 func toolNames(set agentruntime.ToolSet) []string {

@@ -93,7 +93,9 @@ type WorldOptions struct {
 	// ChatModel, TaskModel and HeadsUpModel are the models turns run on; the case's user model
 	// and effort replace ChatModel's. A zero TaskModel and HeadsUpModel follow ChatModel.
 	ChatModel, TaskModel, HeadsUpModel agentruntime.ModelEffort
-	TurnTimeout                        time.Duration
+	// TurnTimeout and ScheduledTurnTimeout bound a chat turn and a scheduled turn; zero means
+	// production's defaults, two and three minutes.
+	TurnTimeout, ScheduledTurnTimeout time.Duration
 	// StepTimeout bounds one step; zero means five minutes.
 	StepTimeout time.Duration
 	// Dir holds the temporary store and files; empty makes a temporary directory the world removes.
@@ -257,7 +259,8 @@ func (w *World) inputs(principals []identity.ConfiguredPrincipal, provider strin
 		Chat: w.Chat, Reminders: w.Chat, Alerts: w.Chat, TaskMessages: w.Chat, Tabs: w.Chat.tabs,
 		Principals: principals, DataDir: w.Dir, Zone: w.Case.Clock.Zone,
 		Core: wiring.CoreConfig{
-			TurnTimeout: cmp.Or(o.TurnTimeout, 5*time.Minute), TurnZone: w.Location, Now: w.Clock.Now,
+			TurnTimeout: cmp.Or(o.TurnTimeout, 2*time.Minute), ScheduledTurnTimeout: cmp.Or(o.ScheduledTurnTimeout, 3*time.Minute),
+			TurnZone: w.Location, Now: w.Clock.Now, Watches: true,
 			ChatModel: chatModel, TaskModel: taskModel, HeadsUpModel: headsUp,
 			ChatGPT: o.ChatGPT,
 			Connection: connection.Config{
