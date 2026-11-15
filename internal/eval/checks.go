@@ -343,6 +343,11 @@ func checkReply(r *ReplyExpect, record TurnRecord, fail func(check, format strin
 			fail("reply.matches", "reply does not match %q; reply starts %q", excerpt(expr), excerpt(reply))
 		}
 	}
+	for _, expr := range r.NotMatches {
+		if re, err := regexp.Compile(expr); err != nil || re.MatchString(reply) {
+			fail("reply.not_matches", "reply matches %q; reply starts %q", excerpt(expr), excerpt(reply))
+		}
+	}
 	if r.Language != "" {
 		if err := checkLanguage(r.Language, reply); err != nil {
 			fail("reply.language", "%v; reply starts %q", err, excerpt(reply))

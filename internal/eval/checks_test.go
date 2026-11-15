@@ -176,6 +176,17 @@ func TestChecksOnHandMadeRecords(t *testing.T) {
 			want:   []string{"reply.matches"},
 		},
 		{
+			name:   "reply not_matches passes when the pattern is absent",
+			expect: Expect{Reply: &ReplyExpect{NotMatches: []string{`(?i)tomorrow|today`}}},
+			record: TurnRecord{Reply: "At 15:00"},
+		},
+		{
+			name:   "reply not_matches fails when the pattern is present",
+			expect: Expect{Reply: &ReplyExpect{NotMatches: []string{`(?i)tomorrow|today`}}},
+			record: TurnRecord{Reply: "Today at 15:00"},
+			want:   []string{"reply.not_matches"},
+		},
+		{
 			name:   "language russian passes",
 			expect: Expect{Reply: &ReplyExpect{Language: "ru"}},
 			record: TurnRecord{Reply: "Сегодня вторник, 10 марта (Berlin)."},

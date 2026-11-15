@@ -81,7 +81,8 @@ neutral names, places and data, never a real message, trace, memory or device.
     (`{from, to}`, both `YYYY-MM-DDTHH:MM` or both `HH:MM`, local time);
   - `not_called`, `max_calls`, `ordered` (calls occur in the listed order);
   - `proposals`: `{min, max, tools}`; `no_writes`: nothing was written;
-  - `reply`: `contains`, `not_contains`, `matches` (regexps), `language` (BCP-47, such as `en`),
+  - `reply`: `contains`, `not_contains` (case-insensitive substrings), `matches`, `not_matches`
+    (regexps, validated on load; the reply must match, or must not match), `language` (BCP-47, such as `en`),
     `quiet` (a scheduled run that sends nothing);
   - `store`: checks on the final store, each an object with a `check` name.
 - `rubric`: yes/no questions for the judge, each about one dimension.

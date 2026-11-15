@@ -126,6 +126,7 @@ type ReplyExpect struct {
 	Contains    []string `json:"contains,omitempty"`
 	NotContains []string `json:"not_contains,omitempty"`
 	Matches     []string `json:"matches,omitempty"`
+	NotMatches  []string `json:"not_matches,omitempty"`
 	Language    string   `json:"language,omitempty"`
 	Quiet       bool     `json:"quiet,omitempty"`
 }
@@ -413,10 +414,15 @@ func validateReply(r *ReplyExpect) error {
 			return fmt.Errorf("matches[%d]: %w", i, err)
 		}
 	}
+	for i, expr := range r.NotMatches {
+		if _, err := regexp.Compile(expr); err != nil {
+			return fmt.Errorf("not_matches[%d]: %w", i, err)
+		}
+	}
 	if r.Language != "" && !languagePattern.MatchString(r.Language) {
 		return fmt.Errorf("language %q: want a BCP-47 tag such as en or ru", r.Language)
 	}
-	if r.Quiet && (len(r.Contains) > 0 || len(r.Matches) > 0 || r.Language != "") {
+	if r.Quiet && (len(r.Contains) > 0 || len(r.Matches) > 0 || len(r.NotMatches) > 0 || r.Language != "") {
 		return errors.New("quiet cannot be combined with checks on the reply text")
 	}
 	return nil

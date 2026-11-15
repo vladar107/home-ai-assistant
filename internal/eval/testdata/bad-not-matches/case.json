@@ -1,0 +1,8 @@
+{
+  "id": "bad-not-matches",
+  "title": "Bad not_matches regexp",
+  "kind": "happy",
+  "clock": {"local": "2026-03-10T08:30", "zone": "UTC"},
+  "user": {},
+  "steps": [{"say": "Hello", "expect": {"reply": {"not_matches": ["(unclosed"]}}}]
+}
