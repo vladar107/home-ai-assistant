@@ -58,6 +58,9 @@ type TabStore interface {
 	// TakeTab makes the tab, while it still serves holder, serve the object the subject names in
 	// place of the tab that served it, and reports whether it did.
 	TakeTab(ctx context.Context, principalID string, threadID int64, subject, holder string) (bool, error)
+	// MoveOfferedApprovals moves the pending proposals offered outside a chat turn from a gone tab
+	// to its replacement, to be shown again there, and reports how many it moved.
+	MoveOfferedApprovals(ctx context.Context, principalID string, from, to int64) (int64, error)
 }
 
 type chatTab struct{ chatID, threadID int64 }

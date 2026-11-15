@@ -502,6 +502,67 @@ func TestAnInboxReportToAGoneTabMakesTheNewInboxTab(t *testing.T) {
 	h.expectNoMessage(50 * time.Millisecond)
 }
 
+// An inbox card refused by an Inbox tab Telegram no longer has lands in the new Inbox tab and is
+// recorded there, so the next check finds it waiting and offers no second card.
+func TestAnInboxCardToAGoneTabWaitsInTheNewTab(t *testing.T) {
+	t.Parallel()
+	h := newInboxHarness(t, harnessOptions{topics: true})
+	h.check("on", noMail)
+	first := h.wantFeedTab("Inbox", thread.FeedInbox)
+	h.nextMessage()
+
+	h.goneTab(first)
+	h.ageTab(first)
+	invoice := mail("m1", "invoice", "Water bill", reminderAction("Pay the water bill"))
+	h.check("check", scanReplyOf(invoice))
+	h.wantRefused("sendMessage", first)
+	again := h.wantFeedTab("Inbox", thread.FeedInbox)
+	if _, card := h.nextCard(); card.threadID != again {
+		t.Fatalf("card = %+v, want it in the new Inbox tab %d", card, again)
+	}
+	if report := h.nextMessage(); report.threadID != again {
+		t.Fatalf("report = %+v, want it in the new Inbox tab %d", report, again)
+	}
+	if moved := h.countRows(`SELECT count(*) FROM approvals WHERE status = 'pending' AND thread_id = ?`, again); moved != 1 {
+		t.Fatalf("%d pending approvals in the new tab, want the card's", moved)
+	}
+
+	parcel := mail("m2", "parcel notice", "Parcel on its way", reminderAction("Be home for the parcel"))
+	h.check("check", scanReplyOf(invoice, parcel))
+	report := h.nextMessage()
+	if len(report.keyboard) != 0 || report.threadID != again || !strings.Contains(report.text, "An earlier inbox card is still waiting") {
+		t.Fatalf("report while the card waits = %+v", report)
+	}
+}
+
+// A card shown in the Inbox tab before Telegram lost the tab is shown again in the tab that replaced
+// it.
+func TestAnInboxCardShownInAGoneTabIsShownAgainInTheNewTab(t *testing.T) {
+	t.Parallel()
+	h := newInboxHarness(t, harnessOptions{topics: true, approvalSweep: 20 * time.Millisecond})
+	h.check("on", scanReplyOf(mail("m1", "invoice", "Water bill", reminderAction("Pay the water bill"))))
+	first := h.wantFeedTab("Inbox", thread.FeedInbox)
+	if _, card := h.nextCard(); card.threadID != first {
+		t.Fatalf("card = %+v, want it in tab %d", card, first)
+	}
+	h.nextMessage()
+
+	h.goneTab(first)
+	h.ageTab(first)
+	h.check("check", scanReplyOf(mail("m2", "notice", "Library notice")))
+	h.wantRefused("sendMessage", first)
+	again := h.wantFeedTab("Inbox", thread.FeedInbox)
+	var card, report bool
+	for !card || !report {
+		message := h.nextMessage()
+		if message.threadID != again {
+			t.Fatalf("message = %+v, want it in the new Inbox tab %d", message, again)
+		}
+		card = card || len(message.keyboard) > 0 && strings.Contains(message.text, "Pay the water bill")
+		report = report || strings.Contains(message.text, "Library notice")
+	}
+}
+
 // The switch is offered only once mail can be read, and creates and deletes the principal's own
 // job; with it off there is no job to run.
 func TestInboxSwitchNeedsMailAndManagesItsJob(t *testing.T) {

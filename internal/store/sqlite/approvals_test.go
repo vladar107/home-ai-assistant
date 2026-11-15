@@ -249,6 +249,54 @@ func TestMigrationApprovalWidgetKindCarriesTheFlagOver(t *testing.T) {
 	foreignKeysHold(t, ctx, db)
 }
 
+// Moving a gone tab's offered proposals moves only the principal's pending ones with a heading, and
+// forgets the message a card already had, keeping its chat, so the sweep sends it again.
+func TestMoveOfferedApprovalsMovesOnlyOfferedCards(t *testing.T) {
+	t.Parallel()
+	store, ctx := openTestStore(t)
+	now := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
+	hash := "0000000000000000000000000000000000000000000000000000000000000000"
+	record := func(id, principalID, heading string) approval.Record {
+		return approval.Record{
+			ID: id, BundleID: id, PrincipalID: principalID, Tool: "note_write", Arguments: json.RawMessage(`{}`), Hash: hash,
+			Summary: "Change " + id, Status: approval.StatusPending, CreatedAt: now, ExpiresAt: now.Add(time.Hour),
+			ThreadID: 70, Heading: heading,
+		}
+	}
+	const gone, replacement = 70, 80
+	chat := record("aaaaaaaaaaaaaaaa", "alice", "")
+	if _, err := store.CreateApprovals(ctx, []approval.Record{chat}); err != nil {
+		t.Fatal(err)
+	}
+	if moved, err := store.MoveOfferedApprovals(ctx, "alice", gone, replacement); err != nil || moved != 0 {
+		t.Fatalf("a chat turn's proposal moved: %d %v", moved, err)
+	}
+	if loaded, _, err := store.LoadApproval(ctx, chat.ID); err != nil || loaded.ThreadID != gone {
+		t.Fatalf("chat turn's proposal = %+v %v, want it in tab %d", loaded, err, gone)
+	}
+
+	offered, others := record("bbbbbbbbbbbbbbbb", "alice", "Inbox"), record("cccccccccccccccc", "bob", "Inbox")
+	if _, err := store.CreateApprovals(ctx, []approval.Record{offered, others}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetApprovalMessage(ctx, []string{offered.ID}, 101, 9001, approval.NotWidget); err != nil {
+		t.Fatal(err)
+	}
+	if moved, err := store.MoveOfferedApprovals(ctx, "alice", gone, replacement); err != nil || moved != 1 {
+		t.Fatalf("moved %d %v, want the offered card", moved, err)
+	}
+	if loaded, _, err := store.LoadApproval(ctx, offered.ID); err != nil || loaded.ThreadID != replacement || loaded.MessageID != 0 || loaded.ChatID != 101 {
+		t.Fatalf("moved card = %+v %v, want it in tab %d without its message", loaded, err, replacement)
+	}
+	if loaded, _, err := store.LoadApproval(ctx, others.ID); err != nil || loaded.ThreadID != gone {
+		t.Fatalf("another principal's card = %+v %v, want it left in tab %d", loaded, err, gone)
+	}
+	undelivered, err := store.UndeliveredApprovals(ctx)
+	if err != nil || len(undelivered) != 1 || undelivered[0].ID != offered.ID {
+		t.Fatalf("undelivered = %+v %v, want the moved card", undelivered, err)
+	}
+}
+
 // ConfirmChosen confirms the kept pending records and ends the other pending ones as left out, in
 // one transaction. It changes nothing while no kept record is pending and unexpired.
 func TestConfirmChosenEndsTheOthersOnlyWhileAKeptRecordWaits(t *testing.T) {

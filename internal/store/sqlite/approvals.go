@@ -294,6 +294,31 @@ func (s *Store) SetApprovalMessage(ctx context.Context, ids []string, chatID, me
 	return nil
 }
 
+// MoveOfferedApprovals moves the principal's pending proposals that were offered outside a chat
+// turn, which have a heading and continue no conversation, from a tab that is gone to the tab that
+// replaced it, and reports how many it moved. A card already sent went with the gone tab, so its
+// message is forgotten and the sweep sends it again in the new tab; a card being sent has no
+// message yet and records the one its send makes.
+func (s *Store) MoveOfferedApprovals(ctx context.Context, principalID string, from, to int64) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, fmt.Errorf("move offered approvals: SQLite store is not open")
+	}
+	result, err := s.db.ExecContext(
+		ctx,
+		`UPDATE approvals SET thread_id = ?, message_id = NULL, widget_kind = ?
+		WHERE principal_id = ? AND thread_id = ? AND status = 'pending' AND mode = 'proposed' AND COALESCE(heading, '') <> ''`,
+		to, string(approval.NotWidget), principalID, from,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("move offered approvals: %w", err)
+	}
+	moved, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("move offered approvals: %w", err)
+	}
+	return moved, nil
+}
+
 func (s *Store) ExpireApprovals(ctx context.Context, now time.Time, all bool) ([]approval.Record, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("expire approvals: SQLite store is not open")

@@ -261,7 +261,9 @@ that answers a tab's sends with any given 400 description.
      - A card that was shown in the Inbox tab before the tab disappeared is shown again in the
        replacement by the approval sweep. Fails today: the record keeps its old message and the
        sweep sends nothing.
-     - A chat turn's pending proposal in the gone tab is not moved.
+     - A chat turn's pending proposal in the gone tab, and another principal's card, are not
+       moved (a store test against a real SQLite database, since a chat turn's proposal and an
+       offered card cannot wait in one tab at once).
 5. **Documentation** (Simple; after 2–4). Update the Feed tabs and object tab sections of
    `docs/architecture.md`: routes, resolution at first send, peeking, gone versus suspect tabs,
    replacement, and moved cards.

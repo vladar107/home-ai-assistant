@@ -271,7 +271,7 @@ func TestAGoneFeedTabIsReplacedByTheMessageThatFoundItGone(t *testing.T) {
 	if tab, _ := h.registryTab(again); !tab.Confirmed {
 		t.Fatalf("the new tab took its message but is not confirmed: %+v", tab)
 	}
-	replaced := fmt.Sprintf(`msg=telegram.feed.replaced principal_id=alice gone_thread_id=%d thread_id=%d feed=reminders object=false method=sendMessage error_code=400 description="Bad Request: message thread not found"`, first, again)
+	replaced := fmt.Sprintf(`msg=telegram.feed.replaced principal_id=alice gone_thread_id=%d thread_id=%d feed=reminders object=false moved_approvals=0 method=sendMessage error_code=400 description="Bad Request: message thread not found"`, first, again)
 	if !strings.Contains(h.logs.String(), replaced) {
 		t.Fatalf("replacement not logged as %s:\n%s", replaced, h.logs.String())
 	}

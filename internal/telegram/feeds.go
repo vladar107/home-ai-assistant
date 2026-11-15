@@ -104,10 +104,18 @@ func (s *Tabs) Route(ctx context.Context, principalID string, chatID int64, dest
 
 // replaced records that a delivery's tab taken for gone was replaced, with Telegram's description
 // of the refusal that found it gone; object says whether the replacement is an object's tab or the
-// feed's.
+// feed's. The cards offered in the gone tab move to the replacement, so the approval sweep and the
+// next offer's idle check find them there; a failure to move them is logged and leaves them where
+// they were.
 func (s *Tabs) replaced(ctx context.Context, principalID string, gone, replacement int64, feed string, object bool, cause error) {
+	logger := s.telemetry.ContextLogger(ctx, s.logger)
 	attributes := []any{"principal_id", principalID, "gone_thread_id", gone, "thread_id", replacement, "feed", feed, "object", object}
-	s.telemetry.ContextLogger(ctx, s.logger).InfoContext(ctx, "telegram.feed.replaced", append(attributes, refusalAttributes(cause)...)...)
+	moved, err := s.store.MoveOfferedApprovals(ctx, principalID, gone, replacement)
+	if err != nil {
+		logger.WarnContext(ctx, "telegram.feed.failed", "principal_id", principalID, "thread_id", replacement, "feed", feed, "stage", "move_approvals", "error", err)
+	}
+	attributes = append(attributes, "moved_approvals", moved)
+	logger.InfoContext(ctx, "telegram.feed.replaced", append(attributes, refusalAttributes(cause)...)...)
 	s.telemetry.RecordTab(ctx, principalID, "tab_replaced")
 }
 
