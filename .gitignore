@@ -46,3 +46,6 @@ coverage.out
 .vscode/
 *.swp
 *.swo
+
+# Agent evaluation results and cassettes
+/evals/results/
