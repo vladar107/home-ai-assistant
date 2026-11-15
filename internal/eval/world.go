@@ -339,6 +339,7 @@ func (w *World) seedFakes(in *wiring.Inputs) error {
 	}
 	if hasMail || hasCalendar {
 		google := googlesim.New(w.reporter)
+		google.SetClock(w.Clock.Now)
 		w.Google = google
 		in.Google = &wiring.GoogleConfig{
 			Accounts: googleConfig(google),

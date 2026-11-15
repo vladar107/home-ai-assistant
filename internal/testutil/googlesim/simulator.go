@@ -95,6 +95,7 @@ type Simulator struct {
 	revoked   []string
 	requests  []Request
 	counter   int
+	now       func() time.Time
 }
 
 func New(t simt.T) *Simulator {
@@ -323,9 +324,10 @@ func (s *Simulator) serveGmail(w http.ResponseWriter, r *http.Request) {
 	case path == "messages":
 		limit, _ := strconv.Atoi(r.URL.Query().Get("maxResults"))
 		var matches []map[string]string
+		now := s.clock()
 		more := false
 		for _, message := range mailbox {
-			if !matchesQuery(message, r.URL.Query().Get("q")) {
+			if !matchesQuery(message, r.URL.Query().Get("q"), now) {
 				continue
 			}
 			if limit > 0 && len(matches) == limit {
@@ -355,24 +357,6 @@ func (s *Simulator) serveGmail(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
-}
-
-// matchesQuery understands is:unread and plain words matched against subject, sender, and
-// snippet, which is all the tests search with.
-func matchesQuery(message Message, query string) bool {
-	for _, term := range strings.Fields(strings.ToLower(query)) {
-		if term == "is:unread" {
-			if !contains(message.Labels, "UNREAD") {
-				return false
-			}
-			continue
-		}
-		haystack := strings.ToLower(message.Subject + " " + message.From + " " + message.Snippet)
-		if !strings.Contains(haystack, term) {
-			return false
-		}
-	}
-	return true
 }
 
 func contains(values []string, want string) bool {
