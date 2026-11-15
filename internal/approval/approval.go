@@ -270,6 +270,13 @@ type Executor interface {
 	ExecuteApproved(context.Context, Record) (Outcome, error)
 }
 
+// Rejecter is implemented by an executor told when the user explicitly rejects one of its
+// proposals, by rejecting the bundle or by leaving the change out of a Confirm. A proposal that
+// expires or is replaced does not reach it. A failure is logged and never blocks the rejection.
+type Rejecter interface {
+	Rejected(context.Context, Record) error
+}
+
 // PrivateExecutor is implemented by an executor whose outcome text may retell Notion page content
 // or NAS file contents, such as a table's property names in a rejected write. A notice carrying
 // such an outcome makes the conversation that receives it private.
@@ -1199,16 +1206,18 @@ func (s *Service) Press(ctx context.Context, principalID, action, approvalID str
 		return Pressed{Shown: bundleShown(bundle, language), Owned: true}, nil
 	}
 	if !s.now().Before(bundle[pending].ExpiresAt) {
-		if err := s.finishPending(ctx, bundle, StatusExpired, ReasonTimeout); err != nil {
+		if _, err := s.finishPending(ctx, bundle, StatusExpired, ReasonTimeout); err != nil {
 			return Pressed{}, err
 		}
 		return Pressed{Shown: bundleShown(bundle, language), Owned: true}, nil
 	}
 	switch action {
 	case ActionReject:
-		if err := s.finishPending(ctx, bundle, StatusRejected, ""); err != nil {
+		rejected, err := s.finishPending(ctx, bundle, StatusRejected, "")
+		if err != nil {
 			return Pressed{}, err
 		}
+		s.notifyRejected(ctx, rejected)
 		s.rememberNotice(bundle)
 		return Pressed{Shown: bundleShown(bundle, language), Owned: true}, nil
 	case ActionConfirm:
@@ -1266,7 +1275,7 @@ func (s *Service) PressKept(ctx context.Context, principalID, approvalID string,
 		return s.stored(ctx, bundle, false, false), nil
 	}
 	if !s.now().Before(bundle[pending].ExpiresAt) {
-		if err := s.finishPending(ctx, bundle, StatusExpired, ReasonTimeout); err != nil {
+		if _, err := s.finishPending(ctx, bundle, StatusExpired, ReasonTimeout); err != nil {
 			return Pressed{}, err
 		}
 		return s.stored(ctx, bundle, false, false), nil
@@ -1298,6 +1307,7 @@ func (s *Service) PressKept(ctx context.Context, principalID, approvalID string,
 			item.Status, item.Reason = StatusRejected, ReasonLeftOut
 			s.recordStatus(ctx, *item, StatusRejected)
 			s.logger.InfoContext(ctx, "approval.resolved", "principal_id", item.PrincipalID, "approval_id", item.ID, "bundle_id", item.BundleID, "status", item.Status, "reason", item.Reason)
+			s.notifyRejected(ctx, []Record{*item})
 		case slices.Contains(confirmed, item.ID):
 			item.Status = StatusConfirmed
 		}
@@ -1407,8 +1417,26 @@ func (s *Service) ProposalPlace(ctx context.Context, principalID, approvalID str
 	return place, true, nil
 }
 
-// finishPending moves the bundle's pending records to a terminal status, in place.
-func (s *Service) finishPending(ctx context.Context, bundle []Record, status, reason string) error {
+// notifyRejected tells the executors that implement Rejecter about records the user rejected.
+func (s *Service) notifyRejected(ctx context.Context, records []Record) {
+	for _, record := range records {
+		s.mu.Lock()
+		executor := s.executors[record.Tool]
+		s.mu.Unlock()
+		rejecter, ok := executor.(Rejecter)
+		if !ok {
+			continue
+		}
+		if err := rejecter.Rejected(context.WithoutCancel(ctx), record); err != nil {
+			s.logger.ErrorContext(ctx, "approval.reject_hook_failed", "principal_id", record.PrincipalID, "approval_id", record.ID)
+		}
+	}
+}
+
+// finishPending moves the bundle's pending records to a terminal status, in place, and returns the
+// ones this call finished, which leaves out a record another path finished first.
+func (s *Service) finishPending(ctx context.Context, bundle []Record, status, reason string) ([]Record, error) {
+	var done []Record
 	for index := range bundle {
 		record := &bundle[index]
 		if record.Status != StatusPending {
@@ -1416,15 +1444,16 @@ func (s *Service) finishPending(ctx context.Context, bundle []Record, status, re
 		}
 		finished, err := s.repository.FinishApproval(ctx, record.ID, StatusPending, status, reason, "", "")
 		if err != nil {
-			return err
+			return done, err
 		}
 		record.Status, record.Reason = status, reason
 		if finished {
 			s.recordStatus(ctx, *record, record.Status)
+			done = append(done, *record)
 		}
 		s.logger.InfoContext(ctx, "approval.resolved", "principal_id", record.PrincipalID, "approval_id", record.ID, "bundle_id", record.BundleID, "status", record.Status, "reason", record.Reason)
 	}
-	return nil
+	return done, nil
 }
 
 func (s *Service) execute(ctx context.Context, record Record) Record {
