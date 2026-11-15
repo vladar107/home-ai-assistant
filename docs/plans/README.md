@@ -168,6 +168,7 @@ plan that links back to the earlier record.
 | 0156 | [OAuth for MCP servers](0156-mcp-oauth.md) | proposed |
 | 0157 | [Pi 1.1.0 in production](0157-pi-1-1.md) | done |
 | 0158 | [Resolve feed tabs at first send and replace a gone one at once](0158-feed-tab-replacement.md) | done |
+| 0159 | [Fix the failures the agent evals found](0159-eval-failure-fixes.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.
