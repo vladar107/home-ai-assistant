@@ -24,17 +24,20 @@ const account = "account-eval"
 func login(t *testing.T, profiles eval.Profiles, sim *codexauth.Simulator) string {
 	t.Helper()
 	sim.SetInterval(0.01)
-	output := &syncBuffer{}
+	output := &syncBuffer{written: make(chan struct{})}
 	done := make(chan error, 1)
 	go func() {
 		done <- eval.Login(t.Context(), profiles, eval.Endpoints{AuthBaseURL: sim.URL(), PollInterval: time.Millisecond}, output)
 	}()
-	deadline := time.Now().Add(10 * time.Second)
-	for sim.LatestUserCode() == "" {
-		if time.Now().After(deadline) {
-			t.Fatal("login never started a device authorization")
-		}
-		time.Sleep(5 * time.Millisecond)
+	// Login prints the verification code once the device authorization has started. Opening the
+	// eval store runs every migration first, which is slow under the race detector, so this waits
+	// for that output rather than for a fixed time.
+	select {
+	case <-output.written:
+	case err := <-done:
+		t.Fatalf("login ended before a device authorization started: %v", err)
+	case <-t.Context().Done():
+		t.Fatal("login never started a device authorization")
 	}
 	sim.Approve(sim.LatestUserCode(), account)
 	if err := <-done; err != nil {
@@ -44,13 +47,18 @@ func login(t *testing.T, profiles eval.Profiles, sim *codexauth.Simulator) strin
 }
 
 type syncBuffer struct {
-	mu     sync.Mutex
-	buffer bytes.Buffer
+	mu      sync.Mutex
+	buffer  bytes.Buffer
+	written chan struct{}
+	once    sync.Once
 }
 
 func (b *syncBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.written != nil {
+		b.once.Do(func() { close(b.written) })
+	}
 	return b.buffer.Write(p)
 }
 
