@@ -1,6 +1,6 @@
 # 0158 — Resolve feed tabs at first send and replace a gone one at once
 
-Status: `proposed`
+Status: `in-progress`
 
 ## Context
 
@@ -151,9 +151,12 @@ What else matters here:
   keeping its chat, because its card went with the topic; the approval sweep then shows it again in
   the replacement. A record whose card is being sent at that moment has no message yet and gets one
   when that send, now in the replacement, completes. Two concurrent replacements move the same
-  records to the same tab, so the move is idempotent. Chat-turn proposals and background tasks
+  records to the same tab, so the move is idempotent.
+- **A gone tab's conversation keeps what it had.** Chat-turn proposals and background tasks
   stored against the gone tab belong to its closed conversation and stay where they are; their
-  sends keep falling back to the main view. Message records (report and alert messages, reply
+  sends keep falling back to the main view. Moving them would attach a closed conversation's
+  proposals or task to the replacement tab's conversation, which confirming or a task report would
+  then continue. The operator accepted this. Message records (report and alert messages, reply
   messages) describe messages that went with the topic and are not moved.
 - **Telegram's description on every refused tab send.** `TabRefused` takes the refused error, and
   the observer gains `TabSendRefused(ctx, chatID, threadID, err)` for any other 400 to a send that
@@ -281,10 +284,6 @@ that answers a tab's sends with any given 400 description.
 
 ## Risks and open questions
 
-- **Chat-turn proposals and background tasks in a gone tab.** They stay against the gone tab, and
-  their sends fall back to the main view. Moving them would attach a closed conversation's
-  proposals or task to the replacement tab's conversation, which confirming or a task report would
-  then continue. Question for the operator: keep them as they are?
 - **Gone without a replacement.** When no replacement is had, and the next delivery makes the tab,
   that tab does not know the gone one, so offered cards stay against the gone tab, as today.
 - **A card that had fallen back to the main view** and is then moved is shown again in the

@@ -36,8 +36,10 @@ type refusedSend struct {
 // tabSimulator stands for the chat's tabs: the ones Telegram answers "message thread not found"
 // for, and the tab calls the bot made.
 type tabSimulator struct {
-	enabled      bool
-	gone         map[int64]bool
+	enabled bool
+	gone    map[int64]bool
+	// refusals are the tabs whose sends Telegram refuses for another reason, by its description.
+	refusals     map[int64]string
 	next         int64
 	deleteStatus int
 	createStatus int
@@ -77,7 +79,7 @@ var testTopicIcons = []TopicIcon{
 
 func newTabSimulator(enabled bool) tabSimulator {
 	return tabSimulator{
-		enabled: enabled, gone: make(map[int64]bool), next: 500,
+		enabled: enabled, gone: make(map[int64]bool), refusals: make(map[int64]string), next: 500,
 		created: make(chan createdTopic, 20), deleted: make(chan int64, 20),
 		forwards: make(chan forwardedMessages, 20), refused: make(chan refusedSend, 50),
 		icons: testTopicIcons, topicEdits: make(chan editedTopic, 20), pins: make(chan pinnedMessage, 20),
@@ -95,13 +97,26 @@ func (h *conversationHarness) threadOf(raw string) int64 {
 	return threadID
 }
 
-// refuseGoneThread answers a send to a gone tab the way Telegram does.
+// refuseGoneThread answers a send to a gone tab the way Telegram does, and a send to a tab whose
+// sends it refuses for another reason with that reason.
 func (h *conversationHarness) refuseGoneThread(w http.ResponseWriter, r *http.Request, method string, threadID int64) bool {
 	h.mu.Lock()
 	gone := h.tabs.gone[threadID]
+	description, refused := h.tabs.refusals[threadID]
 	h.mu.Unlock()
-	if threadID <= 0 || !gone {
+	if threadID <= 0 || !gone && !refused {
 		return false
+	}
+	if !gone {
+		select {
+		case h.tabs.refused <- refusedSend{method: method, threadID: threadID}:
+		case <-r.Context().Done():
+			return true
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_code": 400, "description": description})
+		return true
 	}
 	select {
 	case h.tabs.refused <- refusedSend{method: method, threadID: threadID}:
@@ -227,10 +242,18 @@ func (h *conversationHarness) goneTab(threadID int64) {
 	h.tabs.gone[threadID] = true
 }
 
+// refuseTab has Telegram refuse every send to the tab with a 400 that gives the description.
+func (h *conversationHarness) refuseTab(threadID int64, description string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.tabs.refusals[threadID] = description
+}
+
 func (h *conversationHarness) restoreTab(threadID int64) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	delete(h.tabs.gone, threadID)
+	delete(h.tabs.refusals, threadID)
 }
 
 func (h *conversationHarness) wantRefused(method string, threadID int64) {

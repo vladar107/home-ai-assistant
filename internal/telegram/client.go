@@ -71,10 +71,12 @@ const (
 )
 
 // TabObserver learns which tabs take the bot's sends. TabRefused hears of each tab Telegram
-// answered "message thread not found" for and returns what that tab is taken to be.
+// answered "message thread not found" for and returns what that tab is taken to be;
+// TabSendRefused hears of any other refusal of a send to a tab. Both are given Telegram's error.
 type TabObserver interface {
 	TabAccepted(ctx context.Context, chatID, threadID int64)
-	TabRefused(ctx context.Context, chatID, threadID int64) TabVerdict
+	TabRefused(ctx context.Context, chatID, threadID int64, err error) TabVerdict
+	TabSendRefused(ctx context.Context, chatID, threadID int64, err error)
 }
 
 // ObserveTabs reports every send that names a tab to the observer; call it before the first send.
@@ -118,11 +120,14 @@ func (c *Client) inTab(ctx context.Context, chatID int64, fallback bool, send fu
 		return nil
 	}
 	if !isThreadGone(err) {
+		if c.tabs != nil && isBadRequest(err) {
+			c.tabs.TabSendRefused(ctx, chatID, threadID, err)
+		}
 		return err
 	}
 	verdict := TabGone
 	if c.tabs != nil {
-		verdict = c.tabs.TabRefused(ctx, chatID, threadID)
+		verdict = c.tabs.TabRefused(ctx, chatID, threadID, err)
 	}
 	if fallback {
 		return send(thread.WithDelivery(thread.With(ctx, 0), 0))
@@ -387,6 +392,34 @@ func (e *apiError) ThreadGone() bool {
 func isThreadGone(err error) bool {
 	var apiErr *apiError
 	return errors.As(err, &apiErr) && apiErr.ThreadGone()
+}
+
+func isBadRequest(err error) bool {
+	var apiErr *apiError
+	return errors.As(err, &apiErr) && (apiErr.errorCode == http.StatusBadRequest || apiErr.errorCode == 0 && apiErr.httpStatus == http.StatusBadRequest)
+}
+
+// refusalDescriptionLimit is how much of Telegram's description of a refusal a log keeps.
+const refusalDescriptionLimit = 200
+
+// refusalAttributes are the log attributes of Telegram's refusal of a send: its method, its code,
+// and its own description, which names the problem and never the message, on one line within
+// refusalDescriptionLimit runes. Any other error has none.
+func refusalAttributes(err error) []any {
+	var apiErr *apiError
+	if !errors.As(err, &apiErr) {
+		return nil
+	}
+	description := strings.TrimSpace(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, strings.ToValidUTF8(apiErr.description, "")))
+	if runes := []rune(description); len(runes) > refusalDescriptionLimit {
+		description = string(runes[:refusalDescriptionLimit])
+	}
+	return []any{"method", apiErr.method, "error_code", apiErr.errorCode, "description", description}
 }
 
 func hasUnparsableEntities(err error) bool {

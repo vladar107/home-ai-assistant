@@ -79,21 +79,23 @@ func (s *Service) TabAccepted(ctx context.Context, chatID, threadID int64) {
 // TabRefused decides what a tab Telegram did not find is. A tab the user wrote in lately, or one the
 // bot made that never took a send, is suspect and kept as it is. Any other is gone: its
 // conversation closes, to come back if the user writes there again, and the registry forgets it.
-// Each refused send is logged, but a gone tab is counted once, by the close of its conversation.
-func (s *Service) TabRefused(ctx context.Context, chatID, threadID int64) TabVerdict {
+// Each refused send is logged with Telegram's description, but a gone tab is counted once, by the
+// close of its conversation.
+func (s *Service) TabRefused(ctx context.Context, chatID, threadID int64, refused error) TabVerdict {
 	logger := s.telemetry.ContextLogger(ctx, s.logger)
+	refusal := refusalAttributes(refused)
 	principalID, found := s.chatPrincipal(ctx, chatID)
 	if !found {
-		logger.WarnContext(ctx, "telegram.send.thread_gone", "thread_id", threadID)
+		logger.WarnContext(ctx, "telegram.send.thread_gone", append([]any{"thread_id", threadID}, refusal...)...)
 		return TabGone
 	}
 	lane := conversation.Lane{PrincipalID: principalID, ThreadID: threadID}
 	if s.tabs.suspect(ctx, lane) {
-		logger.InfoContext(ctx, "telegram.send.thread_gone_suspect", "principal_id", principalID, "thread_id", threadID)
+		logger.InfoContext(ctx, "telegram.send.thread_gone_suspect", append([]any{"principal_id", principalID, "thread_id", threadID}, refusal...)...)
 		s.telemetry.RecordTab(ctx, principalID, "tab_gone_suspect")
 		return TabSuspect
 	}
-	logger.WarnContext(ctx, "telegram.send.thread_gone", "principal_id", principalID, "thread_id", threadID)
+	logger.WarnContext(ctx, "telegram.send.thread_gone", append([]any{"principal_id", principalID, "thread_id", threadID}, refusal...)...)
 	if s.conversation != nil {
 		closed, err := s.conversation.CloseLane(ctx, lane, conversation.CloseTabGone)
 		if err != nil {
@@ -105,6 +107,16 @@ func (s *Service) TabRefused(ctx context.Context, chatID, threadID int64) TabVer
 	}
 	s.tabs.forget(ctx, chatID, lane)
 	return TabGone
+}
+
+// TabSendRefused logs Telegram's refusal of a send to a tab for any reason but a tab not found, with
+// Telegram's description, so a refusal the bot does not recognize can be read.
+func (s *Service) TabSendRefused(ctx context.Context, chatID, threadID int64, refused error) {
+	attributes := []any{"thread_id", threadID}
+	if principalID, found := s.chatPrincipal(ctx, chatID); found {
+		attributes = append([]any{"principal_id", principalID}, attributes...)
+	}
+	s.telemetry.ContextLogger(ctx, s.logger).WarnContext(ctx, "telegram.send.refused", append(attributes, refusalAttributes(refused)...)...)
 }
 
 // chatPrincipal is the principal of a private chat, whose ID is its user's.

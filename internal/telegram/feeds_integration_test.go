@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -268,6 +269,44 @@ func TestAGoneFeedTabIsMadeAgainOnItsNextMessage(t *testing.T) {
 	again := h.wantFeedTab("Reminders", thread.FeedReminders)
 	if message := h.nextMessage(); again == first || message.threadID != again {
 		t.Fatalf("message after the tab was gone = %+v, want it in a new tab, not %d", message, first)
+	}
+}
+
+// Telegram's own description of a refused send to a tab is logged, whatever the refusal, and the
+// message never is.
+func TestARefusedTabSendLogsTelegramsDescription(t *testing.T) {
+	t.Parallel()
+	h, _ := newFeedHarness(t, newControlledRuntime(), nil, true)
+	if err := h.notifier().Send(h.ctx, "alice", "", "first"); err != nil {
+		t.Fatal(err)
+	}
+	tab := h.wantFeedTab("Reminders", thread.FeedReminders)
+	h.nextMessage()
+
+	h.refuseTab(tab, "Bad Request: TOPIC_CLOSED")
+	if err := h.notifier().Send(h.ctx, "alice", "", "a private closed note"); err == nil {
+		t.Fatal("a refused send reported success")
+	}
+	h.wantRefused("sendMessage", tab)
+	refused := fmt.Sprintf(`msg=telegram.send.refused principal_id=alice thread_id=%d method=sendMessage error_code=400 description="Bad Request: TOPIC_CLOSED"`, tab)
+	if !strings.Contains(h.logs.String(), refused) {
+		t.Fatalf("refusal not logged as %s:\n%s", refused, h.logs.String())
+	}
+
+	h.restoreTab(tab)
+	h.goneTab(tab)
+	h.ageTab(tab)
+	if err := h.notifier().Send(h.ctx, "alice", "", "a private gone note"); err != nil {
+		t.Fatal(err)
+	}
+	h.wantRefused("sendMessage", tab)
+	h.nextMessage()
+	gone := fmt.Sprintf(`msg=telegram.send.thread_gone principal_id=alice thread_id=%d method=sendMessage error_code=400 description="Bad Request: message thread not found"`, tab)
+	if !strings.Contains(h.logs.String(), gone) {
+		t.Fatalf("gone tab not logged as %s:\n%s", gone, h.logs.String())
+	}
+	if strings.Contains(h.logs.String(), "private") {
+		t.Fatalf("a message reached the logs:\n%s", h.logs.String())
 	}
 }
 
