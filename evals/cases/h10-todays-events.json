@@ -18,14 +18,14 @@
       "events": [
         {
           "id": "ev1",
-          "summary": "Планёрка",
+          "summary": "Team Standup",
           "start": "2026-03-10T09:30",
           "end": "2026-03-10T10:00",
           "location": "Westfield Office"
         },
         {
           "id": "ev2",
-          "summary": "Обед с Робин",
+          "summary": "Lunch with Robin",
           "start": "2026-03-10T12:30",
           "end": "2026-03-10T13:30"
         },

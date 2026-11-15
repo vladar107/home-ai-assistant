@@ -290,7 +290,7 @@
       "events": [
         {
           "id": "ev1",
-          "summary": "Планёрка",
+          "summary": "Team Standup",
           "start": "2026-03-11T09:30",
           "end": "2026-03-11T10:30",
           "location": "Westfield Office"

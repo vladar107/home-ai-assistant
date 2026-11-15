@@ -21,7 +21,7 @@
       "events": [
         {
           "id": "ev1",
-          "summary": "Квиз в пабе",
+          "summary": "Pub Quiz Night",
           "start": "2026-03-10T19:00",
           "end": "2026-03-10T21:00",
           "location": "Westfield, The Harbour Pub"
