@@ -533,22 +533,16 @@ func TestADeletedTakenTabIsReplaced(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.wantRefused("sendMessage", userTab)
-	if message := h.nextMessage(); message.threadID != 0 || message.text != "first" {
-		t.Fatalf("notice to the gone tab = %+v, want it in the main view", message)
-	}
-	if _, kept := h.registryTab(userTab); kept || h.summaryMessage(planned.ID) != 0 {
-		t.Fatalf("the gone tab was kept (%v) with summary %d", kept, h.summaryMessage(planned.ID))
-	}
-	if err := h.notifier.Send(h.ctx, "alice", planned.ID, "second"); err != nil {
-		t.Fatal(err)
+	if _, kept := h.registryTab(userTab); kept {
+		t.Fatal("the gone tab was kept")
 	}
 	again := h.wantTripTab("Example trip", planned.ID)
 	summary := h.wantSummary(again, planned.ID, h.summaryOf(planned.ID))
 	if again == userTab || again == old || summary.messageID == taken.messageID {
 		t.Fatalf("the trip kept tab %d or summary %d", again, summary.messageID)
 	}
-	if message := h.nextMessage(); message.threadID != again || message.text != "second" {
-		t.Fatalf("notice after the tab was gone = %+v, want it in the new tab %d", message, again)
+	if message := h.nextMessage(); message.threadID != again || message.text != "first" {
+		t.Fatalf("notice to the gone tab = %+v, want it in the new tab %d", message, again)
 	}
 }
 

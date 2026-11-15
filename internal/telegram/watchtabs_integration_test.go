@@ -437,8 +437,8 @@ func TestAMessageAfterARemovedWatchsAlertIsAboutThatWatch(t *testing.T) {
 }
 
 // A watch that exists already gets its tab with its next message. While the tab cannot be made the
-// message goes to the Watches tab; once Telegram no longer has the tab the client leaves the
-// message in the main view, and the next one makes the tab again with a fresh summary.
+// message goes to the Watches tab; once Telegram no longer has the tab the message that found it gone
+// makes the tab again with a fresh summary and lands there.
 func TestAWatchWhoseTabCannotBeHadFallsBackAndGetsItAgain(t *testing.T) {
 	t.Parallel()
 	h := newWatchTabHarness(t, true)
@@ -478,22 +478,19 @@ func TestAWatchWhoseTabCannotBeHadFallsBackAndGetsItAgain(t *testing.T) {
 	h.checks.set(id, triggered("23", "The kettle costs 23 euros."))
 	h.cycleAt("08:15")
 	h.wantRefused("sendMessage", tab)
-	if alert := h.nextAlert(id); alert.threadID != 0 {
-		t.Fatalf("alert to the gone tab = %+v, want it in the main view", alert)
-	}
-	if h.storedWatch(id).SummaryMessageID != 0 {
-		t.Fatal("the summary outlived its tab")
-	}
-
-	h.checks.set(id, triggered("22", "The kettle costs 22 euros."))
-	h.cycleAt("08:20")
 	again := h.wantWatchTab("Kettle price", id)
 	summary := h.wantWatchSummary(again, id)
 	if again == tab || summary.messageID == first.messageID {
 		t.Fatalf("the watch kept tab %d or summary %d", again, summary.messageID)
 	}
 	if alert := h.nextAlert(id); alert.threadID != again {
-		t.Fatalf("alert after the tab was gone = %+v, want it in the new tab %d", alert, again)
+		t.Fatalf("alert to the gone tab = %+v, want it in the new tab %d", alert, again)
+	}
+
+	h.checks.set(id, triggered("22", "The kettle costs 22 euros."))
+	h.cycleAt("08:20")
+	if alert := h.nextAlert(id); alert.threadID != again {
+		t.Fatalf("alert after the replacement = %+v, want it in the new tab %d", alert, again)
 	}
 }
 

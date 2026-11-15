@@ -18,6 +18,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
+	"github.com/vladar107/home-ai-assistant/internal/thread"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 )
 
@@ -453,6 +454,7 @@ func TestScheduledRunDeliversItsCardUnderTheScheduledCaption(t *testing.T) {
 	if queued, err := h.scheduler.RunNow(h.ctx, "alice", job.ID, ""); err != nil || !queued {
 		t.Fatalf("run now: %v %v", queued, err)
 	}
+	h.scheduler.Wake()
 	run = receive(t, h.ctx, runtime.calls)
 	h.stageCard(run)
 	run.answer <- agentruntime.RunResult{Response: report, Final: report}
@@ -468,6 +470,66 @@ func TestScheduledRunDeliversItsCardUnderTheScheduledCaption(t *testing.T) {
 		}
 	}
 	h.wantNoCards("alice")
+}
+
+// A scheduled report with a card, too long for one message, whose Reports tab Telegram no longer
+// has makes one new tab: the card that found the tab gone and every chunk after it land there.
+func TestAScheduledCardAndReportToAGoneTabLandInOneNewTab(t *testing.T) {
+	t.Parallel()
+	runtime := newControlledRuntime()
+	clock := newTestClock(t, mondayMorning)
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{cards: true, schedules: clock, topics: true})
+	h.provision("alice", "acct-alice")
+	h.start()
+	job := h.createJob("alice", "a1b2c3d4e5f60718", "Weekly tasks", "0 9 * * 1", "Plan my day.")
+	delivered := func(want int) {
+		for h.countRows(`SELECT count(*) FROM schedule_runs WHERE status = ?`, schedule.StatusDelivered) != want {
+			select {
+			case <-time.After(5 * time.Millisecond):
+			case <-h.ctx.Done():
+				t.Fatalf("run %d was not delivered", want)
+			}
+		}
+	}
+	if queued, err := h.scheduler.RunNow(h.ctx, "alice", job.ID, ""); err != nil || !queued {
+		t.Fatalf("run now: %v %v", queued, err)
+	}
+	run := receive(t, h.ctx, runtime.calls)
+	run.answer <- agentruntime.RunResult{Response: "Dry all day.", Final: "Dry all day."}
+	first := h.wantFeedTab("Reports", thread.FeedReports)
+	h.nextMessage()
+	delivered(1)
+
+	h.goneTab(first)
+	h.ageTab(first)
+	clock.Set(t, "2026-09-28T08:10:00+02:00")
+	if queued, err := h.scheduler.RunNow(h.ctx, "alice", job.ID, ""); err != nil || !queued {
+		t.Fatalf("run now: %v %v", queued, err)
+	}
+	h.scheduler.Wake()
+	run = receive(t, h.ctx, runtime.calls)
+	h.stageCard(run)
+	report := strings.Repeat("Trains run on time all day. ", 350)
+	run.answer <- agentruntime.RunResult{Response: report, Final: report}
+	h.wantRefused("sendPhoto", first)
+	again := h.wantFeedTab("Reports", thread.FeedReports)
+	if photo := h.nextPhoto(); photo.threadID != again {
+		t.Fatalf("card = %+v, want it in the new tab %d", photo, again)
+	}
+	delivered(2)
+	chunks := 0
+	for len(h.messages) > 0 {
+		if message := h.nextMessage(); message.threadID != again {
+			t.Fatalf("chunk %d = %+v, want it in the new tab %d", chunks, message, again)
+		}
+		chunks++
+	}
+	if chunks < 2 {
+		t.Fatalf("the report went out in %d messages, want several", chunks)
+	}
+	if made := len(h.tabs.created); made != 0 {
+		t.Fatalf("the delivery made %d more tabs", made)
+	}
 }
 
 func TestCardsStayWithTheirPrincipal(t *testing.T) {

@@ -351,14 +351,16 @@ func TestTripNoticesLandInTheTripsTab(t *testing.T) {
 		t.Fatalf("summary of the ended trip = %+v", edit)
 	}
 
+	// The ended trip's gone tab is replaced by its feed at once.
 	h.goneTab(tab)
 	h.ageTab(tab)
 	if err := h.notifier.Send(h.ctx, "alice", planned.ID, "first"); err != nil {
 		t.Fatal(err)
 	}
 	h.wantRefused("sendMessage", tab)
-	if message := h.nextMessage(); message.threadID != 0 || message.text != "first" {
-		t.Fatalf("notice to the gone tab = %+v, want it in the main view", message)
+	reminders := h.wantFeedTab("Reminders", thread.FeedReminders)
+	if message := h.nextMessage(); message.threadID != reminders || message.text != "first" {
+		t.Fatalf("notice to the gone tab = %+v, want it in the reminders tab %d", message, reminders)
 	}
 	if _, kept := h.registryTab(tab); kept || h.summaryMessage(planned.ID) != 0 {
 		t.Fatalf("the gone tab was kept (%v) with summary %d", kept, h.summaryMessage(planned.ID))
@@ -366,15 +368,14 @@ func TestTripNoticesLandInTheTripsTab(t *testing.T) {
 	if err := h.notifier.Send(h.ctx, "alice", planned.ID, "second"); err != nil {
 		t.Fatal(err)
 	}
-	reminders := h.wantFeedTab("Reminders", thread.FeedReminders)
 	if message := h.nextMessage(); message.threadID != reminders || message.text != "second" {
 		t.Fatalf("notice of the ended trip = %+v, want it in the reminders tab %d", message, reminders)
 	}
 	h.expectNoNewTab()
 }
 
-// A planned trip whose tab was deleted gets a new one with a fresh pinned summary on its next
-// message.
+// A planned trip whose tab was deleted gets a new one with a fresh pinned summary from the message
+// that found it gone, which lands there.
 func TestADeletedTripTabIsMadeAgainWithAFreshSummary(t *testing.T) {
 	t.Parallel()
 	h := newTripTabHarness(t, true)
@@ -388,21 +389,22 @@ func TestADeletedTripTabIsMadeAgainWithAFreshSummary(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.wantRefused("sendMessage", tab)
-	if message := h.nextMessage(); message.threadID != 0 || message.text != "first" {
-		t.Fatalf("notice to the gone tab = %+v, want it in the main view", message)
-	}
-
-	if err := h.notifier.Send(h.ctx, "alice", planned.ID, "second"); err != nil {
-		t.Fatal(err)
-	}
 	again := h.wantTripTab("Example trip", planned.ID)
 	summary := h.wantSummary(again, planned.ID, h.summaryOf(planned.ID))
 	if again == tab || summary.messageID == first.messageID {
 		t.Fatalf("the trip kept tab %d or summary %d", again, summary.messageID)
 	}
-	if message := h.nextMessage(); message.threadID != again || message.text != "second" {
-		t.Fatalf("notice after the tab was gone = %+v, want it in the new tab %d", message, again)
+	if message := h.nextMessage(); message.threadID != again || message.text != "first" {
+		t.Fatalf("notice to the gone tab = %+v, want it in the new tab %d", message, again)
 	}
+
+	if err := h.notifier.Send(h.ctx, "alice", planned.ID, "second"); err != nil {
+		t.Fatal(err)
+	}
+	if message := h.nextMessage(); message.threadID != again || message.text != "second" {
+		t.Fatalf("notice after the replacement = %+v, want it in the new tab %d", message, again)
+	}
+	h.expectNoNewTab()
 }
 
 func TestATripTabRecordedByItsCreationNoticeFirstTakesItsSummary(t *testing.T) {

@@ -104,36 +104,55 @@ func tabRefusal(err error) (TabVerdict, bool) {
 }
 
 // inTab makes a send under the context's tab. When Telegram answers that the tab is not found, the
-// observer hears of it, and a send that may fall back is made once more to the main view, so a
-// reply for a deleted tab still reaches the user. Otherwise the refusal is returned with its
-// verdict. The tab is read once, so the send and what the observer hears name the same tab even
-// while another send moves the context's route.
+// observer hears of it. A tab taken for gone that the context's route can replace is replaced: the
+// route sends there from now on, and a send that may fall back is made there once more. Failing
+// that, a send that may fall back is made once more to the main view, so a reply for a deleted tab
+// still reaches the user; any other send returns the refusal with its verdict. The tab is read
+// once, so the send and what the observer hears name the same tab even while another send moves
+// the context's route.
 func (c *Client) inTab(ctx context.Context, chatID int64, fallback bool, send func(context.Context) error) error {
 	threadID := sendThread(ctx)
-	err := send(thread.WithDelivery(ctx, threadID))
-	if threadID <= 0 {
+	verdict, err := c.sendIn(ctx, chatID, threadID, send)
+	if verdict == "" {
 		return err
 	}
-	if err == nil {
-		if c.tabs != nil {
-			c.tabs.TabAccepted(ctx, chatID, threadID)
+	if route, routed := thread.RouteOf(ctx); routed && verdict == TabGone {
+		if replacement, again := route.Replace(ctx, threadID, err); again && fallback {
+			refused, resent := c.sendIn(ctx, chatID, replacement, send)
+			if refused == "" {
+				return resent
+			}
+			// The replacement refused too, so the rest of the delivery goes to the main view.
+			route.Replace(ctx, replacement, resent)
 		}
-		return nil
-	}
-	if !isThreadGone(err) {
-		if c.tabs != nil && isBadRequest(err) {
-			c.tabs.TabSendRefused(ctx, chatID, threadID, err)
-		}
-		return err
-	}
-	verdict := TabGone
-	if c.tabs != nil {
-		verdict = c.tabs.TabRefused(ctx, chatID, threadID, err)
 	}
 	if fallback {
 		return send(thread.WithDelivery(thread.With(ctx, 0), 0))
 	}
 	return &tabRefusedError{verdict: verdict, err: err}
+}
+
+// sendIn makes the send in the tab and tells the observer how it went. It returns the observer's
+// verdict on a tab Telegram did not find, and none for any other outcome.
+func (c *Client) sendIn(ctx context.Context, chatID, threadID int64, send func(context.Context) error) (TabVerdict, error) {
+	err := send(thread.WithDelivery(ctx, threadID))
+	switch {
+	case threadID <= 0:
+		return "", err
+	case err == nil:
+		if c.tabs != nil {
+			c.tabs.TabAccepted(ctx, chatID, threadID)
+		}
+		return "", nil
+	case !isThreadGone(err):
+		if c.tabs != nil && isBadRequest(err) {
+			c.tabs.TabSendRefused(ctx, chatID, threadID, err)
+		}
+		return "", err
+	case c.tabs == nil:
+		return TabGone, err
+	}
+	return c.tabs.TabRefused(ctx, chatID, threadID, err), err
 }
 
 // sendThread is the tab a send goes to: the delivery's tab when one is set, found now when it is a

@@ -11,8 +11,8 @@ type Telemetry interface {
 	StartStore(context.Context, string) (context.Context, func(error))
 	StartTelegramAPI(context.Context, string) (context.Context, func(error))
 	StartTelegramUpdate(context.Context) (context.Context, func(string, string, string, error))
-	// RecordTab counts a tab taken for gone, kept as suspect, or closed by the user: tab_gone,
-	// tab_gone_suspect, or tab_closed.
+	// RecordTab counts a tab taken for gone, kept as suspect, closed by the user, or replaced by a
+	// delivery: tab_gone, tab_gone_suspect, tab_closed, or tab_replaced.
 	RecordTab(ctx context.Context, principal, outcome string)
 }
 

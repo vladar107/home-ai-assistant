@@ -46,6 +46,11 @@ type Route interface {
 	Peek(ctx context.Context) (int64, bool)
 	// Resolved returns the route's tab once it was found, and the main view before.
 	Resolved() int64
+	// Replace is told that Telegram refused gone, the tab a send of the route named, and that it was
+	// taken for gone, with Telegram's error. It returns the tab the route sends to from now on, and
+	// whether a send may be made there again now; a route finds one replacement at most, and then
+	// sends to the main view.
+	Replace(ctx context.Context, gone int64, cause error) (int64, bool)
 }
 
 // WithRoute returns a context whose sends go where the route finds, whatever tab From names. Like
@@ -190,3 +195,8 @@ func (r FixedRoute) Tab(context.Context) int64 { return max(int64(r), 0) }
 func (r FixedRoute) Peek(context.Context) (int64, bool) { return max(int64(r), 0), true }
 
 func (r FixedRoute) Resolved() int64 { return max(int64(r), 0) }
+
+// Replace finds no replacement: a fixed tab stays what it is.
+func (r FixedRoute) Replace(context.Context, int64, error) (int64, bool) {
+	return max(int64(r), 0), false
+}

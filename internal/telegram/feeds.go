@@ -43,8 +43,8 @@ var _ thread.Feeds = (*Tabs)(nil)
 // Thread returns the feed's tab, making it when the registry has none. Two deliveries of one feed
 // at once make one tab. A tab the registry keeps is returned even while it refuses sends: it is
 // suspect for its first day, its sends fall back to the main view, and only once it is taken for
-// gone is its row dropped and a new one made. A failure is logged and returned, and the next
-// delivery tries again.
+// gone is its row dropped and a new one made, by the delivery that found it gone. A failure is
+// logged and returned, and the next delivery tries again.
 func (s *Tabs) Thread(ctx context.Context, principalID string, chatID int64, feed string) (int64, error) {
 	if s.store == nil {
 		return 0, nil
@@ -102,6 +102,15 @@ func (s *Tabs) Route(ctx context.Context, principalID string, chatID int64, dest
 	return &tabRoute{tabs: s, principalID: principalID, chatID: chatID, destination: destination, feed: feed, language: locale.From(ctx)}
 }
 
+// replaced records that a delivery's tab taken for gone was replaced, with Telegram's description
+// of the refusal that found it gone; object says whether the replacement is an object's tab or the
+// feed's.
+func (s *Tabs) replaced(ctx context.Context, principalID string, gone, replacement int64, feed string, object bool, cause error) {
+	attributes := []any{"principal_id", principalID, "gone_thread_id", gone, "thread_id", replacement, "feed", feed, "object", object}
+	s.telemetry.ContextLogger(ctx, s.logger).InfoContext(ctx, "telegram.feed.replaced", append(attributes, refusalAttributes(cause)...)...)
+	s.telemetry.RecordTab(ctx, principalID, "tab_replaced")
+}
+
 // tabRoute finds its tab with the first send that asks, under that send's context, so the send's
 // deadline, cancellation, and trace cover the lookup, and names a tab it makes in the language of
 // the context it was made under. A lookup the sending context ended is not kept, so the next send
@@ -116,6 +125,8 @@ type tabRoute struct {
 	mu                sync.Mutex
 	resolved          bool
 	threadID          int64
+	// replaced is set once the route looked for a replacement, which it does once.
+	replaced bool
 }
 
 func (r *tabRoute) Tab(ctx context.Context) int64 {
@@ -149,6 +160,33 @@ func (r *tabRoute) Resolved() int64 {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.threadID
+}
+
+// Replace finds the tab that takes over from gone, a tab the observer took for gone and whose row
+// it dropped. The route looks itself up again, under the lock of its feed or object: a feed gets a
+// new tab, or the one a concurrent delivery just made; an open object gets a new tab with a fresh
+// summary, and any other its feed. A route whose tab is already another, because another send of
+// it replaced gone, keeps that one. The route looks once: when that finds nothing, finds gone again
+// because its row could not be dropped, or is asked again because its replacement was refused too,
+// it sends to the main view from then on.
+func (r *tabRoute) Replace(ctx context.Context, gone int64, cause error) (int64, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.resolved && r.threadID != gone {
+		return r.threadID, r.threadID > 0
+	}
+	r.resolved, r.threadID = true, 0
+	if r.replaced {
+		return 0, false
+	}
+	r.replaced = true
+	replacement, object, err := r.tabs.destination(r.lookupContext(ctx), r.principalID, r.chatID, r.destination, r.feed)
+	if err != nil || replacement <= 0 || replacement == gone {
+		return 0, false
+	}
+	r.threadID = replacement
+	r.tabs.replaced(ctx, r.principalID, gone, replacement, r.feed, object, cause)
+	return replacement, true
 }
 
 // lookupContext is the sending context in the route's language, without the route, so a message

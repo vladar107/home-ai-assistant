@@ -238,7 +238,11 @@ that answers a tab's sends with any given 400 description.
      - A trip notice to a gone Reminders tab lands in the new Reminders tab
        (`TestAGoneFeedTabIsMadeAgainOnItsNextMessage` changes to say so).
      - A message to a gone tab of an open trip lands in the trip's new tab, after its fresh
-       summary; a message to the gone tab of a trip that has ended lands in the Reminders tab.
+       summary; a message to the gone tab of a trip that has ended lands in the Reminders tab. The
+       same holds for a tab a trip took and for an agent watch's tab
+       (`TestADeletedTripTabIsMadeAgainWithAFreshSummary`, `TestTripNoticesLandInTheTripsTab`,
+       `TestADeletedTakenTabIsReplaced`, `TestAWatchWhoseTabCannotBeHadFallsBackAndGetsItAgain`
+       change to say so).
      - When the replacement cannot be made (`createStatus` 429), the message and the rest of the
        delivery go to the main view, and the next delivery makes the tab. This passes today too
        and guards the fallback.

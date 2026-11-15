@@ -743,9 +743,12 @@ func (t *Telemetry) ZeroRareOutcomes(ctx context.Context, principals, turnErrorK
 }
 
 // TabOutcomes are the fixed outcomes RecordTab counts.
-func TabOutcomes() []string { return []string{"tab_gone", "tab_gone_suspect", "tab_closed"} }
+func TabOutcomes() []string {
+	return []string{"tab_gone", "tab_gone_suspect", "tab_closed", "tab_replaced"}
+}
 
-// RecordTab counts a tab taken for gone, one kept as suspect, or one the user closed.
+// RecordTab counts a tab taken for gone, one kept as suspect, one the user closed, or one a
+// delivery replaced.
 func (t *Telemetry) RecordTab(ctx context.Context, principal, outcome string) {
 	t.telegramTabs.Add(ctx, 1, metric.WithAttributes(principalAttr(principal), labelAttr("home_agent.outcome", outcome, "unknown")))
 }

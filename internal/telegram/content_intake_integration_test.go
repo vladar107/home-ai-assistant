@@ -470,6 +470,38 @@ func TestAQuietInboxCheckMakesNoTab(t *testing.T) {
 	}
 }
 
+// A scheduled inbox report refused by an Inbox tab Telegram no longer has makes the new Inbox tab
+// and lands there, and its report records that tab; nothing reaches the main view.
+func TestAnInboxReportToAGoneTabMakesTheNewInboxTab(t *testing.T) {
+	t.Parallel()
+	h := newInboxHarness(t, harnessOptions{topics: true})
+	h.check("on", noMail)
+	first := h.wantFeedTab("Inbox", thread.FeedInbox)
+	h.nextMessage()
+
+	h.goneTab(first)
+	h.ageTab(first)
+	h.clock.Set(t, "2026-09-28T11:00:30+02:00")
+	call := receive(t, h.ctx, h.runtime.calls)
+	call.answer <- agentruntime.RunResult{Final: scanReplyOf(mail("m1", "invoice", "Water bill"))}
+	h.wantRefused("sendMessage", first)
+	again := h.wantFeedTab("Inbox", thread.FeedInbox)
+	if report := h.nextMessage(); again == first || report.threadID != again || !strings.Contains(report.text, "Water bill") {
+		t.Fatalf("report = %+v, want it in a new Inbox tab, not %d", report, first)
+	}
+	for h.countRows(`SELECT count(*) FROM job_report_messages WHERE thread_id = ?`, again) != 1 {
+		select {
+		case <-time.After(5 * time.Millisecond):
+		case <-h.ctx.Done():
+			t.Fatalf("the report was never recorded in tab %d", again)
+		}
+	}
+	if tab, _ := h.registryTab(again); !tab.Confirmed {
+		t.Fatalf("the new Inbox tab = %+v, want it confirmed", tab)
+	}
+	h.expectNoMessage(50 * time.Millisecond)
+}
+
 // The switch is offered only once mail can be read, and creates and deletes the principal's own
 // job; with it off there is no job to run.
 func TestInboxSwitchNeedsMailAndManagesItsJob(t *testing.T) {

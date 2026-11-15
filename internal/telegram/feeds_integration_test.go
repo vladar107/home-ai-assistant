@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -246,7 +247,9 @@ func TestFeedTabsShowTheirIconWhenTelegramOffersIt(t *testing.T) {
 	}
 }
 
-func TestAGoneFeedTabIsMadeAgainOnItsNextMessage(t *testing.T) {
+// A message refused by a feed tab taken for gone makes the feed's new tab at once and lands there,
+// where the next message goes too.
+func TestAGoneFeedTabIsReplacedByTheMessageThatFoundItGone(t *testing.T) {
 	t.Parallel()
 	h, _ := newFeedHarness(t, newControlledRuntime(), nil, true)
 	if err := h.notifier().Send(h.ctx, "alice", "", "first"); err != nil {
@@ -261,16 +264,144 @@ func TestAGoneFeedTabIsMadeAgainOnItsNextMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.wantRefused("sendMessage", first)
-	if message := h.nextMessage(); message.threadID != 0 || message.text != "second" {
-		t.Fatalf("message to a gone feed tab = %+v, want it in the main view", message)
+	again := h.wantFeedTab("Reminders", thread.FeedReminders)
+	if message := h.nextMessage(); again == first || message.threadID != again || message.text != "second" {
+		t.Fatalf("message to a gone feed tab = %+v, want it in a new tab, not %d", message, first)
+	}
+	if tab, _ := h.registryTab(again); !tab.Confirmed {
+		t.Fatalf("the new tab took its message but is not confirmed: %+v", tab)
+	}
+	replaced := fmt.Sprintf(`msg=telegram.feed.replaced principal_id=alice gone_thread_id=%d thread_id=%d feed=reminders object=false method=sendMessage error_code=400 description="Bad Request: message thread not found"`, first, again)
+	if !strings.Contains(h.logs.String(), replaced) {
+		t.Fatalf("replacement not logged as %s:\n%s", replaced, h.logs.String())
 	}
 
 	if err := h.notifier().Send(h.ctx, "alice", "", "third"); err != nil {
 		t.Fatal(err)
 	}
+	if message := h.nextMessage(); message.threadID != again || message.text != "third" {
+		t.Fatalf("message after the replacement = %+v, want it in tab %d", message, again)
+	}
+	if made := len(h.tabs.created); made != 0 {
+		t.Fatalf("%d more tabs were made", made)
+	}
+}
+
+// When a gone feed tab's replacement cannot be made, the message reaches the main view, and the next
+// delivery makes the tab.
+func TestAGoneFeedTabWhoseReplacementCannotBeMadeFallsBackToTheMainView(t *testing.T) {
+	t.Parallel()
+	h, _ := newFeedHarness(t, newControlledRuntime(), nil, true)
+	if err := h.notifier().Send(h.ctx, "alice", "", "first"); err != nil {
+		t.Fatal(err)
+	}
+	first := h.wantFeedTab("Reminders", thread.FeedReminders)
+	h.nextMessage()
+
+	h.goneTab(first)
+	h.ageTab(first)
+	h.mu.Lock()
+	h.tabs.createStatus = 429
+	h.mu.Unlock()
+	if err := h.notifier().Send(h.ctx, "alice", "", "second"); err != nil {
+		t.Fatal(err)
+	}
+	h.wantRefused("sendMessage", first)
+	if message := h.nextMessage(); message.threadID != 0 || message.text != "second" {
+		t.Fatalf("message without a replacement = %+v, want it in the main view", message)
+	}
+
+	h.mu.Lock()
+	h.tabs.createStatus = 0
+	h.mu.Unlock()
+	if err := h.notifier().Send(h.ctx, "alice", "", "third"); err != nil {
+		t.Fatal(err)
+	}
 	again := h.wantFeedTab("Reminders", thread.FeedReminders)
-	if message := h.nextMessage(); again == first || message.threadID != again {
-		t.Fatalf("message after the tab was gone = %+v, want it in a new tab, not %d", message, first)
+	if message := h.nextMessage(); message.threadID != again || message.text != "third" {
+		t.Fatalf("next message = %+v, want it in the new tab %d", message, again)
+	}
+}
+
+// A document whose body cannot be read again is not sent anywhere else when its tab is gone, but
+// its route moves to the replacement, so the delivery's next message lands there.
+func TestAGoneTabMovesTheRouteOfASendThatCannotBeMadeAgain(t *testing.T) {
+	t.Parallel()
+	h, _ := newFeedHarness(t, newControlledRuntime(), nil, true)
+	if err := h.notifier().Send(h.ctx, "alice", "", "first"); err != nil {
+		t.Fatal(err)
+	}
+	first := h.wantFeedTab("Reminders", thread.FeedReminders)
+	h.nextMessage()
+
+	h.goneTab(first)
+	h.ageTab(first)
+	ctx := thread.WithRoute(h.ctx, h.tabSet.Route(h.ctx, "alice", 101, "", thread.FeedReminders))
+	body := io.MultiReader(strings.NewReader("notes"))
+	err := h.client.SendDocument(ctx, 101, "notes.txt", body, 5)
+	if verdict, refused := tabRefusal(err); !refused || verdict != TabGone {
+		t.Fatalf("document to a gone tab = %v, want its refusal as gone", err)
+	}
+	h.wantRefused("sendDocument", first)
+	again := h.wantFeedTab("Reminders", thread.FeedReminders)
+	if err := h.client.SendMessage(ctx, 101, "after the document"); err != nil {
+		t.Fatal(err)
+	}
+	if message := h.nextMessage(); message.threadID != again || message.text != "after the document" {
+		t.Fatalf("next message of the delivery = %+v, want it in the new tab %d", message, again)
+	}
+}
+
+// Two deliveries that found the same feed tab before it was gone make one replacement, both
+// landing there: both are refused before the first replacement is recorded.
+func TestTwoDeliveriesToAGoneFeedTabMakeOneReplacement(t *testing.T) {
+	t.Parallel()
+	h, _ := newFeedHarness(t, newControlledRuntime(), nil, true)
+	if err := h.notifier().Send(h.ctx, "alice", "", "first"); err != nil {
+		t.Fatal(err)
+	}
+	first := h.wantFeedTab("Reminders", thread.FeedReminders)
+	h.nextMessage()
+
+	contexts := make([]context.Context, 2)
+	for index := range contexts {
+		contexts[index] = thread.WithRoute(h.ctx, h.tabSet.Route(h.ctx, "alice", 101, "", thread.FeedReminders))
+		if found, _ := thread.Delivery(contexts[index]); found != first {
+			t.Fatalf("route %d found tab %d, want %d", index, found, first)
+		}
+	}
+	h.goneTab(first)
+	h.ageTab(first)
+	hold := make(chan struct{})
+	h.mu.Lock()
+	h.tabs.createHold = hold
+	h.mu.Unlock()
+	sent := make(chan error, len(contexts))
+	for index, ctx := range contexts {
+		go func() { sent <- h.client.SendMessage(ctx, 101, fmt.Sprintf("delivery %d", index)) }()
+	}
+	h.wantRefused("sendMessage", first)
+	h.wantRefused("sendMessage", first)
+	created := receive(t, h.ctx, h.tabs.created)
+	h.mu.Lock()
+	h.tabs.createHold = nil
+	h.mu.Unlock()
+	close(hold)
+	for range contexts {
+		if err := receive(t, h.ctx, sent); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range contexts {
+		if message := h.nextMessage(); message.threadID != created.threadID {
+			t.Fatalf("message = %+v, want it in the one new tab %d", message, created.threadID)
+		}
+	}
+	if made := len(h.tabs.created); made != 0 {
+		t.Fatalf("two deliveries made %d more tabs", made)
+	}
+	if threadID, found, err := h.store.SubjectTab(h.ctx, "alice", thread.FeedSubject(thread.FeedReminders)); err != nil || !found || threadID != created.threadID {
+		t.Fatalf("registry has the feed at %d %v %v, want %d", threadID, found, err, created.threadID)
 	}
 }
 
