@@ -40,6 +40,9 @@ var (
 	TypeSafePrivacyLine = locale.T("Safety checks: a scrubbed copy of messages, replies, outside content, and proposed actions goes to TypeSafe, never after Notion or NAS content.", "Проверки безопасности: очищенная копия сообщений, ответов, внешнего содержимого и предлагаемых действий уходит в TypeSafe, и никогда — после чтения содержимого Notion или NAS.")
 	WidgetOnLine        = locale.T("Widgets: on. Proposals are shown as a widget, a small view Telegram draws in the chat, with the proposal, Confirm, Reject and Preview inside it and a one-line caption. A proposal of several changes is a list: tap a change to read it, untick the ones to leave out, and confirm the rest. A single change too long for a widget keeps its buttons.", "Виджеты: включены. Предложения показываются как виджет, небольшое окно, которое Telegram рисует в чате: с самим предложением, кнопками «Подтвердить», «Отклонить» и «Предпросмотр» внутри и однострочной подписью. Предложение из нескольких изменений показывается списком: коснись изменения, чтобы прочитать его, сними отметки с тех, которые нужно пропустить, и подтверди остальные. Слишком длинное для виджета одиночное изменение сохраняет свои кнопки.")
 	WidgetOffLine       = locale.T("Widgets: off (the default). Proposals are shown with Confirm, Reject and Preview buttons. A widget is a small view Telegram draws in the chat; an app that cannot draw one shows only its caption.", "Виджеты: выключены (по умолчанию). Предложения показываются с кнопками «Подтвердить», «Отклонить» и «Предпросмотр». Виджет — это небольшое окно, которое Telegram рисует в чате; приложение, которое не может его нарисовать, показывает только подпись.")
+	ParcelsOnLine       = locale.T("Parcels: on. I follow the parcels you are waiting for from the carrier accounts the operator assigned to you in Home Assistant and from your shipping mail, and show each one as a card in the Parcels tab. Parcel watches you already have keep running until you remove them in /jobs.", "Посылки: включены. Я слежу за посылками, которые ты ждёшь, по аккаунтам служб доставки, которые оператор назначил тебе в Home Assistant, и по письмам о доставке, и показываю каждую карточкой во вкладке «Посылки». Наблюдения за посылками, которые у тебя уже есть, продолжают работать, пока ты не удалишь их в /jobs.")
+	ParcelsOffLine      = locale.T("Parcels: off (the default). Turn it on to follow your parcels from the carrier accounts the operator assigned to you in Home Assistant and from your shipping mail, with a card for each in the Parcels tab. Parcel watches you already have keep running until you remove them in /jobs.", "Посылки: выключены (по умолчанию). Включи, чтобы следить за посылками по аккаунтам служб доставки, которые оператор назначил тебе в Home Assistant, и по письмам о доставке, с карточкой для каждой во вкладке «Посылки». Наблюдения за посылками, которые у тебя уже есть, продолжают работать, пока ты не удалишь их в /jobs.")
+	ParcelsPrivacyLine  = locale.T("Parcels: the assigned Home Assistant carrier accounts and your shipping mail are read to follow your parcels, and the mail goes to your model. A postcode you set goes to the Home Assistant carrier integration, which uses it with the carrier, only when a tracking number is added. I send nothing to third parties.", "Посылки: чтобы следить за посылками, читаются назначенные тебе аккаунты служб доставки в Home Assistant и письма о доставке, а письма уходят твоей модели. Указанный тобой почтовый индекс уходит интеграции службы доставки в Home Assistant, которая использует его вместе с названием службы, только когда добавляется номер отслеживания. Я ничего не отправляю третьим лицам.")
 	// WidgetPrivacyLine is added to /privacy while the principal has widgets on.
 	WidgetPrivacyLine = locale.T("Widgets: what they show is drawn by a small program Telegram runs in the chat, which reaches nothing outside Telegram.", "Виджеты: то, что они показывают, рисует небольшая программа, которую Telegram запускает в чате и которая не имеет доступа ни к чему вне Telegram.")
 )
@@ -84,6 +87,11 @@ var (
 		HelpTopic: "safety_checks", PrivacyLine: TypeSafePrivacyLine,
 		SummaryOn: locale.T("safety checks on", "проверки безопасности включены"), SummaryOff: locale.T("safety checks off", "проверки безопасности выключены"),
 	}
+	ParcelsPage = SwitchPage{
+		Integration: "parcels", Prefix: parcelsSectionPrefix, Name: locale.T("Parcels", "Посылки"), OnLine: ParcelsOnLine, OffLine: ParcelsOffLine,
+		OnButton: locale.T("Turn on parcels", "Включить посылки"), OffButton: locale.T("Turn off parcels", "Выключить посылки"),
+		Event: "parcels.changed", HelpTopic: "parcels", PrivacyLine: ParcelsPrivacyLine,
+	}
 	WidgetPage = SwitchPage{
 		Integration: "widgets", Prefix: widgetSectionPrefix, Name: locale.T("Widgets", "Виджеты"), OnLine: WidgetOnLine, OffLine: WidgetOffLine,
 		OnButton: locale.T("Turn on widgets", "Включить виджеты"), OffButton: locale.T("Turn off widgets", "Выключить виджеты"),
@@ -93,7 +101,7 @@ var (
 
 // SwitchPageFor is the on/off page of the named integration.
 func SwitchPageFor(integration string) (SwitchPage, bool) {
-	for _, page := range []SwitchPage{WebPage, NSPage, FlightsPage, BusPage, HomePage, GrafanaPage, TypeSafePage, WidgetPage} {
+	for _, page := range []SwitchPage{WebPage, NSPage, FlightsPage, BusPage, HomePage, GrafanaPage, TypeSafePage, WidgetPage, ParcelsPage} {
 		if page.Integration == integration {
 			return page, true
 		}

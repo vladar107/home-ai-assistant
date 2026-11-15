@@ -17,6 +17,7 @@ var feedTabNames = map[string]locale.Text{
 	thread.FeedWatches:   locale.T("Watches", "Наблюдения"),
 	thread.FeedEvents:    locale.T("Events", "События"),
 	thread.FeedInbox:     locale.T("Inbox", "Входящие"),
+	thread.FeedParcels:   locale.T("Parcels", "Посылки"),
 }
 
 // feedNames are the English names, for text that names a feed tab.
@@ -36,6 +37,7 @@ var feedIcons = map[string]string{
 	thread.FeedWatches:   "👀",
 	thread.FeedEvents:    "🔔",
 	thread.FeedInbox:     "📥",
+	thread.FeedParcels:   "📦",
 }
 
 var _ thread.Feeds = (*Tabs)(nil)

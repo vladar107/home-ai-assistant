@@ -181,6 +181,7 @@ var sectionOrder = []string{
 	memorySectionPrefix,
 	tripsSectionPrefix,
 	inboxSectionPrefix,
+	parcelsSectionPrefix,
 }
 
 // settingsGroups orders the overview; a section missing from it is never shown.
@@ -189,7 +190,7 @@ var settingsGroups = []settingsGroup{
 	{id: "model", title: locale.T("Model", "Модель"), members: []string{modelSectionPrefix}},
 	{id: "accounts", title: locale.T("Accounts", "Аккаунты"), members: []string{googleSectionPrefix, notionSectionPrefix}},
 	{id: "home", title: locale.T("Home & files", "Дом и файлы"), inline: true, members: []string{homeAssistantSectionPrefix, nasSectionPrefix}},
-	{id: "tools", title: locale.T("Everyday tools", "Повседневные инструменты"), inline: true, members: []string{webSectionPrefix, nsSectionPrefix, flightsSectionPrefix, busSectionPrefix, headsUpSectionPrefix, tripsSectionPrefix, inboxSectionPrefix}},
+	{id: "tools", title: locale.T("Everyday tools", "Повседневные инструменты"), inline: true, members: []string{webSectionPrefix, nsSectionPrefix, flightsSectionPrefix, busSectionPrefix, headsUpSectionPrefix, tripsSectionPrefix, inboxSectionPrefix, parcelsSectionPrefix}},
 	{id: "services", title: locale.T("Services", "Сервисы"), inline: true, members: []string{mcpSectionPrefix}},
 	{id: "location", title: locale.T("Location", "Местоположение"), inline: true, members: []string{locationSectionPrefix}},
 	{id: "memory", title: locale.T("Memory", "Память"), inline: true, members: []string{memorySectionPrefix}},

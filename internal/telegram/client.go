@@ -236,8 +236,10 @@ type CallbackQuery struct {
 }
 
 type InlineButton struct {
-	Text         string `json:"text"`
-	CallbackData string `json:"callback_data"`
+	Text string `json:"text"`
+	// CallbackData and URL are exclusive: a button either reports its press or opens a link.
+	CallbackData string `json:"callback_data,omitempty"`
+	URL          string `json:"url,omitempty"`
 }
 
 // InlineKeyboard is the rows of buttons shown under a message.
@@ -381,6 +383,20 @@ func (e *apiError) Error() string {
 // NotModified reports Telegram's rejection of an edit that would change nothing.
 func (e *apiError) NotModified() bool {
 	return e.errorCode == http.StatusBadRequest && strings.Contains(strings.ToLower(e.description), "message is not modified")
+}
+
+// MessageGone reports Telegram's refusal to edit a message, or to find its tab, that is not there.
+func (e *apiError) MessageGone() bool {
+	if e.errorCode != 400 {
+		return false
+	}
+	description := strings.ToLower(e.description)
+	for _, gone := range []string{"message to edit not found", "message thread not found", "message_id_invalid", "message can't be edited"} {
+		if strings.Contains(description, gone) {
+			return true
+		}
+	}
+	return false
 }
 
 // UnparsableEntities reports Telegram's rejection of the formatting entities of a message, which

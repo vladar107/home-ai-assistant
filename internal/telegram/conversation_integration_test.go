@@ -122,6 +122,8 @@ type sentMessage struct {
 	threadID int64
 	// preview is the link preview options the message was sent with.
 	preview string
+	// silent is whether the message was sent without a notification.
+	silent bool
 }
 
 type sentDocument struct {
@@ -248,6 +250,9 @@ type harnessOptions struct {
 	// languages adds the Language page to /settings and gives each chat a slash menu in its user's
 	// language, as the application does.
 	languages bool
+	// deps changes the Telegram service's dependencies before it is built, for a feature the
+	// application assembles outside the assembly.
+	deps func(h *conversationHarness, deps *Dependencies)
 }
 
 // testFile is one attachment the Telegram simulator will hand out through getFile.
@@ -281,6 +286,7 @@ type conversationHarness struct {
 	mcp            *mcp.Service
 	mcpCatalog     []config.MCPServer
 	languages      bool
+	extraDeps      func(h *conversationHarness, deps *Dependencies)
 	switches       *integration.Switches
 	locations      *location.Service
 	memory         *memory.Service
@@ -411,7 +417,7 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 		answers: make(chan callbackAnswer, 100), deletes: make(chan deletedMessage, 100), offsets: make(chan int64, 100), registrations: make(chan commandRegistration, 10),
 		turns: make(chan turnOutcome, 20), logs: &lockedBuffer{}, files: make(map[string]testFile), indicatorFailures: make(map[string]int),
 		reactionCounts: make(map[string]int), feedbackCounts: make(map[string]int), tabs: newTabSimulator(options.topics),
-		widgets: newWidgetSimulator(), languages: options.languages,
+		widgets: newWidgetSimulator(), languages: options.languages, extraDeps: options.deps,
 	}
 	server := httptest.NewServer(http.HandlerFunc(h.serveHTTP))
 	t.Cleanup(server.Close)
@@ -676,6 +682,9 @@ func (h *conversationHarness) telegramService(identities *identity.Service, logg
 		deps.Sections = append(deps.Sections, NewTripsSection(asm.Scheduler, asm.Google, asm.Trips, logger, nil))
 		deps.Sections = append(deps.Sections, NewInboxSection(asm.Scheduler, asm.Google, asm.Intake, logger, nil))
 	}
+	if h.extraDeps != nil {
+		h.extraDeps(h, &deps)
+	}
 	service, err := NewService(deps)
 	if err != nil {
 		h.t.Fatal(err)
@@ -780,7 +789,7 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		select {
-		case h.messages <- sentMessage{chatID: chatID, replyTo: replyTo, text: r.Form.Get("text"), parseMode: r.Form.Get("parse_mode"), keyboard: h.parseKeyboard(r.Form.Get("reply_markup")), status: status, gated: gate != nil, messageID: messageID, threadID: threadID, preview: r.Form.Get("link_preview_options")}:
+		case h.messages <- sentMessage{chatID: chatID, replyTo: replyTo, text: r.Form.Get("text"), parseMode: r.Form.Get("parse_mode"), keyboard: h.parseKeyboard(r.Form.Get("reply_markup")), status: status, gated: gate != nil, messageID: messageID, threadID: threadID, preview: r.Form.Get("link_preview_options"), silent: r.Form.Get("disable_notification") == "true"}:
 		case <-r.Context().Done():
 			return
 		}
@@ -1057,7 +1066,7 @@ func (h *conversationHarness) parseKeyboard(raw string) InlineKeyboard {
 	}
 	for _, row := range markup.InlineKeyboard {
 		for _, button := range row {
-			if button.Text == "" || button.CallbackData == "" || len(button.CallbackData) > 64 {
+			if button.Text == "" || (button.CallbackData == "") == (button.URL == "") || len(button.CallbackData) > 64 {
 				h.t.Errorf("invalid inline button %+v", button)
 			}
 		}

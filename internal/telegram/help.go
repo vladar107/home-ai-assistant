@@ -121,7 +121,7 @@ func (s *Service) helpText(ctx context.Context, principalID, topic string) (stri
 				return "", err
 			}
 			page := settingsPageOf(sections, section.prefix())
-			text, keyboard, err := renderSettings(ctx, principalID, sections, page, "")
+			text, keyboard, err := renderSettings(withHelpView(ctx), principalID, sections, page, "")
 			if err != nil {
 				return "", err
 			}
@@ -141,6 +141,9 @@ func (s *Service) helpText(ctx context.Context, principalID, topic string) (stri
 			}
 			if section.prefix() == mcpSectionPrefix {
 				fmt.Fprintf(&builder, "\n%s", ServicesHelp)
+			}
+			if section.prefix() == parcelsSectionPrefix {
+				fmt.Fprintf(&builder, "\n%s", ParcelsHelp)
 			}
 			if section.prefix() == tripsSectionPrefix {
 				fmt.Fprintf(&builder, "\n%s", TripsTabHelp)

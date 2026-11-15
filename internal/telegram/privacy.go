@@ -32,6 +32,7 @@ var privacyOrder = []string{
 	memorySectionPrefix,
 	typeSafeSectionPrefix,
 	widgetSectionPrefix,
+	parcelsSectionPrefix,
 }
 
 func (s *Service) privacyReply(ctx context.Context, principalID string) (string, error) {

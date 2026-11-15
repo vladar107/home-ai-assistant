@@ -371,8 +371,8 @@ type Cards interface {
 
 // Tracker is the loop that keeps cards current, which the tools and the Stop control call.
 type Tracker interface {
-	// Stop stops tracking one of the principal's parcels: its card shows Stopped, a number the user
-	// added is removed from Home Assistant, and it is tombstoned. It reports false for an unknown
-	// parcel.
+	// Stop stops tracking one of the principal's parcels: it is tombstoned, a number the user added
+	// is removed from Home Assistant on a best-effort basis, and its card shows Stopped. Stop owns all
+	// of that; the Telegram tap only authorizes it. It reports false for an unknown parcel.
 	Stop(ctx context.Context, principalID, parcelID string) (Parcel, bool, error)
 }

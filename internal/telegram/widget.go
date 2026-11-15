@@ -39,6 +39,7 @@ var widgetLanguages = []locale.Language{locale.English, locale.Russian}
 // without any has none here.
 var widgetLabelSets = map[widgetKind]func(language locale.Language) map[string]any{
 	changesWidget: changesLabels,
+	parcelWidget:  parcelLabels,
 }
 
 // widgetLabels is the labels a kind's template carries, in every language, as the JSON object the
@@ -83,6 +84,7 @@ type widgetKind string
 const (
 	proposalWidget widgetKind = "proposal"
 	changesWidget  widgetKind = "changes"
+	parcelWidget   widgetKind = "parcel"
 )
 
 //go:embed widgets
@@ -93,6 +95,7 @@ var widgetFiles embed.FS
 var widgetTemplates = map[widgetKind]string{
 	proposalWidget: composeWidget(proposalWidget),
 	changesWidget:  composeWidget(changesWidget),
+	parcelWidget:   composeWidget(parcelWidget),
 }
 
 // composeWidget puts a kind's view into the base: its styles from widgets/<kind>.css, its markup
@@ -222,6 +225,11 @@ func executeCaptioned[T any](c *Client, ctx context.Context, method string, para
 // caption line under it. It never carries an inline keyboard, which makes some Telegram apps show a
 // widget message as unsupported.
 func (c *Client) sendWidget(ctx context.Context, chatID int64, kind widgetKind, data, caption string) (Message, error) {
+	return c.sendWidgetWith(ctx, chatID, kind, data, caption, false)
+}
+
+// sendWidgetWith is sendWidget, without a notification when silent.
+func (c *Client) sendWidgetWith(ctx context.Context, chatID int64, kind widgetKind, data, caption string, silent bool) (Message, error) {
 	template, found := widgetTemplates[kind]
 	if !found {
 		return Message{}, fmt.Errorf("unknown widget kind %q", kind)
@@ -231,6 +239,9 @@ func (c *Client) sendWidget(ctx context.Context, chatID int64, kind widgetKind, 
 		"html":          {template},
 		"chat_data":     {data},
 		"allow_queries": {"true"},
+	}
+	if silent {
+		params.Set("disable_notification", "true")
 	}
 	var message Message
 	err := c.inTab(ctx, chatID, true, func(ctx context.Context) error {

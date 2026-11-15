@@ -1,0 +1,170 @@
+<style>
+body{margin:0;padding:12px;font:15px/1.4 -apple-system,system-ui,sans-serif;background:var(--tg-theme-bg-color,#fff);color:var(--tg-theme-text-color,#000)}
+#status{margin-top:8px;color:var(--tg-theme-hint-color,#888)}
+#status:empty{display:none}
+button{flex:1;padding:10px 4px;border:0;border-radius:8px;font:inherit;background:var(--tg-theme-button-color,#2481cc);color:var(--tg-theme-button-text-color,#fff)}
+button.quiet{background:var(--tg-theme-secondary-bg-color,#eee);color:var(--tg-theme-text-color,#000)}
+button:disabled{opacity:.5}
+#carrier{color:var(--tg-theme-hint-color,#888)}
+#title{font-weight:600;white-space:pre-wrap;word-wrap:break-word}
+#sender,#when,#pickup{margin-top:4px;white-space:pre-wrap;word-wrap:break-word}
+#state{margin-top:8px;font-weight:600}
+#carrier:empty,#title:empty,#sender:empty,#state:empty,#when:empty,#pickup:empty{display:none}
+#actions{display:flex;gap:8px;margin-top:12px}
+button.stop{background:var(--tg-theme-secondary-bg-color,#eee);color:var(--tg-theme-destructive-text-color,#d33)}
+</style>
+<div id="view"><div id="carrier"></div>
+<div id="title"></div>
+<div id="sender"></div>
+<div id="state"></div>
+<div id="when"></div>
+<div id="pickup"></div>
+<div id="actions"></div></div>
+<div id="status"></div>
+<script>
+(function () {
+  var widget = window.TelegramWidget;
+  if (!widget) {
+    return;
+  }
+  var view = document.getElementById('view');
+  var status = document.getElementById('status');
+  var labels = {"en":{"expected":"Expected:","from":"From:","idle":"No longer followed: no news for 30 days","ignored":"This no longer does anything.","noAnswer":"No answer came; try again.","off":"Tracking off","pickup":"Pickup point:","statuses":{"at_pickup_point":"Ready for pickup","delivered":"Delivered","in_transit":"On its way","out_for_delivery":"Out for delivery","problem":"Problem with delivery","registered":"Registered","unknown":"Status unknown"},"stop":"Stop tracking","stopped":"Stopped","tooMany":"Too many taps; wait a moment and try again.","working":"Working on it…"},"ru":{"expected":"Ожидается:","from":"От:","idle":"Больше не отслеживается: 30 дней без новостей","ignored":"Эта кнопка больше не действует.","noAnswer":"Ответ не пришёл; попробуй ещё раз.","off":"Отслеживание выключено","pickup":"Пункт выдачи:","statuses":{"at_pickup_point":"Ожидает в пункте выдачи","delivered":"Доставлена","in_transit":"В пути","out_for_delivery":"Доставляется","problem":"Проблема с доставкой","registered":"Зарегистрирована","unknown":"Статус неизвестен"},"stop":"Прекратить отслеживание","stopped":"Отслеживание остановлено","tooMany":"Слишком много нажатий; подожди немного и попробуй снова.","working":"Выполняется…"}};
+  var language = 'en';
+  var controlsReturn = 'controls';
+  var dataChanges = 'data';
+  var drawn = 0;
+  var busy = false;
+
+  function label(key) {
+    var set = labels[language];
+    return set && set[key] !== undefined ? set[key] : labels.en[key];
+  }
+
+  function current() {
+    try {
+      var raw = widget.chatData;
+      var data = raw && typeof raw === 'object' ? raw : JSON.parse(raw || '{}');
+      return data && typeof data === 'object' ? data : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function setBusy(on) {
+    var buttons = view.getElementsByTagName('button');
+    for (var i = 0; i < buttons.length; i++) {
+      buttons[i].disabled = on || buttons[i].getAttribute('data-off') === '1';
+    }
+    busy = on;
+  }
+
+  function failure(error) {
+    if (error && error.code === 'RATE_LIMITED') {
+      return label('tooMany');
+    }
+    return label('noAnswer');
+  }
+
+  function request(data, after) {
+    if (busy) {
+      return;
+    }
+    var tapped = drawn;
+    setBusy(true);
+    status.textContent = label('working');
+    widget.request(data).then(function (response) {
+      if (tapped !== drawn) {
+        return;
+      }
+      if (typeof after === 'function') {
+        status.textContent = '';
+        setBusy(false);
+        after(response && response.result ? String(response.result) : '');
+        return;
+      }
+      if (response && response.result) {
+        status.textContent = String(response.result);
+      }
+      if (after === controlsReturn) {
+        setBusy(false);
+      } else {
+        setTimeout(function () {
+          if (tapped === drawn) {
+            redraw();
+          }
+        }, 20000);
+      }
+    }, function (error) {
+      if (tapped !== drawn) {
+        return;
+      }
+      status.textContent = failure(error);
+      setBusy(false);
+    });
+  }
+
+  function redraw() {
+    drawn++;
+    busy = false;
+    status.textContent = '';
+    var data = current();
+    language = String(data.g || data.lang || 'en');
+    draw(data);
+  }
+
+  var carrier = document.getElementById('carrier');
+  var title = document.getElementById('title');
+  var sender = document.getElementById('sender');
+  var state = document.getElementById('state');
+  var when = document.getElementById('when');
+  var pickup = document.getElementById('pickup');
+  var actions = document.getElementById('actions');
+
+  function stateText(data) {
+    var mode = String(data.m || '');
+    if (mode === 'x') {
+      return label('stopped');
+    }
+    if (mode === 'o') {
+      return label('off');
+    }
+    if (mode === 'i') {
+      return label('idle');
+    }
+    var words = label('statuses') || {};
+    return words[String(data.s || '')] || words.unknown || '';
+  }
+
+  function labelled(key, value) {
+    return value ? label(key) + ' ' + String(value) : '';
+  }
+
+  function draw(data) {
+    var open = !data.m && data.s !== 'delivered';
+    carrier.textContent = String(data.c || '');
+    title.textContent = String(data.t || '');
+    sender.textContent = labelled('from', data.f);
+    state.textContent = stateText(data);
+    when.textContent = open ? labelled('expected', data.w) : '';
+    pickup.textContent = labelled('pickup', data.p);
+    while (actions.firstChild) {
+      actions.removeChild(actions.firstChild);
+    }
+    if (open && data.i) {
+      var stop = document.createElement('button');
+      stop.className = 'stop';
+      stop.textContent = label('stop');
+      stop.onclick = function () {
+        request('parcel:stop:' + String(data.i), dataChanges);
+      };
+      actions.appendChild(stop);
+    }
+    actions.style.display = actions.firstChild ? 'flex' : 'none';
+  }
+
+  redraw();
+  widget.onEvent('chatDataChanged', redraw);
+  widget.ready();
+})();
+</script>

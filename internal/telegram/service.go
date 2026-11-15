@@ -175,6 +175,7 @@ type Service struct {
 	tasks        TaskController
 	watches      WatchController
 	trips        TripController
+	parcels      *ParcelTaps
 	routes       RouteController
 	why          WhyController
 	exports      ExportController
@@ -226,6 +227,8 @@ type Dependencies struct {
 	Watches      WatchController
 	Trips        TripController
 	Routes       RouteController
+	// Parcels answers the Stop tracking taps of parcel cards; nil leaves them unanswered.
+	Parcels *ParcelTaps
 	// Why answers /why, and a short "how do you know?" in reply to one of the bot's messages.
 	Why WhyController
 	// Exports answers /export and /restore.
@@ -282,6 +285,7 @@ func NewService(deps Dependencies) (*Service, error) {
 		tasks:        deps.Tasks,
 		watches:      deps.Watches,
 		trips:        deps.Trips,
+		parcels:      deps.Parcels,
 		routes:       deps.Routes,
 		why:          deps.Why,
 		exports:      deps.Exports,
@@ -1160,6 +1164,9 @@ func (s *Service) processCallback(ctx context.Context, bot Bot, updateID int64, 
 	if action, tripID, isTrip := parseTripCallback(callback.Data); isTrip && s.trips != nil {
 		return s.processTripPress(ctx, callback, principalID, action, tripID)
 	}
+	if _, parcelID, isParcel := parseParcelCallback(callback.Data); isParcel && s.parcels != nil {
+		return s.processParcelPress(ctx, callback, principalID, parcelID)
+	}
 	if action, sessionID, isSession := parseSessionCallback(callback.Data); isSession && s.conversation != nil {
 		return s.processSessionPress(ctx, bot, callback, principalID, action, sessionID)
 	}
@@ -1415,6 +1422,7 @@ type widgetHandler func(s *Service, ctx context.Context, bot Bot, updateID int64
 var widgetHandlers = []widgetHandler{
 	(*Service).processProposalWidgetTap,
 	(*Service).processChangesWidgetTap,
+	(*Service).processParcelWidgetTap,
 }
 
 // ignoreWidgetTap answers a tap as doing nothing and logs it as ignored for the reason.

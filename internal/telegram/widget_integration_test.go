@@ -28,6 +28,10 @@ import (
 type sentWidget struct {
 	chatID, messageID, threadID int64
 	html, caption, data         string
+	// rawCaption is the caption as it was sent, with the parse mode it was sent in, and silent
+	// whether it was sent without a notification.
+	rawCaption, parseMode string
+	silent                bool
 }
 
 // widgetEdit is an edit of a widget message: its caption, as the user reads it, or its data.
@@ -149,7 +153,7 @@ func (h *conversationHarness) serveWidgetMethod(w http.ResponseWriter, r *http.R
 		messageID := sentMessageID(h.sentCount)
 		h.widgets.ids[messageID], h.widgets.captions[messageID], h.widgets.data[messageID] = true, caption, r.Form.Get("chat_data")
 		h.mu.Unlock()
-		h.widgets.sent <- sentWidget{chatID: chatID, messageID: messageID, threadID: threadID, html: r.Form.Get("html"), caption: caption, data: r.Form.Get("chat_data")}
+		h.widgets.sent <- sentWidget{chatID: chatID, messageID: messageID, threadID: threadID, html: r.Form.Get("html"), caption: caption, data: r.Form.Get("chat_data"), rawCaption: r.Form.Get("caption"), parseMode: r.Form.Get("parse_mode"), silent: r.Form.Get("disable_notification") == "true"}
 		return Message{MessageID: messageID, MessageThreadID: threadID, Chat: Chat{ID: chatID, Type: ChatTypePrivate}}, true
 	}
 	messageID, err := strconv.ParseInt(r.Form.Get("message_id"), 10, 64)

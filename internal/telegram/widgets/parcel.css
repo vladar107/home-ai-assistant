@@ -1,0 +1,7 @@
+#carrier{color:var(--tg-theme-hint-color,#888)}
+#title{font-weight:600;white-space:pre-wrap;word-wrap:break-word}
+#sender,#when,#pickup{margin-top:4px;white-space:pre-wrap;word-wrap:break-word}
+#state{margin-top:8px;font-weight:600}
+#carrier:empty,#title:empty,#sender:empty,#state:empty,#when:empty,#pickup:empty{display:none}
+#actions{display:flex;gap:8px;margin-top:12px}
+button.stop{background:var(--tg-theme-secondary-bg-color,#eee);color:var(--tg-theme-destructive-text-color,#d33)}
