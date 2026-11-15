@@ -60,7 +60,7 @@ func (r *Recorder) Run(ctx context.Context, request agentruntime.RunRequest, sin
 	result, err := r.inner.Run(ctx, request, &recordingSink{inner: sink, log: record})
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.runs = append(r.runs, RunRecord{Request: request, Events: record.events, ToolCalls: record.calls, Result: result, Err: err})
+	r.runs = append(r.runs, RunRecord{Request: request, Events: record.events, ToolCalls: record.toolCalls(), Result: result, Err: err})
 	return result, err
 }
 
@@ -79,6 +79,52 @@ type runLog struct {
 	mu     sync.Mutex
 	events []agentruntime.Event
 	calls  []ToolCall
+	ids    []string
+}
+
+// toolCalls lists the run's calls in the order the runtime made them: the calls the application
+// executed, and the ones the runtime ran itself, such as web_search inside Pi, which only its
+// tool_call and tool_result events show. Events and executed calls are matched by call ID.
+func (l *runLog) toolCalls() []ToolCall {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	executed := make(map[string]int, len(l.ids))
+	for i, id := range l.ids {
+		if id != "" {
+			executed[id] = i
+		}
+	}
+	results := map[string]agentruntime.Event{}
+	for _, event := range l.events {
+		if event.Type == "tool_result" && event.CallID != "" {
+			results[event.CallID] = event
+		}
+	}
+	used := make([]bool, len(l.calls))
+	var calls []ToolCall
+	seen := map[string]bool{}
+	for _, event := range l.events {
+		if event.Type != "tool_call" || event.CallID == "" || seen[event.CallID] {
+			continue
+		}
+		seen[event.CallID] = true
+		if i, ok := executed[event.CallID]; ok {
+			used[i] = true
+			calls = append(calls, l.calls[i])
+			continue
+		}
+		recorded := ToolCall{Name: event.Tool, Arguments: event.Arguments}
+		if result, ok := results[event.CallID]; ok {
+			recorded.Result, recorded.IsError = result.Text, result.IsError
+		}
+		calls = append(calls, recorded)
+	}
+	for i, call := range l.calls {
+		if !used[i] {
+			calls = append(calls, call)
+		}
+	}
+	return calls
 }
 
 type recordingSink struct {
@@ -109,6 +155,7 @@ func (e *recordingExecutor) Execute(ctx context.Context, call agentruntime.ToolC
 	}
 	e.log.mu.Lock()
 	e.log.calls = append(e.log.calls, recorded)
+	e.log.ids = append(e.log.ids, call.ID)
 	e.log.mu.Unlock()
 	return result, err
 }

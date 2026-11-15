@@ -39,10 +39,13 @@ func (s scriptedModel) Run(ctx context.Context, request agentruntime.RunRequest,
 			continue
 		}
 		name, arguments, _ := strings.Cut(call, " ")
+		id := fmt.Sprint("call-", calls)
+		_ = sink.Emit(ctx, agentruntime.Event{Type: "tool_call", Tool: name, CallID: id, Arguments: json.RawMessage(arguments)})
 		result, err := request.Tools.Executor.Execute(ctx, agentruntime.ToolCall{ID: fmt.Sprint("call-", calls), Name: name, Arguments: json.RawMessage(arguments)})
 		if err != nil {
 			return agentruntime.RunResult{}, err
 		}
+		_ = sink.Emit(ctx, agentruntime.Event{Type: "tool_result", Tool: name, CallID: id, Text: result.Text, IsError: result.IsError})
 		texts = append(texts, result.Text)
 		calls++
 	}
