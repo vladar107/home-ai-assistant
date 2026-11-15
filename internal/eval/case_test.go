@@ -67,6 +67,7 @@ func TestLoadRejectsInvalidCases(t *testing.T) {
 		{"confirm-first", "case.json", "steps[0]: confirm cannot be the first step"},
 		{"two-actions", "case.json", "steps[0]: want exactly one action"},
 		{"bad-zone", "case.json", `clock.zone "Mars/Olympus"`},
+		{"bad-user-language", "case.json", `user.language "English please"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.dir, func(t *testing.T) {

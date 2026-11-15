@@ -31,9 +31,25 @@ neutral names, places and data, never a real message, trace, memory or device.
 - `id`: unique across files, lowercase kebab case. `title` is required.
 - `kind`: the failure kind the case covers, lowercase kebab case, or `happy` for a flow that works.
 - `clock`: `local` is `YYYY-MM-DDTHH:MM` wall time in the IANA `zone`.
-- `user`: all optional: `name`, `switches` (name to bool), `memory` lines, `model`, `effort`.
+- `user`: all optional: `name`, `switches` (name to bool), `memory` lines, `model`, `effort`, `language` (`en` or `ru`, the interface language).
+  A switch name is the integration's name, such as `typesafe` (safety checks and the tool hint,
+  on by default in a run that has a TypeSafe key) or `widgets`.
 - `world`: state the tools see, keyed by provider. Each key must be a section registered by a
-  world seeder; an unknown key fails the load.
+  world seeder; an unknown key fails the load. Times are `YYYY-MM-DDTHH:MM` in the case's zone.
+  Sections, each decoded strictly:
+  - `gmail`: `{"account": "sam@example.test", "messages": [{"id", "from", "to", "subject",
+    "received", "body", "html", "snippet", "labels", "thread_id", "attachments": {name: bytes}}]}`
+  - `calendar`: `{"account", "events": [{"id", "summary", "start", "end", "all_day", "location",
+    "description", "organizer", "attendees": [{"email", "name", "response"}]}]}`
+  - `notion`: `{"pages": [{"id", "title", "url", "lines": ["text", "- bullet"]}]}`
+  - `jobs`: `[{"id", "name", "prompt" | "reminder" | "heads_up": true, "cron" | "at": "YYYY-MM-DD HH:MM",
+    "zone", "model", "disabled"}]`; `id` is the name `run_job` uses. `heads_up` is the Heads-up job
+    (its prompt is the notes; cron defaults to the Heads-up schedule).
+  - `memory`: `[{"kind": "fact" | "instruction", "text"}]`, beside `user.memory` lines (facts)
+  - `backlog`: `[{"title", "details"}]`
+  - `routes`: `[{"name", "days": ["mon"], "arrive_by", "legs": [{"mode", "minutes", "from", "to",
+    "via", "stop", "line", "towards", "departures"}]}]`
+  - `places`: `[{"name", "lat", "lon", "radius_m"}]` (saved places)
 - `steps`: at least one, played in one session. A step has exactly one action: `say` (text),
   `confirm: true`, `reject: true`, `thumbs_down: true` (the last three act on the previous turn
   and cannot start a case), or `run_job` (id of a scheduled job in the world).

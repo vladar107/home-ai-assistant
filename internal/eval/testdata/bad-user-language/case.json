@@ -1,0 +1,8 @@
+{
+  "id": "bad-user-language",
+  "title": "Bad user language",
+  "kind": "happy",
+  "clock": {"local": "2026-03-10T08:30", "zone": "UTC"},
+  "user": {"language": "English please"},
+  "steps": [{"say": "Hello"}]
+}

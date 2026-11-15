@@ -68,6 +68,8 @@ type User struct {
 	Memory   []string        `json:"memory,omitempty"`
 	Model    string          `json:"model,omitempty"`
 	Effort   string          `json:"effort,omitempty"`
+	// Language is the user's interface language, such as en or ru; empty leaves the default.
+	Language string `json:"language,omitempty"`
 }
 
 // Step holds exactly one action; Expect is checked after that action's turn.
@@ -228,6 +230,9 @@ func (r *Registry) validate(c *Case) error {
 	}
 	if _, err := c.Clock.Time(); err != nil {
 		return err
+	}
+	if c.User.Language != "" && !languagePattern.MatchString(c.User.Language) {
+		return fmt.Errorf("user.language %q: want a BCP-47 tag such as en or ru", c.User.Language)
 	}
 	if c.Trials == 0 {
 		c.Trials = DefaultTrials
