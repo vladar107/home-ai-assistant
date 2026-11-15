@@ -111,9 +111,12 @@ trials each; a Markdown report, run by hand from the operator's Mac.
     including scheduled jobs and saved routes. Every connector reaches a loopback fake seeded from
     the case, so a mailbox, a timetable, a forecast or a device is case data, not a scripted tool
     answer: the existing `googlesim`, `calendarsim` and `notionsim`; new fakes for the train and bus
-    planners, the weather service, web search and page fetch, places, flights, the monitoring
-    connector and the NAS file search; a fake home server whose synthetic devices, sensors and
-    history the case lists; and `mcpsim` serving the case's catalogue MCP tools and their answers;
+    planners, the weather service, page fetch, places, flights, the monitoring connector and the NAS
+    file search; a fake home server whose synthetic devices, sensors and history the case lists;
+    and `mcpsim` serving the case's catalogue MCP tools and their answers. Web search is the
+    model provider's own search inside Pi, not a connector, so it cannot be faked: it runs live,
+    cases check the arguments it was called with, and anything that depends on its results is
+    left to the rubric and the operator's review;
   - `turns`: a sequence of steps in one session. A step is a user message; a Confirm or Reject of
     the proposals the previous turn made; a 👎 on the previous reply, which starts the reconsider
     turn the way a reaction in Telegram does; or a run of one of the world's scheduled jobs at
@@ -342,8 +345,9 @@ they run one at a time in that order, each on top of the one before.
      production wiring passes `time.Now` and its tests are unchanged.
 3. **Fakes for every connector** — Complex; depends on 2.
    - Task: loopback fakes seeded from the case for the train and bus planners and disruptions,
-     the weather service (its existing forecast and geocoding URL overrides), web search and page
-     fetch, places, flights, the monitoring connector and the NAS file search; a fake home
+     the weather service (its existing forecast and geocoding URL overrides), page fetch
+     (through the web connector's existing resolver and dialer, so the guard still vets every
+     hop), places, flights, the monitoring connector and the NAS file search; a fake home
      server whose synthetic devices, sensors, history and
      vacuum schedule come from the case; and `mcpsim` serving the case's catalogue MCP tools.
      Where a connector has no endpoint override yet, add one that production leaves empty. Add
