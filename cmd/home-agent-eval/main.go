@@ -2,6 +2,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"flag"
@@ -177,13 +178,21 @@ func runSuite(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	webSearch := setting("HOME_AGENT_PI_WEB_SEARCH_EXTENSION")
-	if webSearch == "" {
-		webSearch = filepath.Join("third_party", "pi-web-search", "src", "index.ts")
+	webSearch, err := filepath.Abs(cmp.Or(setting("HOME_AGENT_PI_WEB_SEARCH_EXTENSION"), filepath.Join("third_party", "pi-web-search", "src", "index.ts")))
+	if err != nil {
+		return err
 	}
 	if info, statErr := os.Stat(webSearch); statErr != nil || !info.Mode().IsRegular() {
 		fmt.Fprintln(os.Stderr, "home-agent-eval: web search extension not found; running without web search")
 		webSearch = ""
+	}
+	piBinary, err := executablePath(setting("HOME_AGENT_PI_BINARY"))
+	if err != nil {
+		return err
+	}
+	nodeBinary, err := executablePath(setting("HOME_AGENT_PI_NODE_BINARY"))
+	if err != nil {
+		return err
 	}
 	result, err := eval.Run(ctx, eval.RunOptions{
 		Profiles: profiles, CasesDir: *casesDir, CaseIDs: caseIDs, Tags: tags, Trials: *trials,
@@ -191,7 +200,7 @@ func runSuite(ctx context.Context, args []string) error {
 		ScanEnvPaths: []string{*envPath, filepath.Join(filepath.Dir(*envPath), "deploy", ".env.nas")},
 		ScanDirs:     []string{*casesDir, filepath.Join(filepath.Dir(*casesDir), "variants")},
 		Pi: eval.PiOptions{
-			Binary: setting("HOME_AGENT_PI_BINARY"), NodeBinary: setting("HOME_AGENT_PI_NODE_BINARY"),
+			Binary: piBinary, NodeBinary: nodeBinary,
 			Provider: setting("HOME_AGENT_PI_PROVIDER"), WebSearchExtension: webSearch,
 		},
 		ChatModel: models["HOME_AGENT_PI_MODEL"], TaskModel: models["HOME_AGENT_PI_TASK_MODEL"], HeadsUpModel: models["HOME_AGENT_PI_HEADSUP_MODEL"],
@@ -208,6 +217,15 @@ func runSuite(ctx context.Context, args []string) error {
 		return fmt.Errorf("run stopped early (%s): %s", result.Stopped, result.StoppedDetail)
 	}
 	return nil
+}
+
+// executablePath makes a binary setting that names a path independent of the working directory,
+// because Pi runs in a per-principal directory; a bare command name is left for the PATH lookup.
+func executablePath(setting string) (string, error) {
+	if setting == "" || !strings.ContainsRune(setting, filepath.Separator) {
+		return setting, nil
+	}
+	return filepath.Abs(setting)
 }
 
 func runDir(flags *flag.FlagSet, args []string) (string, error) {
