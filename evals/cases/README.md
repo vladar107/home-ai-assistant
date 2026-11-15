@@ -41,7 +41,10 @@ neutral names, places and data, never a real message, trace, memory or device.
     "received", "body", "html", "snippet", "labels", "thread_id", "attachments": {name: bytes}}]}`
   - `calendar`: `{"account", "events": [{"id", "summary", "start", "end", "all_day", "location",
     "description", "organizer", "attendees": [{"email", "name", "response"}]}]}`
-  - `notion`: `{"pages": [{"id", "title", "url", "lines": ["text", "- bullet"]}]}`
+  - `notion`: `{"pages": [{"id", "title", "url", "lines": ["text", "- bullet"]}], "data_sources": [{"id", "title",
+    "title_property" (default "Title"), "properties": [{"name", "type": "date" | "number" | "select" | "status" |
+    "rich_text" | "checkbox", "options"}], "rows": [{"id", "title", "values": {column: value}}]}], "writes": true}`;
+    a data source is a table whose rows are pages, `writes` grants the Notion write tools
   - `jobs`: `[{"id", "name", "prompt" | "reminder" | "heads_up": true, "cron" | "at": "YYYY-MM-DD HH:MM",
     "zone", "model", "disabled"}]`; `id` is the name `run_job` uses. `heads_up` is the Heads-up job
     (its prompt is the notes; cron defaults to the Heads-up schedule).

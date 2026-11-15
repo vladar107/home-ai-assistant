@@ -2,6 +2,7 @@ package eval
 
 import (
 	"bytes"
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -93,7 +94,42 @@ type calendarAttendee struct {
 }
 
 type notionSection struct {
-	Pages []notionPage `json:"pages"`
+	Pages       []notionPage       `json:"pages,omitempty"`
+	DataSources []notionDataSource `json:"data_sources,omitempty"`
+	// Writes switches on the principal's Notion write grant, so the write tools are offered.
+	Writes bool `json:"writes,omitempty"`
+}
+
+// notionDataSource is a table: its typed columns and its rows. The title column is named by
+// TitleProperty and is not listed in Properties.
+type notionDataSource struct {
+	ID            string           `json:"id"`
+	Title         string           `json:"title"`
+	TitleProperty string           `json:"title_property,omitempty"`
+	Properties    []notionProperty `json:"properties,omitempty"`
+	Rows          []notionRow      `json:"rows,omitempty"`
+}
+
+type notionProperty struct {
+	Name    string   `json:"name"`
+	Type    string   `json:"type"`
+	Options []string `json:"options,omitempty"`
+}
+
+type notionRow struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	// Values holds a value per column name: a YYYY-MM-DD date or date-time string, a number, an
+	// option name, text, or a bool; null or absent leaves the cell empty.
+	Values map[string]any `json:"values,omitempty"`
+}
+
+const defaultNotionTitleProperty = "Title"
+
+// notionPropertyTypes are the column types a case may give a table, and the JSON type of the
+// values each takes.
+var notionPropertyTypes = map[string]string{
+	"date": "string", "number": "number", "select": "string", "status": "string", "rich_text": "string", "checkbox": "bool",
 }
 
 type notionPage struct {
@@ -222,7 +258,86 @@ func validateNotion(raw json.RawMessage) error {
 			return fmt.Errorf("pages[%d]: title is required", i)
 		}
 	}
-	return uniqueIDs("pages", ids)
+	if err := uniqueIDs("pages", ids); err != nil {
+		return err
+	}
+	sources := make([]string, 0, len(section.DataSources))
+	for i, source := range section.DataSources {
+		sources = append(sources, source.ID)
+		if source.Title == "" {
+			return fmt.Errorf("data_sources[%d]: title is required", i)
+		}
+		if err := validateNotionTable(i, source); err != nil {
+			return err
+		}
+		for _, row := range source.Rows {
+			ids = append(ids, row.ID)
+		}
+	}
+	if err := uniqueIDs("data_sources", sources); err != nil {
+		return err
+	}
+	return uniqueIDs("pages and rows", ids)
+}
+
+func validateNotionTable(i int, source notionDataSource) error {
+	columns := map[string]string{}
+	title := cmp.Or(source.TitleProperty, defaultNotionTitleProperty)
+	for j, property := range source.Properties {
+		_, known := notionPropertyTypes[property.Type]
+		_, duplicate := columns[property.Name]
+		switch {
+		case property.Name == "" || property.Name == title || duplicate:
+			return fmt.Errorf("data_sources[%d].properties[%d]: want a name that is unique and is not the title column %q", i, j, title)
+		case !known:
+			return fmt.Errorf("data_sources[%d].properties[%d]: type %q: want date, number, select, status, rich_text or checkbox", i, j, property.Type)
+		case len(property.Options) > 0 && property.Type != "select" && property.Type != "status":
+			return fmt.Errorf("data_sources[%d].properties[%d]: only a select or status takes options", i, j)
+		}
+		columns[property.Name] = property.Type
+	}
+	for j, row := range source.Rows {
+		if row.Title == "" {
+			return fmt.Errorf("data_sources[%d].rows[%d]: title is required", i, j)
+		}
+		for name, value := range row.Values {
+			propertyType, known := columns[name]
+			if !known {
+				return fmt.Errorf("data_sources[%d].rows[%d]: value for unknown column %q", i, j, name)
+			}
+			if err := validateNotionValue(propertyType, value); err != nil {
+				return fmt.Errorf("data_sources[%d].rows[%d].values.%s: %w", i, j, name, err)
+			}
+		}
+	}
+	return nil
+}
+
+func validateNotionValue(propertyType string, value any) error {
+	if value == nil {
+		return nil
+	}
+	switch notionPropertyTypes[propertyType] {
+	case "string":
+		text, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("want a string for a %s column", propertyType)
+		}
+		if propertyType == "date" {
+			if _, err := time.Parse("2006-01-02", text[:min(len(text), 10)]); err != nil {
+				return fmt.Errorf("date %q: want YYYY-MM-DD, optionally with a time", text)
+			}
+		}
+	case "number":
+		if _, ok := value.(float64); !ok {
+			return errors.New("want a number")
+		}
+	case "bool":
+		if _, ok := value.(bool); !ok {
+			return errors.New("want true or false")
+		}
+	}
+	return nil
 }
 
 func validateJobs(raw json.RawMessage) error {

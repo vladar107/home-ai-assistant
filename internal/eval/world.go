@@ -405,6 +405,7 @@ func (w *World) seedFakes(in *wiring.Inputs) error {
 				ID: p.ID, Title: p.Title, URL: cmp.Or(p.URL, "https://notion.example.test/"+p.ID), LastEdited: edited, Blocks: blocks,
 			})
 		}
+		seedNotionTables(sim, pages.DataSources, edited)
 		in.Notion = &notion.Config{APIBaseURL: sim.URL(), HTTPClient: sim.Client()}
 	}
 	if err := w.seedPlaces(in); err != nil {
@@ -559,6 +560,15 @@ func (w *World) connectAccounts(ctx context.Context) error {
 	if w.Notion != nil {
 		if _, err := w.Assembly.Notion.Connect(ctx, PrincipalID, notionToken); err != nil {
 			return fmt.Errorf("connect the Notion fake: %w", err)
+		}
+		var section notionSection
+		if _, err := w.section(SectionNotion, &section); err != nil {
+			return err
+		}
+		if section.Writes {
+			if _, err := w.Assembly.Notion.SetWrites(ctx, PrincipalID, true); err != nil {
+				return fmt.Errorf("grant the Notion fake's writes: %w", err)
+			}
 		}
 	}
 	return nil
