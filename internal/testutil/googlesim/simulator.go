@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -85,17 +86,18 @@ type Simulator struct {
 	server *httptest.Server
 	t      simt.T
 
-	mu        sync.Mutex
-	mailboxes map[string][]Message
-	failing   map[string]int
-	codes     map[string]grant
-	refreshes map[string]token
-	accesses  map[string]token
-	subjects  map[string]string
-	revoked   []string
-	requests  []Request
-	counter   int
-	now       func() time.Time
+	mu          sync.Mutex
+	newestFirst bool
+	mailboxes   map[string][]Message
+	failing     map[string]int
+	codes       map[string]grant
+	refreshes   map[string]token
+	accesses    map[string]token
+	subjects    map[string]string
+	revoked     []string
+	requests    []Request
+	counter     int
+	now         func() time.Time
 }
 
 func New(t simt.T) *Simulator {
@@ -151,6 +153,14 @@ func (s *Simulator) AddMailbox(account string, messages ...Message) {
 	s.mailboxes[account] = append(s.mailboxes[account], messages...)
 }
 
+// ListNewestFirst makes a search list the newest matches first, as Gmail does, so a search with a
+// limit keeps the newest messages; by default a mailbox lists in the order its messages were added.
+func (s *Simulator) ListNewestFirst() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.newestFirst = true
+}
+
 // FailMessage makes every read of the message with the id fail with the status, while it is
 // still listed by a search.
 func (s *Simulator) FailMessage(id string, status int) {
@@ -180,6 +190,17 @@ func (s *Simulator) Consent(link, account string, granted Grant) string {
 	s.codes[code] = grant{account: account, challenge: query.Get("code_challenge"), scope: scope}
 	s.mu.Unlock()
 	return RedirectURL + "?" + url.Values{"state": {query.Get("state")}, "code": {code}, "scope": {scope}}.Encode()
+}
+
+// Access issues an access token for the account with the products granted, as a finished consent
+// would, for a test that reads the APIs without playing the consent screen.
+func (s *Simulator) Access(account string, granted Grant) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.counter++
+	access := fmt.Sprintf("access-%d", s.counter)
+	s.accesses[access] = token{account: account, scope: granted.scope()}
+	return access
 }
 
 // RevokeGrant is the user removing the app from their Google account.
@@ -309,8 +330,12 @@ func (s *Simulator) serveGmail(w http.ResponseWriter, r *http.Request) {
 	account := issued.account
 	s.requests = append(s.requests, Request{Method: r.Method, Path: r.URL.Path, Query: r.URL.Query(), Account: account})
 	mailbox := append([]Message(nil), s.mailboxes[account]...)
+	newestFirst := s.newestFirst
 	failing := s.failing[strings.TrimPrefix(r.URL.Path, "/gmail/v1/users/me/messages/")]
 	s.mu.Unlock()
+	if newestFirst {
+		slices.SortStableFunc(mailbox, func(a, b Message) int { return b.Received.Compare(a.Received) })
+	}
 	if account == "" {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": map[string]any{"code": 401}})
 		return

@@ -92,12 +92,14 @@ type Reference struct {
 const (
 	ActionReminder = "reminder"
 	ActionWatch    = "watch"
+	ActionParcel   = "parcel"
 )
 
 // Action is one follow-up an inbox check proposed: a one-time reminder of Text at the local time
-// At, or an agent watch named Name that checks Instruction for Condition until Until. ApprovalID is
-// the proposal it was last offered as, or "" while it waits to be offered. Offering marks an action
-// being offered whose approval is not recorded yet, and Expiries counts the cards it expired on.
+// At, an agent watch named Name that checks Instruction for Condition until Until, or tracking the
+// parcel Number, of Carrier when known. ApprovalID is the proposal it was last offered as, or ""
+// while it waits to be offered. Offering marks an action being offered whose approval is not
+// recorded yet, and Expiries counts the cards it expired on.
 type Action struct {
 	Type            string `json:"type"`
 	Text            string `json:"text,omitempty"`
@@ -107,6 +109,8 @@ type Action struct {
 	Condition       string `json:"condition,omitempty"`
 	IntervalMinutes int    `json:"interval_minutes,omitempty"`
 	Until           string `json:"until,omitempty"`
+	Number          string `json:"number,omitempty"`
+	Carrier         string `json:"carrier,omitempty"`
 	ApprovalID      string `json:"approval_id,omitempty"`
 	Offering        bool   `json:"offering,omitempty"`
 	Expiries        int    `json:"expiries,omitempty"`

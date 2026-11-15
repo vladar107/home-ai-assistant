@@ -54,7 +54,7 @@ func (e *Engine) RunCheck(ctx context.Context, principalID, message string) (Sch
 // reads, and in a fresh session. Like RunCheck it takes no turn slot. Failures come back as the
 // reply a chat turn would have given; an error is returned only when ctx ends.
 func (e *Engine) RunReview(ctx context.Context, principalID, message string, model agentruntime.ModelEffort) (ScheduledReply, error) {
-	return e.runToolless(ctx, principalID, message, model, false, "", agentruntime.RunBackground)
+	return e.runToolless(ctx, principalID, message, model, false, "", false, agentruntime.RunBackground)
 }
 
 // RunAssess runs the turn that decides whether an inbound event is worth telling the user about:
@@ -62,7 +62,16 @@ func (e *Engine) RunReview(ctx context.Context, principalID, message string, mod
 // care about, and their name. Like RunCheck it takes no turn slot, and the caller reads the
 // decision from the final text. The turn keeps a trace under the key ctx names, if any.
 func (e *Engine) RunAssess(ctx context.Context, principalID, message string) (ScheduledReply, error) {
-	return e.runToolless(ctx, principalID, message, agentruntime.ModelEffort{}, true, TraceAssess, agentruntime.RunBackground)
+	return e.runToolless(ctx, principalID, message, agentruntime.ModelEffort{}, true, TraceAssess, true, agentruntime.RunBackground)
+}
+
+// RunExtract runs the turn that reads facts out of messages from outside, which its message frames
+// as untrusted data: like RunReview with no tools, memory, or web search, in a fresh session, on the
+// runtime's default model. Like RunCheck it takes no turn slot, the caller reads the answer from the
+// final text, and the turn keeps a check's trace under the key ctx names, if any: the trace kinds are
+// a closed set in the store.
+func (e *Engine) RunExtract(ctx context.Context, principalID, message string) (ScheduledReply, error) {
+	return e.runToolless(ctx, principalID, message, agentruntime.ModelEffort{}, false, TraceCheck, true, agentruntime.RunBackground)
 }
 
 // RunExplain runs the turn that explains what one of the assistant's messages was based on, from
@@ -71,11 +80,12 @@ func (e *Engine) RunAssess(ctx context.Context, principalID, message string) (Sc
 // behind the shared background slots or takes one; the caller runs at most one per principal. It
 // keeps no trace of its own.
 func (e *Engine) RunExplain(ctx context.Context, principalID, message string) (ScheduledReply, error) {
-	return e.runToolless(ctx, principalID, message, agentruntime.ModelEffort{}, false, "", agentruntime.RunChat)
+	return e.runToolless(ctx, principalID, message, agentruntime.ModelEffort{}, false, "", false, agentruntime.RunChat)
 }
 
-// runToolless runs a turn without tools; a kind traces it under the key ctx names.
-func (e *Engine) runToolless(ctx context.Context, principalID, message string, model agentruntime.ModelEffort, withMemory bool, kind string, runKind agentruntime.RunKind) (ScheduledReply, error) {
+// runToolless runs a turn without tools; a kind traces it under the key ctx names, and external marks
+// a trace whose message is itself outside content.
+func (e *Engine) runToolless(ctx context.Context, principalID, message string, model agentruntime.ModelEffort, withMemory bool, kind string, external bool, runKind agentruntime.RunKind) (ScheduledReply, error) {
 	started := e.config.Now()
 	// A failure reply is stored as the run's reply, which the model reads later, so it stays English
 	// whatever language the run carries.
@@ -111,9 +121,9 @@ func (e *Engine) runToolless(ctx context.Context, principalID, message string, m
 	}, discardEvents{})
 	if kind != "" {
 		e.saveTrace(ctx, tracedRun{principalID: principalID, key: TraceKeyFrom(ctx), kind: kind, model: model.Model, effort: model.Effort, started: started, result: result,
-			// An assessed event's text is the turn's message, written by the user's own system, which may
-			// repeat text from anywhere.
-			external: kind == TraceAssess})
+			// An assessed event's text and the messages an extraction reads are the turn's message,
+			// which may repeat text from anywhere.
+			external: external})
 	}
 	return unwatchedReply(english, turnCtx, result, runErr, nil)
 }
