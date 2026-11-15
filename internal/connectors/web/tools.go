@@ -149,7 +149,7 @@ func (s *Service) Contribute(ctx context.Context, principalID string) (tools.Con
 func (s *Service) guidance() string {
 	home := "When the user names no place, ask which place they mean."
 	if s.weatherHome != "" {
-		home = fmt.Sprintf("When the user names no place, leave location empty to use the household's home, %s.", s.weatherHome)
+		home = fmt.Sprintf("When the user asks about the weather at home or names no place, leave location empty to use the household's home, %s.", s.weatherHome)
 	}
 	return fmt.Sprintf(guidance, home)
 }

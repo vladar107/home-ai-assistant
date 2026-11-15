@@ -1164,7 +1164,7 @@ func TestWeatherForecastUsesTheConfiguredHome(t *testing.T) {
 	queries := f.openMeteo(forecastAmsterdam)
 
 	set := f.toolSet("alice")
-	if !strings.Contains(set.Guidance, "household's home, Amsterdam") {
+	if !strings.Contains(set.Guidance, "asks about the weather at home or names no place, leave location empty to use the household's home, Amsterdam") {
 		t.Fatalf("guidance = %q", set.Guidance)
 	}
 	wantText(t, f.callWith(set, "weather_forecast", map[string]any{"days": 2}), "Weather for Amsterdam, North Holland, The Netherlands")

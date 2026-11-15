@@ -267,6 +267,12 @@ func TestWeatherCardRefusals(t *testing.T) {
 		})
 	}
 	wantError(t, f.call("alice", "weather_card", card(leg)), "A card can only be attached during a conversation turn.")
+
+	if result := f.callInTurn(turn, card(with("place", "Atlantis"))); strings.Contains(result.Text, "place_list") {
+		t.Fatalf("a refusal without saved places names place_list: %s", result.Text)
+	}
+	f.service.SetSavedPlaces(savedPlaces{})
+	wantError(t, f.callInTurn(turn, card(with("place", "Atlantis"))), "The user's saved places are listed by place_list; use one by its exact name")
 	if _, found, err := box.Card("alice", turn); err != nil || found {
 		t.Fatalf("a refused call staged a card: %v %v", found, err)
 	}

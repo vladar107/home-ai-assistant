@@ -342,7 +342,11 @@ func (s *Service) resolvePlace(ctx context.Context, principalID string, request 
 		return resolvedPlace{}, err
 	}
 	if !ok {
-		return resolvedPlace{}, &placeRefusal{fmt.Sprintf("no place called %q was found; try its English name with its country, such as Zwolle, Netherlands, and otherwise ask the user for a nearby town or a more precise name", request.name)}
+		text := fmt.Sprintf("no place called %q was found; try its English name with its country, such as Zwolle, Netherlands, and otherwise ask the user for a nearby town or a more precise name", request.name)
+		if s.places != nil {
+			text += ". The user's saved places are listed by place_list; use one by its exact name"
+		}
+		return resolvedPlace{}, &placeRefusal{text}
 	}
 	return found, nil
 }
