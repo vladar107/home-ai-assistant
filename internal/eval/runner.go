@@ -18,7 +18,6 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/chatgpt"
 	"github.com/vladar107/home-ai-assistant/internal/config"
 	"github.com/vladar107/home-ai-assistant/internal/judgment"
-	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/runtime/pi"
 )
@@ -81,6 +80,8 @@ type RunOptions struct {
 	// Wrap lets a caller put a layer around the Pi runtime, such as a test's scripted model.
 	Wrap     func(*pi.Runtime) agentruntime.AgentRuntime
 	Registry *Registry
+	// Variant is the prompt variant to try; nil runs production's prompt.
+	Variant *Variant
 }
 
 type runner struct {
@@ -122,6 +123,10 @@ func Run(ctx context.Context, opts RunOptions) (*Result, error) {
 		opts.Now = time.Now
 	}
 	registry := cmp.Or(opts.Registry, DefaultRegistry)
+	if v := opts.Variant; v != nil {
+		opts.ChatModel.Model = cmp.Or(v.Model, opts.ChatModel.Model)
+		opts.ChatModel.Effort = cmp.Or(v.Effort, opts.ChatModel.Effort)
+	}
 
 	cases, err := registry.LoadCases(opts.CasesDir)
 	if err != nil {
@@ -169,6 +174,10 @@ func Run(ctx context.Context, opts RunOptions) (*Result, error) {
 		return nil, fmt.Errorf("start Pi %s: %w", piVersion, err)
 	}
 
+	if err := opts.validateVariantTools(ctx, plan, binding.AccountID); err != nil {
+		return nil, err
+	}
+
 	windows, err := Preflight(ctx, opts.Profiles, opts.Endpoints, opts.MaxUsedPercent)
 	if err != nil {
 		return nil, err
@@ -181,6 +190,7 @@ func Run(ctx context.Context, opts RunOptions) (*Result, error) {
 			RunID: started.UTC().Format("20060102-150405"), StartedAt: started, Commit: cmp.Or(opts.Commit, "unknown"),
 			PiVersion: piVersion, Provider: provider, Model: opts.ChatModel.Model,
 			Effort: cmp.Or(opts.ChatModel.Effort, agentruntime.DefaultEffort), Budget: opts.Budget,
+			Variant: opts.Variant.Info(),
 		},
 	}
 	r.runtime = piRuntime
@@ -213,6 +223,30 @@ func Run(ctx context.Context, opts RunOptions) (*Result, error) {
 		return r.result, err
 	}
 	return r.result, nil
+}
+
+// validateVariantTools checks the variant's tool_guidance names against the tools the planned cases'
+// worlds offer, before any model call.
+func (opts RunOptions) validateVariantTools(ctx context.Context, plan []planned, accountID string) error {
+	if opts.Variant == nil || len(opts.Variant.ToolGuidance) == 0 {
+		return nil
+	}
+	var offered []string
+	for _, entry := range plan {
+		names, err := OfferedTools(ctx, entry.c, WorldOptions{
+			ProfilesDir: opts.Profiles.Root, AccountID: accountID, AuthBaseURL: opts.Endpoints.AuthBaseURL,
+			ChatGPT:   chatgpt.Config{BaseURL: opts.Endpoints.ChatGPTBaseURL, HTTPClient: opts.Endpoints.HTTPClient},
+			ChatModel: opts.ChatModel, TaskModel: opts.TaskModel, HeadsUpModel: opts.HeadsUpModel,
+		})
+		if err != nil {
+			return fmt.Errorf("list the tools of case %s: %w", entry.c.ID, err)
+		}
+		offered = append(offered, names...)
+		if opts.Variant.ValidateTools(offered) == nil {
+			return nil
+		}
+	}
+	return opts.Variant.ValidateTools(offered)
 }
 
 func selectCases(cases []Case, opts RunOptions) ([]planned, error) {
@@ -332,7 +366,7 @@ func (r *runner) trial(ctx context.Context, c Case, n int) (result TrialResult, 
 		Runtime: r.runtime, ProfilesDir: r.opts.Profiles.Root, AccountID: r.accountID,
 		AuthBaseURL: r.opts.Endpoints.AuthBaseURL,
 		ChatGPT:     chatgpt.Config{BaseURL: r.opts.Endpoints.ChatGPTBaseURL, HTTPClient: r.opts.Endpoints.HTTPClient},
-		TypeSafe:    r.opts.TypeSafe, ChatModel: r.opts.ChatModel, TaskModel: r.opts.TaskModel, HeadsUpModel: r.opts.HeadsUpModel,
+		TypeSafe:    r.opts.TypeSafe, Variant: r.opts.Variant, ChatModel: r.opts.ChatModel, TaskModel: r.opts.TaskModel, HeadsUpModel: r.opts.HeadsUpModel,
 		TurnTimeout: r.opts.TurnTimeout, StepTimeout: r.opts.StepTimeout,
 	})
 	if err != nil {
@@ -412,10 +446,11 @@ func stopReason(category agentruntime.FailureCategory) string {
 	return StopAuth
 }
 
-// Fingerprint is the SHA-256 of the system prompt a request renders, without memory and jobs. It
-// renders the prompt the way the Pi runtime does.
+// Fingerprint is the SHA-256 of the system prompt a request renders, without memory and jobs: the
+// fixed sections, variant or default, and the tools' guidance. It renders the prompt the way the Pi
+// runtime does.
 func Fingerprint(request agentruntime.RunRequest) string {
-	sum := sha256.Sum256([]byte(prompt.System(!request.Tools.Empty(), request.Tools.Guidance, request.WebSearch)))
+	sum := sha256.Sum256([]byte(request.SystemPrompt()))
 	return hex.EncodeToString(sum[:])
 }
 

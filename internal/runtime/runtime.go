@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+
+	"github.com/vladar107/home-ai-assistant/internal/prompt"
 )
 
 type RunRequest struct {
@@ -30,9 +32,21 @@ type RunRequest struct {
 	Kind RunKind
 	// Model and Effort say which model answers and how hard it reasons. Callers pass both; a
 	// request with no Model runs on the runtime's default pair.
-	Model    string
-	Effort   string
-	Metadata map[string]string
+	Model  string
+	Effort string
+	// PromptSections replaces the fixed text of the system prompt. Only the evaluation harness sets
+	// it, to try a prompt variant; nil means prompt.Default, which every production request uses.
+	PromptSections *prompt.Sections
+	Metadata       map[string]string
+}
+
+// SystemPrompt renders the request's system prompt without memory and jobs.
+func (r RunRequest) SystemPrompt() string {
+	sections := prompt.Default
+	if r.PromptSections != nil {
+		sections = *r.PromptSections
+	}
+	return sections.System(!r.Tools.Empty(), r.Tools.Guidance, r.WebSearch)
 }
 
 // RunKind is what a request is for. A chat turn is never held up by more than the others' fair

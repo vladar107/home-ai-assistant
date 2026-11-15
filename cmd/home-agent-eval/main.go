@@ -149,12 +149,23 @@ func runSuite(ctx context.Context, args []string) error {
 	maxUsed := flags.Float64("max-used", eval.DefaultMaxUsedPercent, "refuse when any quota window is above this percent used")
 	results := flags.String("results", eval.DefaultResultsDir, "directory the run's result, report and cassettes are written under")
 	trials := flags.Int("trials", 0, "trials per case, replacing each case's own count")
+	variantName := flags.String("variant", "", "run under this prompt variant, evals/variants/<name>.json (default: production's prompt)")
+	variantsDir := flags.String("variants", "", "directory of variant files (default: variants/ beside the cases directory)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	profiles, err := prepareProfiles(*root, *envPath)
 	if err != nil {
 		return err
+	}
+	if *variantsDir == "" {
+		*variantsDir = filepath.Join(filepath.Dir(*casesDir), "variants")
+	}
+	var variant *eval.Variant
+	if *variantName != "" {
+		if variant, err = eval.LoadVariant(*variantsDir, *variantName); err != nil {
+			return err
+		}
 	}
 	env, err := eval.ReadEnvFile(*envPath)
 	if err != nil {
@@ -198,7 +209,7 @@ func runSuite(ctx context.Context, args []string) error {
 		Profiles: profiles, CasesDir: *casesDir, CaseIDs: caseIDs, Tags: tags, Trials: *trials,
 		Budget: *budget, MaxUsedPercent: *maxUsed, ResultsDir: *results,
 		ScanEnvPaths: []string{*envPath, filepath.Join(filepath.Dir(*envPath), "deploy", ".env.nas")},
-		ScanDirs:     []string{*casesDir, filepath.Join(filepath.Dir(*casesDir), "variants")},
+		ScanDirs:     []string{*casesDir, *variantsDir}, Variant: variant,
 		Pi: eval.PiOptions{
 			Binary: piBinary, NodeBinary: nodeBinary,
 			Provider: setting("HOME_AGENT_PI_PROVIDER"), WebSearchExtension: webSearch,

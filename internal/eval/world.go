@@ -101,6 +101,8 @@ type WorldOptions struct {
 	// Dir holds the temporary store and files; empty makes a temporary directory the world removes.
 	Dir    string
 	Logger *slog.Logger
+	// Variant is the prompt variant the world's turns run under; nil runs production's prompt.
+	Variant *Variant
 	// Configure may change the wiring inputs before the build, to plug in the fake of a connector
 	// the world does not serve itself.
 	Configure func(*wiring.Inputs) error
@@ -192,6 +194,7 @@ func NewWorld(ctx context.Context, c Case, options WorldOptions) (world *World, 
 		return nil, fmt.Errorf("bind the eval principal's model account: bound=%v: %w", bound, err)
 	}
 	w.Recorder = NewRecorder(options.Runtime)
+	w.Recorder.sections = options.Variant.promptSections()
 	inputs, err := w.inputs(principals, provider)
 	if err != nil {
 		return nil, err
@@ -206,6 +209,9 @@ func NewWorld(ctx context.Context, c Case, options WorldOptions) (world *World, 
 	}
 	if w.Assembly, err = wiring.Build(ctx, inputs); err != nil {
 		return nil, fmt.Errorf("build the world's wiring: %w", err)
+	}
+	if overrides := options.Variant.guidance(); len(overrides) > 0 {
+		w.Assembly.Tools.SetGuidanceOverrides(overrides)
 	}
 	if err := w.guard(func() error { return w.seedStore(ctx) }); err != nil {
 		return nil, err

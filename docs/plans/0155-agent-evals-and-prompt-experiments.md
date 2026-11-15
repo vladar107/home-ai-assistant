@@ -258,17 +258,26 @@ trials each; a Markdown report, run by hand from the operator's Mac.
   few cassettes the harness's own tests need are committed.
 - **Prompt variants are named overrides of the fixed sections.** `prompt.System`'s constants
   become fields of a `prompt.Sections` value with a `Default`; production uses `Default` and its
-  rendered bytes do not change, which the existing golden files prove. A variant file in
-  `evals/variants/` replaces named sections and may also set a model and effort; a later stage may
-  replace one connector's guidance by tool name. `RunRequest` gains an optional sections field
-  that only the harness sets.
+  rendered bytes do not change, which the existing golden files prove. A variant file
+  `evals/variants/<name>.json` has a `description`, and any of `sections` (section name to
+  replacement text, names checked against `prompt.SectionNames`; the closing secrecy sentence is
+  not replaceable), `tool_guidance` (the name of a tool to the text that replaces the guidance of
+  the connector offering it, write guidance included; names checked against the tools the planned
+  cases' worlds offer, before any model call), and `model` and `effort` (the run's defaults; a case
+  that pins its own keeps it). Most failures the first baseline found sit in tool guidance, so a
+  variant may change it as well as the fixed sections. Overrides reach the runtime only through the
+  harness: `RunRequest` gains an optional `PromptSections` field, which the eval recorder sets and
+  the Pi runtime reads through `RunRequest.SystemPrompt`, and the tool broker gains a guidance
+  override map that only the eval world sets. Production sets neither, so its bytes do not change.
+  A run records the variant's name, the SHA-256 of its file and the fingerprint.
 - **Variants do not break prompt caching.** The system prompt stays free of per-turn facts in
   every variant, and a run executes all trials of one variant before the next, so each variant
   warms its own cached prefix and production's prefix is never touched. A winning variant ships
   as an ordinary change to the defaults with its golden files, never as a runtime switch, and is
   never tried live on household users: their turns are too few to compare and are private.
 - **A prompt's identity is its fingerprint.** The harness records the SHA-256 of the rendered
-  system prompt without memory and jobs, the commit, the Pi version, the model and the effort with
+  system prompt without memory and jobs (the tools' guidance text is part of it, so a
+  guidance-only variant has its own fingerprint), the commit, the Pi version, the model and the effort with
   every run, so a trend line can be split where the prompt changed.
 - **Results stay local first.** A run writes a JSON result and a Markdown report to an ignored
   directory, and its rows to a local SQLite file (`runs`, `trials`, `checks`) on the machine that
@@ -407,14 +416,19 @@ they run one at a time in that order, each on top of the one before.
 
 8. **Prompt sections and variants** — Complex; depends on 5.
    - Task: `prompt.Sections` with `Default`, the optional sections field on `RunRequest` read by
-     the Pi runtime, variant files, the prompt fingerprint, and a `--variant` flag on the run
-     command.
+     the Pi runtime, a guidance override map on the tool broker that only the eval world sets,
+     variant files (sections, tool guidance, model and effort), the prompt fingerprint, a
+     `--variant` flag on the run command that records the variant's name, file hash and
+     fingerprint in `result.json` and the report, and one example variant,
+     `look-before-asking`, for the assistant asking for details it could find with its tools.
    - Files: `internal/prompt/system.go`, `internal/runtime/runtime.go`,
-     `internal/runtime/pi/runtime.go`, `internal/eval/variant.go`, `evals/variants/`,
-     `cmd/home-agent-eval/main.go`.
+     `internal/runtime/pi/runtime.go`, `internal/tools/broker.go`, `internal/eval/variant.go`,
+     `internal/eval/world.go`, `internal/eval/recorder.go`, `internal/eval/runner.go`,
+     `evals/variants/`, `cmd/home-agent-eval/main.go`.
    - Acceptance: every existing golden file is unchanged; the Pi fixture receives the variant's
-     prompt only when the harness sets one; the fingerprint changes with a section and not with
-     memory or jobs; trials of one variant all run before the next starts.
+     prompt only when the harness sets one; the fingerprint changes with a section or a tool's
+     guidance and not with memory or jobs; a variant naming a tool no planned world offers is
+     refused before a model call; trials of one variant all run before the next starts.
 9. **Local results store, trend and compare** — Complex; depends on 8.
    - Task: the SQLite file with runs, trials, checks and the operator's verdicts; `trend` (pass rate
      and `pass^k` per run, split by fingerprint, model and Pi version) and `compare` (the paired

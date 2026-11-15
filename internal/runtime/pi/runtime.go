@@ -244,7 +244,7 @@ func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink
 		return agentruntime.RunResult{}, fmt.Errorf("create Pi turn directory: %w", err)
 	}
 	defer os.RemoveAll(turnDir)
-	promptPath, err := writeSystemPrompt(turnDir, prompt.WithSections(prompt.System(!request.Tools.Empty(), request.Tools.Guidance, request.WebSearch), request.Memory, request.Jobs))
+	promptPath, err := writeSystemPrompt(turnDir, prompt.WithSections(request.SystemPrompt(), request.Memory, request.Jobs))
 	if err != nil {
 		return agentruntime.RunResult{}, err
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"sync"
 
+	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 )
 
@@ -30,6 +31,8 @@ type RunRecord struct {
 // for on a runtime.
 type Recorder struct {
 	inner agentruntime.AgentRuntime
+	// sections is the prompt variant every request carries; nil leaves production's prompt.
+	sections *prompt.Sections
 
 	mu   sync.Mutex
 	runs []RunRecord
@@ -54,6 +57,9 @@ func (r *Recorder) Since(mark int) []RunRecord {
 
 func (r *Recorder) Run(ctx context.Context, request agentruntime.RunRequest, sink agentruntime.EventSink) (agentruntime.RunResult, error) {
 	record := &runLog{}
+	if r.sections != nil {
+		request.PromptSections = r.sections
+	}
 	if request.Tools.Executor != nil {
 		request.Tools.Executor = &recordingExecutor{inner: request.Tools.Executor, log: record}
 	}

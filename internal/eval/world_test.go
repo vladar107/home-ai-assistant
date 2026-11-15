@@ -130,6 +130,12 @@ func newTestWorld(t *testing.T, config worldConfig, steps ...Step) testWorld {
 // newCaseWorld builds the world of a case over the scripted Pi fixture runtime.
 func newCaseWorld(t *testing.T, c Case, typeSafe string) testWorld {
 	t.Helper()
+	return newVariantWorld(t, c, typeSafe, nil)
+}
+
+// newVariantWorld is newCaseWorld with a prompt variant on the world's turns.
+func newVariantWorld(t *testing.T, c Case, typeSafe string, variant *Variant) testWorld {
+	t.Helper()
 	profiles := filepath.Join(t.TempDir(), "profiles")
 	directory := filepath.Join(profiles, PrincipalID)
 	if err := os.MkdirAll(directory, 0o700); err != nil {
@@ -153,7 +159,7 @@ func newCaseWorld(t *testing.T, c Case, typeSafe string) testWorld {
 	}
 	options := WorldOptions{
 		Runtime: scripted{runtime}, ProfilesDir: profiles, AccountID: testAccount, StepTimeout: 30 * time.Second,
-		ChatModel: agentruntime.ModelEffort{Model: "gpt-test", Effort: agentruntime.DefaultEffort},
+		ChatModel: agentruntime.ModelEffort{Model: "gpt-test", Effort: agentruntime.DefaultEffort}, Variant: variant,
 	}
 	if typeSafe != "" {
 		options.TypeSafe = judgment.Config{APIKey: testTypeSafe, Endpoint: typeSafe}

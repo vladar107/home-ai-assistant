@@ -164,6 +164,8 @@ type Broker struct {
 	telemetry Telemetry
 	outcomes  OutcomeRecorder
 	switches  integration.SwitchReader
+
+	guidanceOverrides map[string]string
 }
 
 func NewBroker(logger *slog.Logger) (*Broker, error) {
@@ -231,6 +233,13 @@ func (b *Broker) SetOutcomes(recorder OutcomeRecorder) {
 	b.outcomes = recorder
 }
 
+// SetGuidanceOverrides replaces the guidance of the provider that offers a named tool with the
+// text given for that name; the provider's write guidance is dropped with it. Only the evaluation
+// harness calls it, to try a guidance variant; production never does, so its guidance is unchanged.
+func (b *Broker) SetGuidanceOverrides(overrides map[string]string) {
+	b.guidanceOverrides = overrides
+}
+
 // SetScreener sets who screens results of tools marked Screen, at wiring time before turns start.
 func (b *Broker) SetScreener(screener Screener) {
 	b.screener = screener
@@ -273,6 +282,7 @@ func (b *Broker) toolsFor(ctx context.Context, principalID string, readOnly bool
 			return agentruntime.ToolSet{}, fmt.Errorf("collect tool contribution: %w", err)
 		}
 		offered := 0
+		override, overridden := "", false
 		for _, definition := range contribution.Definitions {
 			if err := validateDefinition(definition); err != nil {
 				return agentruntime.ToolSet{}, err
@@ -281,6 +291,9 @@ func (b *Broker) toolsFor(ctx context.Context, principalID string, readOnly bool
 				continue
 			}
 			offered++
+			if text, ok := b.guidanceOverrides[definition.Name]; ok && !overridden {
+				override, overridden = text, true
+			}
 			if _, exists := executor.bindings[definition.Name]; exists {
 				return agentruntime.ToolSet{}, fmt.Errorf("tool %q is contributed twice", definition.Name)
 			}
@@ -296,6 +309,12 @@ func (b *Broker) toolsFor(ctx context.Context, principalID string, readOnly bool
 			if definition.Activity != "" {
 				activities[definition.Name] = definition.Activity
 			}
+		}
+		if overridden {
+			if text := strings.TrimSpace(override); text != "" {
+				guidance = append(guidance, text)
+			}
+			continue
 		}
 		if text := strings.TrimSpace(contribution.Guidance); text != "" && offered > 0 {
 			guidance = append(guidance, text)

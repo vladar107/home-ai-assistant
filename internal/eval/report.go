@@ -126,13 +126,15 @@ type Result struct {
 	ReportedModels []string `json:"reported_models,omitempty"`
 	// PromptFingerprint is the SHA-256 of the sorted distinct system prompts of the run, each
 	// rendered without memory and jobs; PromptFingerprints lists those prompts' own hashes.
-	PromptFingerprint  string                   `json:"prompt_fingerprint,omitempty"`
-	PromptFingerprints []string                 `json:"prompt_fingerprints,omitempty"`
-	Replayed           bool                     `json:"replayed,omitempty"`
-	Budget             int                      `json:"budget"`
-	ModelCalls         int                      `json:"model_calls"`
-	Tokens             agentruntime.TokenCounts `json:"tokens"`
-	QuotaBefore        []WindowUsage            `json:"quota_before,omitempty"`
+	PromptFingerprint  string   `json:"prompt_fingerprint,omitempty"`
+	PromptFingerprints []string `json:"prompt_fingerprints,omitempty"`
+	Replayed           bool     `json:"replayed,omitempty"`
+	// Variant names the prompt variant the run tried; nil is production's prompt.
+	Variant     *VariantInfo             `json:"variant,omitempty"`
+	Budget      int                      `json:"budget"`
+	ModelCalls  int                      `json:"model_calls"`
+	Tokens      agentruntime.TokenCounts `json:"tokens"`
+	QuotaBefore []WindowUsage            `json:"quota_before,omitempty"`
 	// RunLog names the file of warn-and-above runtime records beside the report; empty when none.
 	RunLog        string       `json:"run_log,omitempty"`
 	Stopped       string       `json:"stopped,omitempty"`
@@ -240,6 +242,11 @@ func (r *Result) Markdown() string {
 	}
 	if r.PromptFingerprint != "" {
 		fmt.Fprintf(&b, "- Prompt fingerprint: `%s` (system prompts without memory and jobs: %d)\n", r.PromptFingerprint, len(r.PromptFingerprints))
+	}
+	if r.Variant != nil {
+		fmt.Fprintf(&b, "- Variant: `%s` (file SHA-256 `%s`): %s\n", r.Variant.Name, r.Variant.SHA256, r.Variant.Description)
+	} else {
+		b.WriteString("- Variant: none (production's prompt)\n")
 	}
 	fmt.Fprintf(&b, "- Commit: %s\n", r.Commit)
 	if r.RunLog != "" {
