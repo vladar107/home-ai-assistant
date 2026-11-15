@@ -50,6 +50,28 @@ neutral names, places and data, never a real message, trace, memory or device.
   - `routes`: `[{"name", "days": ["mon"], "arrive_by", "legs": [{"mode", "minutes", "from", "to",
     "via", "stop", "line", "towards", "departures"}]}]`
   - `places`: `[{"name", "lat", "lon", "radius_m"}]` (saved places)
+  - Connector fakes: each section is the seed of a loopback fake, decoded strictly by the fake
+    (the full shape and an example are in the fake's package doc under `internal/testutil/`). A
+    connector whose section the case lacks stays unconfigured, so its tools are not offered, and
+    a case may name only tools its world offers (CI checks every case). Names and data are made up:
+    - `trains` (`nssim`): `{"stations": [{"code": "EBK", "name": "Eastbrook Centraal"}], "trips", "departures", "disruptions", "ovfiets"}`;
+      trips, departures and disruptions are the objects the NS API returns
+    - `buses` (`bussim`): `{"stops": [{"id", "code", "name", "lat", "lon"}], "routes", "timing_points", "alerts", "places", "plans"}`
+    - `weather` (`weathersim`): `{"places": [{"name": "Eastbrook", "latitude", "longitude", "timezone"}], "forecasts": [{"latitude", "longitude", "current", "days", "hours"}]}`
+    - `pages` (`pagesim`): `{"pages": [{"host": "news.example", "path": "/market", "title", "body", "status", "redirect_to", "timeout"}]}`;
+      `weather` and `pages` both configure the web connector, and only the seeded hosts resolve
+    - `places_search` (`placessim`): `{"elements": [{"lat", "lon", "tags": {"amenity": "pharmacy", "name"}}], "reverse": [{"lat", "lon", "street", "areas"}]}`;
+      it serves nearby-place search and the reverse geocoding that names a shared location. The
+      name `places` stays the saved places above, and either section turns shared locations on
+    - `flights` (`flightssim`): `{"flights": [{"number": "EX123", "date": "2026-03-10", "status", "departure", "arrival"}]}`
+    - `monitoring` (`grafanasim`): `{"dashboards", "metrics", "logs", "rules", "annotations"}`
+    - `nas` (`nassim`): `{"roots": [{"name": "home", "files": {"Documents/notes.md": "text"}, "folders", "writable"}], "default_write"}`
+    - `home` (`homesim`): `{"entities": [{"entity_id", "name", "state", "area", "exposed", "statistics"}], "tools": [{"name", "answer", "effects"}], "services"}`;
+      the fake runs on the case's clock, and the home tools are offered only when this section exists
+    - `mcp`: an object from a catalogue server name (lowercase letters and digits) to its seed
+      (`mcpsim`): `{"kitchen": {"tools": [{"name": "lookup_recipe", "input_schema", "text", "answers": [{"arguments": {"dish": "soup"}, "text"}]}]}}`;
+      the tools are offered as `mcp_<server>_<tool>`, and each server is switched on for the user
+      unless `user.switches` sets `mcp-<server>` to false
 - `steps`: at least one, played in one session. A step has exactly one action: `say` (text),
   `confirm: true`, `reject: true`, `thumbs_down: true` (the last three act on the previous turn
   and cannot start a case), or `run_job` (id of a scheduled job in the world).

@@ -1,0 +1,24 @@
+{
+  "id": "offered-home-mcp",
+  "title": "Home and catalogue tools are offered when the world defines them",
+  "kind": "happy",
+  "clock": {"local": "2026-03-10T08:30", "zone": "Europe/Amsterdam"},
+  "world": {
+    "home": {
+      "entities": [{"entity_id": "light.study_lamp", "name": "Study lamp", "state": "off", "area": "Study", "exposed": true}],
+      "tools": [{"name": "intent__HassTurnOn", "description": "Turns on a device.", "answer": "Turned on."}]
+    },
+    "mcp": {
+      "kitchen": {"tools": [{"name": "lookup_recipe", "description": "Finds a recipe.", "text": "No recipe found."}]}
+    }
+  },
+  "steps": [
+    {
+      "say": "Turn on the study lamp and find me a soup recipe.",
+      "expect": {
+        "calls": [{"tool": "ha_turn_on"}, {"tool": "mcp_kitchen_lookup_recipe"}],
+        "proposals": {"tools": ["ha_turn_on"]}
+      }
+    }
+  ]
+}

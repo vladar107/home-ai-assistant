@@ -1,0 +1,13 @@
+{
+  "id": "offered-plain",
+  "title": "A case without a world offers the core tools",
+  "kind": "happy",
+  "clock": {"local": "2026-03-10T08:30", "zone": "Europe/Amsterdam"},
+  "world": {},
+  "steps": [
+    {
+      "say": "Remind me tomorrow at 9 to call the dentist.",
+      "expect": {"calls": [{"tool": "reminder_set"}], "not_called": ["reminder_cancel"]}
+    }
+  ]
+}

@@ -109,6 +109,27 @@ type worldConfig struct {
 
 func newTestWorld(t *testing.T, config worldConfig, steps ...Step) testWorld {
 	t.Helper()
+	world := map[string]json.RawMessage{}
+	for name, section := range config.sections {
+		raw, err := json.Marshal(section)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := DefaultRegistry.worlds[name](raw); err != nil {
+			t.Fatalf("world.%s: %v", name, err)
+		}
+		world[name] = raw
+	}
+	c := Case{
+		ID: "world-test", Title: "World test", Kind: KindHappy, Clock: Clock{Local: clockLocal, Zone: clockZone},
+		User: config.user, World: world, Steps: steps, Trials: 1,
+	}
+	return newCaseWorld(t, c, config.typeSafe)
+}
+
+// newCaseWorld builds the world of a case over the scripted Pi fixture runtime.
+func newCaseWorld(t *testing.T, c Case, typeSafe string) testWorld {
+	t.Helper()
 	profiles := filepath.Join(t.TempDir(), "profiles")
 	directory := filepath.Join(profiles, PrincipalID)
 	if err := os.MkdirAll(directory, 0o700); err != nil {
@@ -130,27 +151,12 @@ func newTestWorld(t *testing.T, config worldConfig, steps ...Step) testWorld {
 	if err != nil {
 		t.Fatal(err)
 	}
-	world := map[string]json.RawMessage{}
-	for name, section := range config.sections {
-		raw, err := json.Marshal(section)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := DefaultRegistry.worlds[name](raw); err != nil {
-			t.Fatalf("world.%s: %v", name, err)
-		}
-		world[name] = raw
-	}
-	c := Case{
-		ID: "world-test", Title: "World test", Kind: KindHappy, Clock: Clock{Local: clockLocal, Zone: clockZone},
-		User: config.user, World: world, Steps: steps, Trials: 1,
-	}
 	options := WorldOptions{
 		Runtime: scripted{runtime}, ProfilesDir: profiles, AccountID: testAccount, StepTimeout: 30 * time.Second,
 		ChatModel: agentruntime.ModelEffort{Model: "gpt-test", Effort: agentruntime.DefaultEffort},
 	}
-	if config.typeSafe != "" {
-		options.TypeSafe = judgment.Config{APIKey: testTypeSafe, Endpoint: config.typeSafe}
+	if typeSafe != "" {
+		options.TypeSafe = judgment.Config{APIKey: testTypeSafe, Endpoint: typeSafe}
 	}
 	w, err := NewWorld(t.Context(), c, options)
 	if err != nil {

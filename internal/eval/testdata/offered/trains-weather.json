@@ -1,0 +1,25 @@
+{
+  "id": "offered-trains-weather",
+  "title": "Train and weather tools are offered when the world seeds them",
+  "kind": "happy",
+  "clock": {"local": "2026-03-10T08:30", "zone": "Europe/Amsterdam"},
+  "user": {"name": "Sam"},
+  "world": {
+    "trains": {
+      "stations": [{"code": "EBK", "name": "Eastbrook Centraal"}, {"code": "WFD", "name": "Westfield"}]
+    },
+    "weather": {
+      "places": [{"name": "Eastbrook", "latitude": 52.1, "longitude": 5.1, "country": "Netherlands",
+        "country_code": "NL", "timezone": "Europe/Amsterdam"}]
+    }
+  },
+  "steps": [
+    {
+      "say": "When is the next train from Eastbrook to Westfield, and will it rain?",
+      "expect": {
+        "calls": [{"tool": "ns_trips"}, {"tool": "weather_forecast"}],
+        "not_called": ["fetch_page"]
+      }
+    }
+  ]
+}

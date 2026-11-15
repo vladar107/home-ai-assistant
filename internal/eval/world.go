@@ -23,7 +23,6 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/gmail"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/google"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/notion"
-	"github.com/vladar107/home-ai-assistant/internal/connectors/places"
 	"github.com/vladar107/home-ai-assistant/internal/conversation/history"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/integration"
@@ -126,6 +125,10 @@ type World struct {
 	ownsDir   bool
 	reporter  *reporter
 	jobIDs    map[string]string
+	closers   []func()
+	// defaultSwitches are integrations the world's own fakes switch on for the principal, below
+	// the case's user.switches.
+	defaultSwitches []string
 
 	mu         sync.Mutex
 	counter    int64
@@ -220,6 +223,10 @@ func (w *World) chatSteps() []wiring.Step {
 		if slices.Contains(wanted, step.Name) {
 			steps = append(steps, step)
 		}
+	}
+	// The MCP connector lists its servers' tools only once it runs.
+	if w.Assembly.MCP != nil {
+		steps = append(steps, wiring.Step{Name: "mcp connector", Start: w.Assembly.MCP.Start, Shutdown: w.Assembly.MCP.Shutdown})
 	}
 	return steps
 }
@@ -396,15 +403,10 @@ func (w *World) seedFakes(in *wiring.Inputs) error {
 		}
 		in.Notion = &notion.Config{APIBaseURL: sim.URL(), HTTPClient: sim.Client()}
 	}
-	if _, has := w.Case.World[SectionPlaces]; has {
-		in.Core.Location = &wiring.LocationConfig{
-			Policy:        userlocation.Policy{PinTTL: time.Hour, LiveSilence: time.Hour, LiveGrace: 15 * time.Minute},
-			PruneInterval: time.Hour,
-			// Nothing serves reverse geocoding yet, so naming a shared location fails fast.
-			Places: placesConfig("http://127.0.0.1:1"),
-		}
+	if err := w.seedPlaces(in); err != nil {
+		return err
 	}
-	return nil
+	return w.seedConnectorFakes(in)
 }
 
 func (w *World) calendarEvent(e calendarEvent) (calendarsim.Event, error) {
@@ -440,6 +442,9 @@ func (w *World) seedStore(ctx context.Context) error {
 		}
 	}
 	switches := map[string]bool{}
+	for _, name := range w.defaultSwitches {
+		switches[name] = true
+	}
 	if w.options.TypeSafe.APIKey != "" {
 		switches[judgment.OptInSwitch.Integration] = true
 	}
@@ -630,6 +635,10 @@ func (w *World) Close() error {
 	if w.Store != nil {
 		errs = append(errs, w.Store.Close())
 	}
+	for _, closer := range slices.Backward(w.closers) {
+		closer()
+	}
+	w.closers = nil
 	w.reporter.mu.Lock()
 	cleanups, served := w.reporter.cleanups, w.reporter.errs
 	w.reporter.cleanups = nil
@@ -658,10 +667,6 @@ func gmailConfig(sim *googlesim.Simulator) gmail.Config {
 // calendarConfig leaves the calendar API unreachable until a calendar section serves it.
 func calendarConfig(location *time.Location) calendar.Config {
 	return calendar.Config{Location: location, APIBaseURL: "http://127.0.0.1:1"}
-}
-
-func placesConfig(reverseGeocoding string) places.Config {
-	return places.Config{TransitousURL: reverseGeocoding}
 }
 
 func cutPrefix(s, prefix string) (string, bool) { return strings.CutPrefix(s, prefix) }
