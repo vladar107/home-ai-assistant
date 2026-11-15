@@ -16,7 +16,7 @@ import (
 const (
 	defaultPiBinary             = "pi"
 	defaultPiProvider           = "openai-codex"
-	defaultPiVersion            = "1.0.0"
+	DefaultPiVersion            = "1.0.0"
 	defaultPiTaskModel          = "gpt-6.1-sol:medium"
 	defaultPiHeadsUpModel       = "gpt-6.1-sol:high"
 	defaultPiWebSearchExtension = "/usr/local/lib/home-agent/pi-web-search/src/index.ts"
@@ -50,7 +50,7 @@ func defaultConversationConfig() ConversationConfig {
 	return ConversationConfig{
 		PiBinary:             defaultPiBinary,
 		PiProvider:           defaultPiProvider,
-		PiVersion:            defaultPiVersion,
+		PiVersion:            DefaultPiVersion,
 		PiWebSearchExtension: defaultPiWebSearchExtension,
 		TurnTimeout:          defaultConversationTimeout,
 		ScheduledTurnTimeout: defaultScheduledTimeout,
@@ -82,7 +82,7 @@ func loadConversationConfig(cfg *ConversationConfig) error {
 	if cfg.PiHeadsUpModel, err = parseModelSetting("HOME_AGENT_PI_HEADSUP_MODEL", envOrDefault("HOME_AGENT_PI_HEADSUP_MODEL", defaultPiHeadsUpModel)); err != nil {
 		return err
 	}
-	cfg.PiVersion = envOrDefault("HOME_AGENT_PI_VERSION", defaultPiVersion)
+	cfg.PiVersion = envOrDefault("HOME_AGENT_PI_VERSION", DefaultPiVersion)
 	cfg.PiWebSearchExtension = envOrDefault("HOME_AGENT_PI_WEB_SEARCH_EXTENSION", defaultPiWebSearchExtension)
 
 	if value := os.Getenv("HOME_AGENT_CONVERSATION_TURN_TIMEOUT"); value != "" {

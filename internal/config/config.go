@@ -13,7 +13,7 @@ import (
 const (
 	defaultListenAddress   = "127.0.0.1:8080"
 	defaultShutdownTimeout = 10 * time.Second
-	defaultDataDir         = "./data"
+	DefaultDataDir         = "./data"
 	defaultTimezone        = "Europe/Amsterdam"
 	databaseFilename       = "home-agent.db"
 )
@@ -53,7 +53,7 @@ func Load() (Config, error) {
 	cfg := Config{
 		ListenAddress:   envOrDefault("HOME_AGENT_LISTEN_ADDRESS", defaultListenAddress),
 		ShutdownTimeout: defaultShutdownTimeout,
-		DataDir:         envOrDefault("HOME_AGENT_DATA_DIR", defaultDataDir),
+		DataDir:         envOrDefault("HOME_AGENT_DATA_DIR", DefaultDataDir),
 		Timezone:        envOrDefault("HOME_AGENT_TIMEZONE", defaultTimezone),
 		Telegram:        defaultTelegramConfig(),
 		Conversation:    defaultConversationConfig(),
