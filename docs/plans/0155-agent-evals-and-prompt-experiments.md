@@ -85,7 +85,7 @@ are a few dozen lines.
 The operator runs one command that plays a suite of synthetic cases through the real turn path
 on a real model and gets a report: which cases passed, how reliably, and how this run compares
 with the last one or with another prompt variant, with an honest interval. Later the same suite
-runs weekly on its own, and its pass rates show as a trend in Grafana. Choosing between prompt
+runs weekly at a scheduled reminder, and its pass rates show as a trend in Grafana. Choosing between prompt
 wordings becomes reading a comparison, not a few live replies.
 
 Success for the first stage: about forty cases covering every failure kind the history review
@@ -287,15 +287,23 @@ trials each; a Markdown report, run by hand from the operator's Mac.
   difference with its standard error and 95% interval, and the cases that got better or worse. When
   the interval includes zero the report says no difference was detected, and how large a difference
   the suite could have detected. Tokens and model calls per trial are compared too.
-- **The judge is a no-tools Pi run on the same eval profile,** on a model different from the one
-  under test when the subscription offers one. It answers each rubric question with reasoning,
-  then `yes`, `no` or `unknown`. A pairwise comparison of two variants' replies asks twice, with
-  the order swapped, and counts only agreeing verdicts. The judge is trusted for a question only
-  after the operator labels a sample of replies and the agreement report clears a threshold.
-- **The weekly run comes last,** after the suite is stable. It runs the regression suite against
-  the default prompt on the current release, on the dedicated eval profile only, and exports each
-  run's pass rate, `pass^k` and cost as metrics through the existing OTLP exporter, with a panel
-  in the monitoring repository's dashboard.
+- **The judge is a no-tools Pi run on the same eval profile,** on `gpt-6-sol` by default, a
+  different model from the one under test (`gpt-6-luna`); a flag may name another, and a judge
+  on the same model as the trial it grades is refused. Jev does not judge, so the judge never
+  shares a model with the safety checks it may be grading. It answers each rubric question with
+  reasoning, then `yes`, `no` or `unknown`. A pairwise comparison of two variants' replies asks
+  twice, with the order swapped, and counts only agreeing verdicts. The judge is trusted for a
+  question only after the operator labels a sample of replies and the agreement report clears a
+  threshold.
+- **The weekly run comes last,** after the suite is stable. The operator starts it by hand on
+  their Mac with the eval profile there; a remote scheduled routine reminds them weekly with the
+  current commands, and nothing on the Mac is scheduled. It runs the regression suite against the
+  default prompt on the current release, on the dedicated eval profile only. The Mac cannot reach
+  the collector from a Go binary (the operating system's local network privacy blocks it, and the
+  collector publishes no port), so the harness writes the run's pass rate, `pass^k`, happy-path
+  rate and cost as an OTLP/JSON metrics file, and a small script posts it with the system `curl`
+  to an authenticated route the home edge adds in front of the collector's OTLP HTTP receiver. A
+  panel in the monitoring repository's dashboard shows the trend.
 
 ## Approach
 
@@ -464,17 +472,23 @@ they run one at a time in that order, each on top of the one before.
    - Files: `internal/eval/judge.go`, `cmd/home-agent-eval/main.go`.
    - Acceptance: with the Pi fixture, a swapped pair that disagrees counts as no verdict; a
      question below the agreement threshold is reported but does not decide a trial.
-12. **Weekly run and Grafana** — Complex; depends on 9 and on the weekly-run location question
-    below.
-    - Task: run the regression suite weekly on the dedicated eval profile, export pass rate,
-      `pass^k`, tokens and the fingerprint's short form as metrics, and add a panel to the
-      monitoring repository's dashboard.
-    - Files: depends on the answer; `internal/observability/telemetry.go` for the metrics either
-      way, and the dashboard in the monitoring repository. On the NAS it also needs the harness
-      in the image or a container of its own, the deploy files, and an interactive device login
-      of the eval profile there; those files are named once the question is answered.
-    - Acceptance: two runs a week apart show as two points in the panel, and a fingerprint change
-      is visible on it; the run refuses to start on any profile but the eval profile.
+12. **Weekly run and Grafana** — Complex; depends on 9.
+    - Task: an `export` command that writes a finished regression run as an OTLP/JSON metrics
+      file: pass rate, `pass^k`, happy-path rate, tokens and model calls, labelled with the
+      fingerprint's short form, model, effort and Pi version. It refuses a variant run, a replayed
+      run and a run on any profile but the eval profile. A script reads the route's token from the
+      Keychain and posts the file with `/usr/bin/curl`. Outside this repository: the monitoring
+      repository's collector accepts OTLP over HTTP with that token, the home edge adds an
+      authenticated route to it, and the dashboard gains a panel that draws each run as a point.
+      The operator runs the suite and the script by hand once a week; the remote routine
+      reminds them.
+    - Files: `internal/eval/export.go`, `cmd/home-agent-eval/main.go`, `scripts/eval-push-metrics`,
+      `docs/architecture.md`; the collector and dashboard in the monitoring repository and the
+      route in the home edge's configuration.
+    - Acceptance: against a loopback OTLP receiver the exported file is accepted and carries every
+      metric and label; a variant or replayed run is refused; two runs a week apart show as two
+      points in the panel, and a fingerprint change is visible on it; the push without the token
+      is rejected by the route.
 
 ## Files affected
 
@@ -487,7 +501,8 @@ they run one at a time in that order, each on top of the one before.
   (the exported Pi version default, stage 1)
 - `internal/prompt/system.go`, `internal/runtime/runtime.go`, `internal/runtime/pi/runtime.go`
   (stage 2)
-- `internal/observability/telemetry.go` and the monitoring repository's dashboard (stage 3)
+- `scripts/eval-push-metrics`, and outside this repository the monitoring repository's collector
+  and dashboard and the home edge's route (stage 3)
 - `.gitignore`, `docs/architecture.md`, `docs/plans/README.md`
 
 ## Validation
@@ -525,11 +540,7 @@ they run one at a time in that order, each on top of the one before.
   outcome also depends on TypeSafe's answers, which may change without a commit here. The report
   marks the trials that ran with them, and a comparison of prompt variants can turn them off by
   case when it needs to isolate the prompt.
-- Open questions for the operator, decided after stage 2:
-  1. Where does the weekly run happen: on the NAS, as a separate run of the harness with its own
-     eval profile directory beside the application's data, or on the Mac on a schedule, pushing
-     metrics? Either way it uses the dedicated eval profile only. Recommendation: the NAS, which
-     is always on and already has the pinned Pi and the OTLP collector.
-  2. Which model judges, and may Jev judge simple yes/no questions? Recommendation: a different
-     model on the same subscription through Pi; keep Jev out of judging, so the judge does not
-     share a model with the safety checks it may be grading.
+- Questions decided with the operator after stage 2: the weekly run happens on the Mac, started
+  by hand, not on the NAS; the judge is `gpt-6-sol` through Pi, and Jev does not judge.
+- **A weekly run started by hand can be skipped.** The trend has gaps when the operator misses a
+  week; the panel draws points, not a continuous line, so a gap shows as a gap.
