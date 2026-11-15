@@ -668,3 +668,49 @@ func TestMovieGuidanceSendsFilmChangesThroughTheMovieTools(t *testing.T) {
 		t.Fatalf("write guidance still forbids updating movie rows: %s", contribution.WriteGuidance)
 	}
 }
+
+func TestMovieWritesFindTheTableThemselvesWhenGivenNoID(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	shareNonMovieDataSource(f, "ds-recipes", "Рецепты")
+	shareMovieTable(f)
+	f.enableWrites()
+	f.contribute()
+
+	f.displayNames["alice"] = "Victor"
+	if result := f.execute("movies_set_score", `{"film":"Кит","score":7.5}`); result.IsError || !strings.Contains(result.Text, "column В") {
+		t.Fatalf("score without an ID = %+v", result)
+	}
+	if pageID, properties := proposedProperties(t, f.proposal()); pageID != "row-whale" || proposedText(t, properties, "В", "rich_text") != "7.5" {
+		t.Fatalf("score proposal = %s %+v", pageID, properties)
+	}
+	if result := f.execute("movies_schedule", `{"film":"Паразиты"}`); result.IsError {
+		t.Fatalf("schedule without an ID = %+v", result)
+	}
+}
+
+func TestNextMovieNamesTheLatestEveningAndAFilmsOwnRow(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	shareMovieTable(f)
+	f.contribute()
+	*f.now = time.Date(2026, time.October, 3, 12, 0, 0, 0, f.now.Location())
+
+	next := f.execute("movies_next", `{"data_source_id":"ds-films"}`)
+	if want := "The latest was Дюна on 26.09.2026 (Saturday), picked by В."; next.IsError || !strings.Contains(next.Text, want) {
+		t.Fatalf("next movie = %+v, want %q", next, want)
+	}
+
+	named := f.execute("movies_next", `{"film":"дюна"}`)
+	if want := "Film Дюна: on 26.09.2026 (Saturday), picked by В, scores В: 8."; named.IsError || !strings.Contains(named.Text, want) {
+		t.Fatalf("named film = %+v, want %q", named, want)
+	}
+	undated := f.execute("movies_next", `{"film":"Паразиты"}`)
+	if want := "Film Паразиты: no date yet, picked by В, no scores yet."; undated.IsError || !strings.Contains(undated.Text, want) {
+		t.Fatalf("undated film = %+v, want %q", undated, want)
+	}
+	missing := f.execute("movies_next", `{"film":"Кит 2"}`)
+	if want := `The movie table has no film "Кит 2"; similar titles are Кит.`; missing.IsError || !strings.Contains(missing.Text, want) {
+		t.Fatalf("missing film = %+v, want %q", missing, want)
+	}
+}

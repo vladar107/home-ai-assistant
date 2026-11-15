@@ -33,6 +33,7 @@ const (
 
 const movieGuidance = " Movie nights live in a Notion table whose title column holds the evening's date as DD.MM.YYYY and whose Фильм column holds the film. " +
 	"For that table use movies_next to answer which film is next, never by reading the rows yourself; call it without data_source_id unless you already have the table's ID. " +
+	"A film the user names is looked up with movies_next and its film argument before searching elsewhere. " +
 	"Each single-letter column of numbers holds the scores of the household member whose name starts with that letter, a Latin and a Cyrillic form of a letter counting as the same, so the user's own scores are in the column of their initial."
 
 const movieWriteGuidance = " For the movie table, movies_add adds films to the user's next turns, movies_schedule gives films that have no date their evening dates, and movies_set_score records the user's own score in their own column. " +
@@ -44,13 +45,14 @@ const movieWriteGuidance = " For the movie table, movies_add adds films to the u
 var movieReadDefinitions = []tools.Definition{
 	{
 		Name:        toolMoviesNext,
-		Description: "Find the next movie night in the movie table: the evening with the earliest date on or after today, its film, who picked it, and whose turn it is when it has no film yet.",
+		Description: "Find the next movie night in the movie table: the evening with the earliest date on or after today, its film, who picked it, and whose turn it is when it has no film yet. With film, it also reports that film's own row: its date, picker and scores.",
 		Risk:        tools.RiskRead,
 		Activity:    tools.ActivityNotion,
 		Private:     true,
 		ThirdParty:  true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
-			`"data_source_id":{"type":"string","description":"The movie table's data source or database ID from an earlier result. May be omitted: the table is then found among the shared data sources."}},` +
+			`"data_source_id":{"type":"string","description":"The movie table's data source or database ID from an earlier result. May be omitted: the table is then found among the shared data sources."},` +
+			`"film":{"type":"string","description":"A film title as the Фильм column spells it; the result then also reports that film's own row."}},` +
 			`"additionalProperties":false}`),
 	},
 }
@@ -64,25 +66,26 @@ var movieWriteDefinitions = []tools.Definition{
 		Private:     true,
 		Timeout:     updateTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
-			`"data_source_id":{"type":"string","description":"The movie table's data source or database ID from an earlier result."},` +
+			`"data_source_id":{"type":"string","description":"The movie table's data source or database ID from an earlier result. May be omitted: the table is then found among the shared data sources."},` +
 			`"film":{"type":"string","description":"The film title as the Фильм column spells it."},` +
 			`"score":{"type":"number","minimum":0,"maximum":10,"description":"The score from 0 to 10, in steps of 0.5."}},` +
-			`"required":["data_source_id","film","score"],"additionalProperties":false}`),
+			`"required":["film","score"],"additionalProperties":false}`),
 	},
 	{
 		Name: toolMoviesSchedule,
 		Description: "Set evening dates in the movie table. Without film, every film without a date goes to its picker's next turn after the latest date, in table order, with an empty reserved evening added for each turn of the other picker in between. " +
 			"With film, only that film is scheduled: on date when given, otherwise in its picker's next turn after the latest other date. " +
-			"A call that adds evenings is proposed as one batch for the user to confirm; a call that only sets dates is written at once when the user asked for it in a conversation that has read no outside content, and is otherwise proposed.",
+			"A call that adds evenings is proposed as one batch for the user to confirm; a call that only sets dates is written at once when the user asked for it in a conversation that has read no outside content, and is otherwise proposed. " +
+			"To move evenings that already have dates, such as shifting every evening by a week, update their rows with notion_update_page, not this tool.",
 		Risk:     tools.RiskWrite,
 		Activity: tools.ActivityNotion,
 		Private:  true,
 		Timeout:  updateTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
-			`"data_source_id":{"type":"string","description":"The movie table's data source or database ID from an earlier result."},` +
+			`"data_source_id":{"type":"string","description":"The movie table's data source or database ID from an earlier result. May be omitted: the table is then found among the shared data sources."},` +
 			`"film":{"type":"string","description":"Schedule only this film, as the Фильм column spells it."},` +
 			`"date":{"type":"string","description":"A specific evening date as YYYY-MM-DD; requires film."}},` +
-			`"required":["data_source_id"],"additionalProperties":false}`),
+			`"additionalProperties":false}`),
 	},
 	{
 		Name: toolMoviesAdd,
@@ -93,10 +96,10 @@ var movieWriteDefinitions = []tools.Definition{
 		Private:  true,
 		Timeout:  updateTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
-			`"data_source_id":{"type":"string","description":"The movie table's data source or database ID from an earlier result."},` +
+			`"data_source_id":{"type":"string","description":"The movie table's data source or database ID from an earlier result. May be omitted: the table is then found among the shared data sources."},` +
 			`"films":{"type":"array","minItems":1,"items":{"type":"string","minLength":1},"description":"The film titles, in the order they should be watched, each at most once."},` +
 			`"picker":{"type":"string","description":"The initial of the household member who picks these films; defaults to the current user."}},` +
-			`"required":["data_source_id","films"],"additionalProperties":false}`),
+			`"required":["films"],"additionalProperties":false}`),
 	},
 }
 
@@ -132,9 +135,6 @@ func (s *Service) movies(ctx context.Context, principalID, token string, call to
 	}
 	if err := tools.DecodeArguments(call.Arguments, &arguments); err != nil {
 		return "", err
-	}
-	if strings.TrimSpace(arguments.DataSourceID) == "" && call.Name != toolMoviesNext {
-		return "", fmt.Errorf("data_source_id is required")
 	}
 	film := strings.TrimSpace(arguments.Film)
 	switch call.Name {
@@ -188,9 +188,9 @@ func (s *Service) movies(ctx context.Context, principalID, token string, call to
 	case toolMoviesNext:
 		if discovered {
 			// The writes still need the ID, and this call is what spared the model a search for it.
-			return s.nextMovie(table) + "\nThe movie table's data_source_id is " + dataSourceID + ".", nil
+			return s.nextMovie(table, film) + "\nThe movie table's data_source_id is " + dataSourceID + ".", nil
 		}
-		return s.nextMovie(table), nil
+		return s.nextMovie(table, film), nil
 	case toolMoviesSetScore:
 		return s.proposeScore(ctx, principalID, token, table, film, *arguments.Score)
 	case toolMoviesAdd:
@@ -367,7 +367,7 @@ func (t movieTable) numericColumn(column string) bool {
 	return true
 }
 
-func (s *Service) nextMovie(table movieTable) string {
+func (s *Service) nextMovie(table movieTable, film string) string {
 	today := s.today()
 	var next, latest *movieRow
 	for i := range table.rows {
@@ -401,6 +401,13 @@ func (s *Service) nextMovie(table movieTable) string {
 		}
 		fmt.Fprintf(&builder, ". Row: %s", next.page.URL)
 	}
+	if next != nil && latest != nil {
+		fmt.Fprintf(&builder, "\nThe latest was %s on %s", movieFilm(*latest), movieDay(latest.date))
+		if picker := table.picker(*latest); picker != "" {
+			fmt.Fprintf(&builder, ", picked by %s", picker)
+		}
+		builder.WriteString(".")
+	}
 	if waiting := table.undated(); len(waiting) > 0 {
 		names := make([]string, 0, len(waiting))
 		for _, row := range waiting {
@@ -408,10 +415,61 @@ func (s *Service) nextMovie(table movieTable) string {
 		}
 		fmt.Fprintf(&builder, "\nFilms without a date yet, in table order: %s.", strings.Join(names, ", "))
 	}
+	if film != "" {
+		builder.WriteString("\n" + table.filmReport(film))
+	}
 	if table.truncated {
 		builder.WriteString("\nThe table has more rows than were read, so later evenings may be missing.")
 	}
 	return builder.String()
+}
+
+func (t movieTable) filmReport(film string) string {
+	rows := t.matching(film)
+	if len(rows) == 0 {
+		text := t.noFilm(film).Error()
+		if t.truncated {
+			return "Among the rows that were read, " + text + "."
+		}
+		return strings.ToUpper(text[:1]) + text[1:] + "."
+	}
+	row := latestMovieRow(rows)
+	var builder strings.Builder
+	fmt.Fprintf(&builder, "Film %s: ", row.film)
+	if row.dated {
+		builder.WriteString("on " + movieDay(row.date))
+	} else {
+		builder.WriteString("no date yet")
+	}
+	if picker := t.picker(row); picker != "" {
+		fmt.Fprintf(&builder, ", picked by %s", picker)
+	}
+	var scores []string
+	for _, column := range t.scoreColumns {
+		if value := row.values[column]; value != "" {
+			scores = append(scores, column+": "+value)
+		}
+	}
+	if len(scores) == 0 {
+		builder.WriteString(", no scores yet")
+	} else {
+		builder.WriteString(", scores " + strings.Join(scores, ", "))
+	}
+	builder.WriteString(".")
+	if len(rows) > 1 {
+		fmt.Fprintf(&builder, " The table holds %d rows of this film; this is the most recent.", len(rows))
+	}
+	return builder.String()
+}
+
+func latestMovieRow(rows []movieRow) movieRow {
+	row := rows[len(rows)-1]
+	for _, candidate := range rows {
+		if candidate.dated && (!row.dated || candidate.date.After(row.date)) {
+			row = candidate
+		}
+	}
+	return row
 }
 
 func (s *Service) today() time.Time {
@@ -470,12 +528,7 @@ func (s *Service) proposeScore(ctx context.Context, principalID, token string, t
 	if len(rows) == 0 {
 		return "", table.noFilm(film)
 	}
-	row := rows[len(rows)-1]
-	for _, candidate := range rows {
-		if candidate.dated && (!row.dated || candidate.date.After(row.date)) {
-			row = candidate
-		}
-	}
+	row := latestMovieRow(rows)
 	properties := map[string]any{column: richTextValue(strconv.FormatFloat(score, 'f', -1, 64))}
 	result, err := s.proposeRowUpdate(ctx, principalID, token, row.page.ID, properties)
 	if err != nil {
