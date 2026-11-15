@@ -421,6 +421,7 @@ they run one at a time in that order, each on top of the one before.
      `--variant` flag on the run command that records the variant's name, file hash and
      fingerprint in `result.json` and the report, and one example variant,
      `look-before-asking`, for the assistant asking for details it could find with its tools.
+     It won its comparison and became the default initiative text; its file was removed.
    - Files: `internal/prompt/system.go`, `internal/runtime/runtime.go`,
      `internal/runtime/pi/runtime.go`, `internal/tools/broker.go`, `internal/eval/variant.go`,
      `internal/eval/world.go`, `internal/eval/recorder.go`, `internal/eval/runner.go`,
