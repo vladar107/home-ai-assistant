@@ -230,6 +230,84 @@
               }
             ]
           }
+        },
+        {
+          "from": {
+            "lat": 52.1,
+            "lon": 5.1
+          },
+          "to": {
+            "lat": 52.202,
+            "lon": 5.203
+          },
+          "itinerary": {
+            "duration": 3120,
+            "startTime": "2026-03-10T16:45:00Z",
+            "endTime": "2026-03-10T17:37:00Z",
+            "transfers": 1,
+            "legs": [
+              {
+                "mode": "BUS",
+                "routeShortName": "340",
+                "headsign": "Eastbrook Central",
+                "duration": 1200,
+                "startTime": "2026-03-10T16:45:00Z",
+                "endTime": "2026-03-10T17:05:00Z",
+                "scheduledStartTime": "2026-03-10T16:45:00Z",
+                "scheduledEndTime": "2026-03-10T17:05:00Z",
+                "from": {
+                  "name": "Eastbrook, Market Square",
+                  "departure": "2026-03-10T16:45:00Z",
+                  "scheduledDeparture": "2026-03-10T16:45:00Z"
+                },
+                "to": {
+                  "name": "Eastbrook, Central Station",
+                  "arrival": "2026-03-10T17:05:00Z",
+                  "scheduledArrival": "2026-03-10T17:05:00Z"
+                }
+              },
+              {
+                "mode": "RAIL",
+                "routeShortName": "IC 1100",
+                "headsign": "Westfield",
+                "duration": 1440,
+                "startTime": "2026-03-10T17:05:00Z",
+                "endTime": "2026-03-10T17:29:00Z",
+                "scheduledStartTime": "2026-03-10T17:05:00Z",
+                "scheduledEndTime": "2026-03-10T17:29:00Z",
+                "from": {
+                  "name": "Eastbrook Central",
+                  "departure": "2026-03-10T17:05:00Z",
+                  "scheduledDeparture": "2026-03-10T17:05:00Z",
+                  "track": "4",
+                  "scheduledTrack": "4"
+                },
+                "to": {
+                  "name": "Westfield",
+                  "arrival": "2026-03-10T17:29:00Z",
+                  "scheduledArrival": "2026-03-10T17:29:00Z"
+                }
+              },
+              {
+                "mode": "WALK",
+                "duration": 480,
+                "startTime": "2026-03-10T17:29:00Z",
+                "endTime": "2026-03-10T17:37:00Z",
+                "scheduledStartTime": "2026-03-10T17:29:00Z",
+                "scheduledEndTime": "2026-03-10T17:37:00Z",
+                "from": {
+                  "name": "Westfield",
+                  "departure": "2026-03-10T17:29:00Z",
+                  "scheduledDeparture": "2026-03-10T17:29:00Z"
+                },
+                "to": {
+                  "name": "Westfield Ice Arena",
+                  "arrival": "2026-03-10T17:37:00Z",
+                  "scheduledArrival": "2026-03-10T17:37:00Z"
+                }
+              }
+            ]
+          }
         }
       ],
       "places": [
@@ -252,6 +330,13 @@
           "name": "Westfield, Station",
           "lat": 52.2,
           "lon": 5.2,
+          "country": "NL"
+        },
+        {
+          "type": "PLACE",
+          "name": "Westfield Ice Arena",
+          "lat": 52.202,
+          "lon": 5.203,
           "country": "NL"
         }
       ],
