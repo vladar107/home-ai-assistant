@@ -4,6 +4,7 @@
 package notionsim
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -34,14 +35,18 @@ type Page struct {
 	URL          string
 	LastEdited   string
 	DataSourceID string
-	Properties   map[string]any
-	Blocks       []map[string]any
+	// TitleName is the name of the page's title property; empty means Name.
+	TitleName  string
+	Properties map[string]any
+	Blocks     []map[string]any
 }
 
 type DataSource struct {
-	ID         string
-	Title      string
-	URL        string
+	ID    string
+	Title string
+	URL   string
+	// TitleName is the name of the title property of the data source and its rows; empty means Name.
+	TitleName  string
 	Properties map[string]any
 }
 
@@ -352,6 +357,9 @@ func (s *Simulator) query(w http.ResponseWriter, token string, dataSource *DataS
 				first, _ := sorts[0].(map[string]any)
 				direction, _ := first["direction"].(string)
 				less := pages[i].Title < pages[j].Title
+				if property, _ := first["property"].(string); property != "" {
+					less = sortKey(pages[i], property) < sortKey(pages[j], property)
+				}
 				switch timestamp, _ := first["timestamp"].(string); timestamp {
 				case "last_edited_time":
 					less = pages[i].LastEdited < pages[j].LastEdited
@@ -588,7 +596,7 @@ func filterMatches(page *Page, filter map[string]any) bool {
 	if !ok {
 		return false
 	}
-	for _, kind := range []string{"status", "select", "checkbox", "rich_text", "title"} {
+	for _, kind := range []string{"status", "select", "checkbox", "rich_text", "title", "number", "date"} {
 		condition, present := filter[kind].(map[string]any)
 		if !present {
 			continue
@@ -600,9 +608,111 @@ func filterMatches(page *Page, filter map[string]any) bool {
 			return option["name"] == expected
 		case "checkbox":
 			return value["checkbox"] == expected
+		case "number":
+			return numberMatches(value["number"], condition)
+		case "date":
+			return dateMatches(value["date"], condition)
 		default:
 			parts, _ := value[kind].([]any)
 			return richTextPlain(parts) == expected
+		}
+	}
+	return false
+}
+
+// sortKey is the text a row sorts by for a property: dates and rich text as they read, numbers
+// zero-padded so that text order follows numeric order, an empty value first.
+func sortKey(page *Page, property string) string {
+	if page.TitleName == property || (page.TitleName == "" && property == "Name") {
+		return page.Title
+	}
+	value, _ := page.Properties[property].(map[string]any)
+	switch value["type"] {
+	case "number":
+		number, ok := value["number"].(float64)
+		if !ok {
+			return ""
+		}
+		return fmt.Sprintf("%020.4f", number+1e9)
+	case "date":
+		date, _ := value["date"].(map[string]any)
+		start, _ := date["start"].(string)
+		return start
+	case "select", "status":
+		option, _ := value[value["type"].(string)].(map[string]any)
+		name, _ := option["name"].(string)
+		return name
+	case "rich_text", "title":
+		parts, _ := value[value["type"].(string)].([]any)
+		return richTextPlain(parts)
+	}
+	return ""
+}
+
+func numberMatches(have any, condition map[string]any) bool {
+	number, present := have.(float64)
+	if empty, ok := condition["is_empty"].(bool); ok {
+		return empty == !present
+	}
+	if empty, ok := condition["is_not_empty"].(bool); ok {
+		return empty == present
+	}
+	if !present {
+		return false
+	}
+	for key, want := range condition {
+		bound, ok := want.(float64)
+		if !ok {
+			continue
+		}
+		switch key {
+		case "equals":
+			return number == bound
+		case "does_not_equal":
+			return number != bound
+		case "greater_than":
+			return number > bound
+		case "greater_than_or_equal_to":
+			return number >= bound
+		case "less_than":
+			return number < bound
+		case "less_than_or_equal_to":
+			return number <= bound
+		}
+	}
+	return false
+}
+
+// dateMatches compares a date property's start with the filter's date as text, which is right for
+// the ISO dates and date-times a case seeds in one zone.
+func dateMatches(have any, condition map[string]any) bool {
+	date, _ := have.(map[string]any)
+	start, present := date["start"].(string)
+	if empty, ok := condition["is_empty"].(bool); ok {
+		return empty == !present
+	}
+	if empty, ok := condition["is_not_empty"].(bool); ok {
+		return empty == present
+	}
+	if !present {
+		return false
+	}
+	for key, want := range condition {
+		bound, ok := want.(string)
+		if !ok {
+			continue
+		}
+		switch key {
+		case "equals":
+			return strings.HasPrefix(start, bound) || strings.HasPrefix(bound, start)
+		case "before":
+			return start < bound
+		case "after":
+			return start > bound
+		case "on_or_before":
+			return start <= bound || strings.HasPrefix(start, bound)
+		case "on_or_after":
+			return start >= bound
 		}
 	}
 	return false
@@ -670,7 +780,8 @@ func botObject(info Token) map[string]any {
 }
 
 func pageObject(page *Page) map[string]any {
-	properties := map[string]any{"Name": TitleProperty(page.Title)}
+	titleName := cmp.Or(page.TitleName, "Name")
+	properties := map[string]any{titleName: TitleProperty(page.Title)}
 	for name, value := range page.Properties {
 		properties[name] = value
 	}
@@ -685,7 +796,8 @@ func pageObject(page *Page) map[string]any {
 }
 
 func dataSourceObject(dataSource *DataSource) map[string]any {
-	properties := map[string]any{"Name": map[string]any{"id": "title", "name": "Name", "type": "title", "title": map[string]any{}}}
+	titleName := cmp.Or(dataSource.TitleName, "Name")
+	properties := map[string]any{titleName: map[string]any{"id": "title", "name": titleName, "type": "title", "title": map[string]any{}}}
 	for name, value := range dataSource.Properties {
 		properties[name] = value
 	}
