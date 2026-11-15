@@ -104,8 +104,9 @@ type message struct {
 }
 
 type Simulator struct {
-	server  *httptest.Server
-	release chan struct{}
+	server    *httptest.Server
+	release   chan struct{}
+	closeOnce sync.Once
 
 	mu            sync.Mutex
 	stateful      bool
@@ -113,6 +114,7 @@ type Simulator struct {
 	tools         []Tool
 	pageSize      int
 	results       map[string]Result
+	responders    map[string]func(arguments json.RawMessage) Result
 	stream        bool
 	interleave    bool
 	batch         bool
@@ -136,18 +138,32 @@ type Simulator struct {
 // it, as JSON, with no tools.
 func New(t testing.TB) *Simulator {
 	t.Helper()
+	s := start()
+	t.Cleanup(s.Close)
+	return s
+}
+
+// start runs a simulator that its caller closes.
+func start() *Simulator {
 	s := &Simulator{
-		release:  make(chan struct{}),
-		results:  map[string]Result{},
-		hang:     map[string]bool{},
-		held:     map[string]*heldMethod{},
-		sessions: map[string]string{},
-		replies:  map[string]chan Request{},
+		release:    make(chan struct{}),
+		results:    map[string]Result{},
+		responders: map[string]func(json.RawMessage) Result{},
+		hang:       map[string]bool{},
+		held:       map[string]*heldMethod{},
+		sessions:   map[string]string{},
+		replies:    map[string]chan Request{},
 	}
 	s.server = httptest.NewServer(http.HandlerFunc(s.serve))
-	t.Cleanup(s.server.Close)
-	t.Cleanup(func() { close(s.release) })
 	return s
+}
+
+// Close stops the server and releases requests it holds open.
+func (s *Simulator) Close() {
+	s.closeOnce.Do(func() {
+		close(s.release)
+		s.server.Close()
+	})
 }
 
 // URL is the MCP endpoint.
@@ -534,7 +550,15 @@ func (s *Simulator) handle(w http.ResponseWriter, r *http.Request, incoming mess
 		_ = json.Unmarshal(incoming.Params, &params)
 		s.mu.Lock()
 		result, known := s.results[params.Name]
+		responder := s.responders[params.Name]
 		s.mu.Unlock()
+		if responder != nil {
+			var call struct {
+				Arguments json.RawMessage `json:"arguments"`
+			}
+			_ = json.Unmarshal(incoming.Params, &call)
+			result, known = responder(call.Arguments), true
+		}
 		if !known {
 			s.answer(w, r, incoming.ID, nil, rpcError(-32602, "Unknown tool"), serverRequest)
 			return
