@@ -32,7 +32,7 @@ COPY third_party/pi-runtime /usr/local/lib/home-agent/pi-runtime
 RUN cd /usr/local/lib/home-agent/pi-runtime \
     && npm ci --omit=dev --ignore-scripts \
     && ln -s /usr/local/lib/home-agent/pi-runtime/node_modules/.bin/pi /usr/local/bin/pi \
-    && test "$(pi --version)" = "1.0.0" \
+    && test "$(pi --version)" = "1.1.0" \
     && npm cache clean --force
 
 COPY third_party/pi-web-search /usr/local/lib/home-agent/pi-web-search

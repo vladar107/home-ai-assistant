@@ -16,7 +16,7 @@ import (
 const (
 	defaultPiBinary             = "pi"
 	defaultPiProvider           = "openai-codex"
-	DefaultPiVersion            = "1.0.0"
+	DefaultPiVersion            = "1.1.0"
 	defaultPiTaskModel          = "gpt-6.1-sol:medium"
 	defaultPiHeadsUpModel       = "gpt-6.1-sol:high"
 	defaultPiWebSearchExtension = "/usr/local/lib/home-agent/pi-web-search/src/index.ts"

@@ -292,7 +292,7 @@ func TestRunRefusesAPiOfAnotherVersion(t *testing.T) {
 	f.options.Pi.ExpectedVersion = ""
 
 	_, err := f.run()
-	if err == nil || !strings.Contains(err.Error(), pifixture.Version) || !strings.Contains(err.Error(), "want \"1.0.0\"") {
+	if err == nil || !strings.Contains(err.Error(), pifixture.Version) || !strings.Contains(err.Error(), "want \"1.1.0\"") {
 		t.Fatalf("a Pi of another version ran: %v", err)
 	}
 	if f.runs.Load() != 0 {

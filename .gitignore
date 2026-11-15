@@ -49,3 +49,5 @@ coverage.out
 
 # Agent evaluation results and cassettes
 /evals/results/
+
+/third_party/pi-runtime/node_modules/

@@ -10,7 +10,7 @@ func TestReportShowsTheHappyLinePerKindRatesAndTypeSafeTrials(t *testing.T) {
 		return TrialResult{N: n, Status: status, TypeSafe: typeSafe}
 	}
 	result := &Result{
-		RunID: "r1", PiVersion: "1.0.0", Provider: "openai-codex", Model: "gpt-test", Effort: "low", Commit: "abc", Budget: 300,
+		RunID: "r1", PiVersion: "1.1.0", Provider: "openai-codex", Model: "gpt-test", Effort: "low", Commit: "abc", Budget: 300,
 		Cases: []CaseResult{
 			{ID: "greet", Kind: KindHappy, Trials: []TrialResult{trial(1, TrialPassed, true), trial(2, TrialFailed, true)}},
 			{ID: "date", Kind: "wrong-date", Tags: []string{KindHappy}, Trials: []TrialResult{trial(1, TrialPassed, false), trial(2, TrialPassed, false)}},
