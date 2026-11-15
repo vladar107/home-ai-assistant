@@ -190,6 +190,16 @@ func (w *World) seedWeb(in *wiring.Inputs) error {
 	}
 	if hasWeather {
 		cfg.GeocodingURL, cfg.ForecastURL = weather.Mount(router)
+		// The household's deployment names a home, so the first seeded place stands in for it and the
+		// model reads the same weather guidance it reads there.
+		var seed struct {
+			Places []struct {
+				Name string `json:"name"`
+			} `json:"places"`
+		}
+		if err := json.Unmarshal(w.Case.World[SectionWeather], &seed); err == nil && len(seed.Places) > 0 {
+			cfg.WeatherHome = seed.Places[0].Name
+		}
 	}
 	pages, hasPages, err := startFake(w, SectionPages, pagesim.Start, (*pagesim.Server).Close)
 	if err != nil {

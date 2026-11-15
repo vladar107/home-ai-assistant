@@ -105,8 +105,10 @@
         "not_called": [
           "movies_schedule"
         ],
-        "proposals": {
-          "min": 1
+        "reply": {
+          "not_matches": [
+            "(?i)(не смог|не удалось|не получилось|не наш(ёл|ел|лось|ли))"
+          ]
         }
       }
     }

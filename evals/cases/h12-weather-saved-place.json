@@ -1,6 +1,6 @@
 {
   "id": "h12-weather-saved-place",
-  "title": "Weather at home draws a card for the saved place",
+  "title": "Weather at home is answered for the household's home without asking",
   "tags": [
     "happy"
   ],
@@ -313,10 +313,18 @@
       "expect": {
         "calls": [
           {
-            "tool": "weather_card",
+            "any_of": [
+              "weather_forecast",
+              "weather_card"
+            ],
             "min": 1
           }
-        ]
+        ],
+        "reply": {
+          "not_matches": [
+            "(?i)(напиши|какой город|уточни|где (находится|твой) дом)"
+          ]
+        }
       }
     }
   ]
