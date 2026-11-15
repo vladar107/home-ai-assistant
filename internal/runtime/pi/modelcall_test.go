@@ -157,11 +157,13 @@ func TestModelCallOutcomes(t *testing.T) {
 func TestPiRetriesStayInsideOneModelCall(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		name, message, outcome string
-		succeeds               bool
+		name, message, outcome, category string
+		succeeds                         bool
 	}{
-		{"recovered", "fixture:pi-retry", "completed", true},
-		{"retries exhausted", "fixture:pi-retry-exhausted", "failed", false},
+		{"recovered", "fixture:pi-retry", "completed", "network", true},
+		{"retries exhausted", "fixture:pi-retry-exhausted", "failed", "network", false},
+		{"server busy", "fixture:pi-retry-busy", "completed", "busy", true},
+		{"model at capacity", "fixture:pi-retry-capacity", "completed", "busy", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -176,14 +178,14 @@ func TestPiRetriesStayInsideOneModelCall(t *testing.T) {
 			for _, span := range turn.spans {
 				events := span.Events()
 				if len(events) != 1 || events[0].Name != "pi.auto_retry" ||
-					len(events[0].Attributes) != 1 || events[0].Attributes[0].Value.AsString() != "network" {
-					t.Errorf("model call events = %+v, want one network pi.auto_retry", events)
+					len(events[0].Attributes) != 1 || events[0].Attributes[0].Value.AsString() != tc.category {
+					t.Errorf("model call events = %+v, want one %s pi.auto_retry", events, tc.category)
 				}
 				if duration := span.EndTime().Sub(span.StartTime()); duration < pifixture.RetryBackoff {
 					t.Errorf("model call lasted %s, shorter than the %s backoff", duration, pifixture.RetryBackoff)
 				}
 				if count := strings.Count(turn.logs, "pi.model_call.retried"); count != 1 ||
-					!strings.Contains(turn.logs, "level=WARN") || !strings.Contains(turn.logs, "category=network") ||
+					!strings.Contains(turn.logs, "level=WARN") || !strings.Contains(turn.logs, "category="+tc.category) ||
 					!strings.Contains(turn.logs, "retries=1") || !strings.Contains(turn.logs, "span_id="+span.SpanContext().SpanID().String()) {
 					t.Errorf("retry log = %q, want one warning with the category, retry count, and model call span", turn.logs)
 				}

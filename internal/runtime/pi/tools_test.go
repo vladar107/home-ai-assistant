@@ -149,7 +149,7 @@ func TestToolTurnBridgesCallsThroughTheBroker(t *testing.T) {
 	}
 
 	report := readReport(t, cfg, testPrincipal, "tools")
-	if slices.Contains(report.Args, "--no-tools") || !slices.Contains(report.Args, "--no-builtin-tools") || !slices.Contains(report.Args, "--no-extensions") {
+	if slices.Contains(report.Args, "--no-tools") || !slices.Contains(report.Args, "--no-builtin-tools") || !slices.Contains(report.Args, "--no-extensions") || !slices.Contains(report.Args, "--no-mcp") {
 		t.Errorf("tool turn flags: %v", report.Args)
 	}
 	index := slices.Index(report.Args, "--extension")
@@ -195,7 +195,7 @@ func TestToolTurnBridgesCallsThroughTheBroker(t *testing.T) {
 		t.Fatalf("plain turn: %q %v", plain.Response, err)
 	}
 	report = readReport(t, cfg, testPrincipal, "plain")
-	if !slices.Contains(report.Args, "--no-tools") || slices.Contains(report.Args, "--extension") || environmentValue(report, "HOME_AGENT_TOOL_BRIDGE_URL") != "" {
+	if !slices.Contains(report.Args, "--no-tools") || !slices.Contains(report.Args, "--no-mcp") || slices.Contains(report.Args, "--extension") || environmentValue(report, "HOME_AGENT_TOOL_BRIDGE_URL") != "" {
 		t.Errorf("tool-less turn was not locked down: %v %v", report.Args, report.Environment)
 	}
 }

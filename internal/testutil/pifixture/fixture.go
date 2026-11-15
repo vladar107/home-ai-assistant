@@ -188,6 +188,8 @@ func run() error {
 		authText       = "Unauthorized: token expired synthetic-private-text"
 		missingKeyText = "No API key found for fixture-provider synthetic-private-text"
 		otherText      = "network error synthetic-private-text"
+		busyText       = "server_busy synthetic-private-text"
+		capacityText   = "Selected model is at capacity synthetic-private-text"
 	)
 	if strings.HasPrefix(prompt.Message, "fixture:call ") {
 		// Pi runs a tool call between two assistant messages; the events mirror its RPC stream.
@@ -301,29 +303,36 @@ func run() error {
 		emit(map[string]string{"type": "turn_end"})
 		emit(map[string]string{"type": "agent_end"})
 		settle()
-	case "fixture:pi-retry", "fixture:pi-retry-exhausted":
+	case "fixture:pi-retry", "fixture:pi-retry-exhausted", "fixture:pi-retry-busy", "fixture:pi-retry-capacity":
 		// Pi 1.1.0 schedules a retry only after the failed attempt's turn and run end, then
 		// sleeps through the backoff before starting a new run.
+		retryText := otherText
+		switch prompt.Message {
+		case "fixture:pi-retry-busy":
+			retryText = busyText
+		case "fixture:pi-retry-capacity":
+			retryText = capacityText
+		}
 		ack()
 		emit(map[string]string{"type": "agent_start"})
 		emit(map[string]string{"type": "turn_start"})
 		emit(map[string]any{"type": "message_start", "message": map[string]any{"role": "system"}})
 		emit(map[string]any{"type": "message_end", "message": map[string]any{"role": "system"}})
 		emit(map[string]any{"type": "message_start", "message": map[string]string{"role": "assistant"}})
-		failMessage(otherText)
+		failMessage(retryText)
 		emit(map[string]string{"type": "turn_end"})
 		emit(map[string]any{"type": "agent_end", "willRetry": true})
-		retryStart(otherText)
+		retryStart(retryText)
 		emit(map[string]string{"type": "entry_appended"})
 		time.Sleep(RetryBackoff)
 		emit(map[string]string{"type": "agent_start"})
 		emit(map[string]string{"type": "turn_start"})
 		emit(map[string]any{"type": "message_start", "message": map[string]string{"role": "assistant"}})
 		if prompt.Message == "fixture:pi-retry-exhausted" {
-			failMessage(otherText)
+			failMessage(retryText)
 			emit(map[string]string{"type": "turn_end"})
 			emit(map[string]any{"type": "agent_end", "willRetry": false})
-			emit(map[string]any{"type": "auto_retry_end", "success": false, "attempt": 1, "finalError": otherText})
+			emit(map[string]any{"type": "auto_retry_end", "success": false, "attempt": 1, "finalError": retryText})
 			settle()
 			break
 		}

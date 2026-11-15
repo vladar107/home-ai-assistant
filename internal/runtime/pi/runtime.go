@@ -281,6 +281,7 @@ func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink
 	}
 	args = append(args,
 		"--no-extensions",
+		"--no-mcp",
 		"--no-skills",
 		"--no-prompt-templates",
 		"--no-themes",
@@ -682,6 +683,10 @@ func actionableFailure(text string) (agentruntime.FailureCategory, bool) {
 
 // Pi reports a retry only by its error text, so its category is a coarse reading of that text.
 var retryCategories = []struct{ substring, category string }{
+	{"server_busy", "busy"},
+	{"servers are currently busy", "busy"},
+	{"at capacity", "busy"},
+	{"high demand", "busy"},
 	{"rate limit", "rate_limit"},
 	{"rate_limit", "rate_limit"},
 	{"too many requests", "rate_limit"},
