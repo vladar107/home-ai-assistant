@@ -19,7 +19,7 @@ import (
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 )
 
-const usageText = "usage: home-agent-eval <login|usage|scan|run|review|report> [flags]"
+const usageText = "usage: home-agent-eval <login|usage|scan|run|review|report|import|trend|compare> [flags]"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -47,6 +47,12 @@ func run(ctx context.Context, args []string) error {
 		return runReview(args[1:])
 	case "report":
 		return runReport(args[1:])
+	case "import":
+		return runImport(ctx, args[1:])
+	case "trend":
+		return runTrend(ctx, args[1:])
+	case "compare":
+		return runCompare(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown command %q\n%s", args[0], usageText)
 	}
@@ -220,6 +226,9 @@ func runSuite(ctx context.Context, args []string) error {
 	if result != nil {
 		fmt.Printf("pass rate %s, pass^k %.1f%% (k=%d)\nreport: %s\n", result.Summary.Overall, 100*result.Summary.PassK, result.Summary.K,
 			filepath.Join(result.Dir, "report.md"))
+		if importErr := importRun(context.WithoutCancel(ctx), result.Dir); importErr != nil {
+			fmt.Fprintln(os.Stderr, "home-agent-eval:", importErr)
+		}
 	}
 	if err != nil {
 		return err
@@ -262,7 +271,82 @@ func runReview(args []string) error {
 	if err != nil {
 		return err
 	}
-	return eval.Review(eval.ReviewOptions{Dir: dir, All: *all, In: os.Stdin, Out: os.Stdout})
+	reviewErr := eval.Review(eval.ReviewOptions{Dir: dir, All: *all, In: os.Stdin, Out: os.Stdout})
+	return errors.Join(reviewErr, importRun(context.Background(), dir))
+}
+
+// importRun records a run directory in the results store beside it.
+func importRun(ctx context.Context, dir string) error {
+	if err := eval.ImportRun(ctx, filepath.Dir(dir), filepath.Base(dir)); err != nil {
+		return fmt.Errorf("import the run into the results store: %w", err)
+	}
+	return nil
+}
+
+func openStore(flags *flag.FlagSet, args []string) (*eval.ResultsStore, string, error) {
+	results := flags.String("results", eval.DefaultResultsDir, "directory the runs and the results store are in")
+	if err := flags.Parse(args); err != nil {
+		return nil, "", err
+	}
+	store, err := eval.OpenResultsStore(*results)
+	return store, *results, err
+}
+
+func runImport(ctx context.Context, args []string) error {
+	store, results, err := openStore(flag.NewFlagSet("import", flag.ContinueOnError), args)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	ids, err := store.ImportAll(ctx, results)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("imported %d run(s) into %s\n", len(ids), filepath.Join(results, eval.ResultsStoreFile))
+	return nil
+}
+
+func runTrend(ctx context.Context, args []string) error {
+	store, _, err := openStore(flag.NewFlagSet("trend", flag.ContinueOnError), args)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	runs, err := store.Runs(ctx)
+	if err != nil {
+		return err
+	}
+	eval.WriteTrend(os.Stdout, runs)
+	return nil
+}
+
+func runCompare(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("compare", flag.ContinueOnError)
+	store, results, err := openStore(flags, args)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	if flags.NArg() != 2 {
+		return errors.New("usage: home-agent-eval compare [--results dir] <first-run-id> <second-run-id>  (an ID may be \"latest\")")
+	}
+	var ids [2]string
+	for i := range ids {
+		if ids[i], err = store.ResolveRun(ctx, flags.Arg(i)); err != nil {
+			return err
+		}
+	}
+	comparison, err := eval.Compare(ctx, store, ids[0], ids[1])
+	if err != nil {
+		return err
+	}
+	path, err := eval.WriteComparison(results, comparison)
+	if err != nil {
+		return err
+	}
+	fmt.Println(comparison.Summary())
+	fmt.Println("comparison:", path)
+	return nil
 }
 
 func runReport(args []string) error {

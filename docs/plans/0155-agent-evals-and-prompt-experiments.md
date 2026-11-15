@@ -430,11 +430,17 @@ they run one at a time in that order, each on top of the one before.
      guidance and not with memory or jobs; a variant naming a tool no planned world offers is
      refused before a model call; trials of one variant all run before the next starts.
 9. **Local results store, trend and compare** — Complex; depends on 8.
-   - Task: the SQLite file with runs, trials, checks and the operator's verdicts; `trend` (pass rate
-     and `pass^k` per run, split by fingerprint, model and Pi version) and `compare` (the paired
-     report above).
+   - Task: the SQLite file (`results.sqlite` in the results directory, through the repository's
+     existing SQLite driver) with runs, trials, failed checks and the operator's verdicts, filled
+     from each run's `result.json` and `review.json` by an `import` command for existing runs and
+     automatically after `run` and `review`; `trend` (pass rate, `pass^k` and happy-path rate per
+     run, split by fingerprint, model, effort and Pi version) and `compare <first> <second>` (two
+     run IDs, or `latest`; the paired report above, written as `compare.md` under
+     `compare-<first>-<second>/` in the results directory, with a short summary printed). The
+     minimum detectable difference is `(1.96 + 0.84)` standard errors, which is 5% significance
+     and 80% power.
    - Files: `internal/eval/store.go`, `internal/eval/stats.go`, `internal/eval/compare.go`,
-     `cmd/home-agent-eval/main.go`.
+     `internal/eval/trend.go`, `cmd/home-agent-eval/main.go`.
    - Acceptance: the statistics are tested on hand-computed examples; comparing a run with itself
      reports no difference; runs over different case sets compare only their shared cases and
      say so.

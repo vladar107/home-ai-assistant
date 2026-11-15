@@ -129,6 +129,8 @@ type Result struct {
 	PromptFingerprint  string   `json:"prompt_fingerprint,omitempty"`
 	PromptFingerprints []string `json:"prompt_fingerprints,omitempty"`
 	Replayed           bool     `json:"replayed,omitempty"`
+	// ReplayOf is the run whose cassettes a replayed run re-scored.
+	ReplayOf string `json:"replay_of,omitempty"`
 	// Variant names the prompt variant the run tried; nil is production's prompt.
 	Variant     *VariantInfo             `json:"variant,omitempty"`
 	Budget      int                      `json:"budget"`
