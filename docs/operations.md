@@ -178,6 +178,7 @@ that user turns it on or off for themselves. Optional Compose overlays
 | NS trains | `HOME_AGENT_NS_ENABLED=true` | Keychain `ns.api-key` (Ns-App product at apiportal.ns.nl) | The same subscription must also include OV-fiets (the places API) for `ns_ovfiets`; without it, that tool answers that the subscription lacks OV-fiets while the other NS tools keep working. |
 | Flight status | `HOME_AGENT_FLIGHTS_ENABLED=true`, optional `HOME_AGENT_FLIGHTS_MONTHLY_UNITS` (340) and `HOME_AGENT_FLIGHTS_QUOTA_RESET_DAY` (1); locally `HOME_AGENT_FLIGHTS_API_KEY` or `HOME_AGENT_FLIGHTS_API_KEY_FILE` | `scripts/keychain-set-secret aerodatabox.api-key`, synced as Docker secret `flights-api-key` | AeroDataBox on RapidAPI's free Basic plan; see the setup below. `flight_status` answers questions, and the trips loop follows the flights of tracked trips on their day of travel. Per-user "Flight status" switch, on by default. |
 | Home Assistant | `HOME_AGENT_HA_ENABLED=true`; locally `HOME_AGENT_HA_TOKEN`, optional `HOME_AGENT_HA_URL` (default `https://ha.home`) | Keychain `home-assistant.token`, synced as Docker secret `ha-token` | One household long-lived token; see the setup below. The overlay `deploy/compose.app.homeassistant.yaml` reaches Home Assistant at `http://homeassistant:8123` through host-gateway, because it uses host networking and the NAS cannot reach the Caddy macvlan edge. Per-user "Home" switch in `/settings`, on by default. |
+| Parcels | `HOME_AGENT_PARCEL_SOURCES` (optional); uses the Home Assistant token and each user's Google account when present | none | Per-user "Parcels" switch, off by default. Home Assistant carrier integrations the operator assigns to a user are read every 10 minutes, and shipping mail is read by a model turn per run on the user's own subscription, capped at 10 messages a run and 40 a day. With no Home Assistant token, or no entries assigned, Parcels works on mail alone. See Parcels setup below. |
 | Grafana | `HOME_AGENT_GRAFANA_ENABLED=true`, `HOME_AGENT_GRAFANA_PRINCIPALS`; locally `HOME_AGENT_GRAFANA_TOKEN`, `HOME_AGENT_GRAFANA_URL` (default `http://grafana:3000`), `HOME_AGENT_GRAFANA_PRINCIPALS` | Keychain `grafana.home-agent-token`, synced as Docker secret `grafana-token` | Read-only dashboards, PromQL, and LogQL for the named principals only; nobody else sees it in `/settings`. See the setup below. The overlay `deploy/compose.app.grafana.yaml` reaches Grafana by service name over `home-observability`. Per-user "Monitoring" switch, on by default. |
 | Buses | `HOME_AGENT_BUS_ENABLED=true`, `HOME_AGENT_BUS_HOME_STOP`, optional `HOME_AGENT_BUS_CONTACT` | none | Live data from OVapi (plain HTTP, no key); the stop list is read daily from OVapi's GTFS archive by range requests. The home stop is any timing point code of the stop (`stop_code` in GTFS `stops.txt`). Planned trips and boards for stops OVapi has no live data for go to Transitous; set the contact, which its terms ask for, to label those requests. Its use is private and non-commercial. |
 | Shared locations | `HOME_AGENT_LOCATION_ENABLED=true`, optional `HOME_AGENT_LOCATION_CONTACT`; retention `HOME_AGENT_LOCATION_PIN_TTL` (1h, 5m–24h), `HOME_AGENT_LOCATION_LIVE_SILENCE` (1h, 5m–24h), `HOME_AGENT_LOCATION_LIVE_GRACE` (15m, 0–2h), `HOME_AGENT_LOCATION_PRUNE_INTERVAL` (10m, 1m–1h) | none | A pin, venue, or live location a user shares is acknowledged without a model call and named through Transitous reverse geocoding; while fresh, its coordinates go into that user's turns, and `nearby_places` queries OpenStreetMap's public Overpass API. Only the latest position per user is kept; it is hidden once expired and deleted at the next prune, with SQLite `secure_delete` on. Changing a duration needs only a restart. Set the contact, which both services' terms ask for. Users forget their location in `/settings`. Places a user saves by name are kept until they delete them and 24 hours more for Undo, after which the prune removes them (see Saved places and arrivals). |
@@ -263,6 +264,58 @@ household token, and only for entities exposed to Assist or labelled
 `assistant-confirm`. An appliance without a clean "finished" state, such as a
 washing machine that only reports power, may need a template sensor in Home
 Assistant to watch.
+
+### Parcels setup
+
+Parcels reads carrier integrations installed in Home Assistant and each user's
+shipping mail. Mail needs only a user's Google account with Mail on; the steps
+below are for the Home Assistant side and are optional.
+
+1. **Install the integrations.** The assistant reads only the carrier integrations
+   whose Home Assistant domains it lists (`postnl`, `dhl_nl`, `dhl`, `gls`). They are
+   community integrations, so install each through Home Assistant's marketplace or by
+   hand, and read its code first: it runs inside Home Assistant with your carrier
+   logins. Pin a version you have reviewed, and never take an update without reading
+   its diff. The assistant's tests pin the attribute shapes it reads, so a changed
+   shape shows as a stale source rather than wrong data. Keep the repositories and
+   pinned versions in your own notes, not in this repository.
+2. **Find the entry IDs.** Each account or postcode you add is one config entry. Find
+   its ID in Settings → Devices & services, or ask the config entries API with the
+   household token (`config_entries/get` over the WebSocket API, with a `domain`
+   filter, returns `entry_id`, `domain`, `title`, and `state`; an account
+   integration's title is the account's login).
+3. **Assign them.** Set `HOME_AGENT_PARCEL_SOURCES` in `.env` or `deploy/.env.nas`:
+   `alice=01EXAMPLEENTRY1,01EXAMPLEENTRY2;bob=01EXAMPLEENTRY3`, a principal, then
+   `=`, then its entry IDs separated by commas, with `;` between principals. Empty
+   means mail only. Startup stops with a message when an entry is named for two
+   principals or twice, a principal is not on the Telegram allowlist, or sources are
+   set without a Home Assistant token. Entries that are not assigned are never read,
+   and changing the assignment needs a restart and runs a silent baseline for the
+   user.
+4. **Check it.** Turn Parcels on in `/settings` → Parcels. Each assigned entry is
+   listed with its state: reading, not read yet since a restart, not reading and
+   showing the last parcels, or not found in Home Assistant. Set the user's postcode there when an integration needs
+   it to add a number.
+
+Home Assistant has no per-entity permissions, so anyone with a Home Assistant login
+can read the parcel sensors of every assigned account. Accept that as household
+trust, and keep the exposure to that. Never expose parcel entities to Assist: the
+generic Home Assistant tools would show every user's parcels to everyone, and the
+assistant logs `homeassistant.parcels.exposed_to_assist` when its live context lists one. Do not
+build a parcel dashboard for the same reason. Parcels found in mail never enter Home
+Assistant.
+
+When a carrier integration breaks, usually because the carrier changed its app or
+site, the account shows as not reading in `/settings` with a short Parcels note, and
+its cards keep their last state. Mail keeps those parcels moving meanwhile, since
+every carrier sends shipping mail; for an account integration, whose parcels mail
+would otherwise duplicate, mail takes over a day after its last good read. A parcel
+not yet delivered that no source has updated for 30 days is no longer followed: its
+card says so and its record is dropped, but news of it, or the user asking for it,
+follows it again. Only a user's stop keeps a number away. Check the integration's logs in Home Assistant,
+review the fix as you would an update, and the source recovers on its next read.
+Remove an integration by clearing its entries from `HOME_AGENT_PARCEL_SOURCES` and
+restarting.
 
 ### Grafana setup
 

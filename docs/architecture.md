@@ -1481,6 +1481,97 @@ at most three cards. The card goes out during the run, and the summary is the
 run's report after it, marked as outside content; a run with nothing to tell
 sends nothing.
 
+### Parcels
+
+`internal/parcel` keeps one `parcels` row per parcel a user is waiting for, with a
+status from one vocabulary (`registered`, `in_transit`, `out_for_delivery`,
+`at_pickup_point`, `delivered`, `problem`, `unknown`), the expected window, and the
+message of its card. Every source maps its own states to that vocabulary and merges by
+carrier and number, by the source's own key, or by sender and order reference when
+there is no number yet. A carrier's name, number pattern, sender domains, and link
+template live in `carriers.go`; a card's link is built from the template and the
+normalised number, never taken from mail, whose links are click-tracking redirects.
+
+There are two sources and no paid service. The `homeassistant` connector reads
+carrier integrations through the household token: a closed list of Home Assistant
+domains, discovered through the entity registry and config entries, in two attribute
+shapes (one sensor per account listing `enroute` and `delivered` packages, and a
+normalised family of summary sensors with a `parcels` list). Only entries that
+`HOME_AGENT_PARCEL_SOURCES` assigns to a principal are read, the `raw` and `history`
+attributes are never read or logged, and one household-wide read every 10 minutes
+(`GET /api/states/<entity_id>`) is split by owner. A failed read keeps the last
+parcels and marks the source stale. The mail source is the assistant's own code: a
+per-user job runs a deterministic Gmail search (known carrier and shop sender domains,
+or delivery words in the subject in English and Dutch) after a cursor, and sends up to
+10 new messages in one toolless model turn on the user's subscription, with the mail
+framed as untrusted, asking for strict JSON per message. Code validates every field,
+checks the number against `^[A-Z0-9]{8,35}$`, and drops the rest. A run reads at most
+10 messages and a user at most 40 a day, the first run looks back three days, and a
+message is never read twice. An account package's shipment key starts with its
+barcode, which becomes the parcel's number, so the package and its mail merge by
+number; a number that the overlapping patterns of several carriers share is one parcel
+under any of them, stored under one of them. Mail that could not be matched to the
+parcels of the user's account with its carrier (no number, or an account listing
+packages without one) is left to that account while it read in the last day.
+
+The loop (`tracker.go`) wakes every minute and runs what is due per principal with
+Parcels on: Home Assistant every 10 minutes, mail every 30 minutes from 07:00 to 22:00
+in `HOME_AGENT_TIMEZONE` while a parcel is not yet delivered and every three hours
+otherwise. A silent baseline runs first after Parcels is turned on, a source
+assignment changes, or a restore: it sends no notices, edits a stored card back to
+current when it still exists, sends a new card, with notifications off, only for an
+undelivered parcel without one, and posts one summary line. When Home Assistant
+cannot be read, or an assigned entry has never read well, the baseline finishes on
+what it has and the reads stay silent until every assigned entry has read well.
+Later reads send a notice
+for `out_for_delivery`, `at_pickup_point`, `delivered`, and `problem`, once per parcel
+and status, recorded in `parcel_notices_sent` before the send so a restart never
+repeats one, and without sound from 22:00 to 07:00. A window change only edits the
+card.
+
+A card is one message per parcel, edited in place and never deleted: a widget when the
+user has Widgets on and text otherwise, in the user's language, in the Parcels feed
+(the main view with tabs off). Titles, senders, and pickup points are outside text,
+shown as plain text and capped. The widget carries Stop tracking as a widget control,
+the text card as a callback button, and a card whose message or tab is gone is sent
+again through the feed's replacement. Stopping edits the card, removes a number the
+user added from Home Assistant, and leaves a tombstone under every identity of the
+parcel; a tombstone, which outlives the deleted parcel so a source that still lists it
+brings nothing back, is dropped 30 days after the last source listing it. A parcel is
+deleted 14 days after delivery or stop, and one not yet delivered that no source has
+updated for 30 days is dropped by the loop without a tombstone, its card edited to "No
+longer followed", so news of it or the user's request follows it again. Turning Parcels off keeps the assignments,
+stops every read and notice, and marks open cards; turning it on edits them back.
+
+Tools are `parcel_track` (a number and an optional carrier), `parcel_list`, and
+`parcel_stop`. `parcel_list` is a third-party read, so its result is framed as
+untrusted and the conversation's next write is a proposal. `parcel_track` goes through
+`approval.Act`: a number the user typed runs at once, and one from a forwarded message,
+from mail, or after `parcel_list` is proposed. Its executor calls only the add service
+of a listed domain, on the entry assigned to the adder (or by the adder's postcode for
+the domain that selects by it), with a validated number; the postcode is added at
+execution and never stored in the proposal. A carrier without a number-tracking
+integration, or a user with no assigned entry, gets a parcel followed by mail, which is
+local and needs no approval. Undo removes the number through the remove service. Every
+proposed number is recorded as proposed, added, or declined, and one check shared by
+chat, Inbox intake, and the mail job skips a number already tracked, tombstoned,
+pending, or declined; a small hook in `approval` reports an explicit reject, and an
+expired or replaced proposal may be offered again. Numbers found in mail go on one
+card with an outside-content warning and a 24-hour lifetime through `OfferIfIdle`, so
+a waiting proposal is never replaced. With Parcels on, Inbox intake offers a delivery
+notice as a `parcel` follow-up instead of a watch.
+
+A number belongs to whoever added it (`parcel_added_numbers`), which decides who sees
+the parcel whatever entry tracks it. The tables are `parcels`, `parcel_added_numbers`,
+`parcel_proposed_numbers`, `parcel_tombstones`, `parcel_notices_sent`,
+`parcel_mail_cursors`, `parcel_tracking`, and `parcel_settings` (the postcode). The
+export has the parcels without their cards, the added and proposed numbers, the
+tombstones, and the postcode; the notices, mail cursor, and baseline state are left
+out, and a restored parcel gets a new card under the baseline. Logs and traces carry
+parcel IDs, carriers, and statuses, never titles, senders, pickup points, numbers, or
+postcodes. The connector logs a warning when the live context lists a discovered
+parcel entity, since exposing one to Assist would show every user's parcels to all.
+
 ### An MCP server
 
 The `mcp` connector offers the read tools of Model Context Protocol servers the

@@ -263,6 +263,43 @@ borrowed between users.
   summed up in the Inbox tab with its follow-ups on one card, at most ten at a
   time, and mail that needs nothing sends nothing. While an inbox card waits,
   later checks send their summary and keep their follow-ups for the next card.
+- **Parcels.** Turned on in `/settings`, the assistant keeps one card per parcel
+  the user is waiting for in a Parcels tab: the carrier, what it is, its status,
+  the expected day and window, the pickup point when there is one, and a link to
+  the carrier's page. The card is edited in place, as a widget when Widgets are
+  on and as text otherwise, with a Stop tracking control, and it updates
+  silently. A new message arrives only when the parcel is out for delivery, is
+  ready at a pickup point, is delivered, or has a problem, once per change and
+  without sound between 22:00 and 07:00. Asking "where is my parcel?" is
+  answered from the same data, without a web search. The first read after
+  Parcels is turned on sends no notices: parcels already on their way get cards
+  and one summary line. A finished parcel keeps its card, and its record is
+  removed 14 days after it was delivered or stopped. A parcel no source has
+  news of for 30 days is no longer followed, and its card says so, until news of
+  it or the user's own request brings it back.
+  Parcels come from three places. The carrier integrations in Home Assistant
+  that the operator assigns to the user list every parcel addressed to a carrier
+  account without a number being typed. The user's shipping mail follows a
+  parcel of any carrier, and is the fallback where no integration covers it.
+  And a number the user types, pastes, or forwards is followed too: a typed
+  number runs at once, while a number in a forwarded message or in mail is
+  proposed on a card first, because adding it writes to Home Assistant. A parcel
+  followed only through mail is local and needs no approval.
+  `/settings` → Parcels holds the switch, the user's postcode (some carrier
+  integrations take it with a number), the state of each assigned Home Assistant
+  account (reading, not reading and showing the last parcels, or not found), and
+  whether mail is readable.
+  Only the parcel sensors of the carriers the assistant lists, and only those
+  the operator assigned to that user, are read, and never an account's raw or
+  history attributes, which hold addresses and other people's names. The
+  postcode goes to the Home Assistant carrier integration only when a number is
+  added, and the assistant sends parcel data to no third party itself. Titles,
+  senders, and pickup points come from shops and carriers and are shown as plain
+  text. Mail is read by a model turn on the user's own subscription, only when
+  new shipping mail has arrived and capped at ten messages a run and forty a
+  day: every 30 minutes between 07:00 and 22:00 while a parcel is on its way,
+  and every three hours otherwise. Parcels are part of `/export`, without their
+  cards.
 - **Backlog.** Ideas for developing the assistant itself ("add to the backlog:
   answer weather questions with a chart") are kept as a per-user backlog that
   never changes how the assistant behaves. `/backlog` marks items done or
