@@ -273,6 +273,34 @@ func (l *Loop) queue(principalID string) {
 	}
 }
 
+// Poke asks for a read of the principal's sources on the loop's own goroutine and returns at once.
+func (l *Loop) Poke(principalID string) { l.queue(principalID) }
+
+// Release drops the Home Assistant parcel of a number that was removed from Home Assistant again,
+// when Home Assistant is the only source that lists it: its card shows Stopped and the parcel is
+// deleted without a tombstone, so the number can be added afresh.
+func (l *Loop) Release(ctx context.Context, principalID, carrier, number string) error {
+	st := l.state(principalID)
+	st.cards.Lock()
+	defer st.cards.Unlock()
+	parcels, err := l.cfg.Repository.ListParcels(ctx, principalID)
+	if err != nil {
+		return err
+	}
+	for _, found := range parcels {
+		if found.Carrier != carrier || found.Number != number || found.Source != SourceHomeAssistant {
+			continue
+		}
+		if found.CardMessage != 0 {
+			if err := l.cfg.Cards.EditCard(ctx, found, CardStopped); err != nil && !errors.Is(err, ErrCardGone) {
+				l.fail(ctx, principalID, "release_card", err)
+			}
+		}
+		return l.cfg.Repository.DeleteParcel(ctx, principalID, found.ID)
+	}
+	return nil
+}
+
 // Baseline makes the principal's next pass a silent baseline, as after a restore. The need is
 // stored first, so a restart before the pass still runs it.
 func (l *Loop) Baseline(ctx context.Context, principalID string) error {

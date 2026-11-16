@@ -468,8 +468,55 @@ func (s *Server) callService(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	s.mu.Lock()
 	s.calls = append(s.calls, Call{Tool: "service:" + domain + "." + service, Arguments: body})
+	s.trackParcel(domain, service, body)
 	s.mu.Unlock()
 	simkit.WriteJSON(w, http.StatusOK, []any{})
+}
+
+// trackParcel makes a parcel integration's track_parcel and untrack_parcel services do what they
+// do in Home Assistant: the number joins, or leaves, the parcels of the entry's incoming sensor.
+// The caller holds the lock.
+func (s *Server) trackParcel(domain, service string, body []byte) {
+	if service != "track_parcel" && service != "untrack_parcel" {
+		return
+	}
+	var request struct {
+		Code    string `json:"tracking_code"`
+		EntryID string `json:"config_entry_id"`
+	}
+	if json.Unmarshal(body, &request) != nil || request.Code == "" {
+		return
+	}
+	for _, registered := range s.seed.Registry {
+		if registered.Platform != domain || !strings.HasSuffix(registered.UniqueID, "_incoming_parcels") ||
+			request.EntryID != "" && registered.ConfigEntryID != request.EntryID {
+			continue
+		}
+		for index := range s.seed.Entities {
+			entity := &s.seed.Entities[index]
+			if entity.EntityID != registered.EntityID {
+				continue
+			}
+			var kept []any
+			if listed, ok := entity.Attributes["parcels"].([]any); ok {
+				for _, item := range listed {
+					if parcel, ok := item.(map[string]any); !ok || parcel["barcode"] != request.Code {
+						kept = append(kept, item)
+					}
+				}
+			}
+			if service == "track_parcel" {
+				kept = append(kept, map[string]any{"carrier": strings.ToUpper(domain), "barcode": request.Code, "status": "registered"})
+			}
+			attributes := map[string]any{}
+			for key, value := range entity.Attributes {
+				attributes[key] = value
+			}
+			attributes["parcels"] = kept
+			entity.Attributes = attributes
+			return
+		}
+	}
 }
 
 func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {

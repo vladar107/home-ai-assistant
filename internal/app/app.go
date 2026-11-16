@@ -30,10 +30,12 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/health"
 	"github.com/vladar107/home-ai-assistant/internal/httpretry"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
+	"github.com/vladar107/home-ai-assistant/internal/integration"
 	"github.com/vladar107/home-ai-assistant/internal/judgment"
 	userlocation "github.com/vladar107/home-ai-assistant/internal/location"
 	"github.com/vladar107/home-ai-assistant/internal/module"
 	"github.com/vladar107/home-ai-assistant/internal/observability"
+	"github.com/vladar107/home-ai-assistant/internal/parcel"
 	"github.com/vladar107/home-ai-assistant/internal/project"
 	piruntime "github.com/vladar107/home-ai-assistant/internal/runtime/pi"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
@@ -297,6 +299,10 @@ func (a *App) buildAssembly(ctx context.Context, client *telegram.Client, config
 		return nil, fmt.Errorf("initialize Pi runtime: %w", err)
 	}
 	runtime.SetTelemetry(a.telemetry)
+	parcelSwitches, err := integration.NewSwitches(a.store, a.logger)
+	if err != nil {
+		return nil, fmt.Errorf("initialize parcel switches: %w", err)
+	}
 	in := wiring.Inputs{
 		Store:        a.store,
 		Registry:     a.registry,
@@ -317,11 +323,16 @@ func (a *App) buildAssembly(ctx context.Context, client *telegram.Client, config
 				Trips:    &telegram.TripNotifier{Client: client, Chats: a.store, Feeds: a.tabs},
 				Projects: telegram.ProjectNotifier{Chats: a.store, Feeds: a.tabs},
 				Watches:  telegram.WatchNotifier{Chats: a.store, Feeds: a.tabs},
+				Parcels: telegram.ParcelNotifier{
+					Client: client, Chats: a.store, Feeds: a.tabs, Widgets: parcelSwitches.Toggle(integration.WidgetsSwitch),
+					Languages: a.store, Carriers: parcel.DefaultCarriers(), Location: location, Logger: a.logger,
+				},
 			}
 		},
-		Principals: configured,
-		DataDir:    cfg.DataDir,
-		Zone:       cfg.Timezone,
+		ParcelSources: cfg.Parcels.Sources,
+		Principals:    configured,
+		DataDir:       cfg.DataDir,
+		Zone:          cfg.Timezone,
 		Core: wiring.CoreConfig{
 			TurnTimeout:          cfg.Conversation.TurnTimeout,
 			ScheduledTurnTimeout: cfg.Conversation.ScheduledTurnTimeout,
@@ -440,6 +451,9 @@ func (a *App) buildTelegram(ctx context.Context, client *telegram.Client, config
 		deps.Backlog = asm.Backlog
 		deps.Why = asm.Why
 		deps.Exports = asm.Exports
+		if asm.ParcelLoop != nil {
+			deps.Parcels = &telegram.ParcelTaps{Parcels: a.store, Tracker: asm.ParcelLoop}
+		}
 		deps.Languages = a.store
 		deps.Chats = a.store
 		deps.Transcriber = asm.ChatGPT
@@ -508,6 +522,11 @@ func (a *App) settingsSections(asm *wiring.Assembly, location *time.Location) ([
 			settings.Details = telegram.UnavailableDetails(page.Unavailable, found.Name)
 		}
 		sections = append(sections, telegram.NewSwitchSection(settings, a.logger, a.telemetry))
+	}
+	if asm.ParcelLoop != nil {
+		sections = append(sections, telegram.NewParcelsSection(telegram.ParcelsSettings{
+			Toggle: asm.Switches.Toggle(parcel.Switch), Sources: asm.ParcelSources, Settings: a.store, Mail: asm.ParcelMailState(), Hook: asm.ParcelLoop,
+		}, a.logger, a.telemetry))
 	}
 	sections = append(sections, telegram.NewHeadsUpSection(asm.Scheduler, a.logger, a.telemetry))
 	if asm.MCP != nil {

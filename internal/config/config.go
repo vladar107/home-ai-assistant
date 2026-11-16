@@ -36,6 +36,7 @@ type Config struct {
 	NS            NSConfig
 	Flights       FlightsConfig
 	HA            HAConfig
+	Parcels       ParcelsConfig
 	Grafana       GrafanaConfig
 	Bus           BusConfig
 	Location      LocationConfig
@@ -144,6 +145,9 @@ func Load() (Config, error) {
 	if err := loadHAConfig(&cfg.HA); err != nil {
 		return Config{}, err
 	}
+	if err := loadParcelsConfig(&cfg.Parcels); err != nil {
+		return Config{}, err
+	}
 	if err := loadGrafanaConfig(&cfg.Grafana); err != nil {
 		return Config{}, err
 	}
@@ -243,6 +247,16 @@ func (c Config) Validate() error {
 	}
 	if c.HA.Enabled() && !c.Conversation.Enabled {
 		return fmt.Errorf("HOME_AGENT_HA_TOKEN or HOME_AGENT_HA_TOKEN_FILE: requires HOME_AGENT_CONVERSATION_ENABLED=true")
+	}
+	var allowed []string
+	for _, user := range c.Telegram.Users {
+		allowed = append(allowed, user.PrincipalID)
+	}
+	if err := c.Parcels.validate(allowed); err != nil {
+		return err
+	}
+	if len(c.Parcels.Sources) > 0 && !c.HA.Enabled() {
+		return fmt.Errorf("HOME_AGENT_PARCEL_SOURCES: requires HOME_AGENT_HA_TOKEN or HOME_AGENT_HA_TOKEN_FILE")
 	}
 	if err := c.Grafana.validate(); err != nil {
 		return err

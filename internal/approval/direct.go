@@ -52,36 +52,43 @@ var (
 // Strict proposal. Anything else, or anything it cannot tell, proposes instead. It returns the text
 // for the model; a direct action that failed returns a *FailedError, which Refused reports.
 func (s *Service) Act(ctx context.Context, principalID string, proposal Proposal) (string, error) {
+	text, _, err := s.ActRecord(ctx, principalID, proposal)
+	return text, err
+}
+
+// ActRecord is Act that also returns the record of the proposal it made, or nil when it acted at
+// once, so a caller can keep the approval's ID.
+func (s *Service) ActRecord(ctx context.Context, principalID string, proposal Proposal) (string, *Record, error) {
 	s.mu.Lock()
 	exposure := s.exposure
 	executor, executable := s.executors[proposal.Tool]
 	s.mu.Unlock()
 	if exposure == nil {
-		return s.proposeText(ctx, principalID, proposal)
+		return s.proposeRecord(ctx, principalID, proposal)
 	}
 	requestID, userChat := exposure.UserChatRequest(ctx)
 	if !userChat || requestID == "" {
-		return s.proposeText(ctx, principalID, proposal)
+		return s.proposeRecord(ctx, principalID, proposal)
 	}
 	if principalID == "" || proposal.Tool == "" || strings.TrimSpace(proposal.Summary) == "" {
-		return "", fmt.Errorf("approval proposal is incomplete")
+		return "", nil, fmt.Errorf("approval proposal is incomplete")
 	}
 	if !executable {
-		return "", fmt.Errorf("approval proposal names a tool without an executor")
+		return "", nil, fmt.Errorf("approval proposal names a tool without an executor")
 	}
 	summary := strings.TrimSpace(proposal.Summary)
 	if utf16Units(summary)+directWarningUnits+2 > bundleSummaryUnits {
-		return "", ErrSummaryTooLong
+		return "", nil, ErrSummaryTooLong
 	}
 	canonical, err := canonicalJSON(proposal.Arguments)
 	if err != nil {
-		return "", fmt.Errorf("canonicalize approval arguments: %w", err)
+		return "", nil, fmt.Errorf("canonicalize approval arguments: %w", err)
 	}
 	digest := sha256.Sum256(canonical)
 	hash := hex.EncodeToString(digest[:])
 	id, err := newID()
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	// The exposure is read under the lock that orders the principal's proposals, so a call that
@@ -90,16 +97,17 @@ func (s *Service) Act(ctx context.Context, principalID string, proposal Proposal
 	proposing.Lock()
 	if exposure.External(ctx, principalID) || proposal.Strict && exposure.Exposed(ctx, principalID) {
 		proposing.Unlock()
-		return s.proposeText(ctx, principalID, proposal)
+		return s.proposeRecord(ctx, principalID, proposal)
 	}
 	existing, found, err := s.repository.FindDirectApproval(ctx, principalID, proposal.Tool, hash, requestID)
 	if err != nil {
 		proposing.Unlock()
-		return "", fmt.Errorf("find direct approval: %w", err)
+		return "", nil, fmt.Errorf("find direct approval: %w", err)
 	}
 	if found {
 		proposing.Unlock()
-		return s.repeatedText(existing)
+		text, err := s.repeatedText(existing)
+		return text, nil, err
 	}
 	now := s.now()
 	record := Record{
@@ -121,7 +129,7 @@ func (s *Service) Act(ctx context.Context, principalID string, proposal Proposal
 	err = s.repository.CreateDirectApproval(ctx, record)
 	proposing.Unlock()
 	if err != nil {
-		return "", fmt.Errorf("store direct approval: %w", err)
+		return "", nil, fmt.Errorf("store direct approval: %w", err)
 	}
 	if proposal.Intent != (Intent{}) {
 		s.mu.Lock()
@@ -150,14 +158,16 @@ func (s *Service) Act(ctx context.Context, principalID string, proposal Proposal
 	}
 	s.recordStatus(ctx, record, status)
 	s.logger.InfoContext(ctx, "approval.resolved", "principal_id", principalID, "approval_id", id, "tool", proposal.Tool, "mode", ModeDirect, "status", status, "reason", reason)
-	return s.repeatedOrDone(record, false)
+	text, err := s.repeatedOrDone(record, false)
+	return text, nil, err
 }
 
-func (s *Service) proposeText(ctx context.Context, principalID string, proposal Proposal) (string, error) {
-	if _, err := s.Propose(ctx, principalID, proposal); err != nil {
-		return "", err
+func (s *Service) proposeRecord(ctx context.Context, principalID string, proposal Proposal) (string, *Record, error) {
+	record, err := s.Propose(ctx, principalID, proposal)
+	if err != nil {
+		return "", nil, err
 	}
-	return ProposedText, nil
+	return ProposedText, &record, nil
 }
 
 func (s *Service) repeatedText(record Record) (string, error) {

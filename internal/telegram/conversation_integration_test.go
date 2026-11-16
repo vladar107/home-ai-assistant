@@ -52,6 +52,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/module"
 	"github.com/vladar107/home-ai-assistant/internal/observability"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
+	"github.com/vladar107/home-ai-assistant/internal/parcel"
 	"github.com/vladar107/home-ai-assistant/internal/project"
 	"github.com/vladar107/home-ai-assistant/internal/routes"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
@@ -203,6 +204,12 @@ type harnessOptions struct {
 	// flights adds the flight status connector against the given AeroDataBox address, as an
 	// operator key does; its limiter does not wait.
 	flights string
+	// parcels adds Parcels as the application wires it: the cards, the loop, the tools, and the
+	// settings page, with parcelSources assigning Home Assistant entries to principals.
+	parcels bool
+	// buildError, when set, receives the error of building the assembly instead of failing the test.
+	buildError    *error
+	parcelSources map[string][]string
 	// homeAssistant adds the Home Assistant connector against the given URL, as an operator token does.
 	homeAssistant string
 	// grafana adds the Grafana connector against the given URL for alice alone, as an operator token does.
@@ -456,6 +463,10 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 	in := h.wiringInputs(t, runtime, options, logger, principals)
 	asm, err := wiring.Build(ctx, in)
 	if err != nil {
+		if options.buildError != nil {
+			*options.buildError = err
+			return h
+		}
 		t.Fatal(err)
 	}
 	h.assembly = asm
@@ -507,9 +518,16 @@ func (h *conversationHarness) wiringInputs(t *testing.T, runtime agentruntime.Ag
 		Runtime: runtime, SessionFiles: sessionFiles,
 		Chat: h.client, Reminders: ReminderSender{Client: h.client}, Alerts: WatchAlertSender{Client: h.client},
 		TaskMessages: TaskMessenger{Client: h.client}, Tabs: func(namer *turn.Engine, trips trip.Reader, projects project.Reader, watches watch.Reader) wiring.TabServices {
-			return h.newTabs(logger, namer, trips, projects, watches)
+			tabs := h.newTabs(logger, namer, trips, projects, watches)
+			if options.parcels {
+				tabs.Parcels = ParcelNotifier{
+					Client: h.client, Chats: h.store, Feeds: h.tabSet, Languages: h.store, Carriers: parcel.DefaultCarriers(), Location: time.UTC, Logger: logger,
+				}
+			}
+			return tabs
 		},
-		Principals: unnamed, DataDir: filepath.Dir(h.attachmentsDir), Zone: zone,
+		ParcelSources: options.parcelSources,
+		Principals:    unnamed, DataDir: filepath.Dir(h.attachmentsDir), Zone: zone,
 		Core: wiring.CoreConfig{
 			TurnTimeout: cmp.Or(options.turnTimeout, 10*time.Second), TurnZone: options.location, Now: now,
 			TypingInterval: options.typingInterval, DraftDelay: options.draftDelay, DraftInterval: options.draftInterval, DeliveryRetryDelay: options.deliveryRetry,
@@ -663,6 +681,12 @@ func (h *conversationHarness) telegramService(identities *identity.Service, logg
 			settings.Details = UnavailableDetails(page.Unavailable, found.Name)
 		}
 		deps.Sections = append(deps.Sections, NewSwitchSection(settings, logger, nil))
+	}
+	if asm.ParcelLoop != nil {
+		deps.Parcels = &ParcelTaps{Parcels: h.store, Tracker: asm.ParcelLoop}
+		deps.Sections = append(deps.Sections, NewParcelsSection(ParcelsSettings{
+			Toggle: asm.Switches.Toggle(parcel.Switch), Sources: asm.ParcelSources, Settings: h.store, Mail: asm.ParcelMailState(), Hook: asm.ParcelLoop,
+		}, logger, nil))
 	}
 	deps.Sections = append(deps.Sections, NewHeadsUpSection(asm.Scheduler, logger, nil))
 	if asm.MCP != nil {

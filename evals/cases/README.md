@@ -53,6 +53,9 @@ neutral names, places and data, never a real message, trace, memory or device.
   - `routes`: `[{"name", "days": ["mon"], "arrive_by", "legs": [{"mode", "minutes", "from", "to",
     "via", "stop", "line", "towards", "departures"}]}]`
   - `places`: `[{"name", "lat", "lon", "radius_m"}]` (saved places)
+  - `parcels`: `[{"carrier", "number", "title", "sender", "status", "window_from", "window_to", "pickup_point"}]`
+    (parcels the user follows, found in mail; `status` is a parcel status such as `in_transit` or
+    `out_for_delivery`, and times are local `YYYY-MM-DDTHH:MM`); the section turns Parcels on
   - Connector fakes: each section is the seed of a loopback fake, decoded strictly by the fake
     (the full shape and an example are in the fake's package doc under `internal/testutil/`). A
     connector whose section the case lacks stays unconfigured, so its tools are not offered, and

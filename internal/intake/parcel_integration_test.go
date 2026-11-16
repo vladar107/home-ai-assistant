@@ -3,6 +3,7 @@ package intake_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -85,6 +86,11 @@ func (f *parcelFixture) scan(actions string) schedule.Result {
 	f.t.Helper()
 	f.checker.reply = `{"messages":[{"account":"alice@example.com","message_id":"m1","kind":"parcel notice","title":"Parcel on its way","sender":"Example Carrier",` +
 		`"dates":[],"amounts":[],"references":[],"action_required":"","actions":[` + actions + `]}],"left":0}`
+	return f.scanAgain()
+}
+
+func (f *parcelFixture) scanAgain() schedule.Result {
+	f.t.Helper()
 	jobType, err := f.service.ScanJobType(intake.ScanConfig{
 		Checker: f.checker, Mail: intakeLangMail{}, Approvals: intakeLangApprovals{}, Offers: f.offers, Chats: intakeLangChats{},
 		Reminders: intakeLangReminders{}, Watches: parcelWatches{},
@@ -268,5 +274,46 @@ func TestInboxCheckOffersANumberOnceWhateverTheNoticesSay(t *testing.T) {
 	f.scan(parcelAction + "," + parcelAction + `,{"type":"parcel","number":"1234567890"}`)
 	if got := f.tools(); len(got) != 1 {
 		t.Fatalf("offered %v", got)
+	}
+}
+
+// flakyParcels fails its proposal checks with a database error while broken is set.
+type flakyParcels struct {
+	*parcelSupport
+	broken bool
+}
+
+func (p *flakyParcels) Proposal(ctx context.Context, principalID, number, carrier string) (approval.Proposal, error) {
+	if p.broken {
+		return approval.Proposal{}, errors.New("database is locked")
+	}
+	return p.parcelSupport.Proposal(ctx, principalID, number, carrier)
+}
+
+func TestInboxCheckKeepsAParcelFollowUpWhoseCheckFailed(t *testing.T) {
+	t.Parallel()
+	f := newParcelFixture(t, true)
+	flaky := &flakyParcels{parcelSupport: f.support, broken: true}
+	service, err := intake.NewService(intake.Config{Location: time.UTC, Now: func() time.Time { return parcelNow }, Parcels: flaky},
+		f.store, &cleanTurn{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.service = service
+
+	f.scan(parcelAction)
+	if len(f.offers.proposals) != 0 {
+		t.Fatalf("offered %+v", f.offers.proposals)
+	}
+	records, err := f.store.PendingIntakeRecords(t.Context(), "alice")
+	if err != nil || len(records) != 1 || len(records[0].Pending) != 1 || records[0].Pending[0].Type != intake.ActionParcel {
+		t.Fatalf("pending after a failed check = %+v %v", records, err)
+	}
+
+	flaky.broken = false
+	f.checker.reply = `{"messages":[],"left":0}`
+	f.scanAgain()
+	if got := f.tools(); len(got) != 1 {
+		t.Fatalf("offered %v after the check recovered", got)
 	}
 }

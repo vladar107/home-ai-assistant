@@ -2,6 +2,7 @@ package eval
 
 import (
 	"context"
+	"errors"
 	"io"
 	"slices"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
+	"github.com/vladar107/home-ai-assistant/internal/parcel"
 	"github.com/vladar107/home-ai-assistant/internal/project"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 	"github.com/vladar107/home-ai-assistant/internal/trip"
@@ -243,7 +245,7 @@ func (c *Chat) TripTab(context.Context, string, string) (int64, error) { return 
 
 // tabs is what the wiring builds the tab services from; the stub keeps no tabs.
 func (c *Chat) tabs(*turn.Engine, trip.Reader, project.Reader, watch.Reader) wiring.TabServices {
-	return wiring.TabServices{Feeds: c, Replies: c, Trips: c}
+	return wiring.TabServices{Feeds: c, Replies: c, Trips: c, Parcels: parcelCards{}}
 }
 
 // text joins the reply chunks of one turn.
@@ -261,3 +263,19 @@ func (c Captured) lastReplyID() int64 {
 	}
 	return slices.MaxFunc(c.Replies, func(a, b Reply) int { return int(a.MessageID - b.MessageID) }).MessageID
 }
+
+// parcelCards keeps no cards: the loop never runs in a world, and what a case asks is what the
+// tools answer.
+type parcelCards struct{}
+
+func (parcelCards) SendCard(context.Context, parcel.Parcel, bool) (int64, parcel.CardKind, error) {
+	return 0, "", errors.New("the eval chat shows no parcel cards")
+}
+
+func (parcelCards) EditCard(context.Context, parcel.Parcel, parcel.CardMode) error {
+	return parcel.ErrCardGone
+}
+
+func (parcelCards) SendNotice(context.Context, parcel.Parcel, bool) error { return nil }
+
+func (parcelCards) SendSummary(context.Context, string, int) error { return nil }

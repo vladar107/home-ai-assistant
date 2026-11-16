@@ -1,0 +1,52 @@
+{
+  "id": "p1-where-is-my-parcel",
+  "title": "Where a parcel is comes from parcel_list, not a web search",
+  "tags": [
+    "happy"
+  ],
+  "kind": "happy",
+  "clock": {
+    "local": "2026-03-10T10:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "en"
+  },
+  "world": {
+    "parcels": [
+      {
+        "carrier": "postnl",
+        "number": "3SEXAMPLE123456",
+        "title": "Garden chair",
+        "sender": "Example Shop",
+        "status": "out_for_delivery",
+        "window_from": "2026-03-10T14:00",
+        "window_to": "2026-03-10T16:00"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "say": "where is my parcel?",
+      "expect": {
+        "calls": [
+          {
+            "tool": "parcel_list",
+            "min": 1
+          }
+        ],
+        "reply": {
+          "language": "en",
+          "matches": [
+            "(?i)(out for delivery|on its way|today)",
+            "(?i)(14:00|2 ?pm|afternoon)"
+          ]
+        }
+      }
+    }
+  ],
+  "rubric": [
+    "Does the reply say the garden chair parcel is out for delivery today between 14:00 and 16:00, using the parcel list rather than a web search?"
+  ]
+}

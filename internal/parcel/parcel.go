@@ -270,6 +270,8 @@ type Repository interface {
 	SaveCard(ctx context.Context, principalID, id string, messageID int64, kind CardKind) error
 	// StopParcel marks the parcel stopped and leaves its tombstone.
 	StopParcel(ctx context.Context, principalID, id string, at time.Time) (Parcel, bool, error)
+	// DeleteParcel deletes the parcel and its notices, leaving no tombstone.
+	DeleteParcel(ctx context.Context, principalID, id string) error
 	// DeleteExpired deletes, for every principal, the parcels delivered or stopped before the
 	// instant, leaving a tombstone for each, and returns how many.
 	DeleteExpired(ctx context.Context, before, now time.Time) (int, error)

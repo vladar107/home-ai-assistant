@@ -305,6 +305,17 @@ func (s *Store) SaveCard(ctx context.Context, principalID, id string, messageID 
 	return nil
 }
 
+// DeleteParcel deletes one parcel without a tombstone, with its notices.
+func (s *Store) DeleteParcel(ctx context.Context, principalID, id string) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("delete parcel: SQLite store is not open")
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM parcels WHERE id = ? AND principal_id = ?`, id, principalID); err != nil {
+		return fmt.Errorf("delete parcel: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) StopParcel(ctx context.Context, principalID, id string, at time.Time) (parcel.Parcel, bool, error) {
 	if s == nil || s.db == nil {
 		return parcel.Parcel{}, false, fmt.Errorf("stop parcel: SQLite store is not open")

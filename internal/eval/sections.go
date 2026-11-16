@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/memory"
+	"github.com/vladar107/home-ai-assistant/internal/parcel"
 	"github.com/vladar107/home-ai-assistant/internal/routes"
 	"github.com/vladar107/home-ai-assistant/internal/weekday"
 )
@@ -29,6 +30,7 @@ const (
 	SectionBacklog  = "backlog"
 	SectionRoutes   = "routes"
 	SectionPlaces   = "places"
+	SectionParcels  = "parcels"
 
 	// DefaultAccount is the mailbox and calendar owner of a section that names none.
 	DefaultAccount = "sam@example.test"
@@ -46,6 +48,7 @@ func init() {
 		SectionBacklog:  validateBacklog,
 		SectionRoutes:   validateRoutes,
 		SectionPlaces:   validatePlaces,
+		SectionParcels:  validateParcels,
 	} {
 		DefaultRegistry.RegisterWorldSection(name, validate)
 	}
@@ -491,4 +494,48 @@ func longID(parts ...string) string {
 func seedID(parts ...string) string {
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return hex.EncodeToString(sum[:4])
+}
+
+// parcelSeed is one parcel the user follows; the section turns the Parcels switch on for the
+// principal.
+type parcelSeed struct {
+	Carrier     string `json:"carrier"`
+	Number      string `json:"number"`
+	Title       string `json:"title,omitempty"`
+	Sender      string `json:"sender,omitempty"`
+	Status      string `json:"status"`
+	WindowFrom  string `json:"window_from,omitempty"`
+	WindowTo    string `json:"window_to,omitempty"`
+	PickupPoint string `json:"pickup_point,omitempty"`
+}
+
+func (p parcelSeed) parcel() parcel.Parcel {
+	return parcel.Parcel{
+		Carrier: p.Carrier, Number: p.Number, Title: p.Title, Sender: p.Sender, Source: parcel.SourceMail,
+		Status: parcel.ParseStatus(p.Status), PickupPoint: p.PickupPoint,
+	}
+}
+
+func validateParcels(raw json.RawMessage) error {
+	var parcels []parcelSeed
+	if err := decodeStrict(raw, &parcels); err != nil {
+		return err
+	}
+	for i, seed := range parcels {
+		if err := seed.parcel().Validate(); err != nil {
+			return fmt.Errorf("parcels[%d]: %w", i, err)
+		}
+		if parcel.ParseStatus(seed.Status) == parcel.StatusUnknown && seed.Status != string(parcel.StatusUnknown) {
+			return fmt.Errorf("parcels[%d]: status %q is not one of the parcel statuses", i, seed.Status)
+		}
+		for _, value := range []string{seed.WindowFrom, seed.WindowTo} {
+			if value == "" {
+				continue
+			}
+			if _, err := time.Parse(ClockLayout, value); err != nil {
+				return fmt.Errorf("parcels[%d]: %q is not a local time such as 2026-03-10T14:00", i, value)
+			}
+		}
+	}
+	return nil
 }

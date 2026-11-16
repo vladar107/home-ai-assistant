@@ -247,6 +247,9 @@ type ScanConfig struct {
 	Watches   WatchProposer
 }
 
+// SetParcels turns the parcel follow-ups on, at wiring time, once Parcels is built.
+func (s *Service) SetParcels(parcels ParcelSupport) { s.parcels = parcels }
+
 // SetScreener sets who screens the check's mail-derived text, at wiring time.
 func (s *Service) SetScreener(screener tools.Screener) { s.screener = screener }
 
@@ -566,6 +569,10 @@ func scannedAction(found scanAction, now time.Time, location *time.Location, par
 	}
 }
 
+// errRetryLater marks a follow-up that could not be judged because of a failure rather than a
+// refusal, so it stays pending for the next check.
+var errRetryLater = errors.New("the follow-up could not be checked")
+
 // offer settles what became of the follow-ups offered before, then offers the ones waiting, oldest
 // first, on one card in the run's tab while no other card waits there. The follow-ups are marked as
 // being offered before the offer, so a failure to record their approvals afterwards never offers
@@ -611,6 +618,12 @@ func (r scan) offer(ctx context.Context, principalID string, done *outcome) erro
 				continue
 			}
 			proposal, err := r.proposal(ctx, principalID, *record, record.Pending[position])
+			if errors.Is(err, errRetryLater) {
+				s.logger.WarnContext(ctx, "intake.scan.proposal_failed", "principal_id", principalID, "record_id", record.ID, "type", record.Pending[position].Type, "error", err.Error())
+				done.failed = true
+				done.pending++
+				continue
+			}
 			if err != nil {
 				s.logger.InfoContext(ctx, "intake.scan.refused", "principal_id", principalID, "record_id", record.ID, "type", record.Pending[position].Type, "reason", err.Error())
 				record.Pending = slices.Delete(record.Pending, position, position+1)
@@ -728,7 +741,7 @@ func (r scan) proposal(ctx context.Context, principalID string, record Record, a
 	case ActionParcel:
 		on, enabledErr := r.service.parcelsOn(ctx, principalID)
 		if enabledErr != nil {
-			return approval.Proposal{}, enabledErr
+			return approval.Proposal{}, errors.Join(errRetryLater, enabledErr)
 		}
 		if !on {
 			return approval.Proposal{}, fmt.Errorf("parcels are off")
@@ -736,9 +749,12 @@ func (r scan) proposal(ctx context.Context, principalID string, record Record, a
 		proposal, err = r.service.parcels.Proposal(ctx, principalID, action.Number, action.Carrier)
 		if errors.Is(err, parcel.ErrNoIntegration) {
 			if err := r.service.parcels.FollowByMail(ctx, principalID, action.Number, action.Carrier, record.Title, record.Sender); err != nil {
-				return approval.Proposal{}, err
+				return approval.Proposal{}, errors.Join(errRetryLater, err)
 			}
 			return approval.Proposal{}, fmt.Errorf("followed through mail instead of a card")
+		}
+		if err != nil && !errors.Is(err, parcel.ErrNotProposed) {
+			return approval.Proposal{}, errors.Join(errRetryLater, err)
 		}
 		screened = action.Number + " " + action.Carrier
 	case ActionReminder:

@@ -31,6 +31,7 @@ import (
 	userlocation "github.com/vladar107/home-ai-assistant/internal/location"
 	"github.com/vladar107/home-ai-assistant/internal/memory"
 	"github.com/vladar107/home-ai-assistant/internal/observability"
+	"github.com/vladar107/home-ai-assistant/internal/parcel"
 	"github.com/vladar107/home-ai-assistant/internal/routes"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
@@ -327,6 +328,13 @@ func (w *World) section(name string, into any) (bool, error) {
 	return true, decodeStrict(raw, into)
 }
 
+func (w *World) optionalLocal(value string) (time.Time, error) {
+	if value == "" {
+		return time.Time{}, nil
+	}
+	return w.parseLocal(value)
+}
+
 func (w *World) parseLocal(value string) (time.Time, error) {
 	return time.ParseInLocation(ClockLayout, value, w.Location)
 }
@@ -521,6 +529,27 @@ func (w *World) seedStore(ctx context.Context) error {
 		}, userlocation.MaximumPlacesPerPrincipal)
 		if err != nil || !created {
 			return fmt.Errorf("places[%d]: created=%v: %w", i, created, err)
+		}
+	}
+	var parcels []parcelSeed
+	if _, err := w.section(SectionParcels, &parcels); err != nil {
+		return err
+	}
+	for i, seed := range parcels {
+		held := seed.parcel()
+		held.PrincipalID, held.CreatedAt, held.UpdatedAt = PrincipalID, now, now
+		var err error
+		if held.WindowFrom, err = w.optionalLocal(seed.WindowFrom); err != nil {
+			return fmt.Errorf("parcels[%d]: %w", i, err)
+		}
+		if held.WindowTo, err = w.optionalLocal(seed.WindowTo); err != nil {
+			return fmt.Errorf("parcels[%d]: %w", i, err)
+		}
+		if carrier, ok := parcel.DefaultCarriers().ByID(held.Carrier); ok {
+			held.Link = carrier.Link(held.Number)
+		}
+		if _, _, err := w.Store.UpsertParcel(ctx, held); err != nil {
+			return fmt.Errorf("parcels[%d]: %w", i, err)
 		}
 	}
 	if err := w.connectAccounts(ctx); err != nil {

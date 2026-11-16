@@ -21,6 +21,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/export"
 	"github.com/vladar107/home-ai-assistant/internal/integration"
 	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
+	"github.com/vladar107/home-ai-assistant/internal/parcel"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 	"github.com/vladar107/home-ai-assistant/internal/trip"
@@ -150,6 +151,25 @@ func (h *conversationHarness) seedExport(principal string) {
 		if _, err := h.db.ExecContext(h.ctx, statement.query, statement.args...); err != nil {
 			h.t.Fatalf("%s: %v", statement.query, err)
 		}
+	}
+	seeded := now.UTC().Truncate(time.Millisecond)
+	if _, _, err := h.store.UpsertParcel(h.ctx, parcel.Parcel{
+		PrincipalID: principal, Carrier: "postnl", Number: "3SABCD1234567", Title: "Garden chair", Sender: "Example Shop", Source: parcel.SourceMail,
+		Status: parcel.StatusInTransit, CreatedAt: seeded, UpdatedAt: seeded,
+	}); err != nil {
+		h.t.Fatal(err)
+	}
+	if err := h.store.SaveAddedNumber(h.ctx, parcel.AddedNumber{PrincipalID: principal, Carrier: "dhl", Number: "1234567892", Domain: "dhl", EntryID: "entry-a", AddedAt: seeded}); err != nil {
+		h.t.Fatal(err)
+	}
+	if err := h.store.SetProposalOutcome(h.ctx, principal, "1234567893", parcel.OutcomeDeclined, seeded); err != nil {
+		h.t.Fatal(err)
+	}
+	if err := h.store.SaveSettings(h.ctx, parcel.Settings{PrincipalID: principal, Postcode: "1234 AB"}); err != nil {
+		h.t.Fatal(err)
+	}
+	if _, err := h.db.ExecContext(h.ctx, `INSERT INTO parcel_tombstones (principal_id, key, created_at, last_seen_at) VALUES (?, 'dhl|1234567894', ?, ?)`, principal, stamp(seeded), stamp(seeded)); err != nil {
+		h.t.Fatal(err)
 	}
 }
 

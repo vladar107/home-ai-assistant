@@ -26,11 +26,11 @@ var (
 	// ErrFollowedByMail means no integration can follow the number for this user: its carrier has
 	// no number-tracking integration, the carrier is ambiguous, or the user has no assigned entry
 	// that can take it.
-	ErrFollowedByMail = errors.New("no Home Assistant integration of the user can follow this number")
+	ErrFollowedByMail = parcel.ErrFollowedByMail
 	// ErrPostcodeMissing means the carrier's integration needs the user's postcode and they have none.
-	ErrPostcodeMissing = errors.New("the user has not set a postcode")
+	ErrPostcodeMissing = parcel.ErrPostcodeMissing
 	// ErrInvalidNumber means the number is not a tracking number.
-	ErrInvalidNumber = errors.New("not a tracking number")
+	ErrInvalidNumber = parcel.ErrInvalidNumber
 )
 
 type parcelShape int

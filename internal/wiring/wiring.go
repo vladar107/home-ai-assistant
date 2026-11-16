@@ -50,6 +50,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/modelcatalog"
 	"github.com/vladar107/home-ai-assistant/internal/module"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
+	"github.com/vladar107/home-ai-assistant/internal/parcel"
 	"github.com/vladar107/home-ai-assistant/internal/project"
 	"github.com/vladar107/home-ai-assistant/internal/provenance"
 	"github.com/vladar107/home-ai-assistant/internal/reaction"
@@ -120,6 +121,8 @@ type TabServices struct {
 	Projects project.Tabs
 	// Watches keeps each agent watch's tab; nil leaves watches without tabs of their own.
 	Watches watch.Tabs
+	// Parcels shows parcel cards and notices; nil leaves Parcels out.
+	Parcels parcel.Cards
 }
 
 // TabsFactory builds the tab services over what only Build can supply: the engine that names tabs
@@ -169,6 +172,9 @@ type Inputs struct {
 	Grafana *grafana.Config
 	Bus     *bus.Config
 	MCP     *mcp.Config
+	// ParcelSources maps a principal to the Home Assistant config entry IDs that are theirs; an
+	// entry belongs to at most one principal, and an unassigned entry is never read.
+	ParcelSources map[string][]string
 
 	// ExtraProviders are tools offered ahead of every other, and WatchEvaluators replace or add the
 	// evaluators of their kinds; both are for tests.
@@ -281,6 +287,12 @@ type Assembly struct {
 	Trips         *trip.Service
 	// TripLoop sends trip notices and starts the checks for news about trips.
 	TripLoop *trip.Loop
+	// ParcelLoop keeps the parcel cards current; nil while the tabs offer no parcel cards.
+	ParcelLoop *parcel.Loop
+	// ParcelSources is the Home Assistant side of Parcels, nil without a token or parcel cards.
+	ParcelSources parcel.Sources
+	// ParcelTools is the parcel tools and the executor of their actions.
+	ParcelTools *parcel.Tools
 	// Exports gives each user their own data as a signed file and restores it.
 	Exports *export.Service
 	// SwitchPages are the on/off pages of the registered integrations, in registration order.
@@ -293,6 +305,8 @@ type Assembly struct {
 	files        *delivery.Service
 	exposures    *exposure.Service
 	tripState    *tripScanState
+	tabs         TabServices
+	gmail        *gmail.Service
 	watchKinds   map[string]bool
 	outcomes     *toolOutcomeLog
 }
@@ -688,6 +702,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	a.Turns = engine
 	projectReader := project.NewReader(in.Store, a.location, in.Core.Now)
 	tabs := in.Tabs(engine, tripReader, projectReader, watch.NewReader(in.Store))
+	a.tabs = tabs
 	// Scheduled runs reach only the owner's own chat, resolved from the allowlist at delivery.
 	scheduler, err := schedule.NewService(schedule.Config{
 		Zone: in.Zone, TickInterval: in.Core.ScheduleTick, Now: in.Core.Now,
@@ -1073,6 +1088,7 @@ func (a *Assembly) buildConnectors(ctx context.Context) error {
 			}
 		}
 		a.tripState.google, a.tripState.calendar = googleService, calendarService
+		a.gmail = gmailService
 		a.Google = googleService
 	}
 	if a.NS != nil {
@@ -1180,7 +1196,10 @@ func (a *Assembly) buildConnectors(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return a.register(ctx, Connector{Watches: transitWatches})
+	if err := a.register(ctx, Connector{Watches: transitWatches}); err != nil {
+		return err
+	}
+	return a.buildParcels()
 }
 
 // transitWatches are the kinds of watch the configured transit connectors can check; each check

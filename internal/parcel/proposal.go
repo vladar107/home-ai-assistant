@@ -19,6 +19,19 @@ var ErrNotProposed = errors.New("the number is not proposed")
 // integration that tracks numbers: a parcel mail follows is all it can be.
 var ErrNoIntegration = errors.New("no Home Assistant integration tracks numbers of the carrier")
 
+// Failures of adding a number to Home Assistant, which its source reports and the tool turns into a
+// parcel followed by mail or a prompt for the postcode.
+var (
+	// ErrFollowedByMail means no integration can follow the number for this user: its carrier has
+	// no number-tracking integration, the carrier is ambiguous, or the user has no assigned entry
+	// that can take it.
+	ErrFollowedByMail = errors.New("no Home Assistant integration of the user can follow this number")
+	// ErrPostcodeMissing means the carrier's integration needs the user's postcode and they have none.
+	ErrPostcodeMissing = errors.New("the user has not set a postcode")
+	// ErrInvalidNumber means the number is not a tracking number.
+	ErrInvalidNumber = errors.New("not a tracking number")
+)
+
 var (
 	errNotNumber    = errors.New("the number is not a tracking number")
 	errAlreadyAdded = errors.New("the number is already tracked in Home Assistant")
@@ -53,7 +66,10 @@ type Proposals struct {
 	// as waiting.
 	Approvals ApprovalLoader
 	Carriers  Carriers
-	Now       func() time.Time
+	// HasEntry says whether the principal has an assigned Home Assistant entry of the domain; it is
+	// always false without Home Assistant. Nil leaves the check out.
+	HasEntry func(ctx context.Context, principalID, domain string) bool
+	Now      func() time.Time
 }
 
 // Proposal returns the proposal that adds the number to Home Assistant, or an error wrapping
@@ -96,7 +112,7 @@ func (p Proposals) proposal(ctx context.Context, principalID, number, carrier st
 			carrier = found[0].ID
 		}
 	}
-	if !TracksNumbers(carrier) {
+	if !TracksNumbers(carrier) || p.HasEntry != nil && !p.HasEntry(ctx, principalID, carrier) {
 		return approval.Proposal{}, errors.Join(ErrNotProposed, ErrNoIntegration)
 	}
 	if _, added, err := p.Repository.LoadAddedNumber(ctx, principalID, carrier, number); err != nil {
@@ -181,14 +197,49 @@ func (p Proposals) now() time.Time {
 // ValidCarrier reports whether the word can stand as a carrier: a short lower-case word.
 func ValidCarrier(carrier string) bool { return carrierPattern.MatchString(carrier) }
 
-// FollowByMail starts following a number through mail alone: a local parcel that touches nothing in
+// Followed is what FollowMail did.
+type Followed int
+
+const (
+	// FollowedNew means a parcel was created.
+	FollowedNew Followed = iota + 1
+	// FollowedAlready means the number is already a parcel, stopped or not, and nothing was done.
+	FollowedAlready
+	// FollowedTombstoned means the user stopped following the number, so nothing was done.
+	FollowedTombstoned
+)
+
+// StillWanted fails with ErrNotProposed when the user has since stopped following the number or
+// declined it, which an approval confirmed later must not override.
+func (p Proposals) StillWanted(ctx context.Context, principalID, number, carrier string) error {
+	if tombstoned, err := p.Repository.TombstoneSeenAny(ctx, principalID, Parcel{Carrier: carrier, Number: number}.Keys(), p.now()); err != nil {
+		return err
+	} else if tombstoned {
+		return errors.Join(ErrNotProposed, errTombstoned)
+	}
+	if proposed, found, err := p.Repository.LoadProposal(ctx, principalID, number); err != nil {
+		return err
+	} else if found && proposed.Outcome == OutcomeDeclined {
+		return errors.Join(ErrNotProposed, errDeclined)
+	}
+	return nil
+}
+
+// FollowByMail is FollowMail without its result.
+func (p Proposals) FollowByMail(ctx context.Context, principalID, number, carrier, title, sender string) error {
+	_, err := p.FollowMail(ctx, principalID, number, carrier, title, sender)
+	return err
+}
+
+// FollowMail starts following a number through mail alone: a local parcel that touches nothing in
 // Home Assistant and needs no approval. The carrier is the number's own when its pattern names one,
 // else the given word, else "other", except that a number several carriers share always stands
-// under one of them (Settle). A number already followed, or tombstoned, is left alone.
-func (p Proposals) FollowByMail(ctx context.Context, principalID, number, carrier, title, sender string) error {
+// under one of them (Settle). A number already followed, or tombstoned, is left alone, and the
+// result says so.
+func (p Proposals) FollowMail(ctx context.Context, principalID, number, carrier, title, sender string) (Followed, error) {
 	number, ok := NormalizeNumber(number)
 	if !ok {
-		return errNotNumber
+		return 0, errNotNumber
 	}
 	word := strings.ToLower(strings.TrimSpace(carrier))
 	switch found := p.Carriers.Detect(number); {
@@ -202,10 +253,13 @@ func (p Proposals) FollowByMail(ctx context.Context, principalID, number, carrie
 	carrier = p.Carriers.Settle(carrier, number)
 	parcels, err := p.Repository.ListParcels(ctx, principalID)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	if slices.ContainsFunc(parcels, func(held Parcel) bool { return held.Number == number }) {
-		return nil
+	if at := slices.IndexFunc(parcels, func(held Parcel) bool { return held.Number == number }); at >= 0 {
+		if parcels[at].Stopped() {
+			return FollowedTombstoned, nil
+		}
+		return FollowedAlready, nil
 	}
 	now := p.now()
 	followed := Parcel{
@@ -215,9 +269,13 @@ func (p Proposals) FollowByMail(ctx context.Context, principalID, number, carrie
 	if known, ok := p.Carriers.ByID(carrier); ok {
 		followed.Link = known.Link(number)
 	}
-	if tombstoned, err := p.Repository.TombstoneSeenAny(ctx, principalID, followed.Keys(), now); err != nil || tombstoned {
-		return err
+	if tombstoned, err := p.Repository.TombstoneSeenAny(ctx, principalID, followed.Keys(), now); err != nil {
+		return 0, err
+	} else if tombstoned {
+		return FollowedTombstoned, nil
 	}
-	_, _, err = p.Repository.UpsertParcel(ctx, followed)
-	return err
+	if _, _, err = p.Repository.UpsertParcel(ctx, followed); err != nil {
+		return 0, err
+	}
+	return FollowedNew, nil
 }

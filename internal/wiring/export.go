@@ -12,6 +12,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/locale"
 	userlocation "github.com/vladar107/home-ai-assistant/internal/location"
 	usermemory "github.com/vladar107/home-ai-assistant/internal/memory"
+	"github.com/vladar107/home-ai-assistant/internal/parcel"
 	"github.com/vladar107/home-ai-assistant/internal/project"
 	"github.com/vladar107/home-ai-assistant/internal/routes"
 	"github.com/vladar107/home-ai-assistant/internal/trip"
@@ -59,6 +60,9 @@ var ExcludedFromExport = map[string]string{
 	"trip_flights":                "what the flight tracking has seen",
 	"trip_flight_pauses":          "what the flight tracking has said",
 	"backlog_items":               "development ideas, which /backlog export gives out",
+	"parcel_notices_sent":         "which parcel notices were sent",
+	"parcel_mail_cursors":         "how far the parcel mail job has read",
+	"parcel_tracking":             "what the parcel loop has settled for the user",
 }
 
 // buildExports registers every section of a user's export, in the order they restore: each after
@@ -100,6 +104,7 @@ func (a *Assembly) buildExports() error {
 		trip.Exporter(),
 		a.Collections.Exporter(),
 		intake.Exporter(),
+		a.parcelExporter(),
 		project.Exporter(),
 		usermemory.Exporter(),
 		usermemory.SettingsExporter(),
@@ -226,4 +231,13 @@ func languageName(language locale.Language) string {
 		return "Русский"
 	}
 	return "English"
+}
+
+// parcelExporter is the parcels section; a restore starts the loop's silent baseline. Without parcel
+// cards the section still restores, and nothing is started.
+func (a *Assembly) parcelExporter() export.Exporter {
+	if a.ParcelLoop == nil {
+		return parcel.Exporter()
+	}
+	return parcelExporter{Exporter: parcel.Exporter(), loop: a.ParcelLoop, a: a}
 }
