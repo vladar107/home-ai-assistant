@@ -179,7 +179,7 @@ func (t *Tools) list(ctx context.Context, principalID string) (tools.Result, err
 			}
 			return 1
 		}
-		return b.CreatedAt.Compare(a.CreatedAt)
+		return recency(b).Compare(recency(a))
 	})
 	var lines []string
 	for _, held := range parcels {
@@ -195,6 +195,15 @@ func (t *Tools) list(ctx context.Context, principalID string) (tools.Result, err
 		return tools.Result{Text: "The user has no parcels being followed."}, nil
 	}
 	return tools.Result{Text: strings.Join(lines, "\n")}, nil
+}
+
+// recency orders finished parcels by delivery: a baseline stores a source's whole history at one
+// moment, so its creation time says nothing about which arrived last.
+func recency(held Parcel) time.Time {
+	if !held.DeliveredAt.IsZero() {
+		return held.DeliveredAt
+	}
+	return held.CreatedAt
 }
 
 func (t *Tools) describe(held Parcel) string {

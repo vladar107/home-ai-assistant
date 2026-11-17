@@ -68,3 +68,45 @@ func TestParcelListPutsOpenAndNewestFirstOnOneLineEach(t *testing.T) {
 		t.Fatalf("list =\n%s", result.Text)
 	}
 }
+
+func TestParcelListOrdersParcelsStoredTogetherByDelivery(t *testing.T) {
+	t.Parallel()
+	store := testutil.OpenStore(t, filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
+	t.Cleanup(func() { _ = store.Close() })
+	if err := store.BootstrapConfiguredPrincipals(t.Context(), []identity.ConfiguredPrincipal{{ID: "alice", DisplayName: "Alice", TelegramUserID: 101}}); err != nil {
+		t.Fatal(err)
+	}
+	// A baseline stores a source's whole history in one read, so every parcel has the same
+	// creation time and only the delivery says which came last.
+	stored := time.Date(2026, 11, 17, 21, 0, 0, 0, time.UTC)
+	// Stored in an order unrelated to delivery, eight parcels leave a creation-time sort no
+	// realistic chance of listing them newest delivery first.
+	for _, day := range []int{12, 3, 27, 8, 19, 1, 23, 15} {
+		if _, _, err := store.UpsertParcel(t.Context(), parcel.Parcel{
+			PrincipalID: "alice", Carrier: "dhl", Number: fmt.Sprintf("30000000%02d", day), Source: parcel.SourceHomeAssistant,
+			Status: parcel.StatusDelivered, DeliveredAt: time.Date(2026, 10, day, 12, 0, 0, 0, time.UTC), CreatedAt: stored, UpdatedAt: stored,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list, err := parcel.NewTools(parcel.ToolsConfig{
+		Repository: store, Actor: refusingActor{}, Tracker: idleLoop{}, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := list.Execute(t.Context(), "alice", tools.Call{Name: parcel.ToolList})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(result.Text, "\n")
+	days := []int{27, 23, 19, 15, 12, 8, 3, 1}
+	if len(lines) != len(days) {
+		t.Fatalf("list =\n%s", result.Text)
+	}
+	for index, day := range days {
+		if !strings.Contains(lines[index], fmt.Sprintf("delivered 2026-10-%02d", day)) {
+			t.Fatalf("line %d is not the parcel delivered on 2026-10-%02d; list =\n%s", index, day, result.Text)
+		}
+	}
+}
