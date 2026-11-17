@@ -5,6 +5,7 @@ services:
     environment:
       HOME_AGENT_HA_TOKEN_FILE: /run/secrets/ha-token
       HOME_AGENT_HA_URL: http://homeassistant:8123
+      HOME_AGENT_PARCEL_SOURCES: ${HOME_AGENT_PARCEL_SOURCES:-}
     # Home Assistant runs with host networking on the NAS, and the NAS cannot reach the Caddy edge
     # on its own macvlan, so the container talks to Home Assistant's host port over a hop that
     # never leaves the NAS.
