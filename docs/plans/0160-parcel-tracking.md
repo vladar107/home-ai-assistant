@@ -1,6 +1,6 @@
 # 0160 — Parcel tracking: a live card for every parcel a user is waiting for
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
@@ -230,9 +230,9 @@ integrations, accounts, and versions the household runs.
 
 ### Model access and privacy
 
-- `parcel_list` returns the user's parcels, those on their way first and the newest first, at most
-  30, each field on one line, and is marked third-party, so its result is framed as
-  untrusted and counts as outside content for later writes. `parcel_stop` stops one. The tools'
+- `parcel_list` returns the user's parcels, those on their way first and the newest first
+  (finished ones by delivery time), at most 30, each field on one line, and is marked third-party,
+  so its result is framed as untrusted and counts as outside content for later writes. `parcel_stop` stops one. The tools'
   guidance, in their contribution, points parcel questions at `parcel_list`; the system prompt is
   not changed.
 - Logs and traces carry parcel IDs, carriers, and statuses only: never titles, senders, pickup
