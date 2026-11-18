@@ -28,6 +28,7 @@ func TestBusinessMetricsAreRecordedWithNormalizedLabels(t *testing.T) {
 	telemetry.RecordModelTurn(ctx, "alice", "on", 2, 100, 20)
 	telemetry.RecordToolCall(ctx, "alice", "calendar", "", time.Millisecond)
 	telemetry.RecordToolCallsPerTurn(ctx, "alice", "on", 1)
+	telemetry.RecordToolBytesOffered(ctx, "alice", "definitions", "builtin", 2048)
 	telemetry.RecordDayCardRender(ctx, "success", time.Millisecond)
 	telemetry.RecordChartRender(ctx, "success", time.Millisecond)
 	telemetry.RecordApproval(ctx, "alice", "notion_create_page", "executed", true)
@@ -80,6 +81,7 @@ func TestBusinessMetricsAreRecordedWithNormalizedLabels(t *testing.T) {
 		{"home_agent.tool.calls", map[string]string{"home_agent.tool": "calendar", "home_agent.outcome": "unknown", "home_agent.principal": "alice"}, 1},
 		{"home_agent.tool.duration", map[string]string{"home_agent.tool": "calendar", "home_agent.outcome": "unknown"}, 1},
 		{"home_agent.tool.calls_per_turn", map[string]string{"home_agent.principal": "alice"}, 1},
+		{"home_agent.tool.offered_bytes", map[string]string{"home_agent.principal": "alice", "home_agent.part": "definitions", "home_agent.source": "builtin"}, 1},
 		{"home_agent.daycard.render.duration", map[string]string{"home_agent.outcome": "success"}, 1},
 		{"home_agent.chart.render.duration", map[string]string{"home_agent.outcome": "success"}, 1},
 		{"home_agent.approvals", map[string]string{"home_agent.status": "executed", "home_agent.warned": "true"}, 1},

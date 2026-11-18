@@ -782,7 +782,7 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		activity.stop()
 		notes := s.engine.MemoryNotes(request.PrincipalID, outbox.ChatTurn(request.ID))
 		if err == nil && !errors.Is(turnCtx.Err(), context.Canceled) {
-			s.recordTurnMetrics(turnCtx, request.PrincipalID, safetyChecks, result, !tools.Empty() || switches.WebSearch, hint)
+			s.recordTurnMetrics(turnCtx, request.PrincipalID, safetyChecks, result, tools, switches.WebSearch, hint)
 		}
 		switch {
 		case errors.Is(turnCtx.Err(), context.DeadlineExceeded) || errors.Is(runErr, agentruntime.ErrStalled):
@@ -1150,11 +1150,17 @@ func (s *Service) safetyChecksLabel(ctx context.Context, principalID string) str
 	}
 }
 
-func (s *Service) recordTurnMetrics(ctx context.Context, principalID, safetyChecks string, ran turn.Result, offeredTools bool, hint toolHint) {
+func (s *Service) recordTurnMetrics(ctx context.Context, principalID, safetyChecks string, ran turn.Result, tools agentruntime.ToolSet, webSearch bool, hint toolHint) {
 	usage, calls, called := ran.Usage, ran.Calls, ran.Called
 	s.telemetry.RecordModelTurn(ctx, principalID, safetyChecks, usage.ModelCalls, usage.PromptTokens, usage.OutputTokens)
-	if offeredTools {
+	if !tools.Empty() || webSearch {
 		s.telemetry.RecordToolCallsPerTurn(ctx, principalID, safetyChecks, calls)
+	}
+	for source, size := range tools.OfferedBytes {
+		s.telemetry.RecordToolBytesOffered(ctx, principalID, "definitions", source, size.Definitions)
+		if size.Guidance > 0 {
+			s.telemetry.RecordToolBytesOffered(ctx, principalID, "guidance", source, size.Guidance)
+		}
 	}
 	if !hint.answered {
 		return

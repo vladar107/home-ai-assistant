@@ -4,6 +4,7 @@
 package tools
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -33,6 +34,8 @@ const (
 	screenClean   = "clean"
 	screenFlagged = "flagged"
 	screenFailed  = "failed"
+
+	builtinSource = "builtin"
 )
 
 type RiskClass string
@@ -269,14 +272,17 @@ func (b *Broker) toolsFor(ctx context.Context, principalID string, readOnly bool
 	var guidance []string
 	var definitions []agentruntime.ToolDefinition
 	activities := make(map[string]string)
+	sizes := make(map[string]agentruntime.OfferedBytes)
 	for _, provider := range b.providers {
-		off, _, err := b.switchedOff(ctx, provider, principalID)
+		off, sw, err := b.switchedOff(ctx, provider, principalID)
 		if err != nil {
 			return agentruntime.ToolSet{}, fmt.Errorf("read integration switch: %w", err)
 		}
 		if off {
 			continue
 		}
+		source := cmp.Or(sw.Integration, builtinSource)
+		size := sizes[source]
 		contribution, err := provider.Contribute(ctx, principalID)
 		if err != nil {
 			return agentruntime.ToolSet{}, fmt.Errorf("collect tool contribution: %w", err)
@@ -306,6 +312,7 @@ func (b *Broker) toolsFor(ctx context.Context, principalID string, readOnly bool
 				Description: definition.Description,
 				InputSchema: definition.InputSchema,
 			})
+			size.Definitions += definitionBytes(definition)
 			if definition.Activity != "" {
 				activities[definition.Name] = definition.Activity
 			}
@@ -313,25 +320,49 @@ func (b *Broker) toolsFor(ctx context.Context, principalID string, readOnly bool
 		if overridden {
 			if text := strings.TrimSpace(override); text != "" {
 				guidance = append(guidance, text)
+				size.Guidance += len(text)
+			}
+			if offered > 0 {
+				sizes[source] = size
 			}
 			continue
 		}
 		if text := strings.TrimSpace(contribution.Guidance); text != "" && offered > 0 {
 			guidance = append(guidance, text)
+			size.Guidance += len(text)
 		}
 		if text := strings.TrimSpace(contribution.WriteGuidance); text != "" && offered > 0 && !readOnly {
 			guidance = append(guidance, text)
+			size.Guidance += len(text)
+		}
+		if offered > 0 {
+			sizes[source] = size
 		}
 	}
 	if len(definitions) == 0 {
 		return agentruntime.ToolSet{}, nil
 	}
 	return agentruntime.ToolSet{
-		Definitions: definitions,
-		Guidance:    strings.Join(guidance, "\n"),
-		Executor:    executor,
-		Activities:  activities,
+		Definitions:  definitions,
+		Guidance:     strings.Join(guidance, "\n"),
+		Executor:     executor,
+		Activities:   activities,
+		OfferedBytes: sizes,
 	}, nil
+}
+
+// definitionBytes is the size of a tool as the runtime hands it to the model: its name,
+// description and schema, encoded as the Pi bridge lists them.
+func definitionBytes(definition Definition) int {
+	encoded, err := json.Marshal(struct {
+		Name        string          `json:"name"`
+		Description string          `json:"description"`
+		Parameters  json.RawMessage `json:"parameters"`
+	}{definition.Name, definition.Description, definition.InputSchema})
+	if err != nil {
+		return 0
+	}
+	return len(encoded)
 }
 
 // switchedOff reports whether the provider belongs to an integration the principal has off, and

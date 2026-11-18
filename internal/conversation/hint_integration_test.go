@@ -98,6 +98,7 @@ func (quietTelemetry) RecordReply(context.Context, string, string, string, strin
 func (quietTelemetry) RecordReplyStage(context.Context, string, string, time.Duration)            {}
 func (quietTelemetry) RecordModelTurn(context.Context, string, string, int, int64, int64)         {}
 func (quietTelemetry) RecordToolCallsPerTurn(context.Context, string, string, int)                {}
+func (quietTelemetry) RecordToolBytesOffered(context.Context, string, string, string, int)        {}
 func (quietTelemetry) RecordHintFollowThrough(context.Context, string, string)                    {}
 func (quietTelemetry) RecordConversationResume(context.Context, string, string)                   {}
 func (quietTelemetry) RecordTurnIndicatorFailure(context.Context, string, string)                 {}

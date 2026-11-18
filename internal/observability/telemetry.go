@@ -33,6 +33,7 @@ var (
 	turnDurationBoundaries      = []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 30, 60, 120, 180, 300}
 	lifecycleDurationBoundaries = []float64{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5, 10, 30, 60}
 	callCountBoundaries         = []float64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	byteBoundaries              = []float64{1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144}
 	tokenBoundaries             = []float64{500, 1000, 2000, 4000, 8000, 16000, 32000, 64000, 128000, 256000, 512000, 1024000}
 )
 
@@ -72,6 +73,7 @@ type Telemetry struct {
 	httpRetries                  metric.Int64Counter
 	toolDuration                 metric.Float64Histogram
 	toolCallsPerTurn             metric.Int64Histogram
+	toolOfferedBytes             metric.Int64Histogram
 	dayCardRenderDuration        metric.Float64Histogram
 	chartRenderDuration          metric.Float64Histogram
 	approvals                    metric.Int64Counter
@@ -393,6 +395,9 @@ func (t *Telemetry) createBusinessInstruments(meter metric.Meter) error {
 		return err
 	}
 	if t.toolCallsPerTurn, err = counts("home_agent.tool.calls_per_turn", "Tool calls made in one turn.", "{call}", callCountBoundaries); err != nil {
+		return err
+	}
+	if t.toolOfferedBytes, err = counts("home_agent.tool.offered_bytes", "Tool definition and guidance bytes offered in one chat turn, by part and source.", "By", byteBoundaries); err != nil {
 		return err
 	}
 	if t.dayCardRenderDuration, err = seconds("home_agent.daycard.render.duration", "Day card render duration.", requestDurationBoundaries); err != nil {
@@ -811,6 +816,16 @@ func (t *Telemetry) RecordToolCall(ctx context.Context, principal, tool, outcome
 
 func (t *Telemetry) RecordToolCallsPerTurn(ctx context.Context, principal, safetyChecks string, calls int) {
 	t.toolCallsPerTurn.Record(ctx, int64(calls), metric.WithAttributes(principalAttr(principal), safetyChecksAttr(safetyChecks)))
+}
+
+// RecordToolBytesOffered records one part (definitions or guidance) of a chat turn's offered tools
+// for one source: an integration name or "builtin".
+func (t *Telemetry) RecordToolBytesOffered(ctx context.Context, principal, part, source string, bytes int) {
+	t.toolOfferedBytes.Record(ctx, int64(bytes), metric.WithAttributes(
+		principalAttr(principal),
+		labelAttr("home_agent.part", part, "unknown"),
+		labelAttr("home_agent.source", source, "unknown"),
+	))
 }
 
 func (t *Telemetry) RecordDayCardRender(ctx context.Context, outcome string, duration time.Duration) {

@@ -351,6 +351,9 @@ type Telemetry interface {
 	RecordReplyStage(ctx context.Context, principal, stage string, duration time.Duration)
 	RecordModelTurn(ctx context.Context, principal, safetyChecks string, calls int, promptTokens, outputTokens int64)
 	RecordToolCallsPerTurn(ctx context.Context, principal, safetyChecks string, calls int)
+	// RecordToolBytesOffered records the bytes of one part of a chat turn's offered tools, "definitions"
+	// or "guidance", for one source, an integration name or "builtin".
+	RecordToolBytesOffered(ctx context.Context, principal, part, source string, bytes int)
 	RecordHintFollowThrough(ctx context.Context, principal, result string)
 	// RecordConversationResume counts a return to an earlier conversation by what triggered it.
 	RecordConversationResume(ctx context.Context, principal, trigger string)

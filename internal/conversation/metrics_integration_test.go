@@ -83,8 +83,13 @@ func newMetricsEnv(t *testing.T) *metricsEnv {
 
 func (e *metricsEnv) service(t *testing.T, runtime agentruntime.AgentRuntime, config conversation.Config) *conversation.Service {
 	t.Helper()
+	return e.serviceWithTools(t, runtime, hintTools{names: []string{"nas_search", "gmail_search"}}, config)
+}
+
+func (e *metricsEnv) serviceWithTools(t *testing.T, runtime agentruntime.AgentRuntime, toolProvider turn.ToolProvider, config conversation.Config) *conversation.Service {
+	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	e.engine = testEngine(t, runtime, hintTools{names: []string{"nas_search", "gmail_search"}}, logger, e.telemetry)
+	e.engine = testEngine(t, runtime, toolProvider, logger, e.telemetry)
 	config.Engine = e.engine
 	service, err := conversation.NewService(config, e.store, hintDeliverer{replies: e.replies}, logger, e.telemetry)
 	if err != nil {

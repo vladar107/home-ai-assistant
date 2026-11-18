@@ -101,6 +101,15 @@ type ToolSet struct {
 	// Activities maps an offered tool's name to its activity key, for showing the user what the
 	// turn is doing. A runtime never sends it to the model.
 	Activities map[string]string
+	// OfferedBytes sizes what the set offers, by the integration it comes from or "builtin", for
+	// measuring the turn's prompt weight. A runtime never sends it to the model.
+	OfferedBytes map[string]OfferedBytes
+}
+
+// OfferedBytes is the size of the tool definitions and guidance one source puts into a turn.
+type OfferedBytes struct {
+	Definitions int
+	Guidance    int
 }
 
 func (t ToolSet) Empty() bool {
