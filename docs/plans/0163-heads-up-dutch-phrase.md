@@ -1,6 +1,6 @@
 # 0163 — Heads-up: a Dutch phrase of the day
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
