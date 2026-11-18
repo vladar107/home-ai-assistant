@@ -1,6 +1,6 @@
 # 0161 — Inbox intake: unread mail only, priority notifications only, and notes the user can edit
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
