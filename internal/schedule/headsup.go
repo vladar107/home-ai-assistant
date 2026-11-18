@@ -11,14 +11,16 @@ import (
 
 const (
 	HeadsUpName = "Heads-up"
-	HeadsUpCron = "30 7,18 * * *"
-	// legacyHeadsUpCron is the schedule jobs were created with before the Trips scan shared 07:30.
-	legacyHeadsUpCron = "0 8,19 * * *"
+	HeadsUpCron = "30 7 * * *"
 	// headsUpCallBudget fits a check of every trip in the window plus the alternatives for a
 	// failed train, which a turn's usual budget would cut short and leave reported as failed
 	// checks.
 	headsUpCallBudget = 30
 )
+
+// legacyHeadsUpCrons are the schedules Heads-up jobs were created with before: twice a day at 08:00
+// and 19:00 until the Trips scan shared 07:30, then at 07:30 and 18:30 until it became morning only.
+var legacyHeadsUpCrons = []string{"0 8,19 * * *", "30 7,18 * * *"}
 
 // HeadsUpNotes are the notes a new Heads-up job starts with. The job stores only the user's
 // notes; every run follows headsUpMethod, so improving the method reaches existing jobs.
@@ -74,14 +76,18 @@ func HeadsUpJobID(principalID string) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-// MigrateHeadsUp moves every Heads-up job still on the legacy schedule to HeadsUpCron, recomputing
+// MigrateHeadsUp moves every Heads-up job still on a legacy schedule to HeadsUpCron, recomputing
 // its next run, and then gives every one still holding the legacy instruction HeadsUpNotes. A job
 // whose schedule or instruction the user changed keeps it, and one that is not the principal's
 // built-in Heads-up job is left alone.
 func (s *Service) MigrateHeadsUp(ctx context.Context) error {
-	jobs, err := s.repository.ScheduledJobsWithCron(ctx, legacyHeadsUpCron)
-	if err != nil {
-		return err
+	var jobs []Job
+	for _, cron := range legacyHeadsUpCrons {
+		found, err := s.repository.ScheduledJobsWithCron(ctx, cron)
+		if err != nil {
+			return err
+		}
+		jobs = append(jobs, found...)
 	}
 	moved := 0
 	for _, job := range jobs {

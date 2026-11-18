@@ -682,9 +682,11 @@ a `travel_pause` column to jobs and watches; neither can be undone, so take a da
 backup before the first deploy that carries them. No setting is needed. Each user
 turns the Trips scan on in `/settings`; it is offered only while Google mail or
 calendar is on for them, and it runs daily at 07:30 as the job "Trips" (also
-visible in `/jobs`). Heads-up moved to 07:30 and 18:30; at start, a Heads-up job
-still on the old schedule is moved once, and one the user changed is left alone.
-Moving a Heads-up job from 19:00 to 18:30 skips that one evening run.
+visible in `/jobs`). Heads-up runs once a day at 07:30; at start, a Heads-up job
+still on an earlier built-in schedule (08:00 and 19:00, or 07:30 and 18:30) is
+moved once, and one the user changed is left alone. A user who wants an evening
+run moves the job in conversation; the method still covers tomorrow on a run
+after 15:00.
 
 Heads-up now runs a built-in method and keeps the job's text as the user's
 notes. At start, a job whose text is still exactly the old built-in

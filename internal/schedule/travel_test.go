@@ -307,33 +307,37 @@ func TestScheduleToolsSetAndKeepTheTravelFlag(t *testing.T) {
 	}
 }
 
-func TestHeadsUpUsesTheNewScheduleAndOldOnesMoveOnce(t *testing.T) {
-	f := newTravelFixture(t)
-	if schedule.HeadsUpCron != "30 7,18 * * *" {
+func TestHeadsUpRunsEachMorningAndOldSchedulesMoveOnce(t *testing.T) {
+	if schedule.HeadsUpCron != "30 7 * * *" {
 		t.Fatalf("heads-up cron = %q", schedule.HeadsUpCron)
 	}
-	id := schedule.HeadsUpJobID("alice")
-	old := f.create(id, schedule.HeadsUpName, schedule.Timing{Cron: "0 8,19 * * *"}, false)
-	other := f.create("0000000000000001", schedule.HeadsUpName, schedule.Timing{Cron: "0 8,19 * * *"}, false)
+	for _, legacy := range []string{"0 8,19 * * *", "30 7,18 * * *"} {
+		t.Run(legacy, func(t *testing.T) {
+			f := newTravelFixture(t)
+			id := schedule.HeadsUpJobID("alice")
+			old := f.create(id, schedule.HeadsUpName, schedule.Timing{Cron: legacy}, false)
+			other := f.create("0000000000000001", schedule.HeadsUpName, schedule.Timing{Cron: legacy}, false)
 
-	f.set(utc(5, 9, 0))
-	f.start()
-	got := f.job(id)
-	if got.Cron != schedule.HeadsUpCron || !got.NextRunAt.Equal(utc(5, 18, 30)) {
-		t.Fatalf("migrated heads-up = %s next %v", got.Cron, got.NextRunAt)
-	}
-	if got.UpdatedAt.Equal(old.UpdatedAt) {
-		t.Fatal("the migrated job was not written")
-	}
-	if untouched := f.job(other.ID); untouched.Cron != "0 8,19 * * *" {
-		t.Fatalf("a job that is not the built-in Heads-up was moved: %s", untouched.Cron)
-	}
+			f.set(utc(5, 9, 0))
+			f.start()
+			got := f.job(id)
+			if got.Cron != schedule.HeadsUpCron || !got.NextRunAt.Equal(utc(6, 7, 30)) {
+				t.Fatalf("migrated heads-up = %s next %v", got.Cron, got.NextRunAt)
+			}
+			if got.UpdatedAt.Equal(old.UpdatedAt) {
+				t.Fatal("the migrated job was not written")
+			}
+			if untouched := f.job(other.ID); untouched.Cron != legacy {
+				t.Fatalf("a job that is not the built-in Heads-up was moved: %s", untouched.Cron)
+			}
 
-	if err := f.service.MigrateHeadsUp(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if again := f.job(id); !again.UpdatedAt.Equal(got.UpdatedAt) {
-		t.Fatal("a second migration changed the job again")
+			if err := f.service.MigrateHeadsUp(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if again := f.job(id); !again.UpdatedAt.Equal(got.UpdatedAt) {
+				t.Fatal("a second migration changed the job again")
+			}
+		})
 	}
 }
 
@@ -451,7 +455,7 @@ func TestAHeadsUpWithTheOldBuiltInTextGetsTheDefaultNotes(t *testing.T) {
 	f.start()
 	got := f.job(id)
 	if schedule.ModelTurnPrompt(got.Config) != schedule.HeadsUpNotes || schedule.ModelTurnModel(got.Config) != "gpt-test:high" ||
-		got.Cron != schedule.HeadsUpCron || !got.NextRunAt.Equal(utc(5, 18, 30)) {
+		got.Cron != schedule.HeadsUpCron || !got.NextRunAt.Equal(utc(6, 7, 30)) {
 		t.Fatalf("migrated heads-up = %s %s next %v", got.Config, got.Cron, got.NextRunAt)
 	}
 	if other := f.job(edited.ID); schedule.ModelTurnPrompt(other.Config) != legacyHeadsUpText {

@@ -563,8 +563,8 @@ reason `quiet`: nothing is sent and no report is kept. Its message allows that
 only when the job's instructions ask to report on a condition that does not
 hold; a failed run still reports. A manual Run now that ends quiet answers
 "Nothing to report right now". Heads-up is a per-user switch in `/settings` that
-creates an ordinary model-turn job with a built-in prompt at 07:30 and 18:30 in
-the default zone, under an ID derived from the principal, so the switch finds
+creates an ordinary model-turn job with a built-in prompt at 07:30 each morning
+in the default zone, under an ID derived from the principal, so the switch finds
 the job however it was renamed, paused, or deleted in conversation. Its runs
 look over the user's day and stay quiet unless something needs attention.
 

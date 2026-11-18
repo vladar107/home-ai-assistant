@@ -163,7 +163,7 @@ borrowed between users.
   ("at 07:40 on weekdays, tell me only if rain is coming in the next hour"), and
   stays silent when it does not hold.
 - **Heads-up.** Turned on in `/settings`, the assistant looks over the user's
-  day at 07:30 and 18:30 (every trip in the window checked against saved routes
+  day each morning at 07:30 (every trip in the window checked against saved routes
   and live trains, with an alternative when a train fails; weather, home
   devices, health and energy trends) and writes first, only when something
   needs attention. It follows a built-in method plus the user's own notes, and

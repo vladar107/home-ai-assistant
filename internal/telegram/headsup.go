@@ -22,11 +22,11 @@ var (
 	headsUpName      = locale.T("Heads-up", "Оповещения")
 	headsUpOffButton = locale.T("Turn off Heads-up", "Выключить оповещения")
 	headsUpOnButton  = locale.T("Turn on Heads-up", "Включить оповещения")
-	HeadsUpOnLine    = locale.T("Heads-up: on. A message at 07:30 and 18:30 when something needs your attention; quiet otherwise. Uses your model subscription.", "Оповещения: включены. Сообщение в 07:30 и 18:30, когда что-то требует твоего внимания; в остальное время тишина. Использует твою подписку на модель.")
-	HeadsUpOffLine   = locale.T("Heads-up: off. Turn it on for a message at 07:30 and 18:30 when something needs your attention; quiet otherwise. Needs a connected model subscription, which it uses.", "Оповещения: выключены. Включи, и в 07:30 и 18:30 будет приходить сообщение, когда что-то требует твоего внимания; в остальное время тишина. Нужна подключённая подписка на модель, которую эта функция использует.")
+	HeadsUpOnLine    = locale.T("Heads-up: on. A message every morning at 07:30 when something needs your attention; quiet otherwise. Uses your model subscription.", "Оповещения: включены. Сообщение каждое утро в 07:30, когда что-то требует твоего внимания; в остальное время тишина. Использует твою подписку на модель.")
+	HeadsUpOffLine   = locale.T("Heads-up: off. Turn it on for a message every morning at 07:30 when something needs your attention; quiet otherwise. Needs a connected model subscription, which it uses.", "Оповещения: выключены. Включи, и каждое утро в 07:30 будет приходить сообщение, когда что-то требует твоего внимания; в остальное время тишина. Нужна подключённая подписка на модель, которую эта функция использует.")
 )
 
-// NewHeadsUpSection is the page that turns the principal's twice-daily heads-up job on and off.
+// NewHeadsUpSection is the page that turns the principal's daily heads-up job on and off.
 func NewHeadsUpSection(schedules ScheduleController, logger *slog.Logger, telemetry Telemetry) Section {
 	return headsUpSection{schedules: schedules, logger: logger, telemetry: telemetryOrNoop(telemetry)}
 }
