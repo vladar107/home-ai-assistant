@@ -14,7 +14,7 @@ import (
 
 var _ intake.Repository = (*Store)(nil)
 
-const intakeColumns = `id, principal_id, source, source_ref, kind, title, sender, facts, action_required, pending_actions, created_at, updated_at`
+const intakeColumns = `id, principal_id, source, source_ref, kind, title, sender, facts, action_required, priority, update_text, pending_actions, created_at, updated_at`
 
 func (s *Store) CreateIntakeRecord(ctx context.Context, record intake.Record) (bool, error) {
 	if s == nil || s.db == nil {
@@ -25,10 +25,10 @@ func (s *Store) CreateIntakeRecord(ctx context.Context, record intake.Record) (b
 		return false, err
 	}
 	result, err := s.db.ExecContext(ctx,
-		`INSERT INTO intake_records (`+intakeColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO intake_records (`+intakeColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (principal_id, source, source_ref) DO NOTHING`,
 		record.ID, record.PrincipalID, record.Source, record.SourceRef, record.Kind, record.Title, record.Sender, facts,
-		record.ActionRequired, pending, formatTime(record.CreatedAt), formatTime(record.UpdatedAt))
+		record.ActionRequired, intakePriority(record), record.Update, pending, formatTime(record.CreatedAt), formatTime(record.UpdatedAt))
 	if err != nil {
 		return false, fmt.Errorf("insert intake record: %w", err)
 	}
@@ -37,6 +37,13 @@ func (s *Store) CreateIntakeRecord(ctx context.Context, record intake.Record) (b
 		return false, fmt.Errorf("insert intake record: %w", err)
 	}
 	return inserted == 1, nil
+}
+
+func intakePriority(record intake.Record) string {
+	if record.Priority == "" {
+		return intake.PriorityAction
+	}
+	return record.Priority
 }
 
 func encodeIntake(record intake.Record) (string, string, error) {
@@ -254,7 +261,7 @@ func scanIntakeRow(row rowScanner) (intake.Record, error) {
 	var record intake.Record
 	var facts, pending, createdAt, updatedAt string
 	if err := row.Scan(&record.ID, &record.PrincipalID, &record.Source, &record.SourceRef, &record.Kind, &record.Title, &record.Sender,
-		&facts, &record.ActionRequired, &pending, &createdAt, &updatedAt); err != nil {
+		&facts, &record.ActionRequired, &record.Priority, &record.Update, &pending, &createdAt, &updatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return intake.Record{}, err
 		}

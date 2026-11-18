@@ -111,7 +111,7 @@ func (s *Service) Undo(ctx context.Context, record approval.Record, raw json.Raw
 	switch {
 	case record.Tool == toolPropose && undo.After != nil:
 		return s.undoCreated(ctx, record.PrincipalID, undo)
-	case record.Tool == toolUpdate && undo.After != nil && undo.Before != nil:
+	case (record.Tool == toolUpdate || record.Tool == toolUpdateNotes) && undo.After != nil && undo.Before != nil:
 		return s.undoUpdated(ctx, record.PrincipalID, undo)
 	case record.Tool == toolRemove && undo.Removed != nil:
 		return s.undoRemoved(ctx, record.PrincipalID, *undo.Removed)

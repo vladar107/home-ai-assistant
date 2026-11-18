@@ -1444,19 +1444,42 @@ suggests needs a card.
 
 The inbox check is a built-in job of type `intake.scan` that the Inbox intake
 switch in `/settings` creates the way the Trips switch does, offered only while
-a Google account has Mail on; its default runs every three hours between 08:00
-and 22:00, at most hourly, and turning the switch off forgets its read position
-and waiting follow-ups. Each run is a `RunCheck` turn with read-only tools and a
-budget of 40 calls that reads the mail received after `intake_scans.read_until`
-less five minutes (a day back the first time, never more than a week, which the
+a Google account has Mail on; its default (`InboxCron`) runs every hour between
+08:00 and 22:00, which is also its minimum interval, and `MigrateInbox` moves a
+job still on the old three-hour schedule to it at startup, as `MigrateHeadsUp`
+does for Heads-up. Turning the switch off forgets its read position, waiting
+follow-ups, and notes. Each run is a `RunCheck` turn with read-only tools and a
+budget of 40 calls that reads the unread mail (every query carries `is:unread`) received after
+`intake_scans.read_until` less five minutes (a day back the first time, never more than a week, which the
 summary then says), opens at most ten messages, skips travel bookings, and
 answers in strict JSON. The run carries a `tools.CallLog`: the broker marks it
-when the budget refuses a call, and the Gmail connector records Gmail's own
-received time of each message read in full. With messages left, or the budget
+when the budget refuses a call, and the Gmail connector records, for each message read in full, Gmail's own
+received time and whether the message was unread at that moment, with its
+account and ID. Gmail's `IMPORTANT` label is neither a filter nor a hint. With messages left, or the budget
 spent, the next check starts at the newest such time, never at one the model
 reports. A run that cannot move on, or whose reply is not the JSON asked for,
 counts a stall; the first unreadable reply sends the failure notice, and the
 second stall in a row skips the window and says so once.
+
+Each message carries a `priority`. `action` means the user must do something and
+needs `action_required`; `update` is important news about something already in
+motion, with nothing to do, and needs an `update` text and carries no follow-ups;
+`parcel`, only while Parcels is on, is a shipping notice reported only to start
+tracking and needs a `parcel` follow-up. `validate` accepts a message only with
+exactly the text its priority needs, and drops any other quietly with a logged
+reason: a message that is not important is not an error, so it never counts in
+the "could not read" notes. Code also drops a reported message that the CallLog
+shows was not opened in full during the run, which enforces that nothing is
+reported from a search snippet, or that was no longer unread when opened; both
+cursor rules are unchanged. A message never opened, or whose account and ID match
+nothing in the log, is counted in the "could not read" note, while one that was
+opened but no longer unread is dropped quietly. At record time a `parcel` message
+is checked through `ParcelSupport.Proposal`, and one whose number is already
+tracked, tombstoned, pending, or declined is dropped with no record and no summary
+line. A notice that also asks for something is an `action`, and may keep its
+`parcel` follow-up. The records keep both fields in the `priority` (default
+`action`) and `update_text` columns of `intake_records`, so older rows and exports
+read as `action`; `intake_get`, `intake_list`, and the export include them.
 
 Code validates the reply field by field: a field too long is cut, a bad fact is
 left out, only a message without a title or kind is dropped, and the summary
@@ -1479,7 +1502,25 @@ approval is confirmed, rejected, or done; one whose card a chat proposal
 replaced waits again, and one whose card expired, swept or not, waits again for
 at most three cards. The card goes out during the run, and the summary is the
 run's report after it, marked as outside content; a run with nothing to tell
-sends nothing.
+sends nothing. The summary has two groups: "Needs something from you" lists the
+`action` messages, and "Worth knowing" lists `update` and `parcel` messages. Only
+actions and parcels put anything on a card, so a run with only updates sends the
+summary and no card.
+
+The job's config holds the user's `notes`. The `intake.scan` job type sets
+`schedule.JobType.EditableNotes`, and `schedule` owns `Notes(config)` and
+`WithNotes(config, notes)`. `schedule_update` dispatches on the job's type first:
+a `model.turn` job takes its usual path; an `EditableNotes` job goes to the
+notes-only path, which takes only `prompt` or `prompt_edits`, applied to the notes,
+and refuses every other field by name; any other type is refused as a built-in
+check controlled from `/settings`, and only a real reminder keeps the reminder
+message. The notes edit has its own approval action, applied at once and undoable
+like a job update, a card after outside content, and refused when the job changed
+since it was proposed. The scan prompt places the notes after the rule that mail
+text is data and frames them as the user's preferences about what to report; they
+cannot widen the tools or the JSON contract, or relax the unread and parcel rules,
+which code enforces. `schedule_list`, `schedule_get`, and the prompt's job section
+show them.
 
 ### Parcels
 

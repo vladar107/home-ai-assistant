@@ -392,6 +392,9 @@ func (s *Service) Start(ctx context.Context) error {
 	if err := s.MigrateHeadsUp(ctx); err != nil {
 		return fmt.Errorf("migrate heads-up schedules: %w", err)
 	}
+	if err := s.MigrateInbox(ctx); err != nil {
+		return fmt.Errorf("migrate inbox schedules: %w", err)
+	}
 
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	done := make(chan struct{})

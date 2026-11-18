@@ -244,6 +244,8 @@ func (s *Service) record(ctx context.Context, principalID string, call tools.Cal
 	if err != nil {
 		return tools.Result{}, err
 	}
+	// A change in chat keeps what the inbox check made of the record, and the summary shows it.
+	record.Priority, record.Update = existing.Priority, existing.Update
 	summary := changeSummary.Format(ctx, existing.Title, existing.Kind, strings.Join(DescribeFor(ctx, record), "\n"))
 	return s.act(ctx, principalID, call, approval.Proposal{Tool: toolRecord, Arguments: canonical, Summary: summary,
 		Intent: approval.Intent{Verb: "change", TargetKind: "intake record", TargetName: existing.Title, NewName: record.Title}})
@@ -406,12 +408,28 @@ func (s *Service) brief(record Record) string {
 	if record.ActionRequired != "" {
 		text += "; to do: " + record.ActionRequired
 	}
-	return text
+	if record.Update != "" {
+		text += "; news: " + record.Update
+	}
+	return text + "; priority: " + priorityName(record)
+}
+
+// priorityName says what a record asks of the user, for the model.
+func priorityName(record Record) string {
+	switch record.Priority {
+	case PriorityUpdate:
+		return "update, news with nothing to do"
+	case PriorityParcel:
+		return "parcel, a shipping notice reported to start tracking it"
+	default:
+		return "action, the user must do something"
+	}
 }
 
 // full is a record with every fact it keeps.
 func (s *Service) full(record Record) string {
-	lines := []string{fmt.Sprintf("Intake record %s, kept %s from a %s.", record.ID, record.CreatedAt.In(s.location).Format("2006-01-02 15:04"), sourceName(record.Source))}
+	lines := []string{fmt.Sprintf("Intake record %s, kept %s from a %s.", record.ID, record.CreatedAt.In(s.location).Format("2006-01-02 15:04"), sourceName(record.Source)),
+		"Priority: " + priorityName(record) + "."}
 	lines = append(lines, Describe(record)...)
 	return strings.Join(lines, "\n")
 }
@@ -426,6 +444,7 @@ var (
 	recordHeading       = locale.T("%s (%s)", "%s (%s)")
 	recordHeadingSender = locale.T("%s (%s), from %s", "%s (%s), от %s")
 	recordToDo          = locale.T("To do: %s", "Что сделать: %s")
+	recordNews          = locale.T("News: %s", "Новости: %s")
 	recordNothingToDo   = locale.T("Nothing to do.", "Ничего делать не нужно.")
 
 	changeSummary        = locale.T("Change the intake record %s (%s) to:\n%s", "Изменить запись входящих %s (%s) так:\n%s")
@@ -466,10 +485,15 @@ func DescribeFor(ctx context.Context, record Record) []string {
 	for _, reference := range record.Facts.References {
 		lines = append(lines, "- "+reference.Label+": "+reference.Value)
 	}
-	if record.ActionRequired != "" {
+	// Only an action says whether there is something to do; news and a parcel never ask for anything.
+	switch {
+	case record.ActionRequired != "":
 		lines = append(lines, recordToDo.Format(ctx, record.ActionRequired))
-	} else {
+	case record.Priority == "" || record.Priority == PriorityAction:
 		lines = append(lines, recordNothingToDo.Format(ctx))
+	}
+	if record.Update != "" {
+		lines = append(lines, recordNews.Format(ctx, record.Update))
 	}
 	return lines
 }

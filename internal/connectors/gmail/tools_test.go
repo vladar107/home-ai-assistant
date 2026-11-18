@@ -212,3 +212,48 @@ func TestAMessageIsReadAsItsHTMLShowsIt(t *testing.T) {
 	requireText(t, h.read(work, "ascii"), false, "Café crème")
 	requireText(t, h.read(work, "plain"), false, "\n\nJust plain text.\n\nSecond paragraph.")
 }
+
+// The run's call log learns which messages were read in full and whether each was still unread,
+// beside the newest receipt time the inbox check's cursor uses.
+func TestReadingMessagesRecordsTheirUnreadStateInTheCallLog(t *testing.T) {
+	h := newHarness(t)
+	h.connect(work, googlesim.Grant{Mail: true})
+	older := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	newer := older.Add(time.Hour)
+	h.sim.AddMailbox(work,
+		googlesim.Message{ID: "fresh", ThreadID: "fresh", From: "a@example.com", Subject: "Fresh", Received: older,
+			PlainText: "Unread body", Labels: []string{"INBOX", "UNREAD"}},
+		googlesim.Message{ID: "seen", ThreadID: "seen", From: "b@example.com", Subject: "Seen", Received: newer,
+			PlainText: "Read body", Labels: []string{"INBOX"}},
+		googlesim.Message{ID: "untouched", ThreadID: "untouched", From: "c@example.com", Subject: "Untouched", Received: newer,
+			PlainText: "Never opened", Labels: []string{"INBOX", "UNREAD"}},
+	)
+	log := &tools.CallLog{}
+	ctx := tools.WithCallLog(context.Background(), log)
+	for _, id := range []string{"fresh", "seen"} {
+		raw, err := json.Marshal(map[string]any{"account": work, "id": id})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := h.service.Execute(ctx, "principal-1", tools.Call{Name: toolRead, Arguments: raw})
+		if err != nil || result.IsError {
+			t.Fatalf("read %s = %+v, %v", id, result, err)
+		}
+	}
+
+	if unread, found := log.Opened(work, "fresh"); !found || !unread {
+		t.Fatalf("Opened(fresh) = %v, %v; want unread, found", unread, found)
+	}
+	if unread, found := log.Opened(work, "seen"); !found || unread {
+		t.Fatalf("Opened(seen) = %v, %v; want read, found", unread, found)
+	}
+	if _, found := log.Opened(work, "untouched"); found {
+		t.Fatal("a message that was never read in full was found")
+	}
+	if _, found := log.Opened(home, "fresh"); found {
+		t.Fatal("a message was found under another account")
+	}
+	if got := log.NewestRead(); !got.Equal(newer) {
+		t.Fatalf("NewestRead = %v, want %v", got, newer)
+	}
+}

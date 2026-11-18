@@ -170,6 +170,7 @@ plan that links back to the earlier record.
 | 0158 | [Resolve feed tabs at first send and replace a gone one at once](0158-feed-tab-replacement.md) | done |
 | 0159 | [Fix the failures the agent evals found](0159-eval-failure-fixes.md) | done |
 | 0160 | [Parcel tracking: a live card for every parcel a user is waiting for](0160-parcel-tracking.md) | done |
+| 0161 | [Inbox intake: unread mail only, priority notifications only, and notes the user can edit](0161-inbox-priority-notifications.md) | in-progress |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

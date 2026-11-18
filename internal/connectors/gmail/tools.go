@@ -146,9 +146,11 @@ func (s *Service) Execute(ctx context.Context, principalID string, call tools.Ca
 		message.Account = account.Address
 		// Gmail's own received time, not the sender's Date header, tells the inbox check how far
 		// it read.
+		var received time.Time
 		if millis, err := strconv.ParseInt(message.InternalDate, 10, 64); err == nil && millis > 0 {
-			tools.CallLogFrom(ctx).Read(time.UnixMilli(millis))
+			received = time.UnixMilli(millis)
 		}
+		tools.CallLogFrom(ctx).ReadMessage(message.Account, message.ID, received, slices.Contains(message.LabelIDs, "UNREAD"))
 		return tools.Result{Text: renderMessage(message, arguments.OffsetBytes)}, nil
 	default:
 		return tools.Result{Text: "unknown Gmail tool", IsError: true}, nil

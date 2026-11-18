@@ -255,4 +255,7 @@ type JobType struct {
 	// Light marks a type whose runs never ask the model, such as a reminder. Its runs skip the
 	// bounds on concurrent runs, so they never wait behind model turns.
 	Light bool
+	// EditableNotes marks a built-in type whose jobs hold the user's notes in their configuration,
+	// which schedule_update changes while everything else about the job stays fixed.
+	EditableNotes bool
 }

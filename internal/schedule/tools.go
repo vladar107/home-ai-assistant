@@ -145,6 +145,7 @@ func proposeGuidance(zone string) string {
 		"A new job's prompt or a rewrite must fit one confirmation, about 2000 characters; longer instructions, up to 10000 characters, are grown with prompt_edits once the job exists. " +
 		"The Heads-up job's text is only the user's notes: how it checks the day is built in and not shown. When the user corrects a Heads-up report, add or change one short note with prompt_edits that states the lasting preference behind the correction, " +
 		"such as what an event in their calendar means or what to leave out, never a step of how to check the day and never one day's mistake. " +
+		"Inbox intake is a built-in mail check, turned on and off in /settings; the user's preferences about what it reports are its notes, changed with schedule_update (prompt or prompt_edits), and never create a separate job that checks mail for the same purpose. " +
 		"Never invent a value the user did not give, such as a time, a buffer, a walking time, or a threshold; ask for it instead. " +
 		"A recurring job stays recurring and a one-time job stays one-time; to switch, remove it and propose a new one. " +
 		"schedule_remove deletes a job by its id from schedule_list. Make every job change the request needs in this turn, once each. Proposals of one turn are shown together and confirmed or rejected as one batch; withdraw a wrong one with proposal_withdraw, and a proposal in a later turn replaces a batch still waiting."
@@ -771,7 +772,7 @@ func (s *Service) getJob(ctx context.Context, principalID string, call tools.Cal
 	if !found || !job.FinishedAt.IsZero() {
 		return tools.Result{Text: "No pending job has that id. Use schedule_list to see the user's jobs.", IsError: true}, nil
 	}
-	return tools.Result{Text: renderJob(job, s.zone, maximumPromptRunes, s.describeModel(ctx, job, true))}, nil
+	return tools.Result{Text: s.renderJob(ctx, job, maximumPromptRunes, true)}, nil
 }
 
 func (s *Service) proposeUpdate(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
@@ -789,8 +790,14 @@ func (s *Service) proposeUpdate(ctx context.Context, principalID string, call to
 	if !found || !job.FinishedAt.IsZero() {
 		return tools.Result{Text: "No pending job has that id. Use schedule_list to see the user's jobs.", IsError: true}, nil
 	}
-	if job.Type != TypeModelTurn {
+	switch registered, known := s.types[job.Type]; {
+	case job.Type == TypeModelTurn:
+	case known && registered.EditableNotes:
+		return s.proposeNotesUpdate(ctx, principalID, call, job, arguments)
+	case job.Type == TypeReminder:
 		return tools.Result{Text: "Reminders cannot be changed; cancel it with reminder_cancel and set a new one with reminder_set.", IsError: true}, nil
+	default:
+		return tools.Result{Text: fmt.Sprintf("%q is a built-in check, turned on and off in /settings, and its instructions are built in, so schedule_update cannot change it.", job.Name), IsError: true}, nil
 	}
 	current, err := currentJob(job)
 	if err != nil {
@@ -991,7 +998,7 @@ func (s *Service) proposeRemoval(ctx context.Context, principalID string, call t
 }
 
 func (s *Service) ActionTools() []string {
-	return []string{toolPropose, toolUpdate, toolRemove, toolReminderSet}
+	return []string{toolPropose, toolUpdate, toolUpdateNotes, toolRemove, toolReminderSet}
 }
 
 // ExecuteApproved stores or deletes the confirmed job. The schedule is validated again, because
@@ -1065,6 +1072,8 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		return approval.Outcome{Text: withNote("Reminder set "+reminderWhen(prepared)+".", prepared), UserText: withNote(reminderSetOutcome.Format(ctx, reminderWhenIn(locale.From(ctx), prepared)), prepared)}, nil
 	case toolUpdate:
 		return s.executeUpdate(ctx, record)
+	case toolUpdateNotes:
+		return s.executeNotesUpdate(ctx, record)
 	case toolRemove:
 		var confirmed removeArguments
 		if err := json.Unmarshal(record.Arguments, &confirmed); err != nil {
@@ -1298,17 +1307,22 @@ func proposalSummary(language locale.Language, heading string, prepared Prepared
 func patchSummary(language locale.Language, heading string, prepared Prepared, edits []promptEdit) string {
 	var builder strings.Builder
 	builder.WriteString(instructionsChangeSummary.FormatIn(language, scheduleSummary(language, heading, prepared)))
+	writeEdits(&builder, language, edits)
+	return builder.String()
+}
+
+// writeEdits adds each edit's passage, old and new, to a confirmation.
+func writeEdits(builder *strings.Builder, language locale.Language, edits []promptEdit) {
 	for index, edit := range edits {
 		replacement := edit.Replace
 		if strings.TrimSpace(replacement) == "" {
 			replacement = editRemoved.In(language)
 		}
 		if len(edits) > 1 {
-			fmt.Fprintf(&builder, "\n%d.", index+1)
+			fmt.Fprintf(builder, "\n%d.", index+1)
 		}
 		builder.WriteString("\n" + editWasNow.FormatIn(language, edit.Find, replacement))
 	}
-	return builder.String()
 }
 
 // scheduleSummary is the heading and the parsed schedule of a proposal, ending with the sentence
@@ -1373,14 +1387,16 @@ func (s *Service) renderJobs(ctx context.Context, jobs []Job) string {
 	}
 	rendered := make([]string, 0, len(jobs))
 	for _, job := range jobs {
-		rendered = append(rendered, renderJob(job, s.zone, listedInstructionRunes, s.describeModel(ctx, job, false)))
+		rendered = append(rendered, s.renderJob(ctx, job, listedInstructionRunes, false))
 	}
 	return strings.Join(rendered, "\n\n")
 }
 
-// renderJob is one job as the model reads it, with its instructions cut to limit runes and the
-// model a model.turn job runs on.
-func renderJob(job Job, zone string, limit int, model string) string {
+// renderJob is one job as the model reads it, with its instructions, or a built-in job's notes,
+// cut to limit runes and the model a model.turn job runs on, checked against the principal's
+// subscription with check.
+func (s *Service) renderJob(ctx context.Context, job Job, limit int, check bool) string {
+	zone := s.zone
 	if job.Type == TypeReminder {
 		return fmt.Sprintf("id %s: reminder, %s\nText: %s", job.ID, DescribeJob(job, zone), clip.Runes(ReminderText(job.Config), limit))
 	}
@@ -1394,11 +1410,14 @@ func renderJob(job Job, zone string, limit int, model string) string {
 	if job.TravelPause {
 		state += ", pauses while traveling"
 	}
+	if registered, known := s.types[job.Type]; known && registered.EditableNotes {
+		return fmt.Sprintf("id %s: %q, %s\n%s: %s", job.ID, job.Name, state, notesLabel(job), clip.Runes(shownNotes(job), limit))
+	}
 	label := "Instructions"
 	if job.ID == HeadsUpJobID(job.PrincipalID) {
 		label = headsUpNotesLabel
 	}
-	return fmt.Sprintf("id %s: %q, %s\nModel: %s\n%s: %s", job.ID, job.Name, state, model, label, clip.Runes(ModelTurnPrompt(job.Config), limit))
+	return fmt.Sprintf("id %s: %q, %s\nModel: %s\n%s: %s", job.ID, job.Name, state, s.describeModel(ctx, job, check), label, clip.Runes(ModelTurnPrompt(job.Config), limit))
 }
 
 // DescribeJob is a job's schedule as the user reads it, with the event it follows and its

@@ -18,7 +18,10 @@ type CallLog struct {
 	exhausted bool
 	newest    time.Time
 	calls     map[string]CallRecord
+	opened    map[openedKey]bool
 }
+
+type openedKey struct{ account, id string }
 
 // CallRecord is what the broker learned of one call: how it ended and, when its tool names one, a
 // short label of what it looked at. The label can be private, so it never reaches a log or
@@ -42,16 +45,38 @@ func CallLogFrom(ctx context.Context) *CallLog {
 	return log
 }
 
-// Read records that a message received at the given instant was read in full.
-func (l *CallLog) Read(received time.Time) {
-	if l == nil || received.IsZero() {
+// ReadMessage records that a message was read in full: the account and id the connector shows the
+// model, when Gmail received it, and whether it was still unread when read. A zero received time
+// leaves the newest receipt time alone.
+func (l *CallLog) ReadMessage(account, id string, received time.Time, unread bool) {
+	if l == nil {
 		return
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if received.After(l.newest) {
+	if !received.IsZero() && received.After(l.newest) {
 		l.newest = received
 	}
+	key := openedKey{account: account, id: id}
+	if l.opened == nil {
+		l.opened = make(map[openedKey]bool)
+	}
+	if _, kept := l.opened[key]; !kept && len(l.opened) >= maximumLoggedCalls {
+		return
+	}
+	l.opened[key] = unread
+}
+
+// Opened reports whether the message was unread when a connector read it in full, and whether it
+// was read in full at all.
+func (l *CallLog) Opened(account, id string) (unread bool, found bool) {
+	if l == nil {
+		return false, false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	unread, found = l.opened[openedKey{account: account, id: id}]
+	return unread, found
 }
 
 func (l *CallLog) refused() {

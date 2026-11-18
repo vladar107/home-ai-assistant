@@ -23,12 +23,14 @@ var recordIDPattern = regexp.MustCompile(`intake record ([0-9a-f]{16})`)
 // cleanTurn stands in for the approval service in a chat turn that has read no outside content:
 // every change is made at once, as Confirm would make it.
 type cleanTurn struct {
-	service *intake.Service
-	acted   []string
+	service   *intake.Service
+	acted     []string
+	summaries []string
 }
 
 func (c *cleanTurn) Act(ctx context.Context, principalID string, proposal approval.Proposal) (string, error) {
 	c.acted = append(c.acted, proposal.Tool)
+	c.summaries = append(c.summaries, proposal.Summary)
 	outcome, err := c.service.ExecuteApproved(ctx, approval.Record{ID: "0000000000000001", PrincipalID: principalID, Tool: proposal.Tool, Arguments: proposal.Arguments})
 	if err != nil {
 		return "", &approval.FailedError{Text: err.Error()}
@@ -39,6 +41,7 @@ func (c *cleanTurn) Act(ctx context.Context, principalID string, proposal approv
 type fixture struct {
 	t       *testing.T
 	service *intake.Service
+	store   intake.Repository
 	turn    *cleanTurn
 	now     time.Time
 }
@@ -53,7 +56,7 @@ func newFixture(t *testing.T) *fixture {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	f := &fixture{t: t, now: time.Date(2026, 10, 5, 9, 0, 0, 0, time.UTC), turn: &cleanTurn{}}
+	f := &fixture{t: t, store: store, now: time.Date(2026, 10, 5, 9, 0, 0, 0, time.UTC), turn: &cleanTurn{}}
 	service, err := intake.NewService(intake.Config{Location: time.UTC, Now: func() time.Time {
 		f.now = f.now.Add(time.Minute)
 		return f.now
@@ -204,5 +207,49 @@ func TestIntakeToolsMarkTheirResultsAsOutsideContent(t *testing.T) {
 	}
 	if !strings.Contains(contribution.WriteGuidance, "collection_add") || !strings.Contains(contribution.WriteGuidance, "at most five") {
 		t.Fatalf("write guidance = %q", contribution.WriteGuidance)
+	}
+}
+
+// An update shows its news line and its priority, and never reads as an action; neither does a
+// parcel record without news. A change made in chat keeps the news, and a record made in chat is an
+// action.
+func TestIntakeShowsTheUpdateOfAScannedRecord(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	empty := intake.Facts{Dates: []intake.Date{}, Amounts: []intake.Amount{}, References: []intake.Reference{}}
+	for _, scanned := range []intake.Record{
+		{ID: "aaaaaaaaaaaaaaa1", PrincipalID: "alice", Source: intake.SourceMail, SourceRef: "alice@example.com/m1", Kind: "notice", Title: "Street works",
+			Facts: empty, Priority: intake.PriorityUpdate, Update: "Road closed until Friday.", CreatedAt: f.now, UpdatedAt: f.now},
+		{ID: "aaaaaaaaaaaaaaa2", PrincipalID: "alice", Source: intake.SourceMail, SourceRef: "alice@example.com/m2", Kind: "parcel notice", Title: "Parcel on its way",
+			Facts: empty, Priority: intake.PriorityParcel, CreatedAt: f.now, UpdatedAt: f.now},
+	} {
+		if created, err := f.store.CreateIntakeRecord(t.Context(), scanned); err != nil || !created {
+			t.Fatalf("create = %v %v", created, err)
+		}
+	}
+
+	if shown := f.call("alice", "intake_get", `{"id":"aaaaaaaaaaaaaaa1"}`); !strings.Contains(shown.Text, "News: Road closed until Friday.") ||
+		!strings.Contains(shown.Text, "Priority: update") || strings.Contains(shown.Text, "Nothing to do.") {
+		t.Fatalf("intake_get = %q", shown.Text)
+	}
+	if shown := f.call("alice", "intake_get", `{"id":"aaaaaaaaaaaaaaa2"}`); !strings.Contains(shown.Text, "Priority: parcel") || strings.Contains(shown.Text, "Nothing to do.") {
+		t.Fatalf("intake_get of a parcel = %q", shown.Text)
+	}
+	if listed := f.call("alice", "intake_list", `{}`); !strings.Contains(listed.Text, "news: Road closed until Friday.; priority: update") || !strings.Contains(listed.Text, "Parcel on its way; priority: parcel") {
+		t.Fatalf("intake_list = %q", listed.Text)
+	}
+
+	changed := f.call("alice", "intake_record", `{"source":"mail","source_ref":"alice@example.com/m1","kind":"notice","title":"Street works on Main Road"}`)
+	if changed.IsError || len(f.turn.summaries) != 1 || !strings.Contains(f.turn.summaries[0], "News: Road closed until Friday.") || strings.Contains(f.turn.summaries[0], "Nothing to do.") {
+		t.Fatalf("change in chat = %+v with summaries %q", changed, f.turn.summaries)
+	}
+	if kept, _, err := f.store.LoadIntakeRecord(t.Context(), "alice", "aaaaaaaaaaaaaaa1"); err != nil || kept.Priority != intake.PriorityUpdate || kept.Update != "Road closed until Friday." {
+		t.Fatalf("record after the change = %+v %v", kept, err)
+	}
+
+	id := f.record("alice", invoice)
+	record, found, err := f.store.LoadIntakeRecord(t.Context(), "alice", id)
+	if err != nil || !found || record.Priority != intake.PriorityAction || record.Update != "" {
+		t.Fatalf("chat record = %+v %v %v, want an action", record, found, err)
 	}
 }

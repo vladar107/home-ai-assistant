@@ -837,10 +837,21 @@ take a data backup before the first deploy that carries it. No setting is
 needed: the intake tools are on with conversation. Each user turns the inbox
 check on as Inbox intake in the Everyday tools page of `/settings`; it is
 offered only while Google mail is on for them, runs as the job "Inbox intake"
-(also visible in `/jobs`) every three hours between 08:00 and 22:00 in the
+(also visible in `/jobs`) every hour between 08:00 and 22:00 in the
 household zone, and each run is one model turn on the user's own subscription
 with a budget of 40 tool calls. With tabs on, its summaries and cards go to the
-Inbox tab.
+Inbox tab. A job still on the old three-hour schedule is moved to the hourly one
+at startup.
+
+A check reads only mail that is still unread when it runs, and a message that
+was opened in another client is never reported. It reports a message only when
+it asks the user to do something ("Needs something from you") or brings
+important news about something already in motion ("Worth knowing"); receipts,
+confirmations, newsletters, and informational mail send nothing, and updates
+come with no card. Gmail's importance label plays no part. The user tells the
+assistant in chat what matters to them; that edits the job's notes through
+`schedule_update`, and every check follows them. The notes are part of the
+job's stored config, so backup and restore carry them.
 
 In the logs, `intake.recorded`, `intake.updated`, and `intake.deleted` mark
 records, `intake.scan.done` sums up a check with counts of what it recorded,
@@ -852,7 +863,8 @@ already past or one agent watch more than the cap, `intake.scan.lost` a
 follow-up dropped because an earlier check failed while offering it, and
 `intake.scan.offer_failed` or `intake.scan.undelivered` a card that could not be
 stored or sent. Logs carry IDs and counts, never record text. Turning Inbox
-intake off forgets where it read to, so turning it on again reads the last day.
+intake off forgets where it read to, the waiting follow-ups, and the notes, so
+turning it on again reads the last day with no preferences.
 
 ### Reply traces and /why
 

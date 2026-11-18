@@ -28,6 +28,13 @@ const (
 	SourceMail    = "mail"
 )
 
+// Priorities say what a record asks of the user.
+const (
+	PriorityAction = "action"
+	PriorityUpdate = "update"
+	PriorityParcel = "parcel"
+)
+
 const (
 	MaximumDates      = 10
 	MaximumAmounts    = 5
@@ -56,6 +63,10 @@ type Record struct {
 	Sender         string
 	Facts          Facts
 	ActionRequired string
+	// Priority is what the record asks of the user; an empty one is stored as an action. Update is
+	// the news line of an update or parcel record.
+	Priority string
+	Update   string
 	// Pending are the follow-ups an inbox check proposed that have reached no final outcome.
 	Pending   []Action
 	CreatedAt time.Time
@@ -155,6 +166,9 @@ type Draft struct {
 	Amounts        []Amount    `json:"amounts"`
 	References     []Reference `json:"references"`
 	ActionRequired string      `json:"action_required"`
+	// Priority and Update come from the inbox scan only, so a chat call cannot set them.
+	Priority string `json:"-"`
+	Update   string `json:"-"`
 }
 
 var (
@@ -206,6 +220,16 @@ func validate(draft Draft, strict bool) (record Record, dropped int, reason stri
 	record.Title, _ = field("title", draft.Title, maximumTitleRunes, true, true)
 	record.Sender, _ = field("sender", draft.Sender, maximumSenderRunes, false, true)
 	record.ActionRequired, _ = field("action_required", draft.ActionRequired, maximumActionRunes, false, true)
+	record.Update, _ = field("update", draft.Update, maximumActionRunes, false, true)
+	record.Priority = draft.Priority
+	if record.Priority == "" {
+		record.Priority = PriorityAction
+	}
+	switch record.Priority {
+	case PriorityAction, PriorityUpdate, PriorityParcel:
+	default:
+		return Record{}, 0, "priority must be action, update, or parcel."
+	}
 	if reason != "" {
 		return Record{}, 0, reason
 	}

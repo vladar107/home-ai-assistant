@@ -130,7 +130,8 @@ func errorsAsAction(err error, target **approval.ActionError) bool {
 
 type intakeLangChecker struct{ reply string }
 
-func (c intakeLangChecker) RunCheck(context.Context, string, string) (string, string, error) {
+func (c intakeLangChecker) RunCheck(ctx context.Context, _, _ string) (string, string, error) {
+	openReported(ctx, c.reply)
 	return c.reply, "", nil
 }
 
@@ -175,7 +176,7 @@ func (o *intakeLangOffers) OfferIfIdle(_ context.Context, _ string, _, _ int64, 
 func TestInboxCheckCardAndReportReadInRussian(t *testing.T) {
 	t.Parallel()
 	service, _ := newIntakeLangService(t)
-	reply := `{"messages":[{"account":"alice@example.com","message_id":"m1","kind":"invoice","title":"Water bill","sender":"Example Sender",` +
+	reply := `{"messages":[{"account":"alice@example.com","message_id":"m1","priority":"action","kind":"invoice","title":"Water bill","sender":"Example Sender",` +
 		`"dates":[{"label":"due","date":"2026-10-15"}],"amounts":[],"references":[{"label":"reference","value":"R-m1"}],"action_required":"Act by 15 October.",` +
 		`"actions":[{"type":"reminder","text":"Be home for the parcel","at":"2026-10-14 09:00"}]}],"left":3,"through":""}`
 	offers := &intakeLangOffers{}

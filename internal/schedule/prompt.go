@@ -92,8 +92,11 @@ func (s PromptSection) promptEntry(job Job) string {
 		return fmt.Sprintf("id %s: reminder, %s: %s", job.ID, DescribeJob(job, s.zone), promptExcerpt(ReminderText(job.Config)))
 	}
 	text := promptExcerpt(ModelTurnPrompt(job.Config))
-	if job.ID == HeadsUpJobID(job.PrincipalID) {
+	switch job.ID {
+	case HeadsUpJobID(job.PrincipalID):
 		text = "notes: " + text
+	case InboxJobID(job.PrincipalID):
+		text = notesLabel(job) + ": " + promptExcerpt(shownNotes(job))
 	}
 	return fmt.Sprintf("id %s: %q, %s: %s", job.ID, job.Name, DescribeJob(job, s.zone), text)
 }

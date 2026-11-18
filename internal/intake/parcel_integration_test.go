@@ -39,8 +39,9 @@ type parcelChecker struct {
 	prompts []string
 }
 
-func (c *parcelChecker) RunCheck(_ context.Context, _, message string) (string, string, error) {
+func (c *parcelChecker) RunCheck(ctx context.Context, _, message string) (string, string, error) {
 	c.prompts = append(c.prompts, message)
+	openReported(ctx, c.reply)
 	return c.reply, "", nil
 }
 
@@ -82,10 +83,17 @@ func newParcelFixture(t *testing.T, on bool) *parcelFixture {
 	return f
 }
 
+// scan reports a parcel notice that asks for something, with the follow-ups.
 func (f *parcelFixture) scan(actions string) schedule.Result {
 	f.t.Helper()
-	f.checker.reply = `{"messages":[{"account":"alice@example.com","message_id":"m1","kind":"parcel notice","title":"Parcel on its way","sender":"Example Carrier",` +
-		`"dates":[],"amounts":[],"references":[],"action_required":"","actions":[` + actions + `]}],"left":0}`
+	return f.notice(intake.PriorityAction, "m1", actions)
+}
+
+// notice reports one parcel notice of the priority, with the follow-ups.
+func (f *parcelFixture) notice(priority, id, actions string) schedule.Result {
+	f.t.Helper()
+	f.checker.reply = `{"messages":[{"account":"alice@example.com","message_id":"` + id + `","priority":"` + priority + `","kind":"parcel notice","title":"Parcel on its way","sender":"Example Carrier",` +
+		`"dates":[],"amounts":[],"references":[],"action_required":"Pick it up by 10 October.","update":"It arrives on Thursday.","actions":[` + actions + `]}],"left":0}`
 	return f.scanAgain()
 }
 

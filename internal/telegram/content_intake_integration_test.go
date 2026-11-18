@@ -1,6 +1,7 @@
 package telegram
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -151,6 +152,7 @@ func newInboxHarness(t *testing.T, options harnessOptions) *inboxHarness {
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
 	sim := googleSimulator(t)
+	sim.AddMailbox(aliceMailbox, inboxMessages()...)
 	options.schedules, options.google = clock, sim
 	h := newConversationHarnessWithOptions(t, runtime, options)
 	h.provision("alice", "account-alice")
@@ -167,11 +169,53 @@ func (h *inboxHarness) update() int64 {
 	return h.nextID - 1
 }
 
-// check presses the button that queues a check, answers the check's turn with reply, and returns
-// the turn's message.
+// inboxMessages are unread messages in alice's mailbox beside the shared ones, for checks to open,
+// and r1, which she has already read.
+func inboxMessages() []googlesim.Message {
+	received := time.Date(2026, 9, 28, 5, 0, 0, 0, time.UTC)
+	var messages []googlesim.Message
+	for _, id := range []string{"m3", "m4", "m5", "m6", "m7", "a", "b", "c", "d"} {
+		messages = append(messages, googlesim.Message{
+			ID: id, ThreadID: "t-" + id, From: "Example Sender <sender@example.com>", To: aliceMailbox, Subject: "Message " + id,
+			Snippet: "Message " + id, Labels: []string{"UNREAD", "INBOX"}, Received: received, PlainText: "Message " + id + ".",
+		})
+	}
+	return append(messages, googlesim.Message{
+		ID: "r1", ThreadID: "t-r1", From: "Example Sender <sender@example.com>", To: aliceMailbox, Subject: "Already read",
+		Snippet: "Already read", Labels: []string{"INBOX"}, Received: received, PlainText: "A bill she has already seen.",
+	})
+}
+
+// check presses the button that queues a check, answers the check's turn with reply after opening
+// every message it reports, as the scan asks, and returns the turn's message.
 func (h *inboxHarness) check(action, reply string) string {
 	h.t.Helper()
-	return h.checkTurn(action, func(runtimeCall) string { return reply })
+	return h.checkTurn(action, func(call runtimeCall) string {
+		openReported(h.t, call, reply)
+		return reply
+	})
+}
+
+// openReported opens in full each message the reply reports, so the check's read log holds it as
+// Gmail shows it; a message the mailbox does not hold is not opened.
+func openReported(t *testing.T, call runtimeCall, reply string) {
+	t.Helper()
+	var reported struct {
+		Messages []struct {
+			Account   string `json:"account"`
+			MessageID string `json:"message_id"`
+		} `json:"messages"`
+	}
+	if json.Unmarshal([]byte(reply), &reported) != nil {
+		return
+	}
+	for _, message := range reported.Messages {
+		arguments, err := json.Marshal(map[string]string{"account": message.Account, "id": message.MessageID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		executeTool(t, call.ctx, call.request.Tools, "gmail_read_message", string(arguments))
+	}
 }
 
 // checkTurn is check with a turn that may call its tools before it answers.
@@ -244,7 +288,7 @@ func (h *inboxHarness) unoffered() int {
 }
 
 func mail(id, kind, title string, actions ...string) string {
-	return fmt.Sprintf(`{"account":"alice@example.com","message_id":%q,"kind":%q,"title":%q,"sender":"Example Sender",`+
+	return fmt.Sprintf(`{"account":"alice@example.com","message_id":%q,"priority":"action","kind":%q,"title":%q,"sender":"Example Sender",`+
 		`"dates":[{"label":"due","date":"2026-10-15"}],"amounts":[],"references":[{"label":"reference","value":%q}],"action_required":"Act by 15 October.","actions":[%s]}`,
 		id, kind, title, "R-"+id, strings.Join(actions, ","))
 }
@@ -286,7 +330,7 @@ func TestInboxCheckOffersOneCardAndWaitsBehindAnUnansweredOne(t *testing.T) {
 		t.Fatalf("report = %+v", report)
 	}
 
-	parcel := mail("m2", "parcel notice", "Parcel on its way", reminderAction("Be home for the parcel"))
+	parcel := mail("m3", "parcel notice", "Parcel on its way", reminderAction("Be home for the parcel"))
 	h.check("check", scanReplyOf(invoice, parcel))
 	report = h.nextMessage()
 	if len(report.keyboard) != 0 || !strings.Contains(report.text, "Parcel on its way") || strings.Contains(report.text, "Water bill") ||
@@ -483,7 +527,9 @@ func TestAnInboxReportToAGoneTabMakesTheNewInboxTab(t *testing.T) {
 	h.ageTab(first)
 	h.clock.Set(t, "2026-09-28T11:00:30+02:00")
 	call := receive(t, h.ctx, h.runtime.calls)
-	call.answer <- agentruntime.RunResult{Final: scanReplyOf(mail("m1", "invoice", "Water bill"))}
+	reply := scanReplyOf(mail("m1", "invoice", "Water bill"))
+	openReported(t, call, reply)
+	call.answer <- agentruntime.RunResult{Final: reply}
 	h.wantRefused("sendMessage", first)
 	again := h.wantFeedTab("Inbox", thread.FeedInbox)
 	if report := h.nextMessage(); again == first || report.threadID != again || !strings.Contains(report.text, "Water bill") {
@@ -527,7 +573,7 @@ func TestAnInboxCardToAGoneTabWaitsInTheNewTab(t *testing.T) {
 		t.Fatalf("%d pending approvals in the new tab, want the card's", moved)
 	}
 
-	parcel := mail("m2", "parcel notice", "Parcel on its way", reminderAction("Be home for the parcel"))
+	parcel := mail("m3", "parcel notice", "Parcel on its way", reminderAction("Be home for the parcel"))
 	h.check("check", scanReplyOf(invoice, parcel))
 	report := h.nextMessage()
 	if len(report.keyboard) != 0 || report.threadID != again || !strings.Contains(report.text, "An earlier inbox card is still waiting") {
@@ -549,7 +595,7 @@ func TestAnInboxCardShownInAGoneTabIsShownAgainInTheNewTab(t *testing.T) {
 
 	h.goneTab(first)
 	h.ageTab(first)
-	h.check("check", scanReplyOf(mail("m2", "notice", "Library notice")))
+	h.check("check", scanReplyOf(mail("m3", "notice", "Library notice")))
 	h.wantRefused("sendMessage", first)
 	again := h.wantFeedTab("Inbox", thread.FeedInbox)
 	var card, report bool
@@ -596,7 +642,10 @@ func TestInboxSwitchNeedsMailAndManagesItsJob(t *testing.T) {
 		t.Fatalf("page after on = %+v", page)
 	}
 	call := receive(t, h.ctx, runtime.calls)
-	call.answer <- agentruntime.RunResult{Final: scanReplyOf(mail("m1", "bill", "Bill A", reminderAction("Pay A 1"), reminderAction("Pay A 2")))}
+	// Only the work account's mail can be read.
+	reply := strings.Replace(scanReplyOf(mail("w1", "bill", "Bill A", reminderAction("Pay A 1"), reminderAction("Pay A 2"))), aliceMailbox, aliceWork, 1)
+	openReported(t, call, reply)
+	call.answer <- agentruntime.RunResult{Final: reply}
 	if card := h.nextMessage(); !strings.HasPrefix(card.text, intake.InboxHeading) {
 		t.Fatalf("first check card = %q", card.text)
 	}
@@ -758,7 +807,7 @@ func TestInboxCheckReadsOnFromTheNewestMessageOpened(t *testing.T) {
 func TestInboxCheckKeepsWhatItCanReadOfAMessage(t *testing.T) {
 	t.Parallel()
 	h := newInboxHarness(t, harnessOptions{watches: &stubEvaluator{}})
-	letter := `{"account":"alice@example.com","message_id":"m1","kind":"letter","title":"Annual statement","sender":"Example Bank",` +
+	letter := `{"account":"alice@example.com","message_id":"m1","priority":"action","kind":"letter","title":"Annual statement","sender":"Example Bank",` +
 		`"dates":[{"label":"` + strings.Repeat("l", 70) + `","date":"2026-10-15 09:30:00"},{"label":"meeting","date":"next Tuesday"}],` +
 		`"amounts":[{"label":"fee","value":"12.00","currency":"euros"},{"label":"balance","value":"100.00","currency":"EUR"}],` +
 		`"references":[{"label":"account","value":"ST-1"}],"action_required":"Check the statement.","actions":[` +
@@ -766,7 +815,7 @@ func TestInboxCheckKeepsWhatItCanReadOfAMessage(t *testing.T) {
 		`{"type":"watch","name":"Reply from the bank","instruction":"Search Gmail for a reply from Example Bank.","condition":"a reply arrived"},` +
 		`{"type":"watch","name":"Late reply","instruction":"Search Gmail for a reply from Example Bank.","condition":"a reply arrived","until":"2027-03-01"},` +
 		`{"type":"watch","name":"Bank reply","instruction":"Search Gmail for a reply from Example Bank.","condition":"a reply arrived","until":"2026-10-20"}]}`
-	untitled := `{"account":"alice@example.com","message_id":"m2","kind":"bill","title":"","sender":"","dates":[],"amounts":[],"references":[],"action_required":"","actions":[]}`
+	untitled := `{"account":"alice@example.com","message_id":"m3","priority":"action","kind":"bill","title":"","sender":"","dates":[],"amounts":[],"references":[],"action_required":"","actions":[]}`
 	h.check("on", scanReplyOf(letter, untitled))
 	text, _ := h.nextCard()
 	if !strings.Contains(text, "Watch Bank reply") || strings.Contains(text, "Statement follow-up") || strings.Contains(text, "Late reply") || strings.Contains(text, "Reply from the bank") {
@@ -875,5 +924,147 @@ func TestChangingOrDeletingARecordAfterOutsideContentNeedsACard(t *testing.T) {
 	}
 	if h.countRows(`SELECT count(*) FROM intake_records`) != 1 {
 		t.Fatal("the record was deleted without the card")
+	}
+}
+
+// openMessages opens each message in full, as the check's model does before it reports one.
+func openMessages(t *testing.T, call runtimeCall, account string, ids ...string) {
+	t.Helper()
+	for _, id := range ids {
+		executeTool(t, call.ctx, call.request.Tools, "gmail_read_message", `{"account":"`+account+`","id":"`+id+`"}`)
+	}
+}
+
+// update is a reported message of important news with the text, which also carries what an action
+// would, for the check to leave out.
+func update(id, title, news string) string {
+	return strings.Replace(mail(id, "notice", title, reminderAction("Read the news")), `"priority":"action"`, `"priority":"update","update":`+strconv.Quote(news), 1)
+}
+
+// Code reports only what the check opened in full this run and that was still unread then. A
+// message read before is left out quietly, as is one without the text its priority needs or with
+// no priority; one never opened, or matching nothing in the mailbox, is counted as unreadable, and
+// the next check still reads from where this one ended.
+func TestInboxCheckReportsOnlyUnreadMessagesItOpenedWithTheirPriority(t *testing.T) {
+	t.Parallel()
+	h := newInboxHarness(t, harnessOptions{})
+	reply := scanReplyOf(
+		mail("m1", "invoice", "Rent increase", reminderAction("Pay the new rent")),
+		mail("r1", "invoice", "Bill already read"),
+		mail("m3", "invoice", "Never opened bill"),
+		mail("zz", "invoice", "Bill nobody sent"),
+		strings.Replace(mail("m4", "letter", "Letter with nothing to do"), `"action_required":"Act by 15 October."`, `"action_required":""`, 1),
+		strings.Replace(mail("m5", "notice", "News without news"), `"priority":"action"`, `"priority":"update"`, 1),
+		strings.Replace(mail("m6", "notice", "Unsorted notice"), `"priority":"action"`, `"priority":""`, 1),
+	)
+	h.checkTurn("on", func(call runtimeCall) string {
+		openMessages(t, call, aliceMailbox, "m1", "r1", "m4", "m5", "m6")
+		return reply
+	})
+	checkedAt := h.clock.Now()
+	text, _ := h.nextCard()
+	if !strings.Contains(text, "Pay the new rent") {
+		t.Fatalf("card = %q", text)
+	}
+	report := h.nextMessage()
+	if !strings.Contains(report.text, "New mail that needs something from you:") || !strings.Contains(report.text, "Rent increase (invoice)") ||
+		!strings.Contains(report.text, "I could not read 2 messages and left them out.") {
+		t.Fatalf("report = %q", report.text)
+	}
+	for _, left := range []string{"Bill already read", "Never opened bill", "Bill nobody sent", "Letter with nothing to do", "News without news", "Unsorted notice", "Worth knowing"} {
+		if strings.Contains(report.text, left) {
+			t.Fatalf("report holds %q:\n%s", left, report.text)
+		}
+	}
+	if count := h.countRows(`SELECT count(*) FROM intake_records`); count != 1 || h.countRows(`SELECT count(*) FROM intake_records WHERE source_ref = ?`, aliceMailbox+"/r1") != 0 {
+		t.Fatalf("%d records, want the unread action only", count)
+	}
+	if after := readsAfter(t, h.check("check", noMail)); !after.Equal(checkedAt.Add(-5 * time.Minute)) {
+		t.Fatalf("the next check reads after %s, want %s", after, checkedAt.Add(-5*time.Minute))
+	}
+	h.nextMessage()
+}
+
+// News about something in motion is told under "Worth knowing" with no card, and kept with its
+// priority and text; it never brings a follow-up. A follow-up that waited from an earlier report is
+// still offered beside it.
+func TestInboxUpdatesAreToldWithoutACardWhileEarlierFollowUpsAreStillOffered(t *testing.T) {
+	t.Parallel()
+	h := newInboxHarness(t, harnessOptions{approvalSweep: 100 * time.Millisecond})
+	h.check("on", scanReplyOf(update("m3", "School trip moved", "The school trip moved to 20 October.")))
+	report := h.nextMessage()
+	if len(report.keyboard) != 0 || !strings.Contains(report.text, "I read this from mail, which is outside content") || !strings.Contains(report.text, "Worth knowing:") ||
+		!strings.Contains(report.text, "School trip moved (notice), from Example Sender") || !strings.Contains(report.text, "News: The school trip moved to 20 October.") ||
+		strings.Contains(report.text, "New mail that needs something from you:") || strings.Contains(report.text, "Act by") || strings.Contains(report.text, "card") {
+		t.Fatalf("report of an update = %+v", report)
+	}
+	if h.countRows(`SELECT count(*) FROM approvals`) != 0 {
+		t.Fatal("an update put something on a card")
+	}
+	var priority, news, required, pending string
+	if err := h.db.QueryRowContext(h.ctx, `SELECT priority, update_text, action_required, pending_actions FROM intake_records WHERE source_ref = ?`, aliceMailbox+"/m3").
+		Scan(&priority, &news, &required, &pending); err != nil {
+		t.Fatal(err)
+	}
+	if priority != intake.PriorityUpdate || news != "The school trip moved to 20 October." || required != "" || pending != "[]" {
+		t.Fatalf("stored update = %q %q %q %q", priority, news, required, pending)
+	}
+
+	h.check("check", scanReplyOf(mail("m4", "invoice", "Water bill", reminderAction("Pay the water bill"))))
+	_, card := h.nextCard()
+	h.nextMessage()
+	h.expirePendingApprovals(card.messageID)
+	h.nextEdit()
+
+	h.check("check", scanReplyOf(update("m5", "Library hours", "The library closes early on Friday.")))
+	if text, _ := h.nextCard(); !strings.Contains(text, "Pay the water bill") {
+		t.Fatalf("card offered again = %q", text)
+	}
+	report = h.nextMessage()
+	if !strings.Contains(report.text, "Worth knowing:") || !strings.Contains(report.text, "Library hours") ||
+		!strings.Contains(report.text, "Follow-ups for mail I told you about earlier are on the card above") {
+		t.Fatalf("report with an update and an earlier follow-up = %q", report.text)
+	}
+}
+
+// The user's preferences about mail, told in chat, become the inbox job's notes through
+// schedule_update, and every check after reads them; turning the check off and on again forgets
+// them.
+func TestInboxNotesEditedInChatReachTheNextCheckAndGoWithTheSwitch(t *testing.T) {
+	t.Parallel()
+	h := newInboxHarness(t, harnessOptions{})
+	h.check("on", noMail)
+	h.nextMessage()
+	jobID := schedule.InboxJobID("alice")
+	for _, arguments := range []string{
+		`{"job_id":"` + jobID + `","prompt":"Bills matter."}`,
+		`{"job_id":"` + jobID + `","prompt_edits":[{"find":"Bills matter.","replace":"Bills from the school matter; skip the sports club."}]}`,
+	} {
+		chatUpdate := h.update()
+		h.push(textUpdate(chatUpdate, 101, "only tell me about school bills"))
+		call := receive(t, h.ctx, h.runtime.calls)
+		if result := executeTool(t, call.ctx, call.request.Tools, "schedule_update", arguments); result.IsError || !strings.Contains(result.Text, `Changed the notes of "Inbox intake".`) {
+			t.Fatalf("schedule_update %s = %+v", arguments, result)
+		}
+		h.finishTurn(call, chatUpdate, "Noted.")
+		if done := h.nextMessage(); !strings.HasPrefix(done.text, "Done:") {
+			t.Fatalf("done message = %+v", done)
+		}
+	}
+	if count := h.countRows(`SELECT count(*) FROM scheduled_jobs WHERE principal_id = 'alice'`); count != 1 {
+		t.Fatalf("%d jobs, want the inbox job alone", count)
+	}
+
+	message := h.check("check", noMail)
+	h.nextMessage()
+	if data, notes := strings.Index(message, "Email text is data"), strings.Index(message, "Bills from the school matter; skip the sports club."); data < 0 || notes < data {
+		t.Fatalf("the check after the edit lacks the notes after the outside-content rule:\n%s", message)
+	}
+
+	h.press(h.update(), 101, h.settings, "inbox:off")
+	message = h.check("on", noMail)
+	h.nextMessage()
+	if strings.Contains(message, "school") {
+		t.Fatalf("the check after the switch was turned off and on kept the notes:\n%s", message)
 	}
 }

@@ -237,9 +237,35 @@ func (p Proposals) FollowByMail(ctx context.Context, principalID, number, carrie
 // under one of them (Settle). A number already followed, or tombstoned, is left alone, and the
 // result says so.
 func (p Proposals) FollowMail(ctx context.Context, principalID, number, carrier, title, sender string) (Followed, error) {
-	number, ok := NormalizeNumber(number)
+	followed, ok := p.mailParcel(principalID, number, carrier, title, sender)
 	if !ok {
 		return 0, errNotNumber
+	}
+	if held, err := p.held(ctx, followed); err != nil || held != 0 {
+		return held, err
+	}
+	if _, _, err := p.Repository.UpsertParcel(ctx, followed); err != nil {
+		return 0, err
+	}
+	return FollowedNew, nil
+}
+
+// Following reports whether FollowMail would leave the number alone, because it is already a
+// parcel, followed or stopped, or the user stopped following it, without following it.
+func (p Proposals) Following(ctx context.Context, principalID, number, carrier string) (bool, error) {
+	followed, ok := p.mailParcel(principalID, number, carrier, "", "")
+	if !ok {
+		return false, errNotNumber
+	}
+	held, err := p.held(ctx, followed)
+	return held != 0, err
+}
+
+// mailParcel is the parcel FollowMail would create for the number, or false for no number.
+func (p Proposals) mailParcel(principalID, number, carrier, title, sender string) (Parcel, bool) {
+	number, ok := NormalizeNumber(number)
+	if !ok {
+		return Parcel{}, false
 	}
 	word := strings.ToLower(strings.TrimSpace(carrier))
 	switch found := p.Carriers.Detect(number); {
@@ -251,16 +277,6 @@ func (p Proposals) FollowMail(ctx context.Context, principalID, number, carrier,
 		carrier = "other"
 	}
 	carrier = p.Carriers.Settle(carrier, number)
-	parcels, err := p.Repository.ListParcels(ctx, principalID)
-	if err != nil {
-		return 0, err
-	}
-	if at := slices.IndexFunc(parcels, func(held Parcel) bool { return held.Number == number }); at >= 0 {
-		if parcels[at].Stopped() {
-			return FollowedTombstoned, nil
-		}
-		return FollowedAlready, nil
-	}
 	now := p.now()
 	followed := Parcel{
 		PrincipalID: principalID, Carrier: carrier, Number: number, Source: SourceMail, Status: StatusUnknown,
@@ -269,13 +285,26 @@ func (p Proposals) FollowMail(ctx context.Context, principalID, number, carrier,
 	if known, ok := p.Carriers.ByID(carrier); ok {
 		followed.Link = known.Link(number)
 	}
-	if tombstoned, err := p.Repository.TombstoneSeenAny(ctx, principalID, followed.Keys(), now); err != nil {
+	return followed, true
+}
+
+// held is what FollowMail finds of a parcel it would create: FollowedAlready or FollowedTombstoned,
+// or 0 when it would create it.
+func (p Proposals) held(ctx context.Context, followed Parcel) (Followed, error) {
+	parcels, err := p.Repository.ListParcels(ctx, followed.PrincipalID)
+	if err != nil {
+		return 0, err
+	}
+	if at := slices.IndexFunc(parcels, func(held Parcel) bool { return held.Number == followed.Number }); at >= 0 {
+		if parcels[at].Stopped() {
+			return FollowedTombstoned, nil
+		}
+		return FollowedAlready, nil
+	}
+	if tombstoned, err := p.Repository.TombstoneSeenAny(ctx, followed.PrincipalID, followed.Keys(), followed.CreatedAt); err != nil {
 		return 0, err
 	} else if tombstoned {
 		return FollowedTombstoned, nil
 	}
-	if _, _, err = p.Repository.UpsertParcel(ctx, followed); err != nil {
-		return 0, err
-	}
-	return FollowedNew, nil
+	return 0, nil
 }

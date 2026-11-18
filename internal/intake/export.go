@@ -63,6 +63,7 @@ func (exporter) Plan(ctx context.Context, plan *export.Planning, _ int, tables e
 		if _, _, reason := validate(Draft{
 			Source: row.Text("source"), SourceRef: row.Text("source_ref"), Kind: row.Text("kind"), Title: row.Text("title"), Sender: row.Text("sender"),
 			Dates: facts.Dates, Amounts: facts.Amounts, References: facts.References, ActionRequired: row.Text("action_required"),
+			Priority: row.Text("priority"), Update: row.Text("update_text"),
 		}, true); reason != "" {
 			plan.Skip(title, reason)
 			continue

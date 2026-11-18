@@ -258,11 +258,18 @@ borrowed between users.
   runs without Confirm, because the content is someone else's. The facts are
   kept as an intake record, never the content itself, so "when was that
   invoice due?" is answered later. With Google mail on, an optional Inbox
-  intake switch in `/settings` checks new mail every three hours between 08:00
-  and 22:00, and *Check now* runs it at once: mail that needs action is
-  summed up in the Inbox tab with its follow-ups on one card, at most ten at a
-  time, and mail that needs nothing sends nothing. While an inbox card waits,
-  later checks send their summary and keep their follow-ups for the next card.
+  intake switch in `/settings` checks mail that is still unread every hour
+  between 08:00 and 22:00, and *Check now* runs it at once. It reports a
+  message only when it asks the user to do something or brings important news
+  about something already in motion, summed up in the Inbox tab as "Needs
+  something from you" and "Worth knowing", at most ten messages at a time;
+  receipts, confirmations, newsletters, and other informational mail send
+  nothing. Only mail that asks for something puts follow-ups on one card;
+  updates come with no card. Gmail's own importance label is not used. The
+  user tells the assistant in chat what matters to them, and that is kept as
+  notes on the job that every check follows; turning the switch off forgets
+  them. While an inbox card waits, later checks send their summary and keep
+  their follow-ups for the next card.
 - **Parcels.** Turned on in `/settings`, the assistant keeps one card per parcel
   the user is waiting for in a Parcels tab: the carrier, what it is, its status,
   the expected day and window, the pickup point when there is one, and a link to
