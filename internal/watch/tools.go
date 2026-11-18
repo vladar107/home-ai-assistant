@@ -75,10 +75,10 @@ func proposeGuidance(zone string, kinds []string) string {
 		"Set language to the language the user writes to you in, such as Russian, so the watch's messages are written in it; leave it out for English, and pass English to switch a watch back. " +
 		"When the user asked for it in this conversation and the conversation has read no outside content, watch_propose, watch_update, and watch_remove make the change at once and the user can undo it; tell the user it is done. After outside content, such as a web page or an email, they only propose it with Confirm and Reject buttons, so never claim it is set. " +
 		"Set pause_while_traveling on a watch that only matters while the user is home, such as a commute departure or a home device, so it stays silent during a trip and resumes by itself afterwards; leave it out for anything that should still alert while away. " +
-		"watch_update changes a watch by its id from watch_list, given only the fields that change; pause_while_traveling there turns the pause on or off, and leaving it out keeps it as it is. watch_remove deletes one. Each user may have " + fmt.Sprint(MaximumWatchesPerPrincipal) + " watches."
+		"watch_update changes a watch by its id from watch_list, given only the fields that change; pause_while_traveling there turns the pause on or off, and it and other omitted fields keep their current values. watch_remove deletes one. Each user may have " + fmt.Sprint(MaximumWatchesPerPrincipal) + " watches."
 	if transit {
 		guidance += " A departure watch is one train (mode train, from, to, optional via) or bus (mode bus, stop, line) with its planned departure time; checking starts minutes_before the departure, 90 by default, and ends at it. Its triggers are cancelled, partly_cancelled, delay (delay_minutes or more, 5 by default), and platform. " +
-			"A route watch names a saved route and the time the user leaves; its triggers are leg and arrival. A disruptions watch takes one or more stations and a fixed window, window_from to window_until; its triggers are new and changed. Omitting triggers means all of the kind's triggers. " +
+			"A route watch names a saved route and, in departure, the time the user leaves, with minutes_before as for a departure; its triggers are leg and arrival. A disruptions watch takes one or more stations and a fixed window, window_from to window_until; its triggers are new and changed. Omitting triggers means all of the kind's triggers. " +
 			"Never invent a departure time, station, stop, or line: ask the user for one they did not give. Transit watches are checked every 5 minutes in the window and every 2 in its last 30, so tell the user it may take that long to notice a change."
 	}
 	if slices.Contains(kinds, KindHome) {
@@ -93,13 +93,13 @@ func proposeGuidance(zone string, kinds []string) string {
 	if slices.Contains(kinds, KindAgent) {
 		guidance += " An agent watch tells the user when something no other kind can check changes or happens, such as a ticket price dropping below a number, a mail from a sender arriving, a product coming back in stock, or a page announcing a date. Prefer a transit or home watch whenever one fits, because those cost no model turn. " +
 			"Each check is one read-only model turn on the user's own subscription with the tools the user has switched on, run without this conversation, so write check.instruction (up to 600 characters) so that a fresh turn can do it alone: what to look at and how, with any URL, search, or mail query to use. Put when to tell the user in check.condition (up to 300 characters), such as the cheapest price is below 150 euros. " +
-			"Give it a short name, such as Lisbon flight price. Pick the longest check.interval_minutes (30 to 1440, 60 by default) that still serves the request and say the interval in your proposal; set check.until (YYYY-MM-DD) when the watch stops mattering after a date. " +
+			"Give it a short name, such as Lisbon flight price. Pick the longest check.interval_minutes (30 to 1440, 60 by default) that still serves the request and say the interval in your proposal; set check.until (YYYY-MM-DD), the last day before the watch is deleted, when it stops mattering after a date. " +
 			"Its triggers are enter, when the condition starts to hold (the default), change, when the value it reports changes while the condition holds, and clear, when it stops holding after an alert; ask for change or clear only when the user wants to hear them. " +
 			"An agent watch runs every day and all day unless the user narrows it. With tabs on it gets its own tab with a pinned summary, where its messages go and where the user can talk about it. Each user may have " + fmt.Sprint(MaximumAgentWatchesPerPrincipal) + " agent watches. " +
 			"When a site or service the user asks about is down, offer in one line to watch it and tell them when it is back; call watch_propose only after the user agrees."
 	}
 	if slices.Contains(kinds, KindWeather) {
-		guidance += " A weather watch tells the user when rain is coming at a place, such as tell me when rain is coming at home, from the 15-minute forecast: give the place in name, as the user says it, or current_location true for wherever the user's shared location is at each check. " +
+		guidance += " A weather watch tells the user when rain is coming at a place, such as tell me when rain is coming at home, from the 15-minute forecast: give the place in name, as the user says it, such as a town or a saved place, or current_location true for wherever the user's shared location is at each check. " +
 			"within_minutes (15 to 360, 60 by default) is how far ahead it looks and threshold_mm (0.2 by default) the precipitation in one 15-minute slot that counts. Its triggers are enter, when rain becomes expected, and clear, when it no longer is; both by default. " +
 			"It checks every 10 minutes, all day unless the user narrows it, and its alerts say they are a forecast."
 	}
@@ -118,45 +118,45 @@ var listDefinition = tools.Definition{
 	InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 }
 
-const specProperties = `"mode":{"type":"string","enum":["train","bus"],"description":"For a departure watch: train or bus."},` +
-	`"from":{"type":"string","description":"Train: the departure station."},` +
-	`"to":{"type":"string","description":"Train: the destination station."},` +
-	`"via":{"type":"string","description":"Train: an optional station the train passes."},` +
-	`"stop":{"type":"string","description":"Bus: the stop the user boards at."},` +
-	`"line":{"type":"string","description":"Bus: the line number."},` +
-	`"stations":{"type":"array","items":{"type":"string"},"maxItems":10,"description":"Disruptions: the stations to watch, such as a pair."},` +
+const specProperties = `"mode":{"type":"string","enum":["train","bus"]},` +
+	`"from":{"type":"string","description":"Train: departure station."},` +
+	`"to":{"type":"string","description":"Train: destination station."},` +
+	`"via":{"type":"string","description":"Train: optional station passed."},` +
+	`"stop":{"type":"string","description":"Bus: boarding stop."},` +
+	`"line":{"type":"string","description":"Bus: line number."},` +
+	`"stations":{"type":"array","items":{"type":"string"},"maxItems":10,"description":"Disruptions: the stations."},` +
 	`"route":{"type":"string","description":"Route: the saved route's name."},` +
-	`"name":{"type":"string","description":"Home: the name of the device or sensor as the user says it, such as Balcony door. Agent: a short label for the watch, such as Lisbon flight price. Weather: the place, such as a town or one of the user's saved places. Place: the saved place's name."},` +
-	`"entity":{"type":"string","description":"Home: the entity id, only when the user or a tool result gave it."},` +
-	`"condition":{"type":"object","description":"Home: what to wait for. Give exactly one of state, above, or below.","properties":{` +
-	`"state":{"type":"array","items":{"type":"string"},"maxItems":10,"description":"The states that count, such as on, off, or idle; open and detected mean on for a binary sensor."},` +
-	`"above":{"type":"number","description":"A numeric sensor going above this value."},` +
-	`"below":{"type":"number","description":"A numeric sensor going below this value."},` +
-	`"for_minutes":{"type":"integer","minimum":1,"maximum":240,"description":"How long the condition must hold before it counts."}},"additionalProperties":false},` +
-	`"check":{"type":"object","description":"Agent: what each check's model turn does.","properties":{` +
-	`"instruction":{"type":"string","maxLength":600,"description":"What to look at and how, so that a turn without this conversation can do it, including any URL, search, or mail query."},` +
-	`"condition":{"type":"string","maxLength":300,"description":"When to tell the user, such as the cheapest price is below 150 euros."},` +
-	`"interval_minutes":{"type":"integer","minimum":30,"maximum":1440,"description":"How often to check; 60 by default."},` +
-	`"until":{"type":"string","description":"Optional last day, YYYY-MM-DD; the watch is deleted after it."}},"additionalProperties":false},` +
-	`"departure":{"type":"string","description":"Departure or route: the planned departure, local HH:MM."},` +
-	`"minutes_before":{"type":"integer","minimum":10,"maximum":240,"description":"Departure or route: how long before the departure checking starts; 90 by default."},` +
-	`"window_from":{"type":"string","description":"Disruptions, home, agent, weather, or place: when checking starts, local HH:MM; a home, agent, weather, or place watch defaults to 00:00."},` +
-	`"window_until":{"type":"string","description":"Disruptions, home, agent, weather, or place: when checking ends, local HH:MM; a home, agent, weather, or place watch may use 24:00 for the end of the day and defaults to it."},` +
-	`"days":{"type":"array","items":{"type":"string","enum":["mon","tue","wed","thu","fri","sat","sun"]},"description":"The weekdays the watch runs on."},` +
-	`"date":{"type":"string","description":"Instead of days: the one date, YYYY-MM-DD, of a one-off watch."},` +
-	`"triggers":{"type":"array","items":{"type":"string","enum":["cancelled","partly_cancelled","delay","platform","leg","arrival","new","changed","enter","change","clear","arrive","leave"]},"description":"What to alert on; omit for all of the kind's triggers."},` +
-	`"delay_minutes":{"type":"integer","minimum":1,"maximum":120,"description":"The delay that counts, in minutes; 5 by default."},` +
-	`"timezone":{"type":"string","description":"IANA time zone such as Europe/Amsterdam; omit to use the user's own."},` +
-	`"language":{"type":"string","description":"The language the watch's messages are written in, such as Russian: the one the user writes to you in. Omit for English."},` +
-	`"current_location":{"type":"boolean","description":"Weather: watch wherever the user's shared location is at each check, instead of a named place."},` +
-	`"within_minutes":{"type":"integer","minimum":15,"maximum":360,"description":"Weather: how far ahead to look for rain; 60 by default."},` +
-	`"threshold_mm":{"type":"number","exclusiveMinimum":0,"maximum":50,"description":"Weather: the precipitation in one 15-minute slot that counts as rain, in mm; 0.2 by default."},` +
-	`"pause_while_traveling":{"type":"boolean","description":"Stay silent while the user is on a trip. On update, omit to keep it as it is."}`
+	`"name":{"type":"string","description":"Home: the device. Agent: a short label. Weather or place: the place."},` +
+	`"entity":{"type":"string","description":"Home: entity id, only when the user or a tool result gave it."},` +
+	`"condition":{"type":"object","description":"Home: what to wait for.","properties":{` +
+	`"state":{"type":"array","items":{"type":"string"},"maxItems":10},` +
+	`"above":{"type":"number"},` +
+	`"below":{"type":"number"},` +
+	`"for_minutes":{"type":"integer","minimum":1,"maximum":240}},"additionalProperties":false},` +
+	`"check":{"type":"object","description":"Agent: what each check does.","properties":{` +
+	`"instruction":{"type":"string","maxLength":600},` +
+	`"condition":{"type":"string","maxLength":300},` +
+	`"interval_minutes":{"type":"integer","minimum":30,"maximum":1440},` +
+	`"until":{"type":"string"}},"additionalProperties":false},` +
+	`"departure":{"type":"string","description":"Departure or route: the planned departure, HH:MM."},` +
+	`"minutes_before":{"type":"integer","minimum":10,"maximum":240,"description":"Departure or route."},` +
+	`"window_from":{"type":"string","description":"Not for departure or route: when checking starts, HH:MM; 00:00 by default except for disruptions."},` +
+	`"window_until":{"type":"string","description":"Not for departure or route: when checking ends, HH:MM; 24:00, the end of the day, by default except for disruptions."},` +
+	`"days":{"type":"array","items":{"type":"string","enum":["mon","tue","wed","thu","fri","sat","sun"]}},` +
+	`"date":{"type":"string","description":"Instead of days: one date, YYYY-MM-DD."},` +
+	`"triggers":{"type":"array","items":{"type":"string","enum":["cancelled","partly_cancelled","delay","platform","leg","arrival","new","changed","enter","change","clear","arrive","leave"]}},` +
+	`"delay_minutes":{"type":"integer","minimum":1,"maximum":120},` +
+	`"timezone":{"type":"string","description":"IANA time zone; omit for the user's own."},` +
+	`"language":{"type":"string"},` +
+	`"current_location":{"type":"boolean"},` +
+	`"within_minutes":{"type":"integer","minimum":15,"maximum":360},` +
+	`"threshold_mm":{"type":"number","exclusiveMinimum":0,"maximum":50},` +
+	`"pause_while_traveling":{"type":"boolean"}`
 
 var writeDefinitions = []tools.Definition{
 	{
 		Name:        toolPropose,
-		Description: "Set up a watch that checks a departure, a saved route, NS disruptions, a device or sensor at home, the rain forecast at a place, arriving at or leaving a saved place, or, as an agent watch, anything the tools can look at, during a daily window and messages the user only when something changes. Done at once and undoable, or proposed for Confirm after outside content.",
+		Description: "Set up a watch that messages the user only when something changes.",
 		Risk:        tools.RiskWrite,
 		Timeout:     actTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
@@ -165,7 +165,7 @@ var writeDefinitions = []tools.Definition{
 	},
 	{
 		Name:        toolUpdate,
-		Description: "Change one of the user's watches; omitted fields keep their current values. Done at once and undoable, or proposed for Confirm after outside content.",
+		Description: "Change one of the user's watches.",
 		Risk:        tools.RiskWrite,
 		Timeout:     actTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +

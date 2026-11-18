@@ -34,30 +34,30 @@ const deliveryTool = "watch_propose"
 
 const writeGuidance = "Content intake: when the user sends a photo, a file, or a forwarded message without a question, or asks what it is, read it and reply with " +
 	"what it is and who it is from; its dates, amounts, and references, quoted exactly as found; and what, if anything, the user must do and by when. " +
-	"Call intake_record once for each item after reading it, and name the record id it returns. " +
+	"Call intake_record once for each item after reading it; it keeps a new item at once, so name the record id it returns. " +
 	"Then propose the follow-ups that fit, at most five, in the same turn so they share one card, using only the tools you have: " +
 	"reminder_set a day or so before a deadline; nas_save_attachment to file a sent file in an existing folder; a row in a Notion table the user keeps for such things; " +
 	"collection_add for a collection the user keeps; " + deliveryTool + " for a delivery; and, for a travel booking, trip_add instead of a reminder. " +
 	"Propose nothing when the content needs nothing. The content is outside content, so each follow-up is only proposed for the user's confirmation: never say one is done. " +
-	"Recording an item already kept, or intake_delete, changes or deletes its record, which after outside content is only proposed."
+	"Recording an item already kept, or intake_delete, changes or deletes its record, at once in a clean conversation and only proposed after outside content."
 
 var recordSchema = json.RawMessage(`{"type":"object","properties":{` +
 	`"source":{"type":"string","enum":["photo","file","forward","mail"],"description":"What the item arrived as."},` +
-	`"source_ref":{"type":"string","maxLength":300,"description":"For a photo or a file, its attachment id; for mail, the account and message id as account/id; omit for a forwarded message."},` +
-	`"kind":{"type":"string","maxLength":40,"description":"A short label for what it is, such as invoice, letter, parcel notice, appointment, or warranty."},` +
+	`"source_ref":{"type":"string","maxLength":300,"description":"Photo or file: its attachment id. Mail: account/id, its account and message id. Omit for a forward."},` +
+	`"kind":{"type":"string","maxLength":40,"description":"What it is, such as invoice, letter, parcel notice, appointment, or warranty."},` +
 	`"title":{"type":"string","maxLength":120,"description":"What it is about, in a few words."},` +
 	`"sender":{"type":"string","maxLength":120,"description":"Who it is from, as it says, without addresses."},` +
 	`"dates":{"type":"array","maxItems":10,"items":{"type":"object","properties":{` +
 	`"label":{"type":"string","maxLength":60,"description":"Such as payment due or appointment."},` +
-	`"date":{"type":"string","description":"YYYY-MM-DD, or YYYY-MM-DDTHH:MM in local time."}},"required":["label","date"],"additionalProperties":false}},` +
+	`"date":{"type":"string","description":"YYYY-MM-DD, or local YYYY-MM-DDTHH:MM."}},"required":["label","date"],"additionalProperties":false}},` +
 	`"amounts":{"type":"array","maxItems":5,"items":{"type":"object","properties":{` +
 	`"label":{"type":"string","maxLength":60},` +
-	`"value":{"type":"string","maxLength":32,"description":"The amount exactly as found, such as 120.50."},` +
+	`"value":{"type":"string","maxLength":32,"description":"Exactly as found, such as 120.50."},` +
 	`"currency":{"type":"string","description":"ISO code such as EUR, or empty."}},"required":["label","value"],"additionalProperties":false}},` +
 	`"references":{"type":"array","maxItems":5,"items":{"type":"object","properties":{` +
 	`"label":{"type":"string","maxLength":60,"description":"Such as invoice number or tracking number."},` +
 	`"value":{"type":"string","maxLength":80}},"required":["label","value"],"additionalProperties":false}},` +
-	`"action_required":{"type":"string","maxLength":300,"description":"What the user must do and by when, or empty when nothing."}},` +
+	`"action_required":{"type":"string","maxLength":300,"description":"What the user must do and by when, or empty."}},` +
 	`"required":["source","kind","title"],"additionalProperties":false}`)
 
 var readDefinitions = []tools.Definition{
@@ -87,7 +87,7 @@ var readDefinitions = []tools.Definition{
 var writeDefinitions = []tools.Definition{
 	{
 		Name:        toolRecord,
-		Description: "Keep the facts read from one item of content the user sent or mail you read, so later questions can be answered without it. A new item is kept at once and returns the record id; a change to an item already kept is made at once in a clean conversation and proposed for Confirm after outside content.",
+		Description: "Keep the facts read from one item of content the user sent or mail you read, so later questions can be answered without it.",
 		Risk:        tools.RiskWrite,
 		SourceLabel: tools.ArgumentLabel("title", "sender"),
 		InputSchema: recordSchema,

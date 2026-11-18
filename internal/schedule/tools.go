@@ -139,7 +139,8 @@ func proposeGuidance(zone string) string {
 		"Set pause_while_traveling on a recurring job that only matters while the user is home, such as cleaning, bins, the commute, or home devices, so it stays silent during a trip and resumes by itself afterwards; never set it for a one-time job or a reminder, and leave it out for anything that should still arrive while away. " +
 		"A job meant to \"only tell me when…\" should say so in its instructions; its runs then stay silent unless the condition holds. " +
 		"Each run is a separate turn the user does not watch, with only read-only tools, so the prompt must say exactly what to look at and what to report, on its own, without relying on this conversation. " +
-		"schedule_update changes a job by its id from schedule_list, given only the fields that change. " +
+		"schedule_update changes a job by its id from schedule_list, given only the fields that change; omitted fields keep their current values. " +
+		"model sets the model and effort a job runs on, as id:effort such as " + modelExample + ": set it only when the user asks for a different model for that job, and pass an empty string to return it to the default. " +
 		"To change its instructions, first read them with schedule_get, then pass prompt_edits: small find and replace pairs, each find copied exactly from the stored prompt and occurring in it once, that change only what the user asked for; the user sees just those passages, old and new. " +
 		"Never rewrite or reword the parts the user did not ask to change, and pass prompt, the complete new instructions, only when the user asks for a real rewrite. " +
 		"A new job's prompt or a rewrite must fit one confirmation, about 2000 characters; longer instructions, up to 10000 characters, are grown with prompt_edits once the job exists. " +
@@ -167,20 +168,20 @@ func (s *Service) anchorGuidance() string {
 		kinds = append(kinds, "calendar_event with the account, calendar_id, and event_id from calendar_events for one event")
 	}
 	if _, known := s.anchors[AnchorCalendarMatch]; known {
-		kinds = append(kinds, "calendar_match with a title for each upcoming event whose title contains it")
+		kinds = append(kinds, "calendar_match with a title for each upcoming event whose title contains it, and optionally an account or calendar_id to match only that account or calendar")
 	}
 	if _, known := s.anchors[AnchorTrip]; known {
 		kinds = append(kinds, "trip with a trip_id from trip_list and edge start or end")
 	}
 	_, place := s.anchors[AnchorPlace]
 	if place {
-		kinds = append(kinds, "place with a place_id from place_list and edge arrive or leave, which runs on every arrival or leaving unless once is set")
+		kinds = append(kinds, "place with a place_id from place_list and edge arrive or leave, which runs on every arrival or leaving unless once is set, for the next one only; its offset_minutes is 0 to 240 after the arrival or leaving")
 	}
 	if len(kinds) == 0 {
 		return ""
 	}
 	guidance := "Anchors: when the user times a reminder or job by an event rather than a clock time, such as 30 minutes before the dentist, an hour before every meeting titled Planning, or when their trip starts, give anchor instead of cron or at: " +
-		strings.Join(kinds, "; ") + ". offset_minutes is negative for before the event and positive for after it. " +
+		strings.Join(kinds, "; ") + ". offset_minutes counts from the event's start, or the trip's start or end, negative for before, such as -30, and positive for after. " +
 		"Look the event or trip up first rather than guessing its ids. An anchored job follows its event when it moves, and when the event is cancelled it ends and the user is told in one line, so prefer an anchor to a time copied from the event."
 	if place {
 		guidance += " A place anchor, such as when I get home remind me to water the plants, runs 0 to 240 minutes after the arrival or leaving, and only while the user shares their live location; tell the user so, and that it may notice the arrival late."
@@ -190,7 +191,7 @@ func (s *Service) anchorGuidance() string {
 
 const conditionGuidance = "Conditions: any reminder or job can take a condition, checked once when it is due; when it does not hold, the run is skipped and nothing is sent, such as at 07:40 on weekdays, tell me only if rain is coming in the next hour, which is a weather condition with within_minutes 60. " +
 	"Prefer a code-checked kind, weather, home, departure, or disruptions, which costs no model turn, to agent, which costs one each run; a reminder takes only a weather or home condition. Prefer a condition to writing only tell me when into a job's instructions whenever a code-checked kind can tell. " +
-	"A home condition takes no for_minutes and route is not a condition. A check that fails lets the run go ahead with a note. Never invent a threshold the user did not give: weather defaults to 0.2 mm in 15 minutes."
+	"A condition's kind takes the fields watch_propose takes for it but no days, date, window, or triggers: weather takes name or current_location, within_minutes, and threshold_mm; home takes name and condition without for_minutes; departure takes mode, its stations or stop and line, departure, and delay_minutes; disruptions takes stations; agent takes name and check. Route is not a condition. A check that fails lets the run go ahead with a note. Never invent a threshold the user did not give: weather defaults to 0.2 mm in 15 minutes."
 
 var listDefinition = tools.Definition{
 	Name:        toolList,
@@ -211,30 +212,28 @@ var getDefinition = tools.Definition{
 }
 
 // anchorProperty and conditionProperty are the anchor and condition every job tool takes.
-const anchorProperty = `"anchor":{"type":"object","description":"Instead of cron or at: run relative to an event, and follow it when it moves.","properties":{` +
-	`"kind":{"type":"string","enum":["calendar_event","calendar_match","trip","place"],"description":"calendar_event: one event from calendar_events; calendar_match: each upcoming event whose title contains title; trip: a trip's start or end; place: each arrival at or leaving of a saved place."},` +
-	`"account":{"type":"string","description":"calendar_event: the account calendar_events shows for the event. calendar_match: optional, to match only that account's events."},` +
-	`"calendar_id":{"type":"string","description":"calendar_event: the event's calendar id. calendar_match: optional, to match only that calendar."},` +
-	`"event_id":{"type":"string","description":"calendar_event: the event id from calendar_events."},` +
-	`"title":{"type":"string","maxLength":100,"description":"calendar_match: text the event titles contain, such as Planning."},` +
-	`"trip_id":{"type":"string","description":"trip: the trip's id from trip_list."},` +
-	`"place_id":{"type":"string","description":"place: the saved place's id from place_list."},` +
-	`"edge":{"type":"string","enum":["start","end","arrive","leave"],"description":"trip: start or end. place: arrive or leave."},` +
-	`"once":{"type":"boolean","description":"place: run on the next arrival or leaving only, then finish; by default it runs on every one."},` +
-	`"offset_minutes":{"type":"integer","minimum":-2880,"maximum":1440,"description":"Minutes after the event's start, or the trip's start or end; negative for before, such as -30 for half an hour before. place: 0 to 240 minutes after arriving or leaving."}},` +
+const anchorProperty = `"anchor":{"type":"object","description":"Instead of cron or at: run relative to an event.","properties":{` +
+	`"kind":{"type":"string","enum":["calendar_event","calendar_match","trip","place"]},` +
+	`"account":{"type":"string"},` +
+	`"calendar_id":{"type":"string"},` +
+	`"event_id":{"type":"string"},` +
+	`"title":{"type":"string","maxLength":100},` +
+	`"trip_id":{"type":"string"},` +
+	`"place_id":{"type":"string"},` +
+	`"edge":{"type":"string","enum":["start","end","arrive","leave"]},` +
+	`"once":{"type":"boolean"},` +
+	`"offset_minutes":{"type":"integer","minimum":-2880,"maximum":1440}},` +
 	`"required":["kind","offset_minutes"],"additionalProperties":false}`
 
-const conditionProperty = `"condition":{"type":"object","description":"Run only if this holds when the job is due, checked once then; otherwise the run is skipped without a message. ` +
-	`kind is weather, home, departure, disruptions, or agent, with the fields watch_propose takes for that kind but no days, date, window, or triggers: ` +
-	`weather takes name or current_location, within_minutes, and threshold_mm; home takes name and condition without for_minutes; departure takes mode, its stations or stop and line, departure, and delay_minutes; disruptions takes stations; agent takes name and check."}`
+const conditionProperty = `"condition":{"type":"object","description":"Run only if this holds when due."}`
 
 // projectProperty routes a job's runs to one of the user's projects; no other destination can be
 // named by the model.
-const projectProperty = `"project_id":{"type":"string","description":"Only when this belongs to one of the user's projects: the project's id from project_list, so its runs arrive in the project's tab."}`
+const projectProperty = `"project_id":{"type":"string","description":"Only for one of the user's projects: its id from project_list, so runs arrive in its tab."}`
 
 // projectUpdateProperty is projectProperty for a change, which can also take a job off its
 // project.
-const projectUpdateProperty = `"project_id":{"type":"string","description":"Only when the user ties this job to one of their projects: the project's id from project_list, so its runs arrive in the project's tab; none takes the job off its project; omit it to keep the job where it goes."}`
+const projectUpdateProperty = `"project_id":{"type":"string","description":"Only when the user ties the job to a project: its id from project_list, so runs arrive in its tab; none takes it off its project."}`
 
 // noProject is the project_id that takes a job off its project.
 const noProject = "none"
@@ -242,14 +241,14 @@ const noProject = "none"
 var reminderDefinitions = []tools.Definition{
 	{
 		Name:        toolReminderSet,
-		Description: "Set a reminder: the text is sent to the user once, at the given local time or relative to an event, without confirmation unless outside content was read in this conversation.",
+		Description: "Set a reminder: the text is sent to the user once, at a time or relative to an event.",
 		Risk:        tools.RiskWrite,
 		Timeout:     actTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
-			`"text":{"type":"string","maxLength":500,"description":"The reminder as the user should read it, at most 500 characters."},` +
-			`"at":{"type":"string","description":"Local date and time, YYYY-MM-DD HH:MM, such as 2026-10-04 17:00; or give anchor instead."},` +
+			`"text":{"type":"string","maxLength":500,"description":"The reminder as the user should read it."},` +
+			`"at":{"type":"string","description":"Local YYYY-MM-DD HH:MM."},` +
 			anchorProperty + `,` + conditionProperty + `,` + projectProperty + `,` +
-			`"timezone":{"type":"string","description":"IANA time zone such as Europe/Amsterdam; omit to use the user's own."}},` +
+			`"timezone":{"type":"string","description":"IANA time zone; omit for the user's own."}},` +
 			`"required":["text"],"additionalProperties":false}`),
 	},
 	{
@@ -265,40 +264,40 @@ var reminderDefinitions = []tools.Definition{
 var writeDefinitions = []tools.Definition{
 	{
 		Name:        toolPropose,
-		Description: "Schedule a job that runs a prompt on a cron schedule, or once at a local time, with read-only tools and sends the result to the user. Done at once and undoable, or proposed for Confirm after outside content.",
+		Description: "Schedule a job that runs a prompt, recurring or once, and sends the user the result.",
 		Risk:        tools.RiskWrite,
 		Timeout:     actTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"name":{"type":"string","maxLength":60,"description":"A short name the user will recognise, such as Overdue Notion tasks."},` +
-			`"cron":{"type":"string","description":"For a recurring job: a five-field cron expression, such as 0 9 * * 1 for Mondays at 09:00."},` +
-			`"at":{"type":"string","description":"For a one-time job instead of cron: local date and time, YYYY-MM-DD HH:MM."},` +
-			`"prompt":{"type":"string","maxLength":2000,"description":"The complete instructions for each run, at most 2000 characters, because the user sees them in full to confirm. Once the job exists, prompt_edits in schedule_update can grow them to 10000 characters."},` +
-			`"timezone":{"type":"string","description":"IANA time zone such as Europe/Amsterdam; omit to use the user's own."},` +
-			`"pause_while_traveling":{"type":"boolean","description":"Recurring jobs only: stay silent while the user is on a trip."},` +
+			`"cron":{"type":"string","description":"Recurring job: five-field cron."},` +
+			`"at":{"type":"string","description":"One-time job: local YYYY-MM-DD HH:MM."},` +
+			`"prompt":{"type":"string","maxLength":2000,"description":"The complete instructions for each run."},` +
+			`"timezone":{"type":"string","description":"IANA time zone; omit for the user's own."},` +
+			`"pause_while_traveling":{"type":"boolean"},` +
 			anchorProperty + `,` + conditionProperty + `,` + projectProperty + `,` +
-			`"model":{"type":"string","maxLength":200,"description":"The model and effort the job runs on, as id:effort such as ` + modelExample + `. Set it only when the user asks for a different model for this job; omit it to use the default."}},` +
+			`"model":{"type":"string","maxLength":200,"description":"id:effort."}},` +
 			`"required":["name","prompt"],"additionalProperties":false}`),
 	},
 	{
 		Name:        toolUpdate,
-		Description: "Change one of the user's scheduled jobs; omitted fields keep their current values. Done at once and undoable, or proposed for Confirm after outside content.",
+		Description: "Change one of the user's scheduled jobs.",
 		Risk:        tools.RiskWrite,
 		Timeout:     actTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
 			`"job_id":{"type":"string","description":"The id from schedule_list."},` +
 			`"name":{"type":"string","maxLength":60,"description":"A new short name."},` +
-			`"cron":{"type":"string","description":"For a recurring job: a new five-field cron expression."},` +
-			`"at":{"type":"string","description":"For a one-time job: a new local date and time, YYYY-MM-DD HH:MM."},` +
-			`"prompt":{"type":"string","maxLength":2000,"description":"The complete new instructions, replacing the old ones, at most 2000 characters, because the user sees them in full to confirm; prompt_edits can grow a job's instructions to 10000 characters. Only for a real rewrite; not together with prompt_edits."},` +
-			`"prompt_edits":{"type":"array","minItems":1,"maxItems":10,"description":"Changes to the current instructions, applied in order. Prefer these to prompt.","items":{"type":"object","properties":{` +
-			`"find":{"type":"string","minLength":1,"maxLength":1000,"description":"A passage copied exactly from the current instructions; it must occur there exactly once."},` +
-			`"replace":{"type":"string","maxLength":1000,"description":"The text that replaces it; empty to delete the passage."}},` +
+			`"cron":{"type":"string","description":"Recurring job: new five-field cron."},` +
+			`"at":{"type":"string","description":"One-time job: new local YYYY-MM-DD HH:MM."},` +
+			`"prompt":{"type":"string","maxLength":2000,"description":"The complete new instructions; not with prompt_edits."},` +
+			`"prompt_edits":{"type":"array","minItems":1,"maxItems":10,"description":"Applied in order.","items":{"type":"object","properties":{` +
+			`"find":{"type":"string","minLength":1,"maxLength":1000},` +
+			`"replace":{"type":"string","maxLength":1000,"description":"Empty deletes the passage."}},` +
 			`"required":["find","replace"],"additionalProperties":false}},` +
-			`"timezone":{"type":"string","description":"A new IANA time zone such as Europe/Amsterdam."},` +
-			`"pause_while_traveling":{"type":"boolean","description":"Recurring jobs only: true to stay silent while the user is on a trip, false to stop doing so; omit to keep it as it is."},` +
+			`"timezone":{"type":"string","description":"New IANA time zone."},` +
+			`"pause_while_traveling":{"type":"boolean"},` +
 			anchorProperty + `,` + conditionProperty + `,` + projectUpdateProperty + `,` +
-			`"remove_condition":{"type":"boolean","description":"true to drop the job's condition, so it runs every time again."},` +
-			`"model":{"type":"string","maxLength":200,"description":"The model and effort the job runs on, as id:effort such as ` + modelExample + `. Set it only when the user asks for a different model for this job; an empty string returns it to the default, and omitting it keeps the current one."}},` +
+			`"remove_condition":{"type":"boolean","description":"true drops the job's condition."},` +
+			`"model":{"type":"string","maxLength":200,"description":"id:effort; empty for the default."}},` +
 			`"required":["job_id"],"additionalProperties":false}`),
 	},
 	{
