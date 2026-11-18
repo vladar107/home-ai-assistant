@@ -42,6 +42,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/web"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/conversation/history"
+	"github.com/vladar107/home-ai-assistant/internal/dutchphrase"
 	"github.com/vladar107/home-ai-assistant/internal/events"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/integration"
@@ -688,7 +689,7 @@ func (h *conversationHarness) telegramService(identities *identity.Service, logg
 			Toggle: asm.Switches.Toggle(parcel.Switch), Sources: asm.ParcelSources, Settings: h.store, Mail: asm.ParcelMailState(), Hook: asm.ParcelLoop,
 		}, logger, nil))
 	}
-	deps.Sections = append(deps.Sections, NewHeadsUpSection(asm.Scheduler, logger, nil))
+	deps.Sections = append(deps.Sections, NewHeadsUpSection(asm.Scheduler, asm.Switches.Toggle(dutchphrase.Switch), h.store, logger, nil))
 	if asm.MCP != nil {
 		allowed := func(principalID string) bool {
 			return slices.ContainsFunc(h.mcpCatalog, func(server config.MCPServer) bool { return server.Allows(principalID) })

@@ -178,6 +178,8 @@ type Service struct {
 	anchors    map[string]AnchorResolver
 	conditions Conditions
 	projects   Projects
+	// headsUpPhrase is optional; without it Heads-up adds no Dutch phrase.
+	headsUpPhrase HeadsUpPhrase
 
 	// anchorStates is the resolver pass's own: only its loop adds and removes entries, and only the
 	// worker of a job's principal, while that principal is in anchorBusy, changes one.

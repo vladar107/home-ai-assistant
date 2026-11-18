@@ -1,11 +1,16 @@
 package telegram
 
-import "strings"
+import (
+	"strings"
+	"unicode"
+	"unicode/utf8"
+)
 
 const (
-	boldMarker  = "**"
-	fenceMarker = "```"
-	quoteMarker = "> "
+	boldMarker    = "**"
+	fenceMarker   = "```"
+	quoteMarker   = "> "
+	spoilerMarker = "||"
 )
 
 var (
@@ -14,12 +19,13 @@ var (
 )
 
 // renderMarkup converts the Markdown subset the model and the assistant write — fenced code,
-// inline code, bold, HTTP links, and "> " quotes — into the HTML subset Telegram parses. Every byte
-// is escaped first, so arbitrary model, user, and integration content can never open a tag of its
-// own, and a marker without its closing counterpart stays literal instead of becoming an entity
-// Telegram refuses to parse. Underscores and single asterisks are deliberately not emphasis, so
-// identifiers such as notion_update_page reach the chat unchanged. Replies are split before they
-// are rendered, so every chunk is rendered on its own and always closes the tags it opens.
+// inline code, bold, ||spoilers||, HTTP links, and "> " quotes — into the HTML subset Telegram
+// parses. Every byte is escaped first, so arbitrary model, user, and integration content can never
+// open a tag of its own, and a marker without its closing counterpart stays literal instead of
+// becoming an entity Telegram refuses to parse. Underscores and single asterisks are deliberately
+// not emphasis, so identifiers such as notion_update_page reach the chat unchanged. Replies are
+// split before they are rendered, so every chunk is rendered on its own and always closes the tags
+// it opens.
 func renderMarkup(text string) string {
 	return renderBlocks(strings.ReplaceAll(text, "\r\n", "\n"), true)
 }
@@ -136,12 +142,12 @@ func fencedContent(content string) string {
 	return strings.TrimSuffix(content, "\n")
 }
 
-// renderInline renders bold and links in text that is known to hold no code span, escaping
+// renderInline renders bold, spoilers, and links in text that is known to hold no code span, escaping
 // everything else.
 func renderInline(text string) string {
 	var rendered strings.Builder
 	for index := 0; index < len(text); {
-		offset := strings.IndexAny(text[index:], "*[")
+		offset := strings.IndexAny(text[index:], "*[|")
 		if offset < 0 {
 			rendered.WriteString(textEscaper.Replace(text[index:]))
 			break
@@ -150,6 +156,11 @@ func renderInline(text string) string {
 		index += offset
 		if bold, width, ok := renderBold(text[index:]); ok {
 			rendered.WriteString(bold)
+			index += width
+			continue
+		}
+		if spoiler, width, ok := renderSpoiler(text[index:]); ok {
+			rendered.WriteString(spoiler)
 			index += width
 			continue
 		}
@@ -174,6 +185,26 @@ func renderBold(text string) (string, int, bool) {
 	}
 	content := text[len(boldMarker) : len(boldMarker)+closing]
 	return "<b>" + renderInline(content) + "</b>", 2*len(boldMarker) + closing, true
+}
+
+// renderSpoiler renders ||text|| as a Telegram spoiler. The text must not start or end with
+// whitespace, so a stray pair of pipes in prose such as "a || b || c" stays literal, and must stay on
+// one line, so stray pipes in a reply cannot hide whole paragraphs.
+func renderSpoiler(text string) (string, int, bool) {
+	if !strings.HasPrefix(text, spoilerMarker) {
+		return "", 0, false
+	}
+	closing := strings.Index(text[len(spoilerMarker):], spoilerMarker)
+	if closing <= 0 {
+		return "", 0, false
+	}
+	content := text[len(spoilerMarker) : len(spoilerMarker)+closing]
+	first, _ := utf8.DecodeRuneInString(content)
+	last, _ := utf8.DecodeLastRuneInString(content)
+	if unicode.IsSpace(first) || unicode.IsSpace(last) || strings.ContainsAny(content, "\n\r") {
+		return "", 0, false
+	}
+	return "<tg-spoiler>" + renderInline(content) + "</tg-spoiler>", 2*len(spoilerMarker) + closing, true
 }
 
 // renderLink renders [text](url) as an anchor. A target that is not an HTTP or HTTPS URL is not a

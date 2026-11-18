@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files in testdata")
@@ -105,6 +107,8 @@ func TestUnattendedTurns(t *testing.T) {
 	checkGolden(t, "trip-updates", TripUpdates("Conference trip", slot, zone, "Look for news about the trip."))
 	checkGolden(t, "watch-check", WatchCheck("Price", slot, time.UTC, "Check: the page.\nTell the user when: below 10."))
 	checkGolden(t, "weekly-review", WeeklyReview(slot, zone, "Replies the user marked 👎: none."))
+	checkGolden(t, "dutch-phrase", DutchPhrase(slot, zone, locale.Russian, []string{"Mag ik de bon?", "Het regent pijpenstelen."}, "Prefer phrases for work.\nSummarise the calendar first."))
+	checkGolden(t, "dutch-phrase-first", DutchPhrase(slot, zone, locale.English, nil, ""))
 	checkGolden(t, "inbound-event", InboundEvent("Backups", slot, zone, "warning", "Nightly backup slow", "Took 3h instead of 1h."))
 	checkGolden(t, "explain-message", ExplainMessage("Tools, in order:\n1. web_search \"train strike\": success", "The trains run normally today.", "Do the trains run today?"))
 	checkGolden(t, "background-task", BackgroundTask(`Read "mail"`, 100, "1h", "Go through last week's mail."))

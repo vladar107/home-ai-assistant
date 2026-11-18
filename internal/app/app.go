@@ -26,6 +26,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/ns"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/places"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/web"
+	"github.com/vladar107/home-ai-assistant/internal/dutchphrase"
 	"github.com/vladar107/home-ai-assistant/internal/events"
 	"github.com/vladar107/home-ai-assistant/internal/health"
 	"github.com/vladar107/home-ai-assistant/internal/httpretry"
@@ -528,7 +529,7 @@ func (a *App) settingsSections(asm *wiring.Assembly, location *time.Location) ([
 			Toggle: asm.Switches.Toggle(parcel.Switch), Sources: asm.ParcelSources, Settings: a.store, Mail: asm.ParcelMailState(), Hook: asm.ParcelLoop,
 		}, a.logger, a.telemetry))
 	}
-	sections = append(sections, telegram.NewHeadsUpSection(asm.Scheduler, a.logger, a.telemetry))
+	sections = append(sections, telegram.NewHeadsUpSection(asm.Scheduler, asm.Switches.Toggle(dutchphrase.Switch), a.store, a.logger, a.telemetry))
 	if asm.MCP != nil {
 		servers := a.cfg.MCP.Servers
 		allowed := func(principalID string) bool {

@@ -119,7 +119,8 @@ func (m modelTurn) Run(ctx context.Context, occurrence Occurrence) (Result, erro
 		return Result{Text: FailedText, ErrorKind: "config"}, nil
 	}
 	task := config.Prompt
-	if occurrence.JobID == HeadsUpJobID(occurrence.PrincipalID) {
+	headsUp := occurrence.JobID == HeadsUpJobID(occurrence.PrincipalID)
+	if headsUp {
 		ctx = tools.WithCallBudget(ctx, headsUpCallBudget)
 		task = HeadsUpTask(occurrence.JobID, config.Prompt)
 	}
@@ -138,6 +139,15 @@ func (m modelTurn) Run(ctx context.Context, occurrence Occurrence) (Result, erro
 	if reply.ErrorKind == "" && strings.Contains(reply.Text, prompt.NothingToAdd) {
 		result.Text = strings.TrimSpace(strings.ReplaceAll(reply.Text, prompt.NothingToAdd, ""))
 		result.Quiet = result.Text == ""
+	}
+	// A blank reply is a failed run, which gets no phrase; a quiet one gets the phrase alone.
+	if headsUp && reply.ErrorKind == "" && (result.Quiet || strings.TrimSpace(result.Text) != "") {
+		if block := m.service.headsUpPhraseBlock(ctx, occurrence, config.Prompt); block != "" {
+			if !result.Quiet {
+				block = strings.TrimSpace(result.Text) + "\n\n" + block
+			}
+			result.Text, result.Quiet = block, false
+		}
 	}
 	return result, nil
 }

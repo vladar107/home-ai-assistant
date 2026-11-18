@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/vladar107/home-ai-assistant/internal/dutchphrase"
 	"github.com/vladar107/home-ai-assistant/internal/events"
 	"github.com/vladar107/home-ai-assistant/internal/export"
 	"github.com/vladar107/home-ai-assistant/internal/intake"
@@ -115,6 +116,7 @@ func (a *Assembly) buildExports() error {
 			}
 		}},
 		events.Exporter(),
+		dutchphrase.Exporter(),
 		a.Scheduler.Exporter(),
 		watch.Exporter(a.in.Core.Now, available, watchesRestored),
 	} {

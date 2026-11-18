@@ -892,6 +892,26 @@ model metrics as a `chat` process; each user has at most one running, and a
 bare "why?" goes to the conversation instead. A chat trace still being written
 at shutdown is waited for by the "turn traces" step.
 
+### Dutch phrase of the day
+
+Migration 065 adds `dutch_phrases`; it cannot be undone, so take a data backup
+before the first deploy that carries it. No setting is needed. Each user turns
+the phrase on with the `dutch-phrase` switch on the Heads-up page of
+`/settings`, shown while Heads-up is on. Each first Heads-up of a day then
+costs one more turn without tools on the user's own subscription and the
+background task model. A manual Heads-up run on a day before its scheduled run
+uses up that day's phrase, so the scheduled run adds none. In the logs, `dutchphrase.chosen` gives the candidate
+and valid counts and the chosen rank, `dutchphrase.failed` a phrase turn that
+failed, `dutchphrase.unreadable` a reply that was not the JSON asked for,
+`dutchphrase.none_usable` a reply whose candidates were all invalid or sent
+before, `dutchphrase.conflict` a lost race for the day's row,
+`dutchphrase.model_catalog.failed` a model list that could not be read,
+`dutchphrase.language_unread` a user's language that could not be read, and
+`schedule.headsup.phrase_failed` a switch or store read that failed; each of
+these leaves the Heads-up run as its turn made it. `headsup.phrase.changed`
+records the switch being turned on or off. Logs carry IDs and counts, never a
+phrase.
+
 ## 7. Logs and rollback
 
 ```sh

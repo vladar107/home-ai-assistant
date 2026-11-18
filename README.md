@@ -168,7 +168,9 @@ borrowed between users.
   devices, health and energy trends) and writes first, only when something
   needs attention. It follows a built-in method plus the user's own notes, and
   it is an ordinary job the user can move, add notes to, or pause in
-  conversation.
+  conversation. An optional Dutch phrase on the same page ends the first
+  Heads-up of each day with an everyday Dutch phrase, never repeated, its
+  translation hidden behind a spoiler; on a quiet morning the phrase comes alone.
 - **Trips.** A trip the user mentions ("I fly to Lisbon on 12 March and stay a
   week") is recorded with its dates and bookings, and every turn knows about the
   active or next one. With Google mail or calendar on, an optional Trips scan

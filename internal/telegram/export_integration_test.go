@@ -147,6 +147,8 @@ func (h *conversationHarness) seedExport(principal string) {
 		{`INSERT INTO watches (id, principal_id, kind, config, enabled, created_at, updated_at, travel_pause) VALUES (?, ?, 'agent', ?, 1, ?, ?, 1), (?, ?, 'place', ?, 0, ?, ?, 0)`,
 			[]any{exportAgentWatch, principal, string(agent), created, created, exportPlaceWatch, principal, string(arrival), created, created}},
 		{`UPDATE watches SET summary_message_id = ? WHERE id = ?`, []any{exportWatchSummary, exportAgentWatch}},
+		{`INSERT INTO dutch_phrases (principal_id, local_date, phrase, normalized, usage, translation, usage_translation, note, created_at) VALUES (?, '2026-09-28', 'Mag ik even langs?', 'mag ik even langs', 'In de trein.', 'Можно пройти?', 'В поезде.', '', ?)`,
+			[]any{principal, created}},
 	} {
 		if _, err := h.db.ExecContext(h.ctx, statement.query, statement.args...); err != nil {
 			h.t.Fatalf("%s: %v", statement.query, err)
@@ -437,7 +439,7 @@ func TestExportRestoresEverySectionIntoAnEmptyDatabase(t *testing.T) {
 	target := newExportHarness(t)
 	copyKey(t, source, target)
 	preview, outcome := target.restore(1, 101, data)
-	for _, want := range []string{exportFactText, exportInstructionText, exportSteps, exportPrompt, "Water the plants", "Pack the suitcase", exportAgentCheck, exportAgentCondition, `"Lisbon"`, `"Gym"`, `"Lent items"`, `"Find a dentist"`, `"Water bill"`, `"To work"`, `"Backup server"`} {
+	for _, want := range []string{exportFactText, exportInstructionText, exportSteps, exportPrompt, "Water the plants", "Pack the suitcase", exportAgentCheck, exportAgentCondition, `"Lisbon"`, `"Gym"`, `"Lent items"`, `"Find a dentist"`, `"Water bill"`, `"To work"`, `"Backup server"`, `"Mag ik even langs?"`} {
 		if !strings.Contains(preview, want) {
 			t.Fatalf("preview lacks %q:\n%s", want, preview)
 		}

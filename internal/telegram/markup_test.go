@@ -38,6 +38,18 @@ func TestRenderMarkupRendersASafeSubset(t *testing.T) {
 		{"greater-than mid-line", "a > b\nc >d\n>e", "a &gt; b\nc &gt;d\n&gt;e"},
 		{"empty quote", "> \ntext", "&gt; \ntext"},
 		{"bold across lines", "**a\nb**", "<b>a\nb</b>"},
+		{"spoiler", "the ||answer|| is hidden", "the <tg-spoiler>answer</tg-spoiler> is hidden"},
+		{"unclosed spoiler", "||never closed", "||never closed"},
+		{"spaced pipes stay literal", "a || b || c", "a || b || c"},
+		{"spoiler with leading space", "|| x||", "|| x||"},
+		{"spoiler with trailing space", "||x ||", "||x ||"},
+		{"empty spoiler", "||||", "||||"},
+		{"spoiler in inline code", "`||x||`", "<code>||x||</code>"},
+		{"spoiler in fence", "```\n||x||\n```", "<pre><code>||x||</code></pre>"},
+		{"bold inside spoiler", "||**x** y||", "<tg-spoiler><b>x</b> y</tg-spoiler>"},
+		{"spoiler escapes its content", "||a < b & c||", "<tg-spoiler>a &lt; b &amp; c</tg-spoiler>"},
+		{"spoiler inside bold", "**a ||x|| b**", "<b>a <tg-spoiler>x</tg-spoiler> b</b>"},
+		{"spoiler across lines stays literal", "a ||x\ny|| b", "a ||x\ny|| b"},
 		{"plain text unchanged", "Notion writes are on.", "Notion writes are on."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

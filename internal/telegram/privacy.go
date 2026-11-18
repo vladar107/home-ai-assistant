@@ -19,6 +19,7 @@ var privacyOrder = []string{
 	notionSectionPrefix,
 	googleSectionPrefix,
 	privacySchedules,
+	headsUpSectionPrefix,
 	privacyTasks,
 	webSectionPrefix,
 	nsSectionPrefix,

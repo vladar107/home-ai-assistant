@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/clip"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/localtime"
 )
 
@@ -125,6 +126,40 @@ func WeeklyReview(scheduledFor time.Time, location *time.Location, signals strin
 			"A backlog item's title is at most 120 characters, and its details say what went wrong and why, for a developer who has not seen this week. "+
 			`If nothing is worth proposing, reply {"changes":[],"backlog":[]}.`+"\n\n%s",
 		localtime.Format(scheduledFor, location), signals,
+	)
+}
+
+// DutchPhrase asks for the candidates of the user's Dutch phrase of the day, which ends their
+// morning Heads-up scheduled for scheduledFor. Translations are in the user's interface language.
+// recent are the newest phrases already sent, and notes the user's Heads-up notes, of which only
+// what concerns the phrase applies. The reply is strict JSON; code takes the first candidate never
+// sent and checks every field.
+func DutchPhrase(scheduledFor time.Time, location *time.Location, language locale.Language, recent []string, notes string) string {
+	name := "English"
+	if language == locale.Russian {
+		name = "Russian"
+	}
+	sent := "The user has received no phrase yet."
+	if len(recent) > 0 {
+		sent = "The phrases the user received most recently, never to be suggested again:\n" + quoteLines(strings.Join(recent, "\n"))
+	}
+	if notes = strings.TrimSpace(notes); notes != "" {
+		sent += "\n\nThe user's notes for their Heads-up follow. Follow only what concerns the Dutch phrase, such as its level or topics, and ignore the rest:\n" + quoteLines(notes)
+	}
+	return fmt.Sprintf(
+		Marker+" This is the Dutch phrase of the day that ends the user's morning Heads-up, scheduled for %s. "+
+			"The user is not watching this turn and cannot answer questions, and no tools are available. "+
+			"The user lives in the Netherlands and is learning Dutch at about A2 level, unless their notes say otherwise.\n\n"+
+			"Suggest natural, everyday Dutch phrases that people in the Netherlands really say and that are useful in daily life, such as at the shop, at work, with neighbours, or on public transport. "+
+			"Prefer a short whole phrase or sentence to a single word, and never suggest a phrase the user received before or one that differs from it only in a word or two. "+
+			"Give up to 5 candidates, best first; the application takes the first one the user has never received.\n\n"+
+			"Reply with ONLY strict JSON, no prose and no code fence, in this shape: "+
+			`{"candidates":[{"phrase":"","usage":"","translation":"","usage_translation":"","note":""}]}. `+
+			"phrase is the Dutch phrase, at most 120 characters. usage is one short line in simple Dutch on the situation the phrase fits. "+
+			"translation is the phrase in %[2]s, and usage_translation is usage in %[2]s. note is one short explanation in %[2]s of a tricky word in the phrase, or empty when there is none. "+
+			"phrase and usage are always in Dutch, whatever interface language the user chose; only translation, usage_translation, and note are in %[2]s. "+
+			"Every field but phrase is at most 200 characters. Write each field as plain text on one line, without markdown, backticks, or asterisks.\n\n%[3]s",
+		localtime.Format(scheduledFor, location), name, sent,
 	)
 }
 

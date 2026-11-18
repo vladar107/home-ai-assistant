@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 )
@@ -56,7 +57,8 @@ const headsUpMethod = "This is the user's Heads-up: a short briefing on what in 
 	"8. Before replying, check the draft: every trip on the timeline was checked and is reported with its times when transit tools are offered, every event comes from the calendar, every time and status came from a tool in this run, nothing is in the past, " +
 	"and nothing states that a trip, an event, or an item is absent, unchanged, or not needed.\n" +
 	"A source whose tools are not offered in this run is skipped silently, never listed as unchecked; a tool call that failed is still named.\n" +
-	"Write a few short lines, most important first, with a section only when it holds something to act on or know. Reply with only " + prompt.NothingToAdd + ", copied verbatim and never translated, only when nothing in the window needs the user's attention.\n\n" +
+	"Write a few short lines, most important first, with a section only when it holds something to act on or know. Reply with only " + prompt.NothingToAdd + ", copied verbatim and never translated, only when nothing in the window needs the user's attention.\n" +
+	"Notes about a Dutch phrase of the day are handled elsewhere: never write a phrase or a language lesson yourself.\n\n" +
 	"The user's notes, which take precedence over the steps above on language, format, and how to read their calendar:\n"
 
 // headsUpNotesLabel heads the Heads-up job's text wherever the model reads it, so it is edited as
@@ -67,6 +69,46 @@ const headsUpNotesLabel = "Notes (the user's preferences; how Heads-up checks th
 // Its reports are read by the job's ID, which a rename keeps.
 func HeadsUpTask(jobID, notes string) string {
 	return fmt.Sprintf(headsUpMethod, jobID) + notes
+}
+
+// HeadsUpPhrase ends the first Heads-up of each day with the principal's Dutch phrase while they
+// have it on. Phrase returns the block, or "" when the run adds none.
+type HeadsUpPhrase interface {
+	Enabled(ctx context.Context, principalID string) (bool, error)
+	Phrase(ctx context.Context, principalID string, scheduledFor time.Time, location *time.Location, notes string, manual bool) (string, error)
+}
+
+// SetHeadsUpPhrase sets what adds the Dutch phrase to Heads-up, at wiring time before the scheduler
+// starts.
+func (s *Service) SetHeadsUpPhrase(phrase HeadsUpPhrase) {
+	s.headsUpPhrase = phrase
+}
+
+// headsUpPhraseBlock is the Dutch phrase block that follows a successful Heads-up turn, or "" when
+// the principal has it off, the day already had it, or it failed, which is logged and leaves the
+// run's result as the turn produced it.
+func (s *Service) headsUpPhraseBlock(ctx context.Context, occurrence Occurrence, notes string) string {
+	if s.headsUpPhrase == nil {
+		return ""
+	}
+	enabled, err := s.headsUpPhrase.Enabled(ctx, occurrence.PrincipalID)
+	if err != nil {
+		s.logger.WarnContext(ctx, "schedule.headsup.phrase_failed", "principal_id", occurrence.PrincipalID, "job_id", occurrence.JobID, "error", err)
+		return ""
+	}
+	if !enabled {
+		return ""
+	}
+	location := occurrence.Location
+	if location == nil {
+		location, _ = LoadZone(s.zone)
+	}
+	block, err := s.headsUpPhrase.Phrase(ctx, occurrence.PrincipalID, occurrence.ScheduledFor, location, notes, occurrence.Manual)
+	if err != nil {
+		s.logger.WarnContext(ctx, "schedule.headsup.phrase_failed", "principal_id", occurrence.PrincipalID, "job_id", occurrence.JobID, "error", err)
+		return ""
+	}
+	return block
 }
 
 // HeadsUpJobID is the principal's Heads-up job ID, so the job is found and created once however

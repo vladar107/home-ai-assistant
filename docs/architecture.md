@@ -590,6 +590,31 @@ instruction gets the default notes; one the user edited keeps its text as its
 notes. A Heads-up run has a budget of 30 tool calls, and the preview of an
 update to the Heads-up job runs with the method too.
 
+The Dutch phrase of the day (`dutchphrase`) is a principal switch,
+`dutch-phrase`, off by default and shown on the Heads-up page only while
+Heads-up is on; turning Heads-up off deletes its job but keeps the switch. The
+phrase is made beside the Heads-up turn, not in it, so code can guarantee that
+it never repeats and that it goes out on a quiet morning: the Heads-up method
+only tells the turn that notes about the phrase are handled elsewhere. After a
+Heads-up turn that succeeded, quiet or not, the scheduler asks `dutchphrase` for
+the day's block. It runs one turn without tools, memory, or web search, in a
+fresh session on the user's own subscription and the background task model (the
+chat default when the subscription does not offer it), bounded by the turn
+timeout. The turn gets the 100 most recent phrases and the Heads-up notes, and
+answers with up to five ranked candidates as JSON. Code rejects a candidate with
+an empty or overlong field or one holding markup, checks the rest against every
+phrase the user was ever sent by their normalized form, and stores the first new
+one in `dutch_phrases` before the block is sent, so a failed delivery loses that
+day's phrase but never repeats it. The table keeps one row per principal and
+local date and one per principal and normalized phrase. Only the run that stores
+the day's row adds the block, after a blank line, or alone instead of staying
+quiet; a later scheduled run the same day adds none, and a manual run shows the
+day's phrase again. A failed Heads-up turn gets no phrase, and a phrase that
+fails, cannot be read, or has no new candidate leaves the run as its turn made
+it. The block is part of the run's result, so the job report keeps it, and its
+translation sits behind a `||spoiler||`. Turning the phrase off keeps the
+history, which `/export` carries in its own section.
+
 ### Trips
 
 `trip` keeps a principal's trips and bookings in SQLite (`trips`, `trip_bookings`)

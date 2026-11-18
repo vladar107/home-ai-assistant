@@ -971,6 +971,9 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	if err := scheduler.Register(reviewJob); err != nil {
 		return err
 	}
+	if err := a.buildDutchPhrase(engine); err != nil {
+		return fmt.Errorf("initialize the Dutch phrase: %w", err)
+	}
 	// The inbox check reads mail on the principal's own subscription with read-only tools, and code
 	// offers what it found; a nil watch service must reach it as a nil interface.
 	inboxConfig := intake.ScanConfig{Checker: tripScanChecker{engine}, Mail: a.tripState, Approvals: in.Store, Offers: approvals, Chats: in.Store, Reminders: scheduler}

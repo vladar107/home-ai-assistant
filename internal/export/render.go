@@ -47,6 +47,7 @@ var (
 		"watches":       locale.T("Watches", "Наблюдения"),
 		"event_sources": locale.T("Event sources", "Источники событий"),
 		"routes":        locale.T("Saved routes", "Сохранённые маршруты"),
+		"dutch_phrases": locale.T("Dutch phrases of the day", "Фразы дня на нидерландском"),
 	}
 )
 
