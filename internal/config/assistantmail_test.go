@@ -169,6 +169,42 @@ func TestAssistantMailRejectsInvalidSettings(t *testing.T) {
 	}
 }
 
+func TestAssistantMailClientLoadsBeforeTheMailboxIsEnabled(t *testing.T) {
+	tests := []struct {
+		name      string
+		overrides map[string]string
+		want      string
+	}{
+		{"neither enabled nor authorized", nil, ""},
+		{"address with plus", map[string]string{"HOME_AGENT_ASSISTANT_MAIL_ADDRESS": "assistant+aa1@example.com"}, "plus tag"},
+		{"address missing", map[string]string{"HOME_AGENT_ASSISTANT_MAIL_ADDRESS": ""}, "HOME_AGENT_ASSISTANT_MAIL_ADDRESS"},
+		{"client id not Google", map[string]string{"HOME_AGENT_ASSISTANT_MAIL_CLIENT_ID": "test.example.com"}, "HOME_AGENT_ASSISTANT_MAIL_CLIENT_ID"},
+		{"client secret blank", map[string]string{"HOME_AGENT_ASSISTANT_MAIL_CLIENT_SECRET": "  "}, "HOME_AGENT_ASSISTANT_MAIL_CLIENT_SECRET or HOME_AGENT_ASSISTANT_MAIL_CLIENT_SECRET_FILE: set exactly one"},
+		{"client secret missing", map[string]string{"HOME_AGENT_ASSISTANT_MAIL_CLIENT_SECRET": ""}, "set exactly one"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			setAssistantMailEnv(t, test.overrides)
+			for _, name := range []string{"HOME_AGENT_ASSISTANT_MAIL_ENABLED", "HOME_AGENT_ASSISTANT_MAIL_REFRESH_TOKEN"} {
+				if err := os.Unsetenv(name); err != nil {
+					t.Fatal(err)
+				}
+			}
+			client, err := LoadAssistantMailClient()
+			if test.want == "" {
+				want := AssistantMailClient{Address: "assistant@example.com", ClientID: "test.apps.googleusercontent.com", ClientSecret: "client-secret"}
+				if err != nil || client != want {
+					t.Fatalf("LoadAssistantMailClient = %+v, %v; want %+v", client, err, want)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestAssistantMailRequiresConversationAndAllowlistedPrincipals(t *testing.T) {
 	cfg := Config{
 		ListenAddress:   defaultListenAddress,

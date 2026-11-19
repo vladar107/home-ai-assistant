@@ -21,14 +21,16 @@ const (
 	DefaultUserInfoURL = "https://openidconnect.googleapis.com/v1/userinfo"
 
 	MailScope     = "https://www.googleapis.com/auth/gmail.readonly"
+	SendScope     = "https://www.googleapis.com/auth/gmail.send"
 	CalendarScope = "https://www.googleapis.com/auth/calendar.readonly"
 
 	requestTimeout    = 10 * time.Second
 	responseBodyLimit = 1 << 20
 )
 
-// scopes is what every sign-in asks for: the account's identity and both read-only products, which
-// Google's consent screen lets the user untick one by one.
+// scopes is what a sign-in asks for unless the client is configured otherwise: the account's
+// identity and both read-only products, which Google's consent screen lets the user untick one by
+// one.
 var scopes = []string{"openid", "email", MailScope, CalendarScope}
 
 type ErrorClass string
@@ -102,7 +104,9 @@ type ClientConfig struct {
 	TokenURL     string
 	RevokeURL    string
 	UserInfoURL  string
-	HTTPClient   *http.Client
+	// Scopes, when set, replaces what a sign-in asks for, for a client other than the users' own.
+	Scopes     []string
+	HTTPClient *http.Client
 }
 
 // Client talks to Google's OAuth endpoints with the operator's OAuth client; it holds no user
@@ -115,6 +119,7 @@ type Client struct {
 	tokenURL     string
 	revokeURL    string
 	userInfoURL  string
+	scopes       []string
 	httpClient   *http.Client
 }
 
@@ -130,7 +135,11 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		clientID:     cfg.ClientID,
 		clientSecret: cfg.ClientSecret,
 		redirectURL:  cfg.RedirectURL,
+		scopes:       scopes,
 		httpClient:   cfg.HTTPClient,
+	}
+	if len(cfg.Scopes) > 0 {
+		client.scopes = cfg.Scopes
 	}
 	for _, endpoint := range []struct {
 		target   *string
@@ -180,7 +189,7 @@ func (c *Client) AuthorizationURL(state, challenge string) string {
 		"client_id":              {c.clientID},
 		"redirect_uri":           {c.redirectURL},
 		"response_type":          {"code"},
-		"scope":                  {strings.Join(scopes, " ")},
+		"scope":                  {strings.Join(c.scopes, " ")},
 		"access_type":            {"offline"},
 		"prompt":                 {"consent select_account"},
 		"include_granted_scopes": {"true"},

@@ -109,6 +109,38 @@ func loadAssistantMailConfig(cfg *AssistantMailConfig) error {
 	return cfg.validate()
 }
 
+// AssistantMailClient is what authorizing the assistant's mailbox needs: its separate OAuth client
+// and the address the grant must belong to.
+type AssistantMailClient struct {
+	Address      string
+	ClientID     string
+	ClientSecret string
+}
+
+// LoadAssistantMailClient reads the mailbox's address and OAuth client from the variables the
+// application reads, without requiring the mailbox to be enabled or a refresh token to exist yet.
+func LoadAssistantMailClient() (AssistantMailClient, error) {
+	client := AssistantMailClient{
+		Address:  strings.TrimSpace(os.Getenv("HOME_AGENT_ASSISTANT_MAIL_ADDRESS")),
+		ClientID: strings.TrimSpace(os.Getenv("HOME_AGENT_ASSISTANT_MAIL_CLIENT_ID")),
+	}
+	if err := validateAssistantMailAddress(client.Address); err != nil {
+		return AssistantMailClient{}, err
+	}
+	if err := validateAssistantMailClientID(client.ClientID); err != nil {
+		return AssistantMailClient{}, err
+	}
+	secret, err := loadAssistantMailSecret("HOME_AGENT_ASSISTANT_MAIL_CLIENT_SECRET")
+	if err != nil {
+		return AssistantMailClient{}, err
+	}
+	if secret == "" {
+		return AssistantMailClient{}, fmt.Errorf("HOME_AGENT_ASSISTANT_MAIL_CLIENT_SECRET or HOME_AGENT_ASSISTANT_MAIL_CLIENT_SECRET_FILE: set exactly one")
+	}
+	client.ClientSecret = secret
+	return client, nil
+}
+
 // loadAssistantMailSecret reads a secret from NAME or from the file NAME_FILE, never both.
 func loadAssistantMailSecret(name string) (string, error) {
 	value := os.Getenv(name)
@@ -196,8 +228,8 @@ func (c AssistantMailConfig) validate() error {
 	if n := utf8.RuneCountInString(c.DisplayName); !utf8.ValidString(c.DisplayName) || n < 1 || n > assistantMailDisplayNameMaxRunes || strings.ContainsFunc(c.DisplayName, unicode.IsControl) {
 		return fmt.Errorf("HOME_AGENT_ASSISTANT_MAIL_DISPLAY_NAME: must be 1 to %d characters without control characters", assistantMailDisplayNameMaxRunes)
 	}
-	if !strings.HasSuffix(c.ClientID, ".apps.googleusercontent.com") {
-		return fmt.Errorf("HOME_AGENT_ASSISTANT_MAIL_CLIENT_ID: must be a Google OAuth client ID")
+	if err := validateAssistantMailClientID(c.ClientID); err != nil {
+		return err
 	}
 	if c.ClientSecret == "" {
 		return fmt.Errorf("HOME_AGENT_ASSISTANT_MAIL_CLIENT_SECRET or HOME_AGENT_ASSISTANT_MAIL_CLIENT_SECRET_FILE: set exactly one")
@@ -213,6 +245,13 @@ func (c AssistantMailConfig) validate() error {
 	}
 	if c.PollInterval < minAssistantMailPollInterval || c.PollInterval > maxAssistantMailPollInterval {
 		return fmt.Errorf("HOME_AGENT_ASSISTANT_MAIL_POLL_INTERVAL: must be between %s and %s", minAssistantMailPollInterval, maxAssistantMailPollInterval)
+	}
+	return nil
+}
+
+func validateAssistantMailClientID(id string) error {
+	if !strings.HasSuffix(id, ".apps.googleusercontent.com") {
+		return fmt.Errorf("HOME_AGENT_ASSISTANT_MAIL_CLIENT_ID: must be a Google OAuth client ID")
 	}
 	return nil
 }
