@@ -64,6 +64,8 @@ var ExcludedFromExport = map[string]string{
 	"parcel_notices_sent":         "which parcel notices were sent",
 	"parcel_mail_cursors":         "how far the parcel mail job has read",
 	"parcel_tracking":             "what the parcel loop has settled for the user",
+	"mail_routes":                 "references to messages in the household mailbox",
+	"mail_sends":                  "a count of the assistant mailbox's sends",
 }
 
 // buildExports registers every section of a user's export, in the order they restore: each after
