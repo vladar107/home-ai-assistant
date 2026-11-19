@@ -1,0 +1,102 @@
+{
+  "id": "k4-continuation-next-step",
+  "title": "After a confirmed proposal, the continuation proposes the step that needed its result",
+  "tags": [
+    "quiet"
+  ],
+  "kind": "stalled-request",
+  "clock": {
+    "local": "2026-03-10T10:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam"
+  },
+  "world": {
+    "notion": {
+      "writes": true,
+      "pages": [
+        {
+          "id": "home-hub",
+          "title": "Home hub",
+          "url": "https://notion.so/home-hub",
+          "lines": [
+            "Links",
+            "- Recipes",
+            "- Garden plan"
+          ]
+        }
+      ],
+      "data_sources": [
+        {
+          "id": "trips",
+          "title": "Trips",
+          "title_property": "Name",
+          "properties": [
+            {
+              "name": "Status",
+              "type": "select",
+              "options": [
+                "Planned",
+                "Done"
+              ]
+            }
+          ],
+          "rows": [
+            {
+              "id": "row-autumn-trip",
+              "title": "Autumn trip",
+              "values": {
+                "Status": "Done"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "say": "Create a page \"Spring trip\" in my Trips table, then add a line with a link to it on my Home hub page.",
+      "expect": {
+        "not_called": [
+          "notion_append_blocks"
+        ],
+        "proposals": {
+          "min": 1,
+          "tools": [
+            "notion_create_page"
+          ]
+        }
+      }
+    },
+    {
+      "confirm": true,
+      "expect": {
+        "calls": [
+          {
+            "tool": "notion_append_blocks",
+            "min": 1,
+            "args": [
+              {
+                "path": "page_id",
+                "equals": "home-hub"
+              },
+              {
+                "path": "paragraphs",
+                "contains": "page-created"
+              }
+            ]
+          }
+        ],
+        "proposals": {
+          "min": 1,
+          "tools": [
+            "notion_append_blocks"
+          ]
+        }
+      }
+    }
+  ],
+  "trials": 5
+}

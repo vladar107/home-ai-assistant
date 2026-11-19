@@ -439,7 +439,11 @@ is refused as unreadable instead of exhausting the service's memory.
    A Confirm that ran the actions queues a
    turn that continues the request from their outcome, so a dependent next step
    needs no nudge and a question asked beside the action is still answered; it
-   stays silent when nothing is left to do. A Confirm pressed while another turn
+   stays silent when nothing is left to do. A turn that only proposes stays
+   silent too, so the card speaks for itself. A silent turn that leaves no card,
+   neither a proposal nor a "Done" message, says so instead: that the change
+   could not be made when a write call failed, or that nothing waits when it
+   withdrew its proposals. A Confirm pressed while another turn
    is in flight continues once that turn is delivered, unless a turn has taken
    the outcome first.
 7. The reply goes back through Telegram, as a day card or chart photo with a caption

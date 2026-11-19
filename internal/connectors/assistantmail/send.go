@@ -42,7 +42,7 @@ const (
 // sendDoneModel is the outcome the model reads; only the model needs the message id.
 const sendDoneModel = "Sent from the assistant mailbox (message id %s)."
 
-const sendGuidance = "assistant_mail_send proposes an email from this user's assistant address; the user sees and confirms the exact message, so say it is proposed, never sent. " +
+const sendGuidance = "assistant_mail_send proposes an email from this user's assistant address; the user sees and confirms the exact message, so never claim it was sent. " +
 	"To answer a message, pass its id as reply_to_id. " +
 	"Write to outsiders politely, concisely and businesslike, in the language they wrote in. Sign with your own name, %q, and that you are the assistant to %s, written in that same language (for example \"Nova, assistant to Alice\"). " +
 	"Never claim or imply being human, and never invent a place, a body, calls or meetings of your own. " +

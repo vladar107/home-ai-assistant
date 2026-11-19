@@ -35,8 +35,8 @@ const (
 
 const writeGuidance = "Notion writes are on. notion_create_page and notion_append_blocks only propose a change. " +
 	"notion_update_page changes the page at once when the user asked for it in a conversation that has read no outside content, and after your reply the user sees it with an Undo button; after outside content it only proposes. " +
-	"The tool result says which happened. A proposal is shown after your reply with Confirm and Reject buttons, so describe what you proposed and never claim it was written. " +
-	"Every proposal you make in this turn is shown to the user together and confirmed or rejected as one batch, so propose every change the request needs in this turn, once each, and withdraw a wrong one with proposal_withdraw; a proposal in a later turn replaces a batch still waiting. " +
+	"The tool result says which happened. A proposal is shown after your reply with Confirm and Reject buttons, so never claim it was written. " +
+	"Every proposal you make in this turn is shown to the user together and confirmed or rejected as one batch, so propose in this turn, once each, every change that does not depend on another change's result, and withdraw a wrong one with proposal_withdraw; a proposal in a later turn replaces a batch still waiting. " +
 	"Property values are Notion API property value objects keyed by property name, for example {\"Status\": {\"status\": {\"name\": \"Done\"}}}. " +
 	"Read the target's structure before proposing property values: notion_get_page shows a row's Structure line, and a data source lists every property with the options it accepts. " +
 	"Spell an option exactly as the table spells it, because Notion cannot add one. " +

@@ -1,0 +1,64 @@
+{
+  "id": "k5-page-append-card-speaks",
+  "title": "A turn that only proposes lines for a page sends the card and no text",
+  "tags": [
+    "quiet"
+  ],
+  "kind": "redundant-reply",
+  "clock": {
+    "local": "2026-03-10T18:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru"
+  },
+  "world": {
+    "notion": {
+      "writes": true,
+      "pages": [
+        {
+          "id": "shopping-list",
+          "title": "Покупки",
+          "url": "https://notion.so/shopping-list",
+          "lines": [
+            "- Молоко",
+            "- Сыр"
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "say": "добавь в Notion на страницу «Покупки» хлеб и яйца",
+      "expect": {
+        "calls": [
+          {
+            "tool": "notion_append_blocks",
+            "min": 1,
+            "args": [
+              {
+                "path": "page_id",
+                "equals": "shopping-list"
+              }
+            ]
+          }
+        ],
+        "proposals": {
+          "min": 1,
+          "max": 1,
+          "tools": [
+            "notion_append_blocks"
+          ]
+        },
+        "reply": {
+          "not_matches": [
+            "\\S"
+          ]
+        }
+      }
+    }
+  ],
+  "trials": 5
+}

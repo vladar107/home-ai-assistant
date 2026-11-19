@@ -592,6 +592,10 @@ func (s *Simulator) blockChildren(w http.ResponseWriter, blocks []map[string]any
 // values, which is enough to prove pass-through; anything else matches nothing.
 func filterMatches(page *Page, filter map[string]any) bool {
 	property, _ := filter["property"].(string)
+	// A row's title is kept apart from its other properties, as the sort reads it.
+	if condition, isTitle := filter["title"].(map[string]any); isTitle && property == cmp.Or(page.TitleName, "Name") {
+		return page.Title == condition["equals"]
+	}
 	value, ok := page.Properties[property].(map[string]any)
 	if !ok {
 		return false

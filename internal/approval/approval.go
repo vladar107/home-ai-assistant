@@ -972,6 +972,26 @@ func (s *Service) AfterDelivery(ctx context.Context, principalID string, chatID 
 	return err
 }
 
+// Staged reports whether a turn's reply will be followed by a card: a bundle of the context's tab
+// not sent yet, or a direct action of the chat request that a "Done" message shows. A failed direct
+// action is shown nowhere, so it does not count.
+func (s *Service) Staged(ctx context.Context, principalID, requestID string) (bool, error) {
+	pending, err := s.repository.PendingApprovals(ctx, principalID, thread.From(ctx))
+	if err != nil {
+		return false, err
+	}
+	if len(pending) > 0 && pending[len(pending)-1].MessageID == 0 {
+		return true, nil
+	}
+	direct, err := s.repository.DirectApprovals(ctx, principalID, requestID)
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(direct, func(record Record) bool {
+		return record.Status == StatusDone || record.Status == StatusUndone
+	}), nil
+}
+
 // DeferContinuation keeps the turn that should continue a confirmed request until the tab's
 // in-flight turn is delivered, unless a turn takes the outcome first. A later deferral replaces an
 // earlier one, since one notice holds every outcome not yet reported.

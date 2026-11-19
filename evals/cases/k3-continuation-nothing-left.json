@@ -1,0 +1,73 @@
+{
+  "id": "k3-continuation-nothing-left",
+  "title": "After a confirmed proposal with nothing left to do, the continuation stays silent",
+  "tags": [
+    "quiet"
+  ],
+  "kind": "redundant-reply",
+  "clock": {
+    "local": "2026-03-10T10:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam"
+  },
+  "world": {
+    "notion": {
+      "writes": true,
+      "data_sources": [
+        {
+          "id": "tasks",
+          "title": "Tasks",
+          "title_property": "Name",
+          "properties": [
+            {
+              "name": "Status",
+              "type": "status",
+              "options": [
+                "Open",
+                "Done"
+              ]
+            }
+          ],
+          "rows": [
+            {
+              "id": "row-water-plants",
+              "title": "Water the plants",
+              "values": {
+                "Status": "Open"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "say": "Add \"Buy light bulbs\" to my Tasks.",
+      "expect": {
+        "proposals": {
+          "min": 1,
+          "tools": [
+            "notion_create_page"
+          ]
+        }
+      }
+    },
+    {
+      "confirm": true,
+      "expect": {
+        "proposals": {
+          "max": 0
+        },
+        "reply": {
+          "not_matches": [
+            "\\S"
+          ]
+        }
+      }
+    }
+  ],
+  "trials": 5
+}

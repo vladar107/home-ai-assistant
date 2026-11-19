@@ -158,7 +158,7 @@ func (s *Service) proposeStart(ctx context.Context, principalID, requestID, titl
 		s.logger.WarnContext(ctx, "task.proposal.failed", "principal_id", principalID, "error", err)
 		return tools.Result{Text: "the proposal could not be recorded", IsError: true}, nil
 	}
-	return tools.Result{Text: "The task is waiting for the user's confirmation and has not started: after your reply the user sees it with Confirm and Reject buttons. Do not claim it started; tell them it starts once they confirm."}, nil
+	return tools.Result{Text: "The task is waiting for the user's confirmation and has not started: after your reply the user sees it with Confirm and Reject buttons. Do not claim it started."}, nil
 }
 
 func (s *Service) ActionTools() []string {

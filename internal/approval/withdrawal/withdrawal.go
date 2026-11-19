@@ -66,5 +66,8 @@ func (p Provider) Execute(ctx context.Context, principalID string, call tools.Ca
 	if err != nil {
 		return tools.Result{}, err
 	}
+	if run := tools.RunFrom(ctx); run != nil && !refused {
+		run.MarkWithdrew()
+	}
 	return tools.Result{Text: text, IsError: refused}, nil
 }

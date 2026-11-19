@@ -40,6 +40,10 @@ var (
 	QuotaReply        = turn.QuotaReply
 	ReconnectReply    = turn.ReconnectReply
 	NotConnectedReply = turn.NotConnectedReply
+	// ChangeFailedReply and NothingWaitingReply stand in for a silent reply that would hide that the
+	// turn's change failed or was withdrawn, since no card follows it.
+	ChangeFailedReply   = locale.T("That change could not be made; nothing is waiting for your confirmation.", "Не удалось внести это изменение; подтверждать нечего.")
+	NothingWaitingReply = locale.T("Nothing is waiting for your confirmation.", "Подтверждать нечего.")
 )
 
 type Service struct {
@@ -795,9 +799,14 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		case runErr != nil || strings.TrimSpace(result.Response) == "":
 			errorKind = ErrorKindRuntime
 			reply, reportedKind = turn.FailureReply(ctx, runErr)
+		case prompt.Silent(result.Response) && run.WriteFailed() && !s.staged(turnCtx, request):
+			errorKind = ErrorKindToolProvider
+			reply = ChangeFailedReply.Format(ctx)
+		case prompt.Silent(result.Response) && run.Withdrew() && !s.staged(turnCtx, request):
+			reply = NothingWaitingReply.Format(ctx)
 		default:
 			reply = result.Response
-			if s.replyAsReaction(turnCtx, request.PrincipalID, reply) {
+			if prompt.Silent(reply) || s.replyAsReaction(turnCtx, request.PrincipalID, reply) {
 				reply = prompt.NothingToAdd
 			}
 			if !strings.Contains(reply, prompt.NothingToAdd) {
@@ -868,6 +877,20 @@ func (s *Service) runTurn(ctx context.Context, request Request) {
 		"outcome", outcome,
 		"error_kind", reportedKind,
 	)
+}
+
+// staged reports whether a card follows the turn's reply. Without a follow-up, or when it cannot
+// tell, it reports none, so a failure is told rather than hidden.
+func (s *Service) staged(ctx context.Context, request Request) bool {
+	if s.config.FollowUp == nil {
+		return false
+	}
+	staged, err := s.config.FollowUp.Staged(ctx, request.PrincipalID, request.ID)
+	if err != nil {
+		s.telemetry.ContextLogger(ctx, s.logger).Warn("conversation.staged_check.failed", "principal_id", request.PrincipalID)
+		return false
+	}
+	return staged
 }
 
 // toolHint is what a turn's tool hint came to. answered is false when no hint was asked or none
@@ -988,10 +1011,9 @@ func (s *Service) deliver(ctx context.Context, request Request) error {
 	deliveryStarted := time.Now()
 	replyTo := request.TelegramMessageID
 	response := request.ResponseText
-	silent := false
+	silent := prompt.Silent(response)
 	if strings.Contains(response, prompt.NothingToAdd) {
 		response = strings.TrimSpace(strings.ReplaceAll(response, prompt.NothingToAdd, ""))
-		silent = response == ""
 	}
 	// A turn with nothing left to say sends nothing, not even the line marking a resumed conversation.
 	var chunks []string

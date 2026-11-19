@@ -1,0 +1,54 @@
+{
+  "id": "k2-proposal-caveat-said",
+  "title": "A proposal the card cannot fully explain comes with its caveat",
+  "tags": [
+    "quiet"
+  ],
+  "kind": "missing-caveat",
+  "clock": {
+    "local": "2026-03-10T18:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam"
+  },
+  "world": {
+    "notion": {
+      "writes": true,
+      "pages": [
+        {
+          "id": "shopping",
+          "title": "Shopping",
+          "url": "https://notion.so/shopping",
+          "lines": [
+            "- Milk",
+            "- Cheese"
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "say": "Add bread and milk to my Shopping page in Notion.",
+      "expect": {
+        "proposals": {
+          "min": 1,
+          "tools": [
+            "notion_append_blocks"
+          ]
+        },
+        "reply": {
+          "contains": [
+            "milk"
+          ]
+        }
+      }
+    }
+  ],
+  "rubric": [
+    "Does the reply tell the user that milk is already on the Shopping page?",
+    "Does the reply add only what the proposal card does not already show, without restating the proposed lines?"
+  ],
+  "trials": 5
+}

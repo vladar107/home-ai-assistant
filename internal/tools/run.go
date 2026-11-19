@@ -30,6 +30,8 @@ type Run struct {
 	reconsidered time.Time
 	lesson       bool
 	reacted      bool
+	writeFailed  bool
+	withdrew     bool
 	seen         map[string]struct{}
 	image        outbox.Once
 	attributions []Attribution
@@ -164,6 +166,40 @@ func (r *Run) Reacted() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.reacted
+}
+
+// MarkWriteFailed records that a write call of the run ended in an error.
+func (r *Run) MarkWriteFailed() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.writeFailed = true
+}
+
+// WriteFailed reports whether a write call of the run ended in an error.
+func (r *Run) WriteFailed() bool {
+	if r == nil {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.writeFailed
+}
+
+// MarkWithdrew records that the run withdrew proposals of its own.
+func (r *Run) MarkWithdrew() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.withdrew = true
+}
+
+// Withdrew reports whether the run withdrew proposals of its own.
+func (r *Run) Withdrew() bool {
+	if r == nil {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.withdrew
 }
 
 // Attribute records that the run read data whose source must be named in its reply; a line already

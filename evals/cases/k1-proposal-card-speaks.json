@@ -1,0 +1,78 @@
+{
+  "id": "k1-proposal-card-speaks",
+  "title": "A turn that only proposes a new row sends the card and no text",
+  "tags": [
+    "quiet"
+  ],
+  "kind": "redundant-reply",
+  "clock": {
+    "local": "2026-03-10T10:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam"
+  },
+  "world": {
+    "notion": {
+      "writes": true,
+      "data_sources": [
+        {
+          "id": "tasks",
+          "title": "Tasks",
+          "title_property": "Name",
+          "properties": [
+            {
+              "name": "Status",
+              "type": "status",
+              "options": [
+                "Open",
+                "Done"
+              ]
+            }
+          ],
+          "rows": [
+            {
+              "id": "row-water-plants",
+              "title": "Water the plants",
+              "values": {
+                "Status": "Open"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "say": "Add \"Book the chimney sweep\" to my Tasks.",
+      "expect": {
+        "calls": [
+          {
+            "tool": "notion_create_page",
+            "min": 1,
+            "args": [
+              {
+                "path": "title",
+                "contains": "chimney"
+              }
+            ]
+          }
+        ],
+        "proposals": {
+          "min": 1,
+          "max": 1,
+          "tools": [
+            "notion_create_page"
+          ]
+        },
+        "reply": {
+          "not_matches": [
+            "\\S"
+          ]
+        }
+      }
+    }
+  ],
+  "trials": 5
+}

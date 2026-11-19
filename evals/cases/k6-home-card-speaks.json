@@ -1,0 +1,72 @@
+{
+  "id": "k6-home-card-speaks",
+  "title": "A turn that only proposes a home action needing confirmation sends the card and no text",
+  "tags": [
+    "quiet"
+  ],
+  "kind": "redundant-reply",
+  "clock": {
+    "local": "2026-03-10T18:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam"
+  },
+  "world": {
+    "home": {
+      "time_zone": "Europe/Berlin",
+      "entities": [
+        {
+          "entity_id": "light.hall_lamp",
+          "name": "Hall lamp",
+          "state": "off",
+          "area": "Hall",
+          "exposed": true
+        },
+        {
+          "entity_id": "lock.garden_gate",
+          "name": "Garden gate",
+          "state": "locked",
+          "labels": [
+            "assistant-confirm"
+          ]
+        }
+      ],
+      "services": [
+        {
+          "domain": "lock",
+          "services": {
+            "lock": [],
+            "unlock": []
+          }
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "say": "Unlock the garden gate.",
+      "expect": {
+        "calls": [
+          {
+            "tool": "ha_service_call",
+            "min": 1
+          }
+        ],
+        "proposals": {
+          "min": 1,
+          "max": 1,
+          "tools": [
+            "ha_service_call"
+          ]
+        },
+        "reply": {
+          "not_matches": [
+            "\\S"
+          ]
+        }
+      }
+    }
+  ],
+  "trials": 5
+}

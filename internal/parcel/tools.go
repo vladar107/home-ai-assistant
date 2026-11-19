@@ -56,7 +56,7 @@ var (
 		},
 		{
 			Name:        ToolStop,
-			Description: "Stop following one parcel by the id parcel_list gave. Because that id comes from a parcel_list result, which is outside content, the stop is usually proposed for the user to confirm on a card; say so, and never say it is done until it is.",
+			Description: "Stop following one parcel by the id parcel_list gave. Because that id comes from a parcel_list result, which is outside content, the stop is usually proposed for the user to confirm on a card, so never claim it is done until it is.",
 			Risk:        tools.RiskWrite,
 			InputSchema: stopSchema,
 		},

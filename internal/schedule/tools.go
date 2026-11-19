@@ -149,7 +149,7 @@ func proposeGuidance(zone string) string {
 		"Inbox intake is a built-in mail check, turned on and off in /settings; the user's preferences about what it reports are its notes, changed with schedule_update (prompt or prompt_edits), and never create a separate job that checks mail for the same purpose. " +
 		"Never invent a value the user did not give, such as a time, a buffer, a walking time, or a threshold; ask for it instead. " +
 		"A recurring job stays recurring and a one-time job stays one-time; to switch, remove it and propose a new one. " +
-		"schedule_remove deletes a job by its id from schedule_list. Make every job change the request needs in this turn, once each. Proposals of one turn are shown together and confirmed or rejected as one batch; withdraw a wrong one with proposal_withdraw, and a proposal in a later turn replaces a batch still waiting."
+		"schedule_remove deletes a job by its id from schedule_list. Make in this turn, once each, every job change that does not depend on another change's result. Proposals of one turn are shown together and confirmed or rejected as one batch; withdraw a wrong one with proposal_withdraw, and a proposal in a later turn replaces a batch still waiting."
 }
 
 func reminderGuidance(zone string) string {

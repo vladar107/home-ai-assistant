@@ -303,7 +303,7 @@ func (b *Broker) toolsFor(ctx context.Context, principalID string, readOnly bool
 			if _, exists := executor.bindings[definition.Name]; exists {
 				return agentruntime.ToolSet{}, fmt.Errorf("tool %q is contributed twice", definition.Name)
 			}
-			executor.bindings[definition.Name] = toolBinding{provider: provider, deadline: definition.Timeout, resultBytes: definition.MaxResultBytes, thirdParty: definition.ThirdParty, household: definition.Household, screen: definition.Screen, private: definition.Private, outsideBudget: definition.OutsideBudget, confirmed: definition.Confirmed, label: definition.SourceLabel}
+			executor.bindings[definition.Name] = toolBinding{provider: provider, deadline: definition.Timeout, resultBytes: definition.MaxResultBytes, thirdParty: definition.ThirdParty, household: definition.Household, screen: definition.Screen, private: definition.Private, outsideBudget: definition.OutsideBudget, confirmed: definition.Confirmed, write: definition.Risk == RiskWrite, label: definition.SourceLabel}
 			if definition.OutsideBudget && executor.handoff == "" {
 				executor.handoff = definition.Name
 			}
@@ -424,6 +424,7 @@ type toolBinding struct {
 	private       bool
 	outsideBudget bool
 	confirmed     bool
+	write         bool
 	label         SourceLabel
 }
 
@@ -464,6 +465,9 @@ func (e *turnExecutor) Execute(ctx context.Context, call agentruntime.ToolCall) 
 	// The label stays in the call log, which only the turn's record reads: it can be private, so it
 	// is kept off the span, the metrics, and the log line below.
 	e.log.record(call.ID, outcome, label)
+	if binding, bound := e.bindings[call.Name]; bound && binding.write && result.IsError && e.run != nil {
+		e.run.MarkWriteFailed()
+	}
 	if e.broker.telemetry != nil {
 		e.broker.telemetry.RecordToolCall(ctx, e.principalID, tool, outcome, time.Since(started))
 	}

@@ -175,7 +175,7 @@ func (e *Engine) runUnwatched(ctx context.Context, principalID, turn, message st
 	reply, err := unwatchedReply(english, turnCtx, result, runErr, run)
 	// A check's reply is read by code, not shown, so only a scheduled reply names the sources the
 	// user reads; one with nothing to add sends nothing, so it is left as it is.
-	if err == nil && kind == TraceScheduled && reply.ErrorKind == "" && !strings.Contains(reply.Text, prompt.NothingToAdd) {
+	if err == nil && kind == TraceScheduled && reply.ErrorKind == "" && !strings.Contains(reply.Text, prompt.NothingToAdd) && !prompt.Silent(reply.Text) {
 		reply.Text = run.Attributed(reply.Text)
 	}
 	return reply, err

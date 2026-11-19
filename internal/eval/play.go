@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
@@ -107,8 +106,7 @@ func quietAnswer(runs []RunRecord) bool {
 	if len(runs) == 0 {
 		return false
 	}
-	answer := runs[len(runs)-1].Result.Response
-	return strings.Contains(answer, prompt.NothingToAdd) && strings.TrimSpace(strings.ReplaceAll(answer, prompt.NothingToAdd, "")) == ""
+	return prompt.Silent(runs[len(runs)-1].Result.Response)
 }
 
 func cmpDuration(value, fallback time.Duration) time.Duration {

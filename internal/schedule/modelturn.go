@@ -136,9 +136,10 @@ func (m modelTurn) Run(ctx context.Context, occurrence Occurrence) (Result, erro
 		return Result{}, err
 	}
 	result := Result{Text: reply.Text, ErrorKind: reply.ErrorKind, Private: reply.Private, External: reply.External}
-	if reply.ErrorKind == "" && strings.Contains(reply.Text, prompt.NothingToAdd) {
+	if reply.ErrorKind == "" && prompt.Silent(reply.Text) {
+		result.Text, result.Quiet = "", true
+	} else if reply.ErrorKind == "" && strings.Contains(reply.Text, prompt.NothingToAdd) {
 		result.Text = strings.TrimSpace(strings.ReplaceAll(reply.Text, prompt.NothingToAdd, ""))
-		result.Quiet = result.Text == ""
 	}
 	// A blank reply is a failed run, which gets no phrase; a quiet one gets the phrase alone.
 	if headsUp && reply.ErrorKind == "" && (result.Quiet || strings.TrimSpace(result.Text) != "") {

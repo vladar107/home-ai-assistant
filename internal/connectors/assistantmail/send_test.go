@@ -157,7 +157,7 @@ func TestSendIsOfferedOnlyWithConfirmationsAndNeverInAReadOnlySet(t *testing.T) 
 		!strings.Contains(string(send.InputSchema), "at most about 2,000 characters") {
 		t.Fatalf("send definition = %+v", send)
 	}
-	for _, want := range []string{`"Assistant"`, "assistant to Alice Example", "written in that same language", "AI assistant writing for Alice Example", "never sent", "Never claim or imply being human"} {
+	for _, want := range []string{`"Assistant"`, "assistant to Alice Example", "written in that same language", "AI assistant writing for Alice Example", "never claim it was sent", "Never claim or imply being human"} {
 		if !strings.Contains(contribution.WriteGuidance, want) {
 			t.Fatalf("write guidance = %q, want %q", contribution.WriteGuidance, want)
 		}

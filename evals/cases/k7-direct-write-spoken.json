@@ -1,0 +1,41 @@
+{
+  "id": "k7-direct-write-spoken",
+  "title": "A change made at once without any card is still told to the user",
+  "tags": [
+    "quiet"
+  ],
+  "kind": "missing-answer",
+  "clock": {
+    "local": "2026-03-10T18:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam"
+  },
+  "steps": [
+    {
+      "say": "Remind me tomorrow at 9 to call the plumber.",
+      "expect": {
+        "calls": [
+          {
+            "tool": "reminder_set",
+            "min": 1,
+            "max": 1
+          }
+        ],
+        "proposals": {
+          "max": 0
+        },
+        "reply": {
+          "matches": [
+            "\\b9\\b|09:00|9:00|9 ?am"
+          ]
+        }
+      }
+    }
+  ],
+  "rubric": [
+    "Does the reply tell the user that the reminder is set, and for when?"
+  ],
+  "trials": 5
+}

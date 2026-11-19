@@ -375,6 +375,8 @@ type SafetyChecks interface {
 // such as a pending confirmation request; failures are logged, never retried with the reply.
 type FollowUp interface {
 	AfterDelivery(ctx context.Context, principalID string, chatID int64) error
+	// Staged reports whether the chat request left a card that follows its reply.
+	Staged(ctx context.Context, principalID, requestID string) (bool, error)
 }
 
 // TabReplies hears of each plain reply delivered in a tab, apart from the lane's worker, so a tab
