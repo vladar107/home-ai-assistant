@@ -167,6 +167,7 @@ var sectionOrder = []string{
 	notionSectionPrefix,
 	nasSectionPrefix,
 	googleSectionPrefix,
+	assistantMailSectionPrefix,
 	webSectionPrefix,
 	nsSectionPrefix,
 	flightsSectionPrefix,
@@ -188,7 +189,7 @@ var sectionOrder = []string{
 var settingsGroups = []settingsGroup{
 	{id: "language", title: locale.T("Language", "Язык"), inline: true, members: []string{languageSectionPrefix}},
 	{id: "model", title: locale.T("Model", "Модель"), members: []string{modelSectionPrefix}},
-	{id: "accounts", title: locale.T("Accounts", "Аккаунты"), members: []string{googleSectionPrefix, notionSectionPrefix}},
+	{id: "accounts", title: locale.T("Accounts", "Аккаунты"), members: []string{googleSectionPrefix, notionSectionPrefix, assistantMailSectionPrefix}},
 	{id: "home", title: locale.T("Home & files", "Дом и файлы"), inline: true, members: []string{homeAssistantSectionPrefix, nasSectionPrefix}},
 	{id: "tools", title: locale.T("Everyday tools", "Повседневные инструменты"), inline: true, members: []string{webSectionPrefix, nsSectionPrefix, flightsSectionPrefix, busSectionPrefix, headsUpSectionPrefix, tripsSectionPrefix, inboxSectionPrefix, parcelsSectionPrefix}},
 	{id: "services", title: locale.T("Services", "Сервисы"), inline: true, members: []string{mcpSectionPrefix}},

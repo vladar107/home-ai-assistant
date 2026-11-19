@@ -101,7 +101,7 @@ var (
 
 // SwitchPageFor is the on/off page of the named integration.
 func SwitchPageFor(integration string) (SwitchPage, bool) {
-	for _, page := range []SwitchPage{WebPage, NSPage, FlightsPage, BusPage, HomePage, GrafanaPage, TypeSafePage, WidgetPage, ParcelsPage} {
+	for _, page := range []SwitchPage{WebPage, NSPage, FlightsPage, BusPage, HomePage, GrafanaPage, TypeSafePage, WidgetPage, ParcelsPage, AssistantMailPage} {
 		if page.Integration == integration {
 			return page, true
 		}

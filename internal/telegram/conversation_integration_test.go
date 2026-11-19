@@ -696,6 +696,10 @@ func (h *conversationHarness) telegramService(identities *identity.Service, logg
 		if page.Unavailable != nil {
 			settings.Details = UnavailableDetails(page.Unavailable, found.Name)
 		}
+		if page.Address != nil {
+			deps.Sections = append(deps.Sections, NewAssistantMailSection(AssistantMailSettings{Switch: settings, Address: page.Address}, logger, nil))
+			continue
+		}
 		deps.Sections = append(deps.Sections, NewSwitchSection(settings, logger, nil))
 	}
 	if asm.ParcelLoop != nil {

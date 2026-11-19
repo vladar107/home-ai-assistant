@@ -56,7 +56,9 @@ func (a *Assembly) buildAssistantMail(ctx context.Context) error {
 		return fmt.Errorf("initialize assistant mailbox: %w", err)
 	}
 	service.SetTelemetry(in.Telemetry)
-	if err := a.register(ctx, Connector{Module: service, Tools: []tools.Provider{service}}); err != nil {
+	if err := a.register(ctx, Connector{Module: service, Tools: []tools.Provider{service}, Switch: &SwitchSettings{
+		Switch: assistantmail.Switch, Unavailable: service.Unavailable, Address: service.Address,
+	}}); err != nil {
 		return err
 	}
 	a.AssistantMail = service

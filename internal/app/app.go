@@ -525,6 +525,10 @@ func (a *App) settingsSections(asm *wiring.Assembly, location *time.Location) ([
 		if page.Unavailable != nil {
 			settings.Details = telegram.UnavailableDetails(page.Unavailable, found.Name)
 		}
+		if page.Address != nil {
+			sections = append(sections, telegram.NewAssistantMailSection(telegram.AssistantMailSettings{Switch: settings, Address: page.Address}, a.logger, a.telemetry))
+			continue
+		}
 		sections = append(sections, telegram.NewSwitchSection(settings, a.logger, a.telemetry))
 	}
 	if asm.ParcelLoop != nil {

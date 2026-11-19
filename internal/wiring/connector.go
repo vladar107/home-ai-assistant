@@ -34,6 +34,9 @@ type SwitchSettings struct {
 	// Unavailable says why the integration cannot work until the operator acts, or "" while it
 	// can; nil for an integration that never says.
 	Unavailable func() string
+	// Address is a principal's own address on a shared mailbox; the page is shown only to
+	// principals that have one. Nil for an integration without one.
+	Address func(principalID string) (string, bool)
 }
 
 // register adds a connector to every part of the application it takes part in.

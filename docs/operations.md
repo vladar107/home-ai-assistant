@@ -174,6 +174,7 @@ that user turns it on or off for themselves. Optional Compose overlays
 | Notion | `HOME_AGENT_NOTION_ENABLED=true` | per user, via `scripts/notion-set-token <principal> [home-nas deploy/.env.nas]` | Internal connection with read, update, insert; share only the wanted pages. `HOME_AGENT_NOTION_CHAT_CONNECT=true` allows pasting the token in chat (deleted before verification). Writes off until the user enables them. |
 | NAS files | `HOME_AGENT_NAS_ENABLED=true` | none | Set the mount paths in `runtime.env` and copy `deploy/nas-roots.example.json` to `deploy/nas-roots.json`. The shared folder is mounted read-only; homes and inboxes are writable, saves only add new files, and only roots marked `create_folders` get new folders. Mark every root granted to more than one user `shared`. The roots file is the access rule between users, so review it like one. |
 | Google (Gmail, Calendar) | `HOME_AGENT_GOOGLE_ENABLED=true`, `HOME_AGENT_GOOGLE_CLIENT_ID` | `scripts/keychain-set-secret home-agent.google-client-secret` | Desktop-app OAuth client in a published Google project (no logo, so no verification) with the Gmail and Calendar APIs enabled and `gmail.readonly` and `calendar.readonly` on the consent screen. Each user connects any number of accounts by pasting the failed `localhost` redirect URL into the chat, then switches Mail and Calendar per account in `/settings`. |
+| Assistant mailbox | `HOME_AGENT_ASSISTANT_MAIL_ENABLED=true`, `_ADDRESS`, `_DISPLAY_NAME`, `_CLIENT_ID`, `_TAGS`, optional `_DAILY_SEND_LIMIT` (10) and `_POLL_INTERVAL` (5m) | `scripts/keychain-set-secret home-agent.assistant-mail-client-secret` and `home-agent.assistant-mail-refresh-token` | The household's one Gmail account for the assistant, with its own Google project and Desktop-app client, and a plus-tagged address per user. Authorized once from the Mac. See Assistant mailbox setup below. |
 | Web | `HOME_AGENT_WEB_ENABLED=true`, optional `HOME_AGENT_WEATHER_HOME` | none | Search runs on the user's own subscription through the vendored `pi-web-search` extension; weather uses Open-Meteo. Locally set `HOME_AGENT_PI_WEB_SEARCH_EXTENSION=<repo>/third_party/pi-web-search/src/index.ts`. Re-check live search on every Pi upgrade. Each query is checked by the application first (see the architecture's security model); `home_agent_search_checks` counts decisions by `verdict` (`allow`, `confirm`, `deny`) and `reason`. |
 | NS trains | `HOME_AGENT_NS_ENABLED=true` | Keychain `ns.api-key` (Ns-App product at apiportal.ns.nl) | The same subscription must also include OV-fiets (the places API) for `ns_ovfiets`; without it, that tool answers that the subscription lacks OV-fiets while the other NS tools keep working. |
 | Flight status | `HOME_AGENT_FLIGHTS_ENABLED=true`, optional `HOME_AGENT_FLIGHTS_MONTHLY_UNITS` (340) and `HOME_AGENT_FLIGHTS_QUOTA_RESET_DAY` (1); locally `HOME_AGENT_FLIGHTS_API_KEY` or `HOME_AGENT_FLIGHTS_API_KEY_FILE` | `scripts/keychain-set-secret aerodatabox.api-key`, synced as Docker secret `flights-api-key` | AeroDataBox on RapidAPI's free Basic plan; see the setup below. `flight_status` answers questions, and the trips loop follows the flights of tracked trips on their day of travel. Per-user "Flight status" switch, on by default. |
@@ -316,6 +317,73 @@ follows it again. Only a user's stop keeps a number away. Check the integration'
 review the fix as you would an update, and the source recovers on its next read.
 Remove an integration by clearing its entries from `HOME_AGENT_PARCEL_SOURCES` and
 restarting.
+
+### Assistant mailbox setup
+
+The assistant has one Gmail account of its own, separate from every user's mail. Users get
+a plus-tagged address on it, such as `assistant+tag@example.com`, and the assistant reads
+and replies from it only with the user's confirmation. Use placeholders below; the real
+address and names stay in `.env` and `deploy/.env.nas`.
+
+1. **Create the account by hand.** In a phone's browser, create a Gmail account with a
+   recovery phone and two-step verification. Use it lightly as a person would for a few
+   days, before connecting anything: Google suspends new accounts that start heavy API
+   traffic at once. Set its display name to the assistant's name alone.
+2. **Create a separate Google Cloud project**, used for nothing else, so a suspension
+   cannot revoke the users' Gmail and Calendar connections, which use the Google
+   integration's client. Enable the Gmail API in it.
+3. **Set up the OAuth consent screen** as External and publish it to production, because
+   refresh tokens of a Testing project expire after seven days. Add the
+   `gmail.readonly` and `gmail.send` scopes. Do not submit it for verification:
+   `gmail.readonly` is a restricted scope, so Google's unverified-app screen and the
+   100-user cap are expected and harmless here.
+4. **Create a Desktop app OAuth client** and keep its client ID and secret. Store the
+   secret in Keychain: `scripts/keychain-set-secret home-agent.assistant-mail-client-secret`.
+5. **Authorize once, on the Mac.** With `HOME_AGENT_ASSISTANT_MAIL_ADDRESS` and
+   `HOME_AGENT_ASSISTANT_MAIL_CLIENT_ID` in the environment:
+   `HOME_AGENT_ASSISTANT_MAIL_CLIENT_SECRET="$(security find-generic-password -a home-ai-assistant -s home-agent.assistant-mail-client-secret -w)" go run ./cmd/assistant-mail-authorize`.
+   Sign in as the assistant's account, accept the unverified-app screen, and allow both
+   scopes; the command refuses a consent without the send scope. It prints the refresh
+   token once. Store it: `scripts/keychain-set-secret home-agent.assistant-mail-refresh-token`.
+6. **Configure and deploy.** In `deploy/.env.nas` (or `.env` locally) set
+   `HOME_AGENT_ASSISTANT_MAIL_ENABLED=true`, `HOME_AGENT_ASSISTANT_MAIL_ADDRESS`,
+   `HOME_AGENT_ASSISTANT_MAIL_DISPLAY_NAME`, `HOME_AGENT_ASSISTANT_MAIL_CLIENT_ID` and
+   `HOME_AGENT_ASSISTANT_MAIL_TAGS`, optionally
+   `HOME_AGENT_ASSISTANT_MAIL_DAILY_SEND_LIMIT` (messages per user per day, default 10) and
+   `HOME_AGENT_ASSISTANT_MAIL_POLL_INTERVAL` (default 5m). Then run
+   `scripts/nas-sync-secrets` and deploy; the `compose.app.assistant-mail.yaml` overlay
+   applies while the integration is enabled.
+7. **Assign tags.** `HOME_AGENT_ASSISTANT_MAIL_TAGS` is
+   `alice=tagone,oldtag;bob=tagtwo`: a principal, `=`, then lowercase letters and digits,
+   with `;` between principals. Each tag is unique across the household and should not be
+   a household name. The first tag is the user's current address, shown in `/settings` and
+   used in `Reply-To`; a tag listed after it is retired and its mail keeps routing to the
+   same user. Never drop a tag a business may still write to. A user's "Assistant mailbox"
+   page in `/settings` appears only with a tag, and each user switches their own mailbox
+   on and off.
+8. **Check the headers.** Before relying on routing, send the account one message to a
+   tagged address from another account, open it in Gmail's web interface, and use "Show
+   original": the tag must appear in `Delivered-To` or `To`. If Gmail drops it from
+   both, the tag cannot route mail and only replies to threads the assistant started reach a user.
+
+Mail that reaches the plain address, or a tag nobody has, is recorded as unrouted and given
+to no one, and a reply to a thread the assistant sent finds its user by the thread. Look for
+other unrouted mail, and for mail the poller treats as spam, in Gmail's web interface signed
+in as the assistant's account. The daily send limit refuses further sends for the day, and a
+send whose outcome is unknown is reported as possibly sent and never retried; check the
+thread in Gmail.
+
+**Authorizing again.** A password change on the account, or six months without use, makes
+Google reject the refresh token. The poller stops, the failure is counted in
+`home_agent.assistant_mail.refresh_failures{reason="rejected"}` and logged as
+`assistant_mail.refresh.rejected`, and each user's mailbox page says the operator must
+authorize it again. A token authorized for another Google account than
+`HOME_AGENT_ASSISTANT_MAIL_ADDRESS` stops the poller the same way at its first poll, counted
+with `reason="wrong_account"` and logged as `assistant_mail.account.mismatch`. Add an alert on
+any increase of either reason in the `home-monitoring` repository. Repeat step 5 with the
+right account, store the new token with
+`scripts/keychain-set-secret home-agent.assistant-mail-refresh-token`, run
+`scripts/nas-sync-secrets`, and redeploy.
 
 ### Grafana setup
 

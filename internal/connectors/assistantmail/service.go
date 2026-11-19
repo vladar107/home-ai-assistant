@@ -347,6 +347,9 @@ func (s *Service) address(principalID string) (string, bool) {
 	return local + "+" + tag + "@" + domain, true
 }
 
+// Address returns the principal's current address on the mailbox, or false without a tag.
+func (s *Service) Address(principalID string) (string, bool) { return s.address(principalID) }
+
 type noTelemetry struct{}
 
 func (noTelemetry) RecordAssistantMailPoll(context.Context, string)           {}

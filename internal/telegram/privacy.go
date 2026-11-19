@@ -18,6 +18,7 @@ var privacyOrder = []string{
 	nasSectionPrefix,
 	notionSectionPrefix,
 	googleSectionPrefix,
+	assistantMailSectionPrefix,
 	privacySchedules,
 	headsUpSectionPrefix,
 	privacyTasks,

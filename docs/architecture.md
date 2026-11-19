@@ -18,6 +18,7 @@ flowchart TB
     model["Model provider<br/>each user's own subscription"]
     notion["Notion"]
     google["Google<br/>Gmail, Calendar"]
+    mailbox["Assistant mailbox<br/>its own Gmail account"]
     ns["NS API<br/>Dutch trains"]
     aerodatabox["AeroDataBox on RapidAPI<br/>flight status"]
     ha["Home Assistant<br/>MCP server, Assist API"]
@@ -35,6 +36,7 @@ flowchart TB
     agent -->|turns, web search| model
     agent -->|read, confirmed writes| notion
     agent -->|read-only, several accounts per user| google
+    agent -->|poll, read, confirmed sends| mailbox
     agent -->|trips, departures, disruptions, OV-fiets| ns
     agent -->|flight numbers and dates, one operator key| aerodatabox
     agent -->|reads, device actions, confirmed service calls| ha
@@ -61,7 +63,7 @@ home edge on the private network.
 ```mermaid
 flowchart TB
     telegram["Telegram Bot API"]
-    ext["External APIs<br/>model provider, Notion, Google, NS, Home Assistant, OVapi, Transitous, Overpass, Open-Meteo, TypeSafe,<br/>hosted MCP servers"]
+    ext["External APIs<br/>model provider, Notion, Google, the assistant mailbox, NS, Home Assistant, OVapi, Transitous, Overpass, Open-Meteo, TypeSafe,<br/>hosted MCP servers"]
 
     subgraph nas["NAS"]
         subgraph app["home-ai-assistant Compose project"]
@@ -157,6 +159,7 @@ flowchart TB
         notion["notion"]
         google["google<br/>accounts, grants"]
         gmail["gmail"]
+        assistantmail["assistantmail<br/>the household's own mailbox"]
         calendar["calendar"]
         nasc["nas"]
         nsc["ns"]
@@ -1637,6 +1640,24 @@ out, and a restored parcel gets a new card under the baseline. Logs and traces c
 parcel IDs, carriers, and statuses, never titles, senders, pickup points, numbers, or
 postcodes. The connector logs a warning when the live context lists a discovered
 parcel entity, since exposing one to Assist would show every user's parcels to all.
+
+### The assistant's own mailbox
+
+`internal/connectors/assistantmail` is one shared household Gmail account that belongs to
+the assistant, with its own OAuth client and refresh token (scopes `gmail.readonly` and
+`gmail.send`) that no user's Google connection shares. Each principal the operator gave a
+plus tag (`HOME_AGENT_ASSISTANT_MAIL_TAGS`) has their own address on it, which they can
+give to businesses. One poller reads Gmail's history every five minutes and routes each new
+message by the tags found in `Delivered-To`, `To` and `Cc`, then by a thread the assistant
+sent for a principal; anything else is recorded as unrouted and stays in Gmail's web
+interface. Notices are deterministic, one batched plain message per principal and poll
+with the real sender, subject, date and a DMARC mark, no model call, and are marked as
+outside content for the next turn. `assistant_mail_list` and `assistant_mail_read` read a
+principal's own routed messages, and `assistant_mail_send` is always a proposal that shows
+the full message, so nothing is sent before the user confirms it. A principal's
+"Assistant mailbox" switch in `/settings` gates the notices and the tools. A refresh token
+Google rejects stops the poller and shows the mailbox as unavailable until the operator
+authorizes again.
 
 ### An MCP server
 
