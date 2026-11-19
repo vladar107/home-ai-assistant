@@ -157,10 +157,13 @@ func TestSendIsOfferedOnlyWithConfirmationsAndNeverInAReadOnlySet(t *testing.T) 
 		!strings.Contains(string(send.InputSchema), "at most about 2,000 characters") {
 		t.Fatalf("send definition = %+v", send)
 	}
-	for _, want := range []string{`"Assistant, Assistant to Alice Example"`, "AI assistant writing for Alice Example", "never sent", "Never claim or imply being human"} {
+	for _, want := range []string{`"Assistant"`, "assistant to Alice Example", "written in that same language", "AI assistant writing for Alice Example", "never sent", "Never claim or imply being human"} {
 		if !strings.Contains(contribution.WriteGuidance, want) {
 			t.Fatalf("write guidance = %q, want %q", contribution.WriteGuidance, want)
 		}
+	}
+	if strings.Contains(contribution.WriteGuidance, "Assistant to") {
+		t.Fatalf("write guidance still has a fixed English signature: %q", contribution.WriteGuidance)
 	}
 
 	broker, err := tools.NewBroker(h.cfg.Logger)
@@ -293,6 +296,9 @@ func TestAConfirmedSendIsExactlyTheProposedMessage(t *testing.T) {
 	outcome, err := h.confirm(record)
 	if err != nil || !strings.HasPrefix(outcome.Text, "Sent from the assistant mailbox (message id ") {
 		t.Fatalf("outcome = %+v %v", outcome, err)
+	}
+	if outcome.UserText != "Sent from the assistant mailbox." {
+		t.Fatalf("user text = %q, want no message id", outcome.UserText)
 	}
 	sent := h.sim.Sent()
 	if len(sent) != 1 || sent[0].Account != mailbox {

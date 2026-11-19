@@ -39,11 +39,14 @@ const (
 	bodyLimit = "at most about 2,000 characters"
 )
 
+// sendDoneModel is the outcome the model reads; only the model needs the message id.
+const sendDoneModel = "Sent from the assistant mailbox (message id %s)."
+
 const sendGuidance = "assistant_mail_send proposes an email from this user's assistant address; the user sees and confirms the exact message, so say it is proposed, never sent. " +
 	"To answer a message, pass its id as reply_to_id. " +
-	"Write to outsiders politely, concisely and businesslike, in the language they wrote in, and sign as %q. " +
+	"Write to outsiders politely, concisely and businesslike, in the language they wrote in. Sign with your own name, %q, and that you are the assistant to %s, written in that same language (for example \"Nova, assistant to Alice\"). " +
 	"Never claim or imply being human, and never invent a place, a body, calls or meetings of your own. " +
-	"Asked whether you are an AI, a bot or a real person, say plainly that you are an AI assistant writing for %s."
+	"Asked whether you are an AI, a bot or a real person, say plainly that you are an AI assistant writing for %[2]s."
 
 var sendDefinition = tools.Definition{
 	Name:        toolSend,
@@ -93,7 +96,7 @@ var (
 	matchesNeither   = locale.T("no recipient is either", "ни один получатель не совпадает ни с одним из них")
 	unusualAddress   = locale.T("an address with unusual characters", "адрес с необычными символами")
 
-	sendDone        = locale.T("Sent from the assistant mailbox (message id %s).", "Отправлено из почты ассистента (id письма %s).")
+	sendDone        = locale.T("Sent from the assistant mailbox.", "Отправлено из почты ассистента.")
 	sendUnknown     = locale.T("The email may have been sent: Gmail did not confirm it. It was not sent again; check the thread in the assistant mailbox before sending it once more.", "Письмо могло уйти: Gmail не подтвердил отправку. Повторно оно не отправлялось; проверь переписку в почте ассистента, прежде чем отправлять ещё раз.")
 	sendRefused     = locale.T("Gmail refused the email; nothing was sent.", "Gmail отклонил письмо; ничего не отправлено.")
 	sendFailed      = locale.T("The assistant mailbox could not be reached; nothing was sent.", "Почта ассистента недоступна; ничего не отправлено.")
@@ -549,7 +552,7 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 		s.logger.WarnContext(ctx, "assistant_mail.contacts.record_failed", "principal_id", record.PrincipalID, "error", err)
 	}
 	s.logger.InfoContext(ctx, "assistant_mail.sent", "principal_id", record.PrincipalID, "reply", thread != nil)
-	return approval.Outcome{Text: sendDone.FormatIn(locale.English, sent.ID), UserText: sendDone.Format(ctx, sent.ID)}, nil
+	return approval.Outcome{Text: fmt.Sprintf(sendDoneModel, sent.ID), UserText: sendDone.Format(ctx)}, nil
 }
 
 // executionFailure reports a send that failed before anything reached Gmail's send.

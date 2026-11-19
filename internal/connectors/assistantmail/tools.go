@@ -84,7 +84,7 @@ func (s *Service) Contribute(_ context.Context, principalID string) (tools.Contr
 	if s.proposer != nil {
 		name := cmp.Or(s.names[principalID], "the user")
 		contribution.Definitions = append(slices.Clip(definitions), sendDefinition)
-		contribution.WriteGuidance = fmt.Sprintf(sendGuidance, s.mailbox.DisplayName+", Assistant to "+name, name)
+		contribution.WriteGuidance = fmt.Sprintf(sendGuidance, s.mailbox.DisplayName, name)
 	}
 	return contribution, nil
 }
