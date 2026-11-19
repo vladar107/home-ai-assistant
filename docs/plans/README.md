@@ -175,6 +175,7 @@ plan that links back to the earlier record.
 | 0163 | [Heads-up: a Dutch phrase of the day](0163-heads-up-dutch-phrase.md) | done |
 | 0164 | [Deferred tool groups](0164-deferred-tool-groups.md) | in-progress |
 | 0165 | [The assistant's own mailbox](0165-assistant-mailbox.md) | in-progress |
+| 0166 | [The assistant's own identity](0166-assistant-identity.md) | in-progress |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.
