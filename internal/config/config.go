@@ -30,6 +30,7 @@ type Config struct {
 	Conversation  ConversationConfig
 	Notion        NotionConfig
 	Google        GoogleConfig
+	AssistantMail AssistantMailConfig
 	NAS           NASConfig
 	MCP           MCPConfig
 	Web           WebConfig
@@ -60,6 +61,7 @@ func Load() (Config, error) {
 		Conversation:    defaultConversationConfig(),
 		Notion:          defaultNotionConfig(),
 		Google:          defaultGoogleConfig(),
+		AssistantMail:   defaultAssistantMailConfig(),
 		NAS:             defaultNASConfig(),
 		Web:             defaultWebConfig(),
 		NS:              defaultNSConfig(),
@@ -119,6 +121,9 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if err := loadGoogleConfig(&cfg.Google); err != nil {
+		return Config{}, err
+	}
+	if err := loadAssistantMailConfig(&cfg.AssistantMail); err != nil {
 		return Config{}, err
 	}
 	if err := loadWebConfig(&cfg.Web); err != nil {
@@ -224,6 +229,12 @@ func (c Config) Validate() error {
 	if c.Google.Enabled && !c.Conversation.Enabled {
 		return fmt.Errorf("HOME_AGENT_GOOGLE_ENABLED: requires HOME_AGENT_CONVERSATION_ENABLED=true")
 	}
+	if err := c.AssistantMail.validate(); err != nil {
+		return err
+	}
+	if c.AssistantMail.Enabled && !c.Conversation.Enabled {
+		return fmt.Errorf("HOME_AGENT_ASSISTANT_MAIL_ENABLED: requires HOME_AGENT_CONVERSATION_ENABLED=true")
+	}
 	if err := c.Web.validate(); err != nil {
 		return err
 	}
@@ -253,6 +264,9 @@ func (c Config) Validate() error {
 		allowed = append(allowed, user.PrincipalID)
 	}
 	if err := c.Parcels.validate(allowed); err != nil {
+		return err
+	}
+	if err := c.AssistantMail.validateAllowlist(allowed); err != nil {
 		return err
 	}
 	if len(c.Parcels.Sources) > 0 && !c.HA.Enabled() {

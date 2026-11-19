@@ -67,6 +67,13 @@ if [[ ${HOME_AGENT_GOOGLE_ENABLED:-false} == true ]]; then
   compose_files+=(-f compose.app.google.yaml)
   compose_inputs+=(deploy/compose.app.google.yaml)
 fi
+if [[ ${HOME_AGENT_ASSISTANT_MAIL_ENABLED:-false} == true ]]; then
+  [[ ${HOME_AGENT_ASSISTANT_MAIL_CLIENT_ID:-} =~ ^[A-Za-z0-9._-]+\.apps\.googleusercontent\.com$ ]] || {
+    echo "HOME_AGENT_ASSISTANT_MAIL_CLIENT_ID must be a Google OAuth client ID" >&2; exit 2;
+  }
+  compose_files+=(-f compose.app.assistant-mail.yaml)
+  compose_inputs+=(deploy/compose.app.assistant-mail.yaml)
+fi
 if [[ ${HOME_AGENT_NS_ENABLED:-false} == true ]]; then
   compose_files+=(-f compose.app.ns.yaml)
   compose_inputs+=(deploy/compose.app.ns.yaml)

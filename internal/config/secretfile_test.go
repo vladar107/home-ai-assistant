@@ -14,6 +14,9 @@ func TestSecretFilesLoadWhateverTheirModeBits(t *testing.T) {
 		"Home Assistant token": readHATokenFile,
 		"Grafana token":        readGrafanaTokenFile,
 		"TypeSafe key":         readTypeSafeKeyFile,
+		"assistant mailbox secret": func(path string) (string, error) {
+			return readAssistantMailSecretFile("HOME_AGENT_ASSISTANT_MAIL_REFRESH_TOKEN_FILE", path)
+		},
 	}
 	for name, read := range readers {
 		t.Run(name, func(t *testing.T) {

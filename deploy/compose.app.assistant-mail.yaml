@@ -1,0 +1,26 @@
+# The assistant's own Gmail mailbox. Applied on top of compose.app.yaml only when
+# HOME_AGENT_ASSISTANT_MAIL_ENABLED is true, so a deployment without the feature needs neither
+# secret on the NAS.
+services:
+  home-agent:
+    environment:
+      HOME_AGENT_ASSISTANT_MAIL_ENABLED: "true"
+      HOME_AGENT_ASSISTANT_MAIL_ADDRESS: ${HOME_AGENT_ASSISTANT_MAIL_ADDRESS:?set HOME_AGENT_ASSISTANT_MAIL_ADDRESS}
+      HOME_AGENT_ASSISTANT_MAIL_DISPLAY_NAME: ${HOME_AGENT_ASSISTANT_MAIL_DISPLAY_NAME:?set HOME_AGENT_ASSISTANT_MAIL_DISPLAY_NAME}
+      HOME_AGENT_ASSISTANT_MAIL_CLIENT_ID: ${HOME_AGENT_ASSISTANT_MAIL_CLIENT_ID:?set HOME_AGENT_ASSISTANT_MAIL_CLIENT_ID}
+      HOME_AGENT_ASSISTANT_MAIL_TAGS: ${HOME_AGENT_ASSISTANT_MAIL_TAGS:?set HOME_AGENT_ASSISTANT_MAIL_TAGS}
+      HOME_AGENT_ASSISTANT_MAIL_DAILY_SEND_LIMIT: ${HOME_AGENT_ASSISTANT_MAIL_DAILY_SEND_LIMIT:-10}
+      HOME_AGENT_ASSISTANT_MAIL_POLL_INTERVAL: ${HOME_AGENT_ASSISTANT_MAIL_POLL_INTERVAL:-5m}
+      HOME_AGENT_ASSISTANT_MAIL_CLIENT_SECRET_FILE: /run/secrets/assistant-mail-client-secret
+      HOME_AGENT_ASSISTANT_MAIL_REFRESH_TOKEN_FILE: /run/secrets/assistant-mail-refresh-token
+    secrets:
+      - source: assistant-mail-client-secret
+        target: assistant-mail-client-secret
+      - source: assistant-mail-refresh-token
+        target: assistant-mail-refresh-token
+
+secrets:
+  assistant-mail-client-secret:
+    file: ${HOME_AGENT_SECRETS_PATH:?set HOME_AGENT_SECRETS_PATH}/assistant-mail-client-secret
+  assistant-mail-refresh-token:
+    file: ${HOME_AGENT_SECRETS_PATH:?set HOME_AGENT_SECRETS_PATH}/assistant-mail-refresh-token
