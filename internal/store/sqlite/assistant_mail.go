@@ -258,6 +258,43 @@ func (s *Store) Route(ctx context.Context, principalID, gmailID string) (assista
 	return route, true, nil
 }
 
+func (s *Store) MailSwitchState(ctx context.Context, principalID string) (assistantmail.SwitchState, bool, error) {
+	var enabled int
+	var onSince, changedAt sql.NullString
+	err := s.db.QueryRowContext(ctx,
+		`SELECT enabled, on_since, switch_changed_at FROM mail_switch_states WHERE principal_id = ?`, principalID,
+	).Scan(&enabled, &onSince, &changedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return assistantmail.SwitchState{}, false, nil
+	}
+	if err != nil {
+		return assistantmail.SwitchState{}, false, fmt.Errorf("load mail switch state: %w", err)
+	}
+	state := assistantmail.SwitchState{Enabled: enabled == 1}
+	if state.OnSince, err = parseOptionalTime(onSince); err != nil {
+		return assistantmail.SwitchState{}, false, err
+	}
+	if state.ChangedAt, err = parseOptionalTime(changedAt); err != nil {
+		return assistantmail.SwitchState{}, false, err
+	}
+	return state, true, nil
+}
+
+func (s *Store) SaveMailSwitchState(ctx context.Context, principalID string, state assistantmail.SwitchState, at time.Time) error {
+	enabled := 0
+	if state.Enabled {
+		enabled = 1
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO mail_switch_states (principal_id, enabled, on_since, switch_changed_at, observed_at) VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT (principal_id) DO UPDATE SET enabled = excluded.enabled, on_since = excluded.on_since,
+		     switch_changed_at = excluded.switch_changed_at, observed_at = excluded.observed_at`,
+		principalID, enabled, nullableTime(state.OnSince), nullableTime(state.ChangedAt), formatTime(at)); err != nil {
+		return fmt.Errorf("save mail switch state: %w", err)
+	}
+	return nil
+}
+
 // StartSend relies on the store's immediate transactions: the write lock is taken at BEGIN, so the
 // count and the insert of concurrent starts are serialized.
 func (s *Store) StartSend(ctx context.Context, principalID, sendID string, dayStart, dayEnd time.Time, limit int, at time.Time) (bool, error) {

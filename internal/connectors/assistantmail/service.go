@@ -20,6 +20,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/gmail"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/google"
 	"github.com/vladar107/home-ai-assistant/internal/integration"
+	"github.com/vladar107/home-ai-assistant/internal/locale"
 	"github.com/vladar107/home-ai-assistant/internal/module"
 )
 
@@ -39,11 +40,25 @@ var Switch = integration.Switch{Integration: Integration, Name: "Assistant mailb
 // restarts.
 var ErrUnavailable = errors.New("the assistant mailbox is unavailable")
 
-// Telemetry counts polls, messages, and failed token refreshes.
+// Telemetry counts polls, messages, failed token refreshes, and notices.
 type Telemetry interface {
 	RecordAssistantMailPoll(ctx context.Context, outcome string)
 	RecordAssistantMailMessage(ctx context.Context, result string)
 	RecordAssistantMailRefreshFailure(ctx context.Context, reason string)
+	// RecordAssistantMailNotice counts a principal's notice of new mail by outcome: sent, failed,
+	// mark_failed, no_chat, blocked, or abandoned.
+	RecordAssistantMailNotice(ctx context.Context, outcome string)
+}
+
+// Chats resolves the private chat of a principal who is still allowlisted and enabled, the only
+// place a notice goes.
+type Chats interface {
+	ResolveActiveChat(ctx context.Context, principalID string) (int64, bool, error)
+}
+
+// Sender delivers a notice as plain text, so nothing in it is read as formatting.
+type Sender interface {
+	SendPlainReply(ctx context.Context, chatID, replyToMessageID int64, text string) error
 }
 
 // TokenRefresher exchanges the mailbox's refresh token for an access token, with the mailbox's own
@@ -58,8 +73,17 @@ type Config struct {
 	Gmail      *gmail.Client
 	Tokens     TokenRefresher
 	Switches   integration.SwitchReader
+	Chats      Chats
+	Sender     Sender
 	Logger     *slog.Logger
-	// Now is the clock of the routes and the cached access token; nil means time.Now.
+	// Languages gives each principal's interface language for their notices; nil writes English.
+	Languages locale.Preferences
+	// Location is the household's time zone, the zone mail times are shown in; nil means UTC.
+	Location *time.Location
+	// Notices keeps each delivered notice for the principal's next turn; nil keeps none.
+	Notices *Notices
+	// Now is the clock of the routes, the switch states, and the cached access token; nil means
+	// time.Now.
 	Now func() time.Time
 	// Jitter returns the extra wait before each poll; nil draws up to a minute at random.
 	Jitter func() time.Duration
@@ -73,6 +97,11 @@ type Service struct {
 	gmail      *gmail.Client
 	tokens     TokenRefresher
 	switches   integration.SwitchReader
+	chats      Chats
+	sender     Sender
+	languages  locale.Preferences
+	location   *time.Location
+	notices    *Notices
 	logger     *slog.Logger
 	telemetry  Telemetry
 	now        func() time.Time
@@ -89,14 +118,19 @@ type Service struct {
 	access  string
 	expiry  time.Time
 
-	// pollMu keeps the loop and a direct Poll from running at once, and guards failures and
-	// relistAfter.
+	// pollMu keeps the loop and a direct Poll from running at once, and guards failures,
+	// relistAfter, observed, and noticeFailures.
 	pollMu sync.Mutex
 	// failures counts the polls in a row that failed on each message.
 	failures map[string]int
 	// relistAfter is the start of the last recovery's window, listed again by the next poll; zero
 	// when there is none.
 	relistAfter time.Time
+	// observed is each tagged principal's switch as the running poll found it; a principal
+	// missing from it counts as off.
+	observed map[string]SwitchState
+	// noticeFailures counts the polls in a row whose notice to each principal failed to deliver.
+	noticeFailures map[string]int
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -121,6 +155,8 @@ func NewService(cfg Config) (*Service, error) {
 		return nil, fmt.Errorf("assistant mailbox token client is required")
 	case cfg.Switches == nil:
 		return nil, fmt.Errorf("assistant mailbox switches are required")
+	case cfg.Chats == nil || cfg.Sender == nil:
+		return nil, fmt.Errorf("assistant mailbox chats and sender are required")
 	case cfg.Logger == nil:
 		return nil, fmt.Errorf("assistant mailbox logger is required")
 	}
@@ -132,11 +168,16 @@ func NewService(cfg Config) (*Service, error) {
 	if jitter == nil {
 		jitter = func() time.Duration { return rand.N(maximumJitter) }
 	}
+	location := cfg.Location
+	if location == nil {
+		location = time.UTC
+	}
 	local, domain, _ := strings.Cut(strings.ToLower(cfg.Mailbox.Address), "@")
 	return &Service{
 		mailbox: cfg.Mailbox, base: gmailBase(local, domain), repository: cfg.Repository, gmail: cfg.Gmail,
-		tokens: cfg.Tokens, switches: cfg.Switches, logger: cfg.Logger, telemetry: noTelemetry{}, now: now,
-		jitter: jitter, failures: make(map[string]int),
+		tokens: cfg.Tokens, switches: cfg.Switches, chats: cfg.Chats, sender: cfg.Sender, languages: cfg.Languages,
+		location: location, notices: cfg.Notices, logger: cfg.Logger, telemetry: noTelemetry{}, now: now,
+		jitter: jitter, failures: make(map[string]int), noticeFailures: make(map[string]int),
 	}, nil
 }
 
@@ -286,23 +327,24 @@ func (s *Service) call(ctx context.Context, request func(access string) error) e
 	return request(access)
 }
 
-// active reports whether some principal with a tag has the switch on.
-func (s *Service) active(ctx context.Context) (bool, error) {
+// principals returns the principals the operator gave a tag, in order.
+func (s *Service) principals() []string {
 	principals := make([]string, 0, len(s.mailbox.Tags))
 	for principal := range s.mailbox.Tags {
 		principals = append(principals, principal)
 	}
 	slices.Sort(principals)
-	for _, principal := range principals {
-		enabled, err := s.switches.Enabled(ctx, principal, Switch)
-		if err != nil {
-			return false, err
-		}
-		if enabled {
-			return true, nil
-		}
+	return principals
+}
+
+// address returns the principal's current address on the mailbox, or false without a tag.
+func (s *Service) address(principalID string) (string, bool) {
+	tag, found := s.mailbox.CurrentTag(principalID)
+	if !found {
+		return "", false
 	}
-	return false, nil
+	local, domain, _ := strings.Cut(s.mailbox.Address, "@")
+	return local + "+" + tag + "@" + domain, true
 }
 
 type noTelemetry struct{}
@@ -310,3 +352,4 @@ type noTelemetry struct{}
 func (noTelemetry) RecordAssistantMailPoll(context.Context, string)           {}
 func (noTelemetry) RecordAssistantMailMessage(context.Context, string)        {}
 func (noTelemetry) RecordAssistantMailRefreshFailure(context.Context, string) {}
+func (noTelemetry) RecordAssistantMailNotice(context.Context, string)         {}

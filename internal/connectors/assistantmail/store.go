@@ -26,8 +26,19 @@ type Route struct {
 	NotifiedAt time.Time
 }
 
-// Repository stores what the mailbox poller has seen, who each message belongs to, and the sends
-// counted against each principal's daily limit.
+// SwitchState is a principal's Assistant mailbox switch as the poller last saw it.
+type SwitchState struct {
+	Enabled bool
+	// OnSince is when the switch was last turned on; mail Gmail received before it is never
+	// announced.
+	OnSince time.Time
+	// ChangedAt is the switch's own change time when it was seen, zero while the principal has
+	// never chosen.
+	ChangedAt time.Time
+}
+
+// Repository stores what the mailbox poller has seen, who each message belongs to, how each
+// principal's switch was last seen, and the sends counted against each principal's daily limit.
 type Repository interface {
 	// RecordSeen stores the message id with its routes in one transaction. An id that was already
 	// seen changes nothing and reports fresh as false. A message with no routes is still recorded.
@@ -58,6 +69,11 @@ type Repository interface {
 	ListMailRoutes(ctx context.Context, principalID string, limit int) ([]Route, error)
 	// Route returns the principal's own route to the message; another principal's route is not found.
 	Route(ctx context.Context, principalID, gmailID string) (Route, bool, error)
+	MailSwitchState(ctx context.Context, principalID string) (SwitchState, bool, error)
+	SaveMailSwitchState(ctx context.Context, principalID string, state SwitchState, at time.Time) error
+	// IntegrationSwitchChangedAt returns when the principal last changed the integration's switch,
+	// or false when they never chose.
+	IntegrationSwitchChangedAt(ctx context.Context, principalID, integration string) (time.Time, bool, error)
 	// StartSend counts a send against the principal's limit for the day [dayStart, dayEnd) and
 	// reports whether it may go ahead. Starting the same sendID again is allowed and not counted twice.
 	StartSend(ctx context.Context, principalID, sendID string, dayStart, dayEnd time.Time, limit int, at time.Time) (allowed bool, err error)

@@ -22,7 +22,7 @@ func TestLongMessagesAreReadInContinuingWindows(t *testing.T) {
 		if windows > 10 {
 			t.Fatal("the message never ended")
 		}
-		text := renderMessage(message, offset)
+		text := RenderMessage(message, offset)
 		window := text[strings.Index(text, "\n\n")+2:]
 		match := continuation.FindStringSubmatch(text)
 		if match == nil {
@@ -56,7 +56,7 @@ func TestAPlainMessageIsNotReadAsItsAttachedMessage(t *testing.T) {
 	message.Payload.MimeType = "multipart/mixed"
 	message.Payload.Parts = []Part{plain.Payload, attached.Payload}
 
-	text := renderMessage(message, 0)
+	text := RenderMessage(message, 0)
 	if !strings.Contains(text, "My own words.") || strings.Contains(text, "forwarded words") {
 		t.Fatalf("message = %s", text)
 	}

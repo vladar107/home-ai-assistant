@@ -151,7 +151,7 @@ func (s *Service) Execute(ctx context.Context, principalID string, call tools.Ca
 			received = time.UnixMilli(millis)
 		}
 		tools.CallLogFrom(ctx).ReadMessage(message.Account, message.ID, received, slices.Contains(message.LabelIDs, "UNREAD"))
-		return tools.Result{Text: renderMessage(message, arguments.OffsetBytes)}, nil
+		return tools.Result{Text: RenderMessage(message, arguments.OffsetBytes)}, nil
 	default:
 		return tools.Result{Text: "unknown Gmail tool", IsError: true}, nil
 	}

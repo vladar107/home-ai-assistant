@@ -261,6 +261,10 @@ type harnessOptions struct {
 	// deps changes the Telegram service's dependencies before it is built, for a feature the
 	// application assembles outside the assembly.
 	deps func(h *conversationHarness, deps *Dependencies)
+	// assistantMail adds the assistant's own mailbox against the simulator, authorized with
+	// assistantMailToken, with alice's address tagged a1 and bob without one.
+	assistantMail      *googlesim.Simulator
+	assistantMailToken string
 }
 
 // testFile is one attachment the Telegram simulator will hand out through getFile.
@@ -618,6 +622,17 @@ func (h *conversationHarness) wiringInputs(t *testing.T, runtime agentruntime.Ag
 	}
 	if len(options.mcp) > 0 {
 		in.MCP = &mcp.Config{Servers: options.mcp, Now: now}
+	}
+	if sim := options.assistantMail; sim != nil {
+		in.AssistantMail = &wiring.AssistantMailConfig{
+			Mailbox: config.AssistantMailConfig{
+				Enabled: true, Address: assistantMailbox, DisplayName: "Assistant",
+				ClientID: googlesim.AssistantClientID, ClientSecret: googlesim.AssistantClientSecret,
+				RefreshToken: options.assistantMailToken, Tags: map[string][]string{"alice": {"a1"}},
+				DailySendLimit: 10, PollInterval: 5 * time.Minute,
+			},
+			Sender: h.client, TokenURL: sim.TokenURL(), APIBaseURL: sim.URL(), HTTPClient: sim.Client(),
+		}
 	}
 	return in
 }

@@ -79,8 +79,9 @@ func writeHeaders(builder *strings.Builder, message Message) {
 	}
 }
 
-// renderMessage prints the headers, the attachments by name, and a window of the body text.
-func renderMessage(message Message, offset int) string {
+// RenderMessage prints a message read in full: its headers, its attachments by name, and a window
+// of its text from the offset, with where to continue when it was cut.
+func RenderMessage(message Message, offset int) string {
 	var builder strings.Builder
 	writeHeaders(&builder, message)
 	var attachments []string

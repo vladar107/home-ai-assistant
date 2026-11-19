@@ -43,10 +43,11 @@ var addressParser = &mail.AddressParser{WordDecoder: &mime.WordDecoder{
 	CharsetReader: func(_ string, input io.Reader) (io.Reader, error) { return input, nil },
 }}
 
-// Poll reads what was added to the mailbox since the stored history cursor and records each new
-// message with its routes. It reads nothing while no principal with a tag has the switch on, and
-// fails with ErrUnavailable once Google rejected the refresh token. The loop calls it on every
-// tick; it is safe to call directly.
+// Poll reads what was added to the mailbox since the stored history cursor, records each new
+// message with its routes, and then tells each principal with the switch on of their new mail. It
+// reads nothing while no principal with a tag has the switch on, though it still notes the
+// switches, and fails with ErrUnavailable once Google rejected the refresh token. The loop calls
+// it on every tick; it is safe to call directly.
 func (s *Service) Poll(ctx context.Context) error {
 	s.pollMu.Lock()
 	defer s.pollMu.Unlock()
@@ -54,7 +55,7 @@ func (s *Service) Poll(ctx context.Context) error {
 		s.telemetry.RecordAssistantMailPoll(ctx, "unavailable")
 		return ErrUnavailable
 	}
-	active, err := s.active(ctx)
+	active, err := s.observeSwitches(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
 			s.telemetry.RecordAssistantMailPoll(ctx, "failed")
@@ -76,6 +77,11 @@ func (s *Service) Poll(ctx context.Context) error {
 		outcome = "failed"
 	}
 	s.telemetry.RecordAssistantMailPoll(ctx, outcome)
+	// Mail a poll recorded before it failed is still announced; once the mailbox is unavailable,
+	// nothing can be read to announce it.
+	if !errors.Is(err, ErrUnavailable) {
+		s.announce(ctx)
+	}
 	return err
 }
 
@@ -321,10 +327,16 @@ func (s *Service) process(ctx context.Context, id string) error {
 	now := s.now()
 	routes := make([]Route, 0, len(principals))
 	for _, principal := range principals {
-		routes = append(routes, Route{
+		route := Route{
 			GmailID: id, PrincipalID: principal, ThreadID: message.ThreadID, Direction: DirectionIn,
 			InternalDate: internalDate, Spam: spam, RecordedAt: now,
-		})
+		}
+		// Mail for a principal with the switch off, or from before they last turned it on, is
+		// never announced, even once the switch is on.
+		if state := s.observed[principal]; !state.Enabled || internalDate.Before(state.OnSince) {
+			route.NotifiedAt = now
+		}
+		routes = append(routes, route)
 	}
 	result := resultRouted
 	if spam {

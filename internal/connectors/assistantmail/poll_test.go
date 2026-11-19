@@ -43,7 +43,10 @@ type harness struct {
 	service  *assistantmail.Service
 	metrics  *metrics
 	logs     *syncBuffer
+	chat     *chatSender
+	notices  *assistantmail.Notices
 	address  string
+	cfg      assistantmail.Config
 }
 
 func newHarness(t *testing.T, configure ...func(*assistantmail.Config)) *harness {
@@ -88,18 +91,32 @@ func newHarnessAt(t *testing.T, address string, configure ...func(*assistantmail
 			Tags:           map[string][]string{"alice": {"a1", "a0"}, "bob": {"b1"}},
 			DailySendLimit: 10, PollInterval: 5 * time.Minute,
 		},
-		Repository: store, Gmail: client, Tokens: tokens, Switches: switches, Logger: logger,
+		Repository: store, Gmail: client, Tokens: tokens, Switches: switches, Chats: &chatDirectory{reader: store}, Sender: &chatSender{},
+		Languages: store, Location: noticeZone, Notices: assistantmail.NewNotices(), Logger: logger,
 	}
 	for _, change := range configure {
 		change(&cfg)
 	}
-	service, err := assistantmail.NewService(cfg)
+	h := &harness{t: t, ctx: ctx, sim: sim, store: store, switches: switches, gmail: client, logs: logs, address: address, cfg: cfg}
+	h.restart()
+	return h
+}
+
+// restart builds the service again over the same store, simulator, chat, and metrics, as a new
+// process would.
+func (h *harness) restart() {
+	h.t.Helper()
+	service, err := assistantmail.NewService(h.cfg)
 	if err != nil {
-		t.Fatal(err)
+		h.t.Fatal(err)
 	}
-	recorded := &metrics{polled: make(chan string, 16)}
-	service.SetTelemetry(recorded)
-	return &harness{t: t, ctx: ctx, sim: sim, store: store, switches: switches, gmail: client, service: service, metrics: recorded, logs: logs, address: address}
+	if h.metrics == nil {
+		h.metrics = &metrics{polled: make(chan string, 16)}
+	}
+	service.SetTelemetry(h.metrics)
+	h.service = service
+	h.chat, _ = h.cfg.Sender.(*chatSender)
+	h.notices = h.cfg.Notices
 }
 
 // authorize plays the operator's one-time authorization of the mailbox's own client and returns
@@ -215,10 +232,12 @@ func (h *harness) googleRequests() int {
 	return len(h.sim.Requests())
 }
 
+// headerReads counts the reads that route the message, which ask for its Delivered-To; a notice
+// reads other headers.
 func (h *harness) headerReads(gmailID string) int {
 	count := 0
 	for _, request := range h.sim.Requests() {
-		if request.Path == "/gmail/v1/users/me/messages/"+gmailID {
+		if request.Path == "/gmail/v1/users/me/messages/"+gmailID && slices.Contains(request.Query["metadataHeaders"], "Delivered-To") {
 			count++
 		}
 	}
@@ -845,10 +864,11 @@ func (s *stuckSwitches) Enabled(ctx context.Context, principalID string, sw inte
 }
 
 type metrics struct {
-	mu       sync.Mutex
-	pollsBy  map[string]int
-	results  map[string]int
-	failures map[string]int
+	mu        sync.Mutex
+	pollsBy   map[string]int
+	results   map[string]int
+	failures  map[string]int
+	noticesBy map[string]int
 	// polled hears each poll's outcome, for a test that waits on the loop.
 	polled chan string
 }
@@ -867,6 +887,16 @@ func (m *metrics) RecordAssistantMailMessage(_ context.Context, result string) {
 
 func (m *metrics) RecordAssistantMailRefreshFailure(_ context.Context, reason string) {
 	m.add(&m.failures, reason)
+}
+
+func (m *metrics) RecordAssistantMailNotice(_ context.Context, outcome string) {
+	m.add(&m.noticesBy, outcome)
+}
+
+func (m *metrics) notices(outcome string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.noticesBy[outcome]
 }
 
 func (m *metrics) add(counts *map[string]int, key string) {

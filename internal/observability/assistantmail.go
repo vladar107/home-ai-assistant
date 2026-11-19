@@ -11,6 +11,7 @@ type assistantMailInstruments struct {
 	polls           metric.Int64Counter
 	messages        metric.Int64Counter
 	refreshFailures metric.Int64Counter
+	notices         metric.Int64Counter
 }
 
 func (t *Telemetry) createAssistantMailInstruments(meter metric.Meter) error {
@@ -27,6 +28,10 @@ func (t *Telemetry) createAssistantMailInstruments(meter metric.Meter) error {
 		metric.WithDescription("Failed access token refreshes of the assistant's own mailbox, by reason (rejected, wrong_account, or failed)."), metric.WithUnit("{failure}")); err != nil {
 		return fmt.Errorf("create home_agent.assistant_mail.refresh_failures counter: %w", err)
 	}
+	if t.assistantMail.notices, err = meter.Int64Counter("home_agent.assistant_mail.notices",
+		metric.WithDescription("Notices of new mail in the assistant's own mailbox, by outcome (sent, failed, mark_failed, no_chat, blocked, or abandoned)."), metric.WithUnit("{notice}")); err != nil {
+		return fmt.Errorf("create home_agent.assistant_mail.notices counter: %w", err)
+	}
 	return nil
 }
 
@@ -36,6 +41,10 @@ func (t *Telemetry) RecordAssistantMailPoll(ctx context.Context, outcome string)
 
 func (t *Telemetry) RecordAssistantMailMessage(ctx context.Context, result string) {
 	t.assistantMail.messages.Add(ctx, 1, metric.WithAttributes(labelAttr("home_agent.result", result, "unknown")))
+}
+
+func (t *Telemetry) RecordAssistantMailNotice(ctx context.Context, outcome string) {
+	t.assistantMail.notices.Add(ctx, 1, metric.WithAttributes(labelAttr("home_agent.outcome", outcome, "unknown")))
 }
 
 func (t *Telemetry) RecordAssistantMailRefreshFailure(ctx context.Context, reason string) {

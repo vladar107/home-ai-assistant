@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/integration"
 )
@@ -29,6 +30,24 @@ func (s *Store) LoadIntegrationSwitch(ctx context.Context, principalID, name str
 		return false, false, fmt.Errorf("query integration switch: %w", err)
 	}
 	return enabled == 1, true, nil
+}
+
+func (s *Store) IntegrationSwitchChangedAt(ctx context.Context, principalID, name string) (time.Time, bool, error) {
+	var changedAt string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT changed_at FROM integration_switches WHERE principal_id = ? AND integration = ?`, principalID, name,
+	).Scan(&changedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("query integration switch change: %w", err)
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, changedAt)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("parse integration switch change: %w", err)
+	}
+	return parsed, true, nil
 }
 
 func (s *Store) SaveIntegrationSwitch(ctx context.Context, principalID, name string, enabled bool) error {

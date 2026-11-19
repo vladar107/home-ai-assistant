@@ -406,7 +406,7 @@ func (a *App) buildAssembly(ctx context.Context, client *telegram.Client, config
 		in.Bus = &bus.Config{HomeStop: cfg.Bus.HomeStop, Contact: cfg.Bus.Contact}
 	}
 	if cfg.AssistantMail.Enabled {
-		in.AssistantMail = &wiring.AssistantMailConfig{Mailbox: cfg.AssistantMail}
+		in.AssistantMail = &wiring.AssistantMailConfig{Mailbox: cfg.AssistantMail, Sender: client}
 	}
 	return wiring.Build(ctx, in)
 }

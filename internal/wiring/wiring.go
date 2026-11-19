@@ -314,6 +314,9 @@ type Assembly struct {
 	gmail        *gmail.Service
 	watchKinds   map[string]bool
 	outcomes     *toolOutcomeLog
+	// mailNotices keeps the assistant mailbox's notices for each principal's next turn; nil
+	// without the mailbox.
+	mailNotices *assistantmail.Notices
 }
 
 // Build builds every service and connector the inputs configure and connects them.
@@ -759,6 +762,12 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	// outside content. The loop that sends them is built later.
 	tripUpdateNotices := trip.NewUpdateNotices()
 	notices = append(notices, conversation.OutsideNotice{Notice: tripUpdateNotices})
+	if in.AssistantMail != nil && in.AssistantMail.Mailbox.Enabled {
+		// A mail notice shows strangers' names and subjects, so a turn told of one has read outside
+		// content. The mailbox that sends them is built with the connectors.
+		a.mailNotices = assistantmail.NewNotices()
+		notices = append(notices, conversation.OutsideNotice{Notice: a.mailNotices})
+	}
 	var reports conversation.Reports = scheduler
 	if in.Core.Tasks != nil {
 		taskConfig := *in.Core.Tasks
