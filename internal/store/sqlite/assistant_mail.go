@@ -332,3 +332,52 @@ func (s *Store) StartSend(ctx context.Context, principalID, sendID string, daySt
 	}
 	return true, nil
 }
+
+func (s *Store) RecordContacts(ctx context.Context, principalID string, addresses []string, at time.Time) error {
+	if len(addresses) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin record mail contacts: %w", err)
+	}
+	defer tx.Rollback()
+	for _, address := range addresses {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO mail_contacts (principal_id, address, first_sent_at, last_sent_at) VALUES (?, ?, ?, ?)
+			 ON CONFLICT (principal_id, address) DO UPDATE SET last_sent_at = excluded.last_sent_at`,
+			principalID, strings.ToLower(address), formatTime(at), formatTime(at)); err != nil {
+			return fmt.Errorf("insert mail contact: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit record mail contacts: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) KnownContacts(ctx context.Context, principalID string, addresses []string) ([]string, error) {
+	if len(addresses) == 0 {
+		return nil, nil
+	}
+	args := []any{principalID}
+	for _, address := range addresses {
+		args = append(args, strings.ToLower(address))
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT address FROM mail_contacts WHERE principal_id = ? AND address IN (`+
+			strings.TrimSuffix(strings.Repeat("?,", len(addresses)), ",")+`) ORDER BY address`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list mail contacts: %w", err)
+	}
+	defer rows.Close()
+	var known []string
+	for rows.Next() {
+		var address string
+		if err := rows.Scan(&address); err != nil {
+			return nil, fmt.Errorf("scan mail contact: %w", err)
+		}
+		known = append(known, address)
+	}
+	return known, rows.Err()
+}

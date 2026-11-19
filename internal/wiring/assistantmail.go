@@ -28,7 +28,8 @@ type AssistantMailConfig struct {
 }
 
 // buildAssistantMail builds the mailbox poller with the mailbox's own OAuth client, which no
-// principal's Google connection shares, and its list and read tools. Notices reach only the
+// principal's Google connection shares, its list and read tools, and its send tool, which only
+// proposes, with the executor of confirmed sends. Notices reach only the
 // principal's own chat, resolved from the allowlist at delivery.
 func (a *Assembly) buildAssistantMail(ctx context.Context) error {
 	in := a.in
@@ -47,16 +48,20 @@ func (a *Assembly) buildAssistantMail(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("initialize assistant mailbox Gmail client: %w", err)
 	}
-	service, err := assistantmail.NewService(assistantmail.Config{
+	mailConfig := assistantmail.Config{
 		Mailbox: cfg.Mailbox, Repository: in.Store, Gmail: client, Tokens: tokens, Switches: a.Switches,
 		Chats: in.Store, Sender: cfg.Sender, Languages: in.Store, Location: a.location, Notices: a.mailNotices,
-		Logger: in.Logger, Now: in.Core.Now,
-	})
+		Proposer: a.Approvals, DisplayNames: a.displayNames, Logger: in.Logger, Now: in.Core.Now,
+	}
+	if a.exposures != nil {
+		mailConfig.Exposure = a.exposures
+	}
+	service, err := assistantmail.NewService(mailConfig)
 	if err != nil {
 		return fmt.Errorf("initialize assistant mailbox: %w", err)
 	}
 	service.SetTelemetry(in.Telemetry)
-	if err := a.register(ctx, Connector{Module: service, Tools: []tools.Provider{service}, Switch: &SwitchSettings{
+	if err := a.register(ctx, Connector{Module: service, Tools: []tools.Provider{service}, Executor: service, Switch: &SwitchSettings{
 		Switch: assistantmail.Switch, Unavailable: service.Unavailable, Address: service.Address,
 	}}); err != nil {
 		return err

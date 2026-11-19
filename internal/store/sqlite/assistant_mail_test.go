@@ -331,3 +331,25 @@ func TestAssistantMailStartSendRefusesAnotherPrincipalsSendID(t *testing.T) {
 		t.Fatalf("bob = %v %v, want an error", allowed, err)
 	}
 }
+
+func TestAssistantMailContactsArePerPrincipalAndCaseInsensitive(t *testing.T) {
+	t.Parallel()
+	store, ctx := openTestStore(t)
+
+	if err := store.RecordContacts(ctx, "alice", []string{"Shop@Example.org", "help@example.net"}, mailNow); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordContacts(ctx, "alice", []string{"shop@example.org"}, mailNow.Add(time.Hour)); err != nil {
+		t.Fatalf("recording a known contact again: %v", err)
+	}
+	known, err := store.KnownContacts(ctx, "alice", []string{"SHOP@example.org", "new@example.com", "help@example.net"})
+	if err != nil || !slices.Equal(known, []string{"help@example.net", "shop@example.org"}) {
+		t.Fatalf("alice's known = %v %v", known, err)
+	}
+	if known, err := store.KnownContacts(ctx, "bob", []string{"shop@example.org"}); err != nil || len(known) != 0 {
+		t.Fatalf("bob's known = %v %v", known, err)
+	}
+	if known, err := store.KnownContacts(ctx, "alice", nil); err != nil || len(known) != 0 {
+		t.Fatalf("no addresses = %v %v", known, err)
+	}
+}

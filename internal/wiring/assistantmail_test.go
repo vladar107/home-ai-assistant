@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/config"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/assistantmail"
 	"github.com/vladar107/home-ai-assistant/internal/identity"
@@ -54,8 +55,13 @@ func TestTheAssistantMailboxIsRegisteredOnlyWhenEnabled(t *testing.T) {
 				t.Fatal(err)
 			}
 			broker.SetSwitches(switches)
+			approvals, err := approval.NewService(approval.Config{}, store, quietApprovals{}, logger)
+			if err != nil {
+				t.Fatal(err)
+			}
+			approvals.SetSwitches(switches)
 			a := &Assembly{
-				Registry: module.NewRegistry(), Switches: switches, Tools: broker,
+				Registry: module.NewRegistry(), Switches: switches, Tools: broker, Approvals: approvals,
 				in: Inputs{Store: store, Logger: logger, Telemetry: observability.Noop(), AssistantMail: mail},
 			}
 			if err := a.buildAssistantMail(t.Context()); err != nil {
@@ -73,6 +79,9 @@ func TestTheAssistantMailboxIsRegisteredOnlyWhenEnabled(t *testing.T) {
 			}
 			if a.AssistantMail == nil || len(registered) != 1 || registered[0] != assistantmail.Integration {
 				t.Fatalf("registered %v", registered)
+			}
+			if _, err := approvals.Propose(t.Context(), "alice", approval.Proposal{Tool: "assistant_mail_send", Arguments: []byte(`{}`), Summary: "send"}); err != nil {
+				t.Fatalf("the send tool has no executor: %v", err)
 			}
 			// The simulator refuses the token as invalid_grant only for the mailbox's own client.
 			if err := a.AssistantMail.Poll(t.Context()); !errors.Is(err, assistantmail.ErrUnavailable) {

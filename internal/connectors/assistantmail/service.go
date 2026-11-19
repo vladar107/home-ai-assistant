@@ -82,6 +82,13 @@ type Config struct {
 	Location *time.Location
 	// Notices keeps each delivered notice for the principal's next turn; nil keeps none.
 	Notices *Notices
+	// Proposer records sends for the user's confirmation; nil offers no send tool.
+	Proposer Proposer
+	// Exposure tells a send proposal that its conversation has read outside content; nil never
+	// marks it.
+	Exposure ExposureChecker
+	// DisplayNames are the principals' full names, which the assistant signs its mail for.
+	DisplayNames map[string]string
 	// Now is the clock of the routes, the switch states, and the cached access token; nil means
 	// time.Now.
 	Now func() time.Time
@@ -102,6 +109,9 @@ type Service struct {
 	languages  locale.Preferences
 	location   *time.Location
 	notices    *Notices
+	proposer   Proposer
+	exposure   ExposureChecker
+	names      map[string]string
 	logger     *slog.Logger
 	telemetry  Telemetry
 	now        func() time.Time
@@ -176,7 +186,7 @@ func NewService(cfg Config) (*Service, error) {
 	return &Service{
 		mailbox: cfg.Mailbox, base: gmailBase(local, domain), repository: cfg.Repository, gmail: cfg.Gmail,
 		tokens: cfg.Tokens, switches: cfg.Switches, chats: cfg.Chats, sender: cfg.Sender, languages: cfg.Languages,
-		location: location, notices: cfg.Notices, logger: cfg.Logger, telemetry: noTelemetry{}, now: now,
+		location: location, notices: cfg.Notices, proposer: cfg.Proposer, exposure: cfg.Exposure, names: cfg.DisplayNames, logger: cfg.Logger, telemetry: noTelemetry{}, now: now,
 		jitter: jitter, failures: make(map[string]int), noticeFailures: make(map[string]int),
 	}, nil
 }

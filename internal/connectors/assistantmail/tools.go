@@ -1,10 +1,12 @@
 package assistantmail
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -70,14 +72,21 @@ var (
 
 func (s *Service) Switch() integration.Switch { return Switch }
 
-// Contribute offers the list and read tools to a principal with a tag while the mailbox can be
-// read; the broker offers them only while the principal has the switch on.
+// Contribute offers the list and read tools, and the send tool when sends can be proposed, to a
+// principal with a tag while the mailbox can be read; the broker offers them only while the
+// principal has the switch on.
 func (s *Service) Contribute(_ context.Context, principalID string) (tools.Contribution, error) {
 	address, found := s.address(principalID)
 	if !found || !s.Available() {
 		return tools.Contribution{}, nil
 	}
-	return tools.Contribution{Guidance: fmt.Sprintf(guidance, address), Definitions: definitions}, nil
+	contribution := tools.Contribution{Guidance: fmt.Sprintf(guidance, address), Definitions: definitions}
+	if s.proposer != nil {
+		name := cmp.Or(s.names[principalID], "the user")
+		contribution.Definitions = append(slices.Clip(definitions), sendDefinition)
+		contribution.WriteGuidance = fmt.Sprintf(sendGuidance, s.mailbox.DisplayName+", Assistant to "+name, name)
+	}
+	return contribution, nil
 }
 
 func (s *Service) Execute(ctx context.Context, principalID string, call tools.Call) (tools.Result, error) {
@@ -112,6 +121,8 @@ func (s *Service) Execute(ctx context.Context, principalID string, call tools.Ca
 			return tools.Result{Text: "offset_bytes cannot be negative", IsError: true}, nil
 		}
 		return s.read(ctx, principalID, strings.TrimSpace(arguments.ID), arguments.OffsetBytes), nil
+	case toolSend:
+		return s.proposeSend(ctx, principalID, call.Arguments), nil
 	default:
 		return tools.Result{Text: "unknown assistant mailbox tool", IsError: true}, nil
 	}

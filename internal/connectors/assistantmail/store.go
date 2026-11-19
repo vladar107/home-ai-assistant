@@ -77,4 +77,9 @@ type Repository interface {
 	// StartSend counts a send against the principal's limit for the day [dayStart, dayEnd) and
 	// reports whether it may go ahead. Starting the same sendID again is allowed and not counted twice.
 	StartSend(ctx context.Context, principalID, sendID string, dayStart, dayEnd time.Time, limit int, at time.Time) (allowed bool, err error)
+	// RecordContacts remembers that the principal has sent mail to each address, compared without
+	// regard to case.
+	RecordContacts(ctx context.Context, principalID string, addresses []string, at time.Time) error
+	// KnownContacts returns, lowercase, those of the addresses the principal has sent mail to before.
+	KnownContacts(ctx context.Context, principalID string, addresses []string) ([]string, error)
 }

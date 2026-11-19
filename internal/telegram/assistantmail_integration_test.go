@@ -1,8 +1,13 @@
 package telegram
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
+	"io"
+	"mime/quotedprintable"
+	netmail "net/mail"
 	"net/url"
 	"slices"
 	"strings"
@@ -153,3 +158,84 @@ func TestAssistantMailToolsFollowTheTagAndTheSwitch(t *testing.T) {
 }
 
 func isAssistantMailTool(name string) bool { return strings.HasPrefix(name, "assistant_mail_") }
+
+// A reply drafted after reading a stranger's mail is shown whole with its marks, sent exactly as
+// shown once confirmed, and a rejected one sends nothing.
+func TestAssistantMailSendIsSentOnlyAsConfirmed(t *testing.T) {
+	t.Parallel()
+	h, runtime, sim := newAssistantMailHarness(t)
+	inbound := sim.DeliverTo("assistant+a1@example.com", googlesim.Message{
+		From: "Shop <orders@shop.example.org>", Subject: "Your order", PlainText: "Is this an automated message?", Received: time.Now().Add(time.Minute),
+	})
+	h.pollAssistantMail()
+	h.nextMessage()
+
+	h.push(textUpdate(1, 101, "answer the shop"))
+	call := receive(t, h.ctx, runtime.calls)
+	if !slices.Contains(toolNames(call.request.Tools), "assistant_mail_send") || !strings.Contains(call.request.Tools.Guidance, "say plainly that you are an AI assistant") {
+		t.Fatalf("tools = %v, guidance %q", toolNames(call.request.Tools), call.request.Tools.Guidance)
+	}
+	if read := executeTool(t, call.ctx, call.request.Tools, "assistant_mail_read", `{"id":"`+inbound+`"}`); read.IsError {
+		t.Fatalf("read = %+v", read)
+	}
+	body := "Hello,\n\nYes: I am an AI assistant writing for the user, who confirms every email. **Not bold** & <b>not markup</b>.\n\nAssistant, Assistant to the user"
+	arguments, err := json.Marshal(map[string]any{"to": []string{"orders@shop.example.org"}, "subject": "Re: Your order", "body": body, "reply_to_id": inbound})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := executeTool(t, call.ctx, call.request.Tools, "assistant_mail_send", string(arguments)); result.IsError || !strings.Contains(result.Text, "awaiting the user's confirmation") {
+		t.Fatalf("send = %+v", result)
+	}
+	if sent := sim.Sent(); len(sent) != 0 {
+		t.Fatalf("a proposal sent %d messages", len(sent))
+	}
+	h.finishTurn(call, 1, "I drafted a reply.")
+	proposal := h.nextMessage()
+	escaped := "From: Assistant &lt;assistant@example.com&gt;\nReply-To: assistant+a1@example.com\nTo: orders@shop.example.org\nSubject: Re: Your order\n\n" +
+		"Hello,\n\nYes: I am an AI assistant writing for the user, who confirms every email. **Not bold** &amp; &lt;b&gt;not markup&lt;/b&gt;.\n\nAssistant, Assistant to the user"
+	for _, want := range []string{"Assistant mailbox · reply", "⚠️ This conversation has read outside content", "<pre><code>" + escaped + "</code></pre>"} {
+		if !strings.Contains(proposal.text, want) {
+			t.Fatalf("proposal = %q\nwant %q", proposal.text, want)
+		}
+	}
+	confirm, _ := approvalButtons(t, proposal.keyboard)
+	h.push(callbackUpdate(2, 101, proposal.messageID, confirm))
+	h.wantAnswer(2)
+	if edit := h.nextEdit(); !strings.Contains(edit.text, "Sent from the assistant mailbox") {
+		t.Fatalf("outcome = %+v", edit)
+	}
+	h.continueTurn(runtime, 2)
+	sent := sim.Sent()
+	if len(sent) != 1 {
+		t.Fatalf("sent %d messages", len(sent))
+	}
+	message, err := netmail.ReadMessage(bytes.NewReader(sent[0].Raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := io.ReadAll(quotedprintable.NewReader(message.Body))
+	if err != nil || strings.ReplaceAll(string(decoded), "\r\n", "\n") != body || message.Header.Get("Subject") != "Re: Your order" ||
+		message.Header.Get("To") != "orders@shop.example.org" || message.Header.Get("Reply-To") != "assistant+a1@example.com" ||
+		message.Header.Get("In-Reply-To") != "<"+inbound+"@googlesim.example>" {
+		t.Fatalf("sent %v\n%q %v", message.Header, decoded, err)
+	}
+
+	// A rejected proposal sends nothing.
+	h.push(textUpdate(3, 101, "write to the shop again"))
+	call = receive(t, h.ctx, runtime.calls)
+	if result := executeTool(t, call.ctx, call.request.Tools, "assistant_mail_send", `{"to":["orders@shop.example.org"],"subject":"Another","body":"Hello again."}`); result.IsError {
+		t.Fatalf("send = %+v", result)
+	}
+	h.finishTurn(call, 3, "Drafted.")
+	proposal = h.nextMessage()
+	_, reject := approvalButtons(t, proposal.keyboard)
+	h.push(callbackUpdate(4, 101, proposal.messageID, reject))
+	h.wantAnswer(4)
+	h.nextEdit()
+	if sent := sim.Sent(); len(sent) != 1 {
+		t.Fatalf("a rejected proposal sent: %d messages", len(sent))
+	}
+	if logs := h.logs.String(); strings.Contains(logs, "shop.example.org") || strings.Contains(logs, "Your order") || strings.Contains(logs, "AI assistant writing") {
+		t.Fatalf("logs carry mail content: %s", logs)
+	}
+}
