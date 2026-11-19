@@ -444,6 +444,36 @@ func TestRunJobRunsThePromptAndNothingRunsOnItsOwn(t *testing.T) {
 	}
 }
 
+// A triage_mail step delivers the section's mail once and lets the mailbox triage it with the mail
+// tools alone; the fixture's echo is no triage answer, so the notice lists the mail as it arrived.
+func TestTriageMailDeliversTheMailOnceAndTheNoticeIsTheReply(t *testing.T) {
+	w := newTestWorld(t, worldConfig{user: User{Name: "Sam"}, sections: map[string]any{
+		SectionAssistantMail: assistantMailSection{Messages: []assistantMailMessage{
+			{From: "Venue Desk <desk@venue.example>", Subject: "Choose a room", Body: "Which room do you want?"},
+		}},
+	}})
+
+	record := w.play(Step{TriageMail: true})
+	if record.Quiet || !strings.HasPrefix(record.Reply, "📬 1 new email at your assistant address:\n• Venue Desk (desk@venue.example) · Choose a room · ") {
+		t.Fatalf("triage = %+v", record)
+	}
+	if len(record.Runs) != 1 || !strings.Contains(record.Message, "This is a check of new mail in one thread") {
+		t.Fatalf("runs = %d, message %q", len(record.Runs), record.Message)
+	}
+	var offered []string
+	for _, definition := range record.Runs[0].Request.Tools.Definitions {
+		offered = append(offered, definition.Name)
+	}
+	if !slices.Equal(offered, []string{"assistant_mail_list", "assistant_mail_read"}) {
+		t.Fatalf("triage tools = %v", offered)
+	}
+
+	again := w.play(Step{TriageMail: true})
+	if !again.Quiet || again.Reply != "" || len(again.Runs) != 0 {
+		t.Fatalf("second triage = %+v", again)
+	}
+}
+
 func TestThumbsDownStartsAReconsiderTurn(t *testing.T) {
 	w := newTestWorld(t, worldConfig{})
 	w.play(Step{Say: "what is two plus two"})

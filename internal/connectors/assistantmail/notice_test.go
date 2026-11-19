@@ -1,6 +1,7 @@
 package assistantmail_test
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -98,10 +99,13 @@ func (c *chatSender) take() []sentNotice {
 	return sent
 }
 
-// expectNotices expects exactly the notices, one per chat, in order.
+// expectNotices expects exactly the notices, one per chat, in the order of their chats: each
+// principal's triage runs on its own.
 func (h *harness) expectNotices(want ...sentNotice) {
 	h.t.Helper()
-	if got := h.chat.take(); !slices.Equal(got, want) {
+	got := h.chat.take()
+	slices.SortStableFunc(got, func(a, b sentNotice) int { return cmp.Compare(a.chatID, b.chatID) })
+	if !slices.Equal(got, want) {
 		h.t.Fatalf("notices = %+v\nwant %+v", got, want)
 	}
 }
@@ -185,7 +189,7 @@ func TestANoticeShowsTheRealSenderAndMarksFailingDMARC(t *testing.T) {
 	h.expectQuietLogs()
 }
 
-func TestSpamIsOnlyCountedAndALongBatchSaysHowManyMore(t *testing.T) {
+func TestSpamIsSettledUnseenAndALongBatchSaysHowManyMore(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	h.start()
@@ -213,7 +217,7 @@ func TestSpamIsOnlyCountedAndALongBatchSaysHowManyMore(t *testing.T) {
 		want = append(want, fmt.Sprintf("• Shop (orders@shop.example.org) · Order %02d · %s", index,
 			locale.Date(locale.English, base.Add(time.Duration(index)*time.Second).In(noticeZone), locale.DayTime)))
 	}
-	want = append(want, "…and 2 more.", "", "📬 2 new emails to your assistant address went to spam.", "", "Ask me to read any of them.")
+	want = append(want, "…and 2 more.", "", "Ask me to read any of them.")
 	if !slices.Equal(lines, want) {
 		t.Fatalf("notice =\n%s\nwant\n%s", sent[0].text, strings.Join(want, "\n"))
 	}
@@ -228,7 +232,10 @@ func TestSpamIsOnlyCountedAndALongBatchSaysHowManyMore(t *testing.T) {
 
 	h.deliver("assistant+a1@example.com", googlesim.Message{Subject: "Secret spam subject", Labels: []string{"SPAM"}})
 	h.poll()
-	h.expectNotices(sentNotice{chatID: 101, text: "📬 1 new email to your assistant address went to spam."})
+	h.expectNotices()
+	if pending := h.pending("alice"); pending != 0 {
+		t.Fatalf("pending spam = %d", pending)
+	}
 }
 
 func TestAFailedNoticeIsSentByTheNextPollOnceAndGoneMailIsDropped(t *testing.T) {

@@ -246,6 +246,12 @@ func (s *Store) ListMailRoutes(ctx context.Context, principalID string, limit in
 		 ORDER BY internal_date DESC, gmail_id DESC LIMIT ?`, principalID, limit)
 }
 
+func (s *Store) ListThreadRoutes(ctx context.Context, principalID, threadID string, limit int) ([]assistantmail.Route, error) {
+	return s.queryMailRoutes(ctx,
+		`SELECT `+mailRouteColumns+` FROM mail_routes WHERE principal_id = ? AND thread_id = ?
+		 ORDER BY internal_date DESC, gmail_id DESC LIMIT ?`, principalID, threadID, limit)
+}
+
 func (s *Store) Route(ctx context.Context, principalID, gmailID string) (assistantmail.Route, bool, error) {
 	route, err := scanMailRoute(s.db.QueryRowContext(ctx,
 		`SELECT `+mailRouteColumns+` FROM mail_routes WHERE principal_id = ? AND gmail_id = ?`, principalID, gmailID))

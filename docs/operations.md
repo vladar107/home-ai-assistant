@@ -174,7 +174,7 @@ that user turns it on or off for themselves. Optional Compose overlays
 | Notion | `HOME_AGENT_NOTION_ENABLED=true` | per user, via `scripts/notion-set-token <principal> [home-nas deploy/.env.nas]` | Internal connection with read, update, insert; share only the wanted pages. `HOME_AGENT_NOTION_CHAT_CONNECT=true` allows pasting the token in chat (deleted before verification). Writes off until the user enables them. |
 | NAS files | `HOME_AGENT_NAS_ENABLED=true` | none | Set the mount paths in `runtime.env` and copy `deploy/nas-roots.example.json` to `deploy/nas-roots.json`. The shared folder is mounted read-only; homes and inboxes are writable, saves only add new files, and only roots marked `create_folders` get new folders. Mark every root granted to more than one user `shared`. The roots file is the access rule between users, so review it like one. |
 | Google (Gmail, Calendar) | `HOME_AGENT_GOOGLE_ENABLED=true`, `HOME_AGENT_GOOGLE_CLIENT_ID` | `scripts/keychain-set-secret home-agent.google-client-secret` | Desktop-app OAuth client in a published Google project (no logo, so no verification) with the Gmail and Calendar APIs enabled and `gmail.readonly` and `calendar.readonly` on the consent screen. Each user connects any number of accounts by pasting the failed `localhost` redirect URL into the chat, then switches Mail and Calendar per account in `/settings`. |
-| Assistant mailbox | `HOME_AGENT_ASSISTANT_MAIL_ENABLED=true`, `_ADDRESS`, `_DISPLAY_NAME`, `_CLIENT_ID`, `_TAGS`, optional `_DAILY_SEND_LIMIT` (10) and `_POLL_INTERVAL` (5m) | `scripts/keychain-set-secret home-agent.assistant-mail-client-secret` and `home-agent.assistant-mail-refresh-token` | The household's one Gmail account for the assistant, with its own Google project and Desktop-app client, and a plus-tagged address per user. Authorized once from the Mac. See Assistant mailbox setup below. |
+| Assistant mailbox | `HOME_AGENT_ASSISTANT_MAIL_ENABLED=true`, `_ADDRESS`, `_DISPLAY_NAME`, `_CLIENT_ID`, `_TAGS`, optional `_DAILY_SEND_LIMIT` (10) and `_POLL_INTERVAL` (5m) | `scripts/keychain-set-secret home-agent.assistant-mail-client-secret` and `home-agent.assistant-mail-refresh-token` | The household's one Gmail account for the assistant, with its own Google project and Desktop-app client, and a plus-tagged address per user. Authorized once from the Mac. New mail is triaged with one model run per thread on the user's subscription. See Assistant mailbox setup below. |
 | Web | `HOME_AGENT_WEB_ENABLED=true`, optional `HOME_AGENT_WEATHER_HOME` | none | Search runs on the user's own subscription through the vendored `pi-web-search` extension; weather uses Open-Meteo. Locally set `HOME_AGENT_PI_WEB_SEARCH_EXTENSION=<repo>/third_party/pi-web-search/src/index.ts`. Re-check live search on every Pi upgrade. Each query is checked by the application first (see the architecture's security model); `home_agent_search_checks` counts decisions by `verdict` (`allow`, `confirm`, `deny`) and `reason`. |
 | NS trains | `HOME_AGENT_NS_ENABLED=true` | Keychain `ns.api-key` (Ns-App product at apiportal.ns.nl) | The same subscription must also include OV-fiets (the places API) for `ns_ovfiets`; without it, that tool answers that the subscription lacks OV-fiets while the other NS tools keep working. |
 | Flight status | `HOME_AGENT_FLIGHTS_ENABLED=true`, optional `HOME_AGENT_FLIGHTS_MONTHLY_UNITS` (340) and `HOME_AGENT_FLIGHTS_QUOTA_RESET_DAY` (1); locally `HOME_AGENT_FLIGHTS_API_KEY` or `HOME_AGENT_FLIGHTS_API_KEY_FILE` | `scripts/keychain-set-secret aerodatabox.api-key`, synced as Docker secret `flights-api-key` | AeroDataBox on RapidAPI's free Basic plan; see the setup below. `flight_status` answers questions, and the trips loop follows the flights of tracked trips on their day of travel. Per-user "Flight status" switch, on by default. |
@@ -369,9 +369,33 @@ address and names stay in `.env` and `deploy/.env.nas`.
 Mail that reaches the plain address, or a tag nobody has, is recorded as unrouted and given
 to no one, and a reply to a thread the assistant sent finds its user by the thread. Look for
 other unrouted mail, and for mail the poller treats as spam, in Gmail's web interface signed
-in as the assistant's account. The daily send limit refuses further sends for the day, and a
-send whose outcome is unknown is reported as possibly sent and never retried; check the
-thread in Gmail.
+in as the assistant's account; spam is never triaged or mentioned in a notice. The daily
+send limit refuses further sends for the day, and a send whose outcome is unknown is
+reported as possibly sent and never retried; check the thread in Gmail.
+
+**Triage.** The assistant tells a user only about mail that needs their decision or
+action. After each poll it runs the model once per thread with new mail, on that user's own
+model subscription, with tools that can read only that thread; a user's threads go one
+after another, at most ten per poll, and polling never waits for them. Expect a notice
+within about five minutes of a message that needs the user, or up to about ten when it
+arrives while a triage is still running. Each thread with new mail costs one model run, so
+a busy address costs more of the user's subscription; at most 30 runs per user in any 24
+hours, after which new mail is listed untriaged. Spam never reaches the model. A message from
+a sender Gmail could not verify (DMARC failed) is always listed, marked unverified. When a
+run fails, answers something other than its JSON, or never read a message (a failed read, or
+more new messages than its tool calls), those messages are listed in the full notice with
+sender, subject, and date, so no mail is silently dropped. A reason carrying a link or a
+domain is replaced by a generic one. A notice that cannot be delivered is retried at the
+next polls without running the model again, and given up after three; so is a message
+whose headers keep failing to load. A restart forgets what triage decided for a notice not
+yet delivered, so that mail may be triaged once more. Mail of a user who switches the
+mailbox off while it is triaged is settled without a notice.
+`home_agent.assistant_mail.triage_runs` counts threads by outcome (`silent`, `notified`,
+`fallback` for an unreadable answer, `failed` for a run that failed, `capped` past the
+daily limit), beside `home_agent.assistant_mail.notices` (which adds `switched_off`). A rising `failed` usually means the user's model
+connection needs attention (the warning `assistant_mail.triage.failed` names the error
+kind); a rising `fallback`, logged as `assistant_mail.triage.unreadable`, means the model
+stopped following the JSON shape.
 
 **Authorizing again.** A password change on the account, or six months without use, makes
 Google reject the refresh token. The poller stops, the failure is counted in

@@ -1,0 +1,38 @@
+{
+  "id": "am1-own-test-mail-stays-silent",
+  "title": "Triage stays silent about a test mail the user sent to their own assistant address",
+  "tags": [
+    "regression",
+    "mail"
+  ],
+  "kind": "noisy-notice",
+  "clock": {
+    "local": "2026-03-12T10:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam Lee"
+  },
+  "world": {
+    "assistant_mail": {
+      "messages": [
+        {
+          "from": "Sam Lee <sam@example.test>",
+          "subject": "test",
+          "body": "Testing my new assistant address."
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "triage_mail": true,
+      "expect": {
+        "reply": {
+          "quiet": true
+        }
+      }
+    }
+  ],
+  "trials": 5
+}

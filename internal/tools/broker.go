@@ -268,7 +268,9 @@ func (b *Broker) toolsFor(ctx context.Context, principalID string, readOnly bool
 	if log == nil {
 		log = &CallLog{}
 	}
-	executor := &turnExecutor{broker: b, principalID: principalID, turn: TurnFrom(ctx), run: RunFrom(ctx), log: log, budget: callBudgetFrom(ctx), bindings: make(map[string]toolBinding)}
+	scope := scopeFrom(ctx)
+	ctx = scope.bind(ctx)
+	executor := &turnExecutor{broker: b, principalID: principalID, turn: TurnFrom(ctx), run: RunFrom(ctx), log: log, budget: callBudgetFrom(ctx), scope: scope, bindings: make(map[string]toolBinding)}
 	var guidance []string
 	var definitions []agentruntime.ToolDefinition
 	activities := make(map[string]string)
@@ -293,7 +295,7 @@ func (b *Broker) toolsFor(ctx context.Context, principalID string, readOnly bool
 			if err := validateDefinition(definition); err != nil {
 				return agentruntime.ToolSet{}, err
 			}
-			if readOnly && definition.Risk != RiskRead {
+			if (readOnly && definition.Risk != RiskRead) || !scope.offers(definition.Name) {
 				continue
 			}
 			offered++
@@ -439,6 +441,8 @@ type turnExecutor struct {
 	log         *CallLog
 	bindings    map[string]toolBinding
 	budget      int32
+	// scope, when set, is what the tools were confined to; its binding goes into every call.
+	scope *Scope
 	// handoff names a tool outside the budget that the exhausted-budget result points to.
 	handoff string
 	// calls counts the calls charged to the budget; attempts counts every budgeted call, failed
@@ -450,6 +454,8 @@ type turnExecutor struct {
 var _ agentruntime.ToolExecutor = (*turnExecutor)(nil)
 
 func (e *turnExecutor) Execute(ctx context.Context, call agentruntime.ToolCall) (agentruntime.ToolResult, error) {
+	// The runtime calls back on a context of its own, which never carries the run's.
+	ctx = e.scope.bind(ctx)
 	started := time.Now()
 	tool := "unknown"
 	if _, bound := e.bindings[call.Name]; bound {

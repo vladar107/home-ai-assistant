@@ -10,6 +10,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/gmail"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/google"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
+	"github.com/vladar107/home-ai-assistant/internal/turn"
 )
 
 // assistantMailRedirect satisfies the OAuth client's loopback check; refreshing a token, the only
@@ -27,10 +28,20 @@ type AssistantMailConfig struct {
 	HTTPClient *http.Client
 }
 
+// mailTriageChecker runs the mailbox's triage on the turn engine.
+type mailTriageChecker struct {
+	engine *turn.Engine
+}
+
+func (c mailTriageChecker) RunConfined(ctx context.Context, principalID, message string, scope tools.Scope) (string, string, error) {
+	reply, err := c.engine.RunConfined(ctx, principalID, message, scope)
+	return reply.Text, reply.ErrorKind, err
+}
+
 // buildAssistantMail builds the mailbox poller with the mailbox's own OAuth client, which no
 // principal's Google connection shares, its list and read tools, and its send tool, which only
-// proposes, with the executor of confirmed sends. Notices reach only the
-// principal's own chat, resolved from the allowlist at delivery.
+// proposes, with the executor of confirmed sends. Notices of the mail that triage finds needs the
+// user reach only the principal's own chat, resolved from the allowlist at delivery.
 func (a *Assembly) buildAssistantMail(ctx context.Context) error {
 	in := a.in
 	if in.AssistantMail == nil || !in.AssistantMail.Mailbox.Enabled {
@@ -55,6 +66,11 @@ func (a *Assembly) buildAssistantMail(ctx context.Context) error {
 	}
 	if a.exposures != nil {
 		mailConfig.Exposure = a.exposures
+	}
+	// Triage reads each thread's new mail on the principal's own subscription, confined to that
+	// thread; without the engine, every new message is listed untriaged.
+	if a.Turns != nil {
+		mailConfig.Checker = mailTriageChecker{engine: a.Turns}
 	}
 	service, err := assistantmail.NewService(mailConfig)
 	if err != nil {

@@ -44,7 +44,8 @@ var addressParser = &mail.AddressParser{WordDecoder: &mime.WordDecoder{
 }}
 
 // Poll reads what was added to the mailbox since the stored history cursor, records each new
-// message with its routes, and then tells each principal with the switch on of their new mail. It
+// message with its routes, and then starts, off its own goroutine, the triage that tells each
+// principal with the switch on of the new mail that needs them. It
 // reads nothing while no principal with a tag has the switch on, though it still notes the
 // switches, and fails with ErrUnavailable once Google rejected the refresh token. The loop calls
 // it on every tick; it is safe to call directly.
@@ -77,10 +78,10 @@ func (s *Service) Poll(ctx context.Context) error {
 		outcome = "failed"
 	}
 	s.telemetry.RecordAssistantMailPoll(ctx, outcome)
-	// Mail a poll recorded before it failed is still announced; once the mailbox is unavailable,
-	// nothing can be read to announce it.
+	// Mail a poll recorded before it failed is still triaged; once the mailbox is unavailable,
+	// nothing can be read to triage it.
 	if !errors.Is(err, ErrUnavailable) {
-		s.announce(ctx)
+		s.startTriage(ctx)
 	}
 	return err
 }

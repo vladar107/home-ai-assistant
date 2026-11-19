@@ -74,18 +74,38 @@ func (h *conversationHarness) pollAssistantMail() {
 	}
 }
 
-// A notice reaches only its principal's chat as plain text, and the next turn hears of it as
-// outside content.
+// triageAssistantMail answers the triage run a poll started for the message's thread, listing the
+// message as needing the user, and returns the run.
+func (h *conversationHarness) triageAssistantMail(runtime *controlledRuntime, id, why string) runtimeCall {
+	h.t.Helper()
+	call := receive(h.t, h.ctx, runtime.calls)
+	if !strings.Contains(call.request.Message, "This is a check of new mail in one thread") || !strings.Contains(call.request.Message, id) {
+		h.t.Fatalf("not the message's triage: %q", call.request.Message)
+	}
+	if read := executeTool(h.t, call.ctx, call.request.Tools, "assistant_mail_read", `{"id":"`+id+`"}`); read.IsError {
+		h.t.Fatalf("triage read = %+v", read)
+	}
+	call.answer <- agentruntime.RunResult{Final: `{"needs_you":[{"id":"` + id + `","why":"` + why + `"}]}`}
+	return call
+}
+
+// A triage run reads only its thread's mail; its notice reaches only its principal's chat as plain
+// text, and the next turn hears of it as outside content.
 func TestAssistantMailNoticesReachTheChatAsOutsideContent(t *testing.T) {
 	t.Parallel()
 	h, runtime, sim := newAssistantMailHarness(t)
-	sim.DeliverTo("assistant+a1@example.com", googlesim.Message{
+	id := sim.DeliverTo("assistant+a1@example.com", googlesim.Message{
 		From: `"Shop *Deals*" <orders@shop.example.org>`, Subject: "Your <b>order</b>", Received: time.Now().Add(time.Minute),
 	})
 	h.pollAssistantMail()
+	triage := h.triageAssistantMail(runtime, id, "Confirm the <b>order</b>.")
+	if names := toolNames(triage.request.Tools); !slices.Equal(names, []string{"assistant_mail_list", "assistant_mail_read"}) ||
+		triage.request.WebSearch || triage.request.Memory != "" {
+		t.Fatalf("triage run = tools %v, web search %v, memory %q", names, triage.request.WebSearch, triage.request.Memory)
+	}
 	notice := h.nextMessage()
 	if notice.chatID != 101 || notice.parseMode != "" || notice.replyTo != 0 ||
-		!strings.HasPrefix(notice.text, "📬 1 new email at your assistant address:\n• Shop Deals (orders@shop.example.org) · Your order · ") {
+		notice.text != "📬 1 email at your assistant address needs you:\n• Shop Deals (orders@shop.example.org) · Your order\n  Confirm the order.\n\nAsk me to read any of them." {
 		t.Fatalf("notice = %+v", notice)
 	}
 
@@ -110,6 +130,7 @@ func TestAssistantMailToolsFollowTheTagAndTheSwitch(t *testing.T) {
 	h, runtime, sim := newAssistantMailHarness(t)
 	id := sim.DeliverTo("assistant+a1@example.com", googlesim.Message{Subject: "Your order", PlainText: "Ships tomorrow.", Received: time.Now().Add(time.Minute)})
 	h.pollAssistantMail()
+	h.triageAssistantMail(runtime, id, "Check the order.")
 	h.nextMessage()
 
 	// The first turn hears of the notice; a new conversation starts clean.
@@ -168,6 +189,7 @@ func TestAssistantMailSendIsSentOnlyAsConfirmed(t *testing.T) {
 		From: "Shop <orders@shop.example.org>", Subject: "Your order", PlainText: "Is this an automated message?", Received: time.Now().Add(time.Minute),
 	})
 	h.pollAssistantMail()
+	h.triageAssistantMail(runtime, inbound, "Answer the shop's question.")
 	h.nextMessage()
 
 	h.push(textUpdate(1, 101, "answer the shop"))

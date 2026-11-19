@@ -67,6 +67,9 @@ type Repository interface {
 	MarkNotifiedBefore(ctx context.Context, principalID string, before time.Time, at time.Time) error
 	// ListMailRoutes returns the principal's own routes in both directions, newest first.
 	ListMailRoutes(ctx context.Context, principalID string, limit int) ([]Route, error)
+	// ListThreadRoutes returns the principal's own routes in one thread, in both directions, newest
+	// first.
+	ListThreadRoutes(ctx context.Context, principalID, threadID string, limit int) ([]Route, error)
 	// Route returns the principal's own route to the message; another principal's route is not found.
 	Route(ctx context.Context, principalID, gmailID string) (Route, bool, error)
 	MailSwitchState(ctx context.Context, principalID string) (SwitchState, bool, error)

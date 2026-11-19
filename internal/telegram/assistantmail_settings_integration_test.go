@@ -40,7 +40,7 @@ func TestAssistantMailboxSettings(t *testing.T) {
 	}
 
 	h.push(textUpdate(5, 101, "/privacy"))
-	if privacy := h.nextMessage().text; !strings.Contains(privacy, "the sender and subject of mail I tell you about go to your model with your next message; a message's text goes to your model only when you ask me to read it, and nothing is sent without your confirmation") {
+	if privacy := h.nextMessage().text; !strings.Contains(privacy, "each new message at your address goes to your model, which decides whether it needs you; the sender and subject of mail I tell you about go to your model with your next message, and nothing is sent without your confirmation") {
 		t.Fatalf("/privacy = %q", privacy)
 	}
 
@@ -83,7 +83,7 @@ func TestAssistantMailboxSettingsReadInRussian(t *testing.T) {
 		t.Fatalf("page = %q", page.text)
 	}
 	h.push(textUpdate(3, 101, "/privacy"))
-	if privacy := h.nextMessage().text; !strings.Contains(privacy, "текст письма уходит твоей модели, только когда ты просишь его прочитать, и ничего не отправляется без твоего подтверждения") {
+	if privacy := h.nextMessage().text; !strings.Contains(privacy, "каждое новое письмо на твой адрес уходит твоей модели, которая решает, требует ли оно твоего внимания") {
 		t.Fatalf("/privacy = %q", privacy)
 	}
 }

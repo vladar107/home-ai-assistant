@@ -145,10 +145,14 @@ func authorize(t *testing.T, sim *googlesim.Simulator, tokens *google.Client, ac
 	return granted.Refresh
 }
 
+// poll polls once and waits for the triage it started.
 func (h *harness) poll() {
 	h.t.Helper()
 	if err := h.service.Poll(h.ctx); err != nil {
 		h.t.Fatalf("poll: %v", err)
+	}
+	if err := h.service.WaitTriage(h.ctx); err != nil {
+		h.t.Fatal(err)
 	}
 }
 
@@ -869,6 +873,7 @@ type metrics struct {
 	results   map[string]int
 	failures  map[string]int
 	noticesBy map[string]int
+	triagesBy map[string]int
 	// polled hears each poll's outcome, for a test that waits on the loop.
 	polled chan string
 }
@@ -891,6 +896,16 @@ func (m *metrics) RecordAssistantMailRefreshFailure(_ context.Context, reason st
 
 func (m *metrics) RecordAssistantMailNotice(_ context.Context, outcome string) {
 	m.add(&m.noticesBy, outcome)
+}
+
+func (m *metrics) RecordAssistantMailTriage(_ context.Context, outcome string) {
+	m.add(&m.triagesBy, outcome)
+}
+
+func (m *metrics) triages(outcome string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.triagesBy[outcome]
 }
 
 func (m *metrics) notices(outcome string) int {

@@ -12,6 +12,7 @@ type assistantMailInstruments struct {
 	messages        metric.Int64Counter
 	refreshFailures metric.Int64Counter
 	notices         metric.Int64Counter
+	triageRuns      metric.Int64Counter
 }
 
 func (t *Telemetry) createAssistantMailInstruments(meter metric.Meter) error {
@@ -29,8 +30,12 @@ func (t *Telemetry) createAssistantMailInstruments(meter metric.Meter) error {
 		return fmt.Errorf("create home_agent.assistant_mail.refresh_failures counter: %w", err)
 	}
 	if t.assistantMail.notices, err = meter.Int64Counter("home_agent.assistant_mail.notices",
-		metric.WithDescription("Notices of new mail in the assistant's own mailbox, by outcome (sent, failed, mark_failed, no_chat, blocked, or abandoned)."), metric.WithUnit("{notice}")); err != nil {
+		metric.WithDescription("Notices of new mail in the assistant's own mailbox, by outcome (sent, failed, mark_failed, no_chat, blocked, abandoned, or switched_off)."), metric.WithUnit("{notice}")); err != nil {
 		return fmt.Errorf("create home_agent.assistant_mail.notices counter: %w", err)
+	}
+	if t.assistantMail.triageRuns, err = meter.Int64Counter("home_agent.assistant_mail.triage_runs",
+		metric.WithDescription("Model runs that triage one thread's new mail in the assistant's own mailbox, by outcome (silent, notified, fallback after an unreadable reply, failed, or capped past the daily run limit)."), metric.WithUnit("{run}")); err != nil {
+		return fmt.Errorf("create home_agent.assistant_mail.triage_runs counter: %w", err)
 	}
 	return nil
 }
@@ -45,6 +50,10 @@ func (t *Telemetry) RecordAssistantMailMessage(ctx context.Context, result strin
 
 func (t *Telemetry) RecordAssistantMailNotice(ctx context.Context, outcome string) {
 	t.assistantMail.notices.Add(ctx, 1, metric.WithAttributes(labelAttr("home_agent.outcome", outcome, "unknown")))
+}
+
+func (t *Telemetry) RecordAssistantMailTriage(ctx context.Context, outcome string) {
+	t.assistantMail.triageRuns.Add(ctx, 1, metric.WithAttributes(labelAttr("home_agent.outcome", outcome, "unknown")))
 }
 
 func (t *Telemetry) RecordAssistantMailRefreshFailure(ctx context.Context, reason string) {

@@ -134,6 +134,10 @@ type World struct {
 	// defaultSwitches are integrations the world's own fakes switch on for the principal, below
 	// the case's user.switches.
 	defaultSwitches []string
+	// assistantMail serves the assistant's own mailbox, and assistantMailSeed holds the mail the next
+	// triage_mail step delivers.
+	assistantMail     *googlesim.Simulator
+	assistantMailSeed assistantMailSection
 
 	mu         sync.Mutex
 	counter    int64
@@ -423,6 +427,9 @@ func (w *World) seedFakes(in *wiring.Inputs) error {
 		in.Notion = &notion.Config{APIBaseURL: sim.URL(), HTTPClient: sim.Client(), Now: w.Clock.Now}
 	}
 	if err := w.seedPlaces(in); err != nil {
+		return err
+	}
+	if err := w.seedAssistantMail(in); err != nil {
 		return err
 	}
 	return w.seedConnectorFakes(in)

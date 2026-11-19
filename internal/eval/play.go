@@ -81,6 +81,9 @@ func (w *World) Play(ctx context.Context, step Step) (TurnRecord, error) {
 	case step.RunJob != "":
 		record.Kind = "run_job"
 		record.Quiet, err = w.runJob(ctx, step.RunJob)
+	case step.TriageMail:
+		record.Kind = "triage_mail"
+		err = w.triageMail(ctx)
 	default:
 		return TurnRecord{}, errors.New("step has no action")
 	}
@@ -99,7 +102,33 @@ func (w *World) Play(ctx context.Context, step Step) (TurnRecord, error) {
 	if record.Kind == "run_job" && (record.Quiet || quietAnswer(record.Runs)) {
 		record.Quiet, record.Reply = true, ""
 	}
+	if record.Kind == "triage_mail" {
+		record.Quiet = len(record.Captured.Replies) == 0
+	}
 	return record, nil
+}
+
+// triageMail polls the assistant mailbox once so it starts reading, delivers the case's mail, and
+// polls again, waiting each time for the triage the poll started; the notice, if any, is the
+// step's reply. The mail is delivered once, so a later step triages only what arrives after it.
+func (w *World) triageMail(ctx context.Context) error {
+	mailbox := w.Assembly.AssistantMail
+	if mailbox == nil || w.assistantMail == nil {
+		return errors.New("triage_mail needs an assistant_mail section")
+	}
+	poll := func() error {
+		if err := mailbox.Poll(ctx); err != nil {
+			return fmt.Errorf("poll the assistant mailbox: %w", err)
+		}
+		return mailbox.WaitTriage(ctx)
+	}
+	if err := poll(); err != nil {
+		return err
+	}
+	if err := w.deliverAssistantMail(); err != nil {
+		return err
+	}
+	return poll()
 }
 
 func quietAnswer(runs []RunRecord) bool {

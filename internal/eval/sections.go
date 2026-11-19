@@ -31,9 +31,15 @@ const (
 	SectionRoutes   = "routes"
 	SectionPlaces   = "places"
 	SectionParcels  = "parcels"
+	// SectionAssistantMail is the assistant's own mailbox, whose mail a triage_mail step delivers.
+	SectionAssistantMail = "assistant_mail"
 
 	// DefaultAccount is the mailbox and calendar owner of a section that names none.
 	DefaultAccount = "sam@example.test"
+	// DefaultAssistantMailbox and DefaultAssistantTag are the assistant mailbox's address and the
+	// eval principal's tag on it when the section names none.
+	DefaultAssistantMailbox = "assistant@example.test"
+	DefaultAssistantTag     = "sam1"
 
 	jobAtLayout = "2006-01-02 15:04"
 )
@@ -49,6 +55,8 @@ func init() {
 		SectionRoutes:   validateRoutes,
 		SectionPlaces:   validatePlaces,
 		SectionParcels:  validateParcels,
+
+		SectionAssistantMail: validateAssistantMail,
 	} {
 		DefaultRegistry.RegisterWorldSection(name, validate)
 	}
@@ -71,6 +79,27 @@ type gmailMessage struct {
 	Body        string         `json:"body"`
 	HTML        string         `json:"html,omitempty"`
 	Attachments map[string]int `json:"attachments,omitempty"`
+}
+
+// assistantMailSection is the assistant's own mailbox with the eval principal's tag, and the mail
+// a triage_mail step delivers to it.
+type assistantMailSection struct {
+	Address  string                 `json:"address,omitempty"`
+	Tag      string                 `json:"tag,omitempty"`
+	Messages []assistantMailMessage `json:"messages"`
+}
+
+// assistantMailMessage is one message to the eval principal's tagged address. Received defaults to
+// the case's clock and must not be earlier, since mail from before the mailbox started is never
+// triaged; DMARC is pass or fail, pass by default.
+type assistantMailMessage struct {
+	ThreadID string `json:"thread_id,omitempty"`
+	From     string `json:"from"`
+	To       string `json:"to,omitempty"`
+	Subject  string `json:"subject"`
+	Body     string `json:"body"`
+	Received string `json:"received,omitempty"`
+	DMARC    string `json:"dmarc,omitempty"`
 }
 
 type calendarSection struct {
@@ -224,6 +253,35 @@ func validateGmail(raw json.RawMessage) error {
 	}
 	return uniqueIDs("messages", ids)
 }
+
+func validateAssistantMail(raw json.RawMessage) error {
+	var section assistantMailSection
+	if err := decodeStrict(raw, &section); err != nil {
+		return err
+	}
+	if section.Tag != "" && !assistantTag.MatchString(section.Tag) {
+		return fmt.Errorf("tag %q: want lowercase letters and digits", section.Tag)
+	}
+	if len(section.Messages) == 0 {
+		return errors.New("messages: at least one message is required")
+	}
+	for i, message := range section.Messages {
+		if message.From == "" || message.Subject == "" || message.Body == "" {
+			return fmt.Errorf("messages[%d]: from, subject and body are required", i)
+		}
+		if message.Received != "" {
+			if err := validateTime(fmt.Sprintf("messages[%d].received", i), message.Received); err != nil {
+				return err
+			}
+		}
+		if message.DMARC != "" && message.DMARC != "pass" && message.DMARC != "fail" {
+			return fmt.Errorf("messages[%d].dmarc %q: want pass or fail", i, message.DMARC)
+		}
+	}
+	return nil
+}
+
+var assistantTag = regexp.MustCompile(`^[a-z0-9]+$`)
 
 func validateCalendar(raw json.RawMessage) error {
 	var section calendarSection

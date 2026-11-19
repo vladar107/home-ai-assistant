@@ -1,0 +1,45 @@
+{
+  "id": "am2-decision-request-notifies",
+  "title": "Triage tells the user about a mail that asks them to choose by a deadline",
+  "tags": [
+    "regression",
+    "mail"
+  ],
+  "kind": "missed-notice",
+  "clock": {
+    "local": "2026-03-12T10:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam Lee"
+  },
+  "world": {
+    "assistant_mail": {
+      "messages": [
+        {
+          "from": "Rowan Hart <rowan@harbourhall.example>",
+          "subject": "Room for your workshop on 14 March",
+          "body": "Hi Sam,\n\nWe have two rooms free for your workshop on 14 March: the Garden Room (20 people, 180 EUR) or the Loft (35 people, 260 EUR). Could you tell us by Thursday which one you want? We release the hold after that.\n\nBest,\nRowan Hart\nHarbour Hall"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "triage_mail": true,
+      "expect": {
+        "reply": {
+          "contains": [
+            "needs you",
+            "rowan@harbourhall.example",
+            "Room for your workshop on 14 March"
+          ]
+        }
+      }
+    }
+  ],
+  "rubric": [
+    "Does the notice say, in one short line, that the user must choose a room by Thursday?"
+  ],
+  "trials": 5
+}

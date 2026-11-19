@@ -81,6 +81,10 @@ type Step struct {
 	ThumbsDown bool    `json:"thumbs_down,omitempty"`
 	RunJob     string  `json:"run_job,omitempty"`
 	Expect     *Expect `json:"expect,omitempty"`
+
+	// TriageMail delivers the assistant_mail section's mail and lets the mailbox triage it; the
+	// step's reply is the notice, quiet when none was sent.
+	TriageMail bool `json:"triage_mail,omitempty"`
 }
 
 type Expect struct {
@@ -281,14 +285,17 @@ func (r *Registry) validateStep(s *Step, i int) error {
 	if s.RunJob != "" {
 		actions = append(actions, "run_job")
 	}
+	if s.TriageMail {
+		actions = append(actions, "triage_mail")
+	}
 	switch len(actions) {
 	case 0:
-		return errors.New("no action: want one of say, confirm, reject, thumbs_down, run_job")
+		return errors.New("no action: want one of say, confirm, reject, thumbs_down, run_job, triage_mail")
 	case 1:
 	default:
 		return fmt.Errorf("want exactly one action, got %v", actions)
 	}
-	if i == 0 && actions[0] != "say" && actions[0] != "run_job" {
+	if i == 0 && actions[0] != "say" && actions[0] != "run_job" && actions[0] != "triage_mail" {
 		return fmt.Errorf("%s cannot be the first step: it needs a previous turn", actions[0])
 	}
 	if s.Expect == nil {

@@ -56,6 +56,10 @@ neutral names, places and data, never a real message, trace, memory or device.
   - `parcels`: `[{"carrier", "number", "title", "sender", "status", "window_from", "window_to", "pickup_point"}]`
     (parcels the user follows, found in mail; `status` is a parcel status such as `in_transit` or
     `out_for_delivery`, and times are local `YYYY-MM-DDTHH:MM`); the section turns Parcels on
+  - `assistant_mail`: `{"address": "assistant@example.test", "tag": "sam1", "messages": [{"from", "subject", "body",
+    "to", "thread_id", "received", "dmarc": "pass" | "fail"}]}`, the assistant's own mailbox with the user's tag
+    (both defaults shown); a `triage_mail` step delivers the messages to the tagged address, `received`
+    defaults to the case's clock and must not be earlier, and `dmarc` defaults to `pass`
   - Connector fakes: each section is the seed of a loopback fake, decoded strictly by the fake
     (the full shape and an example are in the fake's package doc under `internal/testutil/`). A
     connector whose section the case lacks stays unconfigured, so its tools are not offered, and
@@ -80,7 +84,9 @@ neutral names, places and data, never a real message, trace, memory or device.
       unless `user.switches` sets `mcp-<server>` to false
 - `steps`: at least one, played in one session. A step has exactly one action: `say` (text),
   `confirm: true`, `reject: true`, `thumbs_down: true` (the last three act on the previous turn
-  and cannot start a case), or `run_job` (id of a scheduled job in the world).
+  and cannot start a case), `run_job` (id of a scheduled job in the world), or `triage_mail: true`
+  (delivers the `assistant_mail` section's messages and lets the mailbox triage them; the step's
+  reply is the notice, and `reply.quiet` expects none).
 - `expect` (optional per step):
   - `calls`: `{tool | any_of, min (default 1), max, args}`; `any_of` lists two or more tools,
     any of which satisfies the call (give `tool` or `any_of`, not both); each arg has a dot `path` into the tool's JSON

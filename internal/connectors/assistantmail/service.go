@@ -46,8 +46,11 @@ type Telemetry interface {
 	RecordAssistantMailMessage(ctx context.Context, result string)
 	RecordAssistantMailRefreshFailure(ctx context.Context, reason string)
 	// RecordAssistantMailNotice counts a principal's notice of new mail by outcome: sent, failed,
-	// mark_failed, no_chat, blocked, or abandoned.
+	// mark_failed, no_chat, blocked, abandoned, or switched_off.
 	RecordAssistantMailNotice(ctx context.Context, outcome string)
+	// RecordAssistantMailTriage counts the threads triaged by outcome: silent, notified, fallback
+	// after a reply that could not be read, failed, or capped, listed untriaged past the daily limit.
+	RecordAssistantMailTriage(ctx context.Context, outcome string)
 }
 
 // Chats resolves the private chat of a principal who is still allowlisted and enabled, the only
@@ -82,6 +85,9 @@ type Config struct {
 	Location *time.Location
 	// Notices keeps each delivered notice for the principal's next turn; nil keeps none.
 	Notices *Notices
+	// Checker triages each thread's new mail, so only mail that needs the user is in a notice; nil
+	// lists every new message, untriaged.
+	Checker Checker
 	// Proposer records sends for the user's confirmation; nil offers no send tool.
 	Proposer Proposer
 	// Exposure tells a send proposal that its conversation has read outside content; nil never
@@ -109,6 +115,7 @@ type Service struct {
 	languages  locale.Preferences
 	location   *time.Location
 	notices    *Notices
+	checker    Checker
 	proposer   Proposer
 	exposure   ExposureChecker
 	names      map[string]string
@@ -129,7 +136,7 @@ type Service struct {
 	expiry  time.Time
 
 	// pollMu keeps the loop and a direct Poll from running at once, and guards failures,
-	// relistAfter, observed, and noticeFailures.
+	// relistAfter, and observed.
 	pollMu sync.Mutex
 	// failures counts the polls in a row that failed on each message.
 	failures map[string]int
@@ -139,8 +146,12 @@ type Service struct {
 	// observed is each tagged principal's switch as the running poll found it; a principal
 	// missing from it counts as off.
 	observed map[string]SwitchState
-	// noticeFailures counts the polls in a row whose notice to each principal failed to deliver.
-	noticeFailures map[string]int
+
+	// triageMu guards triages, the state of each principal's triage of new mail; triageWG counts the
+	// triages running.
+	triageMu sync.Mutex
+	triages  map[string]*triageState
+	triageWG sync.WaitGroup
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -186,8 +197,8 @@ func NewService(cfg Config) (*Service, error) {
 	return &Service{
 		mailbox: cfg.Mailbox, base: gmailBase(local, domain), repository: cfg.Repository, gmail: cfg.Gmail,
 		tokens: cfg.Tokens, switches: cfg.Switches, chats: cfg.Chats, sender: cfg.Sender, languages: cfg.Languages,
-		location: location, notices: cfg.Notices, proposer: cfg.Proposer, exposure: cfg.Exposure, names: cfg.DisplayNames, logger: cfg.Logger, telemetry: noTelemetry{}, now: now,
-		jitter: jitter, failures: make(map[string]int), noticeFailures: make(map[string]int),
+		location: location, notices: cfg.Notices, checker: cfg.Checker, proposer: cfg.Proposer, exposure: cfg.Exposure, names: cfg.DisplayNames, logger: cfg.Logger, telemetry: noTelemetry{}, now: now,
+		jitter: jitter, failures: make(map[string]int), triages: make(map[string]*triageState),
 	}, nil
 }
 
@@ -244,6 +255,10 @@ func (s *Service) Shutdown(ctx context.Context) error {
 	case <-done:
 	case <-ctx.Done():
 		return fmt.Errorf("shutdown assistant mailbox: %w", ctx.Err())
+	}
+	// The loop's end cancelled the triages it started; they still finish marking what they sent.
+	if err := s.WaitTriage(ctx); err != nil {
+		return fmt.Errorf("shutdown assistant mailbox triage: %w", err)
 	}
 	s.tokenMu.Lock()
 	s.access, s.expiry = "", time.Time{}
@@ -366,3 +381,4 @@ func (noTelemetry) RecordAssistantMailPoll(context.Context, string)           {}
 func (noTelemetry) RecordAssistantMailMessage(context.Context, string)        {}
 func (noTelemetry) RecordAssistantMailRefreshFailure(context.Context, string) {}
 func (noTelemetry) RecordAssistantMailNotice(context.Context, string)         {}
+func (noTelemetry) RecordAssistantMailTriage(context.Context, string)         {}

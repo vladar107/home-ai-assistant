@@ -1654,14 +1654,34 @@ plus tag (`HOME_AGENT_ASSISTANT_MAIL_TAGS`) has their own address on it, which t
 give to businesses. One poller reads Gmail's history every five minutes and routes each new
 message by the tags found in `Delivered-To`, `To` and `Cc`, then by a thread the assistant
 sent for a principal; anything else is recorded as unrouted and stays in Gmail's web
-interface. Notices are deterministic, one batched plain message per principal and poll
-with the real sender, subject, date and a DMARC mark, no model call, and are marked as
-outside content for the next turn. `assistant_mail_list` and `assistant_mail_read` read a
-principal's own routed messages, and `assistant_mail_send` is always a proposal that shows
-the full message, so nothing is sent before the user confirms it. A principal's
-"Assistant mailbox" switch in `/settings` gates the notices and the tools. A refresh token
-Google rejects stops the poller and shows the mailbox as unavailable until the operator
-authorizes again.
+interface. `assistant_mail_list` and `assistant_mail_read` read a principal's own routed
+messages, and `assistant_mail_send` is always a proposal that shows the full message, so
+nothing is sent before the user confirms it. A principal's "Assistant mailbox" switch in
+`/settings` gates the notices and the tools. A refresh token Google rejects stops the
+poller and shows the mailbox as unavailable until the operator authorizes again.
+
+**Triage.** After each poll, the mailbox triages each principal's new routed mail off the
+poll loop, so a slow model never delays polling. One principal's triage runs at a time, and
+it runs the model once per thread with new non-spam mail, up to ten threads per poll, through
+`turn.Engine.RunConfined`: an unattended check on the principal's own subscription in a
+fresh session, offered only `assistant_mail_list` and `assistant_mail_read` bound to that
+thread (a `tools.Scope` whose binding reaches each call's context), with no web search,
+memory, place, collections, or other integration. One correspondent's text therefore never
+reaches another thread or anything private. The run (`prompt.MailTriage`) treats mail as
+data, never instructions, and answers strict JSON, `{"needs_you":[{"id","why"}]}`; code
+drops ids outside the thread's new mail and adds every new message whose sender is not
+verified (an unreadable `From` or `dmarc=fail`) with a reason code writes. A message the
+run never read in full (the binding records each read) is listed untriaged, a reason with a
+link or a domain gives way to a generic one, and past 30 runs per principal in 24 hours
+threads are listed untriaged without a run. One plain
+notice per principal then lists what needs them, with the real sender, subject, and the
+reason, cleaned and capped as before, and is marked as outside content for the next turn;
+with nothing to list, nothing is sent. A run that fails or answers anything else lists
+its thread's messages as the deterministic notice did, with sender, subject, and date, so
+mail is never silently dropped. Mail is marked notified only once its notice was delivered,
+or at once when nothing needed sending; the decisions of an undelivered notice are kept in
+memory, so the next polls retry the delivery without running the model again, until the
+abandon rule settles it. Spam is settled unseen and no longer counted in the notice.
 
 ### An MCP server
 
@@ -1796,8 +1816,8 @@ once, and sessions end with an HTTP `DELETE` at shutdown, as best effort.
 `home-agent-eval` plays synthetic cases through the real turn path on a real model
 and reports how reliably each passes (plan 0155). A case in `evals/cases/` is a
 JSON file: a fixed clock and zone, a synthetic user, the world the tools see, a
-sequence of steps (a message, a Confirm or Reject, a 👎, or a run of a scheduled
-job), and deterministic checks on the tool calls, proposals, reply and store.
+sequence of steps (a message, a Confirm or Reject, a 👎, a run of a scheduled
+job, or a triage of new mail in the assistant mailbox), and deterministic checks on the tool calls, proposals, reply and store.
 `evals/cases/README.md` documents the format and every world section.
 
 Each trial builds the production wiring for the synthetic principal `eval` on a

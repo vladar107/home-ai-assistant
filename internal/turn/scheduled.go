@@ -37,7 +37,7 @@ func (e *Engine) RunScheduled(ctx context.Context, principalID, turn, message st
 		return ScheduledReply{}, err
 	}
 	defer release()
-	return e.runUnwatched(ctx, principalID, turn, message, model, e.config.ScheduledTurnTimeout, TraceScheduled, turn)
+	return e.runUnwatched(ctx, principalID, turn, message, model, e.config.ScheduledTurnTimeout, TraceScheduled, turn, nil)
 }
 
 // RunCheck runs one check of an agent watch as RunScheduled runs a scheduled turn, but under no
@@ -46,7 +46,15 @@ func (e *Engine) RunScheduled(ctx context.Context, principalID, turn, message st
 // turn must not wait behind one. The caller reads the verdict from the final text. The check keeps
 // a trace under the key ctx names, if any.
 func (e *Engine) RunCheck(ctx context.Context, principalID, message string) (ScheduledReply, error) {
-	return e.runUnwatched(ctx, principalID, "", message, agentruntime.ModelEffort{}, e.config.TurnTimeout, TraceCheck, TraceKeyFrom(ctx))
+	return e.runUnwatched(ctx, principalID, "", message, agentruntime.ModelEffort{}, e.config.TurnTimeout, TraceCheck, TraceKeyFrom(ctx), nil)
+}
+
+// RunConfined runs a check as RunCheck does, over content from strangers that must reach nothing
+// beyond the scope: the run is offered only the scope's tools, each call carries its binding, and
+// it has no web search, memory, place, or collections, so nothing private can end up in what the
+// run writes.
+func (e *Engine) RunConfined(ctx context.Context, principalID, message string, scope tools.Scope) (ScheduledReply, error) {
+	return e.runUnwatched(ctx, principalID, "", message, agentruntime.ModelEffort{}, e.config.TurnTimeout, TraceCheck, TraceKeyFrom(ctx), &scope)
 }
 
 // RunReview runs the turn of a weekly review on the principal's own subscription and the given
@@ -128,22 +136,28 @@ func (e *Engine) runToolless(ctx context.Context, principalID, message string, m
 	return unwatchedReply(english, turnCtx, result, runErr, nil)
 }
 
-func (e *Engine) runUnwatched(ctx context.Context, principalID, turn, message string, model agentruntime.ModelEffort, timeout time.Duration, kind, traceKey string) (ScheduledReply, error) {
+// runUnwatched runs a turn nobody watches with read tools; a scope confines it to the scope's tools
+// and leaves out web search, memory, place, and collections.
+func (e *Engine) runUnwatched(ctx context.Context, principalID, turn, message string, model agentruntime.ModelEffort, timeout time.Duration, kind, traceKey string, scope *tools.Scope) (ScheduledReply, error) {
 	started := e.config.Now()
 	english := locale.With(ctx, locale.English)
 	run := tools.NewRun(message)
-	turnCtx, cancel := context.WithTimeout(tools.WithRun(tools.WithTurn(ctx, turn), run), timeout)
+	runCtx := tools.WithRun(tools.WithTurn(ctx, turn), run)
+	if scope != nil {
+		runCtx = tools.WithScope(runCtx, *scope)
+	}
+	turnCtx, cancel := context.WithTimeout(runCtx, timeout)
 	defer cancel()
 	if reply, ready, err := e.unwatchedGate(english, turnCtx, principalID); !ready {
 		return reply, err
 	}
 	tools, err := e.tools.ReadOnlyToolsFor(turnCtx, principalID)
 	var webSearch bool
-	if err == nil {
+	if err == nil && scope == nil {
 		webSearch, err = e.webSearchEnabled(turnCtx, principalID)
 	}
 	var memory string
-	if err == nil {
+	if err == nil && scope == nil {
 		memory, err = e.memoryText(turnCtx, principalID)
 	}
 	if err != nil {
@@ -156,11 +170,14 @@ func (e *Engine) runUnwatched(ctx context.Context, principalID, turn, message st
 	if err != nil {
 		return ScheduledReply{}, err
 	}
+	if scope == nil {
+		message = withPlace(e.placeLines(turnCtx, principalID), e.withCollections(turnCtx, principalID, message))
+	}
 	sink := e.newCountingSink(principalID, turn, run)
 	result, runErr := e.runtime.Run(turnCtx, agentruntime.RunRequest{
 		PrincipalID: principalID,
 		SessionID:   sessionID,
-		Message:     e.withTime(withLanguage(ctx, e.withUser(principalID, withPlace(e.placeLines(turnCtx, principalID), e.withCollections(turnCtx, principalID, message))))),
+		Message:     e.withTime(withLanguage(ctx, e.withUser(principalID, message))),
 		Tools:       tools,
 		Memory:      memory,
 		WebSearch:   webSearch,
