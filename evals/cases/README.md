@@ -57,9 +57,12 @@ neutral names, places and data, never a real message, trace, memory or device.
     (parcels the user follows, found in mail; `status` is a parcel status such as `in_transit` or
     `out_for_delivery`, and times are local `YYYY-MM-DDTHH:MM`); the section turns Parcels on
   - `assistant_mail`: `{"address": "assistant@example.test", "tag": "sam1", "messages": [{"from", "subject", "body",
-    "to", "thread_id", "received", "dmarc": "pass" | "fail"}]}`, the assistant's own mailbox with the user's tag
+    "to", "thread_id", "received", "dmarc": "pass" | "fail", "sent"}]}`, the assistant's own mailbox with the user's tag
     (both defaults shown); a `triage_mail` step delivers the messages to the tagged address, `received`
-    defaults to the case's clock and must not be earlier, and `dmarc` defaults to `pass`
+    defaults to the case's clock and must not be earlier, and `dmarc` defaults to `pass`. A message
+    with `"sent": true` is one the assistant sent for the user to `to` (no `from` or `dmarc`), such as
+    the one that starts a thread; give a reply in that thread a later `received`. The user switch
+    `assistant-mail-replies` turns on routine replies, which a notice reports under "Replied for you"
   - Connector fakes: each section is the seed of a loopback fake, decoded strictly by the fake
     (the full shape and an example are in the fake's package doc under `internal/testutil/`). A
     connector whose section the case lacks stays unconfigured, so its tools are not offered, and

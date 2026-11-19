@@ -255,7 +255,8 @@ func (b *Broker) ToolsFor(ctx context.Context, principalID string) (agentruntime
 }
 
 // ReadOnlyToolsFor is ToolsFor limited to read tools, for a turn nobody is watching: a write tool
-// is neither offered nor callable, and guidance is kept only from providers that still offer one.
+// is neither offered nor callable, unless the run's scope names it among its writes, and guidance
+// is kept only from providers that still offer one.
 func (b *Broker) ReadOnlyToolsFor(ctx context.Context, principalID string) (agentruntime.ToolSet, error) {
 	return b.toolsFor(ctx, principalID, true)
 }
@@ -295,7 +296,7 @@ func (b *Broker) toolsFor(ctx context.Context, principalID string, readOnly bool
 			if err := validateDefinition(definition); err != nil {
 				return agentruntime.ToolSet{}, err
 			}
-			if (readOnly && definition.Risk != RiskRead) || !scope.offers(definition.Name) {
+			if (readOnly && definition.Risk != RiskRead && !scope.writes(definition.Name)) || !scope.offers(definition.Name) {
 				continue
 			}
 			offered++

@@ -70,3 +70,42 @@ func TestAScopeOffersOnlyItsToolsAndBindsEveryCall(t *testing.T) {
 		t.Fatalf("an unscoped call was bound: %v", bound)
 	}
 }
+
+// A read-only run is offered a write tool only when its scope names it among its writes, and never
+// without a scope.
+func TestAScopeOffersAReadOnlyRunOnlyTheWritesItNames(t *testing.T) {
+	t.Parallel()
+	broker := testBroker(t)
+	reply := testDefinition("mail_reply", 0)
+	reply.Risk = RiskWrite
+	send := testDefinition("mail_send", 0)
+	send.Risk = RiskWrite
+	mail := &fakeProvider{principal: testPrincipal, definitions: []Definition{testDefinition("mail_read", 0), reply, send}}
+	if err := broker.Register(mail); err != nil {
+		t.Fatal(err)
+	}
+	for _, check := range []struct {
+		scope *Scope
+		want  []string
+	}{
+		{nil, []string{"mail_read"}},
+		{&Scope{Tools: []string{"mail_read", "mail_reply", "mail_send"}}, []string{"mail_read"}},
+		{&Scope{Tools: []string{"mail_read", "mail_reply"}, Writes: []string{"mail_reply", "mail_send"}}, []string{"mail_read", "mail_reply"}},
+	} {
+		ctx := context.Background()
+		if check.scope != nil {
+			ctx = WithScope(ctx, *check.scope)
+		}
+		set, err := broker.ReadOnlyToolsFor(ctx, testPrincipal)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var offered []string
+		for _, definition := range set.Definitions {
+			offered = append(offered, definition.Name)
+		}
+		if !slices.Equal(offered, check.want) {
+			t.Fatalf("scope %+v offers %v, want %v", check.scope, offered, check.want)
+		}
+	}
+}

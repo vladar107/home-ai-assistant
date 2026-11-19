@@ -101,6 +101,8 @@ type Message struct {
 	// Headers, when set, is the message's whole header block in order and spelling, served in
 	// place of headers made from the fields.
 	Headers []Header
+	// Extra are headers added at the end of the block made from the fields, such as Auto-Submitted.
+	Extra []Header
 }
 
 type Header struct {
@@ -152,7 +154,9 @@ type Simulator struct {
 	// unindexed is how many more searches leave each message out.
 	unindexed    map[string]int
 	failingSends int
-	sent         []SentMessage
+	// slowSends delays the answer to each send that went out, as a send whose answer is lost does.
+	slowSends time.Duration
+	sent      []SentMessage
 }
 
 func New(t simt.T) *Simulator {

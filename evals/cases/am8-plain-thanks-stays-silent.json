@@ -1,0 +1,51 @@
+{
+  "id": "am8-plain-thanks-stays-silent",
+  "title": "Triage neither answers nor reports a plain thanks that needs no answer",
+  "tags": [
+    "regression",
+    "mail"
+  ],
+  "kind": "noisy-routine-reply",
+  "clock": {
+    "local": "2026-03-12T10:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam Lee",
+    "switches": {
+      "assistant-mail-replies": true
+    }
+  },
+  "world": {
+    "assistant_mail": {
+      "messages": [
+        {
+          "sent": true,
+          "thread_id": "t1",
+          "to": "Rowan Hart <rowan@harbourhall.example>",
+          "subject": "Garden Room on 14 March",
+          "body": "Hello Rowan,\n\nThank you for confirming the Garden Room for the workshop on 14 March, from 10:00 to 16:00, for 18 people. We look forward to it.\n\nBest regards,\nAssistant, assistant to Sam Lee",
+          "received": "2026-03-12T10:00"
+        },
+        {
+          "thread_id": "t1",
+          "from": "Rowan Hart <rowan@harbourhall.example>",
+          "subject": "Re: Garden Room on 14 March",
+          "body": "Hi,\n\nThanks, all noted. See you on the 14th!\n\nBest,\nRowan Hart\nHarbour Hall",
+          "received": "2026-03-12T10:05"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "triage_mail": true,
+      "expect": {
+        "reply": {
+          "quiet": true
+        }
+      }
+    }
+  ],
+  "trials": 5
+}

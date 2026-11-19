@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/assistantmail"
 )
 
@@ -386,4 +387,111 @@ func (s *Store) KnownContacts(ctx context.Context, principalID string, addresses
 		known = append(known, address)
 	}
 	return known, rows.Err()
+}
+
+func (s *Store) FirstThreadRoute(ctx context.Context, threadID string) (assistantmail.Route, bool, error) {
+	route, err := scanMailRoute(s.db.QueryRowContext(ctx,
+		`SELECT `+mailRouteColumns+` FROM mail_routes WHERE thread_id = ?
+		 ORDER BY internal_date, recorded_at, gmail_id LIMIT 1`, threadID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return assistantmail.Route{}, false, nil
+	}
+	if err != nil {
+		return assistantmail.Route{}, false, fmt.Errorf("load first thread route: %w", err)
+	}
+	return route, true, nil
+}
+
+// StartRoutineReply relies on the store's immediate transactions, as StartSend does, so the counts
+// and the inserts of concurrent starts are serialized.
+func (s *Store) StartRoutineReply(ctx context.Context, start assistantmail.RoutineStart) (assistantmail.RoutineVerdict, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", fmt.Errorf("begin start routine reply: %w", err)
+	}
+	defer tx.Rollback()
+	var replied bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM mail_routine_replies WHERE thread_id = ?)`, start.ThreadID).Scan(&replied); err != nil {
+		return "", fmt.Errorf("check routine reply thread: %w", err)
+	}
+	if replied {
+		return assistantmail.RoutineThreadReplied, nil
+	}
+	dayStart, dayEnd := formatTime(start.DayStart), formatTime(start.DayEnd)
+	var replies int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT count(*) FROM mail_routine_replies WHERE principal_id = ? AND started_at >= ? AND started_at < ?`,
+		start.PrincipalID, dayStart, dayEnd).Scan(&replies); err != nil {
+		return "", fmt.Errorf("count routine replies: %w", err)
+	}
+	if replies >= start.DailyLimit {
+		return assistantmail.RoutineDailyLimit, nil
+	}
+	var sent int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT count(*) FROM mail_sends WHERE principal_id = ? AND started_at >= ? AND started_at < ?`,
+		start.PrincipalID, dayStart, dayEnd).Scan(&sent); err != nil {
+		return "", fmt.Errorf("count mail sends: %w", err)
+	}
+	if sent >= start.SendLimit {
+		return assistantmail.RoutineSendLimit, nil
+	}
+	at := formatTime(start.At)
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO mail_routine_replies (thread_id, principal_id, send_id, started_at) VALUES (?, ?, ?, ?)`,
+		start.ThreadID, start.PrincipalID, start.SendID, at); err != nil {
+		return "", fmt.Errorf("insert routine reply: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO mail_sends (send_id, principal_id, started_at) VALUES (?, ?, ?)`,
+		start.SendID, start.PrincipalID, at); err != nil {
+		return "", fmt.Errorf("insert routine mail send: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("commit start routine reply: %w", err)
+	}
+	return assistantmail.RoutineAllowed, nil
+}
+
+func (s *Store) UnreportedRoutineReplies(ctx context.Context, principalID string) ([]assistantmail.RoutineReply, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT r.send_id, r.thread_id, a.arguments, r.started_at, a.status FROM mail_routine_replies r
+		 JOIN approvals a ON a.id = r.send_id AND a.principal_id = r.principal_id
+		 WHERE r.principal_id = ? AND r.reported_at IS NULL
+		   AND (a.status IN ('done', 'confirmed') OR (a.status = 'failed' AND a.reason IN (?, ?, ?, ?)))
+		 ORDER BY r.started_at, r.send_id`, principalID,
+		assistantmail.ReasonPossiblySent, approval.ReasonTimeout, approval.ReasonInterrupted, approval.ReasonExecutorFailed)
+	if err != nil {
+		return nil, fmt.Errorf("list unreported routine replies: %w", err)
+	}
+	defer rows.Close()
+	var replies []assistantmail.RoutineReply
+	for rows.Next() {
+		var reply assistantmail.RoutineReply
+		var arguments, started, status string
+		if err := rows.Scan(&reply.SendID, &reply.ThreadID, &arguments, &started, &status); err != nil {
+			return nil, fmt.Errorf("scan routine reply: %w", err)
+		}
+		if reply.StartedAt, err = time.Parse(time.RFC3339Nano, started); err != nil {
+			return nil, fmt.Errorf("parse routine reply start: %w", err)
+		}
+		reply.Arguments, reply.Uncertain = []byte(arguments), status != approval.StatusDone
+		replies = append(replies, reply)
+	}
+	return replies, rows.Err()
+}
+
+func (s *Store) MarkRoutineRepliesReported(ctx context.Context, principalID string, sendIDs []string, at time.Time) error {
+	if len(sendIDs) == 0 {
+		return nil
+	}
+	args := []any{formatTime(at), principalID}
+	for _, id := range sendIDs {
+		args = append(args, id)
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE mail_routine_replies SET reported_at = ? WHERE principal_id = ? AND reported_at IS NULL AND send_id IN (`+
+			strings.TrimSuffix(strings.Repeat("?,", len(sendIDs)), ",")+`)`, args...); err != nil {
+		return fmt.Errorf("mark routine replies reported: %w", err)
+	}
+	return nil
 }

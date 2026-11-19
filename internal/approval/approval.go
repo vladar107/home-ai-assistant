@@ -349,7 +349,8 @@ type Repository interface {
 	// DirectApprovals returns the direct records of a chat request in the order they were made.
 	DirectApprovals(ctx context.Context, principalID, requestID string) ([]Record, error)
 	// UnsentDirectApprovals returns the principal's done and undone direct records of one tab that
-	// no message shows yet and that are still inside their undo window, in the order they were made.
+	// no message shows yet and that are still inside their undo window, in the order they were made,
+	// leaving out unattended ones.
 	UnsentDirectApprovals(ctx context.Context, principalID string, threadID int64, now time.Time) ([]Record, error)
 	// ShownDirectApprovals returns the principal's direct records that the message shows, in order.
 	ShownDirectApprovals(ctx context.Context, principalID string, chatID, messageID int64) ([]Record, error)
@@ -1606,7 +1607,8 @@ func (s *Service) rememberNotice(bundle []Record) {
 	}
 	var notices []string
 	for _, record := range bundle {
-		if record.Reason == ReasonReplaced || record.Reason == ReasonWithdrawn {
+		// An unattended action was made in no conversation, and its caller reports it itself.
+		if record.Reason == ReasonReplaced || record.Reason == ReasonWithdrawn || strings.HasPrefix(record.RequestID, UnattendedRequest) {
 			continue
 		}
 		if entry := noticeText(record); entry != "" {

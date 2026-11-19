@@ -51,6 +51,9 @@ type Telemetry interface {
 	// RecordAssistantMailTriage counts the threads triaged by outcome: silent, notified, fallback
 	// after a reply that could not be read, failed, or capped, listed untriaged past the daily limit.
 	RecordAssistantMailTriage(ctx context.Context, outcome string)
+	// RecordAssistantMailRoutineReply counts the routine replies triage tried, by outcome: sent,
+	// not_ours, sender, automated, group, invalid, limited, switched_off, or failed.
+	RecordAssistantMailRoutineReply(ctx context.Context, outcome string)
 }
 
 // Chats resolves the private chat of a principal who is still allowlisted and enabled, the only
@@ -90,6 +93,9 @@ type Config struct {
 	Checker Checker
 	// Proposer records sends for the user's confirmation; nil offers no send tool.
 	Proposer Proposer
+	// Unattended records each routine reply triage sends without asking; nil offers no routine
+	// replies.
+	Unattended Unattended
 	// Exposure tells a send proposal that its conversation has read outside content; nil never
 	// marks it.
 	Exposure ExposureChecker
@@ -117,6 +123,7 @@ type Service struct {
 	notices    *Notices
 	checker    Checker
 	proposer   Proposer
+	unattended Unattended
 	exposure   ExposureChecker
 	names      map[string]string
 	logger     *slog.Logger
@@ -197,7 +204,7 @@ func NewService(cfg Config) (*Service, error) {
 	return &Service{
 		mailbox: cfg.Mailbox, base: gmailBase(local, domain), repository: cfg.Repository, gmail: cfg.Gmail,
 		tokens: cfg.Tokens, switches: cfg.Switches, chats: cfg.Chats, sender: cfg.Sender, languages: cfg.Languages,
-		location: location, notices: cfg.Notices, checker: cfg.Checker, proposer: cfg.Proposer, exposure: cfg.Exposure, names: cfg.DisplayNames, logger: cfg.Logger, telemetry: noTelemetry{}, now: now,
+		location: location, notices: cfg.Notices, checker: cfg.Checker, proposer: cfg.Proposer, unattended: cfg.Unattended, exposure: cfg.Exposure, names: cfg.DisplayNames, logger: cfg.Logger, telemetry: noTelemetry{}, now: now,
 		jitter: jitter, failures: make(map[string]int), triages: make(map[string]*triageState),
 	}, nil
 }
@@ -382,3 +389,4 @@ func (noTelemetry) RecordAssistantMailMessage(context.Context, string)        {}
 func (noTelemetry) RecordAssistantMailRefreshFailure(context.Context, string) {}
 func (noTelemetry) RecordAssistantMailNotice(context.Context, string)         {}
 func (noTelemetry) RecordAssistantMailTriage(context.Context, string)         {}
+func (noTelemetry) RecordAssistantMailRoutineReply(context.Context, string)   {}

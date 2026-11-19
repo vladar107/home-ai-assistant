@@ -397,6 +397,25 @@ connection needs attention (the warning `assistant_mail.triage.failed` names the
 kind); a rising `fallback`, logged as `assistant_mail.triage.unreadable`, means the model
 stopped following the JSON shape.
 
+**Routine replies.** Each user can turn on "Routine replies" on the mailbox page in
+`/settings`; it is off by default. With it on, triage may answer a routine message (thanks,
+an acknowledgement, something the thread already settled) without asking, but only in a
+thread the assistant started for that user and wrote to one person only, only to that
+person, whose mail passed Gmail's DMARC check, never to automated mail or a differing
+`Reply-To`, at most once per thread ever and three times per user per day, and each reply
+also counts toward `_DAILY_SEND_LIMIT`. Anything code refuses is listed in the notice with
+the reason. Every reply sent is shown in full under "Replied for you" in the next notice
+that is delivered, and so is one whose send timed out or was cut off by a restart, marked as
+possibly not sent; check that thread in Gmail. For an audit, each reply is an approval record with tool
+`assistant_mail_reply_routine`, mode `direct` and status `done` (or `failed` with its
+reason), whose arguments hold the recipient, the answered message id, the subject and the
+whole body; `mail_routine_replies` ties it to its thread, its day, and when a notice
+reported it. `home_agent.assistant_mail.routine_replies` counts attempts by outcome
+(`sent`, `not_ours`, `sender`, `automated`, `group`, `invalid`, `limited`,
+`switched_off`, `failed`); logs (`assistant_mail.routine.sent`, `assistant_mail.routine.refused`) carry the
+user and the outcome, never an address, subject or body. To stop them for a user, they turn
+the switch off; no further reply is sent, even by a run already under way.
+
 **Authorizing again.** A password change on the account, or six months without use, makes
 Google reject the refresh token. The poller stops, the failure is counted in
 `home_agent.assistant_mail.refresh_failures{reason="rejected"}` and logged as

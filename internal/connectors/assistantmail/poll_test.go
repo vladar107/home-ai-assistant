@@ -874,6 +874,7 @@ type metrics struct {
 	failures  map[string]int
 	noticesBy map[string]int
 	triagesBy map[string]int
+	routineBy map[string]int
 	// polled hears each poll's outcome, for a test that waits on the loop.
 	polled chan string
 }
@@ -900,6 +901,16 @@ func (m *metrics) RecordAssistantMailNotice(_ context.Context, outcome string) {
 
 func (m *metrics) RecordAssistantMailTriage(_ context.Context, outcome string) {
 	m.add(&m.triagesBy, outcome)
+}
+
+func (m *metrics) RecordAssistantMailRoutineReply(_ context.Context, outcome string) {
+	m.add(&m.routineBy, outcome)
+}
+
+func (m *metrics) routine(outcome string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.routineBy[outcome]
 }
 
 func (m *metrics) triages(outcome string) int {

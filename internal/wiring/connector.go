@@ -37,6 +37,9 @@ type SwitchSettings struct {
 	// Address is a principal's own address on a shared mailbox; the page is shown only to
 	// principals that have one. Nil for an integration without one.
 	Address func(principalID string) (string, bool)
+	// Replies is a mailbox's switch for routine replies, which its page also turns on and off; nil
+	// for the others.
+	Replies *integration.Switch
 }
 
 // register adds a connector to every part of the application it takes part in.

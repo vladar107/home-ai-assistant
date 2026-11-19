@@ -526,7 +526,11 @@ func (a *App) settingsSections(asm *wiring.Assembly, location *time.Location) ([
 			settings.Details = telegram.UnavailableDetails(page.Unavailable, found.Name)
 		}
 		if page.Address != nil {
-			sections = append(sections, telegram.NewAssistantMailSection(telegram.AssistantMailSettings{Switch: settings, Address: page.Address}, a.logger, a.telemetry))
+			mail := telegram.AssistantMailSettings{Switch: settings, Address: page.Address}
+			if page.Replies != nil {
+				mail.Replies = asm.Switches.Toggle(*page.Replies)
+			}
+			sections = append(sections, telegram.NewAssistantMailSection(mail, a.logger, a.telemetry))
 			continue
 		}
 		sections = append(sections, telegram.NewSwitchSection(settings, a.logger, a.telemetry))

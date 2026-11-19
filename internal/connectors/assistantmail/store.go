@@ -85,4 +85,52 @@ type Repository interface {
 	RecordContacts(ctx context.Context, principalID string, addresses []string, at time.Time) error
 	// KnownContacts returns, lowercase, those of the addresses the principal has sent mail to before.
 	KnownContacts(ctx context.Context, principalID string, addresses []string) ([]string, error)
+	// FirstThreadRoute returns the thread's earliest route of any principal, by internal date.
+	FirstThreadRoute(ctx context.Context, threadID string) (Route, bool, error)
+	// StartRoutineReply counts a routine reply against its thread, which takes one ever, the
+	// principal's routine replies of the day, and their sends of the day, in one transaction, and
+	// records it in both when every limit allows it.
+	StartRoutineReply(ctx context.Context, start RoutineStart) (RoutineVerdict, error)
+	// UnreportedRoutineReplies returns the principal's routine replies that were sent, or may have
+	// been, and that no delivered notice showed yet, oldest first, each with the arguments of its
+	// approval record. A reply may have been sent when its send failed in a way that leaves it
+	// unknown, such as a timeout or a restart, or when its record never finished.
+	UnreportedRoutineReplies(ctx context.Context, principalID string) ([]RoutineReply, error)
+	MarkRoutineRepliesReported(ctx context.Context, principalID string, sendIDs []string, at time.Time) error
+}
+
+// RoutineStart is a routine reply about to be sent, with the limits of the day [DayStart, DayEnd).
+type RoutineStart struct {
+	PrincipalID string
+	ThreadID    string
+	// SendID is the reply's approval record, which also counts it as a send.
+	SendID     string
+	DayStart   time.Time
+	DayEnd     time.Time
+	DailyLimit int
+	SendLimit  int
+	At         time.Time
+}
+
+// RoutineVerdict is whether a routine reply may go ahead: RoutineAllowed, or the limit it reached.
+type RoutineVerdict string
+
+const (
+	RoutineAllowed RoutineVerdict = ""
+	// RoutineThreadReplied means the thread already had its one routine reply.
+	RoutineThreadReplied RoutineVerdict = "thread"
+	// RoutineDailyLimit means the principal had all their routine replies of the day.
+	RoutineDailyLimit RoutineVerdict = "day"
+	// RoutineSendLimit means the principal had all their sends of the day.
+	RoutineSendLimit RoutineVerdict = "send"
+)
+
+// RoutineReply is a routine reply that was sent, as its approval record keeps it, in its thread.
+// Uncertain marks one that may or may not have gone out.
+type RoutineReply struct {
+	SendID    string
+	ThreadID  string
+	Arguments []byte
+	StartedAt time.Time
+	Uncertain bool
 }

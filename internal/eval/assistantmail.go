@@ -82,11 +82,14 @@ func authorizeAssistantMail(sim *googlesim.Simulator, account string) (string, e
 }
 
 // deliverAssistantMail delivers the section's mail to the eval principal's tagged address, with
-// Gmail's authentication results for each sender, once.
+// Gmail's authentication results for each sender, once. A sent message lands in the mailbox as the
+// assistant sent it for the principal, with the tagged address as its Reply-To, which is how the
+// poller records it as theirs.
 func (w *World) deliverAssistantMail() error {
 	section := w.assistantMailSeed
 	w.assistantMailSeed.Messages = nil
-	local, domain, _ := strings.Cut(cmp.Or(section.Address, DefaultAssistantMailbox), "@")
+	address := cmp.Or(section.Address, DefaultAssistantMailbox)
+	local, domain, _ := strings.Cut(address, "@")
 	tagged := local + "+" + cmp.Or(section.Tag, DefaultAssistantTag) + "@" + domain
 	now := w.Clock.Now()
 	for i, message := range section.Messages {
@@ -99,6 +102,13 @@ func (w *World) deliverAssistantMail() error {
 			if received.Before(now) {
 				return fmt.Errorf("assistant_mail.messages[%d]: received %s is before the case's clock, so it would never be triaged", i, message.Received)
 			}
+		}
+		if message.Sent {
+			w.assistantMail.DeliverTo(address, googlesim.Message{
+				ThreadID: message.ThreadID, From: "Assistant <" + address + ">", To: message.To, ReplyTo: tagged,
+				Subject: message.Subject, PlainText: message.Body, Received: received, Labels: []string{"SENT"},
+			})
+			continue
 		}
 		sender, err := mail.ParseAddress(message.From)
 		if err != nil {

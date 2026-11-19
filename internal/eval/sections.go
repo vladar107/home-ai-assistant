@@ -91,10 +91,13 @@ type assistantMailSection struct {
 
 // assistantMailMessage is one message to the eval principal's tagged address. Received defaults to
 // the case's clock and must not be earlier, since mail from before the mailbox started is never
-// triaged; DMARC is pass or fail, pass by default.
+// triaged; DMARC is pass or fail, pass by default. A Sent message is one the assistant sent for the
+// principal from the tagged address to To, such as the one that started a thread; it has no From
+// and no DMARC.
 type assistantMailMessage struct {
 	ThreadID string `json:"thread_id,omitempty"`
-	From     string `json:"from"`
+	Sent     bool   `json:"sent,omitempty"`
+	From     string `json:"from,omitempty"`
 	To       string `json:"to,omitempty"`
 	Subject  string `json:"subject"`
 	Body     string `json:"body"`
@@ -266,8 +269,13 @@ func validateAssistantMail(raw json.RawMessage) error {
 		return errors.New("messages: at least one message is required")
 	}
 	for i, message := range section.Messages {
-		if message.From == "" || message.Subject == "" || message.Body == "" {
-			return fmt.Errorf("messages[%d]: from, subject and body are required", i)
+		switch {
+		case message.Sent && (message.To == "" || message.From != "" || message.DMARC != ""):
+			return fmt.Errorf("messages[%d]: a sent message takes to, and no from or dmarc", i)
+		case !message.Sent && message.From == "":
+			return fmt.Errorf("messages[%d]: from is required", i)
+		case message.Subject == "" || message.Body == "":
+			return fmt.Errorf("messages[%d]: subject and body are required", i)
 		}
 		if message.Received != "" {
 			if err := validateTime(fmt.Sprintf("messages[%d].received", i), message.Received); err != nil {

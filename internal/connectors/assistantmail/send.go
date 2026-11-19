@@ -39,6 +39,9 @@ const (
 	bodyLimit = "at most about 2,000 characters"
 )
 
+// ReasonPossiblySent fails a send whose outcome Gmail left unknown, so it may have gone out.
+const ReasonPossiblySent = "possibly_sent"
+
 // sendDoneModel is the outcome the model reads; only the model needs the message id.
 const sendDoneModel = "Sent from the assistant mailbox (message id %s)."
 
@@ -223,15 +226,26 @@ func (s *Service) validateSend(arguments *sendArguments) error {
 	if n := utf8.RuneCountInString(arguments.Subject); n < 1 || n > maximumSubjectRunes {
 		return refusal{fmt.Sprintf("the subject must be 1 to %d characters", maximumSubjectRunes)}
 	}
-	arguments.Body = strings.ReplaceAll(arguments.Body, "\r\n", "\n")
-	if !utf8.ValidString(arguments.Body) || strings.ContainsFunc(arguments.Body, func(r rune) bool { return r != '\n' && r != '\t' && isControl(r) }) {
-		return refusal{"the body must be plain UTF-8 text without control characters"}
+	body, err := checkBody(arguments.Body, maximumBodyRunes, bodyLimit)
+	if err != nil {
+		return err
 	}
-	if strings.TrimSpace(arguments.Body) == "" || utf8.RuneCountInString(arguments.Body) > maximumBodyRunes {
-		return refusal{"the body must hold text, " + bodyLimit}
-	}
+	arguments.Body = body
 	arguments.ReplyToID = strings.TrimSpace(arguments.ReplyToID)
 	return nil
+}
+
+// checkBody returns the body with plain line ends, refusing control characters, and a body that is
+// empty or longer than limit runes, which limitText words.
+func checkBody(body string, limit int, limitText string) (string, error) {
+	body = strings.ReplaceAll(body, "\r\n", "\n")
+	if !utf8.ValidString(body) || strings.ContainsFunc(body, func(r rune) bool { return r != '\n' && r != '\t' && isControl(r) }) {
+		return "", refusal{"the body must be plain UTF-8 text without control characters"}
+	}
+	if strings.TrimSpace(body) == "" || utf8.RuneCountInString(body) > limit {
+		return "", refusal{"the body must hold text, " + limitText}
+	}
+	return body, nil
 }
 
 func isControl(r rune) bool {
@@ -524,24 +538,9 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 	if thread != nil && thread.messageID != "" {
 		threadID = thread.threadID
 	}
-	var sent gmail.MessageRef
-	err = s.call(ctx, func(access string) error {
-		var err error
-		sent, err = s.gmail.Send(ctx, access, raw, threadID)
-		return err
-	})
+	sent, err := s.deliver(ctx, record.PrincipalID, raw, threadID)
 	if err != nil {
-		// An approval deadline that ran out before the request left fails the same way; possibly
-		// sent is the safe report, since this cannot tell it from a request cut off in flight.
-		if gmailErr, ok := google.ProductError(err, "Gmail"); ok && gmailErr.Class == google.ErrorUnavailable {
-			s.logger.WarnContext(ctx, "assistant_mail.send.unknown", "principal_id", record.PrincipalID, "error", err)
-			return approval.Outcome{}, sendFailure(ctx, "possibly_sent", sendUnknown)
-		}
-		if _, ok := google.ProductError(err, "Gmail"); ok {
-			s.logger.WarnContext(ctx, "assistant_mail.send.refused", "principal_id", record.PrincipalID, "error", err)
-			return approval.Outcome{}, sendFailure(ctx, "refused", sendRefused)
-		}
-		return approval.Outcome{}, s.executionFailure(ctx, record.PrincipalID, err)
+		return approval.Outcome{}, err
 	}
 	// The message went out; failing to record it only costs reply routing and a first-contact mark.
 	recorded := context.WithoutCancel(ctx)
@@ -553,6 +552,30 @@ func (s *Service) ExecuteApproved(ctx context.Context, record approval.Record) (
 	}
 	s.logger.InfoContext(ctx, "assistant_mail.sent", "principal_id", record.PrincipalID, "reply", thread != nil)
 	return approval.Outcome{Text: fmt.Sprintf(sendDoneModel, sent.ID), UserText: sendDone.Format(ctx)}, nil
+}
+
+// deliver sends the message once, reporting a failure as the action error the send's outcome shows.
+func (s *Service) deliver(ctx context.Context, principalID string, raw []byte, threadID string) (gmail.MessageRef, error) {
+	var sent gmail.MessageRef
+	err := s.call(ctx, func(access string) error {
+		var err error
+		sent, err = s.gmail.Send(ctx, access, raw, threadID)
+		return err
+	})
+	if err == nil {
+		return sent, nil
+	}
+	// An approval deadline that ran out before the request left fails the same way; possibly sent is
+	// the safe report, since this cannot tell it from a request cut off in flight.
+	if gmailErr, ok := google.ProductError(err, "Gmail"); ok && gmailErr.Class == google.ErrorUnavailable {
+		s.logger.WarnContext(ctx, "assistant_mail.send.unknown", "principal_id", principalID, "error", err)
+		return gmail.MessageRef{}, sendFailure(ctx, ReasonPossiblySent, sendUnknown)
+	}
+	if _, ok := google.ProductError(err, "Gmail"); ok {
+		s.logger.WarnContext(ctx, "assistant_mail.send.refused", "principal_id", principalID, "error", err)
+		return gmail.MessageRef{}, sendFailure(ctx, "refused", sendRefused)
+	}
+	return gmail.MessageRef{}, s.executionFailure(ctx, principalID, err)
 }
 
 // executionFailure reports a send that failed before anything reached Gmail's send.

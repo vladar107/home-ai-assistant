@@ -70,6 +70,8 @@ type decision struct {
 	verdict verdict
 	why     string
 	forced  bool
+	// refusal is the code's reason for a message whose routine reply it refused.
+	refusal locale.Text
 }
 
 // triageState is what one principal's triage keeps between polls. triageMu guards running; the rest
@@ -85,6 +87,10 @@ type triageState struct {
 	headerFailures map[string]int
 	// runs are when the model ran for the principal in the last runWindow.
 	runs []time.Time
+	// repliesHeld is set once a notice that carried only routine replies was given up, or the
+	// principal had no chat, so they wait for the next notice of new mail instead of being tried
+	// again every poll.
+	repliesHeld bool
 }
 
 // allowRun reports whether another run fits maximumDailyRuns at now, and counts it when it does.
@@ -187,8 +193,14 @@ func (s *Service) triageTo(ctx context.Context, principalID string, state *triag
 	}
 	state.keepOnly(pending)
 	if len(pending) == 0 {
-		state.failures = 0
-		return "", nil
+		replies, err := s.repository.UnreportedRoutineReplies(ctx, principalID)
+		if err != nil {
+			return noticeFailed, err
+		}
+		if len(replies) == 0 || state.repliesHeld {
+			state.failures = 0
+			return "", nil
+		}
 	}
 	chatID, found, err := s.chats.ResolveActiveChat(ctx, principalID)
 	if err != nil {
@@ -196,7 +208,7 @@ func (s *Service) triageTo(ctx context.Context, principalID string, state *triag
 	}
 	if !found {
 		clear(state.decided)
-		state.failures = 0
+		state.failures, state.repliesHeld = 0, true
 		return s.settle(ctx, principalID, routeIDs(pending), noticeNoChat)
 	}
 	ctx, err = locale.ForPrincipal(ctx, s.languages, principalID)
@@ -263,7 +275,7 @@ func (s *Service) triageTo(ctx context.Context, principalID string, state *triag
 		return noticeFailed, err
 	}
 	if !found {
-		state.failures = 0
+		state.failures, state.repliesHeld = 0, true
 		return s.settleDecided(ctx, principalID, notice.covered, noticeNoChat, state)
 	}
 	if err := s.sender.SendPlainReply(ctx, chatID, 0, s.noticeText(ctx, &notice)); err != nil {
@@ -278,25 +290,48 @@ func (s *Service) triageTo(ctx context.Context, principalID string, state *triag
 			outcome = noticeAbandoned
 		}
 		state.failures = 0
+		state.repliesHeld = len(notice.covered) == 0
 		s.logger.WarnContext(ctx, "assistant_mail.notice.dropped", "principal_id", principalID, "outcome", outcome, "error", err)
 		return s.settleDecided(ctx, principalID, notice.covered, outcome, state)
 	}
-	state.failures = 0
+	state.failures, state.repliesHeld = 0, false
 	if s.notices != nil {
 		s.notices.keep(principalID, s.turnNotice(notice))
 	}
-	// The notice is in the chat, so marking its mail outlives a shutdown that has begun; otherwise
-	// the next poll announces it again.
+	// The notice is in the chat, so marking its mail and its replies outlives a shutdown that has
+	// begun; otherwise the next poll announces them again.
 	storeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), noticeStoreTimeout)
 	defer cancel()
+	if err := s.repository.MarkRoutineRepliesReported(storeCtx, principalID, notice.replyIDs(), s.now()); err != nil {
+		s.logger.WarnContext(ctx, "assistant_mail.routine.unmarked", "principal_id", principalID, "error", err)
+	}
 	return s.settleDecided(storeCtx, principalID, notice.covered, noticeSent, state)
 }
 
 // buildNotice reads the headers of the decided mail a notice lists, oldest first, and returns the
 // notice and the ids of the mail that needs nothing. A message gone from the mailbox is settled
-// unlisted, and past noticeListed messages the rest are only counted.
+// unlisted, and past noticeListed messages the rest are only counted. The notice also carries every
+// routine reply not yet reported, from its record.
 func (s *Service) buildNotice(ctx context.Context, principalID string, pending []Route, state *triageState) (pendingNotice, []string, error) {
 	notice := newPendingNotice()
+	replies, err := s.repository.UnreportedRoutineReplies(ctx, principalID)
+	if err != nil {
+		return pendingNotice{}, nil, err
+	}
+	for _, reply := range replies {
+		var arguments routineArguments
+		if err := json.Unmarshal(reply.Arguments, &arguments); err != nil {
+			s.logger.WarnContext(ctx, "assistant_mail.routine.unreadable", "principal_id", principalID)
+			continue
+		}
+		if len(notice.replied.entries) == noticeListed {
+			notice.replied.more++
+			continue
+		}
+		notice.replied.entries = append(notice.replied.entries, noticeEntry{
+			shown: shown{address: cleanAddress(arguments.To), verified: true}, at: reply.StartedAt, body: arguments.Body, sendID: reply.SendID, uncertain: reply.Uncertain,
+		})
+	}
 	var silent []string
 	for _, route := range pending {
 		decided, found := state.decided[route.GmailID]
@@ -321,7 +356,9 @@ func (s *Service) buildNotice(ctx context.Context, principalID string, pending [
 			return pendingNotice{}, nil, err
 		}
 		if found {
-			section.entries = append(section.entries, noticeEntry{shown: shownMessage(message), at: route.InternalDate, why: decided.why, forced: decided.forced})
+			section.entries = append(section.entries, noticeEntry{
+				shown: shownMessage(message), at: route.InternalDate, why: decided.why, forced: decided.forced, refusal: decided.refusal,
+			})
 		}
 	}
 	return notice, silent, nil
@@ -351,9 +388,11 @@ func (s *Service) triageHeaders(ctx context.Context, principalID, id string, sta
 	return gmail.Message{}, false, nil
 }
 
-// decide triages one thread's new messages in one model run that sees only the thread. A message
-// whose sender is not verified needs the user whatever the run says, and one the run never read is
-// listed as it arrived; when the run fails, its reply cannot be read, or the principal's runs reached
+// decide triages one thread's new messages in one model run that sees only the thread, and that may
+// send a routine reply while the principal has routine replies on. A message whose sender is not
+// verified needs the user whatever the run says, a message whose routine reply code refused needs
+// them with the code's reason unless the run listed it itself, and one the run never read is listed
+// as it arrived; when the run fails, its reply cannot be read, or the principal's runs reached
 // maximumDailyRuns, every message is listed as it arrived.
 func (s *Service) decide(ctx context.Context, principalID string, routes []Route, state *triageState) error {
 	var ids []string
@@ -384,11 +423,20 @@ func (s *Service) decide(ctx context.Context, principalID string, routes []Route
 		decideAll(state, ids, verdictUnsorted)
 		return nil
 	}
-	read := &readIDs{ids: make(map[string]bool)}
+	read, routine := &readIDs{ids: make(map[string]bool)}, newRoutineLog()
 	scope := tools.Scope{Tools: []string{toolList, toolRead}, Bind: func(ctx context.Context) context.Context {
-		return withThread(ctx, principalID, threadID, read)
+		return withThread(ctx, principalID, threadID, read, routine)
 	}}
-	text, errorKind, err := s.checker.RunConfined(tools.WithCallBudget(ctx, triageBudget), principalID, prompt.MailTriage(ids, ""), scope)
+	offered, err := s.routineOffered(ctx, principalID)
+	if err != nil {
+		return err
+	}
+	guidance := ""
+	if offered {
+		scope.Tools, scope.Writes = append(scope.Tools, toolReply), []string{toolReply}
+		guidance = s.routineText(principalID)
+	}
+	text, errorKind, err := s.checker.RunConfined(tools.WithCallBudget(ctx, triageBudget), principalID, prompt.MailTriage(ids, guidance), scope)
 	if err != nil && ctx.Err() != nil {
 		return err
 	}
@@ -408,12 +456,15 @@ func (s *Service) decide(ctx context.Context, principalID string, routes []Route
 	outcome := triageSilent
 	for _, id := range ids {
 		why, listed := needs[id]
+		refusal, refused := routine.refusal(id)
 		switch {
+		case listed && read.has(id):
+			state.decided[id] = decision{verdict: verdictNeeds, why: why, refusal: refusal}
+		case refused:
+			state.decided[id] = decision{verdict: verdictNeeds, refusal: refusal}
 		case !read.has(id):
 			// Mail the run never read, such as one past its call budget, is never settled on its word.
 			state.decided[id] = decision{verdict: verdictUnsorted}
-		case listed:
-			state.decided[id] = decision{verdict: verdictNeeds, why: why}
 		case unverified[id]:
 			state.decided[id] = decision{verdict: verdictNeeds, forced: true}
 		default:

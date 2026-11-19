@@ -65,5 +65,5 @@ func deliveryHeaders(message Message) []Header {
 			headers = append(headers, optional)
 		}
 	}
-	return headers
+	return append(headers, message.Extra...)
 }

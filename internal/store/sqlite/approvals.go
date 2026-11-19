@@ -462,10 +462,13 @@ func (s *Store) UnsentDirectApprovals(ctx context.Context, principalID string, t
 		s.db,
 		`SELECT `+approvalColumns+` FROM approvals
 		 WHERE principal_id = ? AND thread_id = ? AND mode = 'direct' AND status IN ('done', 'undone') AND message_id IS NULL AND expires_at > ?
+		   AND substr(request_id, 1, ?) <> ?
 		 ORDER BY created_at, rowid`,
 		principalID,
 		threadID,
 		formatTime(now),
+		len(approval.UnattendedRequest),
+		approval.UnattendedRequest,
 	)
 }
 

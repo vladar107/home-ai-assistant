@@ -39,9 +39,10 @@ func (c mailTriageChecker) RunConfined(ctx context.Context, principalID, message
 }
 
 // buildAssistantMail builds the mailbox poller with the mailbox's own OAuth client, which no
-// principal's Google connection shares, its list and read tools, and its send tool, which only
-// proposes, with the executor of confirmed sends. Notices of the mail that triage finds needs the
-// user reach only the principal's own chat, resolved from the allowlist at delivery.
+// principal's Google connection shares, its list and read tools, its send tool, which only
+// proposes, with the executor of confirmed sends, and the routine replies its triage may send.
+// Notices of the mail that triage finds needs the user reach only the principal's own chat,
+// resolved from the allowlist at delivery.
 func (a *Assembly) buildAssistantMail(ctx context.Context) error {
 	in := a.in
 	if in.AssistantMail == nil || !in.AssistantMail.Mailbox.Enabled {
@@ -67,6 +68,11 @@ func (a *Assembly) buildAssistantMail(ctx context.Context) error {
 	if a.exposures != nil {
 		mailConfig.Exposure = a.exposures
 	}
+	// Routine replies are recorded through the approval service's one entry point for an action
+	// made without asking; without the service, triage never sends.
+	if a.Approvals != nil {
+		mailConfig.Unattended = a.Approvals
+	}
 	// Triage reads each thread's new mail on the principal's own subscription, confined to that
 	// thread; without the engine, every new message is listed untriaged.
 	if a.Turns != nil {
@@ -78,7 +84,7 @@ func (a *Assembly) buildAssistantMail(ctx context.Context) error {
 	}
 	service.SetTelemetry(in.Telemetry)
 	if err := a.register(ctx, Connector{Module: service, Tools: []tools.Provider{service}, Executor: service, Switch: &SwitchSettings{
-		Switch: assistantmail.Switch, Unavailable: service.Unavailable, Address: service.Address,
+		Switch: assistantmail.Switch, Unavailable: service.Unavailable, Address: service.Address, Replies: &assistantmail.RoutineSwitch,
 	}}); err != nil {
 		return err
 	}

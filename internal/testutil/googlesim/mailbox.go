@@ -81,6 +81,14 @@ func (s *Simulator) ExpireHistoryBefore(mailbox, historyID string) {
 	s.historyOf(mailbox).expired = id
 }
 
+// SlowSends makes every send go out and answer only after the delay, so a client that gives up
+// sooner cannot tell whether it was sent; 0 answers at once again.
+func (s *Simulator) SlowSends(delay time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.slowSends = delay
+}
+
 // FailSends makes every send answer the status; 0 lets sends succeed again.
 func (s *Simulator) FailSends(status int) {
 	s.mu.Lock()
@@ -223,7 +231,15 @@ func (s *Simulator) serveSend(w http.ResponseWriter, r *http.Request, account st
 	s.identify(account, &message)
 	s.store(account, message)
 	s.sent = append(s.sent, SentMessage{Account: account, ID: message.ID, ThreadID: message.ThreadID, Raw: raw})
+	delay := s.slowSends
 	s.mu.Unlock()
+	if delay > 0 {
+		select {
+		case <-time.After(delay):
+		case <-r.Context().Done():
+			return
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"id": message.ID, "threadId": message.ThreadID, "labelIds": message.Labels})
 }
 

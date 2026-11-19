@@ -474,6 +474,33 @@ func TestTriageMailDeliversTheMailOnceAndTheNoticeIsTheReply(t *testing.T) {
 	}
 }
 
+// A sent message starts the principal's thread as the assistant's own, so a reply in it is triaged
+// with the routine-reply tool while the user has routine replies on.
+func TestTriageMailStartsAThreadWithASentMessage(t *testing.T) {
+	w := newTestWorld(t, worldConfig{user: User{Name: "Sam", Switches: map[string]bool{"assistant-mail-replies": true}}, sections: map[string]any{
+		SectionAssistantMail: assistantMailSection{Messages: []assistantMailMessage{
+			{Sent: true, ThreadID: "t1", To: "Venue Desk <desk@venue.example>", Subject: "Room booking", Body: "Please book the small room."},
+			{ThreadID: "t1", From: "Venue Desk <desk@venue.example>", Subject: "Re: Room booking", Body: "Booked, thanks.", Received: "2026-03-10T08:35"},
+		}},
+	}})
+
+	record := w.play(Step{TriageMail: true})
+	if len(record.Runs) != 1 {
+		t.Fatalf("runs = %d", len(record.Runs))
+	}
+	var offered []string
+	for _, definition := range record.Runs[0].Request.Tools.Definitions {
+		offered = append(offered, definition.Name)
+	}
+	if !slices.Equal(offered, []string{"assistant_mail_list", "assistant_mail_read", "assistant_mail_reply_routine"}) {
+		t.Fatalf("triage tools = %v", offered)
+	}
+	first, found, err := w.Store.FirstThreadRoute(t.Context(), "t1")
+	if err != nil || !found || first.Direction != "out" || first.PrincipalID != PrincipalID {
+		t.Fatalf("first route = %+v %v %v", first, found, err)
+	}
+}
+
 func TestThumbsDownStartsAReconsiderTurn(t *testing.T) {
 	w := newTestWorld(t, worldConfig{})
 	w.play(Step{Say: "what is two plus two"})

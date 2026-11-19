@@ -34,6 +34,11 @@ func newAssistantMailHarness(t *testing.T) (*conversationHarness, *controlledRun
 	h.provision("bob", "acct-bob-2222")
 	h.start()
 	h.pollAssistantMail()
+	// The first poll's triage must end before a test polls again, or that poll skips the principal
+	// whose triage is still running.
+	if err := h.assembly.AssistantMail.WaitTriage(h.ctx); err != nil {
+		t.Fatal(err)
+	}
 	return h, runtime, sim
 }
 

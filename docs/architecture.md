@@ -1656,7 +1656,8 @@ message by the tags found in `Delivered-To`, `To` and `Cc`, then by a thread the
 sent for a principal; anything else is recorded as unrouted and stays in Gmail's web
 interface. `assistant_mail_list` and `assistant_mail_read` read a principal's own routed
 messages, and `assistant_mail_send` is always a proposal that shows the full message, so
-nothing is sent before the user confirms it. A principal's "Assistant mailbox" switch in
+nothing is sent before the user confirms it, except the routine replies below, which triage
+sends in the assistant's own threads only while the user has them on. A principal's "Assistant mailbox" switch in
 `/settings` gates the notices and the tools. A refresh token Google rejects stops the
 poller and shows the mailbox as unavailable until the operator authorizes again.
 
@@ -1682,6 +1683,44 @@ mail is never silently dropped. Mail is marked notified only once its notice was
 or at once when nothing needed sending; the decisions of an undelivered notice are kept in
 memory, so the next polls retry the delivery without running the model again, until the
 abandon rule settles it. Spam is settled unseen and no longer counted in the notice.
+
+**Routine replies.** A principal's "Routine replies" switch (`assistant-mail-replies`, off by
+default, on the mailbox's `/settings` page) lets their triage runs answer routine mail in a
+thread the assistant started for them, without asking. Only then does the run's scope add
+`assistant_mail_reply_routine` (`reply_to_id`, `body`), named among the scope's writes, the
+one write tool a read-only run can be offered; chat turns and scheduled runs never see it,
+and the triage prompt carries its guidance: acknowledgements, thanks, confirming what the
+thread settled, or answers already in the thread, never money, personal data, documents,
+new commitments or dates, and `needs_you` when in doubt. Code then enforces everything. The
+answered message must be an inbound, non-spam route of the principal in the thread being
+triaged, and the thread's earliest route an outgoing one of the principal. Its single
+`From` must be the one address in the `To` and `Cc` of the principal's own sent messages in
+the thread, read back from Gmail at reply time since the store keeps no addresses; a thread
+the assistant wrote to more than one address is left to the user. Gmail's own topmost
+`Authentication-Results` (authserv-id `mx.google.com`) must have a `;`-delimited clause that
+is itself `dmarc=pass` for that domain, there must be no `Reply-To` other than the sender, a
+`Message-ID` to thread the reply on, and no sign of automated mail
+(`Auto-Submitted` other than `no`, `Precedence: bulk/list/junk`, `List-Id`, or a no-reply
+style sender). A stranger who joins the thread through forged `References` therefore gets
+nothing. The reply goes to that sender alone, no Cc, Bcc or attachment, as "Re: " and the
+subject of the assistant's first message, threaded like a confirmed reply, with a body of 1
+to 600 characters checked as `assistant_mail_send` checks one. In the same transaction as
+the send's start, `mail_routine_replies` takes one reply per thread ever (its own table, so
+pruning routes could never reset it) and three per principal per day, and `mail_sends`
+counts it toward the daily send limit; both switches are read again right before the send.
+The send runs through `approval.ActUnattended`, the
+approval service's one entry point for an action made without asking: it takes only this
+tool, runs the executor its caller passes, and records a direct action, done or failed,
+without Undo, whose arguments keep the recipient, the answered id, the subject and the
+whole body; such a record never appears in a "Done" message or in what a restart tells a
+conversation. A refused reply, or one that failed, lists its message in the notice with a
+reason code writes, unless the run listed it itself, or the refusal is the thread's limit
+while its earlier reply still waits to be reported. Every sent reply appears under "Replied
+for you" at the top of the next delivered notice, with its recipient and whole body, built
+from the records and never from the run's words; so does one that may have gone out (its
+send timed out or Gmail's answer was lost, a restart cut it off, or its record never
+finished), marked as maybe not sent. `reported_at` is set only once that notice was
+delivered, so a failed delivery or a crash keeps it for the next one.
 
 ### An MCP server
 

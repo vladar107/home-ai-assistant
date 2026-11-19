@@ -30,6 +30,8 @@ type triageRun struct {
 	offered   []string
 	guidance  string
 	call      func(name, arguments string) string
+	// callWithin calls a tool on the context given, such as one that ends sooner than its deadline.
+	callWithin func(ctx context.Context, name, arguments string) string
 }
 
 // asks reports whether the run was asked about the message.
@@ -71,13 +73,16 @@ func (c *triageChecker) RunConfined(ctx context.Context, principalID, message st
 	for _, definition := range set.Definitions {
 		run.offered = append(run.offered, definition.Name)
 	}
-	run.call = func(name, arguments string) string {
-		// The runtime calls tools back on a context of its own.
-		result, err := set.Executor.Execute(context.Background(), agentruntime.ToolCall{ID: "call", Name: name, Arguments: json.RawMessage(arguments)})
+	run.callWithin = func(ctx context.Context, name, arguments string) string {
+		result, err := set.Executor.Execute(ctx, agentruntime.ToolCall{ID: "call", Name: name, Arguments: json.RawMessage(arguments)})
 		if err != nil {
 			return "error: " + err.Error()
 		}
 		return result.Text
+	}
+	run.call = func(name, arguments string) string {
+		// The runtime calls tools back on a context of its own.
+		return run.callWithin(context.Background(), name, arguments)
 	}
 	c.mu.Lock()
 	c.runs = append(c.runs, run)
