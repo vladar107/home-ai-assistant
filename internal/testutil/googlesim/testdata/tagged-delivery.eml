@@ -1,0 +1,15 @@
+Delivered-To: assistant+test1@example.com
+Received: by 2001:db8::1 with SMTP id fake1lkb; Thu, 19 Nov 2026 03:46:42 -0800 (PST)
+Authentication-Results: mx.google.com; dkim=pass header.i=@example.org header.s=20260707 header.b="AbCd"; spf=pass (google.com: domain of sender@example.org designates 192.0.2.41 as permitted sender) smtp.mailfrom=sender@example.org; dmarc=pass (p=NONE sp=QUARANTINE dis=NONE) header.from=example.org
+Return-Path: <sender@example.org>
+Received: from mail-sor-f41.example.org (mail-sor-f41.example.org. [192.0.2.41]) by mx.google.com with SMTPS id fake2 for <assistant+test1@example.com> (Google Transport Security); Thu, 19 Nov 2026 03:46:42 -0800 (PST)
+From: Sam Sender <sender@example.org>
+Content-Type: text/plain; charset=us-ascii
+Content-Transfer-Encoding: 7bit
+Mime-Version: 1.0
+Subject: test email
+Message-Id: <test-1@example.org>
+Date: Thu, 19 Nov 2026 12:46:29 +0100
+To: assistant+test1@example.com
+
+test email with tag

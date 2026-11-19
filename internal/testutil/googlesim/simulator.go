@@ -1,6 +1,7 @@
 // Package googlesim is a loopback simulator of the Google endpoints the Google and Gmail connectors
 // use: the consent screen as a function a test calls, the token, revocation, and userinfo
-// endpoints with PKCE checks, and the read-only Gmail API over a set of mailboxes. It records every
+// endpoints with PKCE checks, and the Gmail API over a set of mailboxes: reads, history, and the
+// send the assistant's own mailbox uses through its separate OAuth client. It records every
 // request without tokens.
 package googlesim
 
@@ -28,12 +29,21 @@ const (
 	mailScope     = "https://www.googleapis.com/auth/gmail.readonly"
 	calendarScope = "https://www.googleapis.com/auth/calendar.readonly"
 	requested     = "openid email " + mailScope + " " + calendarScope
+
+	// AssistantClientID and AssistantClientSecret are the separate Desktop app client of the
+	// assistant's own mailbox, which asks for the mailbox scopes only and redirects to any
+	// loopback port.
+	AssistantClientID     = "assistant-client.apps.googleusercontent.com"
+	AssistantClientSecret = "assistant-client-secret"
+	sendScope             = "https://www.googleapis.com/auth/gmail.send"
 )
 
 // Grant is what the user leaves ticked on the consent screen.
 type Grant struct {
 	Mail     bool
 	Calendar bool
+	// Send is gmail.send, which only the assistant mailbox's client asks for.
+	Send bool
 }
 
 func (g Grant) scope() string {
@@ -44,7 +54,25 @@ func (g Grant) scope() string {
 	if g.Calendar {
 		scope += " " + calendarScope
 	}
+	if g.Send {
+		scope += " " + sendScope
+	}
 	return scope
+}
+
+func (g Grant) assistantScope() string {
+	var scopes []string
+	if g.Mail {
+		scopes = append(scopes, mailScope)
+	}
+	if g.Send {
+		scopes = append(scopes, sendScope)
+	}
+	return strings.Join(scopes, " ")
+}
+
+func hasScope(scope, want string) bool {
+	return slices.Contains(strings.Fields(scope), want)
 }
 
 type Message struct {
@@ -61,6 +89,22 @@ type Message struct {
 	// Charset, when set, is declared on both alternatives, whose text then holds bytes in it.
 	Charset     string
 	Attachments map[string]int
+
+	Cc                    string
+	ReplyTo               string
+	DeliveredTo           string
+	AuthenticationResults string
+	MessageID             string
+	InReplyTo             string
+	References            string
+	// Headers, when set, is the message's whole header block in order and spelling, served in
+	// place of headers made from the fields.
+	Headers []Header
+}
+
+type Header struct {
+	Name  string
+	Value string
 }
 
 type Request struct {
@@ -72,12 +116,15 @@ type Request struct {
 }
 
 type grant struct {
+	client    string
+	redirect  string
 	account   string
 	challenge string
 	scope     string
 }
 
 type token struct {
+	client  string
 	account string
 	scope   string
 }
@@ -98,18 +145,25 @@ type Simulator struct {
 	requests    []Request
 	counter     int
 	now         func() time.Time
+
+	histories       map[string]*history
+	historyPageSize int
+	failingSends    int
+	sent            []SentMessage
 }
 
 func New(t simt.T) *Simulator {
 	t.Helper()
 	sim := &Simulator{
-		t:         t,
-		mailboxes: make(map[string][]Message),
-		failing:   make(map[string]int),
-		codes:     make(map[string]grant),
-		refreshes: make(map[string]token),
-		accesses:  make(map[string]token),
-		subjects:  make(map[string]string),
+		t:               t,
+		mailboxes:       make(map[string][]Message),
+		failing:         make(map[string]int),
+		codes:           make(map[string]grant),
+		refreshes:       make(map[string]token),
+		accesses:        make(map[string]token),
+		subjects:        make(map[string]string),
+		histories:       make(map[string]*history),
+		historyPageSize: defaultHistoryPageSize,
 	}
 	sim.server = httptest.NewServer(http.HandlerFunc(sim.serve))
 	t.Cleanup(sim.server.Close)
@@ -151,6 +205,9 @@ func (s *Simulator) AddMailbox(account string, messages ...Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.mailboxes[account] = append(s.mailboxes[account], messages...)
+	for _, message := range messages {
+		s.addHistory(account, message.ID)
+	}
 }
 
 // ListNewestFirst makes a search list the newest matches first, as Gmail does, so a search with a
@@ -170,8 +227,9 @@ func (s *Simulator) FailMessage(id string, status int) {
 }
 
 // Consent plays the user on Google's consent screen for the given link: it checks the link the
-// connector built and returns the address the browser would be sent to. grantGmail false is the
-// products the user left ticked.
+// connector built and returns the address the browser would be sent to. granted is the products
+// the user left ticked. A link of the assistant mailbox's client is checked against what that
+// client asks for: gmail.readonly and gmail.send, either of which the user may untick.
 func (s *Simulator) Consent(link, account string, granted Grant) string {
 	s.t.Helper()
 	parsed, err := url.Parse(link)
@@ -179,17 +237,42 @@ func (s *Simulator) Consent(link, account string, granted Grant) string {
 		s.t.Fatalf("consent link: %v", err)
 	}
 	query := parsed.Query()
-	if query.Get("client_id") != ClientID || query.Get("redirect_uri") != RedirectURL || query.Get("scope") != requested || query.Get("include_granted_scopes") != "true" ||
-		query.Get("access_type") != "offline" || query.Get("code_challenge_method") != "S256" || query.Get("code_challenge") == "" || query.Get("state") == "" {
+	if query.Get("access_type") != "offline" || query.Get("code_challenge_method") != "S256" || query.Get("code_challenge") == "" || query.Get("state") == "" {
 		s.t.Fatalf("consent link carries unexpected parameters: %v", query)
 	}
-	scope := granted.scope()
+	client, redirect := query.Get("client_id"), query.Get("redirect_uri")
+	var scope string
+	switch client {
+	case AssistantClientID:
+		asked := strings.Fields(query.Get("scope"))
+		slices.Sort(asked)
+		if !loopbackRedirect(redirect) || !slices.Equal(asked, []string{mailScope, sendScope}) {
+			s.t.Fatalf("assistant consent link carries unexpected parameters: %v", query)
+		}
+		scope = granted.assistantScope()
+	default:
+		if client != ClientID || redirect != RedirectURL || query.Get("scope") != requested || query.Get("include_granted_scopes") != "true" || granted.Send {
+			s.t.Fatalf("consent link carries unexpected parameters: %v", query)
+		}
+		scope = granted.scope()
+	}
 	s.mu.Lock()
 	s.counter++
 	code := fmt.Sprintf("4/code-%d", s.counter)
-	s.codes[code] = grant{account: account, challenge: query.Get("code_challenge"), scope: scope}
+	s.codes[code] = grant{client: client, redirect: redirect, account: account, challenge: query.Get("code_challenge"), scope: scope}
 	s.mu.Unlock()
-	return RedirectURL + "?" + url.Values{"state": {query.Get("state")}, "code": {code}, "scope": {scope}}.Encode()
+	return redirect + "?" + url.Values{"state": {query.Get("state")}, "code": {code}, "scope": {scope}}.Encode()
+}
+
+// loopbackRedirect reports whether a Desktop app client may redirect to the address: plain HTTP
+// to the loopback interface on a port the app chose.
+func loopbackRedirect(redirect string) bool {
+	parsed, err := url.Parse(redirect)
+	if err != nil || parsed.Scheme != "http" || parsed.Port() == "" || parsed.RawQuery != "" {
+		return false
+	}
+	host := parsed.Hostname()
+	return host == "127.0.0.1" || host == "localhost" || host == "::1"
 }
 
 // Access issues an access token for the account with the products granted, as a finished consent
@@ -273,7 +356,8 @@ func (s *Simulator) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"sub": subject, "email": issued.account, "email_verified": true})
-	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/gmail/v1/users/me/"):
+	case (r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/gmail/v1/users/me/")) ||
+		(r.Method == http.MethodPost && r.URL.Path == "/gmail/v1/users/me/messages/send"):
 		s.serveGmail(w, r)
 	default:
 		http.NotFound(w, r)
@@ -281,10 +365,12 @@ func (s *Simulator) serve(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Simulator) serveToken(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil || r.PostForm.Get("client_id") != ClientID || r.PostForm.Get("client_secret") != ClientSecret {
+	secrets := map[string]string{ClientID: ClientSecret, AssistantClientID: AssistantClientSecret}
+	if err := r.ParseForm(); err != nil || secrets[r.PostForm.Get("client_id")] == "" || r.PostForm.Get("client_secret") != secrets[r.PostForm.Get("client_id")] {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid_client"})
 		return
 	}
+	client := r.PostForm.Get("client_id")
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.requests = append(s.requests, Request{Method: r.Method, Path: r.URL.Path, Query: url.Values{"grant_type": {r.PostForm.Get("grant_type")}}})
@@ -295,17 +381,17 @@ func (s *Simulator) serveToken(w http.ResponseWriter, r *http.Request) {
 		issued, exists := s.codes[code]
 		delete(s.codes, code)
 		challenge := sha256.Sum256([]byte(r.PostForm.Get("code_verifier")))
-		if !exists || base64.RawURLEncoding.EncodeToString(challenge[:]) != issued.challenge || r.PostForm.Get("redirect_uri") != RedirectURL {
+		if !exists || base64.RawURLEncoding.EncodeToString(challenge[:]) != issued.challenge || r.PostForm.Get("redirect_uri") != issued.redirect || issued.client != client {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_grant"})
 			return
 		}
 		account, scope = issued.account, issued.scope
 		s.counter++
 		refresh = fmt.Sprintf("refresh-%d", s.counter)
-		s.refreshes[refresh] = token{account: account, scope: scope}
+		s.refreshes[refresh] = token{client: client, account: account, scope: scope}
 	case "refresh_token":
 		issued := s.refreshes[r.PostForm.Get("refresh_token")]
-		if issued.account == "" {
+		if issued.account == "" || issued.client != client {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_grant"})
 			return
 		}
@@ -316,7 +402,7 @@ func (s *Simulator) serveToken(w http.ResponseWriter, r *http.Request) {
 	}
 	s.counter++
 	access := fmt.Sprintf("access-%d", s.counter)
-	s.accesses[access] = token{account: account, scope: scope}
+	s.accesses[access] = token{client: client, account: account, scope: scope}
 	body := map[string]any{"access_token": access, "expires_in": 3599, "scope": scope, "token_type": "Bearer"}
 	if refresh != "" {
 		body["refresh_token"] = refresh
@@ -340,12 +426,22 @@ func (s *Simulator) serveGmail(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": map[string]any{"code": 401}})
 		return
 	}
-	if !strings.Contains(issued.scope, mailScope) {
+	path := strings.TrimPrefix(r.URL.Path, "/gmail/v1/users/me/")
+	needed := mailScope
+	if r.Method == http.MethodPost {
+		needed = sendScope
+	}
+	if !hasScope(issued.scope, needed) {
 		writeJSON(w, http.StatusForbidden, map[string]any{"error": map[string]any{"code": 403}})
 		return
 	}
-	path := strings.TrimPrefix(r.URL.Path, "/gmail/v1/users/me/")
 	switch {
+	case r.Method == http.MethodPost:
+		s.serveSend(w, r, account)
+	case path == "history":
+		s.serveHistory(w, r, account)
+	case path == "profile":
+		s.serveProfile(w, account)
 	case path == "messages":
 		limit, _ := strconv.Atoi(r.URL.Query().Get("maxResults"))
 		var matches []map[string]string
@@ -374,7 +470,7 @@ func (s *Simulator) serveGmail(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, message := range mailbox {
 			if message.ID == id {
-				writeJSON(w, http.StatusOK, resource(message, r.URL.Query().Get("format")))
+				writeJSON(w, http.StatusOK, resource(message, r.URL.Query().Get("format"), r.URL.Query()["metadataHeaders"]))
 				return
 			}
 		}
@@ -393,12 +489,15 @@ func contains(values []string, want string) bool {
 	return false
 }
 
-func resource(message Message, format string) map[string]any {
-	headers := []map[string]string{
-		{"name": "From", "value": message.From},
-		{"name": "To", "value": message.To},
-		{"name": "Subject", "value": message.Subject},
-		{"name": "Date", "value": message.Received.Format(time.RFC1123Z)},
+// resource is the message as Gmail serves it. A metadata read with metadataHeaders keeps only the
+// headers named, matched without regard to case.
+func resource(message Message, format string, wanted []string) map[string]any {
+	headers := []map[string]string{}
+	for _, header := range messageHeaders(message) {
+		if format == "metadata" && len(wanted) > 0 && !slices.ContainsFunc(wanted, func(name string) bool { return strings.EqualFold(name, header.Name) }) {
+			continue
+		}
+		headers = append(headers, map[string]string{"name": header.Name, "value": header.Value})
 	}
 	payload := map[string]any{"mimeType": "multipart/mixed", "headers": headers}
 	if format == "full" {
@@ -420,6 +519,25 @@ func resource(message Message, format string) map[string]any {
 		"id": message.ID, "threadId": message.ThreadID, "labelIds": message.Labels, "snippet": message.Snippet,
 		"internalDate": strconv.FormatInt(message.Received.UnixMilli(), 10), "payload": payload,
 	}
+}
+
+// messageHeaders is the message's header block: its own when it has one, else the headers its
+// fields give, the optional ones only when set.
+func messageHeaders(message Message) []Header {
+	if len(message.Headers) > 0 {
+		return message.Headers
+	}
+	headers := []Header{{"From", message.From}, {"To", message.To}}
+	for _, optional := range []Header{
+		{"Cc", message.Cc}, {"Reply-To", message.ReplyTo}, {"Delivered-To", message.DeliveredTo},
+		{"Authentication-Results", message.AuthenticationResults}, {"Message-ID", message.MessageID},
+		{"In-Reply-To", message.InReplyTo}, {"References", message.References},
+	} {
+		if optional.Value != "" {
+			headers = append(headers, optional)
+		}
+	}
+	return append(headers, Header{"Subject", message.Subject}, Header{"Date", message.Received.Format(time.RFC1123Z)})
 }
 
 func bodyPart(mimeType, text, charset string) map[string]any {
