@@ -40,7 +40,12 @@ type Repository interface {
 	// NewestSeenInternalDate returns the internal date of the newest seen message, for recovering
 	// the poll position.
 	NewestSeenInternalDate(ctx context.Context) (time.Time, bool, error)
+	// Seen reports whether the message id was already recorded, by the poller or at send.
+	Seen(ctx context.Context, gmailID string) (bool, error)
 	HistoryCursor(ctx context.Context) (string, bool, error)
+	// HistoryCursorSavedAt returns when the history cursor was last saved, the point from which an
+	// expired cursor is recovered when no dated message was seen.
+	HistoryCursorSavedAt(ctx context.Context) (time.Time, bool, error)
 	SaveHistoryCursor(ctx context.Context, historyID string) error
 	// PendingNotices returns the principal's incoming routes not yet notified, oldest first. Spam
 	// routes are included; the caller decides how to show them.

@@ -263,6 +263,34 @@ func TestHistoryPagesTheMessagesAddedAfterTheStartID(t *testing.T) {
 	}
 }
 
+func TestListMessagesPageContinuesFromThePageToken(t *testing.T) {
+	sim := googlesim.New(t)
+	client, _ := mailboxClient(t, sim.URL(), sim.Client().Transport)
+	access := sim.Access(assistant, googlesim.Grant{Mail: true})
+	var delivered []string
+	for _, subject := range []string{"One", "Two", "Three"} {
+		delivered = append(delivered, sim.DeliverTo(assistant, googlesim.Message{From: "Shop <shop@example.org>", Subject: subject}))
+	}
+
+	var listed []string
+	token := ""
+	for pages := 1; ; pages++ {
+		page, err := client.ListMessagesPage(t.Context(), access, "in:anywhere", token, 2)
+		if err != nil || pages > 2 {
+			t.Fatalf("page %d = %+v, %v", pages, page, err)
+		}
+		for _, message := range page.Messages {
+			listed = append(listed, message.ID)
+		}
+		if token = page.NextPageToken; token == "" {
+			break
+		}
+	}
+	if !slices.Equal(listed, delivered) {
+		t.Fatalf("listed %v, delivered %v", listed, delivered)
+	}
+}
+
 func TestHistoryFromAnExpiredStartIDFailsDistinctly(t *testing.T) {
 	sim := googlesim.New(t)
 	client, _ := mailboxClient(t, sim.URL(), sim.Client().Transport)

@@ -6,6 +6,7 @@
 package googlesim
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -148,8 +149,10 @@ type Simulator struct {
 
 	histories       map[string]*history
 	historyPageSize int
-	failingSends    int
-	sent            []SentMessage
+	// unindexed is how many more searches leave each message out.
+	unindexed    map[string]int
+	failingSends int
+	sent         []SentMessage
 }
 
 func New(t simt.T) *Simulator {
@@ -158,6 +161,7 @@ func New(t simt.T) *Simulator {
 		t:               t,
 		mailboxes:       make(map[string][]Message),
 		failing:         make(map[string]int),
+		unindexed:       make(map[string]int),
 		codes:           make(map[string]grant),
 		refreshes:       make(map[string]token),
 		accesses:        make(map[string]token),
@@ -224,6 +228,14 @@ func (s *Simulator) FailMessage(id string, status int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.failing[id] = status
+}
+
+// IndexLate leaves the message out of the next searches, as Gmail's search does for a while
+// after a message arrives; history and reads still find it.
+func (s *Simulator) IndexLate(id string, searches int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.unindexed[id] = searches
 }
 
 // Consent plays the user on Google's consent screen for the given link: it checks the link the
@@ -418,6 +430,18 @@ func (s *Simulator) serveGmail(w http.ResponseWriter, r *http.Request) {
 	mailbox := append([]Message(nil), s.mailboxes[account]...)
 	newestFirst := s.newestFirst
 	failing := s.failing[strings.TrimPrefix(r.URL.Path, "/gmail/v1/users/me/messages/")]
+	var unindexed map[string]bool
+	if r.URL.Path == "/gmail/v1/users/me/messages" {
+		unindexed = make(map[string]bool)
+		for id, searches := range s.unindexed {
+			unindexed[id] = true
+			if searches <= 1 {
+				delete(s.unindexed, id)
+			} else {
+				s.unindexed[id] = searches - 1
+			}
+		}
+	}
 	s.mu.Unlock()
 	if newestFirst {
 		slices.SortStableFunc(mailbox, func(a, b Message) int { return b.Received.Compare(a.Received) })
@@ -444,11 +468,22 @@ func (s *Simulator) serveGmail(w http.ResponseWriter, r *http.Request) {
 		s.serveProfile(w, account)
 	case path == "messages":
 		limit, _ := strconv.Atoi(r.URL.Query().Get("maxResults"))
+		// The page token is the number of matches the earlier pages held.
+		offset, err := strconv.Atoi(cmp.Or(r.URL.Query().Get("pageToken"), "0"))
+		if err != nil || offset < 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": map[string]any{"code": 400}})
+			return
+		}
 		var matches []map[string]string
 		now := s.clock()
 		more := false
+		skip := offset
 		for _, message := range mailbox {
-			if !matchesQuery(message, r.URL.Query().Get("q"), now) {
+			if unindexed[message.ID] || !matchesQuery(message, r.URL.Query().Get("q"), now) {
+				continue
+			}
+			if skip > 0 {
+				skip--
 				continue
 			}
 			if limit > 0 && len(matches) == limit {
@@ -459,7 +494,7 @@ func (s *Simulator) serveGmail(w http.ResponseWriter, r *http.Request) {
 		}
 		body := map[string]any{"messages": matches, "resultSizeEstimate": len(matches)}
 		if more {
-			body["nextPageToken"] = "next"
+			body["nextPageToken"] = strconv.Itoa(offset + len(matches))
 		}
 		writeJSON(w, http.StatusOK, body)
 	case strings.HasPrefix(path, "messages/"):

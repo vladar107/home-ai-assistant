@@ -110,7 +110,8 @@ func (c *Client) do(request *http.Request, access string, out any) error {
 	return nil
 }
 
-type messageList struct {
+// MessageList is one page of a search: the matching ids, and the token of the next page.
+type MessageList struct {
 	Messages []struct {
 		ID string `json:"id"`
 	} `json:"messages"`
@@ -118,12 +119,22 @@ type messageList struct {
 	ResultSizeEstimate int    `json:"resultSizeEstimate"`
 }
 
-func (c *Client) ListMessages(ctx context.Context, access, query string, limit int) (messageList, error) {
-	var list messageList
-	err := c.get(ctx, access, "/gmail/v1/users/me/messages", url.Values{
+func (c *Client) ListMessages(ctx context.Context, access, query string, limit int) (MessageList, error) {
+	return c.ListMessagesPage(ctx, access, query, "", limit)
+}
+
+// ListMessagesPage lists one page of a search, the first when pageToken is empty, else the one
+// the previous page's NextPageToken names.
+func (c *Client) ListMessagesPage(ctx context.Context, access, query, pageToken string, limit int) (MessageList, error) {
+	values := url.Values{
 		"q":          {query},
 		"maxResults": {strconv.Itoa(limit)},
-	}, &list)
+	}
+	if pageToken != "" {
+		values.Set("pageToken", pageToken)
+	}
+	var list MessageList
+	err := c.get(ctx, access, "/gmail/v1/users/me/messages", values, &list)
 	return list, err
 }
 

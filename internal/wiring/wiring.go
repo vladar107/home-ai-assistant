@@ -21,6 +21,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/chatgpt"
 	"github.com/vladar107/home-ai-assistant/internal/collection"
 	"github.com/vladar107/home-ai-assistant/internal/connection"
+	"github.com/vladar107/home-ai-assistant/internal/connectors/assistantmail"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/bus"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/calendar"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/flights"
@@ -83,6 +84,7 @@ type Telemetry interface {
 	events.Telemetry
 	web.Telemetry
 	flights.Telemetry
+	assistantmail.Telemetry
 	chart.Telemetry
 	history.Telemetry
 	judgment.Recorder
@@ -172,6 +174,8 @@ type Inputs struct {
 	Grafana *grafana.Config
 	Bus     *bus.Config
 	MCP     *mcp.Config
+	// AssistantMail is the assistant's own mailbox; nil or disabled leaves it out.
+	AssistantMail *AssistantMailConfig
 	// ParcelSources maps a principal to the Home Assistant config entry IDs that are theirs; an
 	// entry belongs to at most one principal, and an unassigned entry is never read.
 	ParcelSources map[string][]string
@@ -275,6 +279,7 @@ type Assembly struct {
 	Grafana       *grafana.Service
 	Bus           *bus.Service
 	MCP           *mcp.Service
+	AssistantMail *assistantmail.Service
 	Routes        *routes.Service
 	Locations     *userlocation.Service
 	Memory        *usermemory.Service
@@ -1093,6 +1098,9 @@ func (a *Assembly) buildConnectors(ctx context.Context) error {
 		a.tripState.google, a.tripState.calendar = googleService, calendarService
 		a.gmail = gmailService
 		a.Google = googleService
+	}
+	if err := a.buildAssistantMail(ctx); err != nil {
+		return err
 	}
 	if a.NS != nil {
 		if err := a.register(ctx, Connector{Module: a.NS, Tools: []tools.Provider{a.NS}, Switch: &SwitchSettings{Switch: ns.Switch}}); err != nil {

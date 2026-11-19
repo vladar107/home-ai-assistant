@@ -184,12 +184,37 @@ func TestAssistantMailHistoryCursorRoundTrip(t *testing.T) {
 	if _, found, err := store.HistoryCursor(ctx); err != nil || found {
 		t.Fatalf("empty cursor = %v %v", found, err)
 	}
-	for _, id := range []string{"100", "250"} {
+	if _, found, err := store.HistoryCursorSavedAt(ctx); err != nil || found {
+		t.Fatalf("empty cursor time = %v %v", found, err)
+	}
+	for i, id := range []string{"100", "250"} {
+		at := mailNow.Add(time.Duration(i) * time.Hour)
+		store.SetClock(func() time.Time { return at })
 		if err := store.SaveHistoryCursor(ctx, id); err != nil {
 			t.Fatal(err)
 		}
 		if got, found, err := store.HistoryCursor(ctx); err != nil || !found || got != id {
 			t.Fatalf("cursor = %q %v %v, want %q", got, found, err, id)
+		}
+		if got, found, err := store.HistoryCursorSavedAt(ctx); err != nil || !found || !got.Equal(at) {
+			t.Fatalf("cursor time = %v %v %v, want %v", got, found, err, at)
+		}
+	}
+}
+
+func TestAssistantMailSeenCoversPolledAndSentMessages(t *testing.T) {
+	t.Parallel()
+	store, ctx := openTestStore(t)
+
+	if _, err := store.RecordSeen(ctx, "m1", mailNow, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordSent(ctx, "m2", "t2", "alice", mailNow, mailNow); err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]bool{"m1": true, "m2": true, "m3": false} {
+		if seen, err := store.Seen(ctx, id); err != nil || seen != want {
+			t.Fatalf("seen %s = %v %v, want %v", id, seen, err, want)
 		}
 	}
 }

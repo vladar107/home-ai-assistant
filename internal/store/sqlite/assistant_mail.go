@@ -144,6 +144,14 @@ func (s *Store) NewestSeenInternalDate(ctx context.Context) (time.Time, bool, er
 	return parsed, true, nil
 }
 
+func (s *Store) Seen(ctx context.Context, gmailID string) (bool, error) {
+	var seen bool
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM seen_mail WHERE gmail_id = ?)`, gmailID).Scan(&seen); err != nil {
+		return false, fmt.Errorf("read seen mail: %w", err)
+	}
+	return seen, nil
+}
+
 func (s *Store) HistoryCursor(ctx context.Context) (string, bool, error) {
 	var historyID string
 	err := s.db.QueryRowContext(ctx, `SELECT history_id FROM mail_cursor WHERE id = 1`).Scan(&historyID)
@@ -156,11 +164,27 @@ func (s *Store) HistoryCursor(ctx context.Context) (string, bool, error) {
 	return historyID, true, nil
 }
 
+func (s *Store) HistoryCursorSavedAt(ctx context.Context) (time.Time, bool, error) {
+	var savedAt string
+	err := s.db.QueryRowContext(ctx, `SELECT updated_at FROM mail_cursor WHERE id = 1`).Scan(&savedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("read mail history cursor time: %w", err)
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, savedAt)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("parse mail history cursor time: %w", err)
+	}
+	return parsed, true, nil
+}
+
 func (s *Store) SaveHistoryCursor(ctx context.Context, historyID string) error {
 	if _, err := s.db.ExecContext(ctx,
 		`INSERT INTO mail_cursor (id, history_id, updated_at) VALUES (1, ?, ?)
 		 ON CONFLICT (id) DO UPDATE SET history_id = excluded.history_id, updated_at = excluded.updated_at`,
-		historyID, formatTime(time.Now())); err != nil {
+		historyID, formatTime(s.clock())); err != nil {
 		return fmt.Errorf("save mail history cursor: %w", err)
 	}
 	return nil

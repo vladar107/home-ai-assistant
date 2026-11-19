@@ -98,6 +98,7 @@ type Telemetry struct {
 	tasks                        taskInstruments
 	watches                      watchInstruments
 	flights                      flightInstruments
+	assistantMail                assistantMailInstruments
 	inboundEvents                metric.Int64Counter
 }
 
@@ -470,6 +471,9 @@ func (t *Telemetry) createBusinessInstruments(meter metric.Meter) error {
 		return err
 	}
 	if err := t.createFlightInstruments(meter); err != nil {
+		return err
+	}
+	if err := t.createAssistantMailInstruments(meter); err != nil {
 		return err
 	}
 	return t.createEventInstruments(meter)
