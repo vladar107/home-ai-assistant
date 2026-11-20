@@ -457,7 +457,6 @@ func (c *Client) sendPlainCard(ctx context.Context, chatID, replyTo int64, text 
 		return Message{}, err
 	}
 	setPlainText(params, text)
-	setNoLinkPreview(params)
 	var message Message
 	err := c.inTab(ctx, chatID, true, func(ctx context.Context) error {
 		params.Del("message_thread_id")
@@ -480,7 +479,6 @@ func (c *Client) editPlainCard(ctx context.Context, chatID, messageID int64, tex
 		return err
 	}
 	setPlainText(params, text)
-	setNoLinkPreview(params)
 	_, err := execute[json.RawMessage](c, ctx, "editMessageText", params)
 	if isNotModified(err) {
 		return nil

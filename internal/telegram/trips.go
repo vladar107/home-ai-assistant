@@ -264,7 +264,6 @@ func (c *Client) sendPlainIn(ctx context.Context, chatID int64, text string, key
 		return Message{}, err
 	}
 	setPlainText(params, text)
-	setNoLinkPreview(params)
 	var message Message
 	err := c.inTab(ctx, chatID, fallback, func(ctx context.Context) error {
 		params.Del("message_thread_id")
@@ -295,17 +294,12 @@ func (c *Client) EditPlain(ctx context.Context, chatID, messageID int64, text st
 		"message_id": {strconv.FormatInt(messageID, 10)},
 	}
 	setPlainText(params, text)
-	setNoLinkPreview(params)
 	_, err := execute[json.RawMessage](c, ctx, "editMessageText", params)
 	var apiErr *apiError
 	if errors.As(err, &apiErr) && apiErr.NotModified() {
 		return nil
 	}
 	return err
-}
-
-func setNoLinkPreview(params url.Values) {
-	params.Set("link_preview_options", `{"is_disabled":true}`)
 }
 
 type plainEditor interface {

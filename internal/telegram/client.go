@@ -1346,6 +1346,11 @@ func execute[T any](c *Client, ctx context.Context, method string, params url.Va
 	if params == nil {
 		params = make(url.Values)
 	}
+	// Telegram's crawler fetches a linked page with no tap unless previews are disabled; a hidden-label
+	// link in a model reply could leak data that way.
+	if (method == "sendMessage" || method == "editMessageText") && !params.Has("link_preview_options") {
+		params.Set("link_preview_options", `{"is_disabled":true}`)
+	}
 
 	request, err := http.NewRequestWithContext(
 		ctx,
