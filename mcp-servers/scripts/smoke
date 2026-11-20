@@ -11,17 +11,21 @@ stack_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck disable=SC1090
 source "$env_file"
 [[ ${MCP_ROOT:-} =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "MCP_ROOT must be an absolute NAS path" >&2; exit 2; }
+python_image=$(sed -n 's/^ARG PYTHON_IMAGE=//p' "$stack_root/marktplaats/Dockerfile")
+[[ $python_image =~ ^[a-z0-9./:_-]+@sha256:[0-9a-f]{64}$ ]] || { echo "PYTHON_IMAGE in marktplaats/Dockerfile must be pinned by digest" >&2; exit 2; }
 
-# The client check runs in a throwaway container on home-mcp, the path a real client takes; the
-# probes run inside the server container, to show what the third-party code can reach.
+# The client check runs in a throwaway container on home-mcp, the path a real client takes. It uses
+# the plain Python base image the server is built on, never the server image, so no third-party
+# code joins home-mcp; client.py needs only the standard library. The probes run inside the
+# server container, to show what the third-party code can reach.
 remote_command=$(cat <<REMOTE
 set -Eeuo pipefail
 cd '$MCP_ROOT/deploy'
 sudo docker compose ps
-image=\$(sudo docker inspect --format '{{.Config.Image}}' "\$(sudo docker compose ps -q marktplaats-server)")
 echo '--- client path'
-sudo docker run --rm --network home-mcp --read-only --cap-drop ALL --user 1000:1000 "\$image" \
-  python -c "\$(cat smoke/client.py)" http://marktplaats:8000/mcp
+sudo docker run --rm --network home-mcp --read-only --cap-drop ALL \
+  --security-opt no-new-privileges --user 1000:1000 '$python_image' \
+  python -I -S -c "\$(cat smoke/client.py)" http://marktplaats:8000/mcp
 echo '--- isolation'
 sudo docker compose exec -T marktplaats-server \
   python -c "\$(cat smoke/probes.py)" marktplaats-egress 8888 www.marktplaats.nl
