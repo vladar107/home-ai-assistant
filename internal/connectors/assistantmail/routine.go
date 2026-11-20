@@ -76,9 +76,10 @@ var routineDefinition = tools.Definition{
 var routineHeaders = []string{"From", "Reply-To", "Subject", "Message-ID", "References", "Authentication-Results", "Auto-Submitted", "Precedence", "List-Id"}
 
 var (
-	// gmailDMARCPass reads a whole result clause that is a passing DMARC result, and the domain it
-	// is for.
-	gmailDMARCPass = regexp.MustCompile(`(?i)^dmarc\s*=\s*pass\b.*?\bheader\.from\s*=\s*([^\s;()]+)`)
+	// dmarcClause reads a result clause, with its comments and quoted strings left out, that is a
+	// DMARC result, and gmailDMARCPass one that is passing, with the domain it is for.
+	dmarcClause    = regexp.MustCompile(`(?i)^dmarc\s*=`)
+	gmailDMARCPass = regexp.MustCompile(`(?i)^dmarc\s*=\s*pass\s(?:.*\s)?header\.from\s*=(\S+)`)
 	// separators are left out of a local part before it is compared with the no-reply names.
 	separators = strings.NewReplacer("-", "", "_", "", ".", "")
 )
@@ -465,19 +466,63 @@ func dmarcPassed(message gmail.Message, domain string) bool {
 			return false
 		}
 	}
-	clauses := strings.Split(results[0], ";")
-	if !strings.EqualFold(strings.TrimSpace(clauses[0]), "mx.google.com") {
+	clauses, ok := resultClauses(results[0])
+	if !ok || !strings.EqualFold(strings.TrimSpace(clauses[0]), "mx.google.com") {
 		return false
 	}
-	// A clause is read whole from its start, so "dmarc=pass" written inside another clause's
-	// comment counts for nothing.
+	dmarcResults, passed := 0, false
 	for _, clause := range clauses[1:] {
-		passed := gmailDMARCPass.FindStringSubmatch(strings.TrimSpace(clause))
-		if passed != nil && strings.EqualFold(strings.TrimSuffix(passed[1], "."), domain) {
-			return true
+		clause = strings.TrimSpace(clause)
+		if !dmarcClause.MatchString(clause) {
+			continue
+		}
+		dmarcResults++
+		result := gmailDMARCPass.FindStringSubmatch(clause)
+		passed = result != nil && strings.EqualFold(strings.TrimSuffix(result[1], "."), domain)
+	}
+	return dmarcResults == 1 && passed
+}
+
+// resultClauses splits an Authentication-Results value into its clauses at the semicolons outside
+// comments and quoted strings, where a sender can write text of its own, such as its envelope
+// address. Each comment and quoted string reads as one space, and an unterminated one fails the
+// value.
+func resultClauses(value string) ([]string, bool) {
+	var clauses []string
+	var clause strings.Builder
+	depth, quoted, escaped := 0, false, false
+	for _, r := range value {
+		switch {
+		case escaped:
+			escaped = false
+		case r == '\\' && (quoted || depth > 0):
+			escaped = true
+		case quoted:
+			if r == '"' {
+				quoted = false
+				clause.WriteByte(' ')
+			}
+		case r == '(':
+			depth++
+		case r == ')' && depth > 0:
+			depth--
+			if depth == 0 {
+				clause.WriteByte(' ')
+			}
+		case depth > 0:
+		case r == '"':
+			quoted = true
+		case r == ';':
+			clauses = append(clauses, clause.String())
+			clause.Reset()
+		default:
+			clause.WriteRune(r)
 		}
 	}
-	return false
+	if quoted || depth > 0 {
+		return nil, false
+	}
+	return append(clauses, clause.String()), true
 }
 
 // automated reports mail a program sent: Auto-Submitted other than no, a bulk, list or junk

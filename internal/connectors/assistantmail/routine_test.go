@@ -290,6 +290,27 @@ func TestARoutineReplyIsSentRecordedAndReportedInFull(t *testing.T) {
 	h.expectLogsWithout(carol, "partner.example.net", "Thank you", tableSubject)
 }
 
+// Gmail's Authentication-Results in the form it has for mail from a Gmail address, comments and
+// all, verifies the sender.
+func TestARoutineReplyTrustsGmailsOwnDMARCPass(t *testing.T) {
+	t.Parallel()
+	const someone = "someone@gmail.com"
+	h := newRoutineHarness(t)
+	thread, sentID := h.startThread(tableSubject, []string{someone})
+	h.answer(thread, sentID, googlesim.Message{
+		From: "Someone <" + someone + ">",
+		AuthenticationResults: "mx.google.com; dkim=pass header.i=@gmail.com header.s=20260707 header.b=c5dYF2v7; " +
+			"spf=pass (google.com: domain of someone@gmail.com designates 209.85.220.41 as permitted sender) smtp.mailfrom=someone@gmail.com; " +
+			"dmarc=pass (p=NONE sp=QUARANTINE dis=NONE) header.from=gmail.com; dara=pass header.i=@gmail.com",
+	})
+	h.replying(thanks, newOnes, nil)
+	h.poll()
+
+	if sent := h.sim.Sent(); len(sent) != 2 || sent[1].ThreadID != thread || h.metrics.routine("sent") != 1 {
+		t.Fatalf("sent %+v, routine replies %d", sent, h.metrics.routine("sent"))
+	}
+}
+
 // A reply the run wrote too long is refused, and the run's next, short one is sent; the message is
 // then not listed, since it was answered.
 func TestARoutineReplyCanBeWrittenAgainWithinTheRun(t *testing.T) {
@@ -409,6 +430,30 @@ func TestARoutineReplyIsRefusedUnlessEveryRuleHolds(t *testing.T) {
 		})},
 		{name: "a passing result inside another clause", outcome: "sender", why: sender, arrange: answered(func(message *googlesim.Message) {
 			message.AuthenticationResults = "mx.google.com; spf=pass (google.com: dmarc=pass header.from=partner.example.net) smtp.mailfrom=" + carol
+		})},
+		{name: "a passing result forged in a quoted envelope sender", outcome: "sender", why: sender, arrange: answered(func(message *googlesim.Message) {
+			message.AuthenticationResults = `mx.google.com; spf=pass smtp.mailfrom="x;dmarc=pass header.from=partner.example.net y"@attacker.example.org`
+		})},
+		{name: "a passing result after a semicolon in a comment", outcome: "sender", why: sender, arrange: answered(func(message *googlesim.Message) {
+			message.AuthenticationResults = "mx.google.com; spf=pass (google.com: x; dmarc=pass header.from=partner.example.net) smtp.mailfrom=" + carol
+		})},
+		{name: "a passing result hidden by nested and escaped parentheses", outcome: "sender", why: sender, arrange: answered(func(message *googlesim.Message) {
+			message.AuthenticationResults = `mx.google.com; spf=pass (google.com: (x) \) ; dmarc=pass header.from=partner.example.net ) smtp.mailfrom=` + carol
+		})},
+		{name: "a passing result after a quote inside a comment", outcome: "sender", why: sender, arrange: answered(func(message *googlesim.Message) {
+			message.AuthenticationResults = `mx.google.com; spf=pass (google.com: " x) smtp.mailfrom="y; dmarc=pass header.from=partner.example.net z"@attacker.example.org`
+		})},
+		{name: "an unterminated quoted string", outcome: "sender", why: sender, arrange: answered(func(message *googlesim.Message) {
+			message.AuthenticationResults = `mx.google.com; dmarc=pass header.from=partner.example.net; spf=pass smtp.mailfrom="x@attacker.example.org`
+		})},
+		{name: "an unterminated comment", outcome: "sender", why: sender, arrange: answered(func(message *googlesim.Message) {
+			message.AuthenticationResults = "mx.google.com; dmarc=pass header.from=partner.example.net; spf=pass (google.com: x smtp.mailfrom=" + carol
+		})},
+		{name: "a quoted header.from followed by another domain", outcome: "sender", why: sender, arrange: answered(func(message *googlesim.Message) {
+			message.AuthenticationResults = `mx.google.com; dmarc=pass header.from="attacker.example.org" partner.example.net`
+		})},
+		{name: "two DMARC results", outcome: "sender", why: sender, arrange: answered(func(message *googlesim.Message) {
+			message.AuthenticationResults = "mx.google.com; dmarc=pass header.from=partner.example.net; dmarc=pass header.from=elsewhere.example.org"
 		})},
 		{name: "a thread written to several people", outcome: "group", why: group, arrange: func(h *routineHarness) (string, string) {
 			thread, sentID := h.startThread(tableSubject, []string{carol}, "host@partner.example.net")
