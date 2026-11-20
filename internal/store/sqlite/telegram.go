@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 )
@@ -66,7 +67,31 @@ func (s *Store) BootstrapConfiguredPrincipals(ctx context.Context, configured []
 				existingPrincipalID,
 				principal.ID,
 			)
+		default:
+			if _, err := tx.ExecContext(
+				ctx,
+				`UPDATE telegram_allowlist SET revoked_at = NULL WHERE telegram_user_id = ? AND revoked_at IS NOT NULL`,
+				principal.TelegramUserID,
+			); err != nil {
+				return fmt.Errorf("restore configured Telegram identity: %w", err)
+			}
 		}
+	}
+
+	configuredIDs := make([]any, 0, len(configured))
+	for _, principal := range configured {
+		configuredIDs = append(configuredIDs, principal.TelegramUserID)
+	}
+	// A clock behind allowed_at must not trip the revocation CHECK and stop the start.
+	if _, err := tx.ExecContext(
+		ctx,
+		`UPDATE telegram_allowlist
+		 SET revoked_at = max(allowed_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+		 WHERE revoked_at IS NULL
+		     AND telegram_user_id NOT IN (?`+strings.Repeat(", ?", len(configuredIDs)-1)+`)`,
+		configuredIDs...,
+	); err != nil {
+		return fmt.Errorf("revoke unconfigured Telegram identities: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {

@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -128,5 +129,127 @@ func TestResolveActiveChatRefusesAnAmbiguousPrincipal(t *testing.T) {
 
 	if _, found, err := store.ResolveActiveChat(ctx, "alice"); err != nil || found {
 		t.Fatalf("a principal with two active identities resolved a chat: %v %v", found, err)
+	}
+}
+
+var (
+	configuredAlice = identity.ConfiguredPrincipal{ID: "alice", DisplayName: "Alice", TelegramUserID: 101}
+	configuredBob   = identity.ConfiguredPrincipal{ID: "bob", DisplayName: "Bob", TelegramUserID: 202}
+)
+
+func bootstrap(t *testing.T, store *Store, configured ...identity.ConfiguredPrincipal) {
+	t.Helper()
+	if err := store.BootstrapConfiguredPrincipals(t.Context(), configured); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func allowlistTimes(t *testing.T, store *Store, telegramUserID int64) (allowedAt string, revokedAt sql.NullString) {
+	t.Helper()
+	if err := store.db.QueryRowContext(t.Context(),
+		`SELECT allowed_at, revoked_at FROM telegram_allowlist WHERE telegram_user_id = ?`, telegramUserID,
+	).Scan(&allowedAt, &revokedAt); err != nil {
+		t.Fatal(err)
+	}
+	return allowedAt, revokedAt
+}
+
+// The users file is the whole allowlist: a user taken out of it loses their chat at the next start,
+// and putting them back restores it.
+func TestBootstrapRevokesAUserRemovedFromTheUsersFile(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "state", "assistant.sqlite")
+	store := openMigratedStore(t, path)
+	bootstrap(t, store, configuredAlice, configuredBob)
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	bootstrap(t, store, configuredAlice)
+
+	if _, found, err := store.ResolveActiveChat(ctx, "bob"); err != nil || found {
+		t.Fatalf("a removed user resolved a chat: %v %v", found, err)
+	}
+	if authorization, err := store.ResolveActivePrincipal(ctx, 202); err != nil || authorization.Status != identity.AuthorizationStatusAllowlistRevoked {
+		t.Fatalf("a removed user's authorization = %+v %v", authorization, err)
+	}
+	if chat, found, err := store.ResolveActiveChat(ctx, "alice"); err != nil || !found || chat != 101 {
+		t.Fatalf("a configured user's chat = %d %v %v", chat, found, err)
+	}
+
+	bootstrap(t, store, configuredAlice, configuredBob)
+	if chat, found, err := store.ResolveActiveChat(ctx, "bob"); err != nil || !found || chat != 202 {
+		t.Fatalf("a user configured again resolved chat %d %v %v", chat, found, err)
+	}
+}
+
+func TestBootstrapRevokesRestoresAndRevokesAgain(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := openMigratedStore(t, filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
+	bootstrap(t, store, configuredAlice, configuredBob)
+	allowedAt, _ := allowlistTimes(t, store, 202)
+
+	for round := range 2 {
+		bootstrap(t, store, configuredAlice)
+		if _, revokedAt := allowlistTimes(t, store, 202); !revokedAt.Valid || revokedAt.String < allowedAt {
+			t.Fatalf("round %d: revoked_at = %+v, allowed_at %s", round, revokedAt, allowedAt)
+		}
+		if _, found, err := store.ResolveActiveChat(ctx, "bob"); err != nil || found {
+			t.Fatalf("round %d: a revoked user resolved a chat: %v %v", round, found, err)
+		}
+
+		bootstrap(t, store, configuredAlice, configuredBob)
+		restoredAllowedAt, revokedAt := allowlistTimes(t, store, 202)
+		if revokedAt.Valid || restoredAllowedAt != allowedAt {
+			t.Fatalf("round %d: restored row allowed_at %s revoked_at %+v, want allowed_at %s", round, restoredAllowedAt, revokedAt, allowedAt)
+		}
+		if chat, found, err := store.ResolveActiveChat(ctx, "bob"); err != nil || !found || chat != 202 {
+			t.Fatalf("round %d: a restored user resolved chat %d %v %v", round, chat, found, err)
+		}
+	}
+	if _, revokedAt := allowlistTimes(t, store, 101); revokedAt.Valid {
+		t.Fatalf("a configured user was revoked at %s", revokedAt.String)
+	}
+}
+
+// A row allowed under a clock that ran ahead must still be revocable, or the start would fail on
+// the allowlist's CHECK.
+func TestBootstrapRevokesAUserAllowedAheadOfTheClock(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := openMigratedStore(t, filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
+	bootstrap(t, store, configuredAlice, configuredBob)
+	const ahead = "2999-01-01T00:00:00.000Z"
+	if _, err := store.db.ExecContext(ctx, `UPDATE telegram_allowlist SET allowed_at = ? WHERE telegram_user_id = 202`, ahead); err != nil {
+		t.Fatal(err)
+	}
+
+	bootstrap(t, store, configuredAlice)
+	if _, revokedAt := allowlistTimes(t, store, 202); revokedAt.String != ahead {
+		t.Fatalf("revoked_at = %+v, want %s", revokedAt, ahead)
+	}
+	if _, found, err := store.ResolveActiveChat(ctx, "bob"); err != nil || found {
+		t.Fatalf("a revoked user resolved a chat: %v %v", found, err)
+	}
+}
+
+func TestBootstrapRefusesAnIdentityMappedToAnotherPrincipal(t *testing.T) {
+	t.Parallel()
+	store := openMigratedStore(t, filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
+	bootstrap(t, store, configuredAlice, configuredBob)
+
+	impostor := identity.ConfiguredPrincipal{ID: "carol", DisplayName: "Carol", TelegramUserID: 202}
+	if err := store.BootstrapConfiguredPrincipals(t.Context(), []identity.ConfiguredPrincipal{configuredAlice, impostor}); err == nil {
+		t.Fatal("an identity mapped to another principal was remapped")
+	}
+	if _, revokedAt := allowlistTimes(t, store, 202); revokedAt.Valid {
+		t.Fatalf("a refused bootstrap revoked bob at %s", revokedAt.String)
 	}
 }

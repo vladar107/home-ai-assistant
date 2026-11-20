@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
-	"github.com/vladar107/home-ai-assistant/internal/identity"
+	"github.com/vladar107/home-ai-assistant/internal/testutil"
 	"github.com/vladar107/home-ai-assistant/internal/turn"
 	"github.com/vladar107/home-ai-assistant/internal/watch"
 )
@@ -303,8 +303,17 @@ func TestAgentWatchCountsUnreadableAnswersAsFailures(t *testing.T) {
 // each principal runs one check at a time, and at most two run at once.
 func TestAgentChecksRunInTheBackground(t *testing.T) {
 	a := newAgentEngine(t)
-	if err := a.store.BootstrapConfiguredPrincipals(a.ctx, []identity.ConfiguredPrincipal{{ID: "carol", DisplayName: "Carol", TelegramUserID: 303}}); err != nil {
-		t.Fatal(err)
+	// The users file holds two users and bootstrapping it revokes everyone else, so a third
+	// principal is added behind the store.
+	db := testutil.OpenDB(t, a.path)
+	for _, statement := range []string{
+		`INSERT INTO principals (id, display_name) VALUES ('carol', 'Carol')`,
+		`INSERT INTO telegram_identities (telegram_user_id) VALUES (303)`,
+		`INSERT INTO telegram_allowlist (telegram_user_id, principal_id) VALUES (303, 'carol')`,
+	} {
+		if _, err := db.ExecContext(a.ctx, statement); err != nil {
+			t.Fatal(err)
+		}
 	}
 	a.clock.Set(t, "2026-09-28 10:00")
 	a.create("alice", watchID, agentSpec())
@@ -339,6 +348,28 @@ func TestAgentChecksRunInTheBackground(t *testing.T) {
 	}
 	if principals := a.checks.ran(); len(principals) != 4 || !sameStarts(principals[2:], "alice", "carol") {
 		t.Fatalf("checks started for %v, want alice's second and carol's next", principals)
+	}
+}
+
+// A principal no longer on the allowlist has no checks run, so a removed user's watches spend
+// nothing on their subscription.
+func TestAgentChecksSkipARevokedPrincipal(t *testing.T) {
+	a := newAgentEngine(t)
+	db := testutil.OpenDB(t, a.path)
+	if _, err := db.ExecContext(a.ctx, `UPDATE telegram_allowlist SET revoked_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE principal_id = 'bob'`); err != nil {
+		t.Fatal(err)
+	}
+	a.clock.Set(t, "2026-09-28 10:00")
+	a.create("alice", watchID, agentSpec())
+	a.create("bob", "0000000000000003", agentSpec())
+	a.checks.answer(verdict(false, "€180", "Still €180."))
+
+	a.at("2026-09-28 10:00")
+	a.waitStarted(1)
+	a.waitFinished()
+	a.service.Cycle(a.ctx)
+	if principals := a.checks.ran(); len(principals) != 1 || principals[0] != "alice" {
+		t.Fatalf("checks started for %v, want alice's only", principals)
 	}
 }
 

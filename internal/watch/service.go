@@ -426,6 +426,12 @@ func (s *Service) check(ctx context.Context, watch Watch, now time.Time, cache *
 	if !active || now.Before(occurrence.Start) || now.After(occurrence.End) || watch.MutedOn == occurrence.Date {
 		return
 	}
+	if _, found, err := s.chats.ResolveActiveChat(ctx, watch.PrincipalID); err != nil || !found {
+		if err != nil && ctx.Err() == nil {
+			s.logger.WarnContext(ctx, "watch.cycle.failed", "stage", "chat", "principal_id", watch.PrincipalID, "watch_id", watch.ID, "error", err)
+		}
+		return
+	}
 	if watch.TravelPause && s.travelingAt(ctx, cache, watch.PrincipalID, watch.ID, now) {
 		return
 	}
