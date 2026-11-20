@@ -312,10 +312,10 @@ func (s *Service) TurnLine(ctx context.Context, principalID string) (string, err
 	}
 	builder.WriteString(" (" + strings.Join(details, "; ") + ")")
 	if fix.VenueTitle != "" {
-		builder.WriteString(", at " + oneLine(fix.VenueTitle))
+		builder.WriteString(", at " + strconv.Quote(oneLine(fix.VenueTitle)))
 	}
 	if near := s.describe(ctx, fix); near != "" {
-		builder.WriteString(", near " + near)
+		builder.WriteString(", near " + strconv.Quote(near))
 	}
 	builder.WriteString(".")
 	if fix.Live(now) {

@@ -158,7 +158,7 @@ func TestTurnLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 12:15 UTC is 14:15 in Amsterdam.
-	want := "User's location: 52.16612, 4.48105 (±15 m; live until 14:15, updated 40 s ago), at Cafe Zuid, near Stationsplein 1, Leiden."
+	want := `User's location: 52.16612, 4.48105 (±15 m; live until 14:15, updated 40 s ago), at "Cafe Zuid", near "Stationsplein 1, Leiden".`
 	if line != want {
 		t.Fatalf("line = %q, want %q", line, want)
 	}

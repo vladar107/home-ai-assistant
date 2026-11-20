@@ -88,7 +88,7 @@ func TestSharedPinIsAcknowledgedWithoutATurnAndInformsTheNextOne(t *testing.T) {
 	clock.Set(t, "2026-09-30T12:07:00Z")
 	message := h.askTurn(runtime, 2, 101, "pharmacy nearby?")
 	for _, want := range []string{
-		"[system] User's location: 52.16612, 4.48105 (±15 m; shared 2 min ago), near Stationsplein 1, Leiden.",
+		`[system] User's location: 52.16612, 4.48105 (±15 m; shared 2 min ago), near "Stationsplein 1, Leiden".`,
 		"[system] Current local time:", "pharmacy nearby?",
 	} {
 		if !strings.Contains(message, want) {
@@ -129,7 +129,7 @@ func TestVenueShareNamesTheVenue(t *testing.T) {
 	update.Message.Location = nil
 	h.push(update)
 	h.wantReply(101, 1, "📍 Got it, near Kerkstraat 2, Leiden. Ask me anything about it.")
-	if message := h.askTurn(runtime, 2, 101, "hi"); !strings.Contains(message, ", at Cafe Zuid, near Kerkstraat 2, Leiden.") {
+	if message := h.askTurn(runtime, 2, 101, "hi"); !strings.Contains(message, `, at "Cafe Zuid", near "Kerkstraat 2, Leiden".`) {
 		t.Fatalf("turn message = %q", message)
 	}
 }

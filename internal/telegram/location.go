@@ -24,10 +24,11 @@ const (
 )
 
 var (
-	LocationDisabledReply = locale.T("Location sharing is not enabled on this assistant.", "Передача местоположения на этом ассистенте не включена.")
-	LocationRefusedReply  = locale.T("I could not read that location, so I did not keep it.", "Не удалось прочитать это местоположение, поэтому оно не сохранено.")
-	LocationSharedLine    = locale.T("Your latest shared location is used in your conversation until it expires; only the latest one is kept, and nothing is kept once it expires or you forget it. Places you save by name are kept until you delete them, and a day more so you can undo it, and are only ever saved when you ask.", "Твоё последнее переданное местоположение используется в твоём разговоре, пока не истечёт срок; хранится только последнее, и ничего не хранится после истечения срока или после того, как ты его забудешь. Места, которые ты сохраняешь по названию, хранятся, пока ты их не удалишь, и ещё сутки, чтобы это можно было отменить, и сохраняются только по твоей просьбе.")
-	LocationNotSharedLine = locale.T("Share a location or a live location in this chat to ask about places, buses, and weather near you.", "Передай местоположение или трансляцию местоположения в этом чате, чтобы спрашивать о местах, автобусах и погоде рядом с тобой.")
+	LocationDisabledReply  = locale.T("Location sharing is not enabled on this assistant.", "Передача местоположения на этом ассистенте не включена.")
+	LocationRefusedReply   = locale.T("I could not read that location, so I did not keep it.", "Не удалось прочитать это местоположение, поэтому оно не сохранено.")
+	LocationForwardedReply = locale.T("I only keep your own location. Share it from the attachment menu.", "Я сохраняю только твоё собственное местоположение. Отправь его через меню вложений.")
+	LocationSharedLine     = locale.T("Your latest shared location is used in your conversation until it expires; only the latest one is kept, and nothing is kept once it expires or you forget it. Places you save by name are kept until you delete them, and a day more so you can undo it, and are only ever saved when you ask.", "Твоё последнее переданное местоположение используется в твоём разговоре, пока не истечёт срок; хранится только последнее, и ничего не хранится после истечения срока или после того, как ты его забудешь. Места, которые ты сохраняешь по названию, хранятся, пока ты их не удалишь, и ещё сутки, чтобы это можно было отменить, и сохраняются только по твоей просьбе.")
+	LocationNotSharedLine  = locale.T("Share a location or a live location in this chat to ask about places, buses, and weather near you.", "Передай местоположение или трансляцию местоположения в этом чате, чтобы спрашивать о местах, автобусах и погоде рядом с тобой.")
 
 	locationName          = locale.T("Location", "Местоположение")
 	locationSharedState   = locale.T("shared", "передано")
@@ -53,6 +54,9 @@ type LocationController interface {
 func (s *Service) processLocation(ctx context.Context, message *Message, principalID string) (processingResult, string, error) {
 	if s.locations == nil {
 		return s.sendLocationReply(ctx, message, principalID, "disabled", LocationDisabledReply.Format(ctx))
+	}
+	if message.Forwarded() {
+		return s.sendLocationReply(ctx, message, principalID, "forwarded", LocationForwardedReply.Format(ctx))
 	}
 	fix := locationFix(principalID, message, false)
 	if err := fix.Validate(); err != nil {
@@ -97,7 +101,7 @@ func (s *Service) processEdit(ctx context.Context, message *Message) (processing
 
 func (s *Service) sendLocationReply(ctx context.Context, message *Message, principalID, reason, reply string) (processingResult, string, error) {
 	result := processingResult{event: "telegram.location.shared", reason: reason, principalID: principalID}
-	if reason == "disabled" || reason == "invalid" {
+	if reason == "disabled" || reason == "invalid" || reason == "forwarded" {
 		result.event = "telegram.location.refused"
 	}
 	if err := s.client.SendReply(ctx, message.Chat.ID, message.MessageID, reply); err != nil {
