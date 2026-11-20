@@ -8,7 +8,16 @@ import (
 
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
+
+	"github.com/vladar107/home-ai-assistant/internal/clip"
 )
+
+// maximumTextBytes bounds the reduced text at the size of the largest page the web connector
+// downloads, because a short link can expand to a long address and grow the text past its source.
+const maximumTextBytes = 2 << 20
+
+// maximumLinkBytes matches the longest address the web connector fetches.
+const maximumLinkBytes = 2048
 
 // skippedElements hold no text a reader of the page would see, or only site furniture and
 // controls: menus, forms, embedded frames, and code.
@@ -76,18 +85,24 @@ type reducer struct {
 	base *url.URL
 	mail bool
 	text strings.Builder
+	// full is set once the text reaches maximumTextBytes; the walk then stops.
+	full bool
 	// breaks is the number of line breaks owed before the next text, so that nested and adjacent
 	// block elements produce one separation between them rather than one each.
 	breaks int
 }
 
 func (r *reducer) write(text string) {
-	if strings.TrimSpace(text) == "" && r.breaks > 0 {
+	if r.full || strings.TrimSpace(text) == "" && r.breaks > 0 {
 		return
 	}
 	if r.breaks > 0 {
-		r.text.WriteString(strings.Repeat("\n", r.breaks))
+		text = strings.Repeat("\n", r.breaks) + text
 		r.breaks = 0
+	}
+	if room := maximumTextBytes - r.text.Len(); len(text) >= room {
+		text = clip.Bytes(text, room)
+		r.full = true
 	}
 	r.text.WriteString(text)
 }
@@ -97,6 +112,9 @@ func (r *reducer) lineBreak(count int) {
 }
 
 func (r *reducer) walk(node *html.Node, preformatted bool) {
+	if r.full {
+		return
+	}
 	switch node.Type {
 	case html.TextNode:
 		text := node.Data
@@ -143,15 +161,18 @@ func (r *reducer) walk(node *html.Node, preformatted bool) {
 	case html.CommentNode, html.DoctypeNode:
 		return
 	}
-	for child := node.FirstChild; child != nil; child = child.NextSibling {
+	for child := node.FirstChild; child != nil && !r.full; child = child.NextSibling {
 		r.walk(child, preformatted)
 	}
 }
 
 func (r *reducer) link(node *html.Node, preformatted bool) {
 	start := r.text.Len()
-	for child := node.FirstChild; child != nil; child = child.NextSibling {
+	for child := node.FirstChild; child != nil && !r.full; child = child.NextSibling {
 		r.walk(child, preformatted)
+	}
+	if r.full {
+		return
 	}
 	text := strings.TrimSpace(r.text.String()[start:])
 	target := r.resolve(attribute(node, "href"))
@@ -166,7 +187,8 @@ func (r *reducer) link(node *html.Node, preformatted bool) {
 }
 
 // resolve returns a link's absolute http or https address, or nothing for anchors on the same
-// page, script links, mail links, and anything else the model could not fetch.
+// page, script links, mail links, addresses too long to fetch, and anything else the model could
+// not fetch.
 func (r *reducer) resolve(href string) string {
 	href = strings.TrimSpace(href)
 	if href == "" || strings.HasPrefix(href, "#") {
@@ -183,7 +205,10 @@ func (r *reducer) resolve(href string) string {
 		return ""
 	}
 	parsed.User = nil
-	return parsed.String()
+	if target := parsed.String(); len(target) <= maximumLinkBytes {
+		return target
+	}
+	return ""
 }
 
 func hidden(node *html.Node) bool {

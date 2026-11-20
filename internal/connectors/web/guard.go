@@ -27,6 +27,7 @@ var (
 	errTooManyRedirects = errors.New("the address redirected too many times")
 	errUnresolvable     = errors.New("the address could not be resolved")
 	errTooLarge         = errors.New("the response exceeds the download limit")
+	errURLTooLong       = errors.New("the address is too long")
 )
 
 // Resolver looks up the addresses of a host name; *net.Resolver satisfies it.
@@ -133,11 +134,15 @@ func newGuard(resolver Resolver, dial DialFunc) *guard {
 	return g
 }
 
-// checkURL refuses what the dialer cannot see: the scheme, credentials in the address, and a
-// port the host name alone would not imply.
+// checkURL refuses what the dialer cannot see: the scheme, credentials in the address, a port
+// the host name alone would not imply, and an address longer than one the model may ask for,
+// which would otherwise become the base of every link on the page.
 func checkURL(target *url.URL) error {
 	if target == nil || (target.Scheme != "http" && target.Scheme != "https") || target.User != nil || target.Hostname() == "" {
 		return errUnsupportedURL
+	}
+	if len(target.String()) > maximumURLBytes {
+		return errURLTooLong
 	}
 	switch target.Port() {
 	case "", "80", "443":
@@ -238,6 +243,8 @@ func failureText(err error) string {
 		return "Only http and https addresses on the standard ports, without a user name or password, can be fetched."
 	case errors.Is(err, errTooManyRedirects):
 		return fmt.Sprintf("That address redirected more than %d times, so it was not followed.", maximumRedirect)
+	case errors.Is(err, errURLTooLong):
+		return fmt.Sprintf("That address, or one it redirected to, is longer than %d characters, so it was not followed.", maximumURLBytes)
 	case errors.Is(err, errUnresolvable):
 		return "That address's host name could not be found."
 	case errors.Is(err, context.DeadlineExceeded), isTimeout(err):

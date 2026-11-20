@@ -335,6 +335,26 @@ func TestFetchPageRefusesTheHomeNetwork(t *testing.T) {
 	}
 }
 
+func TestFetchPageRefusesARedirectToAnOverLongAddress(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "")
+	landing := "http://public.test/landing?q="
+	atLimit := landing + strings.Repeat("a", 2048-len(landing))
+	f.serve("public.test/landing", "text/html; charset=utf-8", []byte("<p>Landing page</p>"))
+	f.route("public.test/to-long", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, atLimit+"a", http.StatusFound)
+	})
+	f.route("public.test/to-limit", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, atLimit, http.StatusFound)
+	})
+
+	wantError(t, f.fetch(map[string]any{"url": "http://public.test/to-long"}), "longer than 2048 characters")
+	if logs := f.logs.String(); !strings.Contains(logs, "error_class=url_too_long") {
+		t.Fatalf("the refusal was not logged by class:\n%s", logs)
+	}
+	wantText(t, f.fetch(map[string]any{"url": "http://public.test/to-limit"}), "Landing page")
+}
+
 func TestFetchPageReducesHTML(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, "")

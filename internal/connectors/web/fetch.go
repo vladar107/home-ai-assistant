@@ -275,6 +275,8 @@ func errorClass(err error) string {
 		return "unsupported_url"
 	case errors.Is(err, errTooManyRedirects):
 		return "too_many_redirects"
+	case errors.Is(err, errURLTooLong):
+		return "url_too_long"
 	case errors.Is(err, errUnresolvable):
 		return "unresolvable"
 	case errors.Is(err, context.DeadlineExceeded), isTimeout(err):
