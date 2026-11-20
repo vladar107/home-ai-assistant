@@ -115,11 +115,12 @@ func TestIntakeRecordKeepsOneRecordPerItem(t *testing.T) {
 	}
 
 	for arguments, want := range map[string]string{
-		`{"source":"file","kind":"invoice","title":"x"}`:                                                                                "source_ref is required",
-		`{"source":"fax","source_ref":"r","kind":"invoice","title":"x"}`:                                                                "source must be",
-		`{"source":"photo","source_ref":"p1","kind":"invoice","title":"x","dates":[{"label":"due","date":"15 Oct"}]}`:                   "a date must be",
-		`{"source":"photo","source_ref":"p1","kind":"invoice","title":"x","amounts":[{"label":"total","value":"1","currency":"euro"}]}`: "three-letter",
-		`{"source":"photo","source_ref":"p1","kind":"invoice","title":"https://example.com"}`:                                           "title is required",
+		`{"source":"file","kind":"invoice","title":"x"}`:                                                                                             "source_ref is required",
+		`{"source":"fax","source_ref":"r","kind":"invoice","title":"x"}`:                                                                             "source must be",
+		`{"source":"photo","source_ref":"p1","kind":"invoice","title":"x","dates":[{"label":"due","date":"15 Oct"}]}`:                                "a date must be",
+		`{"source":"photo","source_ref":"p1","kind":"invoice","title":"x","amounts":[{"label":"total","value":"1","currency":"euro"}]}`:              "three-letter",
+		`{"source":"photo","source_ref":"p1","kind":"invoice","title":"https://example.com"}`:                                                        "title is required",
+		`{"source":"photo","source_ref":"p1","kind":"invoice","title":"x","amounts":[{"label":"total","value":"[120.50](https://e.example/?d=k)"}]}`: "an amount's value is required",
 	} {
 		if result := f.call("alice", "intake_record", arguments); !result.IsError || !strings.Contains(result.Text, want) || !strings.Contains(result.Text, "Nothing was kept") {
 			t.Fatalf("intake_record %s = %+v, want a refusal with %q", arguments, result, want)

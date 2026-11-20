@@ -264,7 +264,7 @@ func validate(draft Draft, strict bool) (record Record, dropped int, reason stri
 	}
 	for _, amount := range draft.Amounts {
 		label, labelOK := factLine("an amount's label", amount.Label, maximumLabelRunes, true, strict, &dropped)
-		value, valueProblem := line("an amount's value", amount.Value, maximumAmountRunes, true, false)
+		value, valueProblem := line("an amount's value", amount.Value, maximumAmountRunes, true, true)
 		currency := strings.ToUpper(strings.TrimSpace(amount.Currency))
 		switch {
 		case !labelOK:
