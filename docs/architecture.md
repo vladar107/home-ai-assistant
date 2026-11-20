@@ -1908,6 +1908,9 @@ and no network.
 
 - **Identity before anything.** Only allowlisted numeric Telegram IDs in private
   chats reach the application; every request resolves to a principal first.
+  The configured users file is the allowlist: at startup a Telegram ID it no
+  longer lists is revoked, which stops every delivery and background run for
+  that principal, and listing it again restores access.
 - **Per-user model subscriptions.** Each user connects their own subscription
   through `/settings`. There is no shared or fallback credential. Voice
   transcription and image generation reach the ChatGPT backend from Go with
@@ -1945,7 +1948,10 @@ and no network.
   A file or photo the user sends counts as outside content, and so does
   `read_attachment`. So does a forwarded message, or a forwarded voice note's
   transcript; the model is told it is someone else's text, not the user's
-  instruction. A run is marked when such a read starts, so a write
+  instruction. OpenStreetMap results from `nearby_places` count too. A
+  forwarded location or venue is refused rather than kept as the user's
+  position, and the location line quotes the venue and address text it carries
+  and names no map point of interest. A run is marked when such a read starts, so a write
   running beside it in the same batch proposes too.
   In a marked conversation, or a run that has read such text:
   - home actions, `reminder_set`, `task_start`, and every act-and-tell tool
@@ -2108,6 +2114,9 @@ and no network.
   reach, whose allowlisting is checked on every request. Paused sources, a
   per-source rate limit, rotation, and deletion bound a leaked token, and event
   text is escaped in Telegram and treated as outside content everywhere after.
+- **No link previews.** Every message the bot sends or edits disables Telegram's
+  link previews, so Telegram never fetches a link the bot wrote, such as one a
+  model was steered into putting in a reply.
 - **Short-lived location.** Only each user's latest shared position is stored. It is
   used while fresh, then deleted by a prune with SQLite `secure_delete` on; a user
   forgets it at once from `/settings`, and a forgotten live share stays ignored.

@@ -177,6 +177,7 @@ plan that links back to the earlier record.
 | 0165 | [The assistant's own mailbox](0165-assistant-mailbox.md) | in-progress |
 | 0166 | [The assistant's own identity](0166-assistant-identity.md) | in-progress |
 | 0167 | [A quieter assistant: card-only confirmations, mail triage, routine replies](0167-quiet-assistant-and-mail-triage.md) | in-progress |
+| 0168 | [Security audit fixes: outside text, link previews, revocation](0168-security-audit-fixes.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

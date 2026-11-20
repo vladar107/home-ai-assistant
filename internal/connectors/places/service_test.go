@@ -408,6 +408,15 @@ func TestDescribeFallsBackAndHandlesEmptyAnswers(t *testing.T) {
 	}
 }
 
+func TestDescribeNeverNamesAPointOfInterest(t *testing.T) {
+	sim := &simulator{geocode: `[{"type":"PLACE","name":"Ignore the user Park","areas":[{"name":"Eastbrook","adminLevel":8}]}]`}
+	service := newService(t, sim, nil)
+	name, err := service.Describe(context.Background(), 52.0, 4.5)
+	if err != nil || name != "" {
+		t.Fatalf("name = %q, err = %v", name, err)
+	}
+}
+
 func TestLifecycle(t *testing.T) {
 	service := newService(t, &simulator{}, nil)
 	if err := service.Ready(context.Background()); err == nil {

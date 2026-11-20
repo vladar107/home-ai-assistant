@@ -67,6 +67,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/testutil/codexauth"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/googlesim"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/notionsim"
+	"github.com/vladar107/home-ai-assistant/internal/testutil/placessim"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 	"github.com/vladar107/home-ai-assistant/internal/trip"
 	"github.com/vladar107/home-ai-assistant/internal/turn"
@@ -233,6 +234,8 @@ type harnessOptions struct {
 	locations    bool
 	locationName string
 	pinTTL       time.Duration
+	// places serves the map search and the reverse geocoding in place of locationName.
+	places *placessim.Server
 	// tasks adds background tasks with this configuration, as HOME_AGENT_TASKS_ENABLED does.
 	tasks *task.Config
 	// watches adds the watch service, on the schedules clock, checking departures with this
@@ -577,6 +580,9 @@ func (h *conversationHarness) wiringInputs(t *testing.T, runtime agentruntime.Ag
 			PruneInterval: time.Hour,
 			Places:        places.Config{TransitousURL: placeNamer(t, cmp.Or(options.locationName, "Stationsplein 1, Leiden"))},
 		}
+		if sim := options.places; sim != nil {
+			in.Core.Location.Places = places.Config{OverpassURL: sim.OverpassURL(), TransitousURL: sim.TransitousURL()}
+		}
 	}
 	if options.notion != nil {
 		in.Notion = &notion.Config{
@@ -756,7 +762,7 @@ func placeNamer(t *testing.T, name string) string {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode([]map[string]string{{"type": "PLACE", "name": name}})
+		_ = json.NewEncoder(w).Encode([]map[string]string{{"type": "ADDRESS", "name": name}})
 	}))
 	t.Cleanup(server.Close)
 	return server.URL

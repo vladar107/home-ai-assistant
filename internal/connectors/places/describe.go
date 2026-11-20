@@ -39,7 +39,9 @@ type geocodeMatch struct {
 	Areas       []geocodeArea `json:"areas"`
 }
 
-var matchRank = map[string]int{"ADDRESS": 0, "PLACE": 1, "STOP": 2}
+// matchRank leaves out PLACE: point-of-interest names are crowd-edited map text, and the name
+// goes into every turn's location line.
+var matchRank = map[string]int{"ADDRESS": 0, "STOP": 1}
 
 // Describe names the point as a short place such as "Stationsplein 1, Leiden", or "" when
 // Transitous knows nothing there. It never logs the point or the name.
