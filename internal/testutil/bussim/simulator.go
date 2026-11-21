@@ -19,7 +19,8 @@
 //	    "ExpectedDepartureTime": "2026-03-10T08:17:00"}}}],
 //	  "alerts": [{"effect": 4, "header": "Line 340 detour", "from": "2026-03-10T00:00:00Z",
 //	    "informed": [{"route_id": "r340"}]}],
-//	  "places": [{"type": "STOP", "name": "Westfield Central", "lat": 52.2, "lon": 5.2, "country": "NL"}]
+//	  "places": [{"type": "STOP", "name": "Westfield Central", "lat": 52.2, "lon": 5.2, "country": "NL",
+//	    "areas": [{"name": "Westfield", "adminLevel": 8}, {"name": "Westfield", "adminLevel": 10}]}]
 //	}
 //
 // Transitous plans and stop times are given as the objects Transitous returns ("plans" and
@@ -148,6 +149,17 @@ type Place struct {
 	Lat     float64 `json:"lat"`
 	Lon     float64 `json:"lon"`
 	Country string  `json:"country"`
+	Areas   []Area  `json:"areas,omitempty"`
+}
+
+// Area is an administrative area a geocoder match lies in. AdminLevel follows OpenStreetMap: 2 for
+// the country, 4 for the province, 8 for the gemeente and 10 for the woonplaats.
+type Area struct {
+	Name       string  `json:"name"`
+	AdminLevel float64 `json:"adminLevel"`
+	Matched    bool    `json:"matched"`
+	Unique     bool    `json:"unique"`
+	Default    bool    `json:"default"`
 }
 
 // Validate checks that seed has the shape the fake accepts.

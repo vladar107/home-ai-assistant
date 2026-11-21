@@ -3,6 +3,8 @@ package bus
 import (
 	"context"
 	"net/url"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -19,7 +21,14 @@ const (
 	geocodeTypeStop = "STOP"
 	homeCountry     = "NL"
 	modeWalk        = "WALK"
+
+	// Transitous gives the gemeente as admin level 8 and the woonplaats as 10; lower levels are the
+	// country and province, higher ones districts and neighbourhoods.
+	townLevelLow  = 8
+	townLevelHigh = 10
 )
+
+var postcodePrefix = regexp.MustCompile(`^[0-9]{4} ?[a-z]{2}( |$)`)
 
 type place struct {
 	name     string
@@ -94,11 +103,49 @@ type planResponse struct {
 }
 
 type geocodeMatch struct {
-	Type    string  `json:"type"`
-	Name    string  `json:"name"`
-	Lat     float64 `json:"lat"`
-	Lon     float64 `json:"lon"`
-	Country string  `json:"country"`
+	Type    string        `json:"type"`
+	Name    string        `json:"name"`
+	Lat     float64       `json:"lat"`
+	Lon     float64       `json:"lon"`
+	Country string        `json:"country"`
+	Areas   []geocodeArea `json:"areas"`
+}
+
+type geocodeArea struct {
+	Name       string  `json:"name"`
+	AdminLevel float64 `json:"adminLevel"`
+}
+
+// inTown tells whether the match lies in a town the query names: one of its municipality or
+// locality areas, or for a stop the town its own name starts with, equals one of the parts.
+func (m geocodeMatch) inTown(parts []string) bool {
+	for _, area := range m.Areas {
+		if area.AdminLevel >= townLevelLow && area.AdminLevel <= townLevelHigh && slices.Contains(parts, transit.Normalize(area.Name)) {
+			return true
+		}
+	}
+	town, _, named := strings.Cut(m.Name, ",")
+	return m.Type == geocodeTypeStop && named && slices.Contains(parts, transit.Normalize(town))
+}
+
+// queryParts splits a query such as "Street 15, 1234 AB Town" into its normalized comma-separated
+// parts without a leading postcode, leaving out parts that are only one; ok is false for a query
+// with fewer than two non-empty comma-separated fields, such as one with only a trailing comma.
+func queryParts(text string) (parts []string, ok bool) {
+	fields := 0
+	for field := range strings.SplitSeq(text, ",") {
+		if strings.TrimSpace(field) == "" {
+			continue
+		}
+		fields++
+		if part := strings.TrimSpace(postcodePrefix.ReplaceAllString(transit.Normalize(field), "")); part != "" {
+			parts = append(parts, part)
+		}
+	}
+	if fields < 2 {
+		return nil, false
+	}
+	return parts, true
 }
 
 // plan asks Transitous for itineraries between two places, cached briefly by request.
@@ -145,9 +192,14 @@ func (s *Service) stopTimes(ctx context.Context, group *stopGroup, at time.Time,
 }
 
 // geocode finds a place the stop directory does not know, such as a railway station or an address,
-// preferring a Dutch stop.
+// preferring a Dutch stop. A query with comma-separated parts takes only a match in a town one of
+// them names.
 func (s *Service) geocode(ctx context.Context, text string) (place, bool, error) {
-	key := "geocode|" + transit.Normalize(text)
+	fields := strings.Split(text, ",")
+	for index, field := range fields {
+		fields[index] = transit.Normalize(field)
+	}
+	key := "geocode|" + strings.Join(fields, ",")
 	if cached, found := s.cached(key); found {
 		match := cached.(place)
 		return match, match.name != "", nil
@@ -156,6 +208,7 @@ func (s *Service) geocode(ctx context.Context, text string) (place, bool, error)
 	if err := s.transitous.getJSON(ctx, "v1/geocode", url.Values{"text": {text}, "language": {"en"}}, &matches); err != nil {
 		return place{}, false, err
 	}
+	parts, townNamed := queryParts(text)
 	var chosen place
 	for _, preferred := range []func(geocodeMatch) bool{
 		func(m geocodeMatch) bool { return m.Type == geocodeTypeStop && m.Country == homeCountry },
@@ -163,7 +216,7 @@ func (s *Service) geocode(ctx context.Context, text string) (place, bool, error)
 		func(geocodeMatch) bool { return true },
 	} {
 		for _, match := range matches {
-			if preferred(match) && strings.TrimSpace(match.Name) != "" {
+			if preferred(match) && strings.TrimSpace(match.Name) != "" && (!townNamed || match.inTown(parts)) {
 				chosen = place{name: clip.Runes(strings.TrimSpace(match.Name), maximumStopRunes), lat: match.Lat, lon: match.Lon}
 				break
 			}

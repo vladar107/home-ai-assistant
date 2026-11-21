@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
@@ -70,6 +71,7 @@ type simulator struct {
 	alertCode int
 	tpcCode   int
 	planCode  int
+	geocode   []byte
 	requests  []*http.Request
 	served    int
 }
@@ -135,7 +137,13 @@ func (s *simulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		_, _ = w.Write(fixtureBytes(s.t, "transitous_stoptimes.json"))
 	case r.URL.Path == "/transitous/v1/geocode":
-		_, _ = w.Write(fixtureBytes(s.t, "transitous_geocode.json"))
+		s.mu.Lock()
+		body := s.geocode
+		s.mu.Unlock()
+		if body == nil {
+			body = fixtureBytes(s.t, "transitous_geocode.json")
+		}
+		_, _ = w.Write(body)
 	default:
 		http.NotFound(w, r)
 	}
@@ -742,6 +750,123 @@ func TestUnknownPlaceIsGeocoded(t *testing.T) {
 	f.text("bus_trip", map[string]any{"to": "hoog  catharijne", "date_time": "2026-10-05T08:00"})
 	if got := len(f.server.seen("/transitous/v1/geocode")); got != 1 {
 		t.Fatalf("geocode requests after a repeat = %d, want the cached answer", got)
+	}
+}
+
+type area struct {
+	level float64
+	name  string
+}
+
+// townAreas are the areas Transitous gives a match in a town: the country, the province, the
+// gemeente and the woonplaats.
+func townAreas(province, town string) []area {
+	return []area{{2, "Netherlands"}, {3, "Netherlands"}, {4, province}, {8, town}, {10, town}}
+}
+
+// geocodeMatch is one Dutch match in the shape of the recorded Transitous geocoder answer.
+func geocodeMatch(kind, name string, lat, lon float64, areas []area) map[string]any {
+	list := []map[string]any{}
+	for _, item := range areas {
+		list = append(list, map[string]any{"name": item.name, "adminLevel": item.level, "matched": false, "unique": false, "default": false})
+	}
+	match := map[string]any{"type": kind, "name": name, "id": "node/[1]", "lat": lat, "lon": lon, "country": "NL", "tz": "Europe/Amsterdam", "score": -20.0}
+	if areas != nil {
+		match["areas"] = list
+	}
+	return match
+}
+
+func (s *simulator) answerGeocode(matches ...map[string]any) {
+	s.t.Helper()
+	body, err := json.Marshal(matches)
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.geocode = body
+}
+
+func TestAddressInAnotherTownIsNotFound(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, options{contact: contact})
+	f.server.answerGeocode(geocodeMatch("STOP", "Westfield, Somestraat", 51.2, 5.9, townAreas("Southmark", "Westfield")))
+	query := "Somestraat 15, Eastbrook"
+	for range 2 {
+		result := f.call("bus_trip", map[string]any{"to": query, "date_time": "2026-10-05T08:00"})
+		if !result.IsError {
+			t.Fatalf("a stop in another town was planned to:\n%s", result.Text)
+		}
+		wantContains(t, result.Text, `"Somestraat 15, Eastbrook"`, "town as its own part")
+		wantLacks(t, result.Text, "Westfield")
+	}
+	if got := len(f.server.seen("/transitous/v1/geocode")); got != 1 {
+		t.Fatalf("geocode requests = %d, want the cached answer on a repeat", got)
+	}
+}
+
+func TestTownRuleIsNotBypassedByTheCacheOfAQueryWithoutComma(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, options{contact: contact})
+	f.server.answerGeocode(geocodeMatch("STOP", "Westfield, Somestraat", 51.2, 5.9, townAreas("Southmark", "Westfield")))
+	wantContains(t, f.text("bus_trip", map[string]any{"to": "Somestraat 15 Eastbrook", "date_time": "2026-10-05T08:00"}), "to Westfield, Somestraat,")
+	if result := f.call("bus_trip", map[string]any{"to": "Somestraat 15, Eastbrook", "date_time": "2026-10-05T08:00"}); !result.IsError {
+		t.Fatalf("the cached answer without a comma was reused:\n%s", result.Text)
+	}
+}
+
+func TestGeocodedPlaceLiesInTheTownTheQueryNames(t *testing.T) {
+	t.Parallel()
+	wrongTownStop := geocodeMatch("STOP", "Westfield, Somestraat", 51.2, 5.9, townAreas("Southmark", "Westfield"))
+	address := geocodeMatch("ADDRESS", "Somestraat 15", 52.15, 5.38, townAreas("Northmark", "Eastbrook"))
+	for _, test := range []struct {
+		name    string
+		query   string
+		matches []map[string]any
+		// want is the chosen place's name, or empty when no place may be found.
+		want string
+	}{
+		{"a match in the named town wins over a stop elsewhere", "Somestraat 15, Eastbrook", []map[string]any{wrongTownStop, address}, "Somestraat 15"},
+		{"town and stop", "Eastbrook, Harbour Road", []map[string]any{
+			wrongTownStop, geocodeMatch("STOP", "Eastbrook, Harbour Road", 52.15, 5.38, townAreas("Northmark", "Eastbrook")),
+		}, "Eastbrook, Harbour Road"},
+		{"a trailing country", "Somestraat 15, Eastbrook, Netherlands", []map[string]any{wrongTownStop}, ""},
+		{"a district shared with another town", "Somestraat 15, Centrum", []map[string]any{
+			geocodeMatch("STOP", "Westfield, Somestraat", 51.2, 5.9, append(townAreas("Southmark", "Westfield"), area{11, "Centrum"})),
+		}, ""},
+		{"a stop named for a town it lies outside", "Eastbrook, Ferry Landing", []map[string]any{
+			geocodeMatch("STOP", "Eastbrook, Ferry Landing", 52.16, 5.39, townAreas("Northmark", "Northgate")),
+		}, "Eastbrook, Ferry Landing"},
+		{"a stop without areas by its name", "Eastbrook, Harbour Road", []map[string]any{
+			geocodeMatch("STOP", "Eastbrook, Harbour Road", 52.15, 5.38, nil),
+		}, "Eastbrook, Harbour Road"},
+		{"an address without areas", "Somestraat 15, Eastbrook", []map[string]any{
+			geocodeMatch("ADDRESS", "Somestraat 15", 52.15, 5.38, nil),
+		}, ""},
+		{"a postcode before the town", "Somestraat 15, 1234 AB Eastbrook", []map[string]any{wrongTownStop, address}, "Somestraat 15"},
+		{"a postcode part", "Somestraat 15, 1234AB, Eastbrook", []map[string]any{wrongTownStop, address}, "Somestraat 15"},
+		{"only a postcode after the street", "Somestraat 15, 1234 AB", []map[string]any{wrongTownStop, address}, ""},
+		{"a query without a comma keeps the stop first", "Somestraat 15 Eastbrook", []map[string]any{address, wrongTownStop}, "Westfield, Somestraat"},
+		{"a trailing comma keeps the stop first", "Somestraat 15 Eastbrook,", []map[string]any{address, wrongTownStop}, "Westfield, Somestraat"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			f := newFixture(t, options{contact: contact})
+			f.server.answerGeocode(test.matches...)
+			result := f.call("bus_trip", map[string]any{"to": test.query, "date_time": "2026-10-05T08:00"})
+			if test.want == "" {
+				if !result.IsError {
+					t.Fatalf("a place was planned to:\n%s", result.Text)
+				}
+				wantContains(t, result.Text, fmt.Sprintf("%q", test.query))
+				return
+			}
+			if result.IsError {
+				t.Fatalf("no place was found: %s", result.Text)
+			}
+			wantContains(t, result.Text, "to "+test.want+",")
+		})
 	}
 }
 

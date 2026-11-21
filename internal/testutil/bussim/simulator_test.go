@@ -28,7 +28,8 @@ const seed = `{
     "ExpectedDepartureTime": "2026-03-10T08:17:00"}}}],
   "alerts": [{"effect": 9, "header": "Market Square platform A moved", "from": "2026-03-09T00:00:00Z",
     "informed": [{"stop_id": "100"}]}],
-  "places": [{"type": "STOP", "name": "Harbourside Terminal", "lat": 52.3, "lon": 5.3, "country": "NL"}],
+  "places": [{"type": "STOP", "name": "Harbourside Terminal", "lat": 52.3, "lon": 5.3, "country": "NL",
+    "areas": [{"name": "Netherlands", "adminLevel": 2}, {"name": "Westfield", "adminLevel": 8}, {"name": "Westfield", "adminLevel": 10}]}],
   "plans": [{"from": {"lat": 52.1, "lon": 5.1}, "to": {"lat": 52.3, "lon": 5.3}, "itinerary": {
     "duration": 2400, "startTime": "2026-03-10T08:30:00Z", "endTime": "2026-03-10T09:10:00Z", "transfers": 0,
     "legs": [{"mode": "BUS", "routeShortName": "340", "headsign": "Harbourside", "duration": 2400,
@@ -82,6 +83,22 @@ func TestTripUsesSeededGeocodeAndPlan(t *testing.T) {
 	text := call(t, service(t), "bus_trip", `{"from":"Market Square","to":"Harbourside Terminal","date_time":"2026-03-10T09:30"}`)
 	if !strings.Contains(text, "340") || !strings.Contains(text, "Harbourside") {
 		t.Fatalf("trip lacks the seeded itinerary:\n%s", text)
+	}
+}
+
+func TestTripGeocodesOnlyInTheNamedTown(t *testing.T) {
+	service := service(t)
+	text := call(t, service, "bus_trip", `{"from":"Market Square","to":"Westfield, Harbourside Terminal","date_time":"2026-03-10T09:30"}`)
+	if !strings.Contains(text, "340") {
+		t.Fatalf("trip lacks the seeded itinerary:\n%s", text)
+	}
+	result, err := service.Execute(t.Context(), "alice", tools.Call{Name: "bus_trip",
+		Arguments: json.RawMessage(`{"from":"Market Square","to":"Eastbrook, Harbourside Terminal","date_time":"2026-03-10T09:30"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError || !strings.Contains(result.Text, `"Eastbrook, Harbourside Terminal"`) {
+		t.Fatalf("a place in another town was accepted: %s", result.Text)
 	}
 }
 

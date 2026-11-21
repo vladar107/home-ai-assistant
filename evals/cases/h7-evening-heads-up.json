@@ -451,7 +451,13 @@
           "name": "Westfield Office",
           "lat": 52.202,
           "lon": 5.203,
-          "country": "NL"
+          "country": "NL",
+          "areas": [
+            {
+              "name": "Westfield",
+              "adminLevel": 8
+            }
+          ]
         }
       ],
       "stop_times": [

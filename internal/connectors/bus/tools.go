@@ -67,8 +67,8 @@ var definitions = []tools.Definition{
 		SourceLabel: tools.RouteLabel("from", "to"),
 		Timeout:     toolTimeout,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` +
-			`"to":{"type":"string","description":"Destination stop or place, such as \"Utrecht Centraal\" or \"Utrecht, Centraal Station\"; also accepts coordinates as lat,lon, such as the user's shared location."},` +
-			`"from":{"type":"string","description":"Departure stop or place; also accepts coordinates as lat,lon, such as the user's shared location; default the household's home stop."},` +
+			`"to":{"type":"string","description":"Destination stop or place, such as \"Utrecht Centraal\" or \"Utrecht, Centraal Station\", or an address as \"street and number, town\"; also accepts coordinates as lat,lon, such as the user's shared location."},` +
+			`"from":{"type":"string","description":"Departure stop or place, or an address as \"street and number, town\"; also accepts coordinates as lat,lon, such as the user's shared location; default the household's home stop."},` +
 			dateTimeSchema + `,` +
 			`"arrive_by":{"type":"boolean","description":"True to treat date_time as the latest arrival instead of the earliest departure."},` +
 			`"limit":{"type":"integer","minimum":1,"maximum":10,"description":"How many trips, default 5."}},` +
@@ -351,7 +351,7 @@ func (s *Service) findPlace(ctx context.Context, principalID string, index *stop
 		return place{}, &result
 	}
 	if !ok {
-		result := errorResult(fmt.Sprintf("No stop or place matches %s %q; ask the user where exactly they mean.", role, clip.Runes(query, maximumStopRunes)))
+		result := errorResult(fmt.Sprintf("No stop or place matches %s %q; ask the user where exactly they mean, with the town as its own part after a comma, such as \"Street 15, Town\".", role, clip.Runes(query, maximumStopRunes)))
 		return place{}, &result
 	}
 	return found, nil
