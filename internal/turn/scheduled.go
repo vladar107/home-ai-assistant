@@ -26,17 +26,12 @@ type ScheduledReply struct {
 }
 
 // RunScheduled runs one turn nobody is watching: on the principal's own subscription, in a fresh
-// session so chat history stays out of it, with read tools only, and after any chat turn of the
-// same principal has finished. Failures come back as the reply a chat turn would have given. An
-// error is returned only when ctx ends, and then nothing should be delivered. The turn key names
-// the run, so what its tools stage goes out with its reply. An empty model runs on Pi's default,
-// and the run has the scheduled turn's own time limit.
+// session so chat history stays out of it, and with read tools only. Like RunCheck it takes no turn
+// slot, so the principal's chat is answered while it runs. Failures come back as the reply a chat
+// turn would have given. An error is returned only when ctx ends, and then nothing should be
+// delivered. The turn key names the run, so what its tools stage goes out with its reply. An empty
+// model runs on Pi's default, and the run has the scheduled turn's own time limit.
 func (e *Engine) RunScheduled(ctx context.Context, principalID, turn, message string, model agentruntime.ModelEffort) (ScheduledReply, error) {
-	release, err := e.Acquire(ctx, Lane{PrincipalID: principalID})
-	if err != nil {
-		return ScheduledReply{}, err
-	}
-	defer release()
 	return e.runUnwatched(ctx, principalID, turn, message, model, e.config.ScheduledTurnTimeout, TraceScheduled, turn, nil)
 }
 

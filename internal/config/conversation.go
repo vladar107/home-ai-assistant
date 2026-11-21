@@ -21,7 +21,7 @@ const (
 	defaultPiHeadsUpModel       = "gpt-6.1-sol:high"
 	defaultPiWebSearchExtension = "/usr/local/lib/home-agent/pi-web-search/src/index.ts"
 	defaultConversationTimeout  = 2 * time.Minute
-	defaultScheduledTimeout     = 3 * time.Minute
+	defaultScheduledTimeout     = 5 * time.Minute
 	minimumConversationTimeout  = 5 * time.Second
 	maximumConversationTimeout  = 10 * time.Minute
 	maximumRuntimeValueRunes    = 200

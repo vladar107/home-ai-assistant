@@ -593,8 +593,8 @@ func (s *Service) travelingAt(ctx context.Context, job Job, at time.Time) bool {
 
 // dispatch starts one run in the background unless it is already in flight or, for a run still to
 // execute that asks the model, the household's concurrent-run bound is reached or its owner already
-// has one executing. A principal's scheduled turns wait behind their chat and each other, so a
-// second one would only hold a slot another principal's run could use.
+// has one executing. One run per principal keeps a principal's jobs from using more of their
+// subscription at once and leaves the other slot to another principal's run.
 func (s *Service) dispatch(ctx context.Context, run Run) {
 	s.mu.Lock()
 	executing := run.Status == StatusQueued

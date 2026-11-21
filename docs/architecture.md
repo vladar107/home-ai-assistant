@@ -1080,9 +1080,10 @@ not when the job was made: the job's own choice, else
 which leaves the choice to Pi. A choice the catalog or the cached usage read
 does not offer falls back to the chat default, by the same rule as background
 tasks (`modelcatalog.Effective`), and the fallback is logged. Scheduled model
-turns use `HOME_AGENT_SCHEDULED_TURN_TIMEOUT` instead of the chat turn timeout
-and still hold the principal's turn lane, so a chat message sent during a run
-waits for it.
+turns use `HOME_AGENT_SCHEDULED_TURN_TIMEOUT` (5m) instead of the chat turn
+timeout and take no turn slot, so a chat message sent during a run is answered
+while it runs; the scheduler's own bounds of one executing run per principal
+and two per household still apply.
 
 ### Model and effort per tab
 

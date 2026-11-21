@@ -17,6 +17,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
+	"github.com/vladar107/home-ai-assistant/internal/turn"
 )
 
 type stopRecorder struct {
@@ -349,7 +350,16 @@ func TestTurnWaitingBehindAnotherKeepsTyping(t *testing.T) {
 	if len(h.chatActionTimes()) != 0 {
 		t.Fatal("a scheduled run sent typing")
 	}
+	first.answer <- agentruntime.RunResult{Response: "scheduled answer", Final: "scheduled answer"}
+	if err := receive(t, h.ctx, scheduled); err != nil {
+		t.Fatal(err)
+	}
 
+	// Scheduled runs take no turn slot, so the test holds the main lane's slot itself.
+	release, err := h.engine.Acquire(h.ctx, turn.Lane{PrincipalID: "alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	h.push(textUpdate(1, 101, "chat request"))
 	time.Sleep(2 * indicatorDelay)
 	h.wantSteadyTyping(int(indicatorDelay / indicatorTyping))
@@ -357,10 +367,7 @@ func TestTurnWaitingBehindAnotherKeepsTyping(t *testing.T) {
 		t.Fatalf("a waiting turn showed drafts: %+v", drafts)
 	}
 	released := time.Now()
-	first.answer <- agentruntime.RunResult{Response: "scheduled answer", Final: "scheduled answer"}
-	if err := receive(t, h.ctx, scheduled); err != nil {
-		t.Fatal(err)
-	}
+	release()
 	chat := receive(t, h.ctx, runtime.calls)
 	chat.answer <- agentruntime.RunResult{Response: "chat answer"}
 	h.wantReply(101, 1, "chat answer")

@@ -105,7 +105,7 @@ func TestScheduledTurnTimeoutSetting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.ScheduledTurnTimeout != 3*time.Minute {
+	if cfg.ScheduledTurnTimeout != 5*time.Minute {
 		t.Errorf("default scheduled turn timeout = %s", cfg.ScheduledTurnTimeout)
 	}
 	tests := []struct {

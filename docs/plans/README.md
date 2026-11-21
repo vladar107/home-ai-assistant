@@ -180,6 +180,7 @@ plan that links back to the earlier record.
 | 0168 | [Security audit fixes: outside text, link previews, revocation](0168-security-audit-fixes.md) | done |
 | 0169 | [Prompt cache share by run kind, and two cache trials](0169-prompt-cache-share.md) | in-progress |
 | 0170 | [Placeholders for email addresses, phone numbers and addresses](0170-personal-value-placeholders.md) | in-progress |
+| 0171 | [Scheduled model turns run beside chat, with a longer limit](0171-scheduled-turns-beside-chat.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

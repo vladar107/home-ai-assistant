@@ -31,10 +31,9 @@ type Engine struct {
 	telemetry Telemetry
 
 	mu sync.Mutex
-	// slots holds one slot per lane, so a lane's chat turns take turns with each other and the main
-	// lane's also with scheduled runs. It once guarded a whole principal against a credential-refresh
-	// race that Pi removed from 1.0.0 on by locking auth.json, which is why tabs and background tasks run
-	// beside each other.
+	// slots holds one slot per lane, so a lane's chat turns take turns with each other. It once
+	// guarded a whole principal against a credential-refresh race that Pi removed from 1.0.0 on by
+	// locking auth.json, which is why tabs, scheduled runs, and background tasks run beside each other.
 	slots map[Lane]chan struct{}
 
 	// pending holds the chat traces being written, by principal and key, each closed once written.

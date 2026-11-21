@@ -382,8 +382,8 @@ func (h *conversationHarness) jobID(principalID string) string {
 }
 
 // /jobs runs, pauses, resumes, and deletes the owner's jobs, and a chat message sent during a
-// scheduled run waits for it instead of starting a second model process.
-func TestJobsCommandControlsAndSharesTheTurnSlot(t *testing.T) {
+// scheduled run is answered while the run is still going.
+func TestJobsCommandControlsAndRunsBesideChat(t *testing.T) {
 	t.Parallel()
 	runtime := newControlledRuntime()
 	clock := newTestClock(t, mondayMorning)
@@ -405,12 +405,11 @@ func TestJobsCommandControlsAndSharesTheTurnSlot(t *testing.T) {
 	run := receive(t, h.ctx, runtime.calls)
 
 	h.push(textUpdate(3, 101, "hello"))
-	expectNoRuntimeCall(t, runtime, 100*time.Millisecond)
-	run.answer <- agentruntime.RunResult{Response: "Quiet day.", Final: "Quiet day."}
-	h.wantMessage(101, "<b>Scheduled: Daily digest</b>\n\nQuiet day.")
 	chat := receive(t, h.ctx, runtime.calls)
 	chat.answer <- agentruntime.RunResult{Response: "hi"}
 	h.wantReply(101, 3, "hi")
+	run.answer <- agentruntime.RunResult{Response: "Quiet day.", Final: "Quiet day."}
+	h.wantMessage(101, "<b>Scheduled: Daily digest</b>\n\nQuiet day.")
 
 	// The poller retries a press whose reply failed; the retry finds the run already queued.
 	if queued, err := h.scheduler.RunNow(h.ctx, "alice", job.ID, pressTrigger(Bot{ID: 999}, 2)); err != nil || !queued {
