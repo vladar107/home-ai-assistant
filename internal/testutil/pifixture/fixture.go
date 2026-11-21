@@ -164,7 +164,12 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(ReportPath(args["--session-dir"], args["--session-id"]), data, 0o600)
+		// The relay scenario rewrites the report while a test may read it, so it is replaced whole.
+		path := ReportPath(args["--session-dir"], args["--session-id"])
+		if err := os.WriteFile(path+".tmp", data, 0o600); err != nil {
+			return err
+		}
+		return os.Rename(path+".tmp", path)
 	}
 	if err := writeReport(); err != nil {
 		return err
