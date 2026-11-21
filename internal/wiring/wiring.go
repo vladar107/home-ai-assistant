@@ -699,6 +699,8 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		}
 	}
 	tripReader := trip.NewReader(in.Store, in.Core.Now)
+	routeSection := routes.NewPromptSection(in.Store, in.Logger)
+	watchSection := watch.NewPromptSection(in.Store, in.Logger)
 	engine, err := turn.New(turn.Config{
 		TurnTimeout:          in.Core.TurnTimeout,
 		ScheduledTurnTimeout: in.Core.ScheduledTurnTimeout,
@@ -706,7 +708,8 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		Now:                  in.Core.Now,
 		DisplayNames:         a.displayNames,
 		Memory:               memoryService,
-		Jobs:                 schedule.NewPromptSection(in.Store, in.Zone, in.Logger),
+		Sections:             []turn.Section{schedule.NewPromptSection(in.Store, in.Zone, in.Logger), routeSection, watchSection},
+		ScheduledSections:    []turn.Section{routeSection, watchSection},
 		WebSearch:            webSearch,
 		SearchChecks:         searchChecks,
 		Exposure:             exposures,

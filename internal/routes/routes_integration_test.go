@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/bus"
@@ -451,6 +453,34 @@ func TestRouteCheckChoosesTheRouteByWeekday(t *testing.T) {
 	}
 	if result := h.call("alice", "route_check", map[string]any{"name": "school"}); !result.IsError || !strings.Contains(result.Text, `No route is called "school"`) {
 		t.Fatalf("unknown name = %+v", result)
+	}
+}
+
+// The prompt section lists the oldest routes that fit, each cut to 300 runes, within 4000 runes,
+// and ends by naming route_list for the rest.
+func TestRoutePromptSectionListsWhatFitsAndNamesRouteList(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	legs := make([]routes.Leg, routes.MaximumLegs)
+	for index := range legs {
+		legs[index] = routes.Leg{Mode: routes.ModeTrain, From: "Eastbrook Central", To: "Westfield North", Via: "Northgate"}
+	}
+	for n := 1; n <= routes.MaximumRoutesPerPrincipal; n++ {
+		h.save("alice", routes.Spec{Name: fmt.Sprintf("Westfield commute %02d", n), Days: []string{"mon"}, Legs: legs})
+	}
+	section := routes.NewPromptSection(h.store, slog.New(slog.NewTextHandler(io.Discard, nil))).PromptSection(h.ctx, "alice")
+	lines := strings.Split(section, "\n")
+	listed := lines[1 : len(lines)-1]
+	if want := fmt.Sprintf("%d more not listed; route_list shows them.", routes.MaximumRoutesPerPrincipal-len(listed)); lines[len(lines)-1] != want || len(listed) == 0 {
+		t.Fatalf("last line = %q, want %q", lines[len(lines)-1], want)
+	}
+	if utf8.RuneCountInString(section) > 4000 || !strings.HasPrefix(listed[0], "- Westfield commute 01: Mon. Legs: train Eastbrook Central → Westfield North via Northgate") {
+		t.Fatalf("section = %q", section)
+	}
+	for _, line := range listed {
+		if utf8.RuneCountInString(line) > len("- ")+300 || !strings.HasSuffix(line, "…") {
+			t.Fatalf("entry is not cut to 300 runes: %q", line)
+		}
 	}
 }
 

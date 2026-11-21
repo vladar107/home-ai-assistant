@@ -838,9 +838,21 @@ The system prompt of chat turns and background tasks ends, after memory, with th
 principal's enabled jobs and pending reminders: ID, name, schedule, and the first
 800 runes of the instructions, newest first and capped at 10000 runes. It changes
 only when a job is added, changed, paused, or finished, so the prompt stays
-cacheable; scheduled turns carry their own prompt instead. Each delivered report of
-a job or reminder is kept in SQLite for 14 days, at most 200 per principal, with
-the Telegram messages it was sent as. The next chat turn gets a one-line excerpt
+cacheable; scheduled turns carry their own prompt instead.
+
+Two more sections follow the jobs, in this order: the principal's saved routes
+(name, weekdays, arrival target, and legs) and their enabled watches (ID and the
+definition the user confirmed). Each lists its entries oldest first by creation,
+so an edit keeps an entry in place, caps an entry at 300 runes and the section at
+4000, and ends with a line naming `route_list` or `watch_list` when entries are
+left out. Chat turns and background tasks get all three sections; scheduled
+model turns get the routes and watches sections without the jobs; agent-watch
+checks, confined runs, and toolless runs get none. A section whose read fails is
+left out and logged, and the turn runs without it.
+
+Each delivered report of a job or reminder is kept in SQLite for 14 days, at most
+200 per principal, with the Telegram messages it was sent as. The next chat turn
+gets a one-line excerpt
 of each report no turn has heard of, the first turn of a conversation those of the
 last day, and a reply to a report's message that report in full; the
 `job_reports` read tool lists and reads them; with `job` and `days` (1 to 7) it

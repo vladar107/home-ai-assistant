@@ -7,12 +7,17 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
+	"github.com/vladar107/home-ai-assistant/internal/outbox"
+	"github.com/vladar107/home-ai-assistant/internal/routes"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
+	"github.com/vladar107/home-ai-assistant/internal/turn"
+	"github.com/vladar107/home-ai-assistant/internal/watch"
 )
 
 func (h *conversationHarness) reportID(text string) string {
@@ -314,4 +319,151 @@ func TestChatTurnsKnowTheUsersJobs(t *testing.T) {
 	}
 	run.answer <- agentruntime.RunResult{Response: "Moist.", Final: "Moist."}
 	h.wantMessage(202, "<b>Scheduled: Garden</b>\n\nMoist.")
+}
+
+func (h *conversationHarness) createRoute(principalID, id string, spec routes.Spec) routes.Route {
+	h.t.Helper()
+	now := h.scheduler.Now()
+	route := routes.Route{ID: id, PrincipalID: principalID, Spec: spec, CreatedAt: now, UpdatedAt: now}
+	if created, err := h.store.CreateRoute(h.ctx, route, routes.MaximumRoutesPerPrincipal); err != nil || !created {
+		h.t.Fatalf("create route: %v %v", created, err)
+	}
+	return route
+}
+
+func eastbrookDeparture() watch.Spec {
+	return watch.Spec{
+		Kind:         watch.KindDeparture,
+		Target:       watch.Target{Mode: watch.ModeTrain, From: "Eastbrook", To: "Westfield"},
+		Triggers:     []string{watch.TriggerCancelled, watch.TriggerDelay},
+		DelayMinutes: 5,
+		Days:         []string{"mon", "tue", "wed", "thu", "fri"},
+		Start:        "07:30",
+		End:          "08:12",
+		Zone:         "Europe/Amsterdam",
+	}
+}
+
+// Chat turns, background tasks, and scheduled turns carry the user's saved routes and enabled
+// watches after their jobs, in creation order, so an edit keeps a route in place and an unchanged
+// store gives the same text. A scheduled turn has no jobs section, a paused watch is left out, and
+// nothing of another user's appears.
+func TestTurnsKnowTheUsersRoutesAndWatches(t *testing.T) {
+	t.Parallel()
+	runtime := newControlledRuntime()
+	clock := newTestClock(t, mondayMorning)
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock})
+	h.provision("alice", "account-alice")
+	h.provision("bob", "account-bob")
+	h.start()
+	h.createJob("alice", "a1b2c3d4e5f60718", "Commute", "0 9 * * 1-5", "Check the 08:12 from Eastbrook.")
+	work := h.createRoute("alice", "00000000000000c1", routes.Spec{
+		Name: "work", Days: []string{"mon", "tue", "wed", "thu", "fri"}, ArriveBy: "09:00",
+		Legs: []routes.Leg{
+			{Mode: routes.ModeWalk, Minutes: 5},
+			{Mode: routes.ModeTrain, From: "Eastbrook", To: "Westfield", Departures: []string{"08:12"}},
+			{Mode: routes.ModeWalk, Minutes: 10},
+		},
+	})
+	clock.Set(t, "2026-09-28T08:00:05+02:00")
+	h.createRoute("alice", "00000000000000c2", routes.Spec{
+		Name: "evening class", Days: []string{"tue", "thu"},
+		Legs: []routes.Leg{{Mode: routes.ModeBus, Stop: "Westfield, Market", Line: "12", Towards: "Eastbrook"}},
+	})
+	h.createRoute("bob", "00000000000000c3", routes.Spec{
+		Name: "gym", Days: []string{"sat"},
+		Legs: []routes.Leg{{Mode: routes.ModeTrain, From: "Westfield", To: "Northgate"}},
+	})
+	h.createWatch("alice", "00000000000000a1", eastbrookDeparture())
+	paused := eastbrookDeparture()
+	paused.Target.To, paused.End = "Southport", "17:40"
+	h.createWatch("alice", "00000000000000a2", paused)
+	if changed, err := h.store.SetWatchEnabled(h.ctx, "alice", "00000000000000a2", false, clock.Now()); err != nil || !changed {
+		t.Fatalf("pause watch = %v %v", changed, err)
+	}
+
+	chatSections := func(update, chatID int64) string {
+		t.Helper()
+		h.push(textUpdate(update, chatID, "how do I get to work tomorrow?"))
+		chat := receive(t, h.ctx, runtime.calls)
+		chat.answer <- agentruntime.RunResult{Response: "ok"}
+		h.wantReply(chatID, update, "ok")
+		h.waitState(update, "delivered")
+		return chat.request.Jobs
+	}
+	first := chatSections(1, 101)
+	jobs := strings.Index(first, "Scheduled jobs: the user's enabled")
+	saved := strings.Index(first, "\n\nSaved routes: the user's saved journeys, oldest first.")
+	watches := strings.Index(first, "\n\nWatches: the user's enabled watches, oldest first.")
+	if jobs != 0 || saved < jobs || watches < saved {
+		t.Fatalf("sections out of order: %q", first)
+	}
+	for _, want := range []string{
+		"call route_check with the route's name",
+		"\n- work: Mon–Fri, arrive by 09:00. Legs: walk 5 min; train Eastbrook → Westfield, departures 08:12; walk 10 min\n- evening class: Tue, Thu. Legs: bus 12 from Westfield, Market towards Eastbrook, no fixed departures\n\n",
+		"\n- id 00000000000000a1: 08:12 train Eastbrook → Westfield; ",
+	} {
+		if !strings.Contains(first, want) {
+			t.Fatalf("sections lack %q: %q", want, first)
+		}
+	}
+	if strings.Contains(first, "Southport") || strings.Contains(first, "gym") || strings.Contains(first, "Northgate") {
+		t.Fatalf("sections list a paused watch or bob's route: %q", first)
+	}
+	if again := chatSections(2, 101); again != first {
+		t.Fatalf("unchanged stores changed the sections:\n%q\n%q", first, again)
+	}
+
+	edited := work
+	edited.ArriveBy, edited.UpdatedAt = "09:15", clock.Now().Add(time.Minute)
+	if updated, err := h.store.UpdateRoute(h.ctx, edited, work.UpdatedAt); err != nil || !updated {
+		t.Fatalf("edit route = %v %v", updated, err)
+	}
+	third := chatSections(3, 101)
+	if !strings.Contains(third, "\n- work: Mon–Fri, arrive by 09:15. Legs: walk 5 min;") || strings.Index(third, "- work:") > strings.Index(third, "- evening class:") {
+		t.Fatalf("the edited route moved or kept its old target: %q", third)
+	}
+
+	task := make(chan turn.TaskReply, 1)
+	go func() {
+		reply, err := h.engine.RunTask(h.ctx, turn.TaskRun{
+			PrincipalID: "alice", Turn: outbox.TaskTurn("eeee"), SessionID: "55555555-5555-4555-8555-555555555555",
+			Message: "plan the week's trips", CallBudget: 4,
+		})
+		if err != nil {
+			t.Error(err)
+		}
+		task <- reply
+	}()
+	call := receive(t, h.ctx, runtime.calls)
+	if call.request.Jobs != third {
+		t.Fatalf("task sections = %q, want the chat turn's %q", call.request.Jobs, third)
+	}
+	call.answer <- agentruntime.RunResult{Response: "planned", Final: "planned"}
+	if reply := receive(t, h.ctx, task); reply.Text != "planned" {
+		t.Fatalf("task reply = %+v", reply)
+	}
+
+	scheduled := make(chan turn.ScheduledReply, 1)
+	go func() {
+		reply, err := h.engine.RunScheduled(h.ctx, "alice", "schedule/aaaa", "check the commute", agentruntime.ModelEffort{})
+		if err != nil {
+			t.Error(err)
+		}
+		scheduled <- reply
+	}()
+	call = receive(t, h.ctx, runtime.calls)
+	if want := third[strings.Index(third, "Saved routes:"):]; call.request.Jobs != want {
+		t.Fatalf("scheduled sections = %q, want routes and watches alone: %q", call.request.Jobs, want)
+	}
+	call.answer <- agentruntime.RunResult{Response: "on time", Final: "on time"}
+	if reply := receive(t, h.ctx, scheduled); reply.Text != "on time" {
+		t.Fatalf("scheduled reply = %+v", reply)
+	}
+
+	bob := chatSections(4, 202)
+	if !strings.HasPrefix(bob, "Saved routes:") || !strings.Contains(bob, "\n- gym: Sat. Legs: train Westfield → Northgate") ||
+		strings.Contains(bob, "Watches:") || strings.Contains(bob, "Eastbrook") {
+		t.Fatalf("bob's sections = %q", bob)
+	}
 }

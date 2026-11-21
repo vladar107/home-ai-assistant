@@ -98,7 +98,7 @@ func (e *Engine) RunTask(ctx context.Context, run TaskRun) (TaskReply, error) {
 		Message:     message,
 		Tools:       toolSet,
 		Memory:      memory,
-		Jobs:        e.jobsText(runCtx, run.PrincipalID),
+		Jobs:        sectionsText(runCtx, e.config.Sections, run.PrincipalID),
 		WebSearch:   webSearch,
 		SearchCheck: e.searchCheck(run.PrincipalID, webSearch, false),
 		Kind:        agentruntime.RunTask,

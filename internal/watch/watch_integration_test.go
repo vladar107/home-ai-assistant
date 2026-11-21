@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/vladar107/home-ai-assistant/internal/identity"
 	"github.com/vladar107/home-ai-assistant/internal/store/sqlite"
@@ -310,6 +311,45 @@ func (e *engine) create(principalID, id string, spec watch.Spec) {
 }
 
 const watchID = "0000000000000001"
+
+// The prompt section lists the oldest enabled watches that fit, each on one line cut to 300 runes,
+// within 4000 runes, and ends by naming watch_list for the rest.
+func TestWatchPromptSectionListsWhatFitsAndNamesWatchList(t *testing.T) {
+	t.Parallel()
+	e := newEngine(t)
+	start := time.Date(2026, 9, 28, 4, 0, 0, 0, time.UTC)
+	for n := 1; n <= watch.MaximumWatchesPerPrincipal; n++ {
+		at := start.Add(time.Duration(n) * time.Minute)
+		spec := watch.Spec{
+			Kind:         watch.KindDeparture,
+			Target:       watch.Target{Mode: watch.ModeTrain, From: "Eastbrook Central", To: "Westfield Riverside", Via: "Northgate Junction"},
+			Triggers:     []string{watch.TriggerCancelled, watch.TriggerPartlyCancelled, watch.TriggerDelay, watch.TriggerPlatform},
+			DelayMinutes: 5,
+			Days:         []string{"mon", "wed", "fri"},
+			Start:        "07:00",
+			End:          fmt.Sprintf("08:%02d", n),
+			Zone:         "Europe/Amsterdam",
+		}
+		created, err := e.store.CreateWatch(e.ctx, watch.Watch{ID: fmt.Sprintf("%016x", n), PrincipalID: "alice", Spec: spec, Enabled: true, CreatedAt: at, UpdatedAt: at}, watch.MaximumWatchesPerPrincipal)
+		if err != nil || !created {
+			t.Fatalf("create watch %d = %v %v", n, created, err)
+		}
+	}
+	section := watch.NewPromptSection(e.store, slog.New(slog.DiscardHandler)).PromptSection(e.ctx, "alice")
+	lines := strings.Split(section, "\n")
+	listed := lines[1 : len(lines)-1]
+	if want := fmt.Sprintf("%d more not listed; watch_list shows them.", watch.MaximumWatchesPerPrincipal-len(listed)); lines[len(lines)-1] != want || len(listed) == 0 {
+		t.Fatalf("last line = %q, want %q", lines[len(lines)-1], want)
+	}
+	if utf8.RuneCountInString(section) > 4000 || !strings.HasPrefix(listed[0], "- id 0000000000000001: 08:01 train Eastbrook Central → Westfield Riverside via Northgate Junction; ") {
+		t.Fatalf("section = %q", section)
+	}
+	for _, line := range listed {
+		if utf8.RuneCountInString(line) > len("- ")+300 || !strings.HasPrefix(line, "- id ") {
+			t.Fatalf("entry = %q", line)
+		}
+	}
+}
 
 // Nothing is checked outside the window, an on-time departure stays silent, a delay over the
 // threshold alerts once however often it is seen, and its recovery sends "back to normal" once.

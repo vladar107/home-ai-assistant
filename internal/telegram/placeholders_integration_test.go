@@ -16,6 +16,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	"github.com/vladar107/home-ai-assistant/internal/memory"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
+	"github.com/vladar107/home-ai-assistant/internal/routes"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/calendarsim"
@@ -23,6 +24,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/testutil/pifixture"
 	"github.com/vladar107/home-ai-assistant/internal/tools"
 	"github.com/vladar107/home-ai-assistant/internal/turn"
+	"github.com/vladar107/home-ai-assistant/internal/watch"
 )
 
 const (
@@ -34,8 +36,9 @@ const (
 )
 
 // newPlaceholderHarness runs alice's turns through the real Pi adapter and her connected mailbox,
-// with a memory fact holding a phone number, a reminder holding the landlord's address, and the
-// assistant mailbox's guidance holding her own address on it.
+// with a memory fact holding a phone number, a reminder holding the landlord's address, a saved
+// route and an agent watch holding them too, and the assistant mailbox's guidance holding her own
+// address on it.
 func newPlaceholderHarness(t *testing.T, hide bool) (*conversationHarness, *googlesim.Simulator, string) {
 	t.Helper()
 	return newPlaceholderHarnessWith(t, harnessOptions{google: googlesim.New(t), placeholders: hide}, mailOnly)
@@ -65,6 +68,11 @@ func newPlaceholderHarnessWith(t *testing.T, options harnessOptions, grant googl
 	}
 	h.seedMemory("alice", "aaaaaaa1", memory.KindFact, "The plumber's number is "+plumberPhone+".")
 	h.createReminder("alice", "00000000000000d1", "Email the landlord at "+landlordAddress, h.scheduler.Now().AddDate(0, 0, 2).Format("2006-01-02 15:04"))
+	h.createRoute("alice", "00000000000000e1", routes.Spec{Name: "Plumber " + plumberPhone, Days: []string{"sat"}, Legs: []routes.Leg{{Mode: routes.ModeWalk, Minutes: 10}}})
+	reply := agentWatch()
+	reply.Target.Name = "Landlord reply"
+	reply.Check = &watch.Check{Instruction: "Look for mail from " + landlordAddress + " about the rent.", Condition: "a reply arrived", IntervalMinutes: 60}
+	h.createWatch("alice", "00000000000000e2", reply)
 	return h, sim, profiles
 }
 
@@ -114,7 +122,7 @@ func (l *deltaLog) Emit(_ context.Context, event agentruntime.Event) error {
 	return nil
 }
 
-// Mail, memory, and jobs reach the model with tokens in place of addresses and numbers, and the
+// Mail, memory, jobs, routes, and watches reach the model with tokens in place of addresses and numbers, and the
 // user, tools, and cards see the real values. Tokens work only as the vault issued them, and a
 // vault that fails fails the turn.
 func TestPlaceholdersHideValuesFromTheModelOnly(t *testing.T) {
@@ -137,6 +145,9 @@ func TestPlaceholdersHideValuesFromTheModelOnly(t *testing.T) {
 	if strings.Contains(report.SystemPrompt, plumberPhone) || strings.Contains(report.SystemPrompt, landlordAddress) ||
 		!strings.Contains(report.SystemPrompt, "The plumber's number is ⟦phone-") || !strings.Contains(report.SystemPrompt, "Email the landlord at "+landlord) {
 		t.Fatalf("memory and jobs were not tokenized:\n%s", report.SystemPrompt)
+	}
+	if !strings.Contains(report.SystemPrompt, "Plumber ⟦phone-") || !strings.Contains(report.SystemPrompt, "Look for mail from "+landlord) {
+		t.Fatalf("routes and watches were not tokenized:\n%s", report.SystemPrompt)
 	}
 	if tagged := h.token("email", aliceTagged, "example.com"); strings.Contains(report.SystemPrompt, aliceTagged) || !strings.Contains(report.SystemPrompt, "this user's address on it, "+tagged+",") {
 		t.Fatalf("tool guidance was not tokenized:\n%s", report.SystemPrompt)

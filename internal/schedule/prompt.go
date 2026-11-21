@@ -25,8 +25,8 @@ const promptSectionHeading = "Scheduled jobs: the user's enabled scheduled jobs 
 	"Before asking the user about their plans, trips, or routine, read the job that covers them with schedule_get."
 
 var (
-	_ turn.Jobs = (*Service)(nil)
-	_ turn.Jobs = PromptSection{}
+	_ turn.Section = (*Service)(nil)
+	_ turn.Section = PromptSection{}
 )
 
 // PromptSection is the jobs section of the system prompt over the repository alone, so a turn

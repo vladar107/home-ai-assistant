@@ -69,9 +69,9 @@ type Telemetry interface {
 	ContextLogger(context.Context, *slog.Logger) *slog.Logger
 }
 
-// Jobs describes the principal's scheduled jobs for the system prompt of chat turns and background
-// tasks, or returns "" when there are none or they cannot be read.
-type Jobs interface {
+// Section describes some of the principal's own data for the system prompt, such as their scheduled
+// jobs, or returns "" when there is none or it cannot be read.
+type Section interface {
 	PromptSection(ctx context.Context, principalID string) string
 }
 
@@ -127,9 +127,12 @@ type Config struct {
 	DisplayNames map[string]string
 	// Memory goes into every turn's system prompt; nil leaves memory out.
 	Memory Memory
-	// Jobs goes into the system prompt of chat turns and background tasks beside memory; nil
-	// leaves it out.
-	Jobs Jobs
+	// Sections go into the system prompt of chat turns and background tasks after memory, in
+	// order, each left out when it is empty.
+	Sections []Section
+	// ScheduledSections go into the system prompt of scheduled model turns in the same way; agent
+	// watch checks and confined runs get none.
+	ScheduledSections []Section
 	// WebSearch decides whether a turn offers the runtime's web search; nil never offers it.
 	WebSearch WebSearch
 	// SearchChecks decides each query of a turn's web search; nil refuses every search.

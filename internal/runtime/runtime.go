@@ -19,8 +19,8 @@ type RunRequest struct {
 	// Memory is the principal's rendered memory, which the runtime adds to the system prompt; empty
 	// leaves the prompt without it.
 	Memory string
-	// Jobs describes the principal's scheduled jobs, which the runtime adds to the system prompt
-	// after memory; empty leaves it out.
+	// Jobs holds the principal's prompt sections, such as their scheduled jobs, saved routes, and
+	// watches, which the runtime adds to the system prompt after memory; empty leaves it out.
 	Jobs string
 	// WebSearch means the principal has web access turned on, so the runtime offers its own web
 	// search alongside the broker's tools.

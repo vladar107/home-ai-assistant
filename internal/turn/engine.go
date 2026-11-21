@@ -151,7 +151,7 @@ func (e *Engine) Compose(ctx context.Context, principalID string, parts Parts) s
 }
 
 // Run is one model run of a chat turn, set up by the caller. A user is there to confirm a web
-// search, and the principal's scheduled jobs are part of the system prompt.
+// search, and the principal's sections, such as their scheduled jobs, are part of the system prompt.
 type Run struct {
 	PrincipalID string
 	SessionID   string
@@ -198,7 +198,7 @@ func (e *Engine) Run(ctx context.Context, run Run) (Result, error) {
 		Memory:      run.Memory,
 		WebSearch:   run.WebSearch,
 		SearchCheck: e.searchCheck(run.PrincipalID, run.WebSearch, true),
-		Jobs:        e.jobsText(ctx, run.PrincipalID),
+		Jobs:        sectionsText(ctx, e.config.Sections, run.PrincipalID),
 		Kind:        run.Kind,
 		Model:       run.Model,
 		Effort:      run.Effort,
@@ -292,11 +292,15 @@ func (e *Engine) memoryText(ctx context.Context, principalID string) (string, er
 	return e.config.Memory.Render(ctx, principalID)
 }
 
-func (e *Engine) jobsText(ctx context.Context, principalID string) string {
-	if e.config.Jobs == nil {
-		return ""
+// sectionsText joins the principal's non-empty sections, in order, with a blank line between them.
+func sectionsText(ctx context.Context, sections []Section, principalID string) string {
+	var texts []string
+	for _, section := range sections {
+		if text := section.PromptSection(ctx, principalID); text != "" {
+			texts = append(texts, text)
+		}
 	}
-	return e.config.Jobs.PromptSection(ctx, principalID)
+	return strings.Join(texts, "\n\n")
 }
 
 // FailureReply maps a failed run to the reply the user sees and the category telemetry reports.

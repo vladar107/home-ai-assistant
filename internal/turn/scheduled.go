@@ -132,7 +132,8 @@ func (e *Engine) runToolless(ctx context.Context, principalID, message string, m
 }
 
 // runUnwatched runs a turn nobody watches with read tools; a scope confines it to the scope's tools
-// and leaves out web search, memory, place, and collections.
+// and leaves out web search, memory, place, and collections. Only a scheduled turn gets the
+// scheduled sections.
 func (e *Engine) runUnwatched(ctx context.Context, principalID, turn, message string, model agentruntime.ModelEffort, timeout time.Duration, kind, traceKey string, scope *tools.Scope) (ScheduledReply, error) {
 	started := e.config.Now()
 	english := locale.With(ctx, locale.English)
@@ -165,8 +166,12 @@ func (e *Engine) runUnwatched(ctx context.Context, principalID, turn, message st
 	if err != nil {
 		return ScheduledReply{}, err
 	}
+	var sections string
 	if scope == nil {
 		message = withPlace(e.placeLines(turnCtx, principalID), e.withCollections(turnCtx, principalID, message))
+		if kind == TraceScheduled {
+			sections = sectionsText(turnCtx, e.config.ScheduledSections, principalID)
+		}
 	}
 	sink := e.newCountingSink(principalID, turn, run)
 	result, runErr := e.runtime.Run(turnCtx, agentruntime.RunRequest{
@@ -175,6 +180,7 @@ func (e *Engine) runUnwatched(ctx context.Context, principalID, turn, message st
 		Message:     e.withTime(withLanguage(ctx, e.withUser(principalID, message))),
 		Tools:       tools,
 		Memory:      memory,
+		Jobs:        sections,
 		WebSearch:   webSearch,
 		SearchCheck: e.searchCheck(principalID, webSearch, false),
 		Model:       model.Model,
