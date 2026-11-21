@@ -216,7 +216,7 @@ func TestHintQuestionGivesTheTabRequestAsAnExample(t *testing.T) {
 	client := newTestClient(t, server, io.Discard, &fakeRecorder{})
 	definitions := []agentruntime.ToolDefinition{{Name: "trip_update", Description: "Move a trip to the tab this conversation is in."}}
 
-	name, answered, err := NewToolHinter(client, stubOptIn(true)).Hint(context.Background(), "alice", "this is the tab for my trip", nil, definitions)
+	name, answered, err := NewToolHinter(client, stubOptIn(true), nil).Hint(context.Background(), "alice", "this is the tab for my trip", nil, definitions)
 	if err != nil || !answered || name != "trip_update" {
 		t.Fatalf("hint = %q %v %v", name, answered, err)
 	}

@@ -3,6 +3,7 @@ package judgment
 import (
 	"context"
 	"sort"
+	"strings"
 
 	"github.com/vladar107/home-ai-assistant/internal/clip"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
@@ -16,17 +17,26 @@ const (
 	hintNone           = "none"
 	hintDescriptionMax = 300
 	// maxHintTools keeps the option set, with "none", within what one Choice question accepts.
-	maxHintTools = 254
+	maxHintTools   = 254
+	routeCheckTool = "route_check"
 )
+
+// SavedRoutes names a principal's saved routes for the tool hint, one entry per route with its
+// name and weekdays, such as "work (Mon–Fri)". An entry holds nothing else of the route.
+type SavedRoutes interface {
+	RouteNames(ctx context.Context, principalID string) ([]string, error)
+}
 
 // ToolHinter names the tool a message most likely needs.
 type ToolHinter struct {
 	client *Client
 	optIn  OptIn
+	routes SavedRoutes
 }
 
-func NewToolHinter(client *Client, optIn OptIn) *ToolHinter {
-	return &ToolHinter{client: client, optIn: optIn}
+// NewToolHinter returns a hinter; with nil routes the hint never sees saved routes.
+func NewToolHinter(client *Client, optIn OptIn, routes SavedRoutes) *ToolHinter {
+	return &ToolHinter{client: client, optIn: optIn, routes: routes}
 }
 
 // Hint returns the name of the most likely tool, or "" when the principal has not opted in, no
@@ -54,13 +64,17 @@ func (h *ToolHinter) Hint(ctx context.Context, principalID, message string, earl
 	if exchange := redactExchange(earlier); !exchange.Empty() {
 		state["earlier"] = exchange
 	}
-	answers, err := h.client.Ask(ctx, "hint", state,
-		map[string]Question{"tool": Choice(
-			"Which one tool would the assistant most likely need to use to handle `message`? "+
-				"`earlier`, when present, is the conversation just before it: read a short follow-up such as 'yes' or 'do it' as answering the assistant's last line there. "+
-				"A message that says the tab it is in is the tab for something, such as 'this is the tab for the trip', needs the tool that moves that thing to this tab. "+
-				"Pick none when the message is conversation, a follow-up that needs no lookup, or general knowledge.",
-			options)})
+	instructions := "Which one tool would the assistant most likely need to use to handle `message`? " +
+		"`earlier`, when present, is the conversation just before it: read a short follow-up such as 'yes' or 'do it' as answering the assistant's last line there. " +
+		"A message that says the tab it is in is the tab for something, such as 'this is the tab for the trip', needs the tool that moves that thing to this tab. "
+	if _, offered := options[routeCheckTool]; offered {
+		if routes := h.savedRoutes(ctx, principalID); !routes.Empty() {
+			state["routes"] = routes
+			instructions += "`routes` is the user's saved routes with their weekdays: a message about travelling where or when one of them goes needs " + routeCheckTool + ". "
+		}
+	}
+	instructions += "Pick none when the message is conversation, a follow-up that needs no lookup, or general knowledge."
+	answers, err := h.client.Ask(ctx, "hint", state, map[string]Question{"tool": Choice(instructions, options)})
 	if err != nil {
 		return "", false, err
 	}
@@ -74,4 +88,20 @@ func (h *ToolHinter) Hint(ctx context.Context, principalID, message string, earl
 	}
 	h.client.recordDecision(ctx, principalID, "hint", "hinted")
 	return name, true, nil
+}
+
+// savedRoutes is the principal's redacted route names and weekdays, empty when there are none. A
+// failed read leaves the routes out, so the hint still runs.
+func (h *ToolHinter) savedRoutes(ctx context.Context, principalID string) Redacted {
+	if h.routes == nil {
+		return Redacted{}
+	}
+	names, err := h.routes.RouteNames(ctx, principalID)
+	if err != nil {
+		if ctx.Err() == nil {
+			h.client.logger.WarnContext(ctx, "judgment.hint.routes_failed", "principal_id", principalID, "error", err)
+		}
+		return Redacted{}
+	}
+	return Redact(strings.Join(names, "; "))
 }

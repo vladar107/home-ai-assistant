@@ -2122,7 +2122,9 @@ and no network.
   until `/new`. Exposure that makes the intent check stricter comes from chat
   turns only; a scheduled run counts only when screening flags its content. The
   tool hint reads the same exchange, and is skipped on the continuation after
-  Confirm.
+  Confirm. When `route_check` is offered, the hint also sends the names and
+  weekdays of the user's saved routes, redacted like the message, and never
+  their legs, stations, stops, lines, or departures.
 - **Home Assistant scope.** One household token from a dedicated non-admin Home
   Assistant user. Only entities exposed to Assist are reachable by the MCP tools;
   the tool, exposure, and label snapshot is cached for 5 minutes, and a name

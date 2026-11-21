@@ -624,7 +624,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		intakeService.SetScreener(screener)
 		approvals.SetIntentChecker(judgment.NewIntentChecker(judge, typeSafe, registry, registry))
 		searchChecks.SetJudge(judgment.NewSearchJudge(judge, typeSafe, registry, registry))
-		toolHint = judgment.NewToolHinter(judge, typeSafe)
+		toolHint = judgment.NewToolHinter(judge, typeSafe, hintRoutes{repository: in.Store})
 		safetyChecks = typeSafe
 		if err := a.register(ctx, Connector{Switch: &SwitchSettings{Switch: judgment.OptInSwitch}}); err != nil {
 			return err
@@ -1278,4 +1278,19 @@ func homeExposure(home *homeassistant.Service) func(context.Context) (bool, []st
 		exposure := home.Exposure(ctx)
 		return exposure.Checked, exposure.Conflicts
 	}
+}
+
+// hintRoutes hands the tool hint each saved route's name and weekdays, and none of its legs.
+type hintRoutes struct{ repository routes.Repository }
+
+func (h hintRoutes) RouteNames(ctx context.Context, principalID string) ([]string, error) {
+	saved, err := h.repository.ListRoutes(ctx, principalID)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(saved))
+	for _, route := range saved {
+		names = append(names, route.Name+" ("+route.DescribeDays()+")")
+	}
+	return names, nil
 }
