@@ -139,6 +139,9 @@ type ToolCall struct {
 type ToolResult struct {
 	Text    string
 	IsError bool
+	// Sensitive lists values in Text that the provider asked to hide from the model. A runtime
+	// never sends it to the model.
+	Sensitive []string
 }
 
 type Event struct {

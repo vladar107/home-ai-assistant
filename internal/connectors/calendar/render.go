@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -54,7 +55,8 @@ func (s *Service) bounds(event Event) (start, end time.Time, allDay, ok bool) {
 // renderEvents lists the events that start before the continuation and fit the byte budget; the
 // first one that does not fit, or the 101st, moves the continuation back to its start, and
 // events starting at or after it are dropped. The header is written last, once the cut is known.
-func renderEvents(events []listed, start, end time.Time, location *time.Location, query string, more continuation, problems []string) string {
+// It also returns the locations of the events it lists.
+func renderEvents(events []listed, start, end time.Time, location *time.Location, query string, more continuation, problems []string) (string, []string) {
 	problems = boundProblems(problems)
 	budget := eventsResultBytes - headerReserveBytes - len(fmt.Sprintf("%q", query))
 	for _, problem := range problems {
@@ -113,7 +115,7 @@ func renderEvents(events []listed, start, end time.Time, location *time.Location
 	for _, problem := range problems {
 		fmt.Fprintf(&builder, "\n%s", problem)
 	}
-	return builder.String()
+	return builder.String(), eventPlaces(events[:shown])
 }
 
 // boundProblems keeps the problem lines within maximumProblemBytes and says how many were left out.
@@ -137,12 +139,29 @@ func writeEvent(builder *strings.Builder, entry listed, location *time.Location)
 	fmt.Fprintf(builder, "Account: %s\n", entry.account.Address)
 	fmt.Fprintf(builder, "Calendar: %s (id %s)\n", clip.Runes(entry.calendar.Name(), maximumTitleRunes), entry.calendar.ID)
 	fmt.Fprintf(builder, "Event id: %s\n", event.ID)
-	if place := strings.TrimSpace(event.Location); place != "" {
-		fmt.Fprintf(builder, "Location: %s\n", clip.Runes(oneLine(place), maximumTitleRunes))
+	if place := eventPlace(event); place != "" {
+		fmt.Fprintf(builder, "Location: %s\n", place)
 	}
 	if response := ownResponse(event); response != "" {
 		fmt.Fprintf(builder, "Your response: %s\n", response)
 	}
+}
+
+// eventPlace is an event's location as a result shows it.
+func eventPlace(event Event) string {
+	return clip.Runes(oneLine(event.Location), maximumTitleRunes)
+}
+
+// eventPlaces lists the distinct locations of the events, the values a result declares as
+// sensitive.
+func eventPlaces(events []listed) []string {
+	var places []string
+	for _, entry := range events {
+		if place := eventPlace(entry.event); place != "" && !slices.Contains(places, place) {
+			places = append(places, place)
+		}
+	}
+	return places
 }
 
 // renderEvent prints an event's details and a window of its description text.

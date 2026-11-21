@@ -160,11 +160,12 @@ func (s *Service) events(ctx context.Context, principalID string, raw json.RawMe
 	if query != "" && len(all) == 0 && end.Sub(start) <= fallbackWindow {
 		listing, listingProblems, _, listingMore := s.listAccounts(ctx, principalID, accounts, start, end, "", from)
 		if len(listing) > 0 {
-			return tools.Result{Text: fmt.Sprintf("Nothing matched %q. Every event in the window follows; the search matches words in the event's own language.\n", query) +
-				renderEvents(listing, start, end, s.location, "", listingMore, listingProblems)}
+			text, places := renderEvents(listing, start, end, s.location, "", listingMore, listingProblems)
+			return tools.Result{Text: fmt.Sprintf("Nothing matched %q. Every event in the window follows; the search matches words in the event's own language.\n", query) + text, Sensitive: places}
 		}
 	}
-	return tools.Result{Text: renderEvents(all, start, end, s.location, query, more, problems)}
+	text, places := renderEvents(all, start, end, s.location, query, more, problems)
+	return tools.Result{Text: text, Sensitive: places}
 }
 
 // listAccounts reads and orders the events of every account, returning the problems met and how many accounts failed whole.
@@ -372,7 +373,7 @@ func (s *Service) readEvent(ctx context.Context, principalID string, raw json.Ra
 		return tools.Result{Text: unavailableText, IsError: true}
 	}
 	entry := listed{account: account, calendar: Calendar{ID: calendarID, Summary: calendarName}, event: event, start: from, end: to, allDay: allDay}
-	return tools.Result{Text: renderEvent(entry, s.location, arguments.OffsetBytes)}
+	return tools.Result{Text: renderEvent(entry, s.location, arguments.OffsetBytes), Sensitive: eventPlaces([]listed{entry})}
 }
 
 func (s *Service) parseBoundary(value string, inclusiveDate bool) (time.Time, error) {

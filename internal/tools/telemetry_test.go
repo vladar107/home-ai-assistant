@@ -3,7 +3,9 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -17,6 +19,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/vladar107/home-ai-assistant/internal/observability"
+	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 )
 
@@ -231,6 +234,84 @@ func TestSourceLabelsStayInTheCallLog(t *testing.T) {
 				t.Fatalf("span %s carries the label in %s", span.Name(), kv.Key)
 			}
 		}
+	}
+}
+
+// A provider's declared values reach the runtime with its result, success and tool error alike,
+// and never the text, the log line, the span, or the metrics of the call; a result that declares
+// nothing comes back as before.
+func TestDeclaredValuesPassThroughToTheRuntimeOnly(t *testing.T) {
+	t.Parallel()
+	reader := sdkmetric.NewManualReader()
+	recorder := tracetest.NewSpanRecorder()
+	telemetry, err := observability.NewWithReader(reader, sdktrace.WithSpanProcessor(recorder))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = telemetry.Shutdown(context.Background()) })
+	var logs strings.Builder
+	broker, err := NewBroker(slog.New(slog.NewTextHandler(&logs, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	broker.SetTelemetry(telemetry)
+	const declared = "Declared Value 42"
+	provider := &fakeProvider{
+		principal:   testPrincipal,
+		definitions: []Definition{testDefinition("declaring_tool", 0), testDefinition("failing_tool", 0), testDefinition("plain_tool", 0)},
+		respond: func(_ context.Context, call Call) (Result, error) {
+			switch call.Name {
+			case "declaring_tool":
+				return Result{Text: "meet at " + declared, Sensitive: []string{declared}}, nil
+			case "failing_tool":
+				return Result{Text: "no room at " + declared, IsError: true, Sensitive: []string{declared}}, nil
+			default:
+				return Result{Text: "nothing to hide"}, nil
+			}
+		},
+	}
+	if err := broker.Register(provider); err != nil {
+		t.Fatal(err)
+	}
+	set, err := broker.ToolsFor(context.Background(), testPrincipal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execute := func(name string) agentruntime.ToolResult {
+		t.Helper()
+		result, err := set.Executor.Execute(context.Background(), agentruntime.ToolCall{Name: name, Arguments: json.RawMessage(`{}`)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	if result := execute("declaring_tool"); result.IsError || result.Text != prompt.ToolResultUntrusted+"meet at "+declared ||
+		!slices.Equal(result.Sensitive, []string{declared}) {
+		t.Fatalf("declaring result = %+v", result)
+	}
+	if result := execute("failing_tool"); !result.IsError || result.Text != "no room at "+declared || !slices.Equal(result.Sensitive, []string{declared}) {
+		t.Fatalf("failing result = %+v", result)
+	}
+	if result := execute("plain_tool"); result.IsError || result.Text != prompt.ToolResultUntrusted+"nothing to hide" || result.Sensitive != nil {
+		t.Fatalf("plain result = %+v", result)
+	}
+
+	if strings.Contains(logs.String(), declared) || !strings.Contains(logs.String(), "tools.call.completed") {
+		t.Fatalf("logs = %s", logs.String())
+	}
+	for _, span := range recorder.Ended() {
+		for _, kv := range span.Attributes() {
+			if strings.Contains(kv.Value.Emit(), declared) {
+				t.Fatalf("span %s carries the declared value in %s", span.Name(), kv.Key)
+			}
+		}
+	}
+	var collected metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &collected); err != nil {
+		t.Fatal(err)
+	}
+	if text := fmt.Sprintf("%+v", collected); strings.Contains(text, declared) {
+		t.Fatalf("metrics carry the declared value: %s", text)
 	}
 }
 

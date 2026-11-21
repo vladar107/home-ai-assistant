@@ -119,10 +119,13 @@ type Call struct {
 // Result is what the model may read. IsError marks a failure the model should adapt to; the text
 // must already be free of credentials and raw provider errors. Private marks a result that may
 // carry Notion page content or NAS file contents from a tool whose results are not always private.
+// Sensitive lists values in the text that the provider asks to hide from the model; the broker
+// passes them on with the result and never adds them to the text, logs, spans, or metrics.
 type Result struct {
-	Text    string
-	IsError bool
-	Private bool
+	Text      string
+	IsError   bool
+	Private   bool
+	Sensitive []string
 }
 
 // Provider is the narrow interface a connector module implements. It never receives the
@@ -584,7 +587,7 @@ func (e *turnExecutor) call(ctx context.Context, call agentruntime.ToolCall, bin
 			e.markExposed(ctx, binding, result)
 			text = prompt.ToolResultUntrusted + text
 		}
-		return "tool_error", "", agentruntime.ToolResult{Text: text, IsError: true}, result
+		return "tool_error", "", agentruntime.ToolResult{Text: text, IsError: true, Sensitive: result.Sensitive}, result
 	default:
 		if binding.thirdParty {
 			e.markExposed(ctx, binding, result)
@@ -601,7 +604,7 @@ func (e *turnExecutor) call(ctx context.Context, call agentruntime.ToolCall, bin
 				text += prompt.ToolResultScreened
 			}
 		}
-		return "success", screened, agentruntime.ToolResult{Text: text + result.Text}, result
+		return "success", screened, agentruntime.ToolResult{Text: text + result.Text, Sensitive: result.Sensitive}, result
 	}
 }
 
