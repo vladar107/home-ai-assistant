@@ -342,6 +342,27 @@ func run() error {
 		emit(map[string]string{"type": "turn_end"})
 		emit(map[string]string{"type": "agent_end"})
 		settle()
+	case "fixture:usage-retry":
+		ack()
+		emit(map[string]string{"type": "agent_start"})
+		emit(map[string]string{"type": "turn_start"})
+		emit(map[string]any{"type": "message_start", "message": map[string]string{"role": "assistant"}})
+		emit(map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "stopReason": "error", "errorMessage": otherText,
+			"usage": map[string]int{"input": 10, "output": 0, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 10}}})
+		emit(map[string]string{"type": "turn_end"})
+		emit(map[string]any{"type": "agent_end", "willRetry": true})
+		retryStart(otherText)
+		time.Sleep(RetryBackoff)
+		emit(map[string]string{"type": "agent_start"})
+		emit(map[string]string{"type": "turn_start"})
+		emit(map[string]any{"type": "message_start", "message": map[string]string{"role": "assistant"}})
+		delta("recovered")
+		emit(map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "stopReason": "stop",
+			"usage": map[string]int{"input": 20, "output": 5, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 25}}})
+		emit(map[string]any{"type": "auto_retry_end", "success": true, "attempt": 1})
+		emit(map[string]string{"type": "turn_end"})
+		emit(map[string]string{"type": "agent_end"})
+		settle()
 	case "fixture:web-search":
 		// web_search runs inside Pi through the search extension, so no bridge call is made.
 		ack()

@@ -75,7 +75,7 @@ type Runtime struct {
 // per model call, which also covers calls that never finish.
 type Telemetry interface {
 	RecordModelCall(ctx context.Context, principal, provider, model, effort, stopReason string, duration time.Duration)
-	RecordModelTokens(ctx context.Context, principal, provider, model, effort string, input, output, cacheRead, cacheWrite int64)
+	RecordModelTokens(ctx context.Context, principal, provider, model, effort, kind string, tools, firstCall bool, input, output, cacheRead, cacheWrite int64)
 	// StartModelCall returns the call's span context, a function that records one Pi retry by
 	// category, and one that ends the call with its outcome.
 	StartModelCall(ctx context.Context, principal string) (context.Context, func(string), func(string))
@@ -415,7 +415,7 @@ func (r *Runtime) attempt(ctx context.Context, request agentruntime.RunRequest, 
 		waitResult <- cmd.Wait()
 	}()
 
-	state := &turnState{toolsEnabled: toolsEnabled, sink: sink, telemetry: r.telemetry, logger: r.logger, principal: request.PrincipalID, effort: effort}
+	state := &turnState{toolsEnabled: toolsEnabled, sink: sink, telemetry: r.telemetry, logger: r.logger, principal: request.PrincipalID, effort: effort, kind: processKind(request.Kind), tools: !request.Tools.Empty()}
 	prompt := map[string]any{
 		"id":      request.SessionID,
 		"type":    "prompt",
@@ -767,11 +767,14 @@ type turnState struct {
 	logger             *slog.Logger
 	principal          string
 	effort             string
+	kind               string
+	tools              bool
 	model              string
 	tokens             agentruntime.TokenCounts
 	messageStarted     time.Time
 	usage              agentruntime.Usage
 	modelCall          *modelCall
+	completedCalls     int
 }
 
 // modelCall lasts from the moment control passes to the model until its outcome is known: an
@@ -943,7 +946,10 @@ func (s *turnState) recordAssistantMessage(ctx context.Context, message *rpcMess
 	s.usage.PromptTokens += usage.Input + usage.CacheRead + usage.CacheWrite
 	s.usage.OutputTokens += usage.Output
 	if s.telemetry != nil {
-		s.telemetry.RecordModelTokens(ctx, s.principal, message.Provider, message.Model, s.effort, usage.Input, usage.Output, usage.CacheRead, usage.CacheWrite)
+		s.telemetry.RecordModelTokens(ctx, s.principal, message.Provider, message.Model, s.effort, s.kind, s.tools, s.completedCalls == 0, usage.Input, usage.Output, usage.CacheRead, usage.CacheWrite)
+	}
+	if message.StopReason != "error" && message.StopReason != "aborted" {
+		s.completedCalls++
 	}
 }
 

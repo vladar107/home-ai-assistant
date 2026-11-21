@@ -772,7 +772,14 @@ func (t *Telemetry) RecordModelProcesses(ctx context.Context, kind, state string
 	t.modelProcesses.Add(ctx, delta, metric.WithAttributes(labelAttr("home_agent.kind", kind, "unknown"), labelAttr("home_agent.state", state, "unknown")))
 }
 
-func (t *Telemetry) RecordModelTokens(ctx context.Context, principal, provider, model, effort string, input, output, cacheRead, cacheWrite int64) {
+func (t *Telemetry) RecordModelTokens(ctx context.Context, principal, provider, model, effort, kind string, tools, firstCall bool, input, output, cacheRead, cacheWrite int64) {
+	toolsLabel, call := "no", "later"
+	if tools {
+		toolsLabel = "yes"
+	}
+	if firstCall {
+		call = "first"
+	}
 	for _, tokens := range []struct {
 		kind  string
 		count int64
@@ -785,6 +792,9 @@ func (t *Telemetry) RecordModelTokens(ctx context.Context, principal, provider, 
 			labelAttr("home_agent.provider", provider, "unknown"),
 			labelAttr("home_agent.model", model, "unknown"),
 			labelAttr("home_agent.effort", effort, "unknown"),
+			labelAttr("home_agent.kind", kind, "unknown"),
+			attribute.String("home_agent.tools", toolsLabel),
+			attribute.String("home_agent.call", call),
 			attribute.String("home_agent.type", tokens.kind),
 		))
 	}

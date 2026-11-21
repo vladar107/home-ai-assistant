@@ -24,7 +24,7 @@ func TestBusinessMetricsAreRecordedWithNormalizedLabels(t *testing.T) {
 	telemetry.RecordReply(ctx, "alice", "chat", "delivered", "", time.Second)
 	telemetry.RecordReplyStage(ctx, "alice", "model", time.Second)
 	telemetry.RecordModelCall(ctx, "alice", "", "m1", "high", "stop", time.Second)
-	telemetry.RecordModelTokens(ctx, "alice", "p", "m1", "high", 10, 0, 5, 0)
+	telemetry.RecordModelTokens(ctx, "alice", "p", "m1", "high", "chat", true, true, 10, 0, 5, 0)
 	telemetry.RecordModelTurn(ctx, "alice", "on", 2, 100, 20)
 	telemetry.RecordToolCall(ctx, "alice", "calendar", "", time.Millisecond)
 	telemetry.RecordToolCallsPerTurn(ctx, "alice", "on", 1)

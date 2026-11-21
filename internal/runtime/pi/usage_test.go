@@ -2,6 +2,7 @@ package pi_test
 
 import (
 	"context"
+	"maps"
 	"testing"
 	"time"
 
@@ -11,7 +12,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
-func runUsageTurn(t *testing.T, message string) (agentruntime.RunResult, metricdata.ResourceMetrics, *eventSink) {
+func runUsageTurn(t *testing.T, message string, adjust ...func(*agentruntime.RunRequest)) (agentruntime.RunResult, metricdata.ResourceMetrics, *eventSink) {
 	t.Helper()
 	reader := sdkmetric.NewManualReader()
 	telemetry, err := observability.NewWithReader(reader)
@@ -23,6 +24,9 @@ func runUsageTurn(t *testing.T, message string) (agentruntime.RunResult, metricd
 	r.SetTelemetry(telemetry)
 	run := principalRequest(testPrincipal, "usage-session", message)
 	run.WebSearch = true
+	for _, change := range adjust {
+		change(&run)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	sink := &eventSink{}
@@ -71,6 +75,45 @@ func modelTokenCounts(t *testing.T, collected metricdata.ResourceMetrics) map[st
 		}
 	}
 	return counts
+}
+
+func tokenPointLabels(collected metricdata.ResourceMetrics) map[string]int64 {
+	labels := map[string]int64{}
+	for _, scope := range collected.ScopeMetrics {
+		for _, m := range scope.Metrics {
+			if m.Name != "home_agent.model.tokens" {
+				continue
+			}
+			for _, point := range m.Data.(metricdata.Sum[int64]).DataPoints {
+				kind, _ := point.Attributes.Value("home_agent.kind")
+				tools, _ := point.Attributes.Value("home_agent.tools")
+				call, _ := point.Attributes.Value("home_agent.call")
+				labels[kind.AsString()+"/"+tools.AsString()+"/"+call.AsString()] += point.Value
+			}
+		}
+	}
+	return labels
+}
+
+func TestTokenPointsCarryKindToolsAndCallPosition(t *testing.T) {
+	t.Parallel()
+	withTools := func(run *agentruntime.RunRequest) {
+		run.Kind = agentruntime.RunChat
+		run.Tools = toolSet(t, &echoProvider{principal: testPrincipal}, testPrincipal)
+	}
+	_, collected, _ := runUsageTurn(t, "fixture:usage", withTools)
+	// First call: 100+20+50+10; later call: 30+5+120+0.
+	want := map[string]int64{"chat/yes/first": 180, "chat/yes/later": 155}
+	if got := tokenPointLabels(collected); !maps.Equal(got, want) {
+		t.Errorf("chat turn with tools: %v, want %v", got, want)
+	}
+	noWebSearch := func(run *agentruntime.RunRequest) { run.WebSearch = false }
+	// The errored attempt and its retry both reach the provider as the first call.
+	_, collected, _ = runUsageTurn(t, "fixture:usage-retry", noWebSearch)
+	want = map[string]int64{"background/no/first": 35}
+	if got := tokenPointLabels(collected); !maps.Equal(got, want) {
+		t.Errorf("retried first call: %v, want %v", got, want)
+	}
 }
 
 func TestAssistantMessagesRecordModelCallsAndTokens(t *testing.T) {
