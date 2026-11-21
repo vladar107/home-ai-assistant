@@ -140,9 +140,6 @@
         ],
         "ordered": true,
         "reply": {
-          "contains": [
-            "340"
-          ],
           "not_contains": [
             "(hidden place)"
           ],
