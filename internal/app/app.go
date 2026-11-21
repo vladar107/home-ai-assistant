@@ -341,6 +341,7 @@ func (a *App) buildAssembly(ctx context.Context, client *telegram.Client, config
 			ChatModel:            cfg.Conversation.PiModel,
 			TaskModel:            cfg.Conversation.PiTaskModel,
 			HeadsUpModel:         cfg.Conversation.PiHeadsUpModel,
+			Placeholders:         cfg.Conversation.Placeholders,
 			Connection: connection.Config{
 				ProfilesDir: profilesDir,
 				Provider:    cfg.Conversation.PiProvider,

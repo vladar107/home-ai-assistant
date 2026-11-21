@@ -63,19 +63,8 @@ var neutralizer = strings.NewReplacer("⟦", "[", "⟧", "]")
 func (m *Mapper) Hide(ctx context.Context, text string, declared []string) (string, error) {
 	text = neutralizer.Replace(text)
 	suffixes := map[string]string{}
-	for _, value := range declared {
-		value = neutralizer.Replace(strings.TrimSpace(value))
-		if !IsAddress(value) {
-			continue
-		}
-		if err := m.addAddress(ctx, suffixes, value); err != nil {
-			return "", err
-		}
-		if first, _, ok := strings.Cut(value, ","); ok && streetShaped(strings.TrimSpace(first)) {
-			if err := m.addAddress(ctx, suffixes, strings.TrimSpace(first)); err != nil {
-				return "", err
-			}
-		}
+	if err := m.declare(ctx, suffixes, declared); err != nil {
+		return "", err
 	}
 	entries, err := m.vault.Entries(ctx, m.principalID, Address)
 	if err != nil {
@@ -100,6 +89,31 @@ func (m *Mapper) Hide(ctx context.Context, text string, declared []string) (stri
 		return "", err
 	}
 	return m.replaceSpans(ctx, text, Phone, findPhones(text))
+}
+
+// Declare adds the values that pass IsAddress to the vault as addresses, and the part of one
+// before its first comma when it holds a number, as Hide does with declared values, so later text
+// that quotes them is hidden.
+func (m *Mapper) Declare(ctx context.Context, values []string) error {
+	return m.declare(ctx, map[string]string{}, values)
+}
+
+func (m *Mapper) declare(ctx context.Context, suffixes map[string]string, declared []string) error {
+	for _, value := range declared {
+		value = neutralizer.Replace(strings.TrimSpace(value))
+		if !IsAddress(value) {
+			continue
+		}
+		if err := m.addAddress(ctx, suffixes, value); err != nil {
+			return err
+		}
+		if first, _, ok := strings.Cut(value, ","); ok && streetShaped(strings.TrimSpace(first)) {
+			if err := m.addAddress(ctx, suffixes, strings.TrimSpace(first)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (m *Mapper) addAddress(ctx context.Context, suffixes map[string]string, value string) error {

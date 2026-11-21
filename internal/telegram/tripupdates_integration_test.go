@@ -51,6 +51,12 @@ type tripUpdateHarness struct {
 // for ten days. With web, a check reads the web too, so it runs a model turn.
 func newTripUpdateHarness(t *testing.T, web bool) *tripUpdateHarness {
 	t.Helper()
+	return newTripUpdateHarnessWith(t, harnessOptions{web: web})
+}
+
+// newTripUpdateHarnessWith is newTripUpdateHarness with further options.
+func newTripUpdateHarnessWith(t *testing.T, options harnessOptions) *tripUpdateHarness {
+	t.Helper()
 	runtime := tripUpdateRuntime{reviewRuntime{controlledRuntime: newControlledRuntime(), dir: t.TempDir()}}
 	if err := os.MkdirAll(filepath.Join(runtime.dir, "alice"), 0o700); err != nil {
 		t.Fatal(err)
@@ -59,7 +65,8 @@ func newTripUpdateHarness(t *testing.T, web bool) *tripUpdateHarness {
 	sim := googlesim.New(t)
 	calendar := calendarsim.New(t, sim.AccountFor)
 	calendar.AddCalendar(aliceMailbox, calendarsim.Calendar{ID: aliceMailbox, Summary: "Alice", Primary: true, AccessRole: "owner"})
-	base := newConversationHarnessWithOptions(t, runtime, harnessOptions{schedules: clock, topics: true, web: web, google: sim, calendar: calendar})
+	options.schedules, options.topics, options.google, options.calendar = clock, true, sim, calendar
+	base := newConversationHarnessWithOptions(t, runtime, options)
 	base.tabs.icons = append(slices.Clone(testTopicIcons), TopicIcon{Emoji: "\u2708\ufe0f", CustomEmojiID: tripIconID})
 	base.provision("alice", "account-alice")
 	base.start()

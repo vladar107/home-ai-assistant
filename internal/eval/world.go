@@ -198,7 +198,8 @@ func NewWorld(ctx context.Context, c Case, options WorldOptions) (world *World, 
 	if bound, err := w.Store.BindModelConnection(ctx, PrincipalID, provider, options.AccountID); err != nil || !bound {
 		return nil, fmt.Errorf("bind the eval principal's model account: bound=%v: %w", bound, err)
 	}
-	w.Recorder = NewRecorder(options.Runtime)
+	// The recorder wraps the placeholder layer, so a case's checks compare real values.
+	w.Recorder = NewRecorder(wiring.PlaceholderRuntime(w.Store, options.Runtime, true, options.Logger))
 	w.Recorder.sections = options.Variant.promptSections()
 	inputs, err := w.inputs(principals, provider)
 	if err != nil {
@@ -266,7 +267,7 @@ func (w *World) inputs(principals []identity.ConfiguredPrincipal, provider strin
 	}
 	return wiring.Inputs{
 		Store: w.Store, Logger: logger, Telemetry: observability.Noop(),
-		Runtime: w.Recorder, SessionFiles: sessionFiles,
+		Runtime: w.Recorder, RuntimeHasPlaceholders: true, SessionFiles: sessionFiles,
 		Chat: w.Chat, Reminders: w.Chat, Alerts: w.Chat, TaskMessages: w.Chat, Tabs: w.Chat.tabs,
 		Principals: principals, DataDir: w.Dir, Zone: w.Case.Clock.Zone,
 		Core: wiring.CoreConfig{

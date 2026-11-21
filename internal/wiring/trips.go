@@ -31,6 +31,11 @@ type tripScanState struct {
 	calendar  *calendar.Service
 	// web is nil while the web connector is not configured.
 	web turn.WebSearch
+	// places learns the places of the events read, so a trip update quoting one hides it; nil while
+	// placeholders are off.
+	places interface {
+		Declare(ctx context.Context, principalID string, places []string) error
+	}
 }
 
 func (s *tripScanState) MailReadable(ctx context.Context, principalID string) (bool, error) {
@@ -61,6 +66,15 @@ func (s *tripScanState) CalendarEvents(ctx context.Context, principalID string, 
 	read, complete, err := s.calendar.EventsBetween(ctx, principalID, from, to, limit)
 	if err != nil || !complete {
 		return nil, false, err
+	}
+	if s.places != nil {
+		places := make([]string, 0, len(read))
+		for _, event := range read {
+			places = append(places, event.Place)
+		}
+		if err := s.places.Declare(ctx, principalID, places); err != nil {
+			return nil, false, err
+		}
 	}
 	events := make([]trip.CalendarEvent, 0, len(read))
 	for _, event := range read {

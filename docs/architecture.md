@@ -502,6 +502,112 @@ feedback, and attachment rows, and the prune deletes its file. The files of
 scheduled runs and finished tasks, which no conversation refers to, are deleted
 30 days after they were last written.
 
+### Personal values behind placeholders
+
+The model provider receives email addresses, phone numbers and calendar street
+addresses as placeholders (plan 0170). The layer is a runtime decorator,
+`placeholder.Runtime`, nearest Pi: the wiring wraps the Pi runtime in it before
+anything else, and every model run of `internal/turn`, chat, task, scheduled,
+tab name and rewrite, goes through it.
+
+- **What is hidden.** The turn's message, the user's own text included, the
+  memory and jobs sections of the system prompt, the tool guidance (the
+  assistant mailbox's names the user's own address on it), and every tool
+  result, error text included. The fixed base prompt is not touched. Emails and phones are
+  found by pattern: an email is a standard addr-spec with a dotted domain, and a
+  phone starts with `+` or `0` and has 9 to 15 digits, with optional spaces,
+  dashes, dots or one bracketed group. Dates, times, number ranges, tracking
+  codes, IBANs and order numbers do not match. Street addresses come only from
+  values a provider declares on its result (`Sensitive`). Calendar declares an
+  event's location when it looks like a street address: at least eight
+  characters with a digit, a letter and a space, not a URL, date or time, and
+  either a comma or two words besides its numbers. "Home", "Zoom", meeting
+  links, "Platform 12" and "Terminal 2" stay readable. The trip check registers
+  the places of the calendar events it reads by the same rule, so a trip update
+  saying an event is "now at" a new address hides it. Once known, an address is
+  replaced wherever it appears again, by exact match on word boundaries,
+  longest first, and so is its part before the first comma when that part holds
+  a number.
+- **Token format.** `⟦email-k3f7qa example.com⟧`, `⟦phone-7hm2xe⟧`,
+  `⟦address-p4tq6n⟧`: the kind, a random six-character base32 suffix, and for
+  an email its domain. The domain stays visible on purpose, for reasoning about
+  a sender's organisation and the routine-reply checks; a personal domain still
+  names its owner. The email body is not an addr-spec, so a token whose brackets
+  the model dropped can never pass as an address.
+- **The vault.** `placeholder_values` in SQLite holds each principal's values in
+  plaintext with their suffixes and when each was first and last seen. The same
+  value always gets the same token, so resumed sessions stay coherent and the
+  prompt prefix stays cache-stable. A value unseen for 120 days, past the 90
+  days closed conversations are kept, is pruned; revoking a principal deletes
+  its rows; export and restore leave the vault out. A token whose row is gone
+  is shown as "(hidden address)", "(hidden number)" or "(hidden place)" and
+  never resolves. The vault is a store of third-party contacts in the same
+  database and backups as the mail-derived data, under the same protection.
+- **Tokens are capabilities.** `⟦` and `⟧` in incoming text become ordinary
+  brackets before anything is hidden, so outside text cannot forge a token. A
+  tool call's arguments are resolved against the principal's own vault before
+  the broker sees them, and an email token resolves only when its domain matches
+  the stored value. A call fails, with an error the model can act on and without
+  reaching the tool, when an argument holds an unknown or malformed token, a
+  token body without brackets (`email-k3f7qa`), an email token with another
+  domain, or a token as an object key.
+- **Real values everywhere else.** Streamed text is held from `⟦` to `⟧`, at
+  most the length of the longest token, so a token split across deltas resolves
+  whole, and the run's `Response` and `Final` are resolved before the turn reads
+  them. The broker's own checks run on resolved arguments and raw results:
+  `MarkExternal` and the TypeSafe screener see the text the provider returned,
+  and proposals, cards and saved records hold real values. The eval recorder
+  wraps the decorator from outside, so a case's checks compare real values; Pi's
+  session files and the fixture's input show what the model received.
+- **Earlier conversations.** Pi's session files hold the tokens the model saw.
+  The history resolves them against the principal's vault before it matches,
+  returns, or shows anything: `conversation_search` finds a turn by the real
+  value, `conversation_read` returns real values that the layer hides again as
+  the same tokens, and titles in `/sessions` and resume notes, the exchanges the
+  weekly review and reply provenance read, and the trip language sample hold
+  real values. Every token in those
+  files was issued by the vault, since incoming brackets were neutralised first.
+- **Fail closed.** When the vault cannot be read or written, while hiding or
+  resolving, the run fails and the turn gets its ordinary failure reply. Raw
+  text is never sent instead. The run logs `placeholder.vault.failed` once, with
+  the principal and the stage (`hide` or `resolve`), never a value.
+- **The setting.** `HOME_AGENT_PLACEHOLDERS` (default `true`) is the operator's
+  escape. `false` stops hiding for every principal and keeps resolving, so a
+  token already in a resumed session still reaches tools and users as its real
+  value; incoming brackets are then left as they are, and a token-shaped string
+  in outside text resolves only if it names a suffix the principal's vault
+  holds, which cannot be guessed. There is no per-user switch, and no backfill:
+  session history written before the layer keeps the raw values it had.
+
+What the layer does not cover:
+
+- Images and photos reach the model as pixels.
+- The provider's own web search runs inside the provider: its results never
+  pass the layer. A query holding a token, a malformed token or a bare token
+  body is denied before the search check, with no card and no search, and the
+  model is told to search without it, so a search cannot look up a hidden
+  value. The turn's trace labels a search with the real value.
+- An address in free text, such as a mail body or a web page, is not detected
+  and reaches the provider as text. Saved places and map and place results are
+  not declared either: they are the household's own records and public business
+  addresses, which the model needs for distance and routing.
+- A location written differently elsewhere is not matched by exact replacement.
+- The model cannot read what a token hides: an email's local part, a phone's
+  country, where an event is. Domain-level reasoning stays; a check that
+  compares local parts, such as spotting `noreply@`, must compare tokens or move
+  server-side.
+- A phone false positive hides a number the model needed, such as a tracking or
+  order number; each known class is pinned by a test.
+- TypeSafe still reads raw third-party text for screening.
+- Failing closed does not undo what a tool already did: a call that ran before
+  the vault failed, such as one that sent an approval card, has had its effect.
+- With the setting off, arguments are still resolved strictly, so a token-shaped
+  body such as `email-k3f7q2` is still refused, and user-facing text still
+  renders an unknown token-shaped string as "(hidden address)", "(hidden
+  number)" or "(hidden place)".
+- Eval runs before and after the layer compare only with that caveat, since it
+  changes what every case sends to the model.
+
 ### What a reply was based on
 
 Every keyed turn leaves a trace in `turn_traces`, written by the turn engine's

@@ -268,6 +268,8 @@ type harnessOptions struct {
 	// assistantMailToken, with alice's address tagged a1 and bob without one.
 	assistantMail      *googlesim.Simulator
 	assistantMailToken string
+	// placeholders hides personal values from the model, as HOME_AGENT_PLACEHOLDERS does.
+	placeholders bool
 }
 
 // testFile is one attachment the Telegram simulator will hand out through getFile.
@@ -555,6 +557,7 @@ func (h *conversationHarness) wiringInputs(t *testing.T, runtime agentruntime.Ag
 		},
 		ExtraProviders: options.providers,
 	}
+	in.Core.Placeholders = options.placeholders
 	if options.schedules != nil {
 		in.Core.ScheduleTick = 10 * time.Millisecond
 	}

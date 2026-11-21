@@ -1,6 +1,7 @@
 // Package history reads a principal's earlier conversations from the session files Pi keeps, for
 // conversation titles and for the model's search and read tools. Nothing is copied out of the
-// files: every title, match, and excerpt is read when it is asked for.
+// files: every title, match, and excerpt is read when it is asked for, with the placeholders the
+// model saw resolved to their real values.
 package history
 
 import (
@@ -42,26 +43,35 @@ type Directories interface {
 	SessionDirectory(principalID string) (string, error)
 }
 
+// Placeholders resolves the placeholders in session text against the principal's own vault.
+type Placeholders interface {
+	ResolveText(ctx context.Context, principalID, text string) (string, error)
+}
+
 type Telemetry interface {
 	RecordConversationSearch(ctx context.Context, principal, outcome string)
 }
 
 type Service struct {
-	sessions    Sessions
-	directories Directories
-	location    *time.Location
-	telemetry   Telemetry
+	sessions     Sessions
+	directories  Directories
+	placeholders Placeholders
+	location     *time.Location
+	telemetry    Telemetry
 }
 
 var _ conversation.History = (*Service)(nil)
 
 // NewService reads history in the household's time zone; a nil location means UTC.
-func NewService(sessions Sessions, directories Directories, location *time.Location, telemetry Telemetry) (*Service, error) {
+func NewService(sessions Sessions, directories Directories, placeholders Placeholders, location *time.Location, telemetry Telemetry) (*Service, error) {
 	if sessions == nil {
 		return nil, fmt.Errorf("conversation history sessions are required")
 	}
 	if directories == nil {
 		return nil, fmt.Errorf("conversation history directories are required")
+	}
+	if placeholders == nil {
+		return nil, fmt.Errorf("conversation history placeholders are required")
 	}
 	if telemetry == nil {
 		return nil, fmt.Errorf("conversation history telemetry is required")
@@ -69,13 +79,13 @@ func NewService(sessions Sessions, directories Directories, location *time.Locat
 	if location == nil {
 		location = time.UTC
 	}
-	return &Service{sessions: sessions, directories: directories, location: location, telemetry: telemetry}, nil
+	return &Service{sessions: sessions, directories: directories, placeholders: placeholders, location: location, telemetry: telemetry}, nil
 }
 
 // Title is the first thing the user wrote in the session, on one line and cut to 60 characters.
-func (s *Service) Title(_ context.Context, principalID, runtimeSessionID string) (string, error) {
+func (s *Service) Title(ctx context.Context, principalID, runtimeSessionID string) (string, error) {
 	var title string
-	err := s.messages(principalID, runtimeSessionID, func(message message) bool {
+	err := s.messages(ctx, principalID, runtimeSessionID, func(message message) bool {
 		if message.role != roleUser {
 			return true
 		}
@@ -97,9 +107,9 @@ type Exchange struct {
 // user's message before that, reading the session's files once. Pi records no request IDs, so a
 // reply is found by time: when the last message recorded by then is the user's, the reply itself was
 // not recorded, as for a turn that failed, and nothing is found rather than an older reply.
-func (s *Service) Exchanges(_ context.Context, principalID, runtimeSessionID string, sentAt []time.Time) ([]Exchange, error) {
+func (s *Service) Exchanges(ctx context.Context, principalID, runtimeSessionID string, sentAt []time.Time) ([]Exchange, error) {
 	var recorded []message
-	if err := s.messages(principalID, runtimeSessionID, func(current message) bool {
+	if err := s.messages(ctx, principalID, runtimeSessionID, func(current message) bool {
 		recorded = append(recorded, current)
 		return true
 	}); err != nil {
@@ -140,7 +150,7 @@ func (s *Service) LatestMessage(ctx context.Context, principalID string, threadI
 			continue
 		}
 		var latest string
-		if err := s.messages(principalID, session.RuntimeSessionID, func(current message) bool {
+		if err := s.messages(ctx, principalID, session.RuntimeSessionID, func(current message) bool {
 			if current.role == roleUser && !current.forwarded {
 				latest = current.text
 			}
@@ -184,7 +194,7 @@ type sessionEntry struct {
 // messages calls visit with each message of the session in the order Pi recorded them, until
 // visit returns false. A session can span several files: before plan 0015 each working directory
 // got its own, so the files are read oldest first by their timestamped names.
-func (s *Service) messages(principalID, runtimeSessionID string, visit func(message) bool) error {
+func (s *Service) messages(ctx context.Context, principalID, runtimeSessionID string, visit func(message) bool) error {
 	directory, err := s.directories.SessionDirectory(principalID)
 	if err != nil {
 		return err
@@ -212,7 +222,7 @@ func (s *Service) messages(principalID, runtimeSessionID string, visit func(mess
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		more, err := s.readFile(filepath.Join(directory, name), runtimeSessionID, visit)
+		more, err := s.readFile(ctx, principalID, filepath.Join(directory, name), runtimeSessionID, visit)
 		if err != nil {
 			return err
 		}
@@ -223,7 +233,7 @@ func (s *Service) messages(principalID, runtimeSessionID string, visit func(mess
 	return nil
 }
 
-func (s *Service) readFile(path, runtimeSessionID string, visit func(message) bool) (bool, error) {
+func (s *Service) readFile(ctx context.Context, principalID, path, runtimeSessionID string, visit func(message) bool) (bool, error) {
 	file, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return true, nil
@@ -260,6 +270,9 @@ func (s *Service) readFile(path, runtimeSessionID string, visit func(message) bo
 		message, ok := s.readMessage(entry)
 		if !ok {
 			continue
+		}
+		if message.text, err = s.placeholders.ResolveText(ctx, principalID, message.text); err != nil {
+			return false, fmt.Errorf("resolve placeholders in Pi session text: %w", err)
 		}
 		if !visit(message) {
 			return false, nil

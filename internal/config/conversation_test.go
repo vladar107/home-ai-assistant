@@ -15,6 +15,7 @@ func loadConversation(t *testing.T, chat, task *string) (ConversationConfig, err
 	t.Setenv("HOME_AGENT_PI_TASK_MODEL", "")
 	t.Setenv("HOME_AGENT_PI_HEADSUP_MODEL", "")
 	t.Setenv("HOME_AGENT_SCHEDULED_TURN_TIMEOUT", "")
+	t.Setenv("HOME_AGENT_PLACEHOLDERS", "")
 	if chat != nil {
 		t.Setenv("HOME_AGENT_PI_MODEL", *chat)
 	}
@@ -131,5 +132,22 @@ func TestScheduledTurnTimeoutSetting(t *testing.T) {
 				t.Errorf("timeout = %s, error = %v", cfg.ScheduledTurnTimeout, err)
 			}
 		})
+	}
+}
+
+func TestPlaceholdersSetting(t *testing.T) {
+	cfg, err := loadConversation(t, ptr("model-a"), nil)
+	if err != nil || !cfg.Placeholders {
+		t.Fatalf("default placeholders = %v, error = %v, want on", cfg.Placeholders, err)
+	}
+	t.Setenv("HOME_AGENT_PLACEHOLDERS", "false")
+	cfg = defaultConversationConfig()
+	if err := loadConversationConfig(&cfg); err != nil || cfg.Placeholders {
+		t.Fatalf("placeholders = %v, error = %v, want off", cfg.Placeholders, err)
+	}
+	t.Setenv("HOME_AGENT_PLACEHOLDERS", "sometimes")
+	cfg = defaultConversationConfig()
+	if err := loadConversationConfig(&cfg); err == nil || !strings.Contains(err.Error(), "HOME_AGENT_PLACEHOLDERS") {
+		t.Errorf("error = %v, want one naming HOME_AGENT_PLACEHOLDERS", err)
 	}
 }

@@ -11,6 +11,10 @@ Helpful details:
 - steps to reproduce
 - the impact you expect
 
+Email addresses, phone numbers and calendar street addresses reach the model
+provider only as placeholders; a way past that, beyond the limits listed under
+"Personal values behind placeholders" in `docs/architecture.md`, is in scope.
+
 There is no bounty. Responses are best-effort.
 
 Only the latest commit on `main` is supported.

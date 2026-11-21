@@ -44,6 +44,9 @@ type ConversationConfig struct {
 	TurnTimeout          time.Duration
 	// ScheduledTurnTimeout bounds a scheduled model turn instead of TurnTimeout.
 	ScheduledTurnTimeout time.Duration
+	// Placeholders hides email addresses, phone numbers and declared street addresses from the
+	// model; false still resolves the tokens already in its sessions.
+	Placeholders bool
 }
 
 func defaultConversationConfig() ConversationConfig {
@@ -54,6 +57,7 @@ func defaultConversationConfig() ConversationConfig {
 		PiWebSearchExtension: defaultPiWebSearchExtension,
 		TurnTimeout:          defaultConversationTimeout,
 		ScheduledTurnTimeout: defaultScheduledTimeout,
+		Placeholders:         true,
 	}
 }
 
@@ -98,6 +102,13 @@ func loadConversationConfig(cfg *ConversationConfig) error {
 			return fmt.Errorf("HOME_AGENT_SCHEDULED_TURN_TIMEOUT: invalid duration")
 		}
 		cfg.ScheduledTurnTimeout = timeout
+	}
+	if value := os.Getenv("HOME_AGENT_PLACEHOLDERS"); value != "" {
+		enabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("HOME_AGENT_PLACEHOLDERS: must be true or false")
+		}
+		cfg.Placeholders = enabled
 	}
 
 	return cfg.validate()

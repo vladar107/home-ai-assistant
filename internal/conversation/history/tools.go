@@ -165,7 +165,7 @@ func (s *Service) search(ctx context.Context, principalID string, arguments json
 		}
 		var found []match
 		position, lastUser := 0, 0
-		err := s.messages(principalID, record.RuntimeSessionID, func(message message) bool {
+		err := s.messages(ctx, principalID, record.RuntimeSessionID, func(message message) bool {
 			position++
 			if message.role == "user" {
 				lastUser = position
@@ -245,7 +245,7 @@ func (s *Service) read(ctx context.Context, principalID string, arguments json.R
 	first, last := max(input.Position-readRadius, 1), input.Position+readRadius
 	var window []message
 	total := 0
-	err = s.messages(principalID, session.RuntimeSessionID, func(message message) bool {
+	err = s.messages(ctx, principalID, session.RuntimeSessionID, func(message message) bool {
 		total++
 		if total >= first && total <= last {
 			window = append(window, message)

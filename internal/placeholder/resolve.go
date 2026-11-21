@@ -203,6 +203,22 @@ func (m *Mapper) lookup(ctx context.Context, text string, match []int) (tokenVal
 	return tokenValue{value: value, found: found}, nil
 }
 
+// HoldsPlaceholder reports whether text holds a token, a malformed one, or a token body without
+// brackets, any of which would carry a hidden value's stand-in to where it cannot be resolved.
+func (m *Mapper) HoldsPlaceholder(ctx context.Context, text string) (bool, error) {
+	if wellFormed.MatchString(text) {
+		return true, nil
+	}
+	var refused *ResolveError
+	switch err := m.checkOutside(ctx, text); {
+	case errors.As(err, &refused):
+		return true, nil
+	case err != nil:
+		return false, err
+	}
+	return false, nil
+}
+
 // ResolveText returns text for a user, with every known token replaced by its real value. A token
 // the vault does not know, or an email token whose domain differs from its value's, becomes
 // "(hidden address)", "(hidden number)" or "(hidden place)".

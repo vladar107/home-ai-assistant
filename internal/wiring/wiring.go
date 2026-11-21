@@ -140,9 +140,14 @@ type Inputs struct {
 	Registry  *module.Registry
 	Logger    *slog.Logger
 	Telemetry Telemetry
-	// Runtime runs the model. Where it implements conversation.Transcripts it also forgets a
-	// finished conversation's photos.
+	// Runtime runs the model. Build wraps it in the placeholder layer, nearest the model, unless
+	// RuntimeHasPlaceholders says the caller did. Where it implements conversation.Transcripts it
+	// also forgets a finished conversation's photos.
 	Runtime agentruntime.AgentRuntime
+	// RuntimeHasPlaceholders means Runtime already holds PlaceholderRuntime around the model, below
+	// a layer of the caller's own that must see real values; only the evaluation harness sets it,
+	// for its recorder.
+	RuntimeHasPlaceholders bool
 	// SessionFiles locates the runtime's session files, for the conversation history tools and the
 	// titles in /sessions; nil leaves the history out, for a runtime that keeps no session files.
 	SessionFiles history.Directories
@@ -212,6 +217,9 @@ type CoreConfig struct {
 	TaskModel agentruntime.ModelEffort
 	// HeadsUpModel is what the Heads-up job runs on unless it has a model of its own.
 	HeadsUpModel agentruntime.ModelEffort
+	// Placeholders hides email addresses, phone numbers and declared street addresses from the
+	// model behind tokens; false still resolves the tokens the model sends back.
+	Placeholders bool
 	ChatGPT      chatgpt.Config
 	Connection   connection.Config
 	Approval     approval.Config
@@ -343,6 +351,9 @@ func Build(ctx context.Context, in Inputs) (*Assembly, error) {
 	}
 	if in.Core.Now != nil {
 		in.Store.SetClock(in.Core.Now)
+	}
+	if !in.RuntimeHasPlaceholders {
+		in.Runtime = PlaceholderRuntime(in.Store, in.Runtime, in.Core.Placeholders, in.Logger)
 	}
 	a := &Assembly{
 		Registry:     cmp.Or(in.Registry, module.NewRegistry()),
@@ -748,7 +759,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 	// The user's own messages are kept nowhere else, so without the files trip messages stay English.
 	var written trip.Messages
 	if in.SessionFiles != nil {
-		reader, err := history.NewService(in.Store, in.SessionFiles, a.location, telemetry)
+		reader, err := history.NewService(in.Store, in.SessionFiles, placeholderText{vault: placeholderVault{store: in.Store}}, a.location, telemetry)
 		if err != nil {
 			return fmt.Errorf("initialize conversation history: %w", err)
 		}
@@ -926,6 +937,9 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		return err
 	}
 	a.tripState = &tripScanState{schedules: scheduler, web: webSearch}
+	if in.Core.Placeholders {
+		a.tripState.places = placeholderPlaces{vault: placeholderVault{store: in.Store}}
+	}
 	tripTools.SetScanState(a.tripState)
 	tripLanguage, err := trip.NewLanguage(tabs.Trips, written, engine, in.Store, in.Logger)
 	if err != nil {

@@ -69,16 +69,21 @@ hidden part of a value.
   database and backups as the mail-derived data the assistant already keeps, under the same
   protection. It holds no more than turns already handled, but in one place.
 - **Everything model-bound gets the same pass,** with no exceptions by source. This covers the
-  composed message (the user's own text included), the memory and jobs sections, and every tool
-  result, error text included. Emails and phones are found by pattern. Values already in the
+  composed message (the user's own text included), the memory and jobs sections, the tools'
+  guidance, and every tool result, error text included. Emails and phones are found by pattern. Values already in the
   vault are replaced by exact match on word boundaries, longest first. Declared values are added
   to the vault, then replaced. One rule everywhere means a value the user typed, saved through a
   tool, or read in mail is the same token in every place.
 - **Addresses come only from declared values.** A provider's `Result` gains `Sensitive`, a list
-  of values to hide. The calendar provider declares an event's location only when it looks like
-  a street address: at least eight characters, containing a digit, and not a URL. "Home",
-  "Zoom" and meeting links stay readable. Free-text address detection is not attempted, so an
-  address inside a mail body or a web page reaches the provider as text.
+  of values to hide. The calendar provider declares every event location, and the placeholder
+  package keeps only those that look like a street address. A street address has at least
+  eight characters, a digit, a letter and a space. It is not a URL, date or time, and has a
+  comma or two words besides its numbers. "Home", "Zoom", "Platform 12" and meeting links stay
+  readable. When an address has a comma, the part before it is registered too, as long as it
+  holds a number, because trip updates quote only that part. The trip scan, which reads the
+  calendar without the calendar tool, registers event places the same way. Free-text address
+  detection is not attempted, so an address inside a mail body or a web page reaches the
+  provider as text.
 - **Saved places and map results are not declared.** Map and place search results are public
   business addresses. Saved places are the household's own records, which the model needs for
   distance and routing. Both reach the provider as they do today. This narrows "addresses from
@@ -96,18 +101,30 @@ hidden part of a value.
   arguments hold any of the following, which are never passed through:
   - an unknown token;
   - a malformed token;
-  - a token body without brackets (`email-k3f7qa`).
+  - a token body without brackets (`email-k3f7qa`);
+  - a token in a JSON object key, or anything after the first JSON value.
 
-  Text from one principal's run never resolves against another principal's vault.
+  Arguments that are not one JSON value come back to the model as a tool error; they never fail
+  the run. Text from one principal's run never resolves against another principal's vault.
+- **Web searches never carry a token.** The provider runs web search itself, so the decorator
+  also wraps the search check. A query holding a token, a malformed token or a bare body is
+  denied with text telling the model to search without hidden values. No card is shown and no
+  search runs.
+- **Earlier conversations read back real values.** Pi session files hold tokens. The history
+  service resolves session text before it searches, returns or shows it, so search by a real
+  value works and titles show real values. The decorator then hides the text again, with the
+  same tokens, when the model reads it.
 - **One runtime decorator, nearest Pi.** It wraps the production runtime, and the eval
-  harness's, as the layer Pi calls into. On the way in it tokenizes the message, memory and
-  jobs, and wraps the tool executor. The wrapped executor resolves arguments before the inner
-  executor runs, then tokenizes the result and error text it returns. On the way out it resolves
-  `Response`, `Final` and every streamed text event. It buffers from `⟦` to `⟧`, at most 128
-  characters, so a token split across chunks is resolved whole and a stray bracket cannot hold
-  back the stream.
+  harness's, as the layer Pi calls into. On the way in it tokenizes the message, memory, jobs
+  and tool guidance, and wraps the tool executor. The wrapped executor resolves arguments
+  before the inner executor runs, then tokenizes the result and error text it returns. On the
+  way out it resolves `Response`, `Final`, every streamed text event, and the arguments of
+  `tool_call` events. It buffers from `⟦` to `⟧`, up to the length of the longest well-formed
+  token, so a token split across chunks is resolved whole and a stray bracket cannot hold back
+  the stream.
 - **Fail closed.** If the vault cannot be read or written, the turn fails with the ordinary
-  failure reply. Raw text is never sent instead.
+  failure reply and logs `placeholder.vault.failed` with its stage, never the value. Raw text
+  is never sent instead.
 - **Ordering with the broker and the eval recorder.** The broker's own checks run inside the
   wrapped executor, on resolved arguments and raw results. `MarkExternal` and the TypeSafe
   screener therefore see raw text, as today, and approval cards show real values. The eval

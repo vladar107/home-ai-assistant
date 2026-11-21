@@ -3,6 +3,7 @@ package pifixture
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -41,6 +42,9 @@ type Report struct {
 	Tools       json.RawMessage `json:"tools"`
 	// AbortReceived is rewritten by the retry scenarios once they stop waiting for abort_retry.
 	AbortReceived bool `json:"abort_received"`
+	// Results are the tool results the relay scenario read, as the model would, rewritten after
+	// each call.
+	Results []BridgeResult `json:"results"`
 }
 
 // Image is one picture the prompt carried, kept as Pi receives it.
@@ -215,6 +219,56 @@ func run() error {
 		delta(text)
 		settle()
 		_, err = io.Copy(io.Discard, os.Stdin)
+		return err
+	}
+	if strings.HasPrefix(prompt.Message, "fixture:relay ") {
+		// Calls tools in turn, each written "<name> <arguments>" and joined by " then ". In the
+		// arguments, $email, $phone and $address stand for the first placeholder of that kind an
+		// earlier result held, and [[ and ]] for placeholder brackets, as a model copying or making
+		// one up would write them. The reply is the last result, streamed a few characters at a time
+		// and recorded in the session file with the message.
+		ack()
+		emit(map[string]any{"type": "message_start", "message": map[string]string{"role": "assistant"}})
+		delta("Checking.")
+		seen := map[string]string{}
+		var text string
+		var isError bool
+		for i, step := range strings.Split(strings.TrimPrefix(prompt.Message, "fixture:relay "), " then ") {
+			name, arguments, _ := strings.Cut(step, " ")
+			arguments = strings.NewReplacer("$email", seen["email"], "$phone", seen["phone"], "$address", seen["address"], "[[", "⟦", "]]", "⟧").Replace(arguments)
+			id := fmt.Sprintf("call-%d", i+1)
+			emit(map[string]any{"type": "message_update", "assistantMessageEvent": map[string]string{"type": "toolcall_start"}})
+			emit(map[string]any{"type": "tool_execution_start", "toolCallId": id, "toolName": name, "args": json.RawMessage(cmp.Or(arguments, "{}"))})
+			var err error
+			if text, isError, err = callBridge(id, name, arguments); err != nil {
+				return err
+			}
+			report.Results = append(report.Results, BridgeResult{Text: text, IsError: isError})
+			if err := writeReport(); err != nil {
+				return err
+			}
+			for _, kind := range []string{"email", "phone", "address"} {
+				start := strings.Index(text, "⟦"+kind+"-")
+				if end := strings.Index(text[max(start, 0):], "⟧"); seen[kind] == "" && start >= 0 && end >= 0 {
+					seen[kind] = text[start : start+end+len("⟧")]
+				}
+			}
+			emit(map[string]any{"type": "tool_execution_end", "toolCallId": id, "toolName": name, "isError": isError})
+		}
+		emit(map[string]any{"type": "message_start", "message": map[string]string{"role": "assistant"}})
+		if isError {
+			text = "error: " + text
+		}
+		if err := recordExchange(args["--session-dir"], args["--session-id"], directory, prompt.Message, nil, text); err != nil {
+			return err
+		}
+		for runes := []rune(text); len(runes) > 0; {
+			n := min(3, len(runes))
+			delta(string(runes[:n]))
+			runes = runes[n:]
+		}
+		settle()
+		_, err := io.Copy(io.Discard, os.Stdin)
 		return err
 	}
 	if strings.HasPrefix(prompt.Message, "fixture:search ") {
