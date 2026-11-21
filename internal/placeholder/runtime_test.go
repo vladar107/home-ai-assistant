@@ -43,6 +43,32 @@ func TestUndecodableArgumentsFailTheCallNotTheRun(t *testing.T) {
 	}
 }
 
+// guidanceRuntime answers with the tool guidance it was given.
+type guidanceRuntime struct{}
+
+func (guidanceRuntime) Run(_ context.Context, request agentruntime.RunRequest, _ agentruntime.EventSink) (agentruntime.RunResult, error) {
+	return agentruntime.RunResult{Final: request.Tools.Guidance}, nil
+}
+
+func TestHidingTellsTheModelToPassPlaceholdersAsWritten(t *testing.T) {
+	t.Parallel()
+	tools := agentruntime.ToolSet{
+		Definitions: []agentruntime.ToolDefinition{{Name: "echo"}},
+		Guidance:    "Use echo.",
+		Executor:    &countingExecutor{},
+	}
+	for _, hide := range []bool{true, false} {
+		result, err := placeholder.NewRuntime(guidanceRuntime{}, newVault(), hide, nil).Run(t.Context(), agentruntime.RunRequest{PrincipalID: "alice", Tools: tools}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		told := strings.Contains(result.Final, "Pass a placeholder to a tool exactly as written")
+		if !strings.HasPrefix(result.Final, "Use echo.") || told != hide {
+			t.Errorf("hide %v: guidance %q", hide, result.Final)
+		}
+	}
+}
+
 func TestAVaultErrorWhileResolvingFailsTheRun(t *testing.T) {
 	t.Parallel()
 	vault := newVault()

@@ -102,7 +102,11 @@ hidden part of a value.
   - an unknown token;
   - a malformed token;
   - a token body without brackets (`email-k3f7qa`);
-  - a token in a JSON object key, or anything after the first JSON value.
+  - a token in a JSON object key, or anything after the first JSON value;
+  - an address rebuilt from a token, a known email suffix joined to its own domain
+    (`k3f7qa@example.com`). A live eval run caught a model doing exactly that. The tool
+    guidance therefore tells the model, whenever hiding is on, to pass placeholders exactly as
+    written.
 
   Arguments that are not one JSON value come back to the model as a tool error; they never fail
   the run. Text from one principal's run never resolves against another principal's vault.

@@ -393,6 +393,9 @@ func TestResolveArgumentsRefusesTokensItCannotResolve(t *testing.T) {
 		`{"⟦phone-7hm2xe⟧":"call"}`:                      placeholder.TokenInKey,
 		`{"list":[{"⟦email-k3f7qa example.com⟧":1}]}`:    placeholder.TokenInKey,
 		`{"phone-7hm2xe":"call"}`:                        placeholder.BareToken,
+		`{"to":"k3f7qa@example.com"}`:                    placeholder.RebuiltToken,
+		`{"to":["Jane <K3F7QA@Example.com>"]}`:           placeholder.RebuiltToken,
+		`{"body":"write to k3f7qa@example.com."}`:        placeholder.RebuiltToken,
 	}
 	mapper := seededMapper("alice")
 	for raw, reason := range cases {
@@ -409,6 +412,16 @@ func TestResolveArgumentsRefusesTokensItCannotResolve(t *testing.T) {
 	}
 	if got, err := mapper.ResolveArguments(context.Background(), json.RawMessage("{\"to\":\"⟦phone-7hm2xe⟧\"}\n")); err != nil || string(got) != `{"to":"+31 20 555 0100"}` {
 		t.Errorf("arguments with trailing whitespace = %s, %v", got, err)
+	}
+}
+
+func TestResolveArgumentsKeepsRealAddressesThatShareASuffix(t *testing.T) {
+	t.Parallel()
+	mapper := seededMapper("alice")
+	for _, raw := range []string{`{"to":"k3f7qa@other.example"}`, `{"to":"Jane.Doe@Example.com"}`, `{"to":"xk3f7qa@example.com"}`} {
+		if got, err := mapper.ResolveArguments(context.Background(), json.RawMessage(raw)); err != nil || string(got) != raw {
+			t.Errorf("ResolveArguments(%s) = %s, %v; want it unchanged", raw, got, err)
+		}
 	}
 }
 

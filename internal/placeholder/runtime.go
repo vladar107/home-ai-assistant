@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
@@ -33,6 +34,11 @@ func NewRuntime(inner agentruntime.AgentRuntime, vault Vault, hide bool, logger 
 	return &Runtime{inner: inner, vault: vault, hide: hide, logger: logger}
 }
 
+// toolGuidance tells the model how to use placeholders, so it never rebuilds an address from one.
+const toolGuidance = "Values written as ⟦email-… domain⟧, ⟦phone-…⟧ or ⟦address-…⟧ are placeholders for hidden values. " +
+	"Pass a placeholder to a tool exactly as written, brackets included, and the tool receives the real value. " +
+	"Never rewrite one as an address or number, and never ask the user for the value it hides."
+
 const (
 	stageHide    = "hide"
 	stageResolve = "resolve"
@@ -53,6 +59,9 @@ func (r *Runtime) Run(ctx context.Context, request agentruntime.RunRequest, sink
 				return agentruntime.RunResult{}, failed.fail(ctx, stageHide, err)
 			}
 			*text = hidden
+		}
+		if !request.Tools.Empty() {
+			request.Tools.Guidance = strings.TrimSpace(request.Tools.Guidance + "\n\n" + toolGuidance)
 		}
 	}
 	if request.Tools.Executor != nil {
