@@ -1,0 +1,1623 @@
+{
+  "id": "rt1-week-trips-from-saved-routes",
+  "title": "A week's trips are answered from the saved routes, not planned from scratch",
+  "tags": [
+    "regression"
+  ],
+  "kind": "ignored-saved-route",
+  "clock": {
+    "local": "2026-03-14T20:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "language": "ru"
+  },
+  "world": {
+    "trains": {
+      "stations": [
+        {
+          "code": "EBC",
+          "name": "Eastbrook Central",
+          "synonyms": [
+            "Eastbrook"
+          ]
+        },
+        {
+          "code": "WFD",
+          "name": "Westfield"
+        },
+        {
+          "code": "NBR",
+          "name": "Northbridge"
+        },
+        {
+          "code": "LKS",
+          "name": "Lakeside"
+        },
+        {
+          "code": "SMR",
+          "name": "Southmoor"
+        }
+      ],
+      "trips": [
+        {
+          "from": "EBC",
+          "to": "WFD",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 25,
+            "legs": [
+              {
+                "name": "IC 2001",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Westfield",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "2001",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-16T07:12:00+0100",
+                  "plannedTrack": "3"
+                },
+                "destination": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-16T07:37:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "EBC",
+          "to": "WFD",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 25,
+            "legs": [
+              {
+                "name": "IC 2002",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Westfield",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "2002",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-16T07:42:00+0100",
+                  "plannedTrack": "3"
+                },
+                "destination": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-16T08:07:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "EBC",
+          "to": "WFD",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 25,
+            "legs": [
+              {
+                "name": "IC 2003",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Westfield",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "2003",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-16T08:12:00+0100",
+                  "plannedTrack": "3"
+                },
+                "destination": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-16T08:37:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "EBC",
+          "to": "WFD",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 25,
+            "legs": [
+              {
+                "name": "IC 2004",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Westfield",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "2004",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-16T08:42:00+0100",
+                  "plannedTrack": "3"
+                },
+                "destination": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-16T09:07:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "WFD",
+          "to": "EBC",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 25,
+            "legs": [
+              {
+                "name": "IC 2005",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Eastbrook Central",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "2005",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-16T17:05:00+0100",
+                  "plannedTrack": "3"
+                },
+                "destination": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-16T17:30:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "WFD",
+          "to": "EBC",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 25,
+            "legs": [
+              {
+                "name": "IC 2006",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Eastbrook Central",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "2006",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-16T17:35:00+0100",
+                  "plannedTrack": "3"
+                },
+                "destination": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-16T18:00:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "WFD",
+          "to": "EBC",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 25,
+            "legs": [
+              {
+                "name": "IC 2007",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Eastbrook Central",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "2007",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-16T18:05:00+0100",
+                  "plannedTrack": "3"
+                },
+                "destination": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-16T18:30:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "EBC",
+          "to": "WFD",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 25,
+            "legs": [
+              {
+                "name": "IC 2008",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Westfield",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "2008",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-17T07:12:00+0100",
+                  "plannedTrack": "3"
+                },
+                "destination": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-17T07:37:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "EBC",
+          "to": "WFD",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 25,
+            "legs": [
+              {
+                "name": "IC 2009",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Westfield",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "2009",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-17T07:42:00+0100",
+                  "plannedTrack": "3"
+                },
+                "destination": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-17T08:07:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "EBC",
+          "to": "WFD",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 25,
+            "legs": [
+              {
+                "name": "IC 2010",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Westfield",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "2010",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-17T08:12:00+0100",
+                  "plannedTrack": "3"
+                },
+                "destination": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-17T08:37:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "EBC",
+          "to": "WFD",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 25,
+            "legs": [
+              {
+                "name": "IC 2011",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Westfield",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "2011",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-17T08:42:00+0100",
+                  "plannedTrack": "3"
+                },
+                "destination": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-17T09:07:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "WFD",
+          "to": "EBC",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 25,
+            "legs": [
+              {
+                "name": "IC 2012",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Eastbrook Central",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "2012",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-17T17:05:00+0100",
+                  "plannedTrack": "3"
+                },
+                "destination": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-17T17:30:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "WFD",
+          "to": "EBC",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 25,
+            "legs": [
+              {
+                "name": "IC 2013",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Eastbrook Central",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "2013",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-17T17:35:00+0100",
+                  "plannedTrack": "3"
+                },
+                "destination": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-17T18:00:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "WFD",
+          "to": "EBC",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 25,
+            "legs": [
+              {
+                "name": "IC 2014",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Eastbrook Central",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "2014",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-17T18:05:00+0100",
+                  "plannedTrack": "3"
+                },
+                "destination": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-17T18:30:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "WFD",
+          "to": "NBR",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 40,
+            "legs": [
+              {
+                "name": "IC 2015",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Northbridge",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "2015",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-16T17:16:00+0100",
+                  "plannedTrack": "3"
+                },
+                "destination": {
+                  "name": "Northbridge",
+                  "stationCode": "NBR",
+                  "plannedDateTime": "2026-03-16T17:56:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "WFD",
+          "to": "NBR",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 40,
+            "legs": [
+              {
+                "name": "IC 2016",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Northbridge",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "2016",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-16T17:46:00+0100",
+                  "plannedTrack": "3"
+                },
+                "destination": {
+                  "name": "Northbridge",
+                  "stationCode": "NBR",
+                  "plannedDateTime": "2026-03-16T18:26:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "WFD",
+          "to": "NBR",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 40,
+            "legs": [
+              {
+                "name": "IC 2017",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Northbridge",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "2017",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-16T18:16:00+0100",
+                  "plannedTrack": "3"
+                },
+                "destination": {
+                  "name": "Northbridge",
+                  "stationCode": "NBR",
+                  "plannedDateTime": "2026-03-16T18:56:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "WFD",
+          "to": "NBR",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 40,
+            "legs": [
+              {
+                "name": "IC 2018",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Northbridge",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "2018",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-16T18:46:00+0100",
+                  "plannedTrack": "3"
+                },
+                "destination": {
+                  "name": "Northbridge",
+                  "stationCode": "NBR",
+                  "plannedDateTime": "2026-03-16T19:26:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "NBR",
+          "to": "EBC",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 55,
+            "legs": [
+              {
+                "name": "IC 2019",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Eastbrook Central",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "2019",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Northbridge",
+                  "stationCode": "NBR",
+                  "plannedDateTime": "2026-03-16T21:10:00+0100",
+                  "plannedTrack": "3"
+                },
+                "destination": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-16T22:05:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "NBR",
+          "to": "EBC",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 55,
+            "legs": [
+              {
+                "name": "IC 2020",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Eastbrook Central",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "2020",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Northbridge",
+                  "stationCode": "NBR",
+                  "plannedDateTime": "2026-03-16T21:40:00+0100",
+                  "plannedTrack": "3"
+                },
+                "destination": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-16T22:35:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "NBR",
+          "to": "EBC",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 55,
+            "legs": [
+              {
+                "name": "IC 2021",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Eastbrook Central",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "2021",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Northbridge",
+                  "stationCode": "NBR",
+                  "plannedDateTime": "2026-03-16T22:10:00+0100",
+                  "plannedTrack": "3"
+                },
+                "destination": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-16T23:05:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "WFD",
+          "to": "LKS",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 28,
+            "legs": [
+              {
+                "name": "IC 2022",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Lakeside",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "2022",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-17T16:51:00+0100",
+                  "plannedTrack": "3"
+                },
+                "destination": {
+                  "name": "Lakeside",
+                  "stationCode": "LKS",
+                  "plannedDateTime": "2026-03-17T17:19:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "WFD",
+          "to": "LKS",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 28,
+            "legs": [
+              {
+                "name": "IC 2023",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Lakeside",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "2023",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-17T17:21:00+0100",
+                  "plannedTrack": "3"
+                },
+                "destination": {
+                  "name": "Lakeside",
+                  "stationCode": "LKS",
+                  "plannedDateTime": "2026-03-17T17:49:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "WFD",
+          "to": "LKS",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 28,
+            "legs": [
+              {
+                "name": "IC 2024",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Lakeside",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "2024",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-17T17:51:00+0100",
+                  "plannedTrack": "3"
+                },
+                "destination": {
+                  "name": "Lakeside",
+                  "stationCode": "LKS",
+                  "plannedDateTime": "2026-03-17T18:19:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "WFD",
+          "to": "LKS",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 28,
+            "legs": [
+              {
+                "name": "IC 2025",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Lakeside",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "2025",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Westfield",
+                  "stationCode": "WFD",
+                  "plannedDateTime": "2026-03-17T18:21:00+0100",
+                  "plannedTrack": "3"
+                },
+                "destination": {
+                  "name": "Lakeside",
+                  "stationCode": "LKS",
+                  "plannedDateTime": "2026-03-17T18:49:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "LKS",
+          "to": "EBC",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 50,
+            "legs": [
+              {
+                "name": "IC 2026",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Eastbrook Central",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "2026",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Lakeside",
+                  "stationCode": "LKS",
+                  "plannedDateTime": "2026-03-17T18:42:00+0100",
+                  "plannedTrack": "3"
+                },
+                "destination": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-17T19:32:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "LKS",
+          "to": "EBC",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 50,
+            "legs": [
+              {
+                "name": "IC 2027",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Eastbrook Central",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "2027",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Lakeside",
+                  "stationCode": "LKS",
+                  "plannedDateTime": "2026-03-17T19:12:00+0100",
+                  "plannedTrack": "3"
+                },
+                "destination": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-17T20:02:00+0100"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "from": "LKS",
+          "to": "EBC",
+          "trip": {
+            "status": "NORMAL",
+            "transfers": 0,
+            "plannedDurationInMinutes": 50,
+            "legs": [
+              {
+                "name": "IC 2028",
+                "travelType": "PUBLIC_TRANSIT",
+                "direction": "Eastbrook Central",
+                "product": {
+                  "categoryCode": "IC",
+                  "number": "2028",
+                  "longCategoryName": "Intercity"
+                },
+                "origin": {
+                  "name": "Lakeside",
+                  "stationCode": "LKS",
+                  "plannedDateTime": "2026-03-17T19:42:00+0100",
+                  "plannedTrack": "3"
+                },
+                "destination": {
+                  "name": "Eastbrook Central",
+                  "stationCode": "EBC",
+                  "plannedDateTime": "2026-03-17T20:32:00+0100"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "departures": [
+        {
+          "station": "EBC",
+          "departure": {
+            "direction": "Westfield",
+            "name": "NS 2001",
+            "plannedDateTime": "2026-03-16T07:12:00+0100",
+            "plannedTrack": "3",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "2001"
+            }
+          }
+        },
+        {
+          "station": "EBC",
+          "departure": {
+            "direction": "Westfield",
+            "name": "NS 2002",
+            "plannedDateTime": "2026-03-16T07:42:00+0100",
+            "plannedTrack": "3",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "2002"
+            }
+          }
+        },
+        {
+          "station": "EBC",
+          "departure": {
+            "direction": "Westfield",
+            "name": "NS 2003",
+            "plannedDateTime": "2026-03-16T08:12:00+0100",
+            "plannedTrack": "3",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "2003"
+            }
+          }
+        },
+        {
+          "station": "EBC",
+          "departure": {
+            "direction": "Westfield",
+            "name": "NS 2004",
+            "plannedDateTime": "2026-03-16T08:42:00+0100",
+            "plannedTrack": "3",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "2004"
+            }
+          }
+        },
+        {
+          "station": "WFD",
+          "departure": {
+            "direction": "Eastbrook Central",
+            "name": "NS 2005",
+            "plannedDateTime": "2026-03-16T17:05:00+0100",
+            "plannedTrack": "3",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "2005"
+            }
+          }
+        },
+        {
+          "station": "WFD",
+          "departure": {
+            "direction": "Eastbrook Central",
+            "name": "NS 2006",
+            "plannedDateTime": "2026-03-16T17:35:00+0100",
+            "plannedTrack": "3",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "2006"
+            }
+          }
+        },
+        {
+          "station": "WFD",
+          "departure": {
+            "direction": "Eastbrook Central",
+            "name": "NS 2007",
+            "plannedDateTime": "2026-03-16T18:05:00+0100",
+            "plannedTrack": "3",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "2007"
+            }
+          }
+        },
+        {
+          "station": "EBC",
+          "departure": {
+            "direction": "Westfield",
+            "name": "NS 2008",
+            "plannedDateTime": "2026-03-17T07:12:00+0100",
+            "plannedTrack": "3",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "2008"
+            }
+          }
+        },
+        {
+          "station": "EBC",
+          "departure": {
+            "direction": "Westfield",
+            "name": "NS 2009",
+            "plannedDateTime": "2026-03-17T07:42:00+0100",
+            "plannedTrack": "3",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "2009"
+            }
+          }
+        },
+        {
+          "station": "EBC",
+          "departure": {
+            "direction": "Westfield",
+            "name": "NS 2010",
+            "plannedDateTime": "2026-03-17T08:12:00+0100",
+            "plannedTrack": "3",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "2010"
+            }
+          }
+        },
+        {
+          "station": "EBC",
+          "departure": {
+            "direction": "Westfield",
+            "name": "NS 2011",
+            "plannedDateTime": "2026-03-17T08:42:00+0100",
+            "plannedTrack": "3",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "2011"
+            }
+          }
+        },
+        {
+          "station": "WFD",
+          "departure": {
+            "direction": "Eastbrook Central",
+            "name": "NS 2012",
+            "plannedDateTime": "2026-03-17T17:05:00+0100",
+            "plannedTrack": "3",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "2012"
+            }
+          }
+        },
+        {
+          "station": "WFD",
+          "departure": {
+            "direction": "Eastbrook Central",
+            "name": "NS 2013",
+            "plannedDateTime": "2026-03-17T17:35:00+0100",
+            "plannedTrack": "3",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "2013"
+            }
+          }
+        },
+        {
+          "station": "WFD",
+          "departure": {
+            "direction": "Eastbrook Central",
+            "name": "NS 2014",
+            "plannedDateTime": "2026-03-17T18:05:00+0100",
+            "plannedTrack": "3",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "2014"
+            }
+          }
+        },
+        {
+          "station": "WFD",
+          "departure": {
+            "direction": "Northbridge",
+            "name": "NS 2015",
+            "plannedDateTime": "2026-03-16T17:16:00+0100",
+            "plannedTrack": "3",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "2015"
+            }
+          }
+        },
+        {
+          "station": "WFD",
+          "departure": {
+            "direction": "Northbridge",
+            "name": "NS 2016",
+            "plannedDateTime": "2026-03-16T17:46:00+0100",
+            "plannedTrack": "3",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "2016"
+            }
+          }
+        },
+        {
+          "station": "WFD",
+          "departure": {
+            "direction": "Northbridge",
+            "name": "NS 2017",
+            "plannedDateTime": "2026-03-16T18:16:00+0100",
+            "plannedTrack": "3",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "2017"
+            }
+          }
+        },
+        {
+          "station": "WFD",
+          "departure": {
+            "direction": "Northbridge",
+            "name": "NS 2018",
+            "plannedDateTime": "2026-03-16T18:46:00+0100",
+            "plannedTrack": "3",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "2018"
+            }
+          }
+        },
+        {
+          "station": "NBR",
+          "departure": {
+            "direction": "Eastbrook Central",
+            "name": "NS 2019",
+            "plannedDateTime": "2026-03-16T21:10:00+0100",
+            "plannedTrack": "3",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "2019"
+            }
+          }
+        },
+        {
+          "station": "NBR",
+          "departure": {
+            "direction": "Eastbrook Central",
+            "name": "NS 2020",
+            "plannedDateTime": "2026-03-16T21:40:00+0100",
+            "plannedTrack": "3",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "2020"
+            }
+          }
+        },
+        {
+          "station": "NBR",
+          "departure": {
+            "direction": "Eastbrook Central",
+            "name": "NS 2021",
+            "plannedDateTime": "2026-03-16T22:10:00+0100",
+            "plannedTrack": "3",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "2021"
+            }
+          }
+        },
+        {
+          "station": "WFD",
+          "departure": {
+            "direction": "Lakeside",
+            "name": "NS 2022",
+            "plannedDateTime": "2026-03-17T16:51:00+0100",
+            "plannedTrack": "3",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "2022"
+            }
+          }
+        },
+        {
+          "station": "WFD",
+          "departure": {
+            "direction": "Lakeside",
+            "name": "NS 2023",
+            "plannedDateTime": "2026-03-17T17:21:00+0100",
+            "plannedTrack": "3",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "2023"
+            }
+          }
+        },
+        {
+          "station": "WFD",
+          "departure": {
+            "direction": "Lakeside",
+            "name": "NS 2024",
+            "plannedDateTime": "2026-03-17T17:51:00+0100",
+            "plannedTrack": "3",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "2024"
+            }
+          }
+        },
+        {
+          "station": "WFD",
+          "departure": {
+            "direction": "Lakeside",
+            "name": "NS 2025",
+            "plannedDateTime": "2026-03-17T18:21:00+0100",
+            "plannedTrack": "3",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "2025"
+            }
+          }
+        },
+        {
+          "station": "LKS",
+          "departure": {
+            "direction": "Eastbrook Central",
+            "name": "NS 2026",
+            "plannedDateTime": "2026-03-17T18:42:00+0100",
+            "plannedTrack": "3",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "2026"
+            }
+          }
+        },
+        {
+          "station": "LKS",
+          "departure": {
+            "direction": "Eastbrook Central",
+            "name": "NS 2027",
+            "plannedDateTime": "2026-03-17T19:12:00+0100",
+            "plannedTrack": "3",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "2027"
+            }
+          }
+        },
+        {
+          "station": "LKS",
+          "departure": {
+            "direction": "Eastbrook Central",
+            "name": "NS 2028",
+            "plannedDateTime": "2026-03-17T19:42:00+0100",
+            "plannedTrack": "3",
+            "cancelled": false,
+            "product": {
+              "categoryCode": "IC",
+              "number": "2028"
+            }
+          }
+        }
+      ],
+      "disruptions": [
+        {
+          "type": "DISRUPTION",
+          "id": "d1",
+          "title": "Regional transport strike: Eastbrook Central - Westfield - Northbridge - Lakeside",
+          "topic": "Strike on Monday 16 and Tuesday 17 March",
+          "isActive": true,
+          "period": "2026-03-16 to 2026-03-17",
+          "publicationSections": [
+            {
+              "section": {
+                "stations": [
+                  {
+                    "name": "Eastbrook Central",
+                    "stationCode": "EBC"
+                  },
+                  {
+                    "name": "Westfield",
+                    "stationCode": "WFD"
+                  },
+                  {
+                    "name": "Northbridge",
+                    "stationCode": "NBR"
+                  },
+                  {
+                    "name": "Lakeside",
+                    "stationCode": "LKS"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "type": "DISRUPTION",
+          "id": "d2",
+          "title": "Engineering work: Southmoor",
+          "topic": "Engineering work on Tuesday 17 March",
+          "isActive": true,
+          "period": "2026-03-17",
+          "publicationSections": [
+            {
+              "section": {
+                "stations": [
+                  {
+                    "name": "Southmoor",
+                    "stationCode": "SMR"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "routes": [
+      {
+        "name": "В офис",
+        "days": [
+          "mon",
+          "tue",
+          "wed",
+          "thu",
+          "fri"
+        ],
+        "legs": [
+          {
+            "mode": "walk",
+            "minutes": 15
+          },
+          {
+            "mode": "train",
+            "from": "Eastbrook Central",
+            "to": "Westfield",
+            "departures": [
+              "07:42"
+            ]
+          },
+          {
+            "mode": "bike",
+            "minutes": 12
+          }
+        ],
+        "arrive_by": "09:00"
+      },
+      {
+        "name": "На шахматы",
+        "days": [
+          "mon"
+        ],
+        "legs": [
+          {
+            "mode": "bike",
+            "minutes": 10
+          },
+          {
+            "mode": "train",
+            "from": "Westfield",
+            "to": "Northbridge",
+            "departures": [
+              "17:46"
+            ]
+          },
+          {
+            "mode": "walk",
+            "minutes": 8
+          }
+        ]
+      },
+      {
+        "name": "На керамику из офиса",
+        "days": [
+          "tue"
+        ],
+        "legs": [
+          {
+            "mode": "bike",
+            "minutes": 10
+          },
+          {
+            "mode": "train",
+            "from": "Westfield",
+            "to": "Lakeside",
+            "departures": [
+              "17:21"
+            ]
+          },
+          {
+            "mode": "bike",
+            "minutes": 8
+          }
+        ],
+        "arrive_by": "18:30"
+      },
+      {
+        "name": "С шахмат домой",
+        "days": [
+          "mon"
+        ],
+        "legs": [
+          {
+            "mode": "walk",
+            "minutes": 8
+          },
+          {
+            "mode": "train",
+            "from": "Northbridge",
+            "to": "Eastbrook Central",
+            "departures": [
+              "21:40"
+            ]
+          },
+          {
+            "mode": "walk",
+            "minutes": 15
+          }
+        ]
+      },
+      {
+        "name": "С керамики домой",
+        "days": [
+          "tue"
+        ],
+        "legs": [
+          {
+            "mode": "bike",
+            "minutes": 8
+          },
+          {
+            "mode": "train",
+            "from": "Lakeside",
+            "to": "Eastbrook Central",
+            "departures": [
+              "19:12"
+            ]
+          },
+          {
+            "mode": "walk",
+            "minutes": 15
+          }
+        ]
+      }
+    ],
+    "calendar": {
+      "events": [
+        {
+          "id": "ev1",
+          "summary": "Office",
+          "start": "2026-03-16T00:00",
+          "end": "2026-03-17T00:00",
+          "location": "Westfield, Office Park",
+          "all_day": true
+        },
+        {
+          "id": "ev2",
+          "summary": "Office",
+          "start": "2026-03-17T00:00",
+          "end": "2026-03-18T00:00",
+          "location": "Westfield, Office Park",
+          "all_day": true
+        },
+        {
+          "id": "ev3",
+          "summary": "Chess club",
+          "start": "2026-03-16T19:30",
+          "end": "2026-03-16T22:00",
+          "location": "Northbridge, Chess House"
+        },
+        {
+          "id": "ev4",
+          "summary": "Pottery class",
+          "start": "2026-03-17T18:30",
+          "end": "2026-03-17T20:00",
+          "location": "Lakeside, Clay Studio"
+        },
+        {
+          "id": "ev5",
+          "summary": "Evening online talk",
+          "start": "2026-03-16T17:00",
+          "end": "2026-03-16T19:00",
+          "location": "Online",
+          "description": "Webinar from the shared community calendar"
+        },
+        {
+          "id": "ev6",
+          "summary": "Evening online talk",
+          "start": "2026-03-17T17:00",
+          "end": "2026-03-17T18:00",
+          "location": "Online",
+          "description": "Webinar from the shared community calendar"
+        }
+      ]
+    },
+    "jobs": [
+      {
+        "id": "evening-heads-up",
+        "name": "Evening Heads-up",
+        "heads_up": true,
+        "prompt": "Событие «Office» на весь день значит офисный день: еду из дома в офис и обратно. В офисные дни выхожу из дома в фиксированное время, до станции иду пешком 12 минут. После шахмат иду до станции пешком. Пиши по-русски, коротко, разделами.",
+        "cron": "30 18 * * *"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "say": "есть какие-то сбои на поездах в пн или вторник?",
+      "expect": {
+        "calls": [
+          {
+            "tool": "ns_disruptions",
+            "min": 1
+          }
+        ]
+      }
+    },
+    {
+      "say": "из дома на работу. и в Northbridge из Westfield в пн и на керамику во вт из Westfield",
+      "expect": {
+        "calls": [
+          {
+            "tool": "route_check",
+            "min": 1
+          },
+          {
+            "tool": "ns_trips",
+            "min": 0,
+            "max": 0
+          }
+        ],
+        "reply": {
+          "matches": [
+            "07[:.]42",
+            "17[:.]21",
+            "17[:.]46"
+          ],
+          "not_matches": [
+            "(?i)(не успел|не удалось проверить|не проверил)"
+          ]
+        }
+      }
+    }
+  ],
+  "rubric": [
+    "Does the reply cover the trip from home to work and the evening trips, to the chess club in Northbridge on Monday and to the pottery class on Tuesday?",
+    "Does it use the trains of the saved routes (Monday chess club train 17:46, Tuesday pottery class train 17:21), not other departures?",
+    "Is every trip in the right direction and at the right time of day?"
+  ],
+  "trials": 3
+}
