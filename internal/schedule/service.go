@@ -39,6 +39,9 @@ const (
 	traceRetention         = 30 * 24 * time.Hour
 	unlinkedTraceRetention = 2 * 24 * time.Hour
 	deliveryStoreTimeout   = 5 * time.Second
+	// placeholderRetention outlasts the 90 days a closed conversation is kept, so a token in any
+	// session that can still resume keeps resolving.
+	placeholderRetention = 120 * 24 * time.Hour
 
 	quietReason = "quiet"
 )
@@ -81,6 +84,8 @@ type Config struct {
 	// Traces links each delivered report to its run's trace and removes old traces; nil links
 	// nothing and keeps them.
 	Traces Traces
+	// Placeholders removes the personal values no turn has seen for a while; nil keeps them.
+	Placeholders PlaceholderPruner
 	// Travel is the trip lookup that jobs flagged to pause while traveling consult; without it
 	// nobody is ever traveling.
 	Travel Travel
@@ -146,6 +151,11 @@ type Traces interface {
 	PruneTurnTraces(ctx context.Context, before, unlinkedBefore time.Time) error
 }
 
+// PlaceholderPruner removes the placeholder vault's values last seen before the cutoff.
+type PlaceholderPruner interface {
+	PrunePlaceholders(ctx context.Context, before time.Time) error
+}
+
 // ReminderDeliverer sends one reminder to its owner's chat with buttons that snooze the job, and
 // returns the sent message's ID and the tab it landed in.
 type ReminderDeliverer interface {
@@ -161,6 +171,7 @@ type Service struct {
 	reminders  ReminderDeliverer
 	sessions   SessionPruner
 	traces     Traces
+	vault      PlaceholderPruner
 	logger     *slog.Logger
 	languages  locale.Preferences
 	zone       string
@@ -335,6 +346,7 @@ func NewService(cfg Config, repository Repository, chats Chats, deliverer conver
 		reminders:  cfg.Reminders,
 		sessions:   cfg.Sessions,
 		traces:     cfg.Traces,
+		vault:      cfg.Placeholders,
 		logger:     logger,
 		zone:       cfg.Zone,
 		tick:       tick,
@@ -492,6 +504,11 @@ func (s *Service) runTick(ctx context.Context) {
 		if s.traces != nil {
 			if err := s.traces.PruneTurnTraces(ctx, now.Add(-traceRetention), now.Add(-unlinkedTraceRetention)); err != nil && ctx.Err() == nil {
 				s.logger.WarnContext(ctx, "schedule.tick.failed", "stage", "prune_traces", "error", err)
+			}
+		}
+		if s.vault != nil {
+			if err := s.vault.PrunePlaceholders(ctx, now.Add(-placeholderRetention)); err != nil && ctx.Err() == nil {
+				s.logger.WarnContext(ctx, "schedule.tick.failed", "stage", "prune_placeholders", "error", err)
 			}
 		}
 	}

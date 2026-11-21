@@ -69,6 +69,7 @@ var ExcludedFromExport = map[string]string{
 	"mail_switch_states":          "what the assistant mailbox's poller has seen of a switch",
 	"mail_contacts":               "whom the assistant mailbox has sent mail to",
 	"mail_routine_replies":        "the limits and reports of the assistant mailbox's routine replies",
+	"placeholder_values":          "the values behind the placeholders the model saw; exported records hold real values",
 }
 
 // buildExports registers every section of a user's export, in the order they restore: each after

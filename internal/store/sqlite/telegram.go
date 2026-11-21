@@ -93,9 +93,42 @@ func (s *Store) BootstrapConfiguredPrincipals(ctx context.Context, configured []
 	); err != nil {
 		return fmt.Errorf("revoke unconfigured Telegram identities: %w", err)
 	}
+	if err := deleteRevokedPlaceholders(ctx, tx); err != nil {
+		return err
+	}
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit configured principal bootstrap: %w", err)
+	}
+	return nil
+}
+
+// deleteRevokedPlaceholders empties the placeholder vault of every principal left without an
+// active Telegram identity.
+func deleteRevokedPlaceholders(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT DISTINCT principal_id FROM telegram_allowlist
+		 WHERE revoked_at IS NOT NULL
+		     AND principal_id NOT IN (SELECT principal_id FROM telegram_allowlist WHERE revoked_at IS NULL)`)
+	if err != nil {
+		return fmt.Errorf("list revoked principals: %w", err)
+	}
+	var revoked []string
+	for rows.Next() {
+		var principalID string
+		if err := rows.Scan(&principalID); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan revoked principal: %w", err)
+		}
+		revoked = append(revoked, principalID)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return fmt.Errorf("iterate revoked principals: %w", err)
+	}
+	for _, principalID := range revoked {
+		if err := deletePlaceholders(ctx, tx, principalID); err != nil {
+			return err
+		}
 	}
 	return nil
 }

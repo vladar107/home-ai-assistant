@@ -717,7 +717,7 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		Cards: cards, Photos: in.Chat, Reminders: in.Reminders, Sessions: in.Sessions,
 		Travel: trip.NewTravel(in.Store), Telemetry: telemetry, Exposure: exposures, SafetyChecks: safetyChecks,
 		Feeds: tabs.Feeds, Models: a.Models, Usage: a.ChatGPT, ChatModel: a.ChatModel, TaskModel: a.TaskModel, HeadsUpModel: in.Core.HeadsUpModel,
-		Projects: projectReader, Traces: in.Store, Languages: in.Store,
+		Projects: projectReader, Traces: in.Store, Placeholders: in.Store, Languages: in.Store,
 	}, in.Store, in.Store, in.Chat, approvals, in.Logger)
 	if err != nil {
 		return fmt.Errorf("initialize scheduler: %w", err)

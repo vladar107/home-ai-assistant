@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -22,6 +23,8 @@ const (
 type Store struct {
 	db  *sql.DB
 	now func() time.Time
+	// placeholderRandom is where placeholder suffixes come from; nil is crypto/rand.
+	placeholderRandom io.Reader
 }
 
 // SetClock replaces the clock the store stamps approval and schedule writes with; call it before
