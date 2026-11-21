@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -15,8 +17,11 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/memory"
 	"github.com/vladar107/home-ai-assistant/internal/outbox"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
+	"github.com/vladar107/home-ai-assistant/internal/schedule"
+	"github.com/vladar107/home-ai-assistant/internal/testutil/calendarsim"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/googlesim"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/pifixture"
+	"github.com/vladar107/home-ai-assistant/internal/tools"
 	"github.com/vladar107/home-ai-assistant/internal/turn"
 )
 
@@ -33,23 +38,29 @@ const (
 // assistant mailbox's guidance holding her own address on it.
 func newPlaceholderHarness(t *testing.T, hide bool) (*conversationHarness, *googlesim.Simulator, string) {
 	t.Helper()
+	return newPlaceholderHarnessWith(t, harnessOptions{google: googlesim.New(t), placeholders: hide}, mailOnly)
+}
+
+// newPlaceholderHarnessWith is newPlaceholderHarness over the given options, whose Google
+// simulator gets the landlord's mail, with alice's account connected for the grant.
+func newPlaceholderHarnessWith(t *testing.T, options harnessOptions, grant googlesim.Grant) (*conversationHarness, *googlesim.Simulator, string) {
+	t.Helper()
 	profiles := filepath.Join(t.TempDir(), "profiles")
-	sim := googlesim.New(t)
+	sim := options.google
 	sim.AddMailbox(aliceMailbox, googlesim.Message{
 		ID: "m1", ThreadID: "t1", From: "Landlord <" + landlordAddress + ">", To: aliceMailbox, Subject: "Rent",
 		Labels: []string{"INBOX"}, Received: time.Date(2026, 9, 28, 7, 15, 0, 0, time.UTC),
 		PlainText: "Call me on " + landlordPhone + " about the rent.",
 	})
 	assistantMail := googlesim.New(t)
-	h := newConversationHarnessWithOptions(t, newFixtureRuntime(t, profiles), harnessOptions{
-		profilesDir: profiles, google: sim, placeholders: hide,
-		assistantMail: assistantMail, assistantMailToken: authorizeAssistantMail(t, assistantMail),
-	})
+	options.profilesDir = profiles
+	options.assistantMail, options.assistantMailToken = assistantMail, authorizeAssistantMail(t, assistantMail)
+	h := newConversationHarnessWithOptions(t, newFixtureRuntime(t, profiles), options)
 	h.provision("alice", "acct-alice")
 	h.start()
 	receive(t, h.ctx, h.registrations)
 	receive(t, h.ctx, h.registrations)
-	if reply := h.connectGoogle(sim, 1, 101, aliceMailbox, mailOnly); !strings.HasPrefix(reply, aliceMailbox+" is connected") {
+	if reply := h.connectGoogle(sim, 1, 101, aliceMailbox, grant); !strings.HasPrefix(reply, aliceMailbox+" is connected") {
 		t.Fatalf("connect reply = %q", reply)
 	}
 	h.seedMemory("alice", "aaaaaaa1", memory.KindFact, "The plumber's number is "+plumberPhone+".")
@@ -290,5 +301,154 @@ func TestPlaceholdersOffStillResolveEarlierTokens(t *testing.T) {
 	}
 	if !strings.Contains(unknown.text, "\n\nerror: placeholder (hidden address) is not known") {
 		t.Fatalf("answer = %q", unknown.text)
+	}
+}
+
+const (
+	dinnerAddress = "Lindenlaan 12, Westfield"
+	readCalendar  = `calendar_events {"start":"2026-10-03","end":"2026-10-03"}`
+)
+
+// travelTool times a trip to a destination, as a transit tool would, and keeps the destinations
+// it was given.
+type travelTool struct {
+	mu           sync.Mutex
+	destinations []string
+}
+
+func (p *travelTool) Contribute(context.Context, string) (tools.Contribution, error) {
+	return tools.Contribution{Definitions: []tools.Definition{{
+		Name: "travel_time", Description: "Time a trip to a destination.", Risk: tools.RiskRead,
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"destination":{"type":"string"}},"required":["destination"]}`),
+	}}}, nil
+}
+
+func (p *travelTool) Execute(_ context.Context, _ string, call tools.Call) (tools.Result, error) {
+	var arguments struct {
+		Destination string `json:"destination"`
+	}
+	if err := json.Unmarshal(call.Arguments, &arguments); err != nil {
+		return tools.Result{}, err
+	}
+	p.mu.Lock()
+	p.destinations = append(p.destinations, arguments.Destination)
+	p.mu.Unlock()
+	return tools.Result{Text: "To " + arguments.Destination + ": 25 minutes by bus."}, nil
+}
+
+func (p *travelTool) given() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.destinations)
+}
+
+// A calendar event's street address reaches the model as a token and an online meeting's place as
+// it is; the token the model passes on reaches the next tool, and the user, as the address.
+func TestPlaceholdersCarryAnEventAddressToTheNextTool(t *testing.T) {
+	t.Parallel()
+	sim := googlesim.New(t)
+	calendar := calendarsim.New(t, sim.AccountFor)
+	calendar.AddCalendar(aliceMailbox, calendarsim.Calendar{ID: aliceMailbox, Summary: "Alice", Primary: true, AccessRole: "owner"})
+	calendar.AddEvents(aliceMailbox, aliceMailbox,
+		calendarsim.Event{ID: "e1", Summary: "Planning call", Location: "Zoom", Start: time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC), End: time.Date(2026, 10, 3, 9, 30, 0, 0, time.UTC)},
+		calendarsim.Event{ID: "e2", Summary: "Dinner at Robin's", Location: dinnerAddress, Start: time.Date(2026, 10, 3, 17, 0, 0, 0, time.UTC), End: time.Date(2026, 10, 3, 19, 0, 0, 0, time.UTC)},
+	)
+	travel := &travelTool{}
+	h, _, profiles := newPlaceholderHarnessWith(t, harnessOptions{
+		google: sim, calendar: calendar, placeholders: true, providers: []tools.Provider{travel},
+	}, bothProducts)
+
+	// The address is in no vault before the listing declares it.
+	answer := h.talk(4, 101, `fixture:relay `+readCalendar+` then travel_time {"destination":"$address"}`)
+	address := h.token("address", dinnerAddress, "")
+	results := h.lastReport(profiles).Results
+	if len(results) != 2 {
+		t.Fatalf("the fixture read %+v, want two results", results)
+	}
+	if listed := results[0]; listed.IsError || !strings.Contains(listed.Text, "Location: "+address+"\n") || !strings.Contains(listed.Text, "Location: Zoom\n") ||
+		strings.Contains(listed.Text, dinnerAddress) || strings.Count(listed.Text, "⟦address-") != 1 {
+		t.Fatalf("the fixture read the events %+v, want the dinner's place as %s and the call's as Zoom", listed, address)
+	}
+	if given := travel.given(); !slices.Equal(given, []string{dinnerAddress}) {
+		t.Fatalf("travel_time was given %q, want the dinner's address", given)
+	}
+	if timed := results[1]; timed.IsError || !strings.HasSuffix(timed.Text, "\nTo "+address+": 25 minutes by bus.") {
+		t.Fatalf("the fixture read the travel time %+v, want the address as %s", timed, address)
+	}
+	if !strings.HasSuffix(answer.text, "\nTo "+dinnerAddress+": 25 minutes by bus.") || strings.Contains(answer.text, "⟦") {
+		t.Fatalf("answer = %q, want the real address", answer.text)
+	}
+}
+
+// A scheduled run reads mail behind tokens and delivers its report with the real values; the next
+// chat turn gets that report in its context with the same tokens.
+func TestPlaceholdersHideAScheduledReportInTheNextTurn(t *testing.T) {
+	t.Parallel()
+	clock := newTestClock(t, mondayMorning)
+	h, _, profiles := newPlaceholderHarnessWith(t, harnessOptions{google: googlesim.New(t), placeholders: true, schedules: clock}, mailOnly)
+	job := h.createJob("alice", "a1b2c3d4e5f60718", "Landlord mail", "0 9 * * *", "fixture:relay "+readLandlord)
+
+	clock.Set(t, "2026-09-28T09:00:20+02:00")
+	h.scheduler.Wake()
+	report := h.nextMessage()
+	if report.chatID != 101 || !strings.HasPrefix(report.text, "<b>Scheduled: Landlord mail</b>\n\n") ||
+		!strings.Contains(report.text, "From: Landlord &lt;"+landlordAddress+"&gt;") || strings.Contains(report.text, "⟦") {
+		t.Fatalf("scheduled report = %+v, want the landlord's real address", report)
+	}
+	h.waitRun(job.ID, schedule.StatusDelivered)
+	landlord := h.token("email", landlordAddress, "example.com")
+	paths, err := filepath.Glob(pifixture.ReportPath(filepath.Join(profiles, "alice", "sessions"), "*"))
+	if err != nil || len(paths) != 1 {
+		t.Fatalf("fixture reports = %v %v, want the scheduled run's alone", paths, err)
+	}
+	scheduled := readReport(t, filepath.Dir(paths[0]), strings.TrimSuffix(filepath.Base(paths[0]), ".fixture.json"))
+	if !strings.Contains(scheduled.Message, "Landlord mail") || len(scheduled.Results) != 1 ||
+		!strings.Contains(scheduled.Results[0].Text, "From: Landlord <"+landlord+">") || strings.Contains(scheduled.Results[0].Text, landlordAddress) {
+		t.Fatalf("the scheduled run read %+v, want the sender as %s", scheduled, landlord)
+	}
+
+	answer := h.talk(4, 101, "fixture:relay job_reports {}")
+	next := h.lastReport(profiles)
+	notice, _, _ := strings.Cut(next.Message, "fixture:relay ")
+	if !strings.Contains(notice, "Landlord mail") || !strings.Contains(notice, landlord) || strings.Contains(next.Message, landlordAddress) {
+		t.Fatalf("the next turn's message = %q, want the report with the sender as %s", next.Message, landlord)
+	}
+	if listed := next.Results[0]; listed.IsError || !strings.Contains(listed.Text, landlord) || strings.Contains(listed.Text, landlordAddress) {
+		t.Fatalf("job_reports read %+v, want the sender as %s", listed, landlord)
+	}
+	if !strings.Contains(answer.text, landlordAddress) || strings.Contains(answer.text, "⟦") {
+		t.Fatalf("answer = %q, want the real address", answer.text)
+	}
+}
+
+// A resumed session gets the same token for the same address in every turn, from one vault row.
+func TestPlaceholdersKeepTheirTokenAcrossTurns(t *testing.T) {
+	t.Parallel()
+	h, _, profiles := newPlaceholderHarness(t, true)
+	sender := regexp.MustCompile(`From: Landlord <(⟦email-[a-z2-7]{6} example\.com⟧)>`)
+
+	var tokens []string
+	var sessions []string
+	for _, update := range []int64{4, 5} {
+		h.talk(update, 101, "fixture:relay "+readLandlord)
+		_, runtimeID := h.activeSession("alice")
+		sessions = append(sessions, runtimeID)
+		match := sender.FindStringSubmatch(h.lastReport(profiles).Results[0].Text)
+		if match == nil {
+			t.Fatalf("turn %d read no tokenized sender: %+v", update, h.lastReport(profiles).Results)
+		}
+		tokens = append(tokens, match[1])
+	}
+	if sessions[0] != sessions[1] {
+		t.Fatalf("runtime sessions = %v, want one resumed", sessions)
+	}
+	if tokens[0] != tokens[1] {
+		t.Fatalf("tokens = %v, want the same in both turns", tokens)
+	}
+	if rows := h.countRows(`SELECT count(*) FROM placeholder_values WHERE principal_id = 'alice' AND kind = 'email' AND value = ?`, landlordAddress); rows != 1 {
+		t.Fatalf("vault rows for the landlord = %d, want 1", rows)
+	}
+	if want := h.token("email", landlordAddress, "example.com"); tokens[0] != want {
+		t.Fatalf("token = %s, want the vault's %s", tokens[0], want)
 	}
 }

@@ -1,0 +1,159 @@
+{
+  "id": "ph2-bus-to-hidden-event-address",
+  "title": "A bus trip to tonight's event goes to its real street address, though the model sees it as a placeholder",
+  "tags": [
+    "regression",
+    "placeholders"
+  ],
+  "kind": "hidden-value-lost",
+  "clock": {
+    "local": "2026-03-10T16:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "memory": [
+      "Lives in Eastbrook; home stop: Eastbrook, Market Square."
+    ]
+  },
+  "world": {
+    "calendar": {
+      "events": [
+        {
+          "id": "ev1",
+          "summary": "Project sync",
+          "start": "2026-03-10T17:00",
+          "end": "2026-03-10T17:30",
+          "location": "Zoom"
+        },
+        {
+          "id": "ev2",
+          "summary": "Dinner at Robin's",
+          "start": "2026-03-10T19:00",
+          "end": "2026-03-10T21:30",
+          "location": "Lindenlaan 12, Westfield"
+        }
+      ]
+    },
+    "buses": {
+      "stops": [
+        {
+          "id": "100",
+          "code": "30000001",
+          "name": "Eastbrook, Market Square",
+          "lat": 52.1,
+          "lon": 5.1,
+          "platform": "A"
+        },
+        {
+          "id": "103",
+          "code": "30000004",
+          "name": "Westfield, Lindenlaan",
+          "lat": 52.2045,
+          "lon": 5.2095
+        }
+      ],
+      "routes": [
+        {
+          "id": "r340",
+          "agency": "UOV",
+          "short": "340",
+          "long": "Eastbrook - Westfield"
+        }
+      ],
+      "plans": [
+        {
+          "from": {
+            "lat": 52.1,
+            "lon": 5.1
+          },
+          "to": {
+            "lat": 52.205,
+            "lon": 5.21
+          },
+          "itinerary": {
+            "duration": 2700,
+            "startTime": "2026-03-10T17:05:00Z",
+            "endTime": "2026-03-10T17:50:00Z",
+            "transfers": 0,
+            "legs": [
+              {
+                "mode": "BUS",
+                "routeShortName": "340",
+                "headsign": "Westfield",
+                "duration": 2580,
+                "startTime": "2026-03-10T17:05:00Z",
+                "endTime": "2026-03-10T17:48:00Z",
+                "scheduledStartTime": "2026-03-10T17:05:00Z",
+                "scheduledEndTime": "2026-03-10T17:48:00Z",
+                "from": {
+                  "name": "Eastbrook, Market Square",
+                  "departure": "2026-03-10T17:05:00Z",
+                  "scheduledDeparture": "2026-03-10T17:05:00Z"
+                },
+                "to": {
+                  "name": "Westfield, Lindenlaan",
+                  "arrival": "2026-03-10T17:48:00Z",
+                  "scheduledArrival": "2026-03-10T17:48:00Z"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "places": [
+        {
+          "type": "STOP",
+          "name": "Eastbrook, Market Square",
+          "lat": 52.1,
+          "lon": 5.1,
+          "country": "NL"
+        },
+        {
+          "type": "ADDRESS",
+          "name": "Lindenlaan 12, Westfield",
+          "lat": 52.205,
+          "lon": 5.21,
+          "country": "NL"
+        }
+      ],
+      "stop_times": []
+    }
+  },
+  "steps": [
+    {
+      "say": "How do I get to tonight's dinner by bus?",
+      "expect": {
+        "calls": [
+          {
+            "tool": "calendar_events"
+          },
+          {
+            "tool": "bus_trip",
+            "args": [
+              {
+                "path": "to",
+                "contains": "Lindenlaan 12"
+              }
+            ]
+          }
+        ],
+        "ordered": true,
+        "reply": {
+          "contains": [
+            "340"
+          ],
+          "not_contains": [
+            "(hidden place)"
+          ],
+          "not_matches": [
+            "(?i)\\b(email|phone|address)-[a-z2-7]{6}\\b"
+          ]
+        }
+      }
+    }
+  ],
+  "rubric": [
+    "Does the answer give a bus that arrives before the dinner at 19:00?"
+  ]
+}

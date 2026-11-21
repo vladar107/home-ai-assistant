@@ -1,0 +1,73 @@
+{
+  "id": "ph1-reply-reaches-hidden-sender",
+  "title": "A reply to a triaged mail goes to the sender's real address, though the model sees it as a placeholder",
+  "tags": [
+    "regression",
+    "mail",
+    "placeholders"
+  ],
+  "kind": "hidden-value-lost",
+  "clock": {
+    "local": "2026-03-12T10:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam Lee"
+  },
+  "world": {
+    "assistant_mail": {
+      "messages": [
+        {
+          "from": "Rowan Hart <rowan@harbourhall.example>",
+          "subject": "Room for your workshop on 14 March",
+          "body": "Hi Sam,\n\nWe have two rooms free for your workshop on 14 March: the Garden Room (20 people, 180 EUR) or the Loft (35 people, 260 EUR). Could you tell us by Thursday which one you want? We release the hold after that.\n\nBest,\nRowan Hart\nHarbour Hall"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "triage_mail": true,
+      "expect": {
+        "reply": {
+          "contains": [
+            "rowan@harbourhall.example"
+          ]
+        }
+      }
+    },
+    {
+      "say": "Answer Rowan that we'll take the Loft.",
+      "expect": {
+        "calls": [
+          {
+            "tool": "assistant_mail_send",
+            "args": [
+              {
+                "path": "to.0",
+                "equals": "rowan@harbourhall.example"
+              }
+            ]
+          }
+        ],
+        "proposals": {
+          "min": 1,
+          "tools": [
+            "assistant_mail_send"
+          ]
+        },
+        "reply": {
+          "not_contains": [
+            "(hidden address)"
+          ],
+          "not_matches": [
+            "(?i)\\b(email|phone|address)-[a-z2-7]{6}\\b"
+          ]
+        }
+      }
+    }
+  ],
+  "rubric": [
+    "Does the proposed email tell Rowan that Sam takes the Loft for the workshop on 14 March?"
+  ]
+}

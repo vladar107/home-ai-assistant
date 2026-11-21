@@ -221,19 +221,21 @@ func run() error {
 		_, err = io.Copy(io.Discard, os.Stdin)
 		return err
 	}
-	if strings.HasPrefix(prompt.Message, "fixture:relay ") {
-		// Calls tools in turn, each written "<name> <arguments>" and joined by " then ". In the
-		// arguments, $email, $phone and $address stand for the first placeholder of that kind an
-		// earlier result held, and [[ and ]] for placeholder brackets, as a model copying or making
-		// one up would write them. The reply is the last result, streamed a few characters at a time
-		// and recorded in the session file with the message.
+	if _, steps, relay := strings.Cut(prompt.Message, "fixture:relay "); relay {
+		// Calls tools in turn, each written "<name> <arguments>" and joined by " then " after
+		// "fixture:relay ", which may follow what the application puts before the user's text or a
+		// scheduled job's instructions. In the arguments, $email, $phone and $address stand for the
+		// first placeholder of that kind an earlier result held, and [[ and ]] for placeholder
+		// brackets, as a model copying or making one up would write them. The reply is the last
+		// result, streamed a few characters at a time and recorded in the session file with the
+		// message.
 		ack()
 		emit(map[string]any{"type": "message_start", "message": map[string]string{"role": "assistant"}})
 		delta("Checking.")
 		seen := map[string]string{}
 		var text string
 		var isError bool
-		for i, step := range strings.Split(strings.TrimPrefix(prompt.Message, "fixture:relay "), " then ") {
+		for i, step := range strings.Split(steps, " then ") {
 			name, arguments, _ := strings.Cut(step, " ")
 			arguments = strings.NewReplacer("$email", seen["email"], "$phone", seen["phone"], "$address", seen["address"], "[[", "⟦", "]]", "⟧").Replace(arguments)
 			id := fmt.Sprintf("call-%d", i+1)
