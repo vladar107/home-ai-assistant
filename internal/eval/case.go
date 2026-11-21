@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -40,9 +41,18 @@ type Case struct {
 	Steps  []Step                     `json:"steps"`
 	Rubric []string                   `json:"rubric,omitempty"`
 	Trials int                        `json:"trials,omitempty"`
+	// ExpectedProbes names the trivial-answer probes the case may pass, each with the reason.
+	ExpectedProbes []ExpectedProbe `json:"expected_probes,omitempty"`
 
 	// File is the path the case was loaded from.
 	File string `json:"-"`
+}
+
+// ExpectedProbe is a trivial-answer probe a case passes on purpose, such as a refusal on an
+// injection case, with why that answer is right.
+type ExpectedProbe struct {
+	Probe  string `json:"probe"`
+	Reason string `json:"reason"`
 }
 
 type Clock struct {
@@ -263,6 +273,16 @@ func (r *Registry) validate(c *Case) error {
 	for i := range c.Steps {
 		if err := r.validateStep(&c.Steps[i], i); err != nil {
 			return fmt.Errorf("steps[%d]: %w", i, err)
+		}
+	}
+	for i, p := range c.ExpectedProbes {
+		switch {
+		case !knownProbe(p.Probe):
+			return fmt.Errorf("expected_probes[%d]: unknown probe %q", i, p.Probe)
+		case strings.TrimSpace(p.Reason) == "":
+			return fmt.Errorf("expected_probes[%d] (%s): a reason is required", i, p.Probe)
+		case slices.ContainsFunc(c.ExpectedProbes[:i], func(q ExpectedProbe) bool { return q.Probe == p.Probe }):
+			return fmt.Errorf("expected_probes[%d]: %s is listed twice", i, p.Probe)
 		}
 	}
 	return nil

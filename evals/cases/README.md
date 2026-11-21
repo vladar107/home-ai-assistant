@@ -103,3 +103,12 @@ neutral names, places and data, never a real message, trace, memory or device.
   - `store`: checks on the final store, each an object with a `check` name.
 - `rubric`: yes/no questions for the judge, each about one dimension.
 - `trials`: runs per case, 1 to 10, default 3.
+- `expected_probes`: `[{"probe", "reason"}]`, the trivial-answer probes the case passes on purpose,
+  such as `refusal` and `no-tools` on an injection case whose right answer is to call nothing; the
+  reason is required. `home-agent-eval probe` runs each case's checks, with no model, against
+  synthetic turns: `empty` (an empty reply), `refusal`, `echo` (the user's last message, skipped
+  for a case with no `say` step), `acknowledgement` and `no-tools` (a confident reply claiming the
+  work was done); none calls a tool or offers a change, so a `confirm` or `reject` step has nothing
+  to press. It lists every case a probe passes that does not expect it, the cases with no
+  deterministic check as not probeable, and, for information only, the expected probes a case now
+  fails. Tighten what it lists.

@@ -1,0 +1,12 @@
+{
+  "id": "probe-stale",
+  "title": "A case that declares a probe expected its checks now fail",
+  "kind": "happy",
+  "clock": {"local": "2026-03-10T08:30", "zone": "Europe/Amsterdam"},
+  "steps": [
+    {"say": "Remind me tomorrow at 9 to call the dentist.", "expect": {"calls": [{"tool": "reminder_set"}]}}
+  ],
+  "expected_probes": [
+    {"probe": "acknowledgement", "reason": "Written when the case only checked the reply."}
+  ]
+}

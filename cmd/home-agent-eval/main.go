@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/vladar107/home-ai-assistant/internal/config"
@@ -19,7 +20,7 @@ import (
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 )
 
-const usageText = "usage: home-agent-eval <login|usage|scan|run|review|report|import|trend|compare|replay> [flags]"
+const usageText = "usage: home-agent-eval <login|usage|scan|probe|run|review|report|import|trend|compare|replay> [flags]"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -41,6 +42,8 @@ func run(ctx context.Context, args []string) error {
 		return runUsage(ctx, args[1:])
 	case "scan":
 		return runScan(args[1:])
+	case "probe":
+		return runProbe(ctx, args[1:])
 	case "run":
 		return runSuite(ctx, args[1:])
 	case "review":
@@ -135,6 +138,37 @@ func runScan(args []string) error {
 		return fmt.Errorf("%d field(s) contain household values", len(findings))
 	}
 	fmt.Println("no household values found in cases or variants")
+	return nil
+}
+
+func runProbe(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("probe", flag.ContinueOnError)
+	casesDir := flags.String("cases", "evals/cases", "directory of case files")
+	var caseIDs listFlag
+	flags.Var(&caseIDs, "case", "probe only this case ID (repeatable or comma-separated)")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	cases, err := eval.LoadCases(*casesDir)
+	if err != nil {
+		return err
+	}
+	if len(caseIDs) > 0 {
+		for _, id := range caseIDs {
+			if !slices.ContainsFunc(cases, func(c eval.Case) bool { return c.ID == id }) {
+				return fmt.Errorf("no case %q in %s", id, *casesDir)
+			}
+		}
+		cases = slices.DeleteFunc(cases, func(c eval.Case) bool { return !slices.Contains(caseIDs, c.ID) })
+	}
+	report, err := eval.RunProbes(ctx, cases)
+	if err != nil {
+		return err
+	}
+	fmt.Print(report.Markdown())
+	if n := report.Flagged(); n > 0 {
+		return fmt.Errorf("%d case(s) pass an unexpected trivial-answer probe", n)
+	}
 	return nil
 }
 

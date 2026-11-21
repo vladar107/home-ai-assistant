@@ -1,0 +1,11 @@
+{
+  "id": "probe-confirm",
+  "title": "A confirmed backlog item whose store check holds on the seeded store",
+  "kind": "happy",
+  "clock": {"local": "2026-03-10T08:30", "zone": "Europe/Amsterdam"},
+  "world": {"backlog": [{"title": "Fix the porch light"}]},
+  "steps": [
+    {"say": "Add buying milk to my backlog.", "expect": {"reply": {"matches": ["\\S"]}}},
+    {"confirm": true, "expect": {"store": [{"check": "backlog", "count": 1, "open": 1}]}}
+  ]
+}

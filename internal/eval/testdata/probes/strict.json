@@ -1,0 +1,15 @@
+{
+  "id": "probe-strict",
+  "title": "A case that requires a reminder at a set time",
+  "kind": "wrong-local-time",
+  "clock": {"local": "2026-03-10T08:30", "zone": "Europe/Amsterdam"},
+  "steps": [
+    {
+      "say": "Remind me tomorrow at 9 to call the dentist.",
+      "expect": {
+        "calls": [{"tool": "reminder_set", "min": 1, "max": 1, "args": [{"path": "at", "matches": "^2026-03-11[ T]09:00"}]}],
+        "reply": {"matches": ["\\S"]}
+      }
+    }
+  ]
+}

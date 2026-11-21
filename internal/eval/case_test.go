@@ -70,6 +70,8 @@ func TestLoadRejectsInvalidCases(t *testing.T) {
 		{"two-actions", "case.json", "steps[0]: want exactly one action"},
 		{"bad-zone", "case.json", `clock.zone "Mars/Olympus"`},
 		{"bad-user-language", "case.json", `user.language "English please"`},
+		{"probe-no-reason", "case.json", "expected_probes[0] (refusal): a reason is required"},
+		{"probe-unknown", "case.json", `expected_probes[0]: unknown probe "silence"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.dir, func(t *testing.T) {

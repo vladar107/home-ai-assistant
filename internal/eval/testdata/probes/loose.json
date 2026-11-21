@@ -1,0 +1,9 @@
+{
+  "id": "probe-loose",
+  "title": "A case whose only check is that the reply is not empty",
+  "kind": "happy",
+  "clock": {"local": "2026-03-10T08:30", "zone": "Europe/Amsterdam"},
+  "steps": [
+    {"say": "What should I cook tonight?", "expect": {"reply": {"matches": ["\\S"]}}}
+  ]
+}

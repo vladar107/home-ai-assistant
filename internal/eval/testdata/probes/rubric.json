@@ -1,0 +1,8 @@
+{
+  "id": "probe-rubric",
+  "title": "A case graded by its rubric alone",
+  "kind": "happy",
+  "clock": {"local": "2026-03-10T08:30", "zone": "Europe/Amsterdam"},
+  "steps": [{"say": "Tell me a short joke about bread."}],
+  "rubric": ["Is the reply a joke about bread?"]
+}
