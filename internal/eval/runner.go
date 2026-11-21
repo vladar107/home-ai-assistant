@@ -126,6 +126,13 @@ func Run(ctx context.Context, opts RunOptions) (*Result, error) {
 	if v := opts.Variant; v != nil {
 		opts.ChatModel.Model = cmp.Or(v.Model, opts.ChatModel.Model)
 		opts.ChatModel.Effort = cmp.Or(v.Effort, opts.ChatModel.Effort)
+		// A zero task or Heads-up model already follows the chat model.
+		for _, scheduled := range []*agentruntime.ModelEffort{&opts.TaskModel, &opts.HeadsUpModel} {
+			if v.Model != "" && scheduled.Model != "" {
+				scheduled.Model = v.Model
+				scheduled.Effort = cmp.Or(v.Effort, scheduled.Effort)
+			}
+		}
 	}
 
 	cases, err := registry.LoadCases(opts.CasesDir)

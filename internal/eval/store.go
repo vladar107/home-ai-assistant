@@ -274,6 +274,8 @@ type CaseRate struct {
 	ModelCalls int64
 	Input      int64
 	Output     int64
+	// Model is the model the case's trials ran on: its own user.model, or else the run's.
+	Model string
 }
 
 // Rate is the case's pass rate over the trials that ran.
@@ -305,7 +307,7 @@ func (s *ResultsStore) Detail(ctx context.Context, runID string) (*RunDetail, er
 		return nil, fmt.Errorf("%w: %s", ErrNoRun, runID)
 	}
 	rows, err := s.db.QueryContext(ctx, `
-SELECT case_id, kind, happy, COUNT(*), SUM(status = 'passed'), SUM(model_calls), SUM(tokens_input), SUM(tokens_output)
+SELECT case_id, kind, happy, COUNT(*), SUM(status = 'passed'), SUM(model_calls), SUM(tokens_input), SUM(tokens_output), MAX(model)
 FROM trials WHERE run_id = ? AND status != 'aborted' GROUP BY case_id, kind, happy ORDER BY case_id`, runID)
 	if err != nil {
 		return nil, err
@@ -315,7 +317,7 @@ FROM trials WHERE run_id = ? AND status != 'aborted' GROUP BY case_id, kind, hap
 	for rows.Next() {
 		var c CaseRate
 		var happy int
-		if err := rows.Scan(&c.ID, &c.Kind, &happy, &c.Ran, &c.Passed, &c.ModelCalls, &c.Input, &c.Output); err != nil {
+		if err := rows.Scan(&c.ID, &c.Kind, &happy, &c.Ran, &c.Passed, &c.ModelCalls, &c.Input, &c.Output, &c.Model); err != nil {
 			return nil, err
 		}
 		c.Happy = happy == 1

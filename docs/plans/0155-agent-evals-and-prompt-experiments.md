@@ -295,6 +295,28 @@ trials each; a Markdown report, run by hand from the operator's Mac.
   twice, with the order swapped, and counts only agreeing verdicts. The judge is trusted for a
   question only after the operator labels a sample of replies and the agreement report clears a
   threshold.
+- **The suite is tested as well as the agent.** Two checks find cases that would pass whatever
+  the model did. Both come from talks at the Podlodka AI Engineers Club ("Архитектура приложений
+  будущего" and "Демодень: Собственный eval агентов").
+  - A sensitivity run plays the regression suite under a variant whose `model` names a clearly
+    weaker model the eval profile offers. Its comparison with the baseline lists every case
+    whose pass rate did not drop, as a case that may not be testing the model.
+  - Trivial-answer probes run each case's checks, with no model, against synthetic turns: an
+    empty reply, a refusal, the user's message echoed, a generic acknowledgement, and no tool
+    calls. Each probe is checked against the world store as seeded. Any case a probe passes has
+    a check too loose to trust, unless the case declares that probe expected, with a reason. An
+    example is an injection case where refusing or calling nothing is the right answer. A
+    Confirm or Reject step whose proposal a probe never made counts as a step with nothing to
+    press, and later steps are checked against what the probe left. A case with no
+    deterministic checks, only a rubric, is reported as not probeable.
+
+  Neither changes a case by itself. The operator tightens what they list.
+- **A rubric question can grade the whole session.** A question marked `"scope": "session"`
+  shows the judge every step of the case: each user message, each tool call with its arguments
+  and a clipped result, the proposals, and each reply. A reply-scoped question, the default,
+  shows only the reply it grades. Multi-step flows such as Confirm, Undo and reconsider are
+  judged on their path, as the "Как писать полезные эвалы" talk recommends, while checks still
+  prefer the final state.
 - **The weekly run comes last,** after the suite is stable. The operator starts it by hand on
   their Mac with the eval profile there; a remote scheduled routine reminds them weekly with the
   current commands, and nothing on the Mac is scheduled. It runs the regression suite against the
@@ -308,8 +330,10 @@ trials each; a Markdown report, run by hand from the operator's Mac.
 ## Approach
 
 Three stages, each useful on its own. Each chunk names its complexity, dependencies and
-acceptance criteria. Chunks 4, 5, 6, 8, 9, 10 and 11 all edit `cmd/home-agent-eval/main.go`, so
-they run one at a time in that order, each on top of the one before.
+acceptance criteria. Chunks 4, 5, 6, 8, 9, 10, 11, 13, 14 and 15 all edit
+`cmd/home-agent-eval/main.go`, so they run one at a time, each on top of the one before. Chunks
+13 and 14 depend only on 9 and 5 and may land before 11. Plan 0169's cache probe edits the same
+file and is serialised with them.
 
 ### Stage 1: a regression suite run by hand
 
@@ -489,6 +513,56 @@ they run one at a time in that order, each on top of the one before.
       metric and label; a variant or replayed run is refused; two runs a week apart show as two
       points in the panel, and a fingerprint change is visible on it; the push without the token
       is rejected by the route.
+13. **Sensitivity report** — Simple (Jev: simple, 0.66, below threshold; taken as simple
+    because it adds one section to the existing paired comparison); depends on 9.
+    - Task: `compare` marks a pair where the second run's variant names a different model. It
+      lists, under "Not sensitive to the model", the cases that passed every baseline trial and
+      whose pass rate did not drop. Only cases with at least three trials in each run count.
+      A case that pins its own model is not counted, and a variant's model also replaces the
+      task and Heads-up models, so scheduled steps run on the model under test. Known gap: a job
+      that pins its own model still counts. One example variant, `weak-model`, names the weaker
+      model.
+    - Files: `internal/eval/compare.go`, `evals/variants/weak-model.json`,
+      `cmd/home-agent-eval/main.go`.
+    - Acceptance: hand-built results with four cases are scored correctly:
+      - one unchanged at full pass is listed;
+      - one that dropped is not listed;
+      - one failing at baseline is not listed;
+      - one with two trials is not listed.
+
+      A comparison of two runs on the same model shows no such section.
+14. **Trivial-answer probes** — Complex (Jev: simple, 0.49, below threshold; taken as complex
+    because it builds the seeded world store without a model and synthesizes turn records for
+    every step kind); depends on 5.
+    - Task: a `probe` command that, for each case, builds the world store as seeded and runs the
+      case's checks against each synthetic turn. The case format gains an optional
+      `expected_probes` list, with a reason for each. The report names the cases and the
+      unexpected probes that passed, and lists rubric-only cases as not probeable.
+    - Files: `internal/eval/probe.go`, `internal/eval/case.go`, `cmd/home-agent-eval/main.go`.
+    - Acceptance, against planted test cases:
+      - a loose case whose only check is "reply is not empty" is listed under the echo and
+        acknowledgement probes;
+      - a strict case that requires a tool call with set arguments is not listed;
+      - an injection case declaring the refusal probe expected is not listed for it;
+      - a case with a Confirm step is probed without error;
+      - a rubric-only case is listed as not probeable;
+      - an expected probe without a reason fails the shape test.
+
+      No Pi process or network call is made.
+15. **Session-scoped rubric questions** — Complex (Jev: complex, 0.55, below threshold; taken
+    as complex because it assembles and clips a multi-step trajectory for the judge); depends
+    on 11.
+    - Task: a rubric question may set `"scope": "session"`. The judge then receives every step:
+      the user message, each tool call with its arguments and a result clipped to 2,000
+      characters, the proposals, and the reply. The labelling command shows the operator the
+      same trajectory. Pairwise comparison stays reply-scoped.
+    - Files: `internal/eval/judge.go`, `internal/eval/case.go`, `cmd/home-agent-eval/main.go`.
+    - Acceptance, with the Pi fixture:
+      - a session-scoped question receives every step, with long results clipped at the limit;
+      - a reply-scoped question receives only its reply;
+      - the labelling command shows the trajectory for a session-scoped question;
+      - a pairwise request on a session-scoped question is refused;
+      - a case with an unknown scope fails the shape test.
 
 ## Files affected
 

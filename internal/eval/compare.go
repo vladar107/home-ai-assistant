@@ -25,7 +25,16 @@ type Comparison struct {
 	FirstHappy, SecondHappy Rate
 	// FirstCost and SecondCost add up the shared cases' trials.
 	FirstCost, SecondCost cost
+	// ModelChanged is set when the second run is on a different model from the first, as under a
+	// variant that names one. NotSensitive then lists the shared cases whose own model changed too,
+	// with at least minSensitivityTrials trials in each run, that passed every first-run trial and
+	// whose pass rate did not drop: cases that may not be testing the model.
+	ModelChanged bool
+	NotSensitive []string
 }
+
+// minSensitivityTrials is the fewest trials a case needs in each run to count as not sensitive.
+const minSensitivityTrials = 3
 
 type cost struct {
 	Trials               int
@@ -81,6 +90,15 @@ func Compare(ctx context.Context, store *ResultsStore, first, second string) (*C
 	c.FirstPassK /= float64(len(c.Shared))
 	c.SecondPassK /= float64(len(c.Shared))
 	c.Paired = PairedDifferences(firstRates, secondRates)
+	c.ModelChanged = a.Run.Model != b.Run.Model
+	if c.ModelChanged {
+		for _, id := range c.Shared {
+			x, y := a.Cases[id], b.Cases[id]
+			if x.Model != y.Model && x.Ran >= minSensitivityTrials && y.Ran >= minSensitivityTrials && x.Passed == x.Ran && y.Rate() >= x.Rate()-rateTolerance {
+				c.NotSensitive = append(c.NotSensitive, id)
+			}
+		}
+	}
 	return c, nil
 }
 
@@ -155,6 +173,9 @@ func (c *Comparison) Markdown() string {
 	if a.Run.Replayed || z.Run.Replayed {
 		b.WriteString("- A replayed run re-scores old cassettes with the current checks; it says nothing about a prompt, since no model ran.\n")
 	}
+	if c.ModelChanged {
+		fmt.Fprintf(&b, "- The second run is on a different model, %s instead of %s: see \"Not sensitive to the model\".\n", z.Run.Model, a.Run.Model)
+	}
 
 	p := c.Paired
 	b.WriteString("\n## Overall, shared cases\n\n| | First | Second |\n| --- | --- | --- |\n")
@@ -190,6 +211,17 @@ func (c *Comparison) Markdown() string {
 		x, y := c.First.Cases[id], c.Second.Cases[id]
 		fmt.Fprintf(&b, "| %s | %d/%d | %d/%d | %+.0f points |\n", id, x.Passed, x.Ran, y.Passed, y.Ran, 100*(y.Rate()-x.Rate()))
 	}
+	if c.ModelChanged {
+		b.WriteString("\n## Not sensitive to the model\n\n")
+		fmt.Fprintf(&b, "Cases whose model changed between the runs, with at least %d trials in each run, that passed every trial of the first run and whose pass rate did not drop. "+
+			"A case that pins its own model is not counted. A case listed here may not be testing the model; consider tightening its checks.\n\n", minSensitivityTrials)
+		if len(c.NotSensitive) == 0 {
+			b.WriteString("None.\n")
+		}
+		for _, id := range c.NotSensitive {
+			fmt.Fprintf(&b, "- %s\n", id)
+		}
+	}
 	return b.String()
 }
 
@@ -209,6 +241,10 @@ func WriteComparison(resultsDir string, c *Comparison) (string, error) {
 // Summary is the few lines the compare command prints.
 func (c *Comparison) Summary() string {
 	p := c.Paired
-	return fmt.Sprintf("%s\nshared cases %d, better %d, worse %d, unchanged %d; pass rate %s -> %s; pass^k %.1f%% -> %.1f%%",
+	summary := fmt.Sprintf("%s\nshared cases %d, better %d, worse %d, unchanged %d; pass rate %s -> %s; pass^k %.1f%% -> %.1f%%",
 		c.Verdict(), len(c.Shared), p.Better, p.Worse, p.Same, c.FirstRate, c.SecondRate, 100*c.FirstPassK, 100*c.SecondPassK)
+	if c.ModelChanged {
+		summary += fmt.Sprintf("\nmodel %s -> %s: %d case(s) not sensitive to the model", c.First.Run.Model, c.Second.Run.Model, len(c.NotSensitive))
+	}
+	return summary
 }

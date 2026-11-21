@@ -1,0 +1,4 @@
+{
+  "description": "Run on an older, clearly weaker model than the default, so the comparison with a baseline lists the cases whose pass rate did not drop as cases that may not be testing the model.",
+  "model": "gpt-5.6-luna"
+}

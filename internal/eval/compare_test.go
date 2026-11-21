@@ -187,6 +187,56 @@ func TestCompareIsPairedAndUsesOnlySharedCases(t *testing.T) {
 	}
 }
 
+func TestCompareOnAWeakerModelListsCasesThatDidNotDrop(t *testing.T) {
+	store := openTestStore(t)
+	start := time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
+	base := storedRun("run-a", "", "fp-a", start, map[string]string{"steady": "ppp", "dropped": "ppp", "failing": "pfp", "short": "pp", "pinned": "ppp"})
+	weak := storedRun("run-b", "weak-model", "fp-a", start.Add(time.Hour), map[string]string{"steady": "ppp", "dropped": "pfp", "failing": "ppp", "short": "pp", "pinned": "ppp"})
+	weak.Model = "m-small"
+	for _, run := range []*Result{base, weak} {
+		for i := range run.Cases {
+			for j := range run.Cases[i].Trials {
+				if run.Cases[i].ID == "pinned" {
+					run.Cases[i].Trials[j].Model = "m-pinned"
+				} else {
+					run.Cases[i].Trials[j].Model = run.Model
+				}
+			}
+		}
+	}
+	weak.Summarize()
+	importAll(t, store, base, weak)
+
+	c, err := Compare(t.Context(), store, "run-a", "run-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.ModelChanged || !slices.Equal(c.NotSensitive, []string{"steady"}) {
+		t.Fatalf("model changed %v, not sensitive %v; want only steady", c.ModelChanged, c.NotSensitive)
+	}
+	markdown := c.Markdown()
+	section := markdown[strings.Index(markdown, "## Not sensitive to the model"):]
+	if !strings.Contains(markdown, "different model, m-small instead of m") || !strings.Contains(section, "- steady\n") {
+		t.Errorf("comparison lacks the sensitivity mark or section:\n%s", markdown)
+	}
+	for _, unlisted := range []string{"- dropped", "- failing", "- short", "- pinned"} {
+		if strings.Contains(section, unlisted) {
+			t.Errorf("section lists %q:\n%s", unlisted, section)
+		}
+	}
+	if !strings.Contains(c.Summary(), "1 case(s) not sensitive to the model") {
+		t.Errorf("summary = %q", c.Summary())
+	}
+
+	same, err := Compare(t.Context(), store, "run-a", "run-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if same.ModelChanged || same.NotSensitive != nil || strings.Contains(same.Markdown(), "Not sensitive") || strings.Contains(same.Summary(), "sensitive") {
+		t.Errorf("a comparison on one model shows a sensitivity section:\n%s", same.Markdown())
+	}
+}
+
 func TestCompareRefusesRunsWithoutSharedCases(t *testing.T) {
 	store := openTestStore(t)
 	start := time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
