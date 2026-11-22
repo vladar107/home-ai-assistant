@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+
+# Sets tracked files', symbolic links' and directories' times from their git object ids, so Go's
+# test cache, which compares modification times rather than content, survives a fresh CI checkout.
+
+import os
+import subprocess
+import sys
+
+BASE_NS = 946_684_800 * 10**9
+RANGE_NS = 10 * 365 * 86_400 * 10**9
+
+REGULAR_MODES = {"100644", "100755"}
+SYMLINK_MODE = "120000"
+GITLINK_MODE = "160000"
+
+
+def fail(message):
+    print(f"pin-mtimes: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def git(*args):
+    result = subprocess.run(["git", *args], check=True, capture_output=True)
+    return result.stdout
+
+
+def records(output):
+    for record in output.split(b"\0"):
+        if not record:
+            continue
+        meta, _, name = record.partition(b"\t")
+        yield meta.decode().split(), os.fsdecode(name)
+
+
+def time_ns(object_id):
+    return BASE_NS + int(object_id[:24], 16) % RANGE_NS
+
+
+def pin(name, object_id, follow_symlinks=True):
+    t = time_ns(object_id)
+    try:
+        os.utime(name, ns=(t, t), follow_symlinks=follow_symlinks)
+    except OSError as error:
+        fail(f"{name}: {error.strerror}")
+
+
+def main():
+    if os.utime not in os.supports_follow_symlinks:
+        fail("this platform cannot set a symbolic link's own time")
+
+    os.chdir(git("rev-parse", "--show-toplevel").decode().rstrip("\n"))
+    if git("status", "--porcelain", "--untracked-files=no"):
+        fail("tracked files differ from HEAD; their times would not match their content")
+
+    files = links = gitlinks = 0
+    for (mode, object_id, stage), name in records(git("ls-files", "-s", "-z")):
+        if stage != "0":
+            fail(f"{name} is unmerged")
+        if mode in REGULAR_MODES:
+            pin(name, object_id)
+            files += 1
+        elif mode == SYMLINK_MODE:
+            pin(name, object_id, follow_symlinks=False)
+            links += 1
+        elif mode == GITLINK_MODE:
+            gitlinks += 1
+        else:
+            fail(f"{name} has unexpected mode {mode}")
+
+    directories = 0
+    for (mode, kind, object_id), name in records(git("ls-tree", "-r", "-d", "-z", "HEAD")):
+        if kind == "tree":
+            pin(name, object_id)
+            directories += 1
+    pin(".", git("rev-parse", "HEAD^{tree}").decode().strip())
+    directories += 1
+
+    print(
+        f"pin-mtimes: {files} files, {links} symbolic links, {directories} directories"
+        + (f", {gitlinks} submodules skipped" if gitlinks else "")
+    )
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except subprocess.CalledProcessError as error:
+        fail(f"{' '.join(error.cmd)} failed: {error.stderr.decode().strip()}")
