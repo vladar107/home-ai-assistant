@@ -1,6 +1,6 @@
 # 0174 — Two tests that fail under load
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 

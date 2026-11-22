@@ -1,6 +1,6 @@
 # 0173 — Race suite under five minutes: template store and parallel eval tests
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
