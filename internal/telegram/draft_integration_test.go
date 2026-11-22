@@ -209,6 +209,25 @@ func (h *conversationHarness) wantSteadyTyping(minimum int) {
 	}
 }
 
+// waitTyping waits until at least minimum typing actions have been sent over at least span from the
+// first.
+func (h *conversationHarness) waitTyping(minimum int, span time.Duration) {
+	h.t.Helper()
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		actions := h.chatActionTimes()
+		if len(actions) >= minimum && actions[len(actions)-1].Sub(actions[0]) >= span {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-h.ctx.Done():
+			h.t.Fatalf("%d typing actions, want at least %d over %v", len(actions), minimum, span)
+		}
+	}
+}
+
 func (h *conversationHarness) waitTurnOutcome(outcome string) {
 	h.t.Helper()
 	for {
@@ -361,10 +380,15 @@ func TestTurnWaitingBehindAnotherKeepsTyping(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.push(textUpdate(1, 101, "chat request"))
-	time.Sleep(2 * indicatorDelay)
+	h.waitTyping(int(indicatorDelay/indicatorTyping), 2*indicatorDelay)
 	h.wantSteadyTyping(int(indicatorDelay / indicatorTyping))
 	if drafts := h.draftRequests(); len(drafts) != 0 {
 		t.Fatalf("a waiting turn showed drafts: %+v", drafts)
+	}
+	select {
+	case <-runtime.calls:
+		t.Fatal("the waiting turn ran while another held its slot")
+	default:
 	}
 	released := time.Now()
 	release()
