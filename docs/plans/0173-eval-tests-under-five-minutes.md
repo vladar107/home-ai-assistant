@@ -91,7 +91,9 @@ The branch ruleset requires the `validate` status check, which is the CI job's n
   connector group is about half of them. The format, module, plan, vet and build checks run
   in a job of their own beside them. `setup-go`'s cache key is shared with the image workflow,
   which saves it without race builds, so the race jobs keep their own cache of builds and modules
-  per shard, keyed on the module files. A final job named `validate` needs every
+  per shard, keyed on the module files. That cache also holds test results, so the race tests run
+  with `-count=1`: every race test still runs on every push, as it did in the single job, and the
+  cache saves only compilation. A final job named `validate` needs every
   other job, runs even when one fails, and passes only when all of them passed, so the ruleset
   needs no change and a skipped job cannot pass the required check.
 

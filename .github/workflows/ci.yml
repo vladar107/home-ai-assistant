@@ -51,7 +51,7 @@ jobs:
             rest) mapfile -t packages < <(grep -vxF -e "$module/internal/eval" -e "$module/internal/telegram" <<<"$all" | grep -vE "$connectors") ;;
           esac
           (( ${#packages[@]} ))
-          go test -race -timeout 30m "${packages[@]}"
+          go test -race -count=1 -timeout 30m "${packages[@]}"
 
   checks:
     runs-on: ubuntu-latest
