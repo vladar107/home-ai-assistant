@@ -23,6 +23,20 @@ var migratedTemplate = sync.OnceValues(buildTemplate)
 // migrations must use sqlite.Open directly.
 func OpenStore(t testing.TB, path string) *sqlite.Store {
 	t.Helper()
+	SeedStore(t, path)
+	store, err := sqlite.Open(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return store
+}
+
+// SeedStore writes the migrated template database to path, for code under test
+// that opens the store itself. The migrations run once per test process. path
+// must not hold a live store: its -wal and -shm files would be replayed against
+// the copy.
+func SeedStore(t testing.TB, path string) {
+	t.Helper()
 	template, err := migratedTemplate()
 	if err != nil {
 		t.Fatal(err)
@@ -33,11 +47,6 @@ func OpenStore(t testing.TB, path string) *sqlite.Store {
 	if err := os.WriteFile(path, template, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	store, err := sqlite.Open(t.Context(), path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return store
 }
 
 // OpenDB opens a second handle on the database at path for a test to inspect or change rows

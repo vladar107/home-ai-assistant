@@ -21,6 +21,7 @@ import (
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/runtime/pi"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
+	"github.com/vladar107/home-ai-assistant/internal/testutil"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/codexauth"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/pifixture"
 )
@@ -136,7 +137,11 @@ func newCaseWorld(t *testing.T, c Case, typeSafe string) testWorld {
 // newVariantWorld is newCaseWorld with a prompt variant on the world's turns.
 func newVariantWorld(t *testing.T, c Case, typeSafe string, variant *Variant) testWorld {
 	t.Helper()
-	profiles := filepath.Join(t.TempDir(), "profiles")
+	root := t.TempDir()
+	dir := filepath.Join(root, "world")
+	seeded := filepath.Join(dir, "state", "assistant.sqlite")
+	testutil.SeedStore(t, seeded)
+	profiles := filepath.Join(root, "profiles")
 	directory := filepath.Join(profiles, PrincipalID)
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		t.Fatal(err)
@@ -159,7 +164,7 @@ func newVariantWorld(t *testing.T, c Case, typeSafe string, variant *Variant) te
 	}
 	options := WorldOptions{
 		Runtime: scripted{runtime}, ProfilesDir: profiles, AccountID: testAccount, StepTimeout: 30 * time.Second,
-		ChatModel: agentruntime.ModelEffort{Model: "gpt-test", Effort: agentruntime.DefaultEffort}, Variant: variant,
+		ChatModel: agentruntime.ModelEffort{Model: "gpt-test", Effort: agentruntime.DefaultEffort}, Variant: variant, Dir: dir,
 	}
 	if typeSafe != "" {
 		options.TypeSafe = judgment.Config{APIKey: testTypeSafe, Endpoint: typeSafe}
@@ -173,7 +178,37 @@ func newVariantWorld(t *testing.T, c Case, typeSafe string, variant *Variant) te
 			t.Error(err)
 		}
 	})
+	requireSeededStore(t, seeded)
 	return testWorld{World: w, t: t}
+}
+
+// requireSeededStore fails the test if the world migrated a store of its own instead of opening the
+// seeded one: the seeded file must hold the principal NewWorld writes through its store, and the
+// template's migration records rather than ones a fresh migration writes.
+func requireSeededStore(t *testing.T, seeded string) {
+	t.Helper()
+	var principals int
+	if err := testutil.OpenDB(t, seeded).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM principals WHERE id = ?`, PrincipalID).Scan(&principals); err != nil {
+		t.Fatal(err)
+	}
+	if principals != 1 {
+		t.Fatalf("the seeded store at %s holds %d eval principals, want 1: NewWorld no longer opens the seeded store path", seeded, principals)
+	}
+	template := filepath.Join(t.TempDir(), "template.sqlite")
+	testutil.SeedStore(t, template)
+	if got, want := migrationRecords(t, seeded), migrationRecords(t, template); got != want {
+		t.Fatal("the world's store holds migration records the template does not: NewWorld migrated it instead of opening the seeded copy")
+	}
+}
+
+func migrationRecords(t *testing.T, path string) string {
+	t.Helper()
+	var records string
+	if err := testutil.OpenDB(t, path).QueryRowContext(t.Context(),
+		`SELECT group_concat(version || ' ' || applied_at, ',') FROM (SELECT version, applied_at FROM schema_migrations ORDER BY version)`).Scan(&records); err != nil {
+		t.Fatal(err)
+	}
+	return records
 }
 
 func (w testWorld) play(step Step) TurnRecord {
