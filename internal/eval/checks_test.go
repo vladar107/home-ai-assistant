@@ -24,6 +24,7 @@ func toolCall(name, arguments string) ToolCall {
 }
 
 func TestChecksOnHandMadeRecords(t *testing.T) {
+	t.Parallel()
 	berlin, err := time.LoadLocation("Europe/Berlin")
 	if err != nil {
 		t.Fatal(err)
@@ -234,6 +235,7 @@ func TestChecksOnHandMadeRecords(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 			failures := CheckStep(t.Context(), &test.expect, test.record, CheckEnv{Location: berlin})
 			if len(test.want) == 0 {
 				if len(failures) != 0 {
@@ -259,6 +261,7 @@ func TestChecksOnHandMadeRecords(t *testing.T) {
 }
 
 func TestStoreChecksReadTheWorldsStore(t *testing.T) {
+	t.Parallel()
 	w := newTestWorld(t, worldConfig{sections: map[string]any{
 		SectionJobs: []jobSeed{
 			{ID: "morning-news", Name: "Morning news", Prompt: "Summarise the news.", Cron: "0 9 * * *"},
@@ -313,6 +316,7 @@ func TestStoreChecksReadTheWorldsStore(t *testing.T) {
 }
 
 func TestStoreCheckShapesAreValidatedByTheLoader(t *testing.T) {
+	t.Parallel()
 	for name, body := range map[string]string{
 		"jobs without anything": `{"check":"jobs"}`,
 		"jobs with a bad time":  `{"check":"jobs","at":"tomorrow"}`,
@@ -327,6 +331,7 @@ func TestStoreCheckShapesAreValidatedByTheLoader(t *testing.T) {
 	} {
 		name, body := name, body
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			var head struct{ Check string }
 			if err := json.Unmarshal([]byte(body), &head); err != nil {
 				t.Fatal(err)

@@ -24,6 +24,7 @@ func (m crashingModel) Run(ctx context.Context, request agentruntime.RunRequest,
 }
 
 func TestRunLogsAPiThatExitedEarlyToTheRunDirectory(t *testing.T) {
+	t.Parallel()
 	f := newRunFixture(t, 10)
 	f.options.Wrap = func(runtime *pi.Runtime) agentruntime.AgentRuntime { return crashingModel{runtime} }
 	f.addCase("pi-crashes", "happy", 1, stepSpec{Say: "script:crash"})
@@ -64,6 +65,7 @@ func TestRunLogsAPiThatExitedEarlyToTheRunDirectory(t *testing.T) {
 }
 
 func TestRunWritesNoRunLogWhenNothingWasLogged(t *testing.T) {
+	t.Parallel()
 	f := newRunFixture(t, 10)
 	f.addCase("quiet-case", "happy", 1, echoes("hello"))
 

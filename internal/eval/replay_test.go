@@ -21,6 +21,7 @@ func replayOf(t *testing.T, f *runFixture, source *eval.Result) *eval.Result {
 }
 
 func TestReplayWithAChangedCheckChangesVerdictsWithoutAModel(t *testing.T) {
+	t.Parallel()
 	f := newRunFixture(t, 10)
 	f.addCase("greets", "happy", 2, echoes("reply:"))
 	f.addCase("too-strict", "wrong-date", 1, echoes("never said"))
@@ -97,6 +98,7 @@ func TestReplayWithAChangedCheckChangesVerdictsWithoutAModel(t *testing.T) {
 }
 
 func TestReplayReportsACaseThatNoLongerMatchesItsCassette(t *testing.T) {
+	t.Parallel()
 	f := newRunFixture(t, 10)
 	f.addCase("shifts", "happy", 1, echoes("reply:"))
 	f.addCase("vanishes", "happy", 1, echoes("reply:"))

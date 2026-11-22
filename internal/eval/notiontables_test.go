@@ -17,6 +17,7 @@ const filmTableSeed = `{
 }`
 
 func TestNotionTableIsQueryableAndWritesAreGranted(t *testing.T) {
+	t.Parallel()
 	w := newTestWorld(t, worldConfig{sections: map[string]any{SectionNotion: json.RawMessage(filmTableSeed)}})
 
 	offered := offeredTools(t, w)
@@ -50,6 +51,7 @@ func TestNotionTableIsQueryableAndWritesAreGranted(t *testing.T) {
 }
 
 func TestNotionWithoutWritesOffersOnlyReads(t *testing.T) {
+	t.Parallel()
 	w := newTestWorld(t, worldConfig{sections: map[string]any{SectionNotion: json.RawMessage(`{"data_sources": [{"id": "films", "title": "Film club"}]}`)}})
 	if offered := offeredTools(t, w); slices.Contains(offered, "notion_update_page") || !slices.Contains(offered, "notion_query_data_source") {
 		t.Errorf("offered: %v", offered)
@@ -57,6 +59,7 @@ func TestNotionWithoutWritesOffersOnlyReads(t *testing.T) {
 }
 
 func TestNotionTableSeedsAreValidated(t *testing.T) {
+	t.Parallel()
 	for name, raw := range map[string]string{
 		"unknown column":  `{"data_sources": [{"id": "t", "title": "T", "rows": [{"id": "r", "title": "R", "values": {"Nope": 1}}]}]}`,
 		"wrong type":      `{"data_sources": [{"id": "t", "title": "T", "properties": [{"name": "Rating", "type": "number"}], "rows": [{"id": "r", "title": "R", "values": {"Rating": "high"}}]}]}`,

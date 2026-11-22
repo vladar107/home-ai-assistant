@@ -6,6 +6,7 @@ import (
 )
 
 func TestReportShowsTheHappyLinePerKindRatesAndTypeSafeTrials(t *testing.T) {
+	t.Parallel()
 	trial := func(n int, status string, typeSafe bool) TrialResult {
 		return TrialResult{N: n, Status: status, TypeSafe: typeSafe}
 	}

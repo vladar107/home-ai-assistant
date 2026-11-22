@@ -66,6 +66,7 @@ func review(t *testing.T, dir string, all bool, input string) string {
 }
 
 func TestReviewStoresVerdictsAndResumesAtTheFirstUnreviewedTrial(t *testing.T) {
+	t.Parallel()
 	dir := reviewRun(t)
 
 	shown := review(t, dir, false, "g\nlooks right\nq\n")
@@ -110,6 +111,7 @@ func TestReviewStoresVerdictsAndResumesAtTheFirstUnreviewedTrial(t *testing.T) {
 }
 
 func TestReviewLimitedToCasesShowsOnlyTheirTrials(t *testing.T) {
+	t.Parallel()
 	dir := reviewRun(t)
 
 	shown := review(t, dir, false, "q\n")
@@ -130,6 +132,7 @@ func TestReviewLimitedToCasesShowsOnlyTheirTrials(t *testing.T) {
 }
 
 func TestReviewReportCountsAgreementAndCallsOutMissedFailuresAndFalseAlarms(t *testing.T) {
+	t.Parallel()
 	dir := reviewRun(t)
 	// alarm#1 failed, operator good: false alarm. alarm#2 passed, operator good: agree.
 	// weather#1 passed, operator bad: missed failure. weather#2 failed, operator unsure: excluded.
@@ -164,6 +167,7 @@ func TestReviewReportCountsAgreementAndCallsOutMissedFailuresAndFalseAlarms(t *t
 }
 
 func TestLatestRunPicksTheNewestRunDirectory(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	for _, id := range []string{"20260101-000000", "20260301-120000", "20260201-000000"} {
 		if err := os.MkdirAll(filepath.Join(root, id), 0o700); err != nil {

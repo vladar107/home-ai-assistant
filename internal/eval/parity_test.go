@@ -8,6 +8,7 @@ import (
 )
 
 func TestWorldOffersWatchesAndWebSearchLikeProduction(t *testing.T) {
+	t.Parallel()
 	w := newTestWorld(t, worldConfig{sections: map[string]any{
 		SectionTrains: json.RawMessage(trainsSeed),
 		SectionPages:  json.RawMessage(pagesSeed),
@@ -26,6 +27,7 @@ func TestWorldOffersWatchesAndWebSearchLikeProduction(t *testing.T) {
 }
 
 func TestMailSearchUnderstandsGmailOperatorsOnTheCaseClock(t *testing.T) {
+	t.Parallel()
 	w := newTestWorld(t, worldConfig{sections: map[string]any{
 		SectionGmail: json.RawMessage(`{"messages": [
 			{"id": "m1", "from": "Northwind Energy <billing@northwind.example>", "subject": "Invoice", "received": "2026-03-10T07:00", "body": "Due soon.", "labels": ["INBOX", "UNREAD"]},

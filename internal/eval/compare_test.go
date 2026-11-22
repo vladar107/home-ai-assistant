@@ -17,6 +17,7 @@ import (
 func near(got, want float64) bool { return math.Abs(got-want) < 1e-9 }
 
 func TestPairedDifferencesOnAHandComputedExample(t *testing.T) {
+	t.Parallel()
 	// Differences 1, 0, -1, 1, 1: mean 0.4; squared deviations 0.36+0.16+1.96+0.36+0.36 = 3.2;
 	// variance 3.2/4 = 0.8; standard error sqrt(0.8/5) = 0.4; interval 0.4 ± 1.96*0.4.
 	p := PairedDifferences([]float64{0, 1, 1, 0, 0}, []float64{1, 1, 0, 1, 1})
@@ -35,6 +36,7 @@ func TestPairedDifferencesOnAHandComputedExample(t *testing.T) {
 }
 
 func TestPairedDifferencesDetectsAConsistentGain(t *testing.T) {
+	t.Parallel()
 	// Differences 0.5, 0.5, 0.25, 0.75: mean 0.5, squared deviations 0+0+0.0625+0.0625, sd sqrt(0.125/3).
 	p := PairedDifferences([]float64{0, 0.5, 0.75, 0}, []float64{0.5, 1, 1, 0.75})
 	wantSE := math.Sqrt(0.125/3) / 2
@@ -44,6 +46,7 @@ func TestPairedDifferencesDetectsAConsistentGain(t *testing.T) {
 }
 
 func TestPairedDifferencesOfIdenticalRatesFindsNothing(t *testing.T) {
+	t.Parallel()
 	rates := []float64{0, 0.3333333333333333, 1, 0.6666666666666666}
 	p := PairedDifferences(rates, rates)
 	if p.Mean != 0 || p.SE != 0 || p.Detected() || p.Better != 0 || p.Worse != 0 || p.Same != 4 {
@@ -52,6 +55,7 @@ func TestPairedDifferencesOfIdenticalRatesFindsNothing(t *testing.T) {
 }
 
 func TestPairedDifferencesWithOneCaseHasNoInterval(t *testing.T) {
+	t.Parallel()
 	p := PairedDifferences([]float64{0}, []float64{1})
 	if p.N != 1 || p.Mean != 1 || p.SE != 0 || p.Detected() {
 		t.Fatalf("paired = %+v", p)
@@ -113,6 +117,7 @@ func openTestStore(t *testing.T) *ResultsStore {
 }
 
 func TestComparingARunWithItselfReportsNoDifference(t *testing.T) {
+	t.Parallel()
 	store := openTestStore(t)
 	start := time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
 	run := storedRun("run-a", "", "fp-a", start, map[string]string{"one": "ppp", "two": "pfp", "three": "fff", "happy-four": "ppp"})
@@ -131,6 +136,7 @@ func TestComparingARunWithItselfReportsNoDifference(t *testing.T) {
 }
 
 func TestCompareIsPairedAndUsesOnlySharedCases(t *testing.T) {
+	t.Parallel()
 	store := openTestStore(t)
 	start := time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
 	base := storedRun("run-a", "", "fp-a", start, map[string]string{"one": "fff", "two": "ppf", "three": "ppp", "only-a": "ppp"})
@@ -188,6 +194,7 @@ func TestCompareIsPairedAndUsesOnlySharedCases(t *testing.T) {
 }
 
 func TestCompareOnAWeakerModelListsCasesThatDidNotDrop(t *testing.T) {
+	t.Parallel()
 	store := openTestStore(t)
 	start := time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
 	base := storedRun("run-a", "", "fp-a", start, map[string]string{"steady": "ppp", "dropped": "ppp", "failing": "pfp", "short": "pp", "pinned": "ppp"})
@@ -238,6 +245,7 @@ func TestCompareOnAWeakerModelListsCasesThatDidNotDrop(t *testing.T) {
 }
 
 func TestCompareRefusesRunsWithoutSharedCases(t *testing.T) {
+	t.Parallel()
 	store := openTestStore(t)
 	start := time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
 	importAll(t, store, storedRun("run-a", "", "x", start, map[string]string{"one": "p"}), storedRun("run-b", "", "x", start, map[string]string{"two": "p"}))
@@ -250,6 +258,7 @@ func TestCompareRefusesRunsWithoutSharedCases(t *testing.T) {
 }
 
 func TestImportReplacesARunAndKeepsTheVerdicts(t *testing.T) {
+	t.Parallel()
 	store := openTestStore(t)
 	start := time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
 	run := storedRun("run-a", "", "x", start, map[string]string{"one": "pf"})
@@ -270,6 +279,7 @@ func TestImportReplacesARunAndKeepsTheVerdicts(t *testing.T) {
 }
 
 func TestImportRunDirReadsResultAndReview(t *testing.T) {
+	t.Parallel()
 	results := t.TempDir()
 	start := time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
 	run := storedRun("20260301-090000", "", "x", start, map[string]string{"one": "pp"})
@@ -299,6 +309,7 @@ func TestImportRunDirReadsResultAndReview(t *testing.T) {
 }
 
 func TestTrendSplitsRunsWherePromptModelOrPiChanged(t *testing.T) {
+	t.Parallel()
 	store := openTestStore(t)
 	start := time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
 	cases := map[string]string{"one": "ppp", "happy-two": "ppf"}

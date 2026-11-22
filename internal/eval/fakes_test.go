@@ -81,6 +81,7 @@ const (
 )
 
 func TestSeededFakesAnswerTheToolsThatReadThem(t *testing.T) {
+	t.Parallel()
 	w := newTestWorld(t, worldConfig{sections: map[string]any{
 		SectionTrains:       json.RawMessage(trainsSeed),
 		SectionBuses:        json.RawMessage(busesSeed),
@@ -124,6 +125,7 @@ func TestSeededFakesAnswerTheToolsThatReadThem(t *testing.T) {
 }
 
 func TestConnectorWithoutASectionStaysUnconfigured(t *testing.T) {
+	t.Parallel()
 	w := newTestWorld(t, worldConfig{sections: map[string]any{SectionTrains: json.RawMessage(trainsSeed)}})
 
 	offered := offeredTools(t, w)
@@ -144,6 +146,7 @@ func TestConnectorWithoutASectionStaysUnconfigured(t *testing.T) {
 }
 
 func TestPlacesReverseGeocodingReadsThePlacesSearchFake(t *testing.T) {
+	t.Parallel()
 	const reverse = `{"reverse": [{"lat": 52.1, "lon": 5.1, "type": "ADDRESS", "street": "Market Street", "house_number": "1",
     "areas": [{"name": "Eastbrook", "admin_level": 8, "default": true}]}]}`
 	w := newTestWorld(t, worldConfig{sections: map[string]any{
@@ -163,6 +166,7 @@ func TestPlacesReverseGeocodingReadsThePlacesSearchFake(t *testing.T) {
 }
 
 func TestNewSectionsRejectBadSeeds(t *testing.T) {
+	t.Parallel()
 	for name, raw := range map[string]string{
 		SectionTrains: `{"bogus": 1}`,
 		SectionHome:   `{"entities": [{"entity_id": ""}]}`,
@@ -236,6 +240,7 @@ func worldOffers(t *testing.T, c Case) []string {
 }
 
 func TestCasesNameOnlyToolsTheirWorldOffers(t *testing.T) {
+	t.Parallel()
 	for _, dir := range []string{filepath.Join("..", "..", "evals", "cases"), filepath.Join("testdata", "offered")} {
 		cases, err := LoadCases(dir)
 		if err != nil {
@@ -243,6 +248,7 @@ func TestCasesNameOnlyToolsTheirWorldOffers(t *testing.T) {
 		}
 		for _, c := range cases {
 			t.Run(filepath.Base(c.File), func(t *testing.T) {
+				t.Parallel()
 				offered := worldOffers(t, c)
 				for tool, places := range namedTools(c) {
 					if !slices.Contains(offered, tool) {
@@ -272,6 +278,7 @@ func assertWorldOnlyTools(t *testing.T, c Case, offered []string) {
 }
 
 func TestToolNameCheckFailsForAToolTheWorldLacks(t *testing.T) {
+	t.Parallel()
 	cases, err := LoadCases(filepath.Join("testdata", "offered"))
 	if err != nil {
 		t.Fatal(err)

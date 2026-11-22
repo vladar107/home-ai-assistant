@@ -26,6 +26,7 @@ func loadTestVariant(t *testing.T, body string) *eval.Variant {
 }
 
 func TestRunUnderAVariantRecordsItAndSendsItsPrompt(t *testing.T) {
+	t.Parallel()
 	var prompts []string
 	f := newRunFixture(t, 10)
 	inner := f.options.Wrap
@@ -67,6 +68,7 @@ func TestRunUnderAVariantRecordsItAndSendsItsPrompt(t *testing.T) {
 }
 
 func TestAVariantModelReachesTheScheduledHeadsUpRun(t *testing.T) {
+	t.Parallel()
 	var models []string
 	f := newRunFixture(t, 10)
 	inner := f.options.Wrap
@@ -109,6 +111,7 @@ func (s modelSpy) Run(ctx context.Context, request agentruntime.RunRequest, sink
 }
 
 func TestRunRefusesAVariantNamingAnUnofferedTool(t *testing.T) {
+	t.Parallel()
 	f := newRunFixture(t, 10)
 	f.addCase("greets", "happy", 1, echoes("hello"))
 	f.options.Variant = loadTestVariant(t, `{"description":"d","tool_guidance":{"no_such_tool":"x"}}`)

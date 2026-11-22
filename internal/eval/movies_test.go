@@ -23,6 +23,7 @@ func movieCase(t *testing.T, id string) Case {
 
 // The movie cases seed a production-shaped table, so the movies_* tools must find and use it.
 func TestMovieCasesSeedATableTheMovieToolsUse(t *testing.T) {
+	t.Parallel()
 	w := newCaseWorld(t, movieCase(t, "f1"), "")
 	record := w.play(Step{Say: call("movies_next", `{}`)})
 	next := w.toolResult(record, "movies_next")

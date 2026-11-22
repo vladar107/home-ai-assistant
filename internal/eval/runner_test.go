@@ -130,6 +130,7 @@ func echoes(text string) stepSpec {
 }
 
 func TestRunPlaysTrialsChecksThemAndWritesTheReport(t *testing.T) {
+	t.Parallel()
 	f := newRunFixture(t, 10)
 	f.addCase("remember-the-flat", "happy", 2, stepSpec{
 		Say: `fixture:call memory_add {"kind":"fact","text":"Lives upstairs."}`,
@@ -215,6 +216,7 @@ func TestRunPlaysTrialsChecksThemAndWritesTheReport(t *testing.T) {
 }
 
 func TestRunSelectsCasesByIDAndTagAndOverridesTrials(t *testing.T) {
+	t.Parallel()
 	f := newRunFixture(t, 10)
 	f.addCase("alpha", "happy", 3, echoes("reply:"))
 	f.addCase("beta", "happy", 3, echoes("reply:"))
@@ -238,6 +240,7 @@ func TestRunSelectsCasesByIDAndTagAndOverridesTrials(t *testing.T) {
 }
 
 func TestRunStopsAtItsBudgetAndReportsWhatItDidNotRun(t *testing.T) {
+	t.Parallel()
 	f := newRunFixture(t, 10)
 	f.addCase("alpha", "happy", 3, echoes("reply:"))
 	f.addCase("beta", "happy", 2, echoes("reply:"))
@@ -261,6 +264,7 @@ func TestRunStopsAtItsBudgetAndReportsWhatItDidNotRun(t *testing.T) {
 }
 
 func TestRunStopsOnTheFirstQuotaFailure(t *testing.T) {
+	t.Parallel()
 	f := newRunFixture(t, 10)
 	f.addCase("alpha", "happy", 1, echoes("reply:"))
 	f.addCase("beta", "happy", 3, stepSpec{Say: "script:quota"})
@@ -290,6 +294,7 @@ func TestRunStopsOnTheFirstQuotaFailure(t *testing.T) {
 }
 
 func TestRunRefusesAPiOfAnotherVersion(t *testing.T) {
+	t.Parallel()
 	f := newRunFixture(t, 10)
 	f.addCase("alpha", "happy", 1, echoes("reply:"))
 	f.options.Pi.ExpectedVersion = ""
@@ -307,6 +312,7 @@ func TestRunRefusesAPiOfAnotherVersion(t *testing.T) {
 }
 
 func TestRunRefusesWhenTheQuotaIsTooHigh(t *testing.T) {
+	t.Parallel()
 	f := newRunFixture(t, 80)
 	f.addCase("alpha", "happy", 1, echoes("reply:"))
 
@@ -321,6 +327,7 @@ func TestRunRefusesWhenTheQuotaIsTooHigh(t *testing.T) {
 }
 
 func TestRunRefusesWhenTheScanFindsAHouseholdValue(t *testing.T) {
+	t.Parallel()
 	f := newRunFixture(t, 10)
 	f.addCase("alpha", "happy", 1, stepSpec{Say: "Meet me on Quillfeather Lane"})
 	if err := os.WriteFile(f.env, []byte("HOME_AGENT_PLACES=Quillfeather Lane\n"), 0o600); err != nil {
@@ -337,6 +344,7 @@ func TestRunRefusesWhenTheScanFindsAHouseholdValue(t *testing.T) {
 }
 
 func TestRunNeedsProfilesALoginAndAModel(t *testing.T) {
+	t.Parallel()
 	f := newRunFixture(t, 10)
 	f.addCase("alpha", "happy", 1, echoes("reply:"))
 

@@ -21,12 +21,14 @@ func testRegistry() *Registry {
 }
 
 func TestRepositoryCasesLoad(t *testing.T) {
+	t.Parallel()
 	if _, err := LoadCases(filepath.Join("..", "..", "evals", "cases")); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestLoadValidCaseAppliesDefaults(t *testing.T) {
+	t.Parallel()
 	cases, err := testRegistry().LoadCases(filepath.Join("testdata", "valid"))
 	if err != nil {
 		t.Fatal(err)
@@ -54,6 +56,7 @@ func TestLoadValidCaseAppliesDefaults(t *testing.T) {
 }
 
 func TestLoadRejectsInvalidCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		dir     string
 		file    string
@@ -75,6 +78,7 @@ func TestLoadRejectsInvalidCases(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.dir, func(t *testing.T) {
+			t.Parallel()
 			_, err := testRegistry().LoadCases(filepath.Join("testdata", tt.dir))
 			if err == nil {
 				t.Fatal("want an error")
@@ -90,6 +94,7 @@ func TestLoadRejectsInvalidCases(t *testing.T) {
 }
 
 func TestWorldValidatorErrorNamesSection(t *testing.T) {
+	t.Parallel()
 	r := NewRegistry()
 	r.RegisterWorldSection("sample", func(json.RawMessage) error { return errors.New("bad shape") })
 	r.RegisterStoreCheck("sample-check", func(json.RawMessage) error { return nil })
@@ -100,6 +105,7 @@ func TestWorldValidatorErrorNamesSection(t *testing.T) {
 }
 
 func TestUnknownStoreCheckIsRejected(t *testing.T) {
+	t.Parallel()
 	r := NewRegistry()
 	r.RegisterWorldSection("sample", func(json.RawMessage) error { return nil })
 	_, err := r.LoadCases(filepath.Join("testdata", "valid"))

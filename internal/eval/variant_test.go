@@ -20,6 +20,7 @@ func writeVariant(t *testing.T, name, body string) string {
 }
 
 func TestLoadVariantValidates(t *testing.T) {
+	t.Parallel()
 	for name, tc := range map[string]struct{ body, want string }{
 		"unknown-section":  {`{"description":"d","sections":{"nonsense":"x"}}`, "sections.nonsense: unknown section"},
 		"secrecy-locked":   {`{"description":"d","sections":{"secrecy":"x"}}`, "sections.secrecy: unknown section"},
@@ -32,6 +33,7 @@ func TestLoadVariantValidates(t *testing.T) {
 		"empty-tool-names": {`{"description":"d","tool_guidance":{" ":"x"}}`, "empty tool name"},
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			_, err := LoadVariant(writeVariant(t, name, tc.body), name)
 			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), name+".json") && name != "malformed" {
 				t.Fatalf("got %v, want %q", err, tc.want)
@@ -47,6 +49,7 @@ func TestLoadVariantValidates(t *testing.T) {
 }
 
 func TestLoadVariantRecordsTheFileHash(t *testing.T) {
+	t.Parallel()
 	dir := writeVariant(t, "brief", `{"description":"d","sections":{"intro":"Hi. "},"model":"m","effort":"high"}`)
 	a, err := LoadVariant(dir, "brief")
 	if err != nil {
@@ -68,6 +71,7 @@ func TestLoadVariantRecordsTheFileHash(t *testing.T) {
 }
 
 func TestRepositoryVariantsLoad(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join("..", "..", "evals", "variants")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -83,6 +87,7 @@ func TestRepositoryVariantsLoad(t *testing.T) {
 }
 
 func TestFingerprintFollowsSectionsAndGuidanceNotMemory(t *testing.T) {
+	t.Parallel()
 	base := agentruntime.RunRequest{Tools: agentruntime.ToolSet{
 		Definitions: []agentruntime.ToolDefinition{{Name: "t"}}, Guidance: "Guidance.",
 	}}
@@ -119,6 +124,7 @@ func TestFingerprintFollowsSectionsAndGuidanceNotMemory(t *testing.T) {
 }
 
 func TestWorldAppliesAVariantOnlyWhenGiven(t *testing.T) {
+	t.Parallel()
 	c := Case{
 		ID: "variant-world", Title: "Variant world", Kind: KindHappy, Clock: Clock{Local: clockLocal, Zone: clockZone},
 		Steps: []Step{{Say: "hello"}}, Trials: 1,
@@ -160,6 +166,7 @@ func TestWorldAppliesAVariantOnlyWhenGiven(t *testing.T) {
 }
 
 func TestValidateToolsNamesTheUnknownTool(t *testing.T) {
+	t.Parallel()
 	v := &Variant{File: "v.json", ToolGuidance: map[string]string{"known": "x", "unknown_tool": "y"}}
 	err := v.ValidateTools([]string{"known"})
 	if err == nil || !strings.Contains(err.Error(), "unknown_tool") || !strings.Contains(err.Error(), "v.json") {

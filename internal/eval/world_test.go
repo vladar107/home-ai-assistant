@@ -252,6 +252,7 @@ func (w testWorld) scheduleRuns() int {
 }
 
 func TestSayReplyReachesTheStubAndNothingElse(t *testing.T) {
+	t.Parallel()
 	w := newTestWorld(t, worldConfig{user: User{Name: "Sam"}})
 	start := w.start()
 
@@ -281,6 +282,7 @@ func TestSayReplyReachesTheStubAndNothingElse(t *testing.T) {
 }
 
 func TestSeededConnectorsAnswerTheToolsThatReadThem(t *testing.T) {
+	t.Parallel()
 	w := newTestWorld(t, worldConfig{sections: map[string]any{
 		SectionGmail: gmailSection{Messages: []gmailMessage{{
 			ID: "m1", From: "Billing <billing@example.test>", Subject: "Invoice 4711", Received: "2026-03-09T18:00",
@@ -314,6 +316,7 @@ func TestSeededConnectorsAnswerTheToolsThatReadThem(t *testing.T) {
 }
 
 func TestInternalToolWritesTheTemporaryStoreOnTheCaseClock(t *testing.T) {
+	t.Parallel()
 	w := newTestWorld(t, worldConfig{user: User{Memory: []string{"Prefers tea."}}})
 	start := w.start()
 
@@ -340,6 +343,7 @@ func TestInternalToolWritesTheTemporaryStoreOnTheCaseClock(t *testing.T) {
 }
 
 func TestSeededInternalSections(t *testing.T) {
+	t.Parallel()
 	w := newTestWorld(t, worldConfig{sections: map[string]any{
 		SectionMemory:  []memorySeed{{Kind: "instruction", Text: "Answer briefly."}},
 		SectionBacklog: []backlogSeed{{Title: "Fix the porch light"}},
@@ -385,6 +389,7 @@ func TestSeededInternalSections(t *testing.T) {
 }
 
 func TestProposalsConfirmRejectAndExpireOnTheCaseClock(t *testing.T) {
+	t.Parallel()
 	w := newTestWorld(t, worldConfig{sections: map[string]any{
 		SectionGmail: gmailSection{Messages: []gmailMessage{{ID: "m1", From: "a@example.test", Subject: "Hello", Received: "2026-03-09T18:00", Body: "Hi."}}},
 	}})
@@ -439,6 +444,7 @@ func TestProposalsConfirmRejectAndExpireOnTheCaseClock(t *testing.T) {
 }
 
 func TestRunJobRunsThePromptAndNothingRunsOnItsOwn(t *testing.T) {
+	t.Parallel()
 	w := newTestWorld(t, worldConfig{user: User{Language: "ru"}, sections: map[string]any{
 		SectionJobs: []jobSeed{
 			{ID: "digest", Name: "Digest", Prompt: "Summarise the open items.", Cron: "0 9 * * *"},
@@ -482,6 +488,7 @@ func TestRunJobRunsThePromptAndNothingRunsOnItsOwn(t *testing.T) {
 // A triage_mail step delivers the section's mail once and lets the mailbox triage it with the mail
 // tools alone; the fixture's echo is no triage answer, so the notice lists the mail as it arrived.
 func TestTriageMailDeliversTheMailOnceAndTheNoticeIsTheReply(t *testing.T) {
+	t.Parallel()
 	w := newTestWorld(t, worldConfig{user: User{Name: "Sam"}, sections: map[string]any{
 		SectionAssistantMail: assistantMailSection{Messages: []assistantMailMessage{
 			{From: "Venue Desk <desk@venue.example>", Subject: "Choose a room", Body: "Which room do you want?"},
@@ -512,6 +519,7 @@ func TestTriageMailDeliversTheMailOnceAndTheNoticeIsTheReply(t *testing.T) {
 // A sent message starts the principal's thread as the assistant's own, so a reply in it is triaged
 // with the routine-reply tool while the user has routine replies on.
 func TestTriageMailStartsAThreadWithASentMessage(t *testing.T) {
+	t.Parallel()
 	w := newTestWorld(t, worldConfig{user: User{Name: "Sam", Switches: map[string]bool{"assistant-mail-replies": true}}, sections: map[string]any{
 		SectionAssistantMail: assistantMailSection{Messages: []assistantMailMessage{
 			{Sent: true, ThreadID: "t1", To: "Venue Desk <desk@venue.example>", Subject: "Room booking", Body: "Please book the small room."},
@@ -537,6 +545,7 @@ func TestTriageMailStartsAThreadWithASentMessage(t *testing.T) {
 }
 
 func TestThumbsDownStartsAReconsiderTurn(t *testing.T) {
+	t.Parallel()
 	w := newTestWorld(t, worldConfig{})
 	w.play(Step{Say: "what is two plus two"})
 
@@ -611,6 +620,7 @@ func (s *typeSafeStandIn) total() int {
 }
 
 func TestSafetyChecksAndToolHintReachTypeSafeOnlyWhenSwitchedOn(t *testing.T) {
+	t.Parallel()
 	sections := map[string]any{
 		SectionGmail: gmailSection{Messages: []gmailMessage{{ID: "m1", From: "a@example.test", Subject: "Hello", Received: "2026-03-09T18:00", Body: "Hi."}}},
 	}
@@ -620,6 +630,7 @@ func TestSafetyChecksAndToolHintReachTypeSafeOnlyWhenSwitchedOn(t *testing.T) {
 	}, "\n")
 
 	t.Run("on", func(t *testing.T) {
+		t.Parallel()
 		stand := newTypeSafeStandIn(t)
 		w := newTestWorld(t, worldConfig{sections: sections, typeSafe: stand.URL})
 
@@ -634,6 +645,7 @@ func TestSafetyChecksAndToolHintReachTypeSafeOnlyWhenSwitchedOn(t *testing.T) {
 	})
 
 	t.Run("off", func(t *testing.T) {
+		t.Parallel()
 		stand := newTypeSafeStandIn(t)
 		w := newTestWorld(t, worldConfig{user: User{Switches: map[string]bool{judgment.OptInSwitch.Integration: false}}, sections: sections, typeSafe: stand.URL})
 
@@ -646,6 +658,7 @@ func TestSafetyChecksAndToolHintReachTypeSafeOnlyWhenSwitchedOn(t *testing.T) {
 }
 
 func TestWorldRefusesAnIncompleteSetup(t *testing.T) {
+	t.Parallel()
 	_, err := NewWorld(t.Context(), Case{}, WorldOptions{})
 	if err == nil || !strings.Contains(err.Error(), "runtime") {
 		t.Fatalf("err = %v, want the missing runtime named", err)

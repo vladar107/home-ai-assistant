@@ -8,6 +8,7 @@ import (
 )
 
 func TestProbesFindLooseChecksWithoutAModel(t *testing.T) {
+	t.Parallel()
 	cases, err := LoadCases(filepath.Join("testdata", "probes"))
 	if err != nil {
 		t.Fatal(err)

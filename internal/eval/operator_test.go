@@ -69,6 +69,7 @@ func (b *syncBuffer) String() string {
 }
 
 func TestLoginCreatesAPrivateBoundProfile(t *testing.T) {
+	t.Parallel()
 	sim := codexauth.New(t)
 	profiles, err := eval.PrepareProfiles(filepath.Join(t.TempDir(), "profiles"), filepath.Join(t.TempDir(), "data"))
 	if err != nil {
@@ -111,6 +112,7 @@ func TestLoginCreatesAPrivateBoundProfile(t *testing.T) {
 }
 
 func TestProfilesRootInsideTheDataDirectoryIsRefused(t *testing.T) {
+	t.Parallel()
 	data := filepath.Join(t.TempDir(), "data")
 	if err := os.MkdirAll(filepath.Join(data, "pi"), 0o700); err != nil {
 		t.Fatal(err)
@@ -170,6 +172,7 @@ func expireCredential(t *testing.T, profiles eval.Profiles) {
 }
 
 func TestUsageRefreshesAnExpiredCredentialThenReads(t *testing.T) {
+	t.Parallel()
 	sim := codexauth.New(t)
 	profiles, err := eval.PrepareProfiles(filepath.Join(t.TempDir(), "profiles"), filepath.Join(t.TempDir(), "data"))
 	if err != nil {
@@ -201,6 +204,7 @@ func TestUsageRefreshesAnExpiredCredentialThenReads(t *testing.T) {
 }
 
 func TestAWindowAboveTheThresholdRefusesAndIsNamed(t *testing.T) {
+	t.Parallel()
 	sim := codexauth.New(t)
 	profiles, err := eval.PrepareProfiles(filepath.Join(t.TempDir(), "profiles"), filepath.Join(t.TempDir(), "data"))
 	if err != nil {
@@ -217,6 +221,7 @@ func TestAWindowAboveTheThresholdRefusesAndIsNamed(t *testing.T) {
 }
 
 func TestUsageWithoutALoginFails(t *testing.T) {
+	t.Parallel()
 	profiles, err := eval.PrepareProfiles(filepath.Join(t.TempDir(), "profiles"), filepath.Join(t.TempDir(), "data"))
 	if err != nil {
 		t.Fatal(err)
@@ -227,6 +232,7 @@ func TestUsageWithoutALoginFails(t *testing.T) {
 }
 
 func TestScanFindsAPlantedValueWithoutPrintingIt(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	envPath := filepath.Join(dir, ".env")
 	const planted = "Quillfeather Lane"
@@ -260,6 +266,7 @@ func TestScanFindsAPlantedValueWithoutPrintingIt(t *testing.T) {
 }
 
 func TestScanWithoutAnEnvFileHasNothingToCheck(t *testing.T) {
+	t.Parallel()
 	findings, found, err := eval.Scan([]string{filepath.Join(t.TempDir(), ".env")}, []string{t.TempDir()})
 	if err != nil || found || len(findings) != 0 {
 		t.Fatalf("scan = %+v %v %v", findings, found, err)
