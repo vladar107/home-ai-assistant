@@ -165,6 +165,12 @@ func TestVendoredExtensionRefusesUnlessTheCheckAllows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Node reads these, not Go; reading them here records them as inputs for Go's test cache.
+	for _, input := range []string{source, filepath.Join(filepath.Dir(source), "..", "package.json")} {
+		if _, err := os.ReadFile(input); err != nil {
+			t.Fatal(err)
+		}
+	}
 	script := filepath.Join(t.TempDir(), "check.mjs")
 	body := "import { searchRefusal } from " + strconv.Quote(source) + ";\n" +
 		"process.stdout.write(JSON.stringify((await searchRefusal(\"query\")) ?? null));\n"

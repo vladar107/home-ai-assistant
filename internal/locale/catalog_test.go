@@ -19,13 +19,13 @@ func TestCatalogIsComplete(t *testing.T) {
 	module := modulePath(t, root)
 	fset := token.NewFileSet()
 	packages := map[string][]*ast.File{}
-	err := filepath.WalkDir(root, func(file string, entry os.DirEntry, err error) error {
+	walk := func(file string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		name := entry.Name()
 		if entry.IsDir() {
-			if file != root && (strings.HasPrefix(name, ".") || name == "vendor" || name == "node_modules" || name == "testdata") {
+			if strings.HasPrefix(name, ".") || name == "vendor" || name == "node_modules" || name == "testdata" {
 				return filepath.SkipDir
 			}
 			return nil
@@ -44,9 +44,11 @@ func TestCatalogIsComplete(t *testing.T) {
 		importPath := path.Join(module, filepath.ToSlash(rel))
 		packages[importPath] = append(packages[importPath], parsed)
 		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
+	}
+	for _, dir := range []string{"cmd", "internal"} {
+		if err := filepath.WalkDir(filepath.Join(root, dir), walk); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if problems := checkModule(fset, packages); len(problems) > 0 {
 		slices.Sort(problems)
