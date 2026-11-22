@@ -83,12 +83,15 @@ The branch ruleset requires the `validate` status check, which is the CI job's n
     they, not the test order, bound the package. The goal is the whole suite's time, which the
     validation measures.
   - Every eval test is parallel; none needed to stay serial.
-- **The CI split keeps the required check.** The race tests run in two parallel jobs: one for eval
-  and Telegram, and one for `go list ./...` minus those two, so the second list is complete by
-  construction. A final job named `validate` needs both shards and runs the format, module, plan,
-  vet and build checks, so the ruleset needs no change. Only the shards save the Go build cache.
-  The checks get their own parallel job only if their measured time keeps the workflow above five
-  minutes.
+- **The CI split keeps the required check.** The race tests run in three parallel jobs: eval,
+  Telegram, and `go list ./...` minus those two, so the last list is complete by construction.
+  Eval and Telegram are the two slowest packages by far and both bound by CPU under the race
+  detector, so each gets a runner of its own. The format, module, plan, vet and build checks run
+  in a job of their own beside them. `setup-go`'s cache key is shared with the image workflow,
+  which saves it without race builds, so the race jobs keep their own cache of builds and modules
+  per shard, keyed on the module files. A final job named `validate` needs every
+  other job, runs even when one fails, and passes only when all of them passed, so the ruleset
+  needs no change and a skipped job cannot pass the required check.
 
 ## Approach
 
@@ -148,10 +151,12 @@ packages are reported to the operator with their measurements, and the next step
 
 - **CPU-bound CI.** Parallel tests spread eval over the four cores but do not reduce its CPU; the
   budget above expects chunk B to be needed.
-- **Sharding compiles twice.** Each shard compiles and links its race test binaries; the eval and
-  Telegram shard compiles most of the dependency graph as well. The shards' Go build cache
-  (restored by `setup-go`) keeps this near today's compile time; the measurement in B's
-  acceptance includes it.
+- **Sharding compiles three times.** Each shard compiles and links its race test binaries, and
+  eval and Telegram each compile most of the dependency graph. Each shard's own race cache keeps
+  this to a link after the first run on new module files; the measurement in B's acceptance
+  includes it.
+- **Cache space.** The repository's caches are shared with the image workflow's build layers
+  under one size limit. Three race caches add to it, and the oldest entries are evicted first.
 - **Runner variance.** One runner took 1.6 times as long as another on the same suite. B's
   acceptance asks for three consecutive runs under five minutes rather than one.
 - **Wall-clock tests elsewhere under more load.** The local baseline run failed two tests that
