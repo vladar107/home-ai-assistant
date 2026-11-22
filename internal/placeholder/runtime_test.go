@@ -62,7 +62,7 @@ func TestHidingTellsTheModelToPassPlaceholdersAsWritten(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		told := strings.Contains(result.Final, "Pass a placeholder to a tool exactly as written")
+		told := strings.Contains(result.Final, "The user sees the real value wherever you write one, in your reply")
 		if !strings.HasPrefix(result.Final, "Use echo.") || told != hide {
 			t.Errorf("hide %v: guidance %q", hide, result.Final)
 		}

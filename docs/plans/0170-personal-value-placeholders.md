@@ -106,7 +106,9 @@ hidden part of a value.
   - an address rebuilt from a token, a known email suffix joined to its own domain
     (`k3f7qa@example.com`). A live eval run caught a model doing exactly that. The tool
     guidance therefore tells the model, whenever hiding is on, to pass placeholders exactly as
-    written.
+    written. It also says the user sees the real value wherever the model writes one, because
+    in the first production week the model refused to tell the user an event's address,
+    calling it hidden (eval case ph3 reproduces it).
 
   Arguments that are not one JSON value come back to the model as a tool error; they never fail
   the run. Text from one principal's run never resolves against another principal's vault.

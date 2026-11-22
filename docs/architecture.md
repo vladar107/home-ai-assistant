@@ -552,7 +552,9 @@ tab name and rewrite, goes through it.
   token body without brackets (`email-k3f7qa`), an email token with another
   domain, a token as an object key, or an address rebuilt from a token
   (`k3f7qa@example.com`, a known suffix at its own domain). With hiding on, the
-  tool guidance tells the model to pass placeholders exactly as written.
+  tool guidance tells the model that the user sees the real value wherever it
+  writes a placeholder, so it answers with placeholders and never calls a value
+  hidden.
 - **Real values everywhere else.** Streamed text is held from `⟦` to `⟧`, at
   most the length of the longest token, so a token split across deltas resolves
   whole, and the run's `Response` and `Final` are resolved before the turn reads

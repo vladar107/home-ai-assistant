@@ -35,9 +35,10 @@ func NewRuntime(inner agentruntime.AgentRuntime, vault Vault, hide bool, logger 
 }
 
 // toolGuidance tells the model how to use placeholders, so it never rebuilds an address from one.
-const toolGuidance = "Values written as ⟦email-… domain⟧, ⟦phone-…⟧ or ⟦address-…⟧ are placeholders for hidden values. " +
-	"Pass a placeholder to a tool exactly as written, brackets included, and the tool receives the real value. " +
-	"Never rewrite one as an address or number, and never ask the user for the value it hides."
+const toolGuidance = "Email addresses, phone numbers and street addresses reach you as placeholders: ⟦email-… domain⟧, ⟦phone-…⟧ or ⟦address-…⟧. " +
+	"The user sees the real value wherever you write one, in your reply and in tool arguments alike. " +
+	"So when the user asks for an address, number or place, answer with its placeholder exactly as written, brackets included; " +
+	"never say it is hidden or that you cannot tell it. Never rewrite a placeholder as an address or number yourself."
 
 const (
 	stageHide    = "hide"
