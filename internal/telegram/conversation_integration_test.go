@@ -427,10 +427,8 @@ func newConversationHarness(t *testing.T, runtime agentruntime.AgentRuntime) *co
 
 func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentRuntime, options harnessOptions) *conversationHarness {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), integrationTimeout)
-	t.Cleanup(cancel)
 	h := &conversationHarness{
-		t: t, ctx: ctx, updates: make(chan []Update, 20), messages: make(chan sentMessage, 100), documents: make(chan sentDocument, 20), photos: make(chan sentPhoto, 20), edits: make(chan editedMessage, 100),
+		t: t, updates: make(chan []Update, 20), messages: make(chan sentMessage, 100), documents: make(chan sentDocument, 20), photos: make(chan sentPhoto, 20), edits: make(chan editedMessage, 100),
 		answers: make(chan callbackAnswer, 100), deletes: make(chan deletedMessage, 100), offsets: make(chan int64, 100), registrations: make(chan commandRegistration, 10),
 		turns: make(chan turnOutcome, 20), logs: &lockedBuffer{}, files: make(map[string]testFile), indicatorFailures: make(map[string]int),
 		reactionCounts: make(map[string]int), feedbackCounts: make(map[string]int), tabs: newTabSimulator(options.topics),
@@ -446,6 +444,9 @@ func newConversationHarnessWithOptions(t *testing.T, runtime agentruntime.AgentR
 			t.Error(err)
 		}
 	})
+	ctx, cancel := context.WithTimeout(context.Background(), integrationTimeout)
+	t.Cleanup(cancel)
+	h.ctx = ctx
 	h.db = testutil.OpenDB(t, path)
 	principals := []identity.ConfiguredPrincipal{
 		{ID: "alice", DisplayName: "Alice", TelegramUserID: 101},

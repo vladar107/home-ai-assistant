@@ -183,6 +183,7 @@ plan that links back to the earlier record.
 | 0171 | [Scheduled model turns run beside chat, with a longer limit](0171-scheduled-turns-beside-chat.md) | done |
 | 0172 | [Saved routes and watches in every turn's prompt](0172-routes-and-watches-in-the-prompt.md) | done |
 | 0173 | [Race suite under five minutes: template store and parallel eval tests](0173-eval-tests-under-five-minutes.md) | in-progress |
+| 0174 | [Two tests that fail under load](0174-load-flakes.md) | in-progress |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

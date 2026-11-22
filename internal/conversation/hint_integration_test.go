@@ -145,11 +145,11 @@ func newHintEnv(t *testing.T, answer string, delay time.Duration, tools []string
 	}))
 	t.Cleanup(server.Close)
 
+	store := testutil.OpenStore(t, filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
+	t.Cleanup(func() { _ = store.Close() })
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	t.Cleanup(cancel)
 	env.ctx = ctx
-	store := testutil.OpenStore(t, filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
-	t.Cleanup(func() { _ = store.Close() })
 	identities, err := identity.NewService(store, []identity.ConfiguredPrincipal{{ID: "alice", DisplayName: "Alice", TelegramUserID: 101}})
 	if err != nil {
 		t.Fatal(err)

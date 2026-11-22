@@ -61,10 +61,10 @@ type metricsEnv struct {
 
 func newMetricsEnv(t *testing.T) *metricsEnv {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	t.Cleanup(cancel)
 	store := testutil.OpenStore(t, filepath.Join(t.TempDir(), "state", "assistant.sqlite"))
 	t.Cleanup(func() { _ = store.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	t.Cleanup(cancel)
 	identities, err := identity.NewService(store, []identity.ConfiguredPrincipal{{ID: "alice", DisplayName: "Alice", TelegramUserID: 101}})
 	if err != nil {
 		t.Fatal(err)
