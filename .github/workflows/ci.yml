@@ -5,6 +5,9 @@ on:
   push:
     branches:
       - main
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -29,15 +32,23 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      - name: Cache Go race builds
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # Go's test cache compares the modification times of the files tests open.
+      - name: Pin file times to their content
+        run: scripts/pin-mtimes
+
+      # The scheduled and manual runs start empty, so every test runs and the cache is rebuilt.
+      - name: Restore Go race cache
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: go-race-${{ runner.os }}-${{ matrix.shard }}-${{ hashFiles('go.mod', 'go.sum') }}
+          key: go-race-${{ runner.os }}-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: go-race-${{ runner.os }}-${{ matrix.shard }}-
 
       - name: Test with race detection
+        id: test
         env:
           SHARD: ${{ matrix.shard }}
         run: |
@@ -51,7 +62,45 @@ jobs:
             rest) mapfile -t packages < <(grep -vxF -e "$module/internal/eval" -e "$module/internal/telegram" <<<"$all" | grep -vE "$connectors") ;;
           esac
           (( ${#packages[@]} ))
-          go test -race -count=1 -timeout 30m "${packages[@]}"
+          set +e
+          go test -race -timeout 30m "${packages[@]}" 2>&1 | tee "$RUNNER_TEMP/test.log"
+          status=${PIPESTATUS[0]}
+          set -e
+          echo "reran=$(grep -cE '^ok\s+\S+\s+[0-9.]+s' "$RUNNER_TEMP/test.log" || true)" >> "$GITHUB_OUTPUT"
+          exit "$status"
+
+      # A push saves only what it newly proved; a full run saves even when a test failed, since a
+      # failed package has no result in the cache and the next push reruns it.
+      - name: Save Go race cache
+        if: >-
+          !cancelled() && github.ref == 'refs/heads/main' &&
+          ((github.event_name == 'push' && steps.test.outputs.reran != '' && steps.test.outputs.reran != '0') ||
+           ((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
+            (steps.test.outcome == 'success' || steps.test.outcome == 'failure')))
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-race-${{ runner.os }}-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+  # Keeps only each shard's newest race cache on main, so the caches stay within the quota.
+  prune:
+    if: always() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: race
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Delete superseded race caches
+        run: |
+          gh cache list --ref refs/heads/main --key "go-race-${RUNNER_OS}-" --sort created_at --order desc --limit 1000 --json id,key \
+            --jq 'group_by(.key | split("-")[3]) | map(.[1:][].id)[]' |
+            while read -r id; do gh cache delete "$id" || echo "cache $id already gone"; done
 
   checks:
     runs-on: ubuntu-latest
