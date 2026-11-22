@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Publishes the eval results store to the NAS for the Grafana board, and backs up the run
+# directories beside it. Only /usr/bin binaries are used because Homebrew binaries cannot reach
+# the LAN.
+
+usage() { echo "usage: $0 [--results <dir>] [ssh-host] [env-file]" >&2; exit 2; }
+results=$HOME/eval-results
+while (( $# > 0 )); do
+  case $1 in
+    --results) (( $# >= 2 )) || usage; results=$2; shift 2 ;;
+    --results=*) results=${1#--results=}; shift ;;
+    -*) usage ;;
+    *) break ;;
+  esac
+done
+(( $# <= 2 )) || usage
+host=${1:-${HOME_AGENT_DEPLOY_HOST:-home-nas}}
+env_file=${2:-deploy/.env.nas}
+[[ $host =~ ^[A-Za-z0-9._@-]+$ ]] || usage
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+[[ $env_file = /* ]] || env_file=$repo_root/$env_file
+[[ -f $env_file ]] || { echo "NAS environment file not found: $env_file" >&2; exit 2; }
+mode=$(stat -f '%Lp' "$env_file")
+(( (8#$mode & 077) == 0 )) || { echo "NAS environment file must not be accessible by group or others: $env_file" >&2; exit 2; }
+# shellcheck disable=SC1090
+source "$env_file"
+nas_root=${HOME_AGENT_NAS_ROOT:-}
+[[ $nas_root =~ ^/[A-Za-z0-9._/-]+$ && $nas_root != / && $nas_root != *'/../'* && $nas_root != */.. ]] || {
+  echo "HOME_AGENT_NAS_ROOT must be a safe absolute NAS path without parent traversal" >&2; exit 2;
+}
+
+[[ -d $results ]] || { echo "results directory not found: $results" >&2; exit 2; }
+results=$(cd "$results" && pwd)
+store=$results/results.sqlite
+[[ -f $store ]] || { echo "results store not found: $store; import the runs first" >&2; exit 2; }
+runs=()
+for dir in "$results"/*/; do
+  dir=${dir%/}
+  [[ -f $dir/result.json ]] && runs+=("${dir##*/}")
+done
+
+publish_root=$nas_root/eval-results
+board=$publish_root/board
+backup=$publish_root/runs
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/eval-publish.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT
+snapshot=$tmp/results.sqlite
+/usr/bin/sqlite3 "$store" "VACUUM INTO '${snapshot//\'/\'\'}'"
+# The board reads only the views; the Mac's run paths stay off the NAS.
+/usr/bin/sqlite3 "$snapshot" "UPDATE runs SET dir = ''"
+/usr/bin/sqlite3 -readonly "$snapshot" \
+  "SELECT (SELECT count(*) FROM eval_runs) + (SELECT count(*) FROM eval_case_rates) + (SELECT count(*) FROM eval_failed_checks)" >/dev/null \
+  || { echo "the snapshot lacks the board's views; open the store with the current home-agent-eval first" >&2; exit 1; }
+
+# The snapshot replaces the board's file by rename, never by writing it in place, so Grafana never
+# reads a half-written file.
+/usr/bin/ssh -o BatchMode=yes "$host" "test -d '$nas_root' && test ! -L '$nas_root' && test ! -L '$publish_root' && test ! -L '$board' && test ! -L '$backup' \
+  && mkdir -p '$board' '$backup' && chmod 0750 '$publish_root' '$board' '$backup'"
+/usr/bin/scp -O -q "$snapshot" "$host:$board/results.sqlite.new"
+/usr/bin/ssh -o BatchMode=yes "$host" "chmod 0640 '$board/results.sqlite.new' && mv -f '$board/results.sqlite.new' '$board/results.sqlite'"
+echo "published $store to $host:$board/results.sqlite" >&2
+
+if (( ${#runs[@]} == 0 )); then
+  echo "no run directories to back up in $results" >&2
+  exit 0
+fi
+# The NAS refuses rsync over SSH outside its rsync modules, so the runs travel as a tar stream.
+COPYFILE_DISABLE=1 /usr/bin/tar --no-mac-metadata --no-xattrs -C "$results" -cf - "${runs[@]}" \
+  | /usr/bin/ssh -o BatchMode=yes "$host" "tar -C '$backup' -xf -" \
+  || { echo "board published, but the run directories' backup failed" >&2; exit 1; }
+echo "backed up ${#runs[@]} run(s) to $host:$backup" >&2

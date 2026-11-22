@@ -320,12 +320,21 @@ trials each; a Markdown report, run by hand from the operator's Mac.
 - **The weekly run comes last,** after the suite is stable. The operator starts it by hand on
   their Mac with the eval profile there; a remote scheduled routine reminds them weekly with the
   current commands, and nothing on the Mac is scheduled. It runs the regression suite against the
-  default prompt on the current release, on the dedicated eval profile only. The Mac cannot reach
-  the collector from a Go binary (the operating system's local network privacy blocks it, and the
-  collector publishes no port), so the harness writes the run's pass rate, `pass^k`, happy-path
-  rate and cost as an OTLP/JSON metrics file, and a small script posts it with the system `curl`
-  to an authenticated route the home edge adds in front of the collector's OTLP HTTP receiver. A
-  panel in the monitoring repository's dashboard shows the trend.
+  default prompt on the current release, on the dedicated eval profile only.
+- **Grafana reads a copy of the results store, not metrics.** Revised when chunk 12 started:
+  the metrics store keeps 30 days, and eval runs are a few relational events a month, not a
+  time series. After a run the operator publishes a snapshot of `results.sqlite` to an
+  application-owned directory on the NAS with the system `sqlite3`, `scp` and `ssh` (a Go binary
+  on the Mac cannot reach the LAN). Grafana mounts that directory read-only and queries it
+  through the pinned community SQLite data source plugin. Every stored run, past ones included,
+  reaches the board with the first copy, history is never expired, the board can drill down to a
+  case and its failed checks. The publish also copies the run directories, so the NAS holds the
+  results' backup off the Mac. Views in the
+  store are the board's contract, so the tables can change without breaking it. Consulted the
+  advisor on OTLP into a dedicated metrics store, a longer global retention, or this copy; it
+  chose the copy, with the dedicated metrics store as the fallback if the plugin does not load.
+- **The results live outside the checkout.** `~/eval-results` is the default results directory,
+  so cleaning or recloning the repository cannot delete them.
 
 ## Approach
 
@@ -496,23 +505,77 @@ file and is serialised with them.
    - Files: `internal/eval/judge.go`, `cmd/home-agent-eval/main.go`.
    - Acceptance: with the Pi fixture, a swapped pair that disagrees counts as no verdict; a
      question below the agreement threshold is reported but does not decide a trial.
-12. **Weekly run and Grafana** — Complex; depends on 9.
-    - Task: an `export` command that writes a finished regression run as an OTLP/JSON metrics
-      file: pass rate, `pass^k`, happy-path rate, tokens and model calls, labelled with the
-      fingerprint's short form, model, effort and Pi version. It refuses a variant run, a replayed
-      run and a run on any profile but the eval profile. A script reads the route's token from the
-      Keychain and posts the file with `/usr/bin/curl`. Outside this repository: the monitoring
-      repository's collector accepts OTLP over HTTP with that token, the home edge adds an
-      authenticated route to it, and the dashboard gains a panel that draws each run as a point.
-      The operator runs the suite and the script by hand once a week; the remote routine
-      reminds them.
-    - Files: `internal/eval/export.go`, `cmd/home-agent-eval/main.go`, `scripts/eval-push-metrics`,
-      `docs/architecture.md`; the collector and dashboard in the monitoring repository and the
-      route in the home edge's configuration.
-    - Acceptance: against a loopback OTLP receiver the exported file is accepted and carries every
-      metric and label; a variant or replayed run is refused; two runs a week apart show as two
-      points in the panel, and a fingerprint change is visible on it; the push without the token
-      is rejected by the route.
+12. **Results store on the NAS and the Grafana board** — rewritten when it started; see the
+    decision above. Two parts that run in parallel against the view contract below, then a
+    rollout.
+    - View contract, created with the store's schema and replaced on every open. `time` is the
+      run's start in Unix seconds, the column the board's queries treat as time; `started_at`
+      is the same instant as RFC 3339 UTC text. No view exposes a file path.
+      - `eval_runs`: one row per run with `run_id`, `time`, `started_at`, `commit_name`,
+        `model`, `effort`, `fingerprint` (first 12 characters), `pi_version`, `variant`,
+        `cases`, `trials_ran`, `trials_passed`, `pass_rate`, `pass_k`, `k`, `happy_rate`
+        (null when no happy trial ran), `tokens_per_trial` (input plus output),
+        `model_calls_per_trial`, `full_suite`, and `regression` (1 for a full-suite run with no
+        variant, not replayed and not stopped).
+      - `eval_case_rates`: one row per run and case with `run_id`, `time`, `regression`,
+        `case_id`, `kind`, `happy`, `trials`, `passed`, `pass_rate`.
+      - `eval_failed_checks`: `run_id`, `time`, `case_id`, `trial`, `step`, `check_name`,
+        `message`.
+    - 12a. **Harness** — Complex (Jev: complex, 1.0).
+      - Task: the default results directory becomes `~/eval-results`; `.gitignore` keeps
+        `evals/results/` so an explicit old path is still never committed. A run records its
+        case selection in `result.json` (the case IDs and tags it was given, and whether it ran
+        the full suite); `runs` gains `full_suite`, added to an existing store when it opens,
+        and the run insert names its columns. A result written before the field existed counts
+        as full when it covered at least 45 cases, the suite's size until then. Replay keeps its
+        source's value. The three views. `scripts/eval-publish` writes a snapshot with
+        `sqlite3 ... "VACUUM INTO"`, copies it with `scp` into a board directory under the
+        application's NAS root with a temporary name and renames it in place, and copies the
+        run directories beside it as a `tar` stream over SSH, so the NAS holds a full backup; it
+        sets the directory and file modes explicitly so Grafana's runtime user in the monitoring
+        stack can read the board directory, and follows `scripts/deploy-app-nas` for the SSH alias and
+        the ignored deploy environment file. `docs/architecture.md` describes the results
+        directory, the views and publishing, replacing its `evals/results` references.
+      - Files: `internal/eval/runner.go`, `internal/eval/report.go`, `internal/eval/store.go`,
+        `internal/eval/replay.go`, `cmd/home-agent-eval/main.go`, `scripts/eval-publish`,
+        `docs/architecture.md`.
+      - Acceptance: integration tests import hand-built results into a temporary store and read
+        exact rows from each view; a run with a case or tag filter is not full and not
+        regression; an old result without the field and 45 cases is full, one with 13 is not; a
+        variant, replayed or stopped run is not regression; a store created by the previous
+        schema, holding runs and verdicts, opens, gains the column and keeps its rows, and a
+        re-import keeps the verdicts; the script passes `bash -n` and `shellcheck`.
+    - 12b. **Board** (monitoring repository) — Complex (Jev: complex, 0.33, below threshold;
+      taken as complex because the panels depend on the plugin's query model and provisioning).
+      - Task: pin the SQLite data source plugin in Grafana's preinstall list; mount the board
+        directory, never the file, read-only through a new path setting, following the existing
+        mount of the edge stack's query log (example environment, the deploy script's existence
+        check and the documented exception to the stack's independence); provision the data
+        source read-only; and add a provisioned dashboard beside the Home Agent ones. Panels:
+        the latest regression run's pass rate, `pass^k`, happy-path rate and tokens per trial;
+        those rates per regression run as points over time, one series per suite size
+        (`cases`), since runs over different suites are not comparable; a table of regression
+        runs with cases, commit, fingerprint, model, effort and Pi version; a case-by-run
+        pass-rate matrix over the last regression runs; the failed checks of a run chosen in a
+        variable; tokens and model calls per trial over time.
+      - Files: `compose.yaml`, `nas.env.example`, `scripts/deploy`, the data source
+        provisioning, a new dashboard JSON, `README.md`, `CLAUDE.md`.
+      - Acceptance: the stack's configured checks pass; the dashboard follows its siblings'
+        structure; every panel's SQL, with its variables substituted, runs with `sqlite3`
+        against a store built from the contract's views and names only their columns.
+    - Between the waves, every panel's SQL also runs against the store 12a produces from the
+      real results.
+    - 12c. **Rollout** — Orchestrator, with the operator for the NAS steps; depends on 12a and
+      12b.
+      - Move the existing results to `~/eval-results` and import them again; check that exactly
+        the six full-suite runs from before the field existed are `regression`; publish; the
+        operator deploys the monitoring stack; the data source's health check passes and the
+        board shows those six runs. That completes the chunk.
+      - Then the full suite runs on the current release: about 200 trials and 600 model calls,
+        so it raises the call budget above the default, and it takes about half an hour. A
+        quota stop leaves a stopped run, which the board does not count. After a second publish
+        its point and matrix column appear without restarting Grafana.
+    - The weekly reminder routine is left for later.
 13. **Sensitivity report** — Simple (Jev: simple, 0.66, below threshold; taken as simple
     because it adds one section to the existing paired comparison); depends on 9.
     - Task: `compare` marks a pair where the second run's variant names a different model. It
@@ -575,8 +638,8 @@ file and is serialised with them.
   (the exported Pi version default, stage 1)
 - `internal/prompt/system.go`, `internal/runtime/runtime.go`, `internal/runtime/pi/runtime.go`
   (stage 2)
-- `scripts/eval-push-metrics`, and outside this repository the monitoring repository's collector
-  and dashboard and the home edge's route (stage 3)
+- `scripts/eval-publish`, and outside this repository the monitoring repository's Grafana data
+  source, mount and dashboard (stage 3)
 - `.gitignore`, `docs/architecture.md`, `docs/plans/README.md`
 
 ## Validation
@@ -616,5 +679,12 @@ file and is serialised with them.
   case when it needs to isolate the prompt.
 - Questions decided with the operator after stage 2: the weekly run happens on the Mac, started
   by hand, not on the NAS; the judge is `gpt-6-sol` through Pi, and Jev does not judge.
+- **The board rests on a community plugin.** It is pinned and reads a read-only mount of one
+  directory. If it stops loading on a Grafana upgrade, the fallback is a dedicated metrics store
+  fed from the same results; the published copy stays as the backup either way.
+- **A replaced file can stay open.** The snapshot always arrives by rename into a mounted
+  directory, since a copy in place could be read half-written. If the plugin keeps the old file
+  open, the board shows stale runs until Grafana restarts; the rollout's second publish checks
+  for this.
 - **A weekly run started by hand can be skipped.** The trend has gaps when the operator misses a
   week; the panel draws points, not a continuous line, so a gap shows as a gap.

@@ -25,13 +25,21 @@ import (
 const (
 	// DefaultBudget is the number of model calls a run may spend unless the command line raises it.
 	DefaultBudget = 300
-	// DefaultResultsDir is where runs are written; it is ignored by git.
-	DefaultResultsDir = "evals/results"
 	// DefaultPiProvider is the model provider production runs Pi with.
 	DefaultPiProvider = "openai-codex"
 
 	maxErrorRunes = 300
 )
+
+// DefaultResultsDir is where runs are written: ~/eval-results, outside the checkout, so cleaning
+// or recloning the repository cannot delete them.
+func DefaultResultsDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "eval-results"
+	}
+	return filepath.Join(home, "eval-results")
+}
 
 // PiOptions says how the runner starts Pi. The zero value is production's: the `pi` binary, the
 // pinned release and provider, and no web search.
@@ -197,7 +205,8 @@ func Run(ctx context.Context, opts RunOptions) (*Result, error) {
 			RunID: started.UTC().Format("20060102-150405"), StartedAt: started, Commit: cmp.Or(opts.Commit, "unknown"),
 			PiVersion: piVersion, Provider: provider, Model: opts.ChatModel.Model,
 			Effort: cmp.Or(opts.ChatModel.Effort, agentruntime.DefaultEffort), Budget: opts.Budget,
-			Variant: opts.Variant.Info(),
+			Variant:   opts.Variant.Info(),
+			Selection: &Selection{CaseIDs: opts.CaseIDs, Tags: opts.Tags, FullSuite: len(opts.CaseIDs) == 0 && len(opts.Tags) == 0},
 		},
 	}
 	r.runtime = piRuntime
@@ -207,7 +216,7 @@ func Run(ctx context.Context, opts RunOptions) (*Result, error) {
 	for _, window := range windows {
 		r.result.QuotaBefore = append(r.result.QuotaBefore, WindowUsage{Name: window.Name, UsedPercent: window.UsedPercent})
 	}
-	r.result.Dir = filepath.Join(cmp.Or(opts.ResultsDir, DefaultResultsDir), r.result.RunID)
+	r.result.Dir = filepath.Join(cmp.Or(opts.ResultsDir, DefaultResultsDir()), r.result.RunID)
 	if err := os.MkdirAll(filepath.Join(r.result.Dir, cassetteDir), 0o700); err != nil {
 		return nil, fmt.Errorf("create the results directory: %w", err)
 	}

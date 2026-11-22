@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -197,6 +198,9 @@ func TestRunPlaysTrialsChecksThemAndWritesTheReport(t *testing.T) {
 	if err := json.Unmarshal(stored, &decoded); err != nil || decoded.Summary.Overall != result.Summary.Overall || decoded.PromptFingerprint != result.PromptFingerprint {
 		t.Fatalf("result.json = %v %+v", err, decoded.Summary)
 	}
+	if decoded.Selection == nil || !decoded.Selection.FullSuite || decoded.Selection.CaseIDs != nil || decoded.Selection.Tags != nil {
+		t.Fatalf("selection = %+v, want the full suite", decoded.Selection)
+	}
 
 	cassette, err := os.ReadFile(filepath.Join(result.Dir, failing.Cassette))
 	if err != nil {
@@ -228,6 +232,9 @@ func TestRunSelectsCasesByIDAndTagAndOverridesTrials(t *testing.T) {
 	}
 	if len(result.Cases) != 1 || result.Cases[0].ID != "beta" || len(result.Cases[0].Trials) != 1 {
 		t.Fatalf("cases = %+v", result.Cases)
+	}
+	if s := result.Selection; s == nil || s.FullSuite || !slices.Equal(s.CaseIDs, []string{"beta"}) || result.FullSuite() {
+		t.Fatalf("selection = %+v, want case beta and not the full suite", s)
 	}
 	f.options.CaseIDs = []string{"missing"}
 	if _, err := f.run(); err == nil || !strings.Contains(err.Error(), "missing") {

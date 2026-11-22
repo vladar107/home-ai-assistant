@@ -112,6 +112,17 @@ type WindowUsage struct {
 	UsedPercent float64 `json:"used_percent"`
 }
 
+// Selection is how a run chose its cases: the case IDs and tags it was given, and whether it ran
+// the full suite, with neither.
+type Selection struct {
+	CaseIDs   []string `json:"case_ids,omitempty"`
+	Tags      []string `json:"tags,omitempty"`
+	FullSuite bool     `json:"full_suite"`
+}
+
+// legacyFullSuiteCases is the suite's size until runs recorded their selection.
+const legacyFullSuiteCases = 45
+
 // Result is a whole run, written as result.json.
 type Result struct {
 	RunID      string    `json:"run_id"`
@@ -133,6 +144,8 @@ type Result struct {
 	ReplayOf string `json:"replay_of,omitempty"`
 	// ReplayChanges lists the trials whose verdict differs from the source run's.
 	ReplayChanges []string `json:"replay_changes,omitempty"`
+	// Selection is nil in a result written before runs recorded it.
+	Selection *Selection `json:"selection,omitempty"`
 	// Variant names the prompt variant the run tried; nil is production's prompt.
 	Variant     *VariantInfo             `json:"variant,omitempty"`
 	Budget      int                      `json:"budget"`
@@ -150,6 +163,15 @@ type Result struct {
 	Dir string `json:"-"`
 	// Review is the operator's review of the run, when there is one; it lives in review.json.
 	Review *ReviewFile `json:"-"`
+}
+
+// FullSuite reports whether the run played every case rather than a selection of them. A result
+// written before runs recorded their selection counts as full when it covered the suite's size then.
+func (r *Result) FullSuite() bool {
+	if r.Selection != nil {
+		return r.Selection.FullSuite
+	}
+	return len(r.Cases) >= legacyFullSuiteCases
 }
 
 // Summarize computes the run's rates from its cases.

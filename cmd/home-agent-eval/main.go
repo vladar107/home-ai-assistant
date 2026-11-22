@@ -189,7 +189,7 @@ func runSuite(ctx context.Context, args []string) error {
 	flags.Var(&tags, "tag", "run only cases with this tag (repeatable or comma-separated)")
 	budget := flags.Int("budget", eval.DefaultBudget, "most model calls the run may spend")
 	maxUsed := flags.Float64("max-used", eval.DefaultMaxUsedPercent, "refuse when any quota window is above this percent used")
-	results := flags.String("results", eval.DefaultResultsDir, "directory the run's result, report and cassettes are written under")
+	results := flags.String("results", eval.DefaultResultsDir(), "directory the run's result, report and cassettes are written under")
 	trials := flags.Int("trials", 0, "trials per case, replacing each case's own count")
 	variantName := flags.String("variant", "", "run under this prompt variant, evals/variants/<name>.json (default: production's prompt)")
 	variantsDir := flags.String("variants", "", "directory of variant files (default: variants/ beside the cases directory)")
@@ -285,7 +285,7 @@ func executablePath(setting string) (string, error) {
 }
 
 func runDir(flags *flag.FlagSet, args []string) (string, error) {
-	results := flags.String("results", eval.DefaultResultsDir, "directory the runs are written under")
+	results := flags.String("results", eval.DefaultResultsDir(), "directory the runs are written under")
 	runID := flags.String("run", "", "run ID (default: the latest run)")
 	if err := flags.Parse(args); err != nil {
 		return "", err
@@ -325,7 +325,7 @@ func importRun(ctx context.Context, dir string) error {
 }
 
 func openStore(flags *flag.FlagSet, args []string) (*eval.ResultsStore, string, error) {
-	results := flags.String("results", eval.DefaultResultsDir, "directory the runs and the results store are in")
+	results := flags.String("results", eval.DefaultResultsDir(), "directory the runs and the results store are in")
 	if err := flags.Parse(args); err != nil {
 		return nil, "", err
 	}
@@ -335,7 +335,7 @@ func openStore(flags *flag.FlagSet, args []string) (*eval.ResultsStore, string, 
 
 func runReplay(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("replay", flag.ContinueOnError)
-	results := flags.String("results", eval.DefaultResultsDir, "directory the runs are written under")
+	results := flags.String("results", eval.DefaultResultsDir(), "directory the runs are written under")
 	runID := flags.String("run", "", "run ID to replay (default: the latest run)")
 	casesDir := flags.String("cases", "evals/cases", "directory of case files holding the checks to score with")
 	if err := flags.Parse(args); err != nil {

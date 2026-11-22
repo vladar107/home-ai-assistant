@@ -28,7 +28,7 @@ type ReplayOptions struct {
 // checks need the world's store, which a cassette does not hold, so a trial keeps the store
 // verdicts it had when the case still expects them.
 func Replay(ctx context.Context, opts ReplayOptions) (*Result, error) {
-	resultsDir := cmp.Or(opts.ResultsDir, DefaultResultsDir)
+	resultsDir := cmp.Or(opts.ResultsDir, DefaultResultsDir())
 	now := opts.Now
 	if now == nil {
 		now = time.Now

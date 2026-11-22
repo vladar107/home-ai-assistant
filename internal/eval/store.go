@@ -13,8 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// ResultsStoreFile is the local results database beside the run directories. It is ignored by git
-// with the rest of the results directory.
+// ResultsStoreFile is the local results database beside the run directories.
 const ResultsStoreFile = "results.sqlite"
 
 const resultsSchema = `
@@ -44,7 +43,8 @@ CREATE TABLE IF NOT EXISTS runs (
 	k INTEGER NOT NULL,
 	happy_ran INTEGER NOT NULL,
 	happy_passed INTEGER NOT NULL,
-	dir TEXT NOT NULL
+	dir TEXT NOT NULL,
+	full_suite INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS trials (
 	run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
@@ -85,6 +85,59 @@ CREATE TABLE IF NOT EXISTS verdicts (
 );
 `
 
+// resultsViews are the Grafana board's contract, so the tables can change without breaking it.
+// They are replaced on every open and expose no file path. A trial ran unless it was aborted and
+// passed when its status is passed, as in Summarize.
+const resultsViews = `
+DROP VIEW IF EXISTS eval_failed_checks;
+DROP VIEW IF EXISTS eval_case_rates;
+DROP VIEW IF EXISTS eval_runs;
+CREATE VIEW eval_runs AS
+SELECT r.run_id,
+       CAST(strftime('%s', r.started_at) AS INTEGER) AS time,
+       r.started_at,
+       r.commit_name,
+       r.model,
+       r.effort,
+       substr(r.fingerprint, 1, 12) AS fingerprint,
+       r.pi_version,
+       r.variant,
+       (SELECT COUNT(DISTINCT t.case_id) FROM trials t WHERE t.run_id = r.run_id) AS cases,
+       r.trials_ran,
+       r.trials_passed,
+       CASE WHEN r.trials_ran > 0 THEN CAST(r.trials_passed AS REAL) / r.trials_ran END AS pass_rate,
+       r.pass_k,
+       r.k,
+       CASE WHEN r.happy_ran > 0 THEN CAST(r.happy_passed AS REAL) / r.happy_ran END AS happy_rate,
+       CASE WHEN r.trials_ran > 0 THEN CAST(r.tokens_input + r.tokens_output AS REAL) / r.trials_ran END AS tokens_per_trial,
+       CASE WHEN r.trials_ran > 0 THEN CAST(r.model_calls AS REAL) / r.trials_ran END AS model_calls_per_trial,
+       r.full_suite,
+       CASE WHEN r.full_suite = 1 AND r.variant = '' AND r.replayed = 0 AND r.stopped = '' THEN 1 ELSE 0 END AS regression
+FROM runs r;
+CREATE VIEW eval_case_rates AS
+SELECT t.run_id,
+       r.time,
+       r.regression,
+       t.case_id,
+       t.kind,
+       t.happy,
+       COUNT(*) AS trials,
+       SUM(t.status = 'passed') AS passed,
+       CAST(SUM(t.status = 'passed') AS REAL) / COUNT(*) AS pass_rate
+FROM trials t JOIN eval_runs r ON r.run_id = t.run_id
+WHERE t.status != 'aborted'
+GROUP BY t.run_id, t.case_id, t.kind, t.happy;
+CREATE VIEW eval_failed_checks AS
+SELECT c.run_id,
+       r.time,
+       c.case_id,
+       c.trial,
+       c.step,
+       c.check_name,
+       c.message
+FROM checks c JOIN eval_runs r ON r.run_id = c.run_id;
+`
+
 // ResultsStore is the local SQLite file of imported runs, their trials, failed checks and the
 // operator's verdicts. The run directories stay the source of truth; the store makes trends and
 // comparisons a query.
@@ -107,7 +160,54 @@ func OpenResultsStore(resultsDir string) (*ResultsStore, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("create the results schema: %w", err)
 	}
+	if err := addFullSuite(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("add the full-suite column: %w", err)
+	}
+	if err := replaceViews(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("create the results views: %w", err)
+	}
 	return &ResultsStore{db: db}, nil
+}
+
+// replaceViews recreates the views in one transaction, so a snapshot taken by another process
+// while a command opens the store never lacks one.
+func replaceViews(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(resultsViews); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// addFullSuite adds runs.full_suite to a store created before it existed, deciding each stored
+// run by the rule Result.FullSuite applies to a result without a selection.
+func addFullSuite(db *sql.DB) error {
+	var present int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('runs') WHERE name = 'full_suite'`).Scan(&present); err != nil {
+		return err
+	}
+	if present > 0 {
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`ALTER TABLE runs ADD COLUMN full_suite INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE runs SET full_suite = (SELECT COUNT(DISTINCT t.case_id) FROM trials t WHERE t.run_id = runs.run_id) >= ?`,
+		legacyFullSuiteCases); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *ResultsStore) Close() error { return s.db.Close() }
@@ -135,11 +235,16 @@ func (s *ResultsStore) Import(ctx context.Context, r *Result, review *ReviewFile
 	if r.Variant != nil {
 		variant, variantSHA = r.Variant.Name, r.Variant.SHA256
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO runs (run_id, started_at, finished_at, commit_name, pi_version, provider,
+	model, effort, fingerprint, variant, variant_sha256, replayed, replay_of, stopped,
+	model_calls, tokens_input, tokens_output, tokens_cache_read, tokens_cache_write,
+	trials_ran, trials_passed, pass_k, k, happy_ran, happy_passed, dir, full_suite)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.RunID, r.StartedAt.UTC().Format(time.RFC3339), r.FinishedAt.UTC().Format(time.RFC3339), r.Commit, r.PiVersion, r.Provider,
 		r.Model, r.Effort, r.PromptFingerprint, variant, variantSHA, flag(r.Replayed), r.ReplayOf, r.Stopped,
 		r.ModelCalls, r.Tokens.Input, r.Tokens.Output, r.Tokens.CacheRead, r.Tokens.CacheWrite,
-		summary.Overall.Ran, summary.Overall.Passed, summary.PassK, summary.K, summary.Happy.Ran, summary.Happy.Passed, r.Dir); err != nil {
+		summary.Overall.Ran, summary.Overall.Passed, summary.PassK, summary.K, summary.Happy.Ran, summary.Happy.Passed, r.Dir, flag(r.FullSuite())); err != nil {
 		return fmt.Errorf("insert run: %w", err)
 	}
 	for _, c := range r.Cases {

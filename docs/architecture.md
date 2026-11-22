@@ -2012,7 +2012,7 @@ never the application's profiles or another user's login:
 4. Run: `run --profiles <root>` with `--case`, `--tag` and `--trials` to narrow it
    and `--budget` (300 model calls by default) to bound it. The first quota or
    login failure stops the run and lists the trials not run.
-5. Read `evals/results/<run>/report.md` (ignored): the pass rate, `pass^k`, the
+5. Read `~/eval-results/<run>/report.md`: the pass rate, `pass^k`, the
    happy-path rate on its own line, the rate per failure kind, failing checks per
    trial, tokens, Pi version, model and prompt fingerprint. Each trial's cassette
    is beside it.
@@ -2021,6 +2021,53 @@ never the application's profiles or another user's login:
    `report.md` with the agreement between the checks and the operator, listing
    missed failures and false alarms. Until agreement is consistently high, every
    trial is reviewed.
+7. Publish: `scripts/eval-publish` copies the results store to the NAS for the
+   eval board, as described below.
+
+The results live in `~/eval-results`, outside the checkout, so cleaning or
+recloning the repository cannot delete them; every command that reads or writes
+runs takes `--results` to use another directory, and `evals/results/` stays
+ignored so an explicit old path is still never committed. Each run directory
+holds `result.json`, `report.md`, `review.json` and the cassettes. `result.json`
+records the run's case selection: the case IDs and tags it was given, and
+whether it ran the full suite, with neither. A result written before the
+selection was recorded counts as the full suite when it covered at least 45
+cases, the suite's size until then. A replay keeps its source's selection.
+
+A run, a review and a replay import their directory into `results.sqlite` beside
+the runs; `import` reads every run directory again, and `trend` and `compare`
+query the store. The run directories stay the source of truth. The store's views
+are the eval board's contract, so its tables can change without breaking the
+board. They are replaced on every open and none exposes a file path. `time` is
+the run's start in Unix seconds, the column the board treats as time, and
+`started_at` the same instant as RFC 3339 UTC text.
+
+- `eval_runs`: one row per run with its commit, model, effort, the prompt
+  fingerprint's first 12 characters, Pi version and variant; `cases`, the
+  distinct cases it played; trials ran and passed, the pass rate, `pass^k` and
+  `k`; the happy-path rate, null when no happy-path trial ran; input plus output
+  tokens and model calls per trial ran; `full_suite`; and `regression`, 1 for a
+  full-suite run of production's prompt that was not replayed and did not stop
+  early. Only regression runs are compared over time.
+- `eval_case_rates`: one row per run and case with the run's `time` and
+  `regression`, the case's kind and happy-path flag, and its trials, passes and
+  pass rate. An aborted trial does not count, as in the report.
+- `eval_failed_checks`: each failed check with its run, `time`, case, trial,
+  step, check name and message.
+
+`scripts/eval-publish [--results <dir>]` writes a consistent snapshot of the store
+with `sqlite3`'s `VACUUM INTO`, clears the run directory paths in it, refuses a
+snapshot without the views, copies it into a board directory under the
+application's NAS root, read from `HOME_AGENT_NAS_ROOT` in the ignored deploy
+environment file, under a temporary name, and renames it over the board's copy,
+so a reader never sees a partial file. It then copies the run directories beside
+it as a `tar` stream over SSH, so the NAS also holds the results' backup. It sets
+the directory and file modes so Grafana's runtime user can read the board
+directory, and it calls only the system `/usr/bin` binaries, because others on the Mac
+cannot reach the LAN. Grafana mounts the board directory read-only and reads the
+views through a SQLite data source; the monitoring stack provisions the data
+source and the dashboard. Every stored run reaches the board with the first
+copy, and history is never expired.
 
 A new case starts from a failure the operator saw, rewritten from scratch with
 made-up data, then `scan` before committing. `go test ./internal/eval/` checks

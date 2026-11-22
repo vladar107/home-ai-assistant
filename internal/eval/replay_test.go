@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -82,6 +83,8 @@ func TestReplayWithAChangedCheckChangesVerdictsWithoutAModel(t *testing.T) {
 	}
 	if stored, err := eval.LoadResult(replayed.Dir); err != nil || !stored.Replayed || stored.ReplayOf != source.RunID || stored.ModelCalls != source.ModelCalls {
 		t.Fatalf("stored replay = %+v, %v", stored, err)
+	} else if !reflect.DeepEqual(stored.Selection, source.Selection) || !stored.FullSuite() {
+		t.Fatalf("replay selection = %+v, source's %+v", stored.Selection, source.Selection)
 	}
 
 	// The source run is untouched, and the replay itself can be replayed.
