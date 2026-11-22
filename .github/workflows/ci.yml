@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [eval, telegram, rest]
+        shard: [eval, telegram, connectors, rest]
     steps:
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -43,10 +43,12 @@ jobs:
         run: |
           module="$(go list -m)"
           all="$(go list ./...)"
+          connectors="^$module/(internal/connectors|internal/store|internal/testutil|cmd)(/|$)"
           case "$SHARD" in
             eval) packages=("$module/internal/eval") ;;
             telegram) packages=("$module/internal/telegram") ;;
-            rest) mapfile -t packages < <(grep -vxF -e "$module/internal/eval" -e "$module/internal/telegram" <<<"$all") ;;
+            connectors) mapfile -t packages < <(grep -E "$connectors" <<<"$all") ;;
+            rest) mapfile -t packages < <(grep -vxF -e "$module/internal/eval" -e "$module/internal/telegram" <<<"$all" | grep -vE "$connectors") ;;
           esac
           (( ${#packages[@]} ))
           go test -race -timeout 30m "${packages[@]}"
