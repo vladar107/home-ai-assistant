@@ -68,11 +68,16 @@ type view struct{}
 
 func (view) ParcelView(context.Context, string) (int64, int64, bool, error) { return 101, 0, true, nil }
 
-type deliverer struct{ sent int }
+// deliverer records whether each proposal message was asked to go out without a notification.
+type deliverer struct {
+	sent   int
+	silent []bool
+}
 
-func (d *deliverer) SendText(context.Context, int64, string) (int64, error) { return 1, nil }
-func (d *deliverer) SendProposal(context.Context, int64, approval.Shown, approval.Buttons) (int64, approval.WidgetKind, error) {
+func (d *deliverer) SendText(context.Context, int64, string, bool) (int64, error) { return 1, nil }
+func (d *deliverer) SendProposal(_ context.Context, _ int64, shown approval.Shown, _ approval.Buttons) (int64, approval.WidgetKind, error) {
 	d.sent++
+	d.silent = append(d.silent, shown.Silent)
 	return int64(d.sent), approval.NotWidget, nil
 }
 func (d *deliverer) EditText(context.Context, int64, int64, approval.Shown) error { return nil }
@@ -102,6 +107,7 @@ type harness struct {
 	extractor *scriptedExtractor
 	mail      *readable
 	approvals *approval.Service
+	deliverer *deliverer
 	now       time.Time
 	sent      int
 }
@@ -123,8 +129,8 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &harness{t: t, store: store, sim: sim, extractor: &scriptedExtractor{}, mail: &readable{}, now: mailNow}
-	approvals, err := approval.NewService(approval.Config{Now: func() time.Time { return h.now }}, store, &deliverer{}, logger)
+	h := &harness{t: t, store: store, sim: sim, extractor: &scriptedExtractor{}, mail: &readable{}, deliverer: &deliverer{}, now: mailNow}
+	approvals, err := approval.NewService(approval.Config{Now: func() time.Time { return h.now }}, store, h.deliverer, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,6 +431,9 @@ func TestMailOffersATrackableNumberOnOneCard(t *testing.T) {
 		!strings.Contains(records[0].Summary, "outside content") || !strings.Contains(string(records[0].Arguments), `"carrier":"dhl"`) ||
 		records[0].ExpiresAt.Sub(records[0].CreatedAt) != parcel.MailProposalLifetime {
 		t.Fatalf("result %+v, records %+v", result, records)
+	}
+	if !records[0].Silent || len(h.deliverer.silent) != 1 || !h.deliverer.silent[0] {
+		t.Fatalf("the card was not offered silently: record %+v, sent silent %v", records[0], h.deliverer.silent)
 	}
 	proposed, found, err := h.store.LoadProposal(t.Context(), "alice", dhlNumber)
 	if err != nil || !found || proposed.ApprovalID != records[0].ID || proposed.Offers != 1 {

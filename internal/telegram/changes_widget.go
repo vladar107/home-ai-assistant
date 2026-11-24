@@ -175,7 +175,7 @@ func (c *Client) sendChangesWidget(ctx context.Context, chatID int64, shown appr
 	if !fits || shortened {
 		return Message{}, false, nil
 	}
-	message, err := c.sendWidget(ctx, chatID, changesWidget, data, shown.Caption)
+	message, err := c.sendWidgetWith(ctx, chatID, changesWidget, data, shown.Caption, shown.Silent)
 	return message, true, err
 }
 

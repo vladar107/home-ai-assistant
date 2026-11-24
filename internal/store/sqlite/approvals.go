@@ -18,7 +18,7 @@ var _ approval.Repository = (*Store)(nil)
 const approvalColumns = `id, bundle_id, position, principal_id, tool, arguments, arguments_hash, summary, status,
 	COALESCE(reason, ''), COALESCE(outcome, ''), COALESCE(chat_id, 0), COALESCE(message_id, 0),
 	created_at, expires_at, COALESCE(started_at, ''), COALESCE(finished_at, ''), mode, COALESCE(request_id, ''),
-	COALESCE(undo, ''), COALESCE(undo_until, ''), thread_id, COALESCE(heading, ''), widget_kind, title, warned, user_outcome`
+	COALESCE(undo, ''), COALESCE(undo_until, ''), thread_id, COALESCE(heading, ''), widget_kind, title, warned, user_outcome, silent`
 
 func (s *Store) CreateApproval(ctx context.Context, record approval.Record) ([]approval.Record, error) {
 	return s.CreateApprovals(ctx, []approval.Record{record})
@@ -70,8 +70,8 @@ func createApproval(ctx context.Context, tx *sql.Tx, record approval.Record, rep
 	}
 	if _, err := tx.ExecContext(
 		ctx,
-		`INSERT INTO approvals (id, bundle_id, position, principal_id, tool, arguments, arguments_hash, summary, status, created_at, expires_at, thread_id, heading, title)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
+		`INSERT INTO approvals (id, bundle_id, position, principal_id, tool, arguments, arguments_hash, summary, status, created_at, expires_at, thread_id, heading, title, silent)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`,
 		record.ID,
 		record.BundleID,
 		record.Position,
@@ -85,6 +85,7 @@ func createApproval(ctx context.Context, tx *sql.Tx, record approval.Record, rep
 		record.ThreadID,
 		sql.NullString{String: record.Heading, Valid: record.Heading != ""},
 		record.Title,
+		record.Silent,
 	); err != nil {
 		return fmt.Errorf("insert approval: %w", err)
 	}
@@ -620,7 +621,7 @@ func scanApprovalRow(row rowScanner) (approval.Record, error) {
 	err := row.Scan(
 		&record.ID, &record.BundleID, &record.Position, &record.PrincipalID, &record.Tool, &arguments, &record.Hash, &record.Summary, &record.Status,
 		&record.Reason, &record.Outcome, &record.ChatID, &record.MessageID, &createdAt, &expiresAt, &startedAt, &finishedAt,
-		&record.Mode, &record.RequestID, &undo, &undoUntil, &record.ThreadID, &record.Heading, &record.Widget, &record.Title, &record.Warned, &record.UserOutcome,
+		&record.Mode, &record.RequestID, &undo, &undoUntil, &record.ThreadID, &record.Heading, &record.Widget, &record.Title, &record.Warned, &record.UserOutcome, &record.Silent,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

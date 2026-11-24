@@ -63,7 +63,9 @@ func newRecordingDeliverer() *recordingDeliverer {
 	return &recordingDeliverer{texts: make(chan approval.Shown, 8)}
 }
 
-func (d *recordingDeliverer) SendText(context.Context, int64, string) (int64, error) { return 1, nil }
+func (d *recordingDeliverer) SendText(context.Context, int64, string, bool) (int64, error) {
+	return 1, nil
+}
 
 func (d *recordingDeliverer) SendProposal(_ context.Context, _ int64, shown approval.Shown, buttons approval.Buttons) (int64, approval.WidgetKind, error) {
 	d.mu.Lock()

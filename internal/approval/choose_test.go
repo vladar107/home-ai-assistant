@@ -28,7 +28,7 @@ func (chooseExecutor) ExecuteApproved(context.Context, approval.Record) (approva
 
 type quietDeliverer struct{}
 
-func (quietDeliverer) SendText(context.Context, int64, string) (int64, error) { return 1, nil }
+func (quietDeliverer) SendText(context.Context, int64, string, bool) (int64, error) { return 1, nil }
 func (quietDeliverer) SendProposal(context.Context, int64, approval.Shown, approval.Buttons) (int64, approval.WidgetKind, error) {
 	return 1, approval.NotWidget, nil
 }

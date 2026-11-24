@@ -19,17 +19,23 @@ import (
 // leaves no notice for the tab's next turn. A delivery that fails is retried by the sweep until the
 // bundle expires; the records are returned either way.
 func (s *Service) Offer(ctx context.Context, principalID string, chatID, threadID int64, heading string, lifetime time.Duration, proposals []Proposal) ([]Record, error) {
-	return s.offer(ctx, principalID, chatID, threadID, heading, lifetime, proposals, false)
+	return s.offer(ctx, principalID, chatID, threadID, heading, lifetime, proposals, false, false)
 }
 
 // OfferIfIdle is Offer that leaves a tab alone while a bundle there still waits for the user, a
 // chat turn's or one offered before, and then returns ErrBundleWaiting. The check and the offer
 // hold the proposal lock together, so a chat turn proposing in the same tab is never replaced.
 func (s *Service) OfferIfIdle(ctx context.Context, principalID string, chatID, threadID int64, heading string, lifetime time.Duration, proposals []Proposal) ([]Record, error) {
-	return s.offer(ctx, principalID, chatID, threadID, heading, lifetime, proposals, true)
+	return s.offer(ctx, principalID, chatID, threadID, heading, lifetime, proposals, true, false)
 }
 
-func (s *Service) offer(ctx context.Context, principalID string, chatID, threadID int64, heading string, lifetime time.Duration, proposals []Proposal, ifIdle bool) ([]Record, error) {
+// OfferSilentlyIfIdle is OfferIfIdle whose messages are sent without a notification, and so is the
+// sweep's resend of any that failed, since the flag is stored with the records.
+func (s *Service) OfferSilentlyIfIdle(ctx context.Context, principalID string, chatID, threadID int64, heading string, lifetime time.Duration, proposals []Proposal) ([]Record, error) {
+	return s.offer(ctx, principalID, chatID, threadID, heading, lifetime, proposals, true, true)
+}
+
+func (s *Service) offer(ctx context.Context, principalID string, chatID, threadID int64, heading string, lifetime time.Duration, proposals []Proposal, ifIdle, silent bool) ([]Record, error) {
 	if principalID == "" || chatID == 0 || strings.TrimSpace(heading) == "" || lifetime <= 0 || len(proposals) == 0 {
 		return nil, fmt.Errorf("approval offer is incomplete")
 	}
@@ -69,7 +75,7 @@ func (s *Service) offer(ctx context.Context, principalID string, chatID, threadI
 		records = append(records, Record{
 			ID: id, BundleID: bundleID, Position: position, PrincipalID: principalID, Tool: proposal.Tool,
 			Arguments: canonical, Hash: hex.EncodeToString(digest[:]), Summary: summary, Title: strings.TrimSpace(proposal.Title), Status: StatusPending,
-			ThreadID: thread.From(ctx), CreatedAt: now, ExpiresAt: now.Add(lifetime), Heading: heading,
+			ThreadID: thread.From(ctx), CreatedAt: now, ExpiresAt: now.Add(lifetime), Heading: heading, Silent: silent,
 		})
 	}
 

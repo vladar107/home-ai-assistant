@@ -160,7 +160,7 @@ func (c *Chat) SetMessageReaction(_ context.Context, _, messageID int64, emoji s
 	return nil
 }
 
-func (c *Chat) SendText(_ context.Context, _ int64, text string) (int64, error) {
+func (c *Chat) SendText(_ context.Context, _ int64, text string, _ bool) (int64, error) {
 	id := c.NextID()
 	c.record(func(captured *Captured) { captured.Texts = append(captured.Texts, text) })
 	return id, nil

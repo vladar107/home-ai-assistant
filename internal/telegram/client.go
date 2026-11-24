@@ -665,20 +665,23 @@ func (c *Client) send(ctx context.Context, chatID, replyToMessageID int64, text 
 }
 
 func (c *Client) sendMessage(ctx context.Context, chatID, replyToMessageID int64, text string, keyboard InlineKeyboard) (Message, error) {
-	return c.sendMessageIn(ctx, chatID, replyToMessageID, text, keyboard, true)
+	return c.sendMessageIn(ctx, chatID, replyToMessageID, text, keyboard, true, false)
 }
 
 // SendInTab posts a message in the context's tab and nowhere else: a tab that is not found is
 // reported to the observer, and the error carries its verdict.
 func (c *Client) SendInTab(ctx context.Context, chatID int64, text string) error {
-	_, err := c.sendMessageIn(ctx, chatID, 0, text, nil, false)
+	_, err := c.sendMessageIn(ctx, chatID, 0, text, nil, false, false)
 	return err
 }
 
-func (c *Client) sendMessageIn(ctx context.Context, chatID, replyToMessageID int64, text string, keyboard InlineKeyboard, fallback bool) (Message, error) {
+func (c *Client) sendMessageIn(ctx context.Context, chatID, replyToMessageID int64, text string, keyboard InlineKeyboard, fallback, silent bool) (Message, error) {
 	params := url.Values{"chat_id": {strconv.FormatInt(chatID, 10)}}
 	if replyToMessageID > 0 {
 		params.Set("reply_parameters", fmt.Sprintf(`{"message_id":%d,"allow_sending_without_reply":true}`, replyToMessageID))
+	}
+	if silent {
+		params.Set("disable_notification", "true")
 	}
 	if err := setKeyboard(params, keyboard); err != nil {
 		return Message{}, err
@@ -721,9 +724,10 @@ func setIndicatorThread(ctx context.Context, params url.Values) {
 	}
 }
 
-// SendText posts a message without buttons and returns its message ID.
-func (c *Client) SendText(ctx context.Context, chatID int64, text string) (int64, error) {
-	message, err := c.sendMessage(ctx, chatID, 0, text, nil)
+// SendText posts a message without buttons, without a notification when silent, and returns its
+// message ID.
+func (c *Client) SendText(ctx context.Context, chatID int64, text string, silent bool) (int64, error) {
+	message, err := c.sendMessageIn(ctx, chatID, 0, text, nil, true, silent)
 	if err != nil {
 		return 0, err
 	}
@@ -736,7 +740,8 @@ func (c *Client) SendText(ctx context.Context, chatID int64, text string) (int64
 // SendProposal posts a confirmation request with Confirm and Reject buttons, and Preview when the
 // bundle offers it, and returns the message ID so the outcome can replace the buttons later. When
 // the buttons ask for a widget, it posts one instead, unless the text does not fit the widget's data
-// whole or Telegram refuses it, and reports the kind of widget it sent.
+// whole or Telegram refuses it, and reports the kind of widget it sent. A silent proposal is sent
+// without a notification, whichever way it goes.
 func (c *Client) SendProposal(ctx context.Context, chatID int64, shown approval.Shown, buttons approval.Buttons) (int64, approval.WidgetKind, error) {
 	if buttons.Kind == approval.ChangesWidget {
 		message, sent, err := c.sendChangesWidget(ctx, chatID, shown, buttons.Preview != "")
@@ -761,7 +766,7 @@ func (c *Client) SendProposal(ctx context.Context, chatID int64, shown approval.
 			return message.MessageID, approval.ProposalWidget, nil
 		}
 	}
-	message, err := c.sendMessage(ctx, chatID, 0, shown.Text, proposalKeyboard(buttons))
+	message, err := c.sendMessageIn(ctx, chatID, 0, shown.Text, proposalKeyboard(buttons), true, shown.Silent)
 	if err != nil {
 		return 0, approval.NotWidget, err
 	}

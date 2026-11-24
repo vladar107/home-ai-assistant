@@ -221,14 +221,9 @@ func executeCaptioned[T any](c *Client, ctx context.Context, method string, para
 	return result, err
 }
 
-// sendWidget posts a widget of the kind with its data, which must fit widgetDataLimit, and its
-// caption line under it. It never carries an inline keyboard, which makes some Telegram apps show a
-// widget message as unsupported.
-func (c *Client) sendWidget(ctx context.Context, chatID int64, kind widgetKind, data, caption string) (Message, error) {
-	return c.sendWidgetWith(ctx, chatID, kind, data, caption, false)
-}
-
-// sendWidgetWith is sendWidget, without a notification when silent.
+// sendWidgetWith posts a widget of the kind with its data, which must fit widgetDataLimit, and its
+// caption line under it, without a notification when silent. It never carries an inline keyboard,
+// which makes some Telegram apps show a widget message as unsupported.
 func (c *Client) sendWidgetWith(ctx context.Context, chatID int64, kind widgetKind, data, caption string, silent bool) (Message, error) {
 	template, found := widgetTemplates[kind]
 	if !found {

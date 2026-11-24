@@ -82,7 +82,7 @@ func (c *Client) sendProposalWidget(ctx context.Context, chatID int64, shown app
 	if !fits {
 		return Message{}, false, nil
 	}
-	message, err := c.sendWidget(ctx, chatID, proposalWidget, data, shown.Caption)
+	message, err := c.sendWidgetWith(ctx, chatID, proposalWidget, data, shown.Caption, shown.Silent)
 	return message, true, err
 }
 

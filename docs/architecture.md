@@ -1753,8 +1753,9 @@ proposed number is recorded as proposed, added, or declined, and one check share
 chat, Inbox intake, and the mail job skips a number already tracked, tombstoned,
 pending, or declined; a small hook in `approval` reports an explicit reject, and an
 expired or replaced proposal may be offered again. Numbers found in mail go on one
-card with an outside-content warning and a 24-hour lifetime through `OfferIfIdle`, so
-a waiting proposal is never replaced. With Parcels on, Inbox intake offers a delivery
+card with an outside-content warning and a 24-hour lifetime through
+`OfferSilentlyIfIdle`, so a waiting proposal is never replaced; the card and any sweep
+resend of it go out without a notification. With Parcels on, Inbox intake offers a delivery
 notice as a `parcel` follow-up instead of a watch.
 
 A number belongs to whoever added it (`parcel_added_numbers`), which decides who sees

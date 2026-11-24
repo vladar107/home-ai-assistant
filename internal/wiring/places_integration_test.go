@@ -44,7 +44,7 @@ func (t *traveling) Traveling(context.Context, string, time.Time) (bool, error) 
 
 type quietApprovals struct{}
 
-func (quietApprovals) SendText(context.Context, int64, string) (int64, error) { return 1, nil }
+func (quietApprovals) SendText(context.Context, int64, string, bool) (int64, error) { return 1, nil }
 func (quietApprovals) SendProposal(context.Context, int64, approval.Shown, approval.Buttons) (int64, approval.WidgetKind, error) {
 	return 1, approval.NotWidget, nil
 }

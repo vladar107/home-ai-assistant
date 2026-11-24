@@ -77,10 +77,10 @@ type Extractor interface {
 	RunExtract(ctx context.Context, principalID, message string) (text, errorKind string, err error)
 }
 
-// Offerer shows proposals as one card unless a bundle already waits in the view; it is the approval
-// service.
+// Offerer shows proposals as one card, sent without a notification, unless a bundle already waits in
+// the view; it is the approval service.
 type Offerer interface {
-	OfferIfIdle(ctx context.Context, principalID string, chatID, threadID int64, heading string, lifetime time.Duration, proposals []approval.Proposal) ([]approval.Record, error)
+	OfferSilentlyIfIdle(ctx context.Context, principalID string, chatID, threadID int64, heading string, lifetime time.Duration, proposals []approval.Proposal) ([]approval.Record, error)
 }
 
 // Destination resolves the chat and tab the principal's parcel proposals are shown in.
@@ -725,7 +725,7 @@ func (m *MailSource) propose(ctx context.Context, principalID string, result *Ma
 	if !found {
 		return nil
 	}
-	records, err := m.Offers.OfferIfIdle(ctx, principalID, chatID, threadID, mailHeading.Format(ctx), MailProposalLifetime, proposals)
+	records, err := m.Offers.OfferSilentlyIfIdle(ctx, principalID, chatID, threadID, mailHeading.Format(ctx), MailProposalLifetime, proposals)
 	if errors.Is(err, approval.ErrBundleWaiting) {
 		result.Waiting = true
 		return nil

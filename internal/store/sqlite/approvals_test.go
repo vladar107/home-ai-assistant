@@ -249,6 +249,70 @@ func TestMigrationApprovalWidgetKindCarriesTheFlagOver(t *testing.T) {
 	foreignKeysHold(t, ctx, db)
 }
 
+// Migration 071 flags a bundle offered silently. A record stored before it sounds, as it did; a
+// silent record keeps its flag in every read, the sweep's included, and a chat turn's does not get it.
+func TestMigrationApprovalSilentKeepsExistingRowsAndRoundTrips(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	db := migrateUpTo(t, ctx, "071")
+	hash := "0000000000000000000000000000000000000000000000000000000000000000"
+	exec(t, ctx, db,
+		`INSERT INTO principals (id, display_name) VALUES ('alice', 'Alice')`,
+		`INSERT INTO approvals (id, bundle_id, position, principal_id, tool, arguments, arguments_hash, summary, status, chat_id, created_at, expires_at, thread_id, heading)
+		 VALUES ('aaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaa', 0, 'alice', 'note_write', '{"name":"a"}', '`+hash+`', 'First', 'pending', 101, '2026-10-01T10:00:00.000Z', '2099-10-01T10:10:00.000Z', 3, 'Weekly review')`,
+	)
+
+	if err := migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	store := &Store{db: db}
+	if record, found, err := store.LoadApproval(ctx, "aaaaaaaaaaaaaaaa"); err != nil || !found || record.Silent || record.Summary != "First" {
+		t.Fatalf("record after migration = %+v %v %v", record, found, err)
+	}
+
+	now := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
+	var offered []approval.Record
+	for position, id := range []string{"bbbbbbbbbbbbbbbb", "cccccccccccccccc"} {
+		offered = append(offered, approval.Record{
+			ID: id, BundleID: "bbbbbbbbbbbbbbbb", Position: position, PrincipalID: "alice", Tool: "note_write", Arguments: json.RawMessage(`{}`), Hash: hash,
+			Summary: "Change " + id, Status: approval.StatusPending, CreatedAt: now, ExpiresAt: now.Add(time.Hour), ThreadID: 4, Heading: "Parcels", Silent: true,
+		})
+	}
+	chat := approval.Record{
+		ID: "dddddddddddddddd", BundleID: "dddddddddddddddd", PrincipalID: "alice", Tool: "note_write", Arguments: json.RawMessage(`{}`), Hash: hash,
+		Summary: "Save the note", Status: approval.StatusPending, CreatedAt: now, ExpiresAt: now.Add(time.Hour), ThreadID: 5,
+	}
+	if _, err := store.CreateApprovals(ctx, offered); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateApprovals(ctx, []approval.Record{chat}); err != nil {
+		t.Fatal(err)
+	}
+	if bundle, err := store.LoadBundle(ctx, "bbbbbbbbbbbbbbbb"); err != nil || len(bundle) != 2 || !bundle[0].Silent || !bundle[1].Silent {
+		t.Fatalf("silent bundle = %+v %v", bundle, err)
+	}
+	if pending, err := store.PendingApprovals(ctx, "alice", 5); err != nil || len(pending) != 1 || pending[0].Silent {
+		t.Fatalf("chat turn's proposal = %+v %v, want it not silent", pending, err)
+	}
+	if err := store.SetApprovalMessage(ctx, []string{"bbbbbbbbbbbbbbbb", "cccccccccccccccc"}, 101, 0, approval.NotWidget); err != nil {
+		t.Fatal(err)
+	}
+	undelivered, err := store.UndeliveredApprovals(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	silent := 0
+	for _, record := range undelivered {
+		if record.Silent {
+			silent++
+		}
+	}
+	if len(undelivered) != 3 || silent != 2 {
+		t.Fatalf("undelivered = %+v, want the old record sounding and the offered bundle silent", undelivered)
+	}
+	foreignKeysHold(t, ctx, db)
+}
+
 // Moving a gone tab's offered proposals moves only the principal's pending ones with a heading, and
 // forgets the message a card already had, keeping its chat, so the sweep sends it again.
 func TestMoveOfferedApprovalsMovesOnlyOfferedCards(t *testing.T) {

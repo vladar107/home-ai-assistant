@@ -194,6 +194,9 @@ type Record struct {
 	// Widget is the kind of Telegram widget the message showing the record is, which has no text;
 	// a text message has none.
 	Widget WidgetKind
+	// Silent is set on every record of a bundle offered silently, whose messages are sent without a
+	// notification.
+	Silent bool
 }
 
 // WidgetKind names the view a widget message runs, which decides the data an edit of it sends.
@@ -369,8 +372,9 @@ type Repository interface {
 
 // Deliverer sends and updates the proposal messages in the user's chat.
 type Deliverer interface {
-	// SendText sends a message without buttons, for the parts of a bundle before the last.
-	SendText(ctx context.Context, chatID int64, text string) (int64, error)
+	// SendText sends a message without buttons, for the parts of a bundle before the last, without a
+	// notification when silent.
+	SendText(ctx context.Context, chatID int64, text string, silent bool) (int64, error)
 	// SendProposal sends the message with the buttons, or a widget standing for them when the
 	// buttons ask for one and it can, and reports the kind of widget it sent, none for text.
 	SendProposal(ctx context.Context, chatID int64, shown Shown, buttons Buttons) (int64, WidgetKind, error)
@@ -407,6 +411,8 @@ type Shown struct {
 	Heading string
 	// Language is the language of the user the proposal is for, which a widget draws its labels in.
 	Language locale.Language
+	// Silent asks for the message to be sent without a notification, as its bundle was offered.
+	Silent bool
 }
 
 // ChangeState is the short code of where one change of a proposal stands, which a widget maps to
@@ -1109,6 +1115,7 @@ func (s *Service) send(ctx context.Context, bundle []Record, chatID int64) error
 	language := s.language(ctx, first.PrincipalID)
 	for index, span := range ranges {
 		shown := messageShown(bundle, span[0], span[1], language)
+		shown.Silent = first.Silent
 		var messageID int64
 		var widget WidgetKind
 		var err error
@@ -1117,7 +1124,7 @@ func (s *Service) send(ctx context.Context, bundle []Record, chatID int64) error
 			buttons.Widget = len(bundle) == 1 && s.wantsWidget(ctx, first.PrincipalID)
 			messageID, widget, err = s.deliverer.SendProposal(ctx, chatID, shown, buttons)
 		} else {
-			messageID, err = s.deliverer.SendText(ctx, chatID, shown.Text)
+			messageID, err = s.deliverer.SendText(ctx, chatID, shown.Text, shown.Silent)
 		}
 		if err != nil {
 			s.undeliverable(ctx, bundle[span[0]:], chatID, err)
@@ -1147,7 +1154,9 @@ func (s *Service) sendChanges(ctx context.Context, bundle []Record, chatID int64
 	}
 	buttons := s.buttons(ctx, bundle)
 	buttons.Widget, buttons.Kind = true, ChangesWidget
-	messageID, kind, err := s.deliverer.SendProposal(ctx, chatID, changesShown(bundle, s.language(ctx, bundle[0].PrincipalID)), buttons)
+	shown := changesShown(bundle, s.language(ctx, bundle[0].PrincipalID))
+	shown.Silent = bundle[0].Silent
+	messageID, kind, err := s.deliverer.SendProposal(ctx, chatID, shown, buttons)
 	if err != nil {
 		s.undeliverable(ctx, bundle, chatID, err)
 		return false, err
