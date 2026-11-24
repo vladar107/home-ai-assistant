@@ -27,6 +27,13 @@ var parcelAssignments = map[string][]string{"alice": {"entry_dhl_a"}, "bob": {"e
 
 func newParcelWiring(t *testing.T, assignments map[string][]string) *parcelWiring {
 	t.Helper()
+	return newParcelWiringAt(t, assignments, nil)
+}
+
+// newParcelWiringAt is newParcelWiring on the clock, which the loop and Home Assistant's reads
+// follow; nil is the wall clock.
+func newParcelWiringAt(t *testing.T, assignments map[string][]string, clock *testClock) *parcelWiring {
+	t.Helper()
 	raw, err := os.ReadFile("../connectors/homeassistant/testdata/parcels/household.json")
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +50,7 @@ func newParcelWiring(t *testing.T, assignments map[string][]string) *parcelWirin
 	home := homesim.New(t, raw, time.Now)
 	runtime := newControlledRuntime()
 	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{
-		parcels: true, parcelSources: assignments, homeAssistant: home.URL(), providers: []tools.Provider{readingTools{}},
+		parcels: true, parcelSources: assignments, homeAssistant: home.URL(), providers: []tools.Provider{readingTools{}}, clock: clock,
 	})
 	h.provision("alice", "account-alice")
 	h.provision("bob", "account-bob")

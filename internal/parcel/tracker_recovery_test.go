@@ -129,7 +129,7 @@ func TestANewlyAssignedSourceRunsTheBaselineAgain(t *testing.T) {
 	h.sources.set(listed(numberA, parcel.StatusInTransit), listed(numberB, parcel.StatusOutForDelivery))
 	h.clock.Set(start.Add(10 * time.Minute))
 	h.cycle()
-	if sends, summaries := h.cards.list("send"), h.cards.list("summary"); len(h.cards.list("notice")) != 0 || len(sends) != 1 || !sends[0].silent || len(summaries) != 1 || summaries[0].count != 2 {
+	if sends, summaries := h.cards.list("send"), h.cards.list("summary"); len(h.cards.list("notice")) != 0 || len(sends) != 1 || len(summaries) != 1 || summaries[0].count != 2 {
 		t.Fatalf("events = %+v", h.cards.events)
 	}
 	h.cards.reset()
@@ -167,7 +167,7 @@ func TestABaselineWithoutHomeAssistantFinishesOnMailAndItsFirstReadIsSilent(t *t
 		return parcel.MailResult{Parcels: []parcel.Upserted{{Parcel: stored, New: created}}}, err
 	})
 	h.cycle()
-	if sends, summaries := h.cards.list("send"), h.cards.list("summary"); len(h.mail.times()) != 1 || len(sends) != 1 || !sends[0].silent || len(summaries) != 1 {
+	if sends, summaries := h.cards.list("send"), h.cards.list("summary"); len(h.mail.times()) != 1 || len(sends) != 1 || len(summaries) != 1 {
 		t.Fatalf("the baseline did not finish on mail: runs %d, events %+v", len(h.mail.times()), h.cards.events)
 	}
 	h.mail.setOnRun(nil)
@@ -178,7 +178,7 @@ func TestABaselineWithoutHomeAssistantFinishesOnMailAndItsFirstReadIsSilent(t *t
 	h.sources.set(listed(numberA, parcel.StatusOutForDelivery))
 	h.clock.Set(start.Add(10 * time.Minute))
 	h.cycle()
-	if notices, sends := h.cards.list("notice"), h.cards.list("send"); len(notices) != 0 || len(sends) != 1 || !sends[0].silent {
+	if notices, sends := h.cards.list("notice"), h.cards.list("send"); len(notices) != 0 || len(sends) != 1 {
 		t.Fatalf("the first read after the baseline was not silent: %+v", h.cards.events)
 	}
 	h.cards.reset()
@@ -271,38 +271,5 @@ func TestAFailedStoppedEditIsRetried(t *testing.T) {
 	edits := h.cards.list("edit")
 	if len(edits) != 2 || edits[0].mode != parcel.CardStopped || edits[1].mode != parcel.CardStopped {
 		t.Fatalf("edits = %+v", edits)
-	}
-}
-
-func TestNoticesFollowTheLocalClockAcrossDaylightSavingChanges(t *testing.T) {
-	t.Parallel()
-	amsterdam, err := time.LoadLocation("Europe/Amsterdam")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, test := range map[string]struct {
-		at     time.Time
-		silent bool
-	}{
-		"06:59 on the day clocks go forward": {time.Date(2026, 3, 29, 4, 59, 0, 0, time.UTC), true},
-		"07:00 on the day clocks go forward": {time.Date(2026, 3, 29, 5, 0, 0, 0, time.UTC), false},
-		"21:59 summer time":                  {time.Date(2026, 10, 24, 19, 59, 0, 0, time.UTC), false},
-		"22:00 summer time":                  {time.Date(2026, 10, 24, 20, 0, 0, 0, time.UTC), true},
-		"21:59 after clocks go back":         {time.Date(2026, 10, 25, 20, 59, 0, 0, time.UTC), false},
-		"22:00 after clocks go back":         {time.Date(2026, 10, 25, 21, 0, 0, 0, time.UTC), true},
-	} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			h := newTrackerHarnessIn(t, test.at.Add(-10*time.Minute), false, amsterdam)
-			h.sources.set(listed(numberA, parcel.StatusInTransit))
-			h.cycle()
-			h.cards.reset()
-			h.sources.set(listed(numberA, parcel.StatusOutForDelivery))
-			h.clock.Set(test.at)
-			h.cycle()
-			if notices := h.cards.list("notice"); len(notices) != 1 || notices[0].silent != test.silent {
-				t.Fatalf("notices = %+v, want silent %v", notices, test.silent)
-			}
-		})
 	}
 }

@@ -549,9 +549,9 @@ func errorKind(err error) string {
 }
 
 // read lists the principal's parcels from Home Assistant and follows what changed, quietly when
-// the baseline is still owed it: no notice for what it finds, and new cards without sound. The cards
-// are repaired whether or not Home Assistant answers. It reports whether every assigned source has
-// now been read well, which settles a baseline still owed.
+// the baseline is still owed it: no notice for what it finds. The cards are repaired whether or not
+// Home Assistant answers. It reports whether every assigned source has now been read well, which
+// settles a baseline still owed.
 func (l *Loop) read(ctx context.Context, principalID string, st *principalState, quiet bool) (bool, error) {
 	var reading Reading
 	var readErr error
@@ -564,7 +564,7 @@ func (l *Loop) read(ctx context.Context, principalID string, st *principalState,
 	st.cards.Lock()
 	defer st.cards.Unlock()
 	now := l.cfg.Now()
-	l.repair(ctx, st, principalID, now, quiet)
+	l.repair(ctx, st, principalID)
 	if readErr != nil {
 		return false, readErr
 	}
@@ -649,16 +649,15 @@ func cardChanged(before, after Parcel) bool {
 
 // follow brings the parcel's card up to date and sends the notice a transition owes. The caller holds
 // st.cards. A parcel first seen already delivered gets neither a card nor a notice. Quiet records the
-// notice without sending it and sends the card without sound, as the baseline does.
+// notice without sending it, as the baseline does.
 func (l *Loop) follow(ctx context.Context, st *principalState, stored, previous Parcel, isNew bool, now time.Time, quiet bool) {
-	night := l.night(now) || quiet
 	switch {
 	case stored.CardMessage == 0:
 		if isOpen(stored) {
-			stored = l.sendCard(ctx, st, stored, night)
+			stored = l.sendCard(ctx, st, stored)
 		}
 	case isNew || cardChanged(previous, stored):
-		stored = l.editCard(ctx, st, stored, night)
+		stored = l.editCard(ctx, st, stored)
 	}
 	if !stored.Status.Notice() || (!isNew && previous.Status == stored.Status) {
 		return
@@ -673,7 +672,7 @@ func (l *Loop) follow(ctx context.Context, st *principalState, stored, previous 
 	if !first || quiet || (isNew && stored.Status == StatusDelivered) {
 		return
 	}
-	if err := l.cfg.Cards.SendNotice(sendCtx, stored, night); err != nil {
+	if err := l.cfg.Cards.SendNotice(sendCtx, stored); err != nil {
 		l.fail(ctx, stored.PrincipalID, "send_notice", err)
 		return
 	}
@@ -702,10 +701,10 @@ func (st *principalState) markDirty(id string, mode CardMode) {
 
 // sendCard sends the parcel's card and stores where it is. A card that cannot be sent is sent by
 // the next repair.
-func (l *Loop) sendCard(ctx context.Context, _ *principalState, found Parcel, silent bool) Parcel {
+func (l *Loop) sendCard(ctx context.Context, _ *principalState, found Parcel) Parcel {
 	sendCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sendTimeout)
 	defer cancel()
-	message, kind, err := l.cfg.Cards.SendCard(sendCtx, found, silent)
+	message, kind, err := l.cfg.Cards.SendCard(sendCtx, found)
 	if err != nil {
 		l.fail(ctx, found.PrincipalID, "send_card", err)
 		return found
@@ -721,13 +720,13 @@ func (l *Loop) sendCard(ctx context.Context, _ *principalState, found Parcel, si
 // editCard shows the parcel on its card. A card that is gone is sent again for a parcel still on
 // its way and forgotten for one that is not; a card that failed to follow is edited again by the
 // next repair.
-func (l *Loop) editCard(ctx context.Context, st *principalState, found Parcel, silent bool) Parcel {
+func (l *Loop) editCard(ctx context.Context, st *principalState, found Parcel) Parcel {
 	err := l.cfg.Cards.EditCard(ctx, found, CardCurrent)
 	switch {
 	case err == nil:
 	case errors.Is(err, ErrCardGone):
 		if isOpen(found) {
-			return l.sendCard(ctx, st, found, silent)
+			return l.sendCard(ctx, st, found)
 		}
 		if err := l.cfg.Repository.SaveCard(context.WithoutCancel(ctx), found.PrincipalID, found.ID, 0, ""); err != nil {
 			l.fail(ctx, found.PrincipalID, "save_card", err)
@@ -740,9 +739,9 @@ func (l *Loop) editCard(ctx context.Context, st *principalState, found Parcel, s
 	return found
 }
 
-// repair sends the card of each parcel on its way that has none, without sound at night or when
-// quiet, and edits again the cards that failed to follow their parcel. The caller holds st.cards.
-func (l *Loop) repair(ctx context.Context, st *principalState, principalID string, now time.Time, quiet bool) {
+// repair sends the card of each parcel on its way that has none, and edits again the cards that
+// failed to follow their parcel. The caller holds st.cards.
+func (l *Loop) repair(ctx context.Context, st *principalState, principalID string) {
 	dirty := st.takeDirty()
 	parcels, err := l.cfg.Repository.ListParcels(ctx, principalID)
 	if err != nil {
@@ -752,7 +751,6 @@ func (l *Loop) repair(ctx context.Context, st *principalState, principalID strin
 		}
 		return
 	}
-	night := l.night(now) || quiet
 	for _, found := range parcels {
 		mode, isDirty := dirty[found.ID]
 		switch {
@@ -765,10 +763,10 @@ func (l *Loop) repair(ctx context.Context, st *principalState, principalID strin
 			}
 		case found.CardMessage == 0:
 			if isOpen(found) {
-				l.sendCard(ctx, st, found, night)
+				l.sendCard(ctx, st, found)
 			}
 		case isDirty && mode == CardCurrent:
-			l.editCard(ctx, st, found, night)
+			l.editCard(ctx, st, found)
 		}
 	}
 }
@@ -807,7 +805,7 @@ func (l *Loop) runMail(ctx context.Context, principalID string, st *principalSta
 	}
 	st.cards.Lock()
 	defer st.cards.Unlock()
-	l.repair(ctx, st, principalID, now, false)
+	l.repair(ctx, st, principalID)
 	for _, id := range ids {
 		if ctx.Err() != nil {
 			return
@@ -851,13 +849,12 @@ func (l *Loop) logMail(ctx context.Context, principalID string, result MailResul
 }
 
 // baseline is the silent first read: no notice for what it finds, the stored cards edited back to
-// current, a silent card for each parcel on its way that has none, and one summary line. The
-// statuses found are recorded as noticed, so nothing sent later repeats them. It is owed until it
-// finishes, when it is stored with the fingerprint of the sources it read, so a restart does not
-// rerun it and a change of sources does. When Home Assistant cannot be read, or a source assigned
-// to the principal has never read well, the baseline finishes on what it has and leaves Home
-// Assistant owed, so its reads stay silent until every source has read well. The caller holds
-// st.ops.
+// current, a card for each parcel on its way that has none, and one summary line. The statuses
+// found are recorded as noticed, so nothing sent later repeats them. It is owed until it finishes,
+// when it is stored with the fingerprint of the sources it read, so a restart does not rerun it and
+// a change of sources does. When Home Assistant cannot be read, or a source assigned to the
+// principal has never read well, the baseline finishes on what it has and leaves Home Assistant
+// owed, so its reads stay silent until every source has read well. The caller holds st.ops.
 func (l *Loop) baseline(ctx context.Context, principalID string, st *principalState, fingerprint string) {
 	now := l.cfg.Now()
 	owed := false
@@ -908,9 +905,9 @@ func (l *Loop) baseline(ctx context.Context, principalID string, st *principalSt
 		}
 		switch {
 		case found.CardMessage != 0:
-			l.editCard(ctx, st, found, true)
+			l.editCard(ctx, st, found)
 		case isOpen(found):
-			l.sendCard(ctx, st, found, true)
+			l.sendCard(ctx, st, found)
 		}
 	}
 	if open > 0 {

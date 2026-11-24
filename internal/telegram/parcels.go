@@ -128,8 +128,9 @@ const (
 type ParcelChats = TripChats
 
 // ParcelNotifier shows parcels as cards, one message each, in the principal's Parcels tab, and
-// follows their statuses with short notices. A card is a widget while the principal has widgets
-// on, and text otherwise. Everything it shows from a carrier, sender, or shop is plain text.
+// follows their statuses with short notices, all without sound. A card is a widget while the
+// principal has widgets on, and text otherwise. Everything it shows from a carrier, sender, or shop
+// is plain text.
 type ParcelNotifier struct {
 	Client *Client
 	Chats  ParcelChats
@@ -142,7 +143,12 @@ type ParcelNotifier struct {
 	}
 	// Languages gives each principal's language; nil writes English.
 	Languages locale.Preferences
-	Carriers  parcel.Carriers
+	// Settings gives each principal's postcode, which a carrier's link takes where it can; nil keeps
+	// the links as stored.
+	Settings interface {
+		LoadSettings(ctx context.Context, principalID string) (parcel.Settings, error)
+	}
+	Carriers parcel.Carriers
 	// Location is the zone the expected day is worded in.
 	Location *time.Location
 	Logger   *slog.Logger
@@ -151,13 +157,14 @@ type ParcelNotifier struct {
 var _ parcel.Cards = ParcelNotifier{}
 
 // SendCard sends the parcel's card to the Parcels tab and returns its message and kind.
-func (n ParcelNotifier) SendCard(ctx context.Context, found parcel.Parcel, silent bool) (int64, parcel.CardKind, error) {
+func (n ParcelNotifier) SendCard(ctx context.Context, found parcel.Parcel) (int64, parcel.CardKind, error) {
 	ctx, chatID, err := n.prepare(ctx, found.PrincipalID, true)
 	if err != nil {
 		return 0, "", err
 	}
+	found.Link = n.link(ctx, found)
 	if n.widgetsOn(ctx, found.PrincipalID) {
-		message, err := n.Client.sendWidgetWith(ctx, chatID, parcelWidget, n.widgetData(ctx, found, parcel.CardCurrent), n.caption(ctx, found, parcel.CardCurrent), silent)
+		message, err := n.Client.sendWidgetWith(ctx, chatID, parcelWidget, n.widgetData(ctx, found, parcel.CardCurrent), n.caption(ctx, found, parcel.CardCurrent), true)
 		switch {
 		case err == nil && message.MessageID > 0:
 			return message.MessageID, parcel.CardWidget, nil
@@ -167,7 +174,7 @@ func (n ParcelNotifier) SendCard(ctx context.Context, found parcel.Parcel, silen
 			return 0, "", err
 		}
 	}
-	message, err := n.Client.sendPlainCard(ctx, chatID, 0, n.cardText(ctx, found, parcel.CardCurrent), n.keyboard(ctx, found, parcel.CardCurrent), silent)
+	message, err := n.Client.sendPlainCard(ctx, chatID, 0, n.cardText(ctx, found, parcel.CardCurrent), n.keyboard(ctx, found, parcel.CardCurrent))
 	if err != nil {
 		return 0, "", err
 	}
@@ -187,6 +194,7 @@ func (n ParcelNotifier) EditCard(ctx context.Context, found parcel.Parcel, mode 
 	if err != nil {
 		return err
 	}
+	found.Link = n.link(ctx, found)
 	switch found.CardKind {
 	case parcel.CardWidget:
 		_, err = n.Client.editWidget(ctx, chatID, found.CardMessage, n.caption(ctx, found, mode), n.widgetData(ctx, found, mode))
@@ -201,7 +209,7 @@ func (n ParcelNotifier) EditCard(ctx context.Context, found parcel.Parcel, mode 
 
 // SendNotice replies to the parcel's card with the status's notice. A status without one sends
 // nothing.
-func (n ParcelNotifier) SendNotice(ctx context.Context, found parcel.Parcel, silent bool) error {
+func (n ParcelNotifier) SendNotice(ctx context.Context, found parcel.Parcel) error {
 	ctx, chatID, err := n.prepare(ctx, found.PrincipalID, true)
 	if err != nil {
 		return err
@@ -210,17 +218,17 @@ func (n ParcelNotifier) SendNotice(ctx context.Context, found parcel.Parcel, sil
 	if !ok {
 		return nil
 	}
-	_, err = n.Client.sendPlainCard(ctx, chatID, found.CardMessage, text, nil, silent)
+	_, err = n.Client.sendPlainCard(ctx, chatID, found.CardMessage, text, nil)
 	return err
 }
 
-// SendSummary posts the line that follows a silent baseline, without a notification.
+// SendSummary posts the line that follows a silent baseline.
 func (n ParcelNotifier) SendSummary(ctx context.Context, principalID string, count int) error {
 	ctx, chatID, err := n.prepare(ctx, principalID, true)
 	if err != nil {
 		return err
 	}
-	_, err = n.Client.sendPlainCard(ctx, chatID, 0, parcelTrackingCount.Format(ctx, count), nil, true)
+	_, err = n.Client.sendPlainCard(ctx, chatID, 0, parcelTrackingCount.Format(ctx, count), nil)
 	return err
 }
 
@@ -253,6 +261,35 @@ func (n ParcelNotifier) widgetsOn(ctx context.Context, principalID string) bool 
 	return err == nil && on
 }
 
+// link is the parcel's link as its card shows it: the carrier's page with the principal's postcode
+// when the stored link is the carrier's plain page for the number and the carrier has one that
+// takes it. Any other link, such as an order page or one a source supplied, is shown as stored. The
+// postcode is read at every draw, so a card picks up a changed one at its next edit, and it never
+// enters the stored link or a log.
+func (n ParcelNotifier) link(ctx context.Context, found parcel.Parcel) string {
+	carrier, known := n.Carriers.ByID(found.Carrier)
+	if n.Settings == nil || !known || carrier.PostcodeLinkTemplate == "" || found.Link == "" || found.Link != carrier.Link(found.Number) {
+		return found.Link
+	}
+	settings, err := n.Settings.LoadSettings(ctx, found.PrincipalID)
+	if err != nil {
+		if n.Logger != nil {
+			n.Logger.WarnContext(ctx, "telegram.parcel.settings_load_failed", "principal_id", found.PrincipalID, "parcel_id", found.ID, "error", fmt.Sprintf("%T", err))
+		}
+		return found.Link
+	}
+	return carrier.LinkFor(found.Number, settings.Postcode)
+}
+
+// sender is the parcel's sender as a card shows it, or "" when it is one of the parcel's carrier's
+// own domains, which mail the carrier sends itself records as the sender.
+func (n ParcelNotifier) sender(found parcel.Parcel) string {
+	if carrier, known := n.Carriers.BySender(found.Sender); known && carrier.ID == found.Carrier {
+		return ""
+	}
+	return parcelShown(found.Sender, maximumParcelSenderRunes)
+}
+
 func (n ParcelNotifier) location() *time.Location {
 	if n.Location == nil {
 		return time.UTC
@@ -282,6 +319,12 @@ func parcelText(text string, limit int) string {
 		return r
 	}, strings.ToValidUTF8(text, ""))
 	return clip.Runes(strings.Join(strings.Fields(text), " "), limit)
+}
+
+// parcelShown is parcelText as a card or notice draws it: a domain in it, such as a shop named
+// SHOP.NL, gets a one-dot leader for each dot, which reads the same and which Telegram does not link.
+func parcelShown(text string, limit int) string {
+	return parcelText(parcel.Unlinked(text), limit)
 }
 
 // statusWord is what the card says about the parcel in a mode.
@@ -334,7 +377,7 @@ func (n ParcelNotifier) widgetData(ctx context.Context, found parcel.Parcel, mod
 	language := locale.From(ctx)
 	data := parcelData{
 		Version: parcelDataVersion, ID: found.ID, Carrier: parcelText(n.carrierName(found), 32),
-		Title: parcelText(found.Title, maximumParcelTitleRunes), Sender: parcelText(found.Sender, maximumParcelSenderRunes),
+		Title: parcelShown(found.Title, maximumParcelTitleRunes), Sender: n.sender(found),
 		Status: string(found.Status), Lang: widgetLanguage(language),
 	}
 	switch mode {
@@ -351,7 +394,7 @@ func (n ParcelNotifier) widgetData(ctx context.Context, found parcel.Parcel, mod
 	}
 	if data.Mode == "" {
 		data.Window = n.expected(language, found)
-		data.Pickup = parcelText(found.PickupPoint, maximumParcelPickupRunes)
+		data.Pickup = parcelShown(found.PickupPoint, maximumParcelPickupRunes)
 	}
 	return marshalWidgetData(data)
 }
@@ -378,10 +421,10 @@ func captionLink(link string) string {
 // cardText is the text card: plain lines, with nothing from outside read as markup.
 func (n ParcelNotifier) cardText(ctx context.Context, found parcel.Parcel, mode parcel.CardMode) string {
 	lines := []string{"📦 " + n.carrierName(found)}
-	if title := parcelText(found.Title, maximumParcelTitleRunes); title != "" {
+	if title := parcelShown(found.Title, maximumParcelTitleRunes); title != "" {
 		lines = append(lines, title)
 	}
-	if sender := parcelText(found.Sender, maximumParcelSenderRunes); sender != "" {
+	if sender := n.sender(found); sender != "" {
 		lines = append(lines, parcelFromLabel.Format(ctx)+" "+sender)
 	}
 	lines = append(lines, "", statusWord(ctx, found, mode))
@@ -391,7 +434,7 @@ func (n ParcelNotifier) cardText(ctx context.Context, found parcel.Parcel, mode 
 				lines = append(lines, parcelWhenLabel.Format(ctx)+" "+when)
 			}
 		}
-		if point := parcelText(found.PickupPoint, maximumParcelPickupRunes); point != "" {
+		if point := parcelShown(found.PickupPoint, maximumParcelPickupRunes); point != "" {
 			lines = append(lines, parcelPickup.Format(ctx)+" "+point)
 		}
 	}
@@ -418,7 +461,7 @@ func (n ParcelNotifier) keyboard(ctx context.Context, found parcel.Parcel, mode 
 
 // noticeText is the notice for the parcel's status, and false for a status that has none.
 func (n ParcelNotifier) noticeText(ctx context.Context, found parcel.Parcel) (string, bool) {
-	subject := parcelText(found.Title, maximumParcelTitleRunes)
+	subject := parcelShown(found.Title, maximumParcelTitleRunes)
 	if subject == "" {
 		subject = parcelParcelOf.Format(ctx, n.carrierName(found))
 	}
@@ -426,7 +469,7 @@ func (n ParcelNotifier) noticeText(ctx context.Context, found parcel.Parcel) (st
 	case parcel.StatusOutForDelivery:
 		return parcelNoticeOutForDelivery.Format(ctx, subject), true
 	case parcel.StatusAtPickupPoint:
-		if point := parcelText(found.PickupPoint, maximumParcelPickupRunes); point != "" {
+		if point := parcelShown(found.PickupPoint, maximumParcelPickupRunes); point != "" {
 			return parcelNoticeAtPickupPoint.Format(ctx, subject, point), true
 		}
 		return parcelNoticeAtPickup.Format(ctx, subject), true
@@ -443,15 +486,12 @@ func isMessageGone(err error) bool {
 	return errors.As(err, &apiErr) && apiErr.MessageGone()
 }
 
-// sendPlainCard posts plain text, without link previews, in the context's tab, as a reply to
-// replyTo when it is set, without a notification when silent.
-func (c *Client) sendPlainCard(ctx context.Context, chatID, replyTo int64, text string, keyboard InlineKeyboard, silent bool) (Message, error) {
-	params := url.Values{"chat_id": {strconv.FormatInt(chatID, 10)}}
+// sendPlainCard posts plain text, without link previews or a notification, in the context's tab, as
+// a reply to replyTo when it is set.
+func (c *Client) sendPlainCard(ctx context.Context, chatID, replyTo int64, text string, keyboard InlineKeyboard) (Message, error) {
+	params := url.Values{"chat_id": {strconv.FormatInt(chatID, 10)}, "disable_notification": {"true"}}
 	if replyTo > 0 {
 		params.Set("reply_parameters", fmt.Sprintf(`{"message_id":%d,"allow_sending_without_reply":true}`, replyTo))
-	}
-	if silent {
-		params.Set("disable_notification", "true")
 	}
 	if err := setKeyboard(params, keyboard); err != nil {
 		return Message{}, err

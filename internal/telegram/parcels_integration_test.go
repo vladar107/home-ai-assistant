@@ -103,10 +103,18 @@ func (h *parcelHook) switched() []bool {
 	return append([]bool(nil), h.calls...)
 }
 
-// failingSettings refuses to save while failing is set.
+// failingSettings refuses to save while failing is set, and to load while loadFailing is.
 type failingSettings struct {
 	*sqlite.Store
-	failing atomic.Bool
+	failing     atomic.Bool
+	loadFailing atomic.Bool
+}
+
+func (f *failingSettings) LoadSettings(ctx context.Context, principalID string) (parcel.Settings, error) {
+	if f.loadFailing.Load() {
+		return parcel.Settings{}, errors.New("disk unreadable")
+	}
+	return f.Store.LoadSettings(ctx, principalID)
 }
 
 func (f *failingSettings) SaveSettings(ctx context.Context, settings parcel.Settings) error {
@@ -136,12 +144,13 @@ func newParcelRig(t *testing.T, topics bool) *parcelRig {
 		topics: topics, languages: true,
 		deps: func(h *conversationHarness, deps *Dependencies) {
 			rig.tracker = &parcelTracker{store: h.store}
+			rig.settings = &failingSettings{Store: h.store}
 			rig.notifier = ParcelNotifier{
 				Client: h.client, Chats: h.store, Feeds: h.tabSet, Widgets: h.switches.Toggle(integration.WidgetsSwitch),
-				Languages: h.store, Carriers: parcel.DefaultCarriers(), Location: time.FixedZone("test", 2*3600),
+				Languages: h.store, Settings: rig.settings, Carriers: parcel.DefaultCarriers(), Location: time.FixedZone("test", 2*3600),
+				Logger: slog.New(slog.NewTextHandler(h.logs, nil)),
 			}
 			rig.tracker.cards = rig.notifier
-			rig.settings = &failingSettings{Store: h.store}
 			deps.Parcels = &ParcelTaps{Parcels: h.store, Tracker: rig.tracker}
 			deps.Sections = append(deps.Sections, NewParcelsSection(ParcelsSettings{
 				Toggle: h.switches.Toggle(parcel.Switch), Sources: rig.sources, Settings: rig.settings, Mail: rig.mail, Hook: rig.hook,
@@ -184,9 +193,9 @@ func (r *parcelRig) add(found parcel.Parcel) parcel.Parcel {
 	return stored
 }
 
-func (r *parcelRig) card(found parcel.Parcel, silent bool) parcel.Parcel {
+func (r *parcelRig) card(found parcel.Parcel) parcel.Parcel {
 	r.t.Helper()
-	message, kind, err := r.notifier.SendCard(r.ctx, found, silent)
+	message, kind, err := r.notifier.SendCard(r.ctx, found)
 	if err != nil {
 		r.t.Fatal(err)
 	}
@@ -215,14 +224,14 @@ func TestParcelTextCardIsPlainWithItsButtons(t *testing.T) {
 	t.Parallel()
 	r := newParcelRig(t, false)
 	found := r.add(sampleParcel())
-	message, kind, err := r.notifier.SendCard(r.ctx, found, false)
+	message, kind, err := r.notifier.SendCard(r.ctx, found)
 	if err != nil || kind != parcel.CardText {
 		t.Fatalf("SendCard = %d %q %v", message, kind, err)
 	}
 	sent := r.nextMessage()
 	want := "📦 PostNL\nGarden chair\nFrom: Example Shop\n\nOut for delivery\nExpected: Tue 29 Sep, 14:00–16:00"
-	if sent.text != want || sent.parseMode != "" || sent.threadID != 0 || sent.silent || sent.messageID != message {
-		t.Fatalf("card = %+v, want plain %q", sent, want)
+	if sent.text != want || sent.parseMode != "" || sent.threadID != 0 || !sent.silent || sent.messageID != message {
+		t.Fatalf("card = %+v, want plain %q sent silently", sent, want)
 	}
 	if len(sent.keyboard) != 1 || len(sent.keyboard[0]) != 2 {
 		t.Fatalf("keyboard = %+v", sent.keyboard)
@@ -243,7 +252,7 @@ func TestParcelTextCardInRussianWithAPickupPoint(t *testing.T) {
 	found := sampleParcel()
 	found.Status, found.PickupPoint = parcel.StatusAtPickupPoint, "Corner shop"
 	found = r.add(found)
-	if _, _, err := r.notifier.SendCard(r.ctx, found, true); err != nil {
+	if _, _, err := r.notifier.SendCard(r.ctx, found); err != nil {
 		t.Fatal(err)
 	}
 	sent := r.nextMessage()
@@ -267,12 +276,12 @@ func TestParcelWidgetCardInEnglishAndRussian(t *testing.T) {
 	r := newParcelRig(t, false)
 	r.setWidgets("alice", true)
 	found := r.add(sampleParcel())
-	message, kind, err := r.notifier.SendCard(r.ctx, found, false)
+	message, kind, err := r.notifier.SendCard(r.ctx, found)
 	if err != nil || kind != parcel.CardWidget {
 		t.Fatalf("SendCard = %d %q %v", message, kind, err)
 	}
 	sent := r.nextWidgetSent()
-	if sent.messageID != message || sent.html != widgetTemplates[parcelWidget] || sent.silent {
+	if sent.messageID != message || sent.html != widgetTemplates[parcelWidget] || !sent.silent {
 		t.Fatalf("widget = %+v", sent)
 	}
 	data := decodeParcelData(t, sent.data)
@@ -288,7 +297,7 @@ func TestParcelWidgetCardInEnglishAndRussian(t *testing.T) {
 	other := sampleParcel()
 	other.Number, other.Link = "3SABCD7654321", ""
 	other = r.add(other)
-	if _, _, err := r.notifier.SendCard(r.ctx, other, true); err != nil {
+	if _, _, err := r.notifier.SendCard(r.ctx, other); err != nil {
 		t.Fatal(err)
 	}
 	russian := r.nextWidgetSent()
@@ -331,7 +340,7 @@ func TestParcelWidgetWorstCaseFitsTheDataAndKeepsTheCaptionLink(t *testing.T) {
 		t.Fatalf("texts are not capped: %+v", data)
 	}
 
-	if _, _, err := r.notifier.SendCard(r.ctx, found, false); err != nil {
+	if _, _, err := r.notifier.SendCard(r.ctx, found); err != nil {
 		t.Fatal(err)
 	}
 	sent := r.nextWidgetSent()
@@ -363,7 +372,7 @@ func TestParcelOutsideTextIsPlainAndCapped(t *testing.T) {
 	found := sampleParcel()
 	found.Title, found.Sender, found.PickupPoint = hostile, hostile, hostile
 	found = r.add(found)
-	if _, _, err := r.notifier.SendCard(r.ctx, found, false); err != nil {
+	if _, _, err := r.notifier.SendCard(r.ctx, found); err != nil {
 		t.Fatal(err)
 	}
 	sent := r.nextMessage()
@@ -372,7 +381,7 @@ func TestParcelOutsideTextIsPlainAndCapped(t *testing.T) {
 	}
 	lines := strings.Split(sent.text, "\n")
 	title := lines[1]
-	if !strings.HasPrefix(title, "**bold** [click](https://evil.example/x) <b>tag</b>") || utf8.RuneCountInString(title) != 60 || !strings.HasSuffix(title, "…") {
+	if !strings.HasPrefix(title, "**bold** [click](https://evil\u2024example/x) <b>tag</b>") || utf8.RuneCountInString(title) != 60 || !strings.HasSuffix(title, "…") {
 		t.Fatalf("title line = %q", title)
 	}
 	for _, line := range lines {
@@ -386,7 +395,7 @@ func TestParcelOutsideTextIsPlainAndCapped(t *testing.T) {
 
 	r.setWidgets("alice", true)
 	widget := r.add(func() parcel.Parcel { p := sampleParcel(); p.Number = "3SABCD7654321"; p.Title = hostile; return p }())
-	if _, _, err := r.notifier.SendCard(r.ctx, widget, false); err != nil {
+	if _, _, err := r.notifier.SendCard(r.ctx, widget); err != nil {
 		t.Fatal(err)
 	}
 	data := decodeParcelData(t, r.nextWidgetSent().data)
@@ -399,15 +408,15 @@ func TestParcelCardsGoToTheParcelsTabWhileTabsAreOn(t *testing.T) {
 	t.Parallel()
 	r := newParcelRig(t, true)
 	found := r.add(sampleParcel())
-	if _, _, err := r.notifier.SendCard(r.ctx, found, false); err != nil {
+	if _, _, err := r.notifier.SendCard(r.ctx, found); err != nil {
 		t.Fatal(err)
 	}
 	tab := r.wantFeedTab("Parcels", thread.FeedParcels)
 	if sent := r.nextMessage(); sent.threadID != tab {
 		t.Fatalf("card went to tab %d, want the Parcels tab %d", sent.threadID, tab)
 	}
-	card := r.card(found, false)
-	if err := r.notifier.SendNotice(r.ctx, card, false); err != nil {
+	card := r.card(found)
+	if err := r.notifier.SendNotice(r.ctx, card); err != nil {
 		t.Fatal(err)
 	}
 	r.nextMessage()
@@ -419,7 +428,7 @@ func TestParcelCardsGoToTheParcelsTabWhileTabsAreOn(t *testing.T) {
 func TestParcelCardIsEditedInPlaceToItsStates(t *testing.T) {
 	t.Parallel()
 	r := newParcelRig(t, false)
-	card := r.card(r.add(sampleParcel()), false)
+	card := r.card(r.add(sampleParcel()))
 	r.nextMessage()
 
 	card.Status = parcel.StatusAtPickupPoint
@@ -466,7 +475,7 @@ func TestParcelWidgetCardIsEditedInPlace(t *testing.T) {
 	t.Parallel()
 	r := newParcelRig(t, false)
 	r.setWidgets("alice", true)
-	card := r.card(r.add(sampleParcel()), false)
+	card := r.card(r.add(sampleParcel()))
 	r.nextWidgetSent()
 
 	card.Status = parcel.StatusDelivered
@@ -504,12 +513,12 @@ func TestParcelWidgetCardIsEditedInPlace(t *testing.T) {
 func TestEditOfAGoneCardReturnsErrCardGone(t *testing.T) {
 	t.Parallel()
 	r := newParcelRig(t, false)
-	text := r.card(r.add(sampleParcel()), false)
+	text := r.card(r.add(sampleParcel()))
 	r.nextMessage()
 	r.setWidgets("alice", true)
 	other := sampleParcel()
 	other.Number = "3SABCD7654321"
-	widget := r.card(r.add(other), false)
+	widget := r.card(r.add(other))
 	r.nextWidgetSent()
 
 	r.mu.Lock()
@@ -527,22 +536,22 @@ func TestEditOfAGoneCardReturnsErrCardGone(t *testing.T) {
 	}
 }
 
-func TestParcelNoticesReplyToTheCardAndAreSilentWhenAsked(t *testing.T) {
+func TestParcelNoticesReplyToTheCardAndAreSilent(t *testing.T) {
 	t.Parallel()
 	r := newParcelRig(t, false)
-	card := r.card(r.add(sampleParcel()), false)
+	card := r.card(r.add(sampleParcel()))
 	r.nextMessage()
 
-	if err := r.notifier.SendNotice(r.ctx, card, false); err != nil {
+	if err := r.notifier.SendNotice(r.ctx, card); err != nil {
 		t.Fatal(err)
 	}
 	notice := r.nextMessage()
-	if notice.replyTo != card.CardMessage || notice.text != "📦 Out for delivery: Garden chair" || notice.silent || notice.parseMode != "" || len(notice.keyboard) != 0 {
+	if notice.replyTo != card.CardMessage || notice.text != "📦 Out for delivery: Garden chair" || !notice.silent || notice.parseMode != "" || len(notice.keyboard) != 0 {
 		t.Fatalf("notice = %+v", notice)
 	}
 
 	card.Status, card.PickupPoint = parcel.StatusAtPickupPoint, "Corner shop"
-	if err := r.notifier.SendNotice(r.ctx, card, true); err != nil {
+	if err := r.notifier.SendNotice(r.ctx, card); err != nil {
 		t.Fatal(err)
 	}
 	if notice := r.nextMessage(); notice.text != "📦 Ready for pickup at Corner shop: Garden chair" || !notice.silent || notice.replyTo != card.CardMessage {
@@ -550,7 +559,7 @@ func TestParcelNoticesReplyToTheCardAndAreSilentWhenAsked(t *testing.T) {
 	}
 
 	card.Status, card.Title = parcel.StatusDelivered, ""
-	if err := r.notifier.SendNotice(r.ctx, card, false); err != nil {
+	if err := r.notifier.SendNotice(r.ctx, card); err != nil {
 		t.Fatal(err)
 	}
 	if notice := r.nextMessage(); notice.text != "📦 Delivered: PostNL parcel" {
@@ -559,7 +568,7 @@ func TestParcelNoticesReplyToTheCardAndAreSilentWhenAsked(t *testing.T) {
 
 	card.Status = parcel.StatusProblem
 	r.russian()
-	if err := r.notifier.SendNotice(r.ctx, card, false); err != nil {
+	if err := r.notifier.SendNotice(r.ctx, card); err != nil {
 		t.Fatal(err)
 	}
 	if notice := r.nextMessage(); notice.text != "📦 Проблема с доставкой: Посылка PostNL" {
@@ -567,7 +576,7 @@ func TestParcelNoticesReplyToTheCardAndAreSilentWhenAsked(t *testing.T) {
 	}
 
 	card.Status = parcel.StatusInTransit
-	if err := r.notifier.SendNotice(r.ctx, card, false); err != nil {
+	if err := r.notifier.SendNotice(r.ctx, card); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.notifier.SendSummary(r.ctx, "alice", 2); err != nil {
@@ -603,7 +612,7 @@ func TestParcelSummaryWordsTheCount(t *testing.T) {
 func TestStopTrackingFromTheTextCardsButton(t *testing.T) {
 	t.Parallel()
 	r := newParcelRig(t, false)
-	card := r.card(r.add(sampleParcel()), false)
+	card := r.card(r.add(sampleParcel()))
 	r.nextMessage()
 
 	r.push(callbackUpdate(1, 101, card.CardMessage, "parcel:stop:"+card.ID))
@@ -617,7 +626,7 @@ func TestStopTrackingFromTheTextCardsButton(t *testing.T) {
 	}
 
 	// Another user's press, and one from a message that is not the card, stop nothing.
-	other := r.card(r.add(func() parcel.Parcel { p := sampleParcel(); p.Number = "3SABCD7654321"; return p }()), false)
+	other := r.card(r.add(func() parcel.Parcel { p := sampleParcel(); p.Number = "3SABCD7654321"; return p }()))
 	r.nextMessage()
 	r.push(callbackUpdate(2, 202, other.CardMessage, "parcel:stop:"+other.ID))
 	r.wantAnswer(2)
@@ -634,7 +643,7 @@ func TestStopTrackingFromTheWidgetQuery(t *testing.T) {
 	t.Parallel()
 	r := newParcelRig(t, false)
 	r.setWidgets("alice", true)
-	card := r.card(r.add(sampleParcel()), false)
+	card := r.card(r.add(sampleParcel()))
 	r.nextWidgetSent()
 
 	r.push(widgetTap(1, 101, card.CardMessage, "parcel:stop:"+card.ID))
@@ -651,7 +660,7 @@ func TestStopTrackingFromTheWidgetQuery(t *testing.T) {
 		t.Fatalf("tracker stops = %v", stops)
 	}
 
-	other := r.card(r.add(func() parcel.Parcel { p := sampleParcel(); p.Number = "3SABCD7654321"; return p }()), false)
+	other := r.card(r.add(func() parcel.Parcel { p := sampleParcel(); p.Number = "3SABCD7654321"; return p }()))
 	r.nextWidgetSent()
 	r.push(widgetTap(2, 202, other.CardMessage, "parcel:stop:"+other.ID))
 	if answer := r.wantWidgetAnswer(2); answer != localetest.English(WidgetIgnoredAnswer) {
@@ -851,7 +860,7 @@ func TestParcelWidgetDataIsReadableByOlderViews(t *testing.T) {
 func TestStopTrackingTransientFailureDoesNotStallTheUpdate(t *testing.T) {
 	t.Parallel()
 	r := newParcelRig(t, false)
-	card := r.card(r.add(sampleParcel()), false)
+	card := r.card(r.add(sampleParcel()))
 	r.nextMessage()
 	r.tracker.mu.Lock()
 	r.tracker.fail = true

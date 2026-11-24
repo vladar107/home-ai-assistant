@@ -1686,7 +1686,12 @@ message of its card. Every source maps its own states to that vocabulary and mer
 carrier and number, by the source's own key, or by sender and order reference when
 there is no number yet. A carrier's name, number pattern, sender domains, and link
 template live in `carriers.go`; a card's link is built from the template and the
-normalised number, never taken from mail, whose links are click-tracking redirects.
+normalised number, never taken from mail, whose links are click-tracking redirects. Two
+carriers also have a template that takes a Dutch postcode: when the stored link is the
+carrier's plain one, the card is drawn with the user's postcode from the Parcels settings,
+read at each send or edit, so the page opens without asking for it. The stored link, which
+the parcel tool shows the model, never holds the postcode, and a settings read that fails
+keeps the plain link.
 
 There are two sources and no paid service. The `homeassistant` connector reads
 carrier integrations through the household token: a closed list of Home Assistant
@@ -1706,30 +1711,36 @@ checks the number against `^[A-Z0-9]{8,35}$`, and drops the rest. A run reads at
 message is never read twice. An account package's shipment key starts with its
 barcode, which becomes the parcel's number, so the package and its mail merge by
 number; a number that the overlapping patterns of several carriers share is one parcel
-under any of them, stored under one of them. Mail that could not be matched to the
-parcels of the user's account with its carrier (no number, or an account listing
-packages without one) is left to that account while it read in the last day.
+under any of them, stored under one of them. Mail settles such a number by the carrier
+whose domain sent it, then by the carrier it names, and otherwise by the first of them;
+a later mail does not move a parcel already stored under another of them. Mail that
+could not be matched to the parcels of the user's account with its carrier (no number,
+or an account listing packages without one) is left to that account while it read in
+the last day.
 
 The loop (`tracker.go`) wakes every minute and runs what is due per principal with
 Parcels on: Home Assistant every 10 minutes, mail every 30 minutes from 07:00 to 22:00
 in `HOME_AGENT_TIMEZONE` while a parcel is not yet delivered and every three hours
-otherwise. A silent baseline runs first after Parcels is turned on, a source
-assignment changes, or a restore: it sends no notices, edits a stored card back to
-current when it still exists, sends a new card, with notifications off, only for an
-undelivered parcel without one, and posts one summary line. When Home Assistant
-cannot be read, or an assigned entry has never read well, the baseline finishes on
-what it has and the reads stay silent until every assigned entry has read well.
-Later reads send a notice
-for `out_for_delivery`, `at_pickup_point`, `delivered`, and `problem`, once per parcel
-and status, recorded in `parcel_notices_sent` before the send so a restart never
-repeats one, and without sound from 22:00 to 07:00. A window change only edits the
-card.
+otherwise. Every card, notice, and summary line goes out without a notification. A
+silent baseline runs first after Parcels is turned on, a source assignment changes, or a
+restore: it sends no notices, edits a stored card back to current when it still exists,
+sends a new card only for an undelivered parcel without one, and posts one summary
+line. When Home Assistant cannot be read, or an assigned entry has never read well, the
+baseline finishes on what it has and the reads stay silent until every assigned entry
+has read well. Later reads send a notice for `out_for_delivery`, `at_pickup_point`,
+`delivered`, and `problem`, once per parcel and status, recorded in
+`parcel_notices_sent` before the send so a restart never repeats one. A window change only edits the card.
 
 A card is one message per parcel, edited in place and never deleted: a widget when the
 user has Widgets on and text otherwise, in the user's language, in the Parcels feed
 (the main view with tabs off). Titles, senders, and pickup points are outside text,
-shown as plain text and capped. The widget carries Stop tracking as a widget control,
-the text card as a callback button, and a card whose message or tab is gone is sent
+shown as plain text and capped. `PlainText` removes links and addresses with a path
+(`shop.example/` included) when they are stored, but keeps a bare domain with its real
+dots, since it is often the shop's only name and senders, order keys, and tombstones match
+on it; a card or notice draws each dot of such a domain as a one-dot leader (U+2024), so
+Telegram does not link it, and so does the stop confirmation. A sender that is one of the
+parcel's carrier's own domains, as the carrier's own mail records it, is not drawn. The
+widget carries Stop tracking as a widget control, the text card as a callback button, and a card whose message or tab is gone is sent
 again through the feed's replacement. Stopping edits the card, removes a number the
 user added from Home Assistant, and leaves a tombstone under every identity of the
 parcel; a tombstone, which outlives the deleted parcel so a source that still lists it

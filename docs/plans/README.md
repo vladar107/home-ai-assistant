@@ -185,6 +185,7 @@ plan that links back to the earlier record.
 | 0173 | [Race suite under five minutes: template store and parallel eval tests](0173-eval-tests-under-five-minutes.md) | done |
 | 0174 | [Two tests that fail under load](0174-load-flakes.md) | done |
 | 0175 | [CI reruns only the tests a change can affect, through Go's test cache](0175-ci-test-cache.md) | in-progress |
+| 0176 | [Quiet parcel messages, postcode tracking links, and cards that name the parcel](0176-quiet-parcels-and-better-cards.md) | in-progress |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

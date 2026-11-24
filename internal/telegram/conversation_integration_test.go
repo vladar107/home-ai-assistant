@@ -532,7 +532,7 @@ func (h *conversationHarness) wiringInputs(t *testing.T, runtime agentruntime.Ag
 			tabs := h.newTabs(logger, namer, trips, projects, watches)
 			if options.parcels {
 				tabs.Parcels = ParcelNotifier{
-					Client: h.client, Chats: h.store, Feeds: h.tabSet, Languages: h.store, Carriers: parcel.DefaultCarriers(), Location: time.UTC, Logger: logger,
+					Client: h.client, Chats: h.store, Feeds: h.tabSet, Languages: h.store, Settings: h.store, Carriers: parcel.DefaultCarriers(), Location: time.UTC, Logger: logger,
 				}
 			}
 			return tabs
@@ -622,7 +622,7 @@ func (h *conversationHarness) wiringInputs(t *testing.T, runtime agentruntime.Ag
 			Sleep: func(ctx context.Context, _ time.Duration) error { return ctx.Err() }}
 	}
 	if options.homeAssistant != "" {
-		in.HA = &homeassistant.Config{Token: "test-token", BaseURL: options.homeAssistant}
+		in.HA = &homeassistant.Config{Token: "test-token", BaseURL: options.homeAssistant, Now: now}
 	}
 	if options.grafana != "" {
 		in.Grafana = &grafana.Config{Token: "test-token", BaseURL: options.grafana, Principals: []string{"alice"}}

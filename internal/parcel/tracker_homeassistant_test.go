@@ -65,11 +65,6 @@ func TestTheBaselineStaysSilentUntilEveryAssignedSourceHasRead(t *testing.T) {
 	if len(sends) == 0 || len(cards.list("notice")) != 0 {
 		t.Fatalf("events = %+v", cards.events)
 	}
-	for _, sent := range sends {
-		if !sent.silent {
-			t.Fatalf("a card of the first good read had sound: %+v", cards.events)
-		}
-	}
 	if tracking, err := store.LoadTracking(t.Context(), "alice"); err != nil || tracking.SourcesOwed {
 		t.Fatalf("tracking = %+v %v", tracking, err)
 	}

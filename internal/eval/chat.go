@@ -268,7 +268,7 @@ func (c Captured) lastReplyID() int64 {
 // tools answer.
 type parcelCards struct{}
 
-func (parcelCards) SendCard(context.Context, parcel.Parcel, bool) (int64, parcel.CardKind, error) {
+func (parcelCards) SendCard(context.Context, parcel.Parcel) (int64, parcel.CardKind, error) {
 	return 0, "", errors.New("the eval chat shows no parcel cards")
 }
 
@@ -276,6 +276,6 @@ func (parcelCards) EditCard(context.Context, parcel.Parcel, parcel.CardMode) err
 	return parcel.ErrCardGone
 }
 
-func (parcelCards) SendNotice(context.Context, parcel.Parcel, bool) error { return nil }
+func (parcelCards) SendNotice(context.Context, parcel.Parcel) error { return nil }
 
 func (parcelCards) SendSummary(context.Context, string, int) error { return nil }

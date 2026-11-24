@@ -69,3 +69,52 @@ func TestStatusSupersedes(t *testing.T) {
 		}
 	}
 }
+
+func TestLinkForTakesADutchPostcodeOnlyWhereTheCarrierHasATemplate(t *testing.T) {
+	t.Parallel()
+	carriers := DefaultCarriers()
+	postnl, _ := carriers.ByID("postnl")
+	gls, _ := carriers.ByID("gls")
+	dhl, _ := carriers.ByID("dhl")
+	for _, tc := range []struct {
+		carrier          Carrier
+		number, postcode string
+		want             string
+	}{
+		{postnl, "3SABCD1234567", "1234 ab", "https://jouw.postnl.nl/track-and-trace/3SABCD1234567-NL-1234AB"},
+		{gls, "12345678901234", " 1234AB ", "https://www.gls-info.nl/tracking?trackid=12345678901234&zipcode=1234AB"},
+		{postnl, "3SABCD1234567", "", postnl.Link("3SABCD1234567")},
+		{postnl, "3SABCD1234567", "12345", postnl.Link("3SABCD1234567")},
+		{gls, "12345678901234", "1234AB&x=1", gls.Link("12345678901234")},
+		{postnl, "3sabcd1234567", "1234AB", ""},
+		{dhl, "1234567890", "1234AB", dhl.Link("1234567890")},
+	} {
+		if got := tc.carrier.LinkFor(tc.number, tc.postcode); got != tc.want {
+			t.Errorf("%s LinkFor(%q, %q) = %q, want %q", tc.carrier.ID, tc.number, tc.postcode, got, tc.want)
+		}
+	}
+	if found := carriers.Detect("12345678901234"); len(found) != 2 || found[0].ID != "dpd" || found[1].ID != "gls" {
+		t.Errorf("a 14-digit number suggests %+v, want DPD and GLS", found)
+	}
+	if carrier, ok := carriers.BySender("noreply@mail.gls-info.nl"); !ok || carrier.ID != "gls" {
+		t.Errorf("GLS's Dutch sender = %+v %v", carrier, ok)
+	}
+}
+
+func TestPlainTextKeepsABareDomainAndDropsAddresses(t *testing.T) {
+	t.Parallel()
+	for input, want := range map[string]string{
+		"Package from EXAMPLESHOP.NL":          "Package from EXAMPLESHOP.NL",
+		"shop.example":                         "shop.example",
+		"Kettle from shop.example/":            "Kettle from",
+		"Kettle from shop.example/deal now":    "Kettle from now",
+		"See https://shop.example or www.a.nl": "See or",
+		"Kettle from shop.example?deal=1":      "Kettle from",
+		"Kettle from shop.example#deal":        "Kettle from",
+		"Kettle from shop.example:8080/deal":   "Kettle from",
+	} {
+		if got := PlainText(input, 200); got != want {
+			t.Errorf("PlainText(%q) = %q, want %q", input, got, want)
+		}
+	}
+}

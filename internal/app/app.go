@@ -326,7 +326,7 @@ func (a *App) buildAssembly(ctx context.Context, client *telegram.Client, config
 				Watches:  telegram.WatchNotifier{Chats: a.store, Feeds: a.tabs},
 				Parcels: telegram.ParcelNotifier{
 					Client: client, Chats: a.store, Feeds: a.tabs, Widgets: parcelSwitches.Toggle(integration.WidgetsSwitch),
-					Languages: a.store, Carriers: parcel.DefaultCarriers(), Location: location, Logger: a.logger,
+					Languages: a.store, Settings: a.store, Carriers: parcel.DefaultCarriers(), Location: location, Logger: a.logger,
 				},
 			}
 		},

@@ -28,6 +28,11 @@ type Carrier struct {
 	// LinkTemplate is the tracking page with {number} for the normalised number. Empty means the
 	// carrier has no link.
 	LinkTemplate string
+	// PostcodeLinkTemplate is the tracking page that also takes the recipient's postcode, with
+	// {number} and {postcode}, so it opens without asking for it. It is used only for a postcode of
+	// PostcodePattern's shape, since the template belongs to one country.
+	PostcodeLinkTemplate string
+	PostcodePattern      *regexp.Regexp
 	// OrderLinkTemplate is the order page with {order} for the order reference, for the shop.
 	OrderLinkTemplate string
 }
@@ -39,6 +44,33 @@ func (c Carrier) Link(number string) string {
 		return ""
 	}
 	return strings.ReplaceAll(c.LinkTemplate, "{number}", url.PathEscape(number))
+}
+
+// LinkFor is the carrier's tracking page for the number and the recipient's postcode. Without a
+// postcode template, or for a postcode that is not of its shape, it is Link.
+func (c Carrier) LinkFor(number, postcode string) string {
+	postcode = strings.ToUpper(strings.Join(strings.Fields(postcode), ""))
+	normalised, ok := NormalizeNumber(number)
+	if c.PostcodeLinkTemplate == "" || c.PostcodePattern == nil || !ok || normalised != number || !c.PostcodePattern.MatchString(postcode) {
+		return c.Link(number)
+	}
+	return fillLink(c.PostcodeLinkTemplate, map[string]string{"{number}": number, "{postcode}": postcode})
+}
+
+// fillLink puts the values into the template, escaped for the path before its query and for the
+// query after it.
+func fillLink(template string, values map[string]string) string {
+	path, query, hasQuery := strings.Cut(template, "?")
+	var pathValues, queryValues []string
+	for placeholder, value := range values {
+		pathValues = append(pathValues, placeholder, url.PathEscape(value))
+		queryValues = append(queryValues, placeholder, url.QueryEscape(value))
+	}
+	filled := strings.NewReplacer(pathValues...).Replace(path)
+	if hasQuery {
+		filled += "?" + strings.NewReplacer(queryValues...).Replace(query)
+	}
+	return filled
 }
 
 // OrderLink is the shop's order page for the order reference, on the marketplace the sender's
@@ -68,6 +100,9 @@ type Carriers []Carrier
 // ShopID is the online shop's entry in the default list.
 const ShopID = "amazon"
 
+// dutchPostcode is a Dutch postcode with the space between its digits and letters removed.
+var dutchPostcode = regexp.MustCompile(`^[0-9]{4}[A-Z]{2}$`)
+
 // DefaultCarriers is the list the assistant knows. A template is left empty where the carrier's
 // public tracking address is not certain.
 func DefaultCarriers() Carriers {
@@ -76,6 +111,8 @@ func DefaultCarriers() Carriers {
 			ID: "postnl", Name: "PostNL", Domains: []string{"postnl.nl"},
 			Patterns:     []*regexp.Regexp{regexp.MustCompile(`^3S[A-Z0-9]{11,13}$`), regexp.MustCompile(`^[A-Z]{2}[0-9]{9}NL$`)},
 			LinkTemplate: "https://postnl.nl/tracktrace/?B={number}&D=NL&T=C",
+			// The form the carrier's own integration hands out.
+			PostcodeLinkTemplate: "https://jouw.postnl.nl/track-and-trace/{number}-NL-{postcode}", PostcodePattern: dutchPostcode,
 		},
 		{
 			ID: "dhl_nl", Name: "DHL Parcel", Domains: []string{"dhlparcel.nl", "dhlecommerce.nl"},
@@ -93,9 +130,12 @@ func DefaultCarriers() Carriers {
 			LinkTemplate: "https://tracking.dpd.de/status/en_US/parcel/{number}",
 		},
 		{
-			ID: "gls", Name: "GLS", Domains: []string{"gls-group.eu", "gls-group.com"},
-			Patterns:     []*regexp.Regexp{regexp.MustCompile(`^[0-9]{11,12}$`)},
+			ID: "gls", Name: "GLS", Domains: []string{"gls-group.eu", "gls-group.com", "gls-netherlands.com", "gls-info.nl"},
+			// Its 14-digit parcel numbers look like DPD's, so mail settles them by the carrier it names.
+			Patterns:     []*regexp.Regexp{regexp.MustCompile(`^[0-9]{11,12}$`), regexp.MustCompile(`^[0-9]{14}$`)},
 			LinkTemplate: "https://gls-group.com/EU/en/parcel-tracking?match={number}",
+			// The Dutch tracker, as the carrier's integration builds it.
+			PostcodeLinkTemplate: "https://www.gls-info.nl/tracking?trackid={number}&zipcode={postcode}", PostcodePattern: dutchPostcode,
 		},
 		{
 			ID: "ups", Name: "UPS", Domains: []string{"ups.com"},

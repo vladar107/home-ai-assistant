@@ -658,7 +658,7 @@ func TestMailDropsAnItemWhoseNumberIsNotInTheMessage(t *testing.T) {
 	}
 }
 
-func TestMailPrefersTheNumbersOwnCarrierAndStripsBareDomains(t *testing.T) {
+func TestMailPrefersTheNumbersOwnCarrierAndStripsAddressesWithAPath(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	h.deliver("m-1", "ship@example-shop.test", "Your parcel", "Number "+dhlNumber, time.Hour)
@@ -741,5 +741,78 @@ func TestAnAccountHoldsBackOnlyItsOwnCarriersMail(t *testing.T) {
 	h.run()
 	if found := h.parcels(); len(found) != 1 || found[0].Number != twin || found[0].Carrier != "dhl_nl" {
 		t.Fatalf("parcels = %+v", found)
+	}
+}
+
+// A 14-digit number fits two carriers' patterns, so the mail decides: the carrier whose domain sent
+// it, then the carrier it names, and otherwise the first of the two.
+func TestAFourteenDigitNumberInMailIsFiledUnderTheCarrierTheMailNames(t *testing.T) {
+	t.Parallel()
+	const number = "12345678901234"
+	for name, test := range map[string]struct{ from, named, want string }{
+		"a shop naming no carrier":      {"ship@shop.example", "", "dpd"},
+		"a shop naming the carrier":     {"ship@shop.example", "gls", "gls"},
+		"the carrier's regional domain": {"noreply@gls-netherlands.com", "", "gls"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			h.deliver("m-1", test.from, "Your parcel was shipped", "Parcel "+number+" is on its way.", time.Hour)
+			h.expect(reply(item{MessageID: "m1", Carrier: test.named, Number: number, Status: "in_transit"}))
+			h.run()
+			carrier, _ := parcel.DefaultCarriers().ByID(test.want)
+			if found := h.parcels(); len(found) != 1 || found[0].Carrier != test.want || found[0].Link != carrier.Link(number) {
+				t.Fatalf("parcels = %+v, want one under %s", found, test.want)
+			}
+		})
+	}
+}
+
+// A shop's name is often a domain; it is kept with its dots, while a link or an address with a path
+// is still removed.
+func TestMailKeepsADomainShapedShopNameAndDropsAddresses(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.deliver("m-1", "ship@shop.example", "Your parcel was shipped", "Parcel "+dhlNumber, 2*time.Hour)
+	h.deliver("m-2", "ship@shop.example", "Your parcel was shipped", "Parcel 9876543210", time.Hour)
+	h.expect(reply(
+		item{MessageID: "m1", Number: dhlNumber, Title: "Package from EXAMPLESHOP.NL", Status: "in_transit"},
+		item{MessageID: "m2", Number: "9876543210", Title: "Kettle from shop.example/ and www.shop.example", PickupPoint: "Point https://point.example/x", Status: "in_transit"},
+	))
+	h.run()
+	titles := map[string]parcel.Parcel{}
+	for _, found := range h.parcels() {
+		titles[found.Number] = found
+	}
+	if got := titles[dhlNumber]; got.Title != "Package from EXAMPLESHOP.NL" || got.Sender != "shop.example" {
+		t.Fatalf("named parcel = %+v", got)
+	}
+	if got := titles["9876543210"]; got.Title != "Kettle from and" || got.PickupPoint != "Point" {
+		t.Fatalf("parcel with addresses = %+v", got)
+	}
+}
+
+// A stopped parcel known only by its order and its domain-shaped sender stays stopped when the shop's
+// mail about it is read again.
+func TestAStoppedOrderFromADomainShapedSenderStaysTombstoned(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.deliver("m-1", "orders@shop.example", "Your order has shipped", "Order ORDER-4711", 2*time.Hour)
+	h.expect(reply(item{MessageID: "m1", OrderReference: "ORDER-4711", Title: "Order from SHOP.EXAMPLE", Status: "registered"}))
+	h.run()
+	found := h.parcels()
+	if len(found) != 1 || found[0].Sender != "shop.example" || found[0].OrderRef != "ORDER-4711" {
+		t.Fatalf("parcels = %+v", found)
+	}
+	if _, _, err := h.store.StopParcel(t.Context(), "alice", found[0].ID, h.now); err != nil {
+		t.Fatal(err)
+	}
+	h.deliver("m-2", "orders@shop.example", "Your order has shipped", "Order ORDER-4711", time.Hour)
+	h.expect(reply(item{MessageID: "m1", OrderReference: "ORDER-4711", Title: "Order from SHOP.EXAMPLE", Status: "in_transit"}))
+	if result := h.run(); len(result.Parcels) != 0 {
+		t.Fatalf("the stopped order came back: %+v", result.Parcels)
+	}
+	if after := h.parcels(); len(after) != 1 || !after[0].Stopped() || after[0].Status != parcel.StatusRegistered {
+		t.Fatalf("parcels = %+v", after)
 	}
 }

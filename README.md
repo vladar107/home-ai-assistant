@@ -278,8 +278,8 @@ borrowed between users.
   the carrier's page. The card is edited in place, as a widget when Widgets are
   on and as text otherwise, with a Stop tracking control, and it updates
   silently. A new message arrives only when the parcel is out for delivery, is
-  ready at a pickup point, is delivered, or has a problem, once per change and
-  without sound between 22:00 and 07:00. Asking "where is my parcel?" is
+  ready at a pickup point, is delivered, or has a problem, once per change, and
+  every parcel message arrives without sound. Asking "where is my parcel?" is
   answered from the same data, without a web search. The first read after
   Parcels is turned on sends no notices: parcels already on their way get cards
   and one summary line. A finished parcel keeps its card, and its record is

@@ -885,6 +885,27 @@ func TestOutsideTextFromHomeAssistantIsPlainText(t *testing.T) {
 	}
 }
 
+// A shop's name that is a domain is kept with its dots: an account package's name is often only
+// that, and a sender is matched by its text.
+func TestADomainShapedNameFromHomeAssistantIsKept(t *testing.T) {
+	t.Parallel()
+	f := newParcelFixture(t, nil)
+	f.sim.SetAttributes("sensor.example_account_delivery", map[string]any{
+		"enroute":   []map[string]any{{"key": "3SEXB98765432-NL-1234AB", "name": "EXAMPLESHOP.NL", "delivered": false}},
+		"delivered": []map[string]any{},
+	})
+	f.sim.SetAttributes("sensor.example_dhl_nl_incoming", map[string]any{"parcels": []map[string]any{{
+		"barcode": "JVGL00000000000000009", "status": "in_transit", "sender": "Shop.Example", "pickup_point": "Point shop.example/",
+	}}})
+	parcels := byKey(f.read("alice"))
+	if got := parcels["entry_postnl_a:3SEXB98765432-NL-1234AB"]; got.Title != "EXAMPLESHOP.NL" {
+		t.Fatalf("account package = %+v", got)
+	}
+	if got := parcels["entry_dhlnl_a:JVGL00000000000000009"]; got.Sender != "Shop.Example" || got.PickupPoint != "Point" {
+		t.Fatalf("parcel = %+v", got)
+	}
+}
+
 func TestAPrincipalWithoutSourcesReadsNothingWhileHomeAssistantIsDown(t *testing.T) {
 	t.Parallel()
 	f := newParcelFixture(t, nil)

@@ -350,7 +350,7 @@ func (t *Tools) stop(ctx context.Context, principalID string, call tools.Call) (
 		label = known.Name
 	}
 	if held.Title != "" {
-		label += ", " + clip.Runes(held.Title, maximumTitleRunes)
+		label += ", " + clip.Runes(Unlinked(held.Title), maximumTitleRunes)
 	}
 	text, _, err := t.cfg.Actor.ActRecord(ctx, principalID, approval.Proposal{Tool: ToolStop, Arguments: canonical, Summary: stopSummary.Format(ctx, label)})
 	if err != nil {

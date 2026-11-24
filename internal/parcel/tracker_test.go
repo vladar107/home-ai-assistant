@@ -174,7 +174,6 @@ type cardEvent struct {
 	id     string
 	status parcel.Status
 	mode   parcel.CardMode
-	silent bool
 	count  int
 }
 
@@ -205,12 +204,12 @@ func (c *fakeCards) record(event cardEvent) {
 	c.mu.Unlock()
 }
 
-func (c *fakeCards) SendCard(_ context.Context, found parcel.Parcel, silent bool) (int64, parcel.CardKind, error) {
+func (c *fakeCards) SendCard(_ context.Context, found parcel.Parcel) (int64, parcel.CardKind, error) {
 	c.mu.Lock()
 	c.next++
 	message, failure := 1000+c.next, c.sendFail
 	c.mu.Unlock()
-	c.record(cardEvent{kind: "send", id: found.ID, status: found.Status, silent: silent})
+	c.record(cardEvent{kind: "send", id: found.ID, status: found.Status})
 	if failure != nil {
 		return 0, "", failure
 	}
@@ -228,8 +227,8 @@ func (c *fakeCards) EditCard(_ context.Context, found parcel.Parcel, mode parcel
 	return failure
 }
 
-func (c *fakeCards) SendNotice(_ context.Context, found parcel.Parcel, silent bool) error {
-	c.record(cardEvent{kind: "notice", id: found.ID, status: found.Status, silent: silent})
+func (c *fakeCards) SendNotice(_ context.Context, found parcel.Parcel) error {
+	c.record(cardEvent{kind: "notice", id: found.ID, status: found.Status})
 	return nil
 }
 
@@ -517,7 +516,7 @@ func TestBaselineIsSilentPostsOneSummaryAndSurvivesARestart(t *testing.T) {
 	h.cycle()
 
 	sends, notices, summaries := h.cards.list("send"), h.cards.list("notice"), h.cards.list("summary")
-	if len(sends) != 2 || !sends[0].silent || !sends[1].silent || len(notices) != 0 || len(summaries) != 1 || summaries[0].count != 2 {
+	if len(sends) != 2 || len(notices) != 0 || len(summaries) != 1 || summaries[0].count != 2 {
 		t.Fatalf("sends = %+v, notices = %+v, summaries = %+v", sends, notices, summaries)
 	}
 	if h.byNumber(numberC).CardMessage != 0 || h.byNumber(numberA).CardMessage == 0 {
@@ -562,9 +561,6 @@ func TestEachTransitionSendsOneNoticeAndARestartDoesNotRepeatIt(t *testing.T) {
 	got := map[string][]parcel.Status{}
 	for _, event := range h.cards.list("notice") {
 		got[event.id] = append(got[event.id], event.status)
-		if event.silent {
-			t.Fatalf("a daytime notice was silent: %+v", event)
-		}
 	}
 	a, b, c := h.byNumber(numberA).ID, h.byNumber(numberB).ID, h.byNumber(numberC).ID
 	if !slices.Equal(got[a], []parcel.Status{parcel.StatusOutForDelivery, parcel.StatusDelivered}) ||
@@ -580,25 +576,6 @@ func TestEachTransitionSendsOneNoticeAndARestartDoesNotRepeatIt(t *testing.T) {
 	step(60, listed(numberA, parcel.StatusDelivered), listed(numberB, parcel.StatusAtPickupPoint), listed(numberC, parcel.StatusProblem))
 	if notices := h.cards.list("notice"); len(notices) != 0 {
 		t.Fatalf("notices repeated: %+v", notices)
-	}
-}
-
-func TestANoticeAtNightIsSilent(t *testing.T) {
-	t.Parallel()
-	start := time.Date(2026, 11, 10, 21, 0, 0, 0, trackerZone)
-	h := newTrackerHarness(t, start, false)
-	h.sources.set(listed(numberA, parcel.StatusInTransit), listed(numberB, parcel.StatusInTransit))
-	h.cycle()
-	h.cards.reset()
-	h.sources.set(listed(numberA, parcel.StatusOutForDelivery), listed(numberB, parcel.StatusInTransit))
-	h.clock.Set(time.Date(2026, 11, 10, 22, 0, 0, 0, trackerZone))
-	h.cycle()
-	h.sources.set(listed(numberA, parcel.StatusOutForDelivery), listed(numberB, parcel.StatusAtPickupPoint))
-	h.clock.Set(time.Date(2026, 11, 11, 7, 0, 0, 0, trackerZone))
-	h.cycle()
-	notices := h.cards.list("notice")
-	if len(notices) != 2 || !notices[0].silent || notices[1].silent {
-		t.Fatalf("notices = %+v", notices)
 	}
 }
 

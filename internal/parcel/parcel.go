@@ -91,16 +91,31 @@ type Parcel struct {
 var (
 	carrierPattern = regexp.MustCompile(`^[a-z0-9_-]{1,32}$`)
 	linkPattern    = regexp.MustCompile(`(?i)\b(?:https?://|www\.)\S+`)
-	// domainPattern is a bare address such as shop.example/track, which outside text never needs.
-	domainPattern = regexp.MustCompile(`(?i)\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b(?:/\S*)?`)
+	// domainPattern is a bare address with a path, query, or port, such as shop.example/track,
+	// shop.example/, or shop.example?x=1, which outside text never needs. A bare domain without one
+	// is often the shop's name and stays.
+	domainPattern = regexp.MustCompile(`(?i)\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}(?::[0-9]+)?[/?#]\S*`)
+	// unlinkPattern is a domain-shaped word, such as a shop named SHOP.NL, which Telegram would link.
+	unlinkPattern = regexp.MustCompile(`[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)*\.\p{L}{2,}`)
 
 	knownCarriers = DefaultCarriers()
 )
 
 // PlainText is outside text, such as a title or a sender from a carrier or a shop, as one line
-// without links, bare domains, or control and format characters, cut to the limit.
+// without links, addresses with a path, or control and format characters, cut to the limit. A bare
+// domain such as "SHOP.NL" keeps its real dots: it is often the only name a source has for the shop,
+// and senders, order keys, and tombstones match on the stored text. The cards make it unlinkable
+// when they draw it.
 func PlainText(text string, limit int) string {
 	return oneLine(domainPattern.ReplaceAllString(linkPattern.ReplaceAllString(text, ""), ""), limit)
+}
+
+// Unlinked is stored outside text as a Telegram message shows it: each dot of a domain in it gets a
+// one-dot leader, which reads the same and which Telegram does not link.
+func Unlinked(text string) string {
+	return unlinkPattern.ReplaceAllStringFunc(text, func(domain string) string {
+		return strings.ReplaceAll(domain, ".", "\u2024")
+	})
 }
 
 // oneLine is text as one line without control or format characters, cut to the limit.
@@ -376,14 +391,15 @@ const (
 // ErrCardGone is returned by EditCard when the card's message or its tab no longer exists.
 var ErrCardGone = errors.New("the parcel card is gone")
 
-// Cards is the Telegram side: one card per parcel, edited in place, and short notices.
+// Cards is the Telegram side: one card per parcel, edited in place, and short notices. Everything it
+// sends goes out without sound.
 type Cards interface {
-	// SendCard sends the parcel's card, silently when asked, and returns its message and kind.
-	SendCard(ctx context.Context, parcel Parcel, silent bool) (int64, CardKind, error)
+	// SendCard sends the parcel's card and returns its message and kind.
+	SendCard(ctx context.Context, parcel Parcel) (int64, CardKind, error)
 	// EditCard edits the parcel's stored card, returning ErrCardGone when it cannot be.
 	EditCard(ctx context.Context, parcel Parcel, mode CardMode) error
-	// SendNotice sends the status notice as a reply to the card, without sound when asked.
-	SendNotice(ctx context.Context, parcel Parcel, silent bool) error
+	// SendNotice sends the status notice as a reply to the card.
+	SendNotice(ctx context.Context, parcel Parcel) error
 	// SendSummary posts the one line that follows a silent baseline, such as "Tracking 3 parcels".
 	SendSummary(ctx context.Context, principalID string, count int) error
 }
