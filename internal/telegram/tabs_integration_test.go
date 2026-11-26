@@ -12,8 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
 	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
+	"github.com/vladar107/home-ai-assistant/internal/prompt"
+	"github.com/vladar107/home-ai-assistant/internal/provenance"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/thread"
 )
@@ -132,7 +135,10 @@ func (h *conversationHarness) refuseGoneThread(w http.ResponseWriter, r *http.Re
 // serveTabMethod answers the tab methods, which exist only while topics are on; a nil result means
 // the answer was already written.
 func (h *conversationHarness) serveTabMethod(w http.ResponseWriter, r *http.Request) (any, bool) {
-	if !h.tabs.enabled {
+	h.mu.Lock()
+	enabled := h.tabs.enabled
+	h.mu.Unlock()
+	if !enabled {
 		return nil, false
 	}
 	switch filepath.Base(r.URL.Path) {
@@ -796,6 +802,383 @@ func TestWithTopicsOffNoTabCallIsMade(t *testing.T) {
 	h.push(textUpdate(4, 101, "/close"))
 	if reply := h.nextMessage(); !strings.HasPrefix(reply.text, localetest.English(HelpHeading)) || strings.Contains(reply.text, "/close") {
 		t.Fatalf("/close with tabs off = %q", reply.text)
+	}
+	// A close button left from when tabs were on closes nothing; deleting the tab would be refused
+	// as a method the simulator does not serve with topics off.
+	h.push(callbackUpdate(5, 101, list.messageID, "tabs:close:5"))
+	h.wantAnswer(5)
+	h.nextEdit()
+	if open := h.count(`SELECT count(*) FROM conversation_sessions WHERE id = '55555555-5555-4555-8555-555555555555' AND status = 'active'`); open != 1 {
+		t.Fatal("a stale close button closed the tab's conversation with tabs off")
+	}
+}
+
+// With topics off, work stored with a tab before the switch lands in the main view: a request queued
+// in a tab, with its turn's typing, draft, and reply, the background task that turn starts, whose
+// tab is stored, with its status and report, and the answer to a /why asked in a tab.
+func TestWithTopicsOffWorkInATabNamesNoTab(t *testing.T) {
+	t.Parallel()
+	runtime := newControlledRuntime()
+	h := newConversationHarnessWithOptions(t, runtime, harnessOptions{tasks: testTasks(), typingInterval: indicatorTyping, draftDelay: indicatorDelay, draftInterval: time.Hour})
+	h.provision("alice", "account-alice")
+	h.start()
+
+	if err := h.conversation.Enqueue(h.ctx, conversation.EnqueueInput{
+		BotUserID: 999, TelegramUpdateID: 1, TelegramMessageID: requestMessageID(1), PrincipalID: "alice", ThreadID: 60, ChatID: 101,
+		Message: "please do this: Receipts",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	chat := receive(t, h.ctx, runtime.calls)
+	h.waitUntil("typing and a draft", func() bool { return len(h.chatActionTimes()) > 0 && len(h.draftRequests()) > 0 })
+	if result := h.callTool(chat, "task_start", `{"title":"Receipts","brief":"Collect this month's receipts."}`); result.IsError {
+		t.Fatalf("task_start = %+v", result)
+	}
+	status := h.nextMessage()
+	data := buttonData(status.keyboard)
+	if len(data) != 1 || !strings.HasPrefix(data[0], "tasks:cancel:") {
+		t.Fatalf("status message = %+v", status)
+	}
+	taskID := strings.TrimPrefix(data[0], "tasks:cancel:")
+	run := receive(t, h.ctx, runtime.calls)
+	h.wantStatusEdit(status, "Working on: Receipts", true)
+	chat.answer <- agentruntime.RunResult{Response: "On it."}
+	reply := h.nextMessage()
+	h.waitState(1, "delivered")
+	run.answer <- agentruntime.RunResult{Response: "Seven receipts.", Final: "Seven receipts."}
+	report := h.nextMessage()
+	h.wantStatusEdit(status, "Done: Receipts", false)
+	if stored := h.taskColumn(taskID, "thread_id"); stored != "60" {
+		t.Fatalf("task stored in tab %s, want 60", stored)
+	}
+
+	h.waitTurnMessage(reply.messageID)
+	if outcome, err := h.assembly.Why.Explain(h.ctx, provenance.Request{
+		PrincipalID: "alice", ChatID: 101, ThreadID: 60, MessageID: requestMessageID(2), RepliedID: reply.messageID, RepliedText: reply.text,
+	}); err != nil || outcome != provenance.Started {
+		t.Fatalf("explain = %v %v", outcome, err)
+	}
+	explanation := receive(t, h.ctx, runtime.calls)
+	explanation.answer <- agentruntime.RunResult{Response: "The turn started a task.", Final: "The turn started a task."}
+	answer := h.nextMessage()
+	for _, sent := range []sentMessage{status, reply, report, answer} {
+		if sent.threadID != 0 {
+			t.Fatalf("message with topics off = %+v, want it in the main view", sent)
+		}
+	}
+	if reply.text != "On it." || report.replyTo != requestMessageID(1) || !strings.Contains(answer.text, "The turn started a task.") {
+		t.Fatalf("reply = %+v, report = %+v, answer = %+v", reply, report, answer)
+	}
+	h.wantNoTabNamed()
+}
+
+// With topics off, a bundle offered in a tab, as one offered before the switch is, and the sweep's
+// resend of one whose delivery failed land in the main view.
+func TestWithTopicsOffAnOfferInATabNamesNoTab(t *testing.T) {
+	t.Parallel()
+	h := newOfferHarness(t, harnessOptions{approvalSweep: 50 * time.Millisecond})
+	if _, err := h.approvals.OfferIfIdle(h.ctx, "alice", 101, 60, "From the garden", 10*time.Minute, []approval.Proposal{outcomeProposal(t, "Water the beds", "Watered.", false)}); err != nil {
+		t.Fatal(err)
+	}
+	if widget := h.nextWidget(); widget.threadID != 0 {
+		t.Fatalf("offer with topics off = %+v, want it in the main view", widget)
+	}
+
+	h.mu.Lock()
+	h.widgets.sendStatus = http.StatusInternalServerError
+	h.mu.Unlock()
+	records, err := h.approvals.OfferIfIdle(h.ctx, "alice", 101, 61, "From the shed", 10*time.Minute, []approval.Proposal{outcomeProposal(t, "Oil the hinges", "Oiled.", false)})
+	if err == nil {
+		t.Fatal("an offer whose widget failed was delivered")
+	}
+	if h.countRows(`SELECT count(*) FROM approvals WHERE id = ? AND thread_id = 61 AND message_id IS NULL`, records[0].ID) != 1 {
+		t.Fatal("the failed offer is not stored undelivered in its tab")
+	}
+	h.mu.Lock()
+	h.widgets.sendStatus = 0
+	h.mu.Unlock()
+	if widget := h.nextWidget(); widget.threadID != 0 {
+		t.Fatalf("resent offer with topics off = %+v, want it in the main view", widget)
+	}
+	h.wantNoTabNamed()
+}
+
+// Before Telegram start-up, a send with a stored tab asks getMe for the switch and with topics off
+// names no tab, whatever it sends. A send to the main view never asks; a failed ask is made once
+// for its send, which keeps its tab, and the next send asks again; sends made while an ask is in
+// flight wait for it instead of asking themselves.
+func TestWithTopicsOffASendBeforeStartNamesNoTab(t *testing.T) {
+	t.Parallel()
+	h := newConversationHarnessWithOptions(t, newControlledRuntime(), harnessOptions{})
+	asked := h.getMeCount()
+	if _, err := h.client.SendText(h.ctx, 101, "in the main view", false); err != nil {
+		t.Fatal(err)
+	}
+	if message := h.nextMessage(); message.threadID != 0 {
+		t.Fatalf("main view message = %+v", message)
+	}
+	if got := h.getMeCount(); got != asked {
+		t.Fatalf("a send to the main view asked getMe %d times", got-asked)
+	}
+
+	h.mu.Lock()
+	h.getMeStatus = http.StatusInternalServerError
+	h.mu.Unlock()
+	if _, err := h.client.SendText(thread.With(h.ctx, 60), 101, "while getMe fails", false); err != nil {
+		t.Fatal(err)
+	}
+	if message := h.nextMessage(); message.threadID != 60 {
+		t.Fatalf("message after a failed ask = %+v, want it to keep its tab", message)
+	}
+	if got := h.getMeCount(); got != asked+1 {
+		t.Fatalf("a send whose ask failed asked getMe %d times, want once", got-asked)
+	}
+
+	gate := make(chan struct{})
+	h.mu.Lock()
+	h.getMeStatus, h.getMeGate, h.namedTabs = 0, gate, nil
+	h.mu.Unlock()
+	asked = h.getMeCount()
+	var sends sync.WaitGroup
+	for range 5 {
+		sends.Go(func() {
+			if _, err := h.client.SendText(thread.With(h.ctx, 60), 101, "a report", false); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	h.waitUntil("the held ask", func() bool { return h.getMeCount() > asked })
+	close(gate)
+	sends.Wait()
+	for range 5 {
+		if message := h.nextMessage(); message.threadID != 0 {
+			t.Fatalf("message before start-up with topics off = %+v, want it in the main view", message)
+		}
+	}
+	if got := h.getMeCount(); got != asked+1 {
+		t.Fatalf("getMe asked %d times for five sends, want once", got-asked)
+	}
+
+	ctx := thread.With(h.ctx, 60)
+	if err := h.client.SendDocument(ctx, 101, "receipts.txt", strings.NewReader("seven receipts"), int64(len("seven receipts"))); err != nil {
+		t.Fatal(err)
+	}
+	if document := h.nextDocument(); document.threadID != 0 {
+		t.Fatalf("document with topics off = %+v, want it in the main view", document)
+	}
+	if err := h.client.SendPhoto(ctx, 101, 0, cardBytes("alice"), "A card"); err != nil {
+		t.Fatal(err)
+	}
+	h.nextPhoto()
+	if err := h.client.SendTyping(ctx, 101); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.client.SendMessageDraft(ctx, 101, 7, "Thinking", false); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.getMeCount(); got != asked+1 {
+		t.Fatalf("sends after the switch was known asked getMe %d more times", got-asked-1)
+	}
+	h.wantNoTabNamed()
+}
+
+// startWithTopics starts the stopped service with BotFather's topics switch as given, as the operator
+// does after flipping it, and takes the slash menus the start registers. Requests that named a tab
+// before it are forgotten.
+func (h *conversationHarness) startWithTopics(on bool) {
+	h.t.Helper()
+	h.mu.Lock()
+	h.tabs.enabled, h.namedTabs = on, nil
+	h.mu.Unlock()
+	h.start()
+	receive(h.t, h.ctx, h.registrations)
+	receive(h.t, h.ctx, h.registrations)
+}
+
+// sessionsState is every conversation's ID, status, close reason, and tab, in ID order.
+func (h *conversationHarness) sessionsState() string {
+	h.t.Helper()
+	var state string
+	if err := h.db.QueryRowContext(h.ctx,
+		`SELECT COALESCE(group_concat(id || ' ' || status || ' ' || COALESCE(close_reason, '') || ' ' || thread_id, '; '), '')
+		 FROM (SELECT * FROM conversation_sessions ORDER BY id)`,
+	).Scan(&state); err != nil {
+		h.t.Fatal(err)
+	}
+	return state
+}
+
+// mainViewSession is the main view's active conversation and its runtime session.
+func (h *conversationHarness) mainViewSession() (string, string) {
+	h.t.Helper()
+	var id, runtimeID string
+	if err := h.db.QueryRowContext(h.ctx,
+		`SELECT id, runtime_session_id FROM conversation_sessions WHERE principal_id = 'alice' AND thread_id = 0 AND status = 'active'`,
+	).Scan(&id, &runtimeID); err != nil {
+		h.t.Fatal(err)
+	}
+	return id, runtimeID
+}
+
+// With topics turned off, start-up closes the conversations left in tabs as gone, so the main view
+// can take them up: /sessions resumes one, a reply to one of its answers returns to it, and a request
+// queued in a tab at the switch is answered in the main view. A later start finds nothing to do.
+func TestTurningTopicsOffClosesTheConversationsLeftInTabs(t *testing.T) {
+	t.Parallel()
+	runtime := newControlledRuntime()
+	h, _ := newTabsHarness(t, runtime, true)
+	h.turnInTab(runtime, 1, 50, "about the trip")
+	h.turnInTab(runtime, 2, 60, "about the garden")
+	h.turnInTab(runtime, 3, 0, "groceries")
+	trip, _, _ := h.laneSession(50)
+	garden, _, _ := h.laneSession(60)
+	groceries, _, _ := h.laneSession(0)
+	var gardenRuntime string
+	var gardenAnswer int64
+	if err := h.db.QueryRowContext(h.ctx,
+		`SELECT session.runtime_session_id, reply.telegram_message_id FROM conversation_reply_messages AS reply
+		 JOIN conversation_sessions AS session ON session.id = reply.session_id WHERE reply.session_id = ?`, garden,
+	).Scan(&gardenRuntime, &gardenAnswer); err != nil {
+		t.Fatal(err)
+	}
+
+	h.stop()
+	queued := conversation.EnqueueInput{
+		BotUserID: 999, TelegramUpdateID: 4, TelegramMessageID: requestMessageID(4), PrincipalID: "alice", ThreadID: 50, ChatID: 101,
+		Message: "and the hotel?",
+	}
+	if _, err := h.store.EnqueueConversation(h.ctx, queued, conversation.Session{}, "77777777-7777-4777-8777-777777777777", nil); err != nil {
+		t.Fatal(err)
+	}
+	h.startWithTopics(false)
+	for threadID, session := range map[int64]string{50: trip, 60: garden} {
+		if id, status, reason := h.laneSession(threadID); id != session || status != "closed" || reason != conversation.CloseTabGone {
+			t.Fatalf("tab %d's conversation after start-up with topics off = %s %s %s, want %s closed as gone", threadID, id, status, reason, session)
+		}
+		if line := "msg=telegram.tab.left principal_id=alice thread_id=" + strconv.FormatInt(threadID, 10) + " session_id=" + session; !strings.Contains(h.logs.String(), line) {
+			t.Fatalf("closed tab not logged as %q:\n%s", line, h.logs.String())
+		}
+	}
+	if id, _ := h.mainViewSession(); id != groceries {
+		t.Fatalf("main view's conversation = %s, want %s kept", id, groceries)
+	}
+
+	call := receive(t, h.ctx, runtime.calls)
+	if call.request.Message != queued.Message {
+		t.Fatalf("queued request = %q", call.request.Message)
+	}
+	call.answer <- agentruntime.RunResult{Response: "The hotel is booked."}
+	if reply := h.nextMessage(); reply.threadID != 0 || reply.text != "The hotel is booked." || reply.replyTo != requestMessageID(4) {
+		t.Fatalf("reply to the request queued in a tab = %+v, want it in the main view", reply)
+	}
+	h.waitState(4, "delivered")
+
+	h.push(textUpdate(5, 101, "/sessions"))
+	list := h.nextMessage()
+	data := buttonData(list.keyboard)
+	if !slices.Contains(data, "sessions:resume:"+trip) || !slices.Contains(data, "sessions:resume:"+garden) {
+		t.Fatalf("/sessions buttons = %v, want Resume for both tabs' conversations", data)
+	}
+	h.push(callbackUpdate(6, 101, list.messageID, "sessions:resume:"+trip))
+	h.wantAnswer(6)
+	h.nextEdit()
+	if note := h.nextMessage(); note.threadID != 0 || !strings.HasPrefix(note.text, "Back in the conversation from ") {
+		t.Fatalf("Resume = %+v", note)
+	}
+	if id, _ := h.mainViewSession(); id != trip {
+		t.Fatalf("main view's conversation after Resume = %s, want %s", id, trip)
+	}
+
+	reply := textUpdate(7, 101, "and the roses?")
+	reply.Message.ReplyToMessage = &Message{MessageID: gardenAnswer, Chat: Chat{ID: 101, Type: ChatTypePrivate}}
+	h.push(reply)
+	call = receive(t, h.ctx, runtime.calls)
+	if call.request.SessionID != gardenRuntime {
+		t.Fatalf("reply to the garden's answer ran in %s, want %s", call.request.SessionID, gardenRuntime)
+	}
+	call.answer <- agentruntime.RunResult{Response: "Prune them in March."}
+	if answer := h.nextMessage(); answer.threadID != 0 || !strings.HasSuffix(answer.text, "Prune them in March.") {
+		t.Fatalf("answer to the reply = %+v", answer)
+	}
+	h.waitState(7, "delivered")
+	if id, _ := h.mainViewSession(); id != garden {
+		t.Fatalf("main view's conversation after the reply = %s, want %s", id, garden)
+	}
+
+	state, left := h.sessionsState(), strings.Count(h.logs.String(), "msg=telegram.tab.left ")
+	h.stop()
+	h.startWithTopics(false)
+	if after := h.sessionsState(); after != state {
+		t.Fatalf("a second start with topics off changed the conversations:\n%s\nwant\n%s", after, state)
+	}
+	if after := strings.Count(h.logs.String(), "msg=telegram.tab.left "); after != left {
+		t.Fatalf("a second start with topics off closed %d more tabs", after-left)
+	}
+	h.wantNoTabNamed()
+}
+
+// With topics off, a 👎 on a reply sent in a tab reconsiders it in the main view, which takes up the
+// reply's conversation instead of making it active in the tab again.
+func TestWithTopicsOffAThumbsDownOnATabReplyReconsidersInTheMainView(t *testing.T) {
+	t.Parallel()
+	runtime := newControlledRuntime()
+	h, _ := newTabsHarness(t, runtime, true)
+	h.turnInTab(runtime, 1, 50, "about the trip")
+	trip, _, _ := h.laneSession(50)
+	var tripRuntime string
+	var tripAnswer int64
+	if err := h.db.QueryRowContext(h.ctx,
+		`SELECT session.runtime_session_id, reply.telegram_message_id FROM conversation_reply_messages AS reply
+		 JOIN conversation_sessions AS session ON session.id = reply.session_id WHERE reply.session_id = ?`, trip,
+	).Scan(&tripRuntime, &tripAnswer); err != nil {
+		t.Fatal(err)
+	}
+
+	h.stop()
+	h.startWithTopics(false)
+	h.push(reactionUpdate(2, 101, tripAnswer, "👎"))
+	reconsider := receive(t, h.ctx, runtime.calls)
+	if !strings.HasPrefix(reconsider.request.Message, prompt.Reconsider) || reconsider.request.SessionID != tripRuntime {
+		t.Fatalf("reconsider turn = %q in %s, want the reconsider message in %s", reconsider.request.Message, reconsider.request.SessionID, tripRuntime)
+	}
+	reconsider.answer <- agentruntime.RunResult{Response: "The train is faster."}
+	if answer := h.nextMessage(); answer.threadID != 0 || !strings.HasSuffix(answer.text, "The train is faster.") {
+		t.Fatalf("reconsider answer = %+v, want it in the main view", answer)
+	}
+	h.waitState(2, "delivered")
+	if inTabs := h.count(`SELECT count(*) FROM conversation_sessions WHERE status = 'active' AND thread_id > 0`); inTabs != 0 {
+		t.Fatalf("%d conversations are active in a tab after the reconsider", inTabs)
+	}
+	if id, _ := h.mainViewSession(); id != trip {
+		t.Fatalf("main view's conversation = %s, want %s", id, trip)
+	}
+	h.wantNoTabNamed()
+}
+
+// A start with topics on closes nothing, and once topics are on again, a message in a tab whose
+// conversation a start with topics off closed continues that conversation.
+func TestTopicsBackOnReopenTheConversationInItsTab(t *testing.T) {
+	t.Parallel()
+	runtime := newControlledRuntime()
+	h, _ := newTabsHarness(t, runtime, true)
+	h.turnInTab(runtime, 1, 50, "about the trip")
+	trip, _, _ := h.laneSession(50)
+
+	h.stop()
+	h.startWithTopics(true)
+	if id, status, _ := h.laneSession(50); id != trip || status != "active" {
+		t.Fatalf("tab's conversation after a start with topics on = %s %s, want %s active", id, status, trip)
+	}
+	h.stop()
+	h.startWithTopics(false)
+	if _, status, reason := h.laneSession(50); status != "closed" || reason != conversation.CloseTabGone {
+		t.Fatalf("tab's conversation after a start with topics off = %s %s", status, reason)
+	}
+	h.stop()
+	h.startWithTopics(true)
+	h.turnInTab(runtime, 2, 50, "still planning")
+	if id, status, _ := h.laneSession(50); id != trip || status != "active" {
+		t.Fatalf("message in the tab joined %s (%s), want %s", id, status, trip)
 	}
 }
 

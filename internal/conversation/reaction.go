@@ -70,6 +70,9 @@ type ReactionInput struct {
 	MessageID        int64
 	// Emojis is the new reaction list; empty when the user removed their reactions.
 	Emojis []string
+	// TabsOff is set while the bot has tabs off, so a reconsider turn runs in the main view whatever
+	// tab the reply was sent to.
+	TabsOff bool
 }
 
 type ReactionResult struct {
@@ -82,8 +85,8 @@ type ReactionResult struct {
 }
 
 // React keeps the user's latest reaction to one of their delivered replies as feedback. The first
-// 👎 on a reply starts one reconsider turn in its conversation and the tab it was sent to, keyed by the reply's request so a
-// reply sent in several messages starts at most one. The turn is enqueued before the key is
+// 👎 on a reply starts one reconsider turn in its conversation and the tab it was sent to, or the main view while tabs are
+// off, keyed by the reply's request so a reply sent in several messages starts at most one. The turn is enqueued before the key is
 // claimed: enqueuing is idempotent per Telegram update, so a redelivered update finds its own
 // request instead of starting a second, and a principal with a turn pending claims nothing, so a
 // later 👎 can still start one.
@@ -119,12 +122,16 @@ func (s *Service) React(ctx context.Context, input ReactionInput) (ReactionResul
 		result.Reconsider = ReconsiderAlready
 		return result, nil
 	}
+	threadID := origin.ThreadID
+	if input.TabsOff {
+		threadID = 0
+	}
 	err = s.Enqueue(ctx, EnqueueInput{
 		BotUserID:         input.BotUserID,
 		TelegramUpdateID:  input.TelegramUpdateID,
 		TelegramMessageID: input.MessageID,
 		PrincipalID:       input.PrincipalID,
-		ThreadID:          origin.ThreadID,
+		ThreadID:          threadID,
 		ChatID:            input.ChatID,
 		Message:           prompt.ReconsiderAt(s.local(origin.SentAt), s.learnsFromFeedback(ctx, input.PrincipalID)),
 		ReplyToMessageID:  input.MessageID,

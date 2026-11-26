@@ -59,6 +59,8 @@ type botAPI interface {
 	GetForumTopicIconStickers(context.Context) ([]TopicIcon, error)
 	SendPlainInTab(context.Context, int64, string) (int64, error)
 	PinChatMessage(context.Context, int64, int64) error
+	topicsOn(context.Context) (bool, error)
+	topicsEnabled() bool
 }
 
 type ConversationController interface {
@@ -72,6 +74,9 @@ type ConversationController interface {
 	NewSession(context.Context, conversation.Lane) (bool, error)
 	// CloseLane ends the conversation of a tab that was closed or is gone.
 	CloseLane(ctx context.Context, lane conversation.Lane, reason string) (bool, error)
+	// CloseTabs ends the conversation of every tab, for a bot whose tabs are off, and returns the
+	// lanes and sessions it closed.
+	CloseTabs(ctx context.Context) ([]conversation.ClosedLane, error)
 	Sessions(context.Context, conversation.Lane) ([]conversation.SessionSummary, error)
 	Resume(context.Context, conversation.Lane, string) (conversation.ResumeResult, error)
 	// SessionMessages returns the Telegram messages of one of the principal's conversations, oldest
@@ -381,9 +386,10 @@ func (s *Service) Start(ctx context.Context) error {
 	if bot.ID <= 0 || bot.Username == "" || bot.Username != strings.TrimSpace(bot.Username) {
 		return fmt.Errorf("Telegram getMe returned an invalid bot identity")
 	}
-	s.tabs.setTopics(bot.HasTopicsEnabled)
 	if bot.HasTopicsEnabled {
 		s.tabs.refreshTopicIcons(ctx)
+	} else {
+		s.leaveTabs(ctx)
 	}
 
 	commands := s.botCommands(locale.English)
@@ -418,6 +424,23 @@ func (s *Service) Start(ctx context.Context) error {
 
 	go s.run(runCtx, done, bot, lastCommittedUpdateID)
 	return nil
+}
+
+// leaveTabs closes the conversations still active in a tab, for a bot whose tabs are off, so the main
+// view is the one place they are resumed. It runs at every start with tabs off and finds nothing once
+// nothing is left in a tab. A failure is logged and left to the next start.
+func (s *Service) leaveTabs(ctx context.Context) {
+	if s.conversation == nil {
+		return
+	}
+	logger := s.telemetry.ContextLogger(ctx, s.logger)
+	closed, err := s.conversation.CloseTabs(ctx)
+	if err != nil {
+		logger.WarnContext(ctx, "telegram.tab.leave_failed", "error", err)
+	}
+	for _, lane := range closed {
+		logger.InfoContext(ctx, "telegram.tab.left", "principal_id", lane.Lane.PrincipalID, "thread_id", lane.Lane.ThreadID, "session_id", lane.SessionID)
+	}
 }
 
 func (s *Service) Ready(ctx context.Context) error {
@@ -976,6 +999,7 @@ func (s *Service) processReaction(ctx context.Context, bot Bot, updateID int64, 
 		ChatID:           reaction.Chat.ID,
 		MessageID:        reaction.MessageID,
 		Emojis:           emojis,
+		TabsOff:          !bot.HasTopicsEnabled,
 	})
 	if err != nil {
 		return processingResult{}, "record_reaction", err

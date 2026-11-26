@@ -93,7 +93,7 @@ var _ conversation.TabReplies = (*Tabs)(nil)
 // A failure leaves the tab as it is and is not retried. Neither the exchange nor the name is
 // logged.
 func (s *Tabs) TabReplied(ctx context.Context, reply conversation.TabReply) {
-	if !s.topics.Load() || s.store == nil || s.namer == nil || reply.ThreadID <= 0 {
+	if !s.enabled() || s.store == nil || s.namer == nil || reply.ThreadID <= 0 {
 		return
 	}
 	key := chatTab{reply.ChatID, reply.ThreadID}

@@ -367,6 +367,13 @@ type conversationHarness struct {
 	// closed, so that a test can read what the failure left before the retry changes it.
 	retryGate <-chan struct{}
 	failed    bool
+	// namedTabs are the methods of the requests that named a tab, in the order they came.
+	namedTabs []string
+	// getMeStatus fails getMe when set, getMeGate holds its answer until it is closed, and
+	// getMeCalls counts the getMe requests.
+	getMeStatus int
+	getMeGate   <-chan struct{}
+	getMeCalls  int
 }
 
 type setReaction struct {
@@ -789,11 +796,24 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 		h.t.Error(err)
 		return
 	}
+	h.noteTab(r)
 	w.Header().Set("Content-Type", "application/json")
 	var result any = struct{}{}
 	switch filepath.Base(r.URL.Path) {
 	case "getMe":
-		result = Bot{ID: 999, Username: "assistant_test_bot", HasTopicsEnabled: h.tabs.enabled}
+		h.mu.Lock()
+		h.getMeCalls++
+		status, gate, topics := h.getMeStatus, h.getMeGate, h.tabs.enabled
+		h.mu.Unlock()
+		if !h.waitGate(r, gate) {
+			return
+		}
+		if status != 0 {
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_code": status, "description": "Internal Server Error"})
+			return
+		}
+		result = Bot{ID: 999, Username: "assistant_test_bot", HasTopicsEnabled: topics}
 	case "getUpdates":
 		offset, err := strconv.ParseInt(r.Form.Get("offset"), 10, 64)
 		if err != nil {
@@ -1037,6 +1057,33 @@ func (h *conversationHarness) serveHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
+// noteTab records the method of a parsed request that named a tab.
+func (h *conversationHarness) noteTab(r *http.Request) {
+	if !r.Form.Has("message_thread_id") {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.namedTabs = append(h.namedTabs, filepath.Base(r.URL.Path))
+}
+
+// wantNoTabNamed expects no request so far to have named a tab, of any method.
+func (h *conversationHarness) wantNoTabNamed() {
+	h.t.Helper()
+	h.mu.Lock()
+	named := slices.Clone(h.namedTabs)
+	h.mu.Unlock()
+	if len(named) > 0 {
+		h.t.Fatalf("requests named a tab: %v", named)
+	}
+}
+
+func (h *conversationHarness) getMeCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.getMeCalls
+}
+
 // serveDocumentUpload answers an upload, whose multipart body ParseForm does not read.
 func (h *conversationHarness) serveDocumentUpload(w http.ResponseWriter, r *http.Request) {
 	chatID, err := strconv.ParseInt(r.FormValue("chat_id"), 10, 64)
@@ -1055,6 +1102,7 @@ func (h *conversationHarness) serveDocumentUpload(w http.ResponseWriter, r *http
 		h.t.Error(err)
 		return
 	}
+	h.noteTab(r)
 	threadID := h.threadOf(r.FormValue("message_thread_id"))
 	if h.refuseGoneThread(w, r, "sendDocument", threadID) {
 		return

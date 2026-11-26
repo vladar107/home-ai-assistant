@@ -445,6 +445,13 @@ func (s *Service) CloseLane(ctx context.Context, lane Lane, reason string) (bool
 	return closed, nil
 }
 
+// CloseTabs ends the conversation of every principal's tab, for a bot whose tabs are off, as CloseLane
+// does for a gone tab, and returns the lanes and sessions it closed. Each stays resumable from the
+// main view, and if tabs come back on, a message in its tab reopens it there.
+func (s *Service) CloseTabs(ctx context.Context) ([]ClosedLane, error) {
+	return s.repository.CloseTabLanes(ctx)
+}
+
 // Sessions lists the principal's recent conversations, newest first, as the lane sees them: only
 // the lane's own active conversation is current, and one another tab holds is marked. Earlier
 // conversations of which Pi recorded nothing the user wrote are left out.

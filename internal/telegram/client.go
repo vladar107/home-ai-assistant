@@ -15,6 +15,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf16"
@@ -57,6 +59,19 @@ type Client struct {
 	uploadClient *http.Client
 	telemetry    Telemetry
 	tabs         TabObserver
+
+	// topics is BotFather's tabs switch as getMe last answered it, once topicsKnown is set.
+	topics      atomic.Bool
+	topicsKnown atomic.Bool
+	// topicsAsk is the getMe ask for the switch in flight, which every send that needs it waits for.
+	topicsMu  sync.Mutex
+	topicsAsk *topicsAsk
+}
+
+// topicsAsk is one getMe ask for the tabs switch; err is set before done is closed.
+type topicsAsk struct {
+	done chan struct{}
+	err  error
 }
 
 // TabVerdict is what a tab Telegram refused a send to is taken to be.
@@ -111,7 +126,7 @@ func tabRefusal(err error) (TabVerdict, bool) {
 // once, so the send and what the observer hears name the same tab even while another send moves
 // the context's route.
 func (c *Client) inTab(ctx context.Context, chatID int64, fallback bool, send func(context.Context) error) error {
-	threadID := sendThread(ctx)
+	threadID := c.sendThread(ctx)
 	verdict, err := c.sendIn(ctx, chatID, threadID, send)
 	if verdict == "" {
 		return err
@@ -155,9 +170,18 @@ func (c *Client) sendIn(ctx context.Context, chatID, threadID int64, send func(c
 	return c.tabs.TabRefused(ctx, chatID, threadID, err), err
 }
 
-// sendThread is the tab a send goes to: the delivery's tab when one is set, found now when it is a
-// route, and the context's otherwise.
-func sendThread(ctx context.Context) int64 {
+// sendThread is the tab a send goes to: the main view while the bot has tabs off, and otherwise the
+// delivery's tab when one is set, found now when it is a route, and the context's otherwise. Whether
+// tabs are off is decided before a route finds its tab, so no route looks up or makes one then.
+func (c *Client) sendThread(ctx context.Context) int64 {
+	if namesTab(ctx) && c.topicsOff(ctx) {
+		return 0
+	}
+	return deliveryThread(ctx)
+}
+
+// deliveryThread is sendThread without the tabs switch, for a send inTab has already given its tab.
+func deliveryThread(ctx context.Context) int64 {
 	if threadID, set := thread.Delivery(ctx); set {
 		return threadID
 	}
@@ -165,12 +189,73 @@ func sendThread(ctx context.Context) int64 {
 }
 
 // indicatorThread is sendThread for what shows only while it lasts, such as typing: a route not yet
-// found is the main view, so an indicator never makes a tab.
-func indicatorThread(ctx context.Context) int64 {
-	if threadID, set := thread.Resolved(ctx); set {
-		return threadID
+// found is the main view, so an indicator never makes a tab, and asks for the switch only for a tab
+// it already has.
+func (c *Client) indicatorThread(ctx context.Context) int64 {
+	threadID, set := thread.Resolved(ctx)
+	if !set {
+		threadID = thread.From(ctx)
 	}
-	return thread.From(ctx)
+	if threadID > 0 && c.topicsOff(ctx) {
+		return 0
+	}
+	return threadID
+}
+
+// namesTab reports whether a send under the context may name a tab, without finding a route's tab.
+func namesTab(ctx context.Context) bool {
+	if _, routed := thread.RouteOf(ctx); routed {
+		return true
+	}
+	return deliveryThread(ctx) > 0
+}
+
+// topicsOff reports whether the bot has tabs off. A send that cannot learn the switch keeps its tab.
+func (c *Client) topicsOff(ctx context.Context) bool {
+	on, err := c.topicsOn(ctx)
+	return err == nil && !on
+}
+
+// topicsOn reports the bot's tabs switch, asking getMe when it has not answered yet: modules and
+// the conversation service start before the poller, so their first send may be the one to ask.
+// Sends at once share one ask, each waiting no longer than its own context; when the ask fails they
+// all get its error, and the next send asks again. The ask outlives the send that started it, so
+// that send's cancellation fails no other.
+func (c *Client) topicsOn(ctx context.Context) (bool, error) {
+	if c.topicsKnown.Load() {
+		return c.topics.Load(), nil
+	}
+	c.topicsMu.Lock()
+	ask := c.topicsAsk
+	if ask == nil && !c.topicsKnown.Load() {
+		ask = &topicsAsk{done: make(chan struct{})}
+		c.topicsAsk = ask
+		go func() {
+			_, ask.err = c.GetMe(context.WithoutCancel(ctx))
+			c.topicsMu.Lock()
+			c.topicsAsk = nil
+			c.topicsMu.Unlock()
+			close(ask.done)
+		}()
+	}
+	c.topicsMu.Unlock()
+	if ask == nil {
+		return c.topics.Load(), nil
+	}
+	select {
+	case <-ask.done:
+	case <-ctx.Done():
+		return false, ctx.Err()
+	}
+	if ask.err != nil {
+		return false, ask.err
+	}
+	return c.topics.Load(), nil
+}
+
+// topicsEnabled reports the bot's tabs switch as getMe last answered it, and off before it answered.
+func (c *Client) topicsEnabled() bool {
+	return c.topicsKnown.Load() && c.topics.Load()
 }
 
 type Bot struct {
@@ -537,8 +622,14 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	}, nil
 }
 
+// GetMe returns the bot's identity and keeps its tabs switch, which decides whether sends name tabs.
 func (c *Client) GetMe(ctx context.Context) (Bot, error) {
-	return execute[Bot](c, ctx, "getMe", nil)
+	bot, err := execute[Bot](c, ctx, "getMe", nil)
+	if err == nil {
+		c.topics.Store(bot.HasTopicsEnabled)
+		c.topicsKnown.Store(true)
+	}
+	return bot, err
 }
 
 func (c *Client) GetUpdates(ctx context.Context, offset int64) ([]Update, error) {
@@ -707,9 +798,9 @@ func (c *Client) sendFormatted(ctx context.Context, params url.Values, text stri
 	return message, err
 }
 
-// setThread sends to the context's tab and reports whether it named one.
+// setThread sends to the tab inTab gave the send and reports whether it named one.
 func setThread(ctx context.Context, params url.Values) bool {
-	threadID := sendThread(ctx)
+	threadID := deliveryThread(ctx)
 	if threadID <= 0 {
 		return false
 	}
@@ -718,8 +809,8 @@ func setThread(ctx context.Context, params url.Values) bool {
 }
 
 // setIndicatorThread is setThread for typing and drafts, which never make a tab.
-func setIndicatorThread(ctx context.Context, params url.Values) {
-	if threadID := indicatorThread(ctx); threadID > 0 {
+func (c *Client) setIndicatorThread(ctx context.Context, params url.Values) {
+	if threadID := c.indicatorThread(ctx); threadID > 0 {
 		params.Set("message_thread_id", strconv.FormatInt(threadID, 10))
 	}
 }
@@ -1043,7 +1134,7 @@ func (c *Client) SendTyping(ctx context.Context, chatID int64) error {
 		"action":  {"typing"},
 		"chat_id": {strconv.FormatInt(chatID, 10)},
 	}
-	setIndicatorThread(ctx, params)
+	c.setIndicatorThread(ctx, params)
 	_, err := execute[bool](c, ctx, "sendChatAction", params)
 	return err
 }
@@ -1060,7 +1151,7 @@ func (c *Client) SendMessageDraft(ctx context.Context, chatID, draftID int64, te
 	if canStop {
 		params.Set("can_stop", "true")
 	}
-	setIndicatorThread(ctx, params)
+	c.setIndicatorThread(ctx, params)
 	_, err := execute[bool](c, ctx, "sendMessageDraft", params)
 	return err
 }
@@ -1135,7 +1226,7 @@ func (c *Client) sendDocument(ctx context.Context, chatID int64, name string, bo
 	if err := writer.WriteField("chat_id", strconv.FormatInt(chatID, 10)); err != nil {
 		return fmt.Errorf("Telegram sendDocument request could not be created")
 	}
-	if threadID := sendThread(ctx); threadID > 0 {
+	if threadID := deliveryThread(ctx); threadID > 0 {
 		if err := writer.WriteField("message_thread_id", strconv.FormatInt(threadID, 10)); err != nil {
 			return fmt.Errorf("Telegram sendDocument request could not be created")
 		}
@@ -1184,7 +1275,7 @@ func (c *Client) SendPhoto(ctx context.Context, chatID, replyToMessageID int64, 
 	}
 	return c.inTab(ctx, chatID, true, func(ctx context.Context) error {
 		fields := map[string]string{"chat_id": strconv.FormatInt(chatID, 10)}
-		if threadID := sendThread(ctx); threadID > 0 {
+		if threadID := deliveryThread(ctx); threadID > 0 {
 			fields["message_thread_id"] = strconv.FormatInt(threadID, 10)
 		}
 		if replyToMessageID > 0 {

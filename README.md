@@ -54,7 +54,10 @@ borrowed between users.
   client opens a tab for anything sent from the main view, so a command that
   is the first message of a tab just opened is answered in the main view, and
   that tab is deleted. With topics off, the chat is one conversation as
-  before.
+  before. The switch is read at start-up, so turning topics off in BotFather
+  takes a restart. That start closes the conversations still open in tabs. A
+  closed conversation can be resumed with `/sessions` or by replying to one of
+  its messages, and nothing is sent to a tab while topics are off.
 - **Feed tabs.** With tabs on, nothing arrives in the main view unasked, so it
   can be muted without losing a notification. Messages nobody asked for go to
   tabs the bot makes on first use, each with a fixed icon: Reminders

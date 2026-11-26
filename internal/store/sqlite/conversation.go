@@ -1,10 +1,12 @@
 package sqlite
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/attachment"
@@ -482,6 +484,55 @@ func (s *Store) CloseLane(ctx context.Context, lane conversation.Lane, reason st
 		return "", false, fmt.Errorf("commit conversation lane close: %w", err)
 	}
 	return sessionID, closed, nil
+}
+
+// CloseTabLanes closes the active conversation of every principal's tab as CloseTabGone, for a bot
+// whose tabs are off, and returns the lanes and sessions it closed, by principal and tab. Like
+// CloseLane with that reason, it leaves the lanes' requests and model choices as they are.
+func (s *Store) CloseTabLanes(ctx context.Context) ([]conversation.ClosedLane, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("close tab conversations: SQLite store is not open")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin tab conversations close: %w", err)
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(
+		ctx,
+		`UPDATE conversation_sessions
+		 SET status = 'closed', close_reason = ?,
+		     closed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+		     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+		 WHERE thread_id > 0 AND status = 'active'
+		 RETURNING principal_id, thread_id, id`,
+		conversation.CloseTabGone,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("close tab conversations: %w", err)
+	}
+	defer rows.Close()
+	var closed []conversation.ClosedLane
+	for rows.Next() {
+		var lane conversation.ClosedLane
+		if err := rows.Scan(&lane.Lane.PrincipalID, &lane.Lane.ThreadID, &lane.SessionID); err != nil {
+			return nil, fmt.Errorf("scan closed tab conversation: %w", err)
+		}
+		closed = append(closed, lane)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("close tab conversations: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close tab conversations: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit tab conversations close: %w", err)
+	}
+	slices.SortFunc(closed, func(left, right conversation.ClosedLane) int {
+		return cmp.Or(cmp.Compare(left.Lane.PrincipalID, right.Lane.PrincipalID), cmp.Compare(left.Lane.ThreadID, right.Lane.ThreadID))
+	})
+	return closed, nil
 }
 
 // reopenGoneTab makes the lane's most recent conversation closed as tab_gone active again, so a

@@ -62,6 +62,7 @@ func (h *conversationHarness) servePhotoUpload(w http.ResponseWriter, r *http.Re
 		h.t.Error(err)
 		return
 	}
+	h.noteTab(r)
 	chatID, err := strconv.ParseInt(r.FormValue("chat_id"), 10, 64)
 	if err != nil {
 		h.t.Error(err)

@@ -205,18 +205,10 @@ func (r *tabRoute) lookupContext(ctx context.Context) context.Context {
 	return locale.With(thread.WithDelivery(ctx, 0), r.language)
 }
 
-// tabsOn reports the bot's tabs switch. Scheduled runs, watches, and trips start before the poller
-// does, so the first of them may ask before Start has read the switch.
+// tabsOn reports the bot's tabs switch, which the client keeps. Scheduled runs, watches, and trips
+// start before the poller does, so the first of them may have the client ask before Start has.
 func (s *Tabs) tabsOn(ctx context.Context) (bool, error) {
-	if !s.topicsKnown.Load() {
-		bot, err := s.client.GetMe(ctx)
-		if err != nil {
-			return false, err
-		}
-		s.topics.Store(bot.HasTopicsEnabled)
-		s.topicsKnown.Store(true)
-	}
-	return s.topics.Load(), nil
+	return s.client.topicsOn(ctx)
 }
 
 func (s *Tabs) giveFeedIcon(ctx context.Context, principalID string, chatID, threadID int64, feed string) {

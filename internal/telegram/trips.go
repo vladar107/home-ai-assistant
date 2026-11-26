@@ -174,7 +174,7 @@ func (n TripNotifier) TripTab(ctx context.Context, principalID, tripID string) (
 	}
 	routed := n.inFeed(ctx, principalID, chatID, tripID)
 	if _, isRoute := thread.RouteOf(routed); !isRoute {
-		return sendThread(routed), nil
+		return n.Client.sendThread(routed), nil
 	}
 	threadID, _ := thread.Peek(routed)
 	return threadID, nil

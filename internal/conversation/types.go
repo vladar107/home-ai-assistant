@@ -51,6 +51,12 @@ const (
 	CloseTabClosed = "tab_closed"
 )
 
+// ClosedLane is a tab's lane and the conversation that was closed in it.
+type ClosedLane struct {
+	Lane      Lane
+	SessionID string
+}
+
 // Lane is one conversation place of a principal: a Telegram tab, or the chat's main view at thread
 // zero. The turn engine owns the type because it keeps the lanes' turn slots.
 type Lane = turn.Lane
@@ -304,6 +310,9 @@ type Repository interface {
 	// CloseLane closes the lane's active session with CloseTabGone or CloseTabClosed and returns
 	// its ID. It leaves the lane's requests as they are.
 	CloseLane(ctx context.Context, lane Lane, reason string) (string, bool, error)
+	// CloseTabLanes closes the active session of every principal's tab with CloseTabGone and returns
+	// the lanes and sessions it closed. It leaves the lanes' requests and model choices as they are.
+	CloseTabLanes(ctx context.Context) ([]ClosedLane, error)
 	// ConversationSessions lists the principal's conversations, most recently active first.
 	ConversationSessions(ctx context.Context, principalID string, limit int) ([]SessionRecord, error)
 	// SwitchConversation makes the principal's own session the lane's active one unless the lane has

@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/conversation"
@@ -35,10 +34,6 @@ type Tabs struct {
 	logger    *slog.Logger
 	telemetry Telemetry
 
-	// topics is the bot's tabs switch as getMe last reported it.
-	topics atomic.Bool
-	// topicsKnown is set once getMe has answered, which may be before Start for a feed delivery.
-	topicsKnown atomic.Bool
 	// confirmedTabs holds the tabs the registry holds as confirmed, so a send there writes nothing.
 	confirmedTabs sync.Map
 	// knownTabs holds the tabs the registry has a row for, so a message there adds none.
@@ -74,13 +69,7 @@ func NewTabs(client botAPI, store TabStore, trips TripReader, projects ProjectRe
 	return &Tabs{client: client, store: store, objects: objects, namer: namer, logger: logger, telemetry: telemetryOrNoop(telemetry)}
 }
 
-// setTopics records the bot's tabs switch as getMe reported it.
-func (s *Tabs) setTopics(enabled bool) {
-	s.topics.Store(enabled)
-	s.topicsKnown.Store(true)
-}
-
-func (s *Tabs) enabled() bool { return s.topics.Load() }
+func (s *Tabs) enabled() bool { return s.client.topicsEnabled() }
 
 func (s *Tabs) confirmed(chatID, threadID int64) bool {
 	_, confirmed := s.confirmedTabs.Load(chatTab{chatID, threadID})
