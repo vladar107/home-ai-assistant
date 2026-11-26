@@ -1,6 +1,6 @@
 # 0177 — Turning tabs off after using them
 
-Status: `in-progress`
+Status: `done`
 
 ## Context
 
