@@ -20,6 +20,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/connectors/places"
 	"github.com/vladar107/home-ai-assistant/internal/connectors/web"
 	userlocation "github.com/vladar107/home-ai-assistant/internal/location"
+	"github.com/vladar107/home-ai-assistant/internal/looseend"
 	"github.com/vladar107/home-ai-assistant/internal/parcel"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/bussim"
 	"github.com/vladar107/home-ai-assistant/internal/testutil/flightssim"
@@ -179,6 +180,9 @@ func (w *World) seedConnectorFakes(in *wiring.Inputs) error {
 	}
 	if _, has := w.Case.World[SectionParcels]; has {
 		w.defaultSwitches = append(w.defaultSwitches, parcel.Integration)
+	}
+	if _, has := w.Case.World[SectionLooseEnds]; has {
+		w.defaultSwitches = append(w.defaultSwitches, looseend.Integration)
 	}
 	return w.seedMCP(in)
 }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/backlog"
+	"github.com/vladar107/home-ai-assistant/internal/looseend"
 	"github.com/vladar107/home-ai-assistant/internal/schedule"
 )
 
@@ -27,6 +28,7 @@ func init() {
 	registerStoreCheck("jobs", validateJobsCheck, checkJobs)
 	registerStoreCheck("memory", validateMemoryCheck, checkMemory)
 	registerStoreCheck("backlog", validateBacklogCheck, checkBacklog)
+	registerStoreCheck("loose_ends", validateLooseEndsCheck, checkLooseEnds)
 }
 
 func storeCheckName(raw json.RawMessage) (string, error) {
@@ -243,6 +245,86 @@ func validateBacklogCheck(raw json.RawMessage) error {
 	}
 	if (check.Count != nil && *check.Count < 0) || (check.Open != nil && *check.Open < 0) {
 		return errors.New("count and open must not be negative")
+	}
+	return nil
+}
+
+// looseEndsCheck counts the principal's loose ends, in any status, that match every filter it sets.
+// TitleContains and Counterpart are compared without case; Due is the local due date, YYYY-MM-DD,
+// or the local due time, YYYY-MM-DDTHH:MM, in the case's zone.
+type looseEndsCheck struct {
+	Check         string `json:"check"`
+	Kind          string `json:"kind,omitempty"`
+	Source        string `json:"source,omitempty"`
+	Status        string `json:"status,omitempty"`
+	TitleContains string `json:"title_contains,omitempty"`
+	Counterpart   string `json:"counterpart,omitempty"`
+	Due           string `json:"due,omitempty"`
+	Outside       *bool  `json:"outside,omitempty"`
+	bounds
+}
+
+func (c looseEndsCheck) filtered() bool {
+	return c.Kind != "" || c.Source != "" || c.Status != "" || c.TitleContains != "" || c.Counterpart != "" || c.Due != "" || c.Outside != nil
+}
+
+func validateLooseEndsCheck(raw json.RawMessage) error {
+	var check looseEndsCheck
+	if err := decodeStrict(raw, &check); err != nil {
+		return err
+	}
+	switch {
+	case !check.filtered() && !check.set():
+		return errors.New("want a filter (kind, source, status, title_contains, counterpart, due, outside) or count, min or max")
+	case check.Kind != "" && !looseend.Kind(check.Kind).Valid():
+		return fmt.Errorf("kind %q is not a loose end kind", check.Kind)
+	case check.Source != "" && !looseend.Source(check.Source).Valid():
+		return fmt.Errorf("source %q: want chat, mail, sent or calendar", check.Source)
+	case check.Status != "" && !looseend.Status(check.Status).Valid():
+		return fmt.Errorf("status %q is not a loose end status", check.Status)
+	}
+	if check.Due != "" {
+		_, day := time.Parse(time.DateOnly, check.Due)
+		_, moment := time.Parse(ClockLayout, check.Due)
+		if day != nil && moment != nil {
+			return fmt.Errorf("due %q: want YYYY-MM-DD or %s", check.Due, ClockLayout)
+		}
+	}
+	return check.validate()
+}
+
+func checkLooseEnds(ctx context.Context, raw json.RawMessage, env CheckEnv) error {
+	var check looseEndsCheck
+	if err := decodeStrict(raw, &check); err != nil {
+		return err
+	}
+	var items []looseend.Item
+	for _, status := range []looseend.Status{looseend.StatusOpen, looseend.StatusDone, looseend.StatusDropped, looseend.StatusExpired, looseend.StatusClosed} {
+		found, err := env.Store.ListLooseEnds(ctx, PrincipalID, status, "")
+		if err != nil {
+			return fmt.Errorf("read the loose ends: %w", err)
+		}
+		items = append(items, found...)
+	}
+	var matching int
+	var seen []string
+	for _, item := range items {
+		local := item.DueAt.In(env.Location)
+		seen = append(seen, fmt.Sprintf("%s %s %q (%s) due %s %s outside=%v", item.Kind, item.Source, item.Title, item.Counterpart, local.Format(ClockLayout), item.Status, item.Outside))
+		switch {
+		case check.Kind != "" && string(item.Kind) != check.Kind,
+			check.Source != "" && string(item.Source) != check.Source,
+			check.Status != "" && string(item.Status) != check.Status,
+			check.TitleContains != "" && !strings.Contains(strings.ToLower(item.Title), strings.ToLower(check.TitleContains)),
+			check.Counterpart != "" && !strings.EqualFold(item.Counterpart, check.Counterpart),
+			check.Due != "" && local.Format(time.DateOnly) != check.Due && local.Format(ClockLayout) != check.Due,
+			check.Outside != nil && item.Outside != *check.Outside:
+			continue
+		}
+		matching++
+	}
+	if err := check.verify("matching loose end(s)", matching, check.filtered()); err != nil {
+		return fmt.Errorf("%w; loose ends are [%s]", err, excerpt(strings.Join(seen, "; ")))
 	}
 	return nil
 }

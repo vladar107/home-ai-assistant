@@ -95,6 +95,17 @@ func (s *Service) saveReport(ctx context.Context, run Run, messages []Sent) {
 	}
 }
 
+// SaveSentReport keeps a message a job's handler sent itself, such as one with buttons of its own,
+// as one of the job's reports, so later turns, replies to it, and job_reports read it as they read
+// a delivered run's. It is delivered now.
+func (s *Service) SaveSentReport(ctx context.Context, report Report) error {
+	report.DeliveredAt = s.now()
+	if strings.TrimSpace(report.Text) == "" {
+		return nil
+	}
+	return s.repository.SaveJobReport(ctx, report, reportsKept)
+}
+
 var _ conversation.Reports = (*Service)(nil)
 
 // TurnReports lists, one line each, the reports the principal has not heard of, with the start of

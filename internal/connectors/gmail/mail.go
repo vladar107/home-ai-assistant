@@ -91,6 +91,49 @@ func (s *Service) SearchMail(ctx context.Context, principalID, query string, lim
 	return found, nil
 }
 
+// ThreadMessage is one message of a thread as code lists it: when Gmail received it, and whether
+// the mailbox's owner sent it.
+type ThreadMessage struct {
+	ID       string
+	Received time.Time
+	Sent     bool
+}
+
+// ListThread lists the messages of one thread in one of the principal's mailboxes from their
+// metadata, without reading any text. It is read-only.
+func (s *Service) ListThread(ctx context.Context, principalID, address, threadID string) ([]ThreadMessage, error) {
+	accounts, err := s.grants.Accounts(ctx, principalID, google.ProductMail)
+	if err != nil {
+		return nil, err
+	}
+	account, found := findAccount(accounts, address)
+	if !found {
+		return nil, google.ErrNotConnected
+	}
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" || len(threadID) > 64 || strings.ContainsAny(threadID, "/?#") {
+		return nil, errors.New("the thread id is not valid")
+	}
+	var messages []Message
+	err = s.withAccess(ctx, principalID, account, func(access string) (err error) {
+		messages, err = s.client.ThreadMetadata(ctx, access, threadID, []string{"Date"})
+		return err
+	})
+	if err != nil {
+		s.logger.InfoContext(ctx, "gmail.thread_list.failed", "principal_id", principalID, "error_class", errorClass(err))
+		return nil, err
+	}
+	listed := make([]ThreadMessage, 0, len(messages))
+	for _, message := range messages {
+		millis, err := strconv.ParseInt(message.InternalDate, 10, 64)
+		if err != nil || millis <= 0 {
+			continue
+		}
+		listed = append(listed, ThreadMessage{ID: message.ID, Received: time.UnixMilli(millis), Sent: slices.Contains(message.LabelIDs, "SENT")})
+	}
+	return listed, nil
+}
+
 // ReadMail reads one message a search found, or returns ErrMessageGone when it was deleted since.
 func (s *Service) ReadMail(ctx context.Context, principalID string, ref MailRef) (Mail, error) {
 	accounts, err := s.grants.Accounts(ctx, principalID, google.ProductMail)

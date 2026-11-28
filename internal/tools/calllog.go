@@ -18,7 +18,7 @@ type CallLog struct {
 	exhausted bool
 	newest    time.Time
 	calls     map[string]CallRecord
-	opened    map[openedKey]bool
+	opened    map[openedKey]OpenedMessage
 }
 
 type openedKey struct{ account, id string }
@@ -45,38 +45,69 @@ func CallLogFrom(ctx context.Context) *CallLog {
 	return log
 }
 
+// OpenedMessage is what a connector learned of a message it read in full, from the message
+// itself rather than from what the model reports.
+type OpenedMessage struct {
+	// Received is when the mailbox received it, zero when unknown.
+	Received time.Time
+	// Unread is whether it was still unread when read.
+	Unread bool
+	// From is the sender's address, lowercase, empty when the message has no single readable one.
+	From string
+	// To is the first address the To header names, lowercase, empty when it names none.
+	To string
+	// ThreadID is the mailbox's thread of the message.
+	ThreadID string
+	// DMARCPass is whether the mailbox's own authentication check shows DMARC passing for the
+	// sender's domain.
+	DMARCPass bool
+}
+
 // ReadMessage records that a message was read in full: the account and id the connector shows the
 // model, when Gmail received it, and whether it was still unread when read. A zero received time
 // leaves the newest receipt time alone.
 func (l *CallLog) ReadMessage(account, id string, received time.Time, unread bool) {
+	l.Read(account, id, OpenedMessage{Received: received, Unread: unread})
+}
+
+// Read records that a message was read in full, by the account and id the connector shows the
+// model, with what the connector learned of it.
+func (l *CallLog) Read(account, id string, message OpenedMessage) {
 	if l == nil {
 		return
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if !received.IsZero() && received.After(l.newest) {
-		l.newest = received
+	if !message.Received.IsZero() && message.Received.After(l.newest) {
+		l.newest = message.Received
 	}
 	key := openedKey{account: account, id: id}
 	if l.opened == nil {
-		l.opened = make(map[openedKey]bool)
+		l.opened = make(map[openedKey]OpenedMessage)
 	}
 	if _, kept := l.opened[key]; !kept && len(l.opened) >= maximumLoggedCalls {
 		return
 	}
-	l.opened[key] = unread
+	l.opened[key] = message
 }
 
 // Opened reports whether the message was unread when a connector read it in full, and whether it
 // was read in full at all.
 func (l *CallLog) Opened(account, id string) (unread bool, found bool) {
+	message, found := l.Message(account, id)
+	return message.Unread, found
+}
+
+// Message returns what a connector learned of the message when it read it in full, and whether it
+// was read in full at all.
+func (l *CallLog) Message(account, id string) (OpenedMessage, bool) {
 	if l == nil {
-		return false, false
+		return OpenedMessage{}, false
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	unread, found = l.opened[openedKey{account: account, id: id}]
-	return unread, found
+	message, found := l.opened[openedKey{account: account, id: id}]
+	return message, found
 }
 
 func (l *CallLog) refused() {
@@ -122,4 +153,21 @@ func (l *CallLog) NewestRead() time.Time {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.newest
+}
+
+// NewestReadWhere is the newest receipt time of the messages read in full that keep accepts, by
+// their account and id, or zero for none.
+func (l *CallLog) NewestReadWhere(keep func(account, id string) bool) time.Time {
+	if l == nil {
+		return time.Time{}
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var newest time.Time
+	for key, message := range l.opened {
+		if message.Received.After(newest) && keep(key.account, key.id) {
+			newest = message.Received
+		}
+	}
+	return newest
 }

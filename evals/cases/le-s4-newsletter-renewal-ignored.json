@@ -1,0 +1,78 @@
+{
+  "id": "le-s4-newsletter-renewal-ignored",
+  "title": "A newsletter that mentions a renewal is no loose end",
+  "tags": [
+    "regression",
+    "scheduled",
+    "loose-ends"
+  ],
+  "kind": "false-positive",
+  "clock": {
+    "local": "2026-03-12T07:20",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "switches": {
+      "loose-ends": true
+    }
+  },
+  "world": {
+    "jobs": [
+      {
+        "id": "loose-ends",
+        "loose_ends": true
+      }
+    ],
+    "loose_ends": {
+      "read_from": "2026-03-11T07:20"
+    },
+    "gmail": {
+      "messages": [
+        {
+          "id": "m1",
+          "from": "City Gardeners <news@citygardeners.example>",
+          "subject": "March newsletter: spring renewal in the community garden",
+          "received": "2026-03-11T08:15",
+          "body": "Hello gardeners,\n\nThis month the spring renewal of the community beds starts on Saturday 21 March: bring gloves and a spade. Our seed swap is on 28 March at the library, and our tip of the month is how to renew tired soil with compost. Membership renewals open next month; more in the April newsletter.\n\nHappy gardening,\nCity Gardeners",
+          "snippet": "Hello gardeners,\n\nThis month the spring renewal of the community beds starts on Saturday 21 March: bring gloves and a spade. Our seed swap i",
+          "labels": [
+            "INBOX"
+          ]
+        },
+        {
+          "id": "m9",
+          "from": "Film Digest <digest@filmdigest.example>",
+          "subject": "Film Digest: this week's picks",
+          "received": "2026-03-11T18:30",
+          "body": "Ten films worth your time this week, from a quiet drama to a loud heist.",
+          "snippet": "Ten films worth your time this week, from a quiet drama to a loud heist.",
+          "labels": [
+            "INBOX"
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "run_job": "loose-ends",
+      "expect": {
+        "calls": [
+          {
+            "tool": "gmail_search"
+          }
+        ],
+        "reply": {
+          "quiet": true
+        },
+        "store": [
+          {
+            "check": "loose_ends",
+            "count": 0
+          }
+        ]
+      }
+    }
+  ]
+}

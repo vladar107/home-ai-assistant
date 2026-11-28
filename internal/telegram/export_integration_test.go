@@ -51,6 +51,7 @@ const (
 	exportPlaceJob    = "e0a1b2c3d4e5f60b"
 	exportAgentWatch  = "e0a1b2c3d4e5f60c"
 	exportPlaceWatch  = "e0a1b2c3d4e5f60d"
+	exportLooseEnd    = "e0a1b2c3d4e5f60e"
 	exportTokenHash   = "1111111111111111111111111111111111111111111111111111111111111111"
 	// exportWatchSummary is the message pinned in the exported agent watch's tab.
 	exportWatchSummary = 4242
@@ -119,6 +120,8 @@ func (h *conversationHarness) seedExport(principal string) {
 			[]any{exportRecord, principal, exportCollection, created, created}},
 		{`INSERT INTO intake_records (id, principal_id, source, source_ref, kind, title, sender, facts, action_required, created_at, updated_at) VALUES (?, ?, 'file', 'att-1', 'invoice', 'Water bill', 'Water company', ?, 'Pay by the due date', ?, ?)`,
 			[]any{exportIntake, principal, `{"dates":[{"label":"Due","date":"2026-12-01"}],"amounts":[],"references":[]}`, created, created}},
+		{`INSERT INTO loose_ends (id, principal_id, kind, title, counterpart, due_at, nudge_on, source, source_ref, status, created_at, updated_at) VALUES (?, ?, 'promise', 'Send the forms', 'the accountant', ?, ?, 'chat', ?, 'open', ?, ?)`,
+			[]any{exportLooseEnd, principal, stamp(remindAt), remindAt.Format("2006-01-02"), exportLooseEnd, created, created}},
 		{`INSERT INTO projects (id, principal_id, title, goal, status, created_at, updated_at) VALUES (?, ?, 'Find a dentist', 'Book a checkup', 'active', ?, ?)`,
 			[]any{exportProject, principal, created, created}},
 		{`INSERT INTO project_items (principal_id, project_id, id, position, text, due_on, note) VALUES (?, ?, ?, 0, 'Ask the neighbours', '2026-12-01', '')`,
@@ -439,7 +442,7 @@ func TestExportRestoresEverySectionIntoAnEmptyDatabase(t *testing.T) {
 	target := newExportHarness(t)
 	copyKey(t, source, target)
 	preview, outcome := target.restore(1, 101, data)
-	for _, want := range []string{exportFactText, exportInstructionText, exportSteps, exportPrompt, "Water the plants", "Pack the suitcase", exportAgentCheck, exportAgentCondition, `"Lisbon"`, `"Gym"`, `"Lent items"`, `"Find a dentist"`, `"Water bill"`, `"To work"`, `"Backup server"`, `"Mag ik even langs?"`} {
+	for _, want := range []string{exportFactText, exportInstructionText, exportSteps, exportPrompt, "Water the plants", "Pack the suitcase", exportAgentCheck, exportAgentCondition, `"Lisbon"`, `"Gym"`, `"Lent items"`, `"Find a dentist"`, `"Water bill"`, `"Send the forms"`, `"To work"`, `"Backup server"`, `"Mag ik even langs?"`} {
 		if !strings.Contains(preview, want) {
 			t.Fatalf("preview lacks %q:\n%s", want, preview)
 		}

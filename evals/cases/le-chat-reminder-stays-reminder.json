@@ -1,0 +1,47 @@
+{
+  "id": "le-chat-reminder-stays-reminder",
+  "title": "An explicit reminder request uses the reminder tool and is not tracked as a loose end",
+  "tags": [
+    "happy"
+  ],
+  "kind": "happy",
+  "clock": {
+    "local": "2026-03-10T10:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "switches": {
+      "loose-ends": true
+    }
+  },
+  "world": {
+    "loose_ends": {}
+  },
+  "steps": [
+    {
+      "say": "Remind me on Friday at 9 to send the form.",
+      "expect": {
+        "calls": [
+          {
+            "tool": "reminder_set",
+            "min": 1,
+            "max": 1,
+            "args": [
+              {
+                "path": "at",
+                "matches": "^2026-03-13[ T]09:00"
+              }
+            ]
+          }
+        ],
+        "not_called": [
+          "loose_end_track"
+        ]
+      }
+    }
+  ],
+  "rubric": [
+    "Does the reply state the day and time of the reminder?"
+  ]
+}

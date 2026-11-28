@@ -47,6 +47,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/integration"
 	"github.com/vladar107/home-ai-assistant/internal/judgment"
 	userlocation "github.com/vladar107/home-ai-assistant/internal/location"
+	"github.com/vladar107/home-ai-assistant/internal/looseend"
 	usermemory "github.com/vladar107/home-ai-assistant/internal/memory"
 	"github.com/vladar107/home-ai-assistant/internal/modelcatalog"
 	"github.com/vladar107/home-ai-assistant/internal/module"
@@ -162,6 +163,9 @@ type Inputs struct {
 	Events events.Sender
 	// Tabs builds the tab services once the turn engine exists.
 	Tabs TabsFactory
+	// LooseEnds builds what sends loose end nudges over the loose ends service; nil leaves the Loose
+	// ends job out.
+	LooseEnds func(*looseend.Service) looseend.Nudger
 
 	Principals []identity.ConfiguredPrincipal
 	DataDir    string
@@ -189,6 +193,8 @@ type Inputs struct {
 	// evaluators of their kinds; both are for tests.
 	ExtraProviders  []tools.Provider
 	WatchEvaluators map[string]watch.Evaluator
+	// LooseEndScanner is the scan the Loose ends job runs after its nudges; it is for tests.
+	LooseEndScanner looseend.Scanner
 }
 
 // CoreConfig configures the services every assembly has, and the optional core features.
@@ -295,6 +301,7 @@ type Assembly struct {
 	Projects      *project.Service
 	Intake        *intake.Service
 	Backlog       *backlog.Service
+	LooseEnds     *looseend.Service
 	Events        *events.Service
 	Why           *provenance.Service
 	Trips         *trip.Service
@@ -992,6 +999,9 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		return err
 	}
 	a.Backlog = backlogService
+	if err := a.buildLooseEndTools(ctx); err != nil {
+		return err
+	}
 	reviewJob, err := memoryService.ReviewJobType(usermemory.ReviewConfig{
 		Checker: reviewChecker{engine: engine, model: a.ChatModel}, Signals: in.Store, Exchanges: exchanges,
 		Offers: approvals, Chats: in.Store, Backlog: backlogService,
@@ -1016,6 +1026,9 @@ func (a *Assembly) buildCore(ctx context.Context) error {
 		return fmt.Errorf("initialize the inbox check: %w", err)
 	}
 	if err := scheduler.Register(inboxJob); err != nil {
+		return err
+	}
+	if err := a.buildLooseEnds(scheduler); err != nil {
 		return err
 	}
 	if a.Watches != nil {

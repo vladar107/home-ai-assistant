@@ -67,6 +67,8 @@ type Event struct {
 	HangoutLink      string
 	ConferenceURL    string
 	Cancelled        bool
+	// Updated is when the event last changed; zero leaves it out.
+	Updated time.Time
 }
 
 type Request struct {
@@ -334,6 +336,9 @@ func eventResource(event Event) map[string]any {
 	}
 	if event.Organizer != "" {
 		resource["organizer"] = map[string]any{"email": event.Organizer}
+	}
+	if !event.Updated.IsZero() {
+		resource["updated"] = event.Updated.UTC().Format(time.RFC3339Nano)
 	}
 	if len(event.Attendees) > 0 {
 		attendees := make([]map[string]any, 0, len(event.Attendees))

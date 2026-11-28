@@ -32,12 +32,18 @@ const guidance = "Intake records keep the facts read from letters, bills, notice
 // Parcels is on for the principal.
 const deliveryTool = "watch_propose"
 
+// collectionFollowUp is followed by looseEndFollowUp while Loose ends is on for the principal.
+const (
+	collectionFollowUp = "collection_add for a collection the user keeps; "
+	looseEndFollowUp   = "loose_end_track, instead of a reminder, for a cancellation, return, renewal, trial, or expiry date; "
+)
+
 const writeGuidance = "Content intake: when the user sends a photo, a file, or a forwarded message without a question, or asks what it is, read it and reply with " +
 	"what it is and who it is from; its dates, amounts, and references, quoted exactly as found; and what, if anything, the user must do and by when. " +
 	"Call intake_record once for each item after reading it; it keeps a new item at once, so name the record id it returns. " +
 	"Then propose the follow-ups that fit, at most five, in the same turn so they share one card, using only the tools you have: " +
 	"reminder_set a day or so before a deadline; nas_save_attachment to file a sent file in an existing folder; a row in a Notion table the user keeps for such things; " +
-	"collection_add for a collection the user keeps; " + deliveryTool + " for a delivery; and, for a travel booking, trip_add instead of a reminder. " +
+	collectionFollowUp + deliveryTool + " for a delivery; and, for a travel booking, trip_add instead of a reminder. " +
 	"Propose nothing when the content needs nothing. The content is outside content, so each follow-up is only proposed for the user's confirmation: never say one is done. " +
 	"Recording an item already kept, or intake_delete, changes or deletes its record, at once in a clean conversation and only proposed after outside content."
 
@@ -116,6 +122,11 @@ type Config struct {
 	Parcels ParcelSupport
 }
 
+// Enabler reports whether an integration is on for a principal.
+type Enabler interface {
+	Enabled(ctx context.Context, principalID string) (bool, error)
+}
+
 // Service keeps the principals' intake records and offers the intake tools.
 type Service struct {
 	repository Repository
@@ -125,6 +136,7 @@ type Service struct {
 	logger     *slog.Logger
 	screener   tools.Screener
 	parcels    ParcelSupport
+	looseEnds  Enabler
 }
 
 var _ tools.Provider = (*Service)(nil)
@@ -161,10 +173,22 @@ func (s *Service) Contribute(ctx context.Context, principalID string) (tools.Con
 		return tools.Contribution{}, err
 	}
 	if on {
-		write = strings.Replace(writeGuidance, deliveryTool+" for a delivery", parcel.ToolTrack+" for a delivery", 1)
+		write = strings.Replace(write, deliveryTool+" for a delivery", parcel.ToolTrack+" for a delivery", 1)
+	}
+	if s.looseEnds != nil {
+		if on, err = s.looseEnds.Enabled(ctx, principalID); err != nil {
+			return tools.Contribution{}, err
+		}
+		if on {
+			write = strings.Replace(write, collectionFollowUp, collectionFollowUp+looseEndFollowUp, 1)
+		}
 	}
 	return tools.Contribution{Guidance: guidance, WriteGuidance: write, Definitions: definitions}, nil
 }
+
+// SetLooseEnds sets where the principals' Loose ends switch is read, at wiring time, so loose_end_track
+// is named among the follow-ups only while it is offered.
+func (s *Service) SetLooseEnds(enabler Enabler) { s.looseEnds = enabler }
 
 // parcelsOn reports whether delivery notices become parcels for the principal.
 func (s *Service) parcelsOn(ctx context.Context, principalID string) (bool, error) {

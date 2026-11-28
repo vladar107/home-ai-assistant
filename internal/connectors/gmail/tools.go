@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/mail"
 	"slices"
 	"strconv"
 	"strings"
@@ -150,11 +151,26 @@ func (s *Service) Execute(ctx context.Context, principalID string, call tools.Ca
 		if millis, err := strconv.ParseInt(message.InternalDate, 10, 64); err == nil && millis > 0 {
 			received = time.UnixMilli(millis)
 		}
-		tools.CallLogFrom(ctx).ReadMessage(message.Account, message.ID, received, slices.Contains(message.LabelIDs, "UNREAD"))
+		from := soleSender(message)
+		_, domain, _ := strings.Cut(from, "@")
+		tools.CallLogFrom(ctx).Read(message.Account, message.ID, tools.OpenedMessage{
+			Received: received, Unread: slices.Contains(message.LabelIDs, "UNREAD"), From: from, To: firstRecipient(message), ThreadID: message.ThreadID,
+			DMARCPass: from != "" && DMARCPassed(message, domain),
+		})
 		return tools.Result{Text: RenderMessage(message, arguments.OffsetBytes)}, nil
 	default:
 		return tools.Result{Text: "unknown Gmail tool", IsError: true}, nil
 	}
+}
+
+// firstRecipient is the first address the message's To header names, lowercase, or "" when it names
+// none.
+func firstRecipient(message Message) string {
+	list, err := mail.ParseAddressList(header(message.Payload, "To"))
+	if err != nil || len(list) == 0 || strings.Count(list[0].Address, "@") != 1 {
+		return ""
+	}
+	return strings.ToLower(list[0].Address)
 }
 
 func findAccount(accounts []google.Account, address string) (google.Account, bool) {

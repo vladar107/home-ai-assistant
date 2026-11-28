@@ -163,6 +163,7 @@ type Event struct {
 	Start            EventTime `json:"start"`
 	End              EventTime `json:"end"`
 	Organizer        Person    `json:"organizer"`
+	Updated          string    `json:"updated"`
 	Attendees        []Person  `json:"attendees"`
 	Recurrence       []string  `json:"recurrence"`
 	RecurringEventID string    `json:"recurringEventId"`

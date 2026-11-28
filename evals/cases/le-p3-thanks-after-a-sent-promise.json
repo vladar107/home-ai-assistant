@@ -1,0 +1,125 @@
+{
+  "id": "le-p3-thanks-after-a-sent-promise",
+  "title": "A promise due today is nudged although the user wrote a thanks in its thread since, and the note says so",
+  "tags": [
+    "happy",
+    "scheduled",
+    "loose-ends"
+  ],
+  "kind": "happy",
+  "clock": {
+    "local": "2026-03-12T07:20",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "switches": {
+      "loose-ends": true
+    }
+  },
+  "world": {
+    "jobs": [
+      {
+        "id": "loose-ends",
+        "loose_ends": true
+      }
+    ],
+    "loose_ends": {
+      "read_from": "2026-03-11T07:20"
+    },
+    "gmail": {
+      "messages": [
+        {
+          "id": "r1",
+          "thread_id": "t1",
+          "from": "Priya Shah <priya@studioworks.example>",
+          "subject": "Slides for the review",
+          "snippet": "Hi Sam, can you send me the slides for Monday's review? Priya",
+          "labels": [
+            "INBOX"
+          ],
+          "received": "2026-03-10T16:00",
+          "body": "Hi Sam, can you send me the slides for Monday's review? Priya"
+        },
+        {
+          "id": "s1",
+          "thread_id": "t1",
+          "from": "Sam <sam@example.test>",
+          "to": "Priya Shah <priya@studioworks.example>",
+          "subject": "Re: Slides for the review",
+          "snippet": "Sure, I'll send you the slides tomorrow.",
+          "labels": [
+            "SENT"
+          ],
+          "received": "2026-03-11T08:30",
+          "body": "Sure, I'll send you the slides tomorrow.\n\nSam"
+        },
+        {
+          "id": "r2",
+          "thread_id": "t1",
+          "from": "Priya Shah <priya@studioworks.example>",
+          "subject": "Re: Slides for the review",
+          "snippet": "Thanks, Sam!",
+          "labels": [
+            "INBOX"
+          ],
+          "received": "2026-03-11T08:50",
+          "body": "Thanks, Sam!"
+        },
+        {
+          "id": "s2",
+          "thread_id": "t1",
+          "from": "Sam <sam@example.test>",
+          "to": "Priya Shah <priya@studioworks.example>",
+          "subject": "Re: Slides for the review",
+          "snippet": "You're welcome, and thanks for organising the review!",
+          "labels": [
+            "SENT"
+          ],
+          "received": "2026-03-11T09:15",
+          "body": "You're welcome, and thanks for organising the review!\n\nSam"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "run_job": "loose-ends",
+      "expect": {
+        "calls": [
+          {
+            "tool": "gmail_read_message",
+            "args": [
+              {
+                "path": "id",
+                "equals": "s1"
+              }
+            ]
+          }
+        ],
+        "reply": {
+          "contains": [
+            "promise",
+            "studioworks.example",
+            "you wrote again on 2026-03-11"
+          ]
+        },
+        "store": [
+          {
+            "check": "loose_ends",
+            "kind": "promise",
+            "source": "sent",
+            "counterpart": "studioworks.example",
+            "due": "2026-03-12",
+            "status": "open",
+            "count": 1
+          },
+          {
+            "check": "loose_ends",
+            "count": 1
+          }
+        ]
+      }
+    }
+  ]
+}

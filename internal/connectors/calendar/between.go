@@ -14,6 +14,8 @@ const betweenPageEvents = 250
 // End are its first and last day, both inclusive, at midnight UTC, whatever zone the service reads
 // dates in.
 type RangeEvent struct {
+	// Account is the address of the Google account the event was read with.
+	Account    string
 	CalendarID string
 	ID         string
 	Title      string
@@ -21,6 +23,13 @@ type RangeEvent struct {
 	Start      time.Time
 	End        time.Time
 	AllDay     bool
+	// Description is the event's own text, written by whoever made the event.
+	Description string
+	// Organizer is the organiser's address, and OrganizerSelf whether that is the user.
+	Organizer     string
+	OrganizerSelf bool
+	// Updated is when the event last changed, as Google reports it.
+	Updated string
 }
 
 // EventsBetween lists the principal's events between two instants, with their own Google accounts,
@@ -74,6 +83,7 @@ func (s *Service) EventsBetween(ctx context.Context, principalID string, from, t
 							whole = false
 							return nil
 						}
+						found.Account = account.Address
 						read = append(read, found)
 					}
 					if next == "" {
@@ -97,7 +107,10 @@ func (s *Service) EventsBetween(ctx context.Context, principalID string, from, t
 }
 
 func rangeEvent(calendarID string, event Event) (RangeEvent, bool) {
-	found := RangeEvent{CalendarID: calendarID, ID: event.ID, Title: event.Summary, Place: event.Location}
+	found := RangeEvent{
+		CalendarID: calendarID, ID: event.ID, Title: event.Summary, Place: event.Location, Description: event.Description,
+		Organizer: event.Organizer.Email, OrganizerSelf: event.Organizer.Self, Updated: event.Updated,
+	}
 	var startErr, endErr error
 	if event.Start.DateTime != "" && event.End.DateTime != "" {
 		found.Start, startErr = time.Parse(time.RFC3339, event.Start.DateTime)

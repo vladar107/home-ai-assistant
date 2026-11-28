@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/vladar107/home-ai-assistant/internal/looseend"
 	"github.com/vladar107/home-ai-assistant/internal/memory"
 	"github.com/vladar107/home-ai-assistant/internal/parcel"
 	"github.com/vladar107/home-ai-assistant/internal/routes"
@@ -31,6 +32,8 @@ const (
 	SectionRoutes   = "routes"
 	SectionPlaces   = "places"
 	SectionParcels  = "parcels"
+	// SectionLooseEnds is where the Loose ends scan reads new mail from and the items already tracked.
+	SectionLooseEnds = "loose_ends"
 	// SectionAssistantMail is the assistant's own mailbox, whose mail a triage_mail step delivers.
 	SectionAssistantMail = "assistant_mail"
 
@@ -56,6 +59,7 @@ func init() {
 		SectionPlaces:   validatePlaces,
 		SectionParcels:  validateParcels,
 
+		SectionLooseEnds:     validateLooseEnds,
 		SectionAssistantMail: validateAssistantMail,
 	} {
 		DefaultRegistry.RegisterWorldSection(name, validate)
@@ -180,11 +184,13 @@ type jobSeed struct {
 	Prompt   string `json:"prompt,omitempty"`
 	Reminder string `json:"reminder,omitempty"`
 	HeadsUp  bool   `json:"heads_up,omitempty"`
-	Cron     string `json:"cron,omitempty"`
-	At       string `json:"at,omitempty"`
-	Zone     string `json:"zone,omitempty"`
-	Model    string `json:"model,omitempty"`
-	Disabled bool   `json:"disabled,omitempty"`
+	// LooseEnds is the Loose ends job, which takes no prompt.
+	LooseEnds bool   `json:"loose_ends,omitempty"`
+	Cron      string `json:"cron,omitempty"`
+	At        string `json:"at,omitempty"`
+	Zone      string `json:"zone,omitempty"`
+	Model     string `json:"model,omitempty"`
+	Disabled  bool   `json:"disabled,omitempty"`
 }
 
 type memorySeed struct {
@@ -421,16 +427,16 @@ func validateJobs(raw json.RawMessage) error {
 			return fmt.Errorf("jobs[%d]: id %q: want lowercase kebab case", i, job.ID)
 		}
 		kinds := 0
-		for _, set := range []bool{job.Prompt != "" && !job.HeadsUp, job.Reminder != "", job.HeadsUp} {
+		for _, set := range []bool{job.Prompt != "" && !job.HeadsUp, job.Reminder != "", job.HeadsUp, job.LooseEnds} {
 			if set {
 				kinds++
 			}
 		}
 		if kinds != 1 {
-			return fmt.Errorf("jobs[%d]: want exactly one of prompt, reminder or heads_up", i)
+			return fmt.Errorf("jobs[%d]: want exactly one of prompt, reminder, heads_up or loose_ends", i)
 		}
 		switch {
-		case job.HeadsUp:
+		case job.HeadsUp || job.LooseEnds:
 			if job.Cron != "" && job.At != "" {
 				return fmt.Errorf("jobs[%d]: cron and at exclude each other", i)
 			}
@@ -601,6 +607,69 @@ func validateParcels(raw json.RawMessage) error {
 			if _, err := time.Parse(ClockLayout, value); err != nil {
 				return fmt.Errorf("parcels[%d]: %q is not a local time such as 2026-03-10T14:00", i, value)
 			}
+		}
+	}
+	return nil
+}
+
+// looseEndsSection is the principal's Loose ends as a run finds them; the section turns the Loose
+// ends switch on for the principal. ReadFrom, a local time, is where the scan reads new mail from,
+// with nothing left to backfill; without it the scan starts as turning the switch on starts it, at
+// the case's clock with the backfill before it. Items are already tracked.
+type looseEndsSection struct {
+	ReadFrom string         `json:"read_from,omitempty"`
+	Items    []looseEndSeed `json:"items,omitempty"`
+}
+
+// looseEndSeed is one tracked item. Source defaults to chat; an item of any other source needs the
+// message or event it was found in, as message_id.
+type looseEndSeed struct {
+	Kind        string `json:"kind"`
+	Title       string `json:"title"`
+	Counterpart string `json:"counterpart,omitempty"`
+	Due         string `json:"due"`
+	Source      string `json:"source,omitempty"`
+	Account     string `json:"account,omitempty"`
+	MessageID   string `json:"message_id,omitempty"`
+	ThreadID    string `json:"thread_id,omitempty"`
+}
+
+func (s looseEndSeed) draft() looseend.Draft {
+	source := looseend.Source(cmp.Or(s.Source, string(looseend.SourceChat)))
+	draft := looseend.Draft{
+		Kind: looseend.Kind(s.Kind), Title: s.Title, Counterpart: s.Counterpart, Due: s.Due, Source: source,
+		SourceRef: s.MessageID, ThreadRef: s.ThreadID, Domain: s.Counterpart,
+	}
+	if source != looseend.SourceChat {
+		draft.Account = cmp.Or(s.Account, DefaultAccount)
+	}
+	return draft
+}
+
+func validateLooseEnds(raw json.RawMessage) error {
+	var section looseEndsSection
+	if err := decodeStrict(raw, &section); err != nil {
+		return err
+	}
+	if section.ReadFrom != "" {
+		if err := validateTime("read_from", section.ReadFrom); err != nil {
+			return err
+		}
+	}
+	for i, item := range section.Items {
+		draft := item.draft()
+		switch {
+		case !draft.Kind.Valid():
+			return fmt.Errorf("items[%d].kind %q is not a loose end kind", i, item.Kind)
+		case !draft.Source.Valid():
+			return fmt.Errorf("items[%d].source %q: want chat, mail, sent or calendar", i, item.Source)
+		case strings.TrimSpace(item.Title) == "":
+			return fmt.Errorf("items[%d]: title is required", i)
+		case draft.Source != looseend.SourceChat && item.MessageID == "":
+			return fmt.Errorf("items[%d]: an item found outside chat needs its message_id", i)
+		}
+		if _, _, ok := looseend.ParseDue(item.Due, time.UTC); !ok {
+			return fmt.Errorf("items[%d].due %q: want YYYY-MM-DD or YYYY-MM-DDTHH:MM", i, item.Due)
 		}
 	}
 	return nil

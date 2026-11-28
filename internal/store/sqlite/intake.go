@@ -124,6 +124,12 @@ func (s *Store) LoadIntakeRecordBySource(ctx context.Context, principalID, sourc
 		principalID, source, sourceRef))
 }
 
+// IntakeMailRecorded reports whether the inbox intake recorded the message of the account.
+func (s *Store) IntakeMailRecorded(ctx context.Context, principalID, account, messageID string) (bool, error) {
+	_, found, err := s.LoadIntakeRecordBySource(ctx, principalID, intake.SourceMail, account+"/"+messageID)
+	return found, err
+}
+
 func (s *Store) UpdateIntakeRecord(ctx context.Context, record intake.Record, expectedUpdatedAt time.Time) (bool, error) {
 	if s == nil || s.db == nil {
 		return false, fmt.Errorf("update intake record: SQLite store is not open")

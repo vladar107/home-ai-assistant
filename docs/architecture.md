@@ -145,6 +145,7 @@ flowchart TB
     mem["<b>memory</b><br/>per-user instructions, facts,<br/>and procedures"]
     coll["<b>collection</b><br/>per-user typed lists,<br/>queried in code"]
     intake["<b>intake</b><br/>facts read from incoming content,<br/>the inbox check"]
+    looseend["<b>looseend</b><br/>tracked deadlines and promises,<br/>daily scan and nudges"]
     backlog["<b>backlog</b><br/>per-user ideas for developing<br/>the assistant"]
     trip["<b>trip</b><br/>trips, bookings, check-in reminders,<br/>start and end notices"]
     attach["<b>attachment</b><br/>inbound photos and files"]
@@ -201,6 +202,9 @@ flowchart TB
     broker --> intake
     schedule --> intake
     intake --> approval
+    broker --> looseend
+    schedule --> looseend
+    looseend --> approval
     tg --> trip
     broker --> trip
     approval --> trip
@@ -1676,6 +1680,83 @@ text is data and frames them as the user's preferences about what to report; the
 cannot widen the tools or the JSON contract, or relax the unread and parcel rules,
 which code enforces. `schedule_list`, `schedule_get`, and the prompt's job section
 show them.
+
+### Loose ends
+
+`internal/looseend` keeps deadlines the user may want to act on before they pass
+(a free-cancellation or return window, a renewal, a trial's end, an expiry) and
+dated promises, in SQLite. Migration 072 adds `loose_ends` and `loose_end_scans`.
+`loose_ends` has one row per item: kind, title, counterpart, the due instant in
+UTC with an all-day flag, `nudge_on` and `nudged_on` as local dates, the source
+(`mail`, `calendar`, or `chat`) with account, source reference, and thread
+reference, an `outside` flag, and a status (`open`, `done`, `dropped`, `expired`,
+or `closed`). `UNIQUE(principal_id, source, account, source_ref, kind)` makes a
+second detection of the same message, event, or chat item a no-op, and a new mail
+item with the same kind, account, Gmail thread, and local due date as an open
+item or a tombstone is not stored. A done, dropped, or closed item keeps its row
+as a tombstone, so neither the scan nor the merge brings it back; rows no longer
+open are pruned 90 days after their due date. Caps are enforced in code: 10 new
+items per scan, 2 per sender domain per scan, 100 open per principal.
+`loose_end_scans` holds the cursor (`read_until`), the backfill window, the stall
+count, and the calendar digest per principal. The switch (`loose-ends`) is
+defined with the domain, so the tools and the job read the same state, and the
+`looseends` export section covers `loose_ends`.
+
+The daily job is a built-in type, `looseend.scan`, named "Loose ends", at 07:20 in
+the household zone. Each run, in order: expire open items past their due time;
+send the nudges, written and sent by code before any model turn, so a slow or
+failed scan never delays them; run the scan when Gmail or Calendar is on and
+connected; send a second, short nudge message only when the scan found items
+already inside their lead time; prune. A run nudges every open item whose
+`nudge_on` is today or earlier and whose `nudged_on` is before it, which catches
+up a missed day. The model turn is skipped when a Gmail search finds no inbox or
+sent message after the cursor and the digest of the next 60 days of calendar
+events is unchanged. The nudge goes to the Reminders feed as the job's report, so
+Heads-up sees it through `job_reports`.
+
+The scan is one unattended `RunCheck` turn with read-only tools. It reads inbox
+mail since the cursor, read or unread, at most 20 messages a run, and, until the
+30-day backfill window set when the switch is turned on is drained, also messages
+that match a fixed list of deadline words. It answers in strict JSON, and code
+validates it:
+
+- a mail item counts only when the Gmail call log shows its message was opened in
+  full this run;
+- the counterpart and the sender domain for the caps come from that message's
+  `From` header, read by code, never from the model; a calendar item's
+  counterpart is the organiser's domain, and calendar items are always `outside`;
+- the due date must parse, lie in the future, and be at most 400 days away;
+- a title with a link or web address is dropped, and a phone number in it is
+  stripped;
+- a close of an open item is accepted only when the sender has the same
+  registrable domain as the item's counterpart (the whole address at a public
+  mailbox provider) and `Authentication-Results` shows `dmarc=pass`, so a spoofed
+  `From` cannot close an item; a calendar item whose event is gone is closed by
+  code, and closing is silent.
+
+Ownership keeps anything from being said twice. A message the inbox intake
+already recorded (`intake_records`, same account and message) is skipped, because
+mail that asks the user to act belongs to the intake. The Trips scan owns a
+booking and loose ends own only its cancellation window. A reminder the user set
+stays a reminder.
+
+Each run also reads the messages the user sent since the last run, at most the
+10 newest, and tracks a promise only when the user commits in their own words to a
+concrete action by a date or a relative day, resolved against when the message was
+sent. Vague intentions such as "let's catch up sometime", promises by others, and
+thanks are not tracked, and only a sent message can give a promise. A sent promise
+keeps its Gmail thread, takes its counterpart from the message's first recipient,
+is marked as outside content because sent mail quotes others, and is nudged on its
+due day. Before the nudge the job lists the thread's metadata in Gmail; if the user
+sent a later message in it, the line adds "you wrote again on <date>", and the
+promise is still nudged, since a thanks is not a kept promise. An unreadable thread
+is nudged without the note, and mail from the counterpart never closes a promise.
+
+In chat, `loose_end_track`, `loose_ends_list`, and `loose_end_close` are offered
+while the switch is on. Track and close go through `approval.Act`: done at once
+with Undo in a clean conversation, a card after outside content, and an item
+tracked after outside content has `outside` set. `loose_ends_list` is a
+third-party read, so reading it exposes the turn.
 
 ### Parcels
 

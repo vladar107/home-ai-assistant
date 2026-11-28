@@ -312,6 +312,20 @@ borrowed between users.
   day: every 30 minutes between 07:00 and 22:00 while a parcel is on its way,
   and every three hours otherwise. Parcels are part of `/export`, without their
   cards.
+- **Loose ends.** Deadlines that need no action until the user changes their
+  mind, such as a free-cancellation window, a return window, a renewal, a
+  trial that turns into a paid plan, or a document that expires, and dated
+  promises the user made. Turned on in `/settings` (off by default), a daily
+  scan at 07:20 finds the deadlines in mail, read or unread, and in calendar
+  events, and tracks them silently. A dated promise stated in chat ("I need to
+  send the forms to the accountant by Friday") is tracked and acknowledged in
+  one short line; a request to be reminded stays a reminder. A dated promise in
+  mail the user sent is tracked too; if they wrote again in that thread since,
+  the nudge says so. On the morning an
+  item comes due for a nudge, one message lists every such item with Done,
+  Tomorrow, and Drop buttons; a day with nothing due sends nothing. "What is
+  still open?" lists the open items, and an item can be marked done or dropped
+  in chat. Chat works without Google; the mail and calendar scan needs it.
 - **Backlog.** Ideas for developing the assistant itself ("add to the backlog:
   answer weather questions with a chart") are kept as a per-user backlog that
   never changes how the assistant behaves. `/backlog` marks items done or
@@ -430,6 +444,7 @@ internal/backlog/      per-user backlog of ideas for developing the assistant
 internal/collection/   per-user typed collections, their tools, and the query engine
 internal/project/      per-user projects with checklists, their tools, and tab summaries
 internal/intake/       intake records of incoming content and the inbox check
+internal/looseend/     tracked deadlines and promises, their daily scan and nudges
 internal/export/       a user's own data as a signed file, and restoring it
 internal/clip/ localtime/ weekday/ httpretry/ testutil/  small shared helpers
 internal/store/sqlite/ persistence and migrations

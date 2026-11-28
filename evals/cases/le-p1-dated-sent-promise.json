@@ -1,0 +1,96 @@
+{
+  "id": "le-p1-dated-sent-promise",
+  "title": "A dated promise in a sent reply is tracked for the day it names, worked out from when it was sent",
+  "tags": [
+    "happy",
+    "scheduled",
+    "loose-ends"
+  ],
+  "kind": "happy",
+  "clock": {
+    "local": "2026-03-12T07:20",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "switches": {
+      "loose-ends": true
+    }
+  },
+  "world": {
+    "jobs": [
+      {
+        "id": "loose-ends",
+        "loose_ends": true
+      }
+    ],
+    "loose_ends": {
+      "read_from": "2026-03-11T07:20"
+    },
+    "gmail": {
+      "messages": [
+        {
+          "id": "r1",
+          "thread_id": "t1",
+          "from": "Alex Morgan <alex@lindenpartners.example>",
+          "subject": "Signed lease?",
+          "snippet": "Hi Sam,",
+          "labels": [
+            "INBOX"
+          ],
+          "received": "2026-03-11T09:10",
+          "body": "Hi Sam,\n\nCould you send me the signed lease? Thanks,\nAlex"
+        },
+        {
+          "id": "s1",
+          "thread_id": "t1",
+          "from": "Sam <sam@example.test>",
+          "to": "Alex Morgan <alex@lindenpartners.example>",
+          "subject": "Re: Signed lease?",
+          "snippet": "Hi Alex,",
+          "labels": [
+            "SENT"
+          ],
+          "received": "2026-03-11T10:05",
+          "body": "Hi Alex,\n\nI'll send you the signed lease on Friday.\n\nBest,\nSam\n\nOn Wed, 11 Mar 2026 at 09:10, Alex Morgan wrote:\n> Hi Sam,\n> Could you send me the signed lease? Thanks,\n> Alex"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "run_job": "loose-ends",
+      "expect": {
+        "calls": [
+          {
+            "tool": "gmail_read_message",
+            "args": [
+              {
+                "path": "id",
+                "equals": "s1"
+              }
+            ]
+          }
+        ],
+        "reply": {
+          "quiet": true
+        },
+        "store": [
+          {
+            "check": "loose_ends",
+            "kind": "promise",
+            "source": "sent",
+            "counterpart": "lindenpartners.example",
+            "due": "2026-03-13",
+            "outside": true,
+            "count": 1
+          },
+          {
+            "check": "loose_ends",
+            "count": 1
+          }
+        ]
+      }
+    }
+  ]
+}

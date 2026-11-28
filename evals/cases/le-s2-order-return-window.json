@@ -1,0 +1,92 @@
+{
+  "id": "le-s2-order-return-window",
+  "title": "A delivered order's 30-day return window is tracked with its last day",
+  "tags": [
+    "happy",
+    "scheduled",
+    "loose-ends"
+  ],
+  "kind": "happy",
+  "clock": {
+    "local": "2026-03-12T07:20",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "switches": {
+      "loose-ends": true
+    }
+  },
+  "world": {
+    "jobs": [
+      {
+        "id": "loose-ends",
+        "loose_ends": true
+      }
+    ],
+    "loose_ends": {
+      "read_from": "2026-03-11T07:20"
+    },
+    "gmail": {
+      "messages": [
+        {
+          "id": "m1",
+          "from": "Northwind Outfitters <orders@northwind-outfitters.example>",
+          "subject": "Your order NW-50731 has been delivered",
+          "received": "2026-03-11T15:40",
+          "body": "Hi Sam,\n\nYour order NW-50731 (rain jacket, size M, 89.00 EUR) was delivered on 11 March 2026.\n\nNot quite right? You have 30 days to return it free of charge: until 10 April 2026. Start a return from your account.\n\nNorthwind Outfitters",
+          "snippet": "Hi Sam,\n\nYour order NW-50731 (rain jacket, size M, 89.00 EUR) was delivered on 11 March 2026.\n\nNot quite right? You have 30 days to return i",
+          "labels": [
+            "INBOX"
+          ]
+        },
+        {
+          "id": "m9",
+          "from": "Film Digest <digest@filmdigest.example>",
+          "subject": "Film Digest: this week's picks",
+          "received": "2026-03-11T18:30",
+          "body": "Ten films worth your time this week, from a quiet drama to a loud heist.",
+          "snippet": "Ten films worth your time this week, from a quiet drama to a loud heist.",
+          "labels": [
+            "INBOX"
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "run_job": "loose-ends",
+      "expect": {
+        "calls": [
+          {
+            "tool": "gmail_read_message",
+            "args": [
+              {
+                "path": "id",
+                "equals": "m1"
+              }
+            ]
+          }
+        ],
+        "reply": {
+          "quiet": true
+        },
+        "store": [
+          {
+            "check": "loose_ends",
+            "kind": "return_window",
+            "source": "mail",
+            "counterpart": "northwind-outfitters.example",
+            "due": "2026-04-10",
+            "count": 1
+          },
+          {
+            "check": "loose_ends",
+            "count": 1
+          }
+        ]
+      }
+    }
+  ]
+}

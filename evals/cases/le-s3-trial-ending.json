@@ -1,0 +1,97 @@
+{
+  "id": "le-s3-trial-ending",
+  "title": "A free trial that turns paid in three days is tracked and nudged in the same run",
+  "tags": [
+    "happy",
+    "scheduled",
+    "loose-ends"
+  ],
+  "kind": "happy",
+  "clock": {
+    "local": "2026-03-12T07:20",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "switches": {
+      "loose-ends": true
+    }
+  },
+  "world": {
+    "jobs": [
+      {
+        "id": "loose-ends",
+        "loose_ends": true
+      }
+    ],
+    "loose_ends": {
+      "read_from": "2026-03-11T07:20"
+    },
+    "gmail": {
+      "messages": [
+        {
+          "id": "m1",
+          "from": "Streamly <hello@streamly.example>",
+          "subject": "Your free trial ends on 15 March",
+          "received": "2026-03-11T09:00",
+          "body": "Hi Sam,\n\nYour 14-day free trial of Streamly Premium ends on 15 March 2026. From then on your card will be charged 9.99 EUR a month, unless you cancel before the trial ends.\n\nEnjoy watching,\nThe Streamly team",
+          "snippet": "Hi Sam,\n\nYour 14-day free trial of Streamly Premium ends on 15 March 2026. From then on your card will be charged 9.99 EUR a month, unless y",
+          "labels": [
+            "INBOX",
+            "UNREAD"
+          ]
+        },
+        {
+          "id": "m9",
+          "from": "Film Digest <digest@filmdigest.example>",
+          "subject": "Film Digest: this week's picks",
+          "received": "2026-03-11T18:30",
+          "body": "Ten films worth your time this week, from a quiet drama to a loud heist.",
+          "snippet": "Ten films worth your time this week, from a quiet drama to a loud heist.",
+          "labels": [
+            "INBOX"
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "run_job": "loose-ends",
+      "expect": {
+        "calls": [
+          {
+            "tool": "gmail_read_message",
+            "args": [
+              {
+                "path": "id",
+                "equals": "m1"
+              }
+            ]
+          }
+        ],
+        "reply": {
+          "contains": [
+            "trial_end",
+            "streamly.example",
+            "2026-03-15"
+          ]
+        },
+        "store": [
+          {
+            "check": "loose_ends",
+            "kind": "trial_end",
+            "source": "mail",
+            "counterpart": "streamly.example",
+            "due": "2026-03-15",
+            "count": 1
+          },
+          {
+            "check": "loose_ends",
+            "count": 1
+          }
+        ]
+      }
+    }
+  ]
+}

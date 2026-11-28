@@ -187,6 +187,7 @@ plan that links back to the earlier record.
 | 0175 | [CI reruns only the tests a change can affect, through Go's test cache](0175-ci-test-cache.md) | in-progress |
 | 0176 | [Quiet parcel messages, postcode tracking links, and cards that name the parcel](0176-quiet-parcels-and-better-cards.md) | in-progress |
 | 0177 | [Turning tabs off after using them](0177-tabs-off-after-tabs.md) | done |
+| 0178 | [Loose ends: deadlines nobody asked about, and promises the user made](0178-loose-ends.md) | done |
 
 Start new plans from [the template](TEMPLATE.md). Run `scripts/check-plans`
 before every commit.

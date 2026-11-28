@@ -1,0 +1,75 @@
+{
+  "id": "le-p2-vague-sent-intention",
+  "title": "A vague intention in sent mail, beside a date that is someone else's, is no promise",
+  "tags": [
+    "regression",
+    "scheduled",
+    "loose-ends"
+  ],
+  "kind": "false-positive",
+  "clock": {
+    "local": "2026-03-12T07:20",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "switches": {
+      "loose-ends": true
+    }
+  },
+  "world": {
+    "jobs": [
+      {
+        "id": "loose-ends",
+        "loose_ends": true
+      }
+    ],
+    "loose_ends": {
+      "read_from": "2026-03-11T07:20"
+    },
+    "gmail": {
+      "messages": [
+        {
+          "id": "s1",
+          "thread_id": "t1",
+          "from": "Sam <sam@example.test>",
+          "to": "Jamie Lee <jamie.lee@mailbox.example>",
+          "subject": "Re: Long time no see",
+          "snippet": "Hi Jamie,",
+          "labels": [
+            "SENT"
+          ],
+          "received": "2026-03-11T19:40",
+          "body": "Hi Jamie,\n\nSo good to hear from you! Things are hectic here, but let's catch up sometime soon, I'll let you know when it calms down. Have a great trip to the coast next Tuesday!\n\nSam"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "run_job": "loose-ends",
+      "expect": {
+        "calls": [
+          {
+            "tool": "gmail_read_message",
+            "args": [
+              {
+                "path": "id",
+                "equals": "s1"
+              }
+            ]
+          }
+        ],
+        "reply": {
+          "quiet": true
+        },
+        "store": [
+          {
+            "check": "loose_ends",
+            "count": 0
+          }
+        ]
+      }
+    }
+  ]
+}

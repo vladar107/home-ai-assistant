@@ -1,0 +1,65 @@
+{
+  "id": "le-s5-invoice-left-to-the-inbox-check",
+  "title": "An invoice with a payment date is the inbox check's, not a loose end",
+  "tags": [
+    "regression",
+    "scheduled",
+    "loose-ends"
+  ],
+  "kind": "false-positive",
+  "clock": {
+    "local": "2026-03-12T07:20",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "switches": {
+      "loose-ends": true
+    }
+  },
+  "world": {
+    "jobs": [
+      {
+        "id": "loose-ends",
+        "loose_ends": true
+      }
+    ],
+    "loose_ends": {
+      "read_from": "2026-03-11T07:20"
+    },
+    "gmail": {
+      "messages": [
+        {
+          "id": "m1",
+          "from": "Northwind Energy <billing@northwind.example>",
+          "subject": "Invoice 2026-02 from Northwind Energy",
+          "received": "2026-03-11T21:30",
+          "body": "Dear Sam,\n\nYour invoice 2026-02 for electricity is ready: 84.20 EUR. Please pay by 25 March 2026.\n\nNorthwind Energy",
+          "snippet": "Dear Sam,\n\nYour invoice 2026-02 for electricity is ready: 84.20 EUR. Please pay by 25 March 2026.\n\nNorthwind Energy",
+          "labels": [
+            "INBOX",
+            "UNREAD"
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "run_job": "loose-ends",
+      "expect": {
+        "calls": [
+          {
+            "tool": "gmail_search"
+          }
+        ],
+        "store": [
+          {
+            "check": "loose_ends",
+            "count": 0
+          }
+        ]
+      }
+    }
+  ]
+}

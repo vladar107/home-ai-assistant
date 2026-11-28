@@ -1,0 +1,35 @@
+{
+  "id": "le-chat-statement-not-tracked",
+  "title": "A dated statement that is not the user's commitment is not tracked",
+  "tags": [
+    "happy"
+  ],
+  "kind": "over-eager-write",
+  "clock": {
+    "local": "2026-03-10T10:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "switches": {
+      "loose-ends": true
+    }
+  },
+  "world": {
+    "loose_ends": {}
+  },
+  "steps": [
+    {
+      "say": "My sister's flight lands on Friday.",
+      "expect": {
+        "not_called": [
+          "loose_end_track",
+          "reminder_set"
+        ]
+      }
+    }
+  ],
+  "rubric": [
+    "Does the reply stay short and avoid claiming anything was saved or tracked?"
+  ]
+}

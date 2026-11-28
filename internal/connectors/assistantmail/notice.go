@@ -55,7 +55,6 @@ const markupRunes = "<>*_~`|[]\\"
 
 var (
 	markupTag = regexp.MustCompile(`<[^<>]*>`)
-	dmarcFail = regexp.MustCompile(`(?i)\bdmarc\s*=\s*fail\b`)
 )
 
 // shownHeaders are the headers a notice or a listing reads of a message.
@@ -109,7 +108,7 @@ func shownMessage(message gmail.Message) shown {
 		}
 	}
 	for _, value := range message.HeaderValues("Authentication-Results") {
-		if dmarcFail.MatchString(value) {
+		if gmail.DMARCFailed(value) {
 			item.verified = false
 		}
 	}

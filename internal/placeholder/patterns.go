@@ -110,6 +110,19 @@ func findPhones(text string) []span {
 	return spans
 }
 
+// WithoutPhones removes from text the phone numbers Hide would replace, leaving identifiers such as
+// an order number in place.
+func WithoutPhones(text string) string {
+	var kept strings.Builder
+	last := 0
+	for _, phone := range findPhones(text) {
+		kept.WriteString(text[last:phone.start])
+		last = phone.end
+	}
+	kept.WriteString(text[last:])
+	return kept.String()
+}
+
 // phoneStart reports whether a phone number can start at i. joined is true right after a phone
 // number and a slash, as in 0612345678/0687654321.
 func phoneStart(text string, i int, joined bool) bool {

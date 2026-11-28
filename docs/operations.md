@@ -179,6 +179,7 @@ that user turns it on or off for themselves. Optional Compose overlays
 | NS trains | `HOME_AGENT_NS_ENABLED=true` | Keychain `ns.api-key` (Ns-App product at apiportal.ns.nl) | The same subscription must also include OV-fiets (the places API) for `ns_ovfiets`; without it, that tool answers that the subscription lacks OV-fiets while the other NS tools keep working. |
 | Flight status | `HOME_AGENT_FLIGHTS_ENABLED=true`, optional `HOME_AGENT_FLIGHTS_MONTHLY_UNITS` (340) and `HOME_AGENT_FLIGHTS_QUOTA_RESET_DAY` (1); locally `HOME_AGENT_FLIGHTS_API_KEY` or `HOME_AGENT_FLIGHTS_API_KEY_FILE` | `scripts/keychain-set-secret aerodatabox.api-key`, synced as Docker secret `flights-api-key` | AeroDataBox on RapidAPI's free Basic plan; see the setup below. `flight_status` answers questions, and the trips loop follows the flights of tracked trips on their day of travel. Per-user "Flight status" switch, on by default. |
 | Home Assistant | `HOME_AGENT_HA_ENABLED=true`; locally `HOME_AGENT_HA_TOKEN`, optional `HOME_AGENT_HA_URL` (default `https://ha.home`) | Keychain `home-assistant.token`, synced as Docker secret `ha-token` | One household long-lived token; see the setup below. The overlay `deploy/compose.app.homeassistant.yaml` reaches Home Assistant at `http://homeassistant:8123` through host-gateway, because it uses host networking and the NAS cannot reach the Caddy macvlan edge. Per-user "Home" switch in `/settings`, on by default. |
+| Loose ends | none; uses each user's Google account when present | none | Per-user "Loose ends" switch (`loose-ends`), off by default. The job "Loose ends" runs daily at 07:20 in `HOME_AGENT_TIMEZONE`. The mail and calendar scan is a model turn on the user's own subscription and needs Gmail or Calendar; the chat tools work without them. See Loose ends below. |
 | Parcels | `HOME_AGENT_PARCEL_SOURCES` (optional); uses the Home Assistant token and each user's Google account when present | none | Per-user "Parcels" switch, off by default. Home Assistant carrier integrations the operator assigns to a user are read every 10 minutes, and shipping mail is read by a model turn per run on the user's own subscription, capped at 10 messages a run and 40 a day. With no Home Assistant token, or no entries assigned, Parcels works on mail alone. See Parcels setup below. |
 | Grafana | `HOME_AGENT_GRAFANA_ENABLED=true`, `HOME_AGENT_GRAFANA_PRINCIPALS`; locally `HOME_AGENT_GRAFANA_TOKEN`, `HOME_AGENT_GRAFANA_URL` (default `http://grafana:3000`), `HOME_AGENT_GRAFANA_PRINCIPALS` | Keychain `grafana.home-agent-token`, synced as Docker secret `grafana-token` | Read-only dashboards, PromQL, and LogQL for the named principals only; nobody else sees it in `/settings`. See the setup below. The overlay `deploy/compose.app.grafana.yaml` reaches Grafana by service name over `home-observability`. Per-user "Monitoring" switch, on by default. |
 | Buses | `HOME_AGENT_BUS_ENABLED=true`, `HOME_AGENT_BUS_HOME_STOP`, optional `HOME_AGENT_BUS_CONTACT` | none | Live data from OVapi (plain HTTP, no key); the stop list is read daily from OVapi's GTFS archive by range requests. The home stop is any timing point code of the stop (`stop_code` in GTFS `stops.txt`). Planned trips and boards for stops OVapi has no live data for go to Transitous; set the contact, which its terms ask for, to label those requests. Its use is private and non-commercial. |
@@ -979,6 +980,31 @@ follow-up dropped because an earlier check failed while offering it, and
 stored or sent. Logs carry IDs and counts, never record text. Turning Inbox
 intake off forgets where it read to, the waiting follow-ups, and the notes, so
 turning it on again reads the last day with no preferences.
+
+### Loose ends
+
+Migration 072 adds `loose_ends` and `loose_end_scans`; it cannot be undone, so take
+a data backup before the first deploy that carries it. No setting is needed. Each
+user turns Loose ends on in `/settings` (off by default). Turning it on creates or
+enables the job "Loose ends" (also visible in `/jobs`), which runs daily at 07:20
+in `HOME_AGENT_TIMEZONE`; *Check now* runs it at once. Each run sends the nudges
+first, with no model turn, then scans mail and calendar when Gmail or Calendar is
+on and connected, and that scan is one model turn on the user's own subscription.
+The scan also reads up to the 10 newest messages the user sent since the last run
+for dated promises; before nudging one, the job lists its Gmail thread to note a
+later reply from the user.
+Without Google, the chat tools (`loose_end_track`, `loose_ends_list`,
+`loose_end_close`) still work and the job only expires and nudges. A run sends
+nothing when no item is due for a nudge. Turning the switch off disables the job
+and forgets its read position and calendar digest; tracked items are kept.
+
+In the logs, `looseend.tracked`, `looseend.closed`, and `looseend.undone` mark
+changes, `looseend.run.done` sums up a daily run, `looseend.scan.done` a scan with
+counts of what it recorded, dropped, and closed, `looseend.scan.skipped` a run
+whose model turn was skipped because nothing was new, `looseend.scan.unreadable` a
+reply that was not the JSON asked for, `looseend.scan.close_refused` a close
+that failed the domain or DMARC check, and `looseend.nudge.failed` a nudge that
+could not be sent. Logs carry IDs and counts, never item text.
 
 ### Reply traces and /why
 

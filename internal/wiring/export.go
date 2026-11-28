@@ -12,6 +12,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/integration"
 	"github.com/vladar107/home-ai-assistant/internal/locale"
 	userlocation "github.com/vladar107/home-ai-assistant/internal/location"
+	"github.com/vladar107/home-ai-assistant/internal/looseend"
 	usermemory "github.com/vladar107/home-ai-assistant/internal/memory"
 	"github.com/vladar107/home-ai-assistant/internal/parcel"
 	"github.com/vladar107/home-ai-assistant/internal/project"
@@ -70,6 +71,7 @@ var ExcludedFromExport = map[string]string{
 	"mail_contacts":               "whom the assistant mailbox has sent mail to",
 	"mail_routine_replies":        "the limits and reports of the assistant mailbox's routine replies",
 	"placeholder_values":          "the values behind the placeholders the model saw; exported records hold real values",
+	"loose_end_scans":             "how far the loose ends check has read",
 }
 
 // buildExports registers every section of a user's export, in the order they restore: each after
@@ -111,6 +113,7 @@ func (a *Assembly) buildExports() error {
 		trip.Exporter(),
 		a.Collections.Exporter(),
 		intake.Exporter(),
+		looseend.Exporter(),
 		a.parcelExporter(),
 		project.Exporter(),
 		usermemory.Exporter(),

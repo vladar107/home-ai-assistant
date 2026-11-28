@@ -45,9 +45,13 @@ neutral names, places and data, never a real message, trace, memory or device.
     "title_property" (default "Title"), "properties": [{"name", "type": "date" | "number" | "select" | "status" |
     "rich_text" | "checkbox", "options"}], "rows": [{"id", "title", "values": {column: value}}]}], "writes": true}`;
     a data source is a table whose rows are pages, `writes` grants the Notion write tools
-  - `jobs`: `[{"id", "name", "prompt" | "reminder" | "heads_up": true, "cron" | "at": "YYYY-MM-DD HH:MM",
+  - `jobs`: `[{"id", "name", "prompt" | "reminder" | "heads_up": true | "loose_ends": true, "cron" | "at": "YYYY-MM-DD HH:MM",
     "zone", "model", "disabled"}]`; `id` is the name `run_job` uses. `heads_up` is the Heads-up job
-    (its prompt is the notes; cron defaults to the Heads-up schedule).
+    (its prompt is the notes; cron defaults to the Heads-up schedule). `loose_ends` is the Loose ends
+    job (no prompt; cron defaults to its schedule): it expires and nudges the tracked items, then runs
+    the mail and calendar scan; it does anything only with the user switch `loose-ends` on. Each nudge
+    is a reply of the step, a line per item: `• <kind>: <title> (<counterpart>), by <YYYY-MM-DDTHH:MM>`,
+    and for a sent promise whose thread holds a later message the user sent, `; you wrote again on <YYYY-MM-DD>`.
   - `memory`: `[{"kind": "fact" | "instruction", "text"}]`, beside `user.memory` lines (facts)
   - `backlog`: `[{"title", "details"}]`
   - `routes`: `[{"name", "days": ["mon"], "arrive_by", "legs": [{"mode", "minutes", "from", "to",
@@ -56,6 +60,14 @@ neutral names, places and data, never a real message, trace, memory or device.
   - `parcels`: `[{"carrier", "number", "title", "sender", "status", "window_from", "window_to", "pickup_point"}]`
     (parcels the user follows, found in mail; `status` is a parcel status such as `in_transit` or
     `out_for_delivery`, and times are local `YYYY-MM-DDTHH:MM`); the section turns Parcels on
+  - `loose_ends`: `{"read_from": "YYYY-MM-DDTHH:MM", "items": [{"kind", "title", "counterpart", "due",
+    "source", "account", "message_id", "thread_id"}]}`. With a `loose_ends` job or this section the
+    scan is started: from `read_from` with nothing to backfill, or, without it, as turning the switch
+    on starts it, at the case's clock with the 30-day backfill before it. `items` are already tracked:
+    `source` is `chat` (default), `mail`, `sent` or `calendar`, and any but `chat` needs `message_id`
+    (`account` defaults to the gmail section's default); `due` is `YYYY-MM-DD` or a local
+    `YYYY-MM-DDTHH:MM`, and must be after the case's clock. The section turns Loose ends on, so its
+    chat tools are offered; `{}` is enough for a chat case
   - `assistant_mail`: `{"address": "assistant@example.test", "tag": "sam1", "messages": [{"from", "subject", "body",
     "to", "thread_id", "received", "dmarc": "pass" | "fail", "sent"}]}`, the assistant's own mailbox with the user's tag
     (both defaults shown); a `triage_mail` step delivers the messages to the tagged address, `received`
@@ -100,7 +112,11 @@ neutral names, places and data, never a real message, trace, memory or device.
   - `reply`: `contains`, `not_contains` (case-insensitive substrings), `matches`, `not_matches`
     (regexps, validated on load; the reply must match, or must not match), `language` (BCP-47, such as `en`),
     `quiet` (a scheduled run that sends nothing);
-  - `store`: checks on the final store, each an object with a `check` name.
+  - `store`: checks on the final store, each an object with a `check` name. `loose_ends` counts the
+    tracked items in any status matching every filter it sets: `{"check": "loose_ends", "kind", "source",
+    "status", "title_contains", "counterpart", "due": "YYYY-MM-DD" | "YYYY-MM-DDTHH:MM", "outside", "count" |
+    "min" | "max"}` (text compared without case, `due` in the case's zone; filters alone want at
+    least one match).
 - `rubric`: yes/no questions for the judge, each about one dimension.
 - `trials`: runs per case, 1 to 10, default 3.
 - `expected_probes`: `[{"probe", "reason"}]`, the trivial-answer probes the case passes on purpose,

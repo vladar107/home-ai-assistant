@@ -247,11 +247,12 @@ type Travel interface {
 	Traveling(ctx context.Context, principalID string, at time.Time) (bool, error)
 }
 
-// feed is the tab of the run's kind: reminders, Trips scans, and what a job's anchor tells its
-// owner with the reminders, inbox checks with the inbox, every other job's report with the reports.
+// feed is the tab of the run's kind: reminders, Trips scans, Loose ends, and what a job's anchor
+// tells its owner with the reminders, inbox checks with the inbox, every other job's report with
+// the reports.
 func feed(run Run) string {
 	switch {
-	case run.JobType == TypeReminder || run.JobType == TripScanType || run.ErrorKind == errorAnchorGone || run.ErrorKind == errorAnchorFailed:
+	case run.JobType == TypeReminder || run.JobType == TripScanType || run.JobType == LooseEndScanType || run.ErrorKind == errorAnchorGone || run.ErrorKind == errorAnchorFailed:
 		return thread.FeedReminders
 	case run.JobType == InboxScanType:
 		return thread.FeedInbox

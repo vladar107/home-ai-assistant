@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -76,10 +75,6 @@ var routineDefinition = tools.Definition{
 var routineHeaders = []string{"From", "Reply-To", "Subject", "Message-ID", "References", "Authentication-Results", "Auto-Submitted", "Precedence", "List-Id"}
 
 var (
-	// dmarcClause reads a result clause, with its comments and quoted strings left out, that is a
-	// DMARC result, and gmailDMARCPass one that is passing, with the domain it is for.
-	dmarcClause    = regexp.MustCompile(`(?i)^dmarc\s*=`)
-	gmailDMARCPass = regexp.MustCompile(`(?i)^dmarc\s*=\s*pass\s(?:.*\s)?header\.from\s*=(\S+)`)
 	// separators are left out of a local part before it is compared with the no-reply names.
 	separators = strings.NewReplacer("-", "", "_", "", ".", "")
 )
@@ -447,82 +442,10 @@ func (s *Service) checkSender(message gmail.Message, allowed map[string]bool) (s
 		return "", refuse("Its sender is not someone the assistant wrote to in this thread.")
 	}
 	_, domain, _ := strings.Cut(from, "@")
-	if !dmarcPassed(message, domain) {
+	if !gmail.DMARCPassed(message, domain) {
 		return "", refuse("Its sender is not verified: Gmail's DMARC check did not pass for it.")
 	}
 	return from, nil
-}
-
-// dmarcPassed reports whether Gmail's own Authentication-Results shows DMARC passing for the
-// domain. Gmail adds its result above the headers a message arrived with, where a sender can write
-// one that claims to be Gmail's, so only the topmost counts, and a failure anywhere refuses.
-func dmarcPassed(message gmail.Message, domain string) bool {
-	results := message.HeaderValues("Authentication-Results")
-	if len(results) == 0 {
-		return false
-	}
-	for _, value := range results {
-		if dmarcFail.MatchString(value) {
-			return false
-		}
-	}
-	clauses, ok := resultClauses(results[0])
-	if !ok || !strings.EqualFold(strings.TrimSpace(clauses[0]), "mx.google.com") {
-		return false
-	}
-	dmarcResults, passed := 0, false
-	for _, clause := range clauses[1:] {
-		clause = strings.TrimSpace(clause)
-		if !dmarcClause.MatchString(clause) {
-			continue
-		}
-		dmarcResults++
-		result := gmailDMARCPass.FindStringSubmatch(clause)
-		passed = result != nil && strings.EqualFold(strings.TrimSuffix(result[1], "."), domain)
-	}
-	return dmarcResults == 1 && passed
-}
-
-// resultClauses splits an Authentication-Results value into its clauses at the semicolons outside
-// comments and quoted strings, where a sender can write text of its own, such as its envelope
-// address. Each comment and quoted string reads as one space, and an unterminated one fails the
-// value.
-func resultClauses(value string) ([]string, bool) {
-	var clauses []string
-	var clause strings.Builder
-	depth, quoted, escaped := 0, false, false
-	for _, r := range value {
-		switch {
-		case escaped:
-			escaped = false
-		case r == '\\' && (quoted || depth > 0):
-			escaped = true
-		case quoted:
-			if r == '"' {
-				quoted = false
-				clause.WriteByte(' ')
-			}
-		case r == '(':
-			depth++
-		case r == ')' && depth > 0:
-			depth--
-			if depth == 0 {
-				clause.WriteByte(' ')
-			}
-		case depth > 0:
-		case r == '"':
-			quoted = true
-		case r == ';':
-			clauses = append(clauses, clause.String())
-			clause.Reset()
-		default:
-			clause.WriteRune(r)
-		}
-	}
-	if quoted || depth > 0 {
-		return nil, false
-	}
-	return append(clauses, clause.String()), true
 }
 
 // automated reports mail a program sent: Auto-Submitted other than no, a bulk, list or junk

@@ -234,6 +234,13 @@ func (s *Simulator) FailMessage(id string, status int) {
 	s.failing[id] = status
 }
 
+// FailThread makes every listing of the thread with the id fail with the status.
+func (s *Simulator) FailThread(id string, status int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failing["threads/"+id] = status
+}
+
 // IndexLate leaves the message out of the next searches, as Gmail's search does for a while
 // after a message arrives; history and reads still find it.
 func (s *Simulator) IndexLate(id string, searches int) {
@@ -434,6 +441,7 @@ func (s *Simulator) serveGmail(w http.ResponseWriter, r *http.Request) {
 	mailbox := append([]Message(nil), s.mailboxes[account]...)
 	newestFirst := s.newestFirst
 	failing := s.failing[strings.TrimPrefix(r.URL.Path, "/gmail/v1/users/me/messages/")]
+	failingThread := s.failing[strings.TrimPrefix(r.URL.Path, "/gmail/v1/users/me/")]
 	var unindexed map[string]bool
 	if r.URL.Path == "/gmail/v1/users/me/messages" {
 		unindexed = make(map[string]bool)
@@ -514,6 +522,23 @@ func (s *Simulator) serveGmail(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": map[string]any{"code": 404}})
+	case strings.HasPrefix(path, "threads/"):
+		if failingThread != 0 {
+			writeJSON(w, failingThread, map[string]any{"error": map[string]any{"code": failingThread}})
+			return
+		}
+		id := strings.TrimPrefix(path, "threads/")
+		thread := slices.DeleteFunc(mailbox, func(message Message) bool { return message.ThreadID != id })
+		slices.SortStableFunc(thread, func(a, b Message) int { return a.Received.Compare(b.Received) })
+		messages := make([]map[string]any, 0, len(thread))
+		for _, message := range thread {
+			messages = append(messages, resource(message, r.URL.Query().Get("format"), r.URL.Query()["metadataHeaders"]))
+		}
+		if len(messages) == 0 {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": map[string]any{"code": 404}})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"id": id, "messages": messages})
 	default:
 		http.NotFound(w, r)
 	}

@@ -49,6 +49,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/judgment"
 	"github.com/vladar107/home-ai-assistant/internal/locale/localetest"
 	"github.com/vladar107/home-ai-assistant/internal/location"
+	"github.com/vladar107/home-ai-assistant/internal/looseend"
 	"github.com/vladar107/home-ai-assistant/internal/memory"
 	"github.com/vladar107/home-ai-assistant/internal/module"
 	"github.com/vladar107/home-ai-assistant/internal/observability"
@@ -270,6 +271,8 @@ type harnessOptions struct {
 	assistantMailToken string
 	// placeholders hides personal values from the model, as HOME_AGENT_PLACEHOLDERS does.
 	placeholders bool
+	// looseEndScanner is the scan the Loose ends job runs after its nudges.
+	looseEndScanner looseend.Scanner
 }
 
 // testFile is one attachment the Telegram simulator will hand out through getFile.
@@ -535,7 +538,10 @@ func (h *conversationHarness) wiringInputs(t *testing.T, runtime agentruntime.Ag
 		Store: h.store, Logger: logger, Telemetry: &integrationTelemetry{Telemetry: cmp.Or(options.telemetry, observability.Noop()), h: h},
 		Runtime: runtime, SessionFiles: sessionFiles,
 		Chat: h.client, Reminders: ReminderSender{Client: h.client}, Alerts: WatchAlertSender{Client: h.client},
-		TaskMessages: TaskMessenger{Client: h.client}, Tabs: func(namer *turn.Engine, trips trip.Reader, projects project.Reader, watches watch.Reader) wiring.TabServices {
+		TaskMessages: TaskMessenger{Client: h.client}, LooseEnds: func(looseEnds *looseend.Service) looseend.Nudger {
+			return LooseEndNudger{Client: h.client, Chats: h.store, LooseEnds: looseEnds}
+		},
+		LooseEndScanner: options.looseEndScanner, Tabs: func(namer *turn.Engine, trips trip.Reader, projects project.Reader, watches watch.Reader) wiring.TabServices {
 			tabs := h.newTabs(logger, namer, trips, projects, watches)
 			if options.parcels {
 				tabs.Parcels = ParcelNotifier{
@@ -747,6 +753,8 @@ func (h *conversationHarness) telegramService(identities *identity.Service, logg
 		deps.Sections = append(deps.Sections, NewTripsSection(asm.Scheduler, asm.Google, asm.Trips, logger, nil))
 		deps.Sections = append(deps.Sections, NewInboxSection(asm.Scheduler, asm.Google, asm.Intake, logger, nil))
 	}
+	deps.LooseEnds = asm.LooseEnds
+	deps.Sections = append(deps.Sections, NewLooseEndsSection(asm.Scheduler, asm.Switches.Toggle(looseend.Switch), asm.LooseEnds, logger, nil))
 	if h.extraDeps != nil {
 		h.extraDeps(h, &deps)
 	}

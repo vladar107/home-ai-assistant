@@ -17,6 +17,7 @@ import (
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
 	"github.com/vladar107/home-ai-assistant/internal/judgment"
+	"github.com/vladar107/home-ai-assistant/internal/looseend"
 	"github.com/vladar107/home-ai-assistant/internal/prompt"
 	agentruntime "github.com/vladar107/home-ai-assistant/internal/runtime"
 	"github.com/vladar107/home-ai-assistant/internal/runtime/pi"
@@ -482,6 +483,68 @@ func TestRunJobRunsThePromptAndNothingRunsOnItsOwn(t *testing.T) {
 	}
 	if running := w.scheduling; running {
 		t.Fatal("the scheduler is still running after the step")
+	}
+}
+
+// An empty loose_ends section turns Loose ends on, so a chat turn is offered its tools, and starts
+// the scan state without tracking anything.
+func TestLooseEndsSectionTurnsLooseEndsOn(t *testing.T) {
+	t.Parallel()
+	w := newTestWorld(t, worldConfig{sections: map[string]any{SectionLooseEnds: looseEndsSection{}}})
+
+	offered := offeredTools(t, w)
+	for _, tool := range []string{"loose_end_track", "loose_ends_list", "loose_end_close"} {
+		if !slices.Contains(offered, tool) {
+			t.Errorf("%s is not offered with a loose_ends section: %v", tool, offered)
+		}
+	}
+	if _, found, err := w.Assembly.LooseEnds.ScanState(t.Context(), PrincipalID); err != nil || !found {
+		t.Fatalf("scan state found=%v err=%v", found, err)
+	}
+	if items, err := w.Assembly.LooseEnds.List(t.Context(), PrincipalID, ""); err != nil || len(items) != 0 {
+		t.Fatalf("items = %+v %v, want none", items, err)
+	}
+}
+
+// The Loose ends job runs on the case's clock over the seeded items: the nudge is the step's reply,
+// and the loose_ends store check reads what is tracked.
+func TestRunJobNudgesTheSeededLooseEnds(t *testing.T) {
+	t.Parallel()
+	w := newTestWorld(t, worldConfig{user: User{Switches: map[string]bool{looseend.Integration: true}}, sections: map[string]any{
+		SectionJobs: []jobSeed{{ID: "loose-ends", LooseEnds: true}},
+		SectionLooseEnds: looseEndsSection{ReadFrom: "2026-03-10T07:00", Items: []looseEndSeed{
+			{Kind: "cancel_window", Title: "Harbour Hotel stay", Counterpart: "hotel.example", Due: "2026-03-11", Source: "mail", MessageID: "m1", ThreadID: "t1"},
+			{Kind: "promise", Title: "Send the forms", Due: "2026-03-20"},
+		}},
+	}})
+
+	record := w.play(Step{RunJob: "loose-ends"})
+	if record.Quiet || !strings.HasPrefix(record.Reply, "Loose ends\n• cancel_window: Harbour Hotel stay (hotel.example), by 2026-03-11T23:59") ||
+		strings.Contains(record.Reply, "Send the forms") || len(record.Runs) != 0 {
+		t.Fatalf("run = %+v", record)
+	}
+	state, found, err := w.Assembly.LooseEnds.ScanState(t.Context(), PrincipalID)
+	if err != nil || !found || !state.BackfillUntil.IsZero() || !state.ReadUntil.After(time.Date(2026, 3, 10, 6, 0, 0, 0, w.Location)) {
+		t.Fatalf("scan state = %+v %v %v", state, found, err)
+	}
+	expect := &Expect{Store: []json.RawMessage{
+		json.RawMessage(`{"check":"loose_ends","kind":"cancel_window","counterpart":"hotel.example","due":"2026-03-11","outside":true,"count":1}`),
+		json.RawMessage(`{"check":"loose_ends","source":"chat","title_contains":"forms","due":"2026-03-20","outside":false,"count":1}`),
+		json.RawMessage(`{"check":"loose_ends","count":2}`),
+	}}
+	if failures := CheckStep(t.Context(), expect, record, CheckEnv{Store: w.Store, Location: w.Location}); len(failures) != 0 {
+		t.Fatalf("store checks failed: %+v", failures)
+	}
+	wrong := &Expect{Store: []json.RawMessage{json.RawMessage(`{"check":"loose_ends","kind":"return_window","min":1}`)}}
+	if failures := CheckStep(t.Context(), wrong, record, CheckEnv{Store: w.Store, Location: w.Location}); len(failures) != 1 {
+		t.Fatalf("a check for an item not tracked passed: %+v", failures)
+	}
+
+	// The next morning, before the job is due on its own, so the step's manual run is the one played.
+	w.Advance(22 * time.Hour)
+	again := w.play(Step{RunJob: "loose-ends"})
+	if !again.Quiet || again.Reply != "" {
+		t.Fatalf("a run with nothing due = %+v, want quiet", again)
 	}
 }
 

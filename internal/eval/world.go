@@ -29,6 +29,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/judgment"
 	"github.com/vladar107/home-ai-assistant/internal/locale"
 	userlocation "github.com/vladar107/home-ai-assistant/internal/location"
+	"github.com/vladar107/home-ai-assistant/internal/looseend"
 	"github.com/vladar107/home-ai-assistant/internal/memory"
 	"github.com/vladar107/home-ai-assistant/internal/observability"
 	"github.com/vladar107/home-ai-assistant/internal/parcel"
@@ -269,6 +270,7 @@ func (w *World) inputs(principals []identity.ConfiguredPrincipal, provider strin
 		Store: w.Store, Logger: logger, Telemetry: observability.Noop(),
 		Runtime: w.Recorder, RuntimeHasPlaceholders: true, SessionFiles: sessionFiles,
 		Chat: w.Chat, Reminders: w.Chat, Alerts: w.Chat, TaskMessages: w.Chat, Tabs: w.Chat.tabs,
+		LooseEnds:  func(*looseend.Service) looseend.Nudger { return looseEndNudger{chat: w.Chat, location: w.Location} },
 		Principals: principals, DataDir: w.Dir, Zone: w.Case.Clock.Zone,
 		Core: wiring.CoreConfig{
 			TurnTimeout: cmp.Or(o.TurnTimeout, 2*time.Minute), ScheduledTurnTimeout: cmp.Or(o.ScheduledTurnTimeout, 5*time.Minute),
@@ -563,7 +565,11 @@ func (w *World) seedStore(ctx context.Context) error {
 	if err := w.connectAccounts(ctx); err != nil {
 		return err
 	}
-	return w.seedJobs(ctx)
+	looseEndsJob, err := w.seedJobs(ctx)
+	if err != nil {
+		return err
+	}
+	return w.seedLooseEnds(ctx, looseEndsJob)
 }
 
 func (w *World) addMemory(ctx context.Context, kind, text string, now time.Time, origin, index string) error {
@@ -627,17 +633,16 @@ func sortedAccounts(accounts map[string]*googleAccount) []string {
 }
 
 // seedJobs stores the case's scheduled jobs through the schedule service, so each has the next run
-// the case's clock gives it.
-func (w *World) seedJobs(ctx context.Context) error {
+// the case's clock gives it, and reports whether one is the Loose ends job.
+func (w *World) seedJobs(ctx context.Context) (looseEnds bool, err error) {
 	var jobs []jobSeed
 	if _, err := w.section(SectionJobs, &jobs); err != nil {
-		return err
+		return false, err
 	}
 	scheduler := w.Assembly.Scheduler
 	for i, job := range jobs {
 		id, name, jobType := longID("job", job.ID), cmp.Or(job.Name, job.ID), schedule.TypeModelTurn
 		var config json.RawMessage
-		var err error
 		timing := schedule.Timing{Cron: job.Cron, At: job.At, Zone: job.Zone}
 		switch {
 		case job.HeadsUp:
@@ -646,6 +651,11 @@ func (w *World) seedJobs(ctx context.Context) error {
 				timing.Cron = schedule.HeadsUpCron
 			}
 			config, err = schedule.ModelTurnConfigWithModel(cmp.Or(job.Prompt, schedule.HeadsUpNotes), job.Model)
+		case job.LooseEnds:
+			id, name, jobType, config, looseEnds = schedule.LooseEndsJobID(PrincipalID), schedule.LooseEndsName, schedule.LooseEndScanType, looseend.JobConfigJSON(), true
+			if timing.Cron == "" && timing.At == "" {
+				timing.Cron = schedule.LooseEndsCron
+			}
 		case job.Reminder != "":
 			jobType = schedule.TypeReminder
 			config, err = schedule.ReminderConfig(job.Reminder)
@@ -653,20 +663,20 @@ func (w *World) seedJobs(ctx context.Context) error {
 			config, err = schedule.ModelTurnConfigWithModel(job.Prompt, job.Model)
 		}
 		if err != nil {
-			return fmt.Errorf("jobs[%d]: %w", i, err)
+			return false, fmt.Errorf("jobs[%d]: %w", i, err)
 		}
 		prepared, err := scheduler.Prepare(PrincipalID, name, jobType, timing, config)
 		if err != nil {
-			return fmt.Errorf("jobs[%d]: %w", i, err)
+			return false, fmt.Errorf("jobs[%d]: %w", i, err)
 		}
 		prepared.Job.Enabled = !job.Disabled
 		created, err := scheduler.Create(ctx, id, prepared)
 		if err != nil || !created {
-			return fmt.Errorf("jobs[%d]: created=%v: %w", i, created, err)
+			return false, fmt.Errorf("jobs[%d]: created=%v: %w", i, created, err)
 		}
 		w.jobIDs[job.ID] = id
 	}
-	return nil
+	return looseEnds, nil
 }
 
 // Advance moves the world's clock forward. A job that becomes due runs when a run_job step starts

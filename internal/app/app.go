@@ -34,6 +34,7 @@ import (
 	"github.com/vladar107/home-ai-assistant/internal/integration"
 	"github.com/vladar107/home-ai-assistant/internal/judgment"
 	userlocation "github.com/vladar107/home-ai-assistant/internal/location"
+	"github.com/vladar107/home-ai-assistant/internal/looseend"
 	"github.com/vladar107/home-ai-assistant/internal/module"
 	"github.com/vladar107/home-ai-assistant/internal/observability"
 	"github.com/vladar107/home-ai-assistant/internal/parcel"
@@ -317,6 +318,9 @@ func (a *App) buildAssembly(ctx context.Context, client *telegram.Client, config
 		Alerts:       telegram.WatchAlertSender{Client: client},
 		TaskMessages: telegram.TaskMessenger{Client: client},
 		Events:       telegram.EventSender{Client: client},
+		LooseEnds: func(looseEnds *looseend.Service) looseend.Nudger {
+			return telegram.LooseEndNudger{Client: client, Chats: a.store, LooseEnds: looseEnds}
+		},
 		Tabs: func(namer *turn.Engine, trips trip.Reader, projects project.Reader, watches watch.Reader) wiring.TabServices {
 			a.tabs = telegram.NewTabs(client, a.store, trips, projects, watches, namer, a.logger, a.telemetry)
 			return wiring.TabServices{
@@ -456,6 +460,7 @@ func (a *App) buildTelegram(ctx context.Context, client *telegram.Client, config
 		deps.Backlog = asm.Backlog
 		deps.Why = asm.Why
 		deps.Exports = asm.Exports
+		deps.LooseEnds = asm.LooseEnds
 		if asm.ParcelLoop != nil {
 			deps.Parcels = &telegram.ParcelTaps{Parcels: a.store, Tracker: asm.ParcelLoop}
 		}
@@ -560,6 +565,7 @@ func (a *App) settingsSections(asm *wiring.Assembly, location *time.Location) ([
 		sections = append(sections, telegram.NewTripsSection(asm.Scheduler, asm.Google, asm.Trips, a.logger, a.telemetry))
 		sections = append(sections, telegram.NewInboxSection(asm.Scheduler, asm.Google, asm.Intake, a.logger, a.telemetry))
 	}
+	sections = append(sections, telegram.NewLooseEndsSection(asm.Scheduler, asm.Switches.Toggle(looseend.Switch), asm.LooseEnds, a.logger, a.telemetry))
 	return sections, nil
 }
 

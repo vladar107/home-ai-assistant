@@ -59,6 +59,7 @@ type botAPI interface {
 	GetForumTopicIconStickers(context.Context) ([]TopicIcon, error)
 	SendPlainInTab(context.Context, int64, string) (int64, error)
 	PinChatMessage(context.Context, int64, int64) error
+	editPlainCard(ctx context.Context, chatID, messageID int64, text string, keyboard InlineKeyboard) error
 	topicsOn(context.Context) (bool, error)
 	topicsEnabled() bool
 }
@@ -181,6 +182,7 @@ type Service struct {
 	watches      WatchController
 	trips        TripController
 	parcels      *ParcelTaps
+	looseEnds    LooseEndController
 	routes       RouteController
 	why          WhyController
 	exports      ExportController
@@ -234,6 +236,8 @@ type Dependencies struct {
 	Routes       RouteController
 	// Parcels answers the Stop tracking taps of parcel cards; nil leaves them unanswered.
 	Parcels *ParcelTaps
+	// LooseEnds answers the buttons of loose end nudges; nil leaves them unanswered.
+	LooseEnds LooseEndController
 	// Why answers /why, and a short "how do you know?" in reply to one of the bot's messages.
 	Why WhyController
 	// Exports answers /export and /restore.
@@ -291,6 +295,7 @@ func NewService(deps Dependencies) (*Service, error) {
 		watches:      deps.Watches,
 		trips:        deps.Trips,
 		parcels:      deps.Parcels,
+		looseEnds:    deps.LooseEnds,
 		routes:       deps.Routes,
 		why:          deps.Why,
 		exports:      deps.Exports,
@@ -1190,6 +1195,9 @@ func (s *Service) processCallback(ctx context.Context, bot Bot, updateID int64, 
 	}
 	if _, parcelID, isParcel := parseParcelCallback(callback.Data); isParcel && s.parcels != nil {
 		return s.processParcelPress(ctx, callback, principalID, parcelID)
+	}
+	if press, isLooseEnd := parseLooseEndCallback(callback.Data); isLooseEnd && s.looseEnds != nil {
+		return s.processLooseEndPress(ctx, callback, principalID, press)
 	}
 	if action, sessionID, isSession := parseSessionCallback(callback.Data); isSession && s.conversation != nil {
 		return s.processSessionPress(ctx, bot, callback, principalID, action, sessionID)

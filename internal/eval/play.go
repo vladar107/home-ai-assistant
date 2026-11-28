@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/vladar107/home-ai-assistant/internal/approval"
@@ -99,7 +100,7 @@ func (w *World) Play(ctx context.Context, step Step) (TurnRecord, error) {
 	}
 	// A manual run with nothing to say is still delivered, with the scheduler's own line saying so,
 	// so the quiet run is recognised by what the model answered.
-	if record.Kind == "run_job" && (record.Quiet || quietAnswer(record.Runs)) {
+	if record.Kind == "run_job" && (record.Quiet || quietAnswer(record.Runs) || quietManual(record.Captured)) {
 		record.Quiet, record.Reply = true, ""
 	}
 	if record.Kind == "triage_mail" {
@@ -136,6 +137,12 @@ func quietAnswer(runs []RunRecord) bool {
 		return false
 	}
 	return prompt.Silent(runs[len(runs)-1].Result.Response)
+}
+
+// quietManual recognises the quiet run of a job that runs no model turn of its own, such as Loose
+// ends, by the scheduler's own line, matched in English, the cases' default language.
+func quietManual(captured Captured) bool {
+	return len(captured.Replies) == 1 && strings.HasSuffix(strings.TrimSpace(captured.Replies[0].Text), schedule.QuietManualText)
 }
 
 func cmpDuration(value, fallback time.Duration) time.Duration {

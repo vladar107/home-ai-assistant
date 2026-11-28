@@ -330,6 +330,11 @@ type InlineButton struct {
 // InlineKeyboard is the rows of buttons shown under a message.
 type InlineKeyboard [][]InlineButton
 
+// ReplyMarkup is a message's buttons as Telegram reports them.
+type ReplyMarkup struct {
+	InlineKeyboard InlineKeyboard `json:"inline_keyboard"`
+}
+
 type Message struct {
 	MessageID int64 `json:"message_id"`
 	// MessageThreadID is the tab the message is in, when the bot has tabs on.
@@ -346,6 +351,8 @@ type Message struct {
 	Venue           *Venue      `json:"venue"`
 	// ReplyToMessage is the message this one replies to, as Telegram includes it.
 	ReplyToMessage *Message `json:"reply_to_message"`
+	// ReplyMarkup is the message's buttons, as Telegram includes them with a press.
+	ReplyMarkup *ReplyMarkup `json:"reply_markup"`
 	// ForwardOrigin is set on a forwarded message, and IsAutomaticForward on a channel post
 	// Telegram forwarded into a discussion group: either way the text is someone else's.
 	ForwardOrigin      *MessageOrigin `json:"forward_origin"`

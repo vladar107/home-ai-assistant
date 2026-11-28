@@ -1,0 +1,51 @@
+{
+  "id": "le-chat-promise-tracked",
+  "title": "A dated promise stated in chat is tracked as a promise, not set as a reminder",
+  "tags": [
+    "happy"
+  ],
+  "kind": "happy",
+  "clock": {
+    "local": "2026-03-10T10:00",
+    "zone": "Europe/Berlin"
+  },
+  "user": {
+    "name": "Sam",
+    "switches": {
+      "loose-ends": true
+    }
+  },
+  "world": {
+    "loose_ends": {}
+  },
+  "steps": [
+    {
+      "say": "I promised the landlord I'd send the signed form by Friday.",
+      "expect": {
+        "calls": [
+          {
+            "tool": "loose_end_track",
+            "min": 1,
+            "max": 1,
+            "args": [
+              {
+                "path": "kind",
+                "equals": "promise"
+              },
+              {
+                "path": "due",
+                "matches": "^2026-03-13"
+              }
+            ]
+          }
+        ],
+        "not_called": [
+          "reminder_set"
+        ]
+      }
+    }
+  ],
+  "rubric": [
+    "Does the reply confirm in one short line, without offering extra steps?"
+  ]
+}

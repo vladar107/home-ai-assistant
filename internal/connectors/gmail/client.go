@@ -207,6 +207,18 @@ func (c *Client) MessageFull(ctx context.Context, access, id string) (Message, e
 	return message, err
 }
 
+// ThreadMetadata reads a thread's messages with their labels and the named headers, without bodies.
+func (c *Client) ThreadMetadata(ctx context.Context, access, id string, headers []string) ([]Message, error) {
+	var thread struct {
+		Messages []Message `json:"messages"`
+	}
+	err := c.get(ctx, access, "/gmail/v1/users/me/threads/"+url.PathEscape(id), url.Values{
+		"format":          {"metadata"},
+		"metadataHeaders": headers,
+	}, &thread)
+	return thread.Messages, err
+}
+
 // MessageRef identifies a message with the labels it carries.
 type MessageRef struct {
 	ID       string   `json:"id"`
